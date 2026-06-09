@@ -30,7 +30,7 @@ test.describe('Terminal loading recovery', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -63,12 +63,15 @@ test.describe('Terminal loading recovery', () => {
     // Create a second task to switch between
     const s = seed(mainWindow)
     const t2 = await s.createTask({
-      projectId: (await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId))!.project_id,
+      projectId: (await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+        taskId
+      ))!.project_id,
       title: 'Switch target task',
       status: 'todo'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       t2.id
     )
     await s.refreshData()

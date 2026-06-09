@@ -19,7 +19,7 @@ test.describe('Git worktree operations', () => {
   const branchName = 'worktree-task' // slugify('Worktree task')
 
   const getTask = async (page: import('@playwright/test').Page, id: string) =>
-    page.evaluate((taskId) => window.api.db.getTask(taskId), id)
+    page.evaluate((taskId) => window.getTrpcVanillaClient().task.get.query({ id: taskId }), id)
 
   const execGit = (command: string) =>
     execSync(command, { cwd: TEST_PROJECT_PATH, stdio: 'pipe' }).toString()
@@ -195,8 +195,11 @@ test.describe('Git worktree operations', () => {
     if (existing?.worktree_path) {
       await mainWindow.evaluate(
         async ({ repoPath, worktreePath, id }) => {
-          await window.api.git.removeWorktree(repoPath, worktreePath).catch(() => {})
-          await window.api.db.updateTask({ id, worktreePath: null })
+          await window
+            .getTrpcVanillaClient()
+            .worktrees.removeWorktree.mutate({ repoPath, worktreePath })
+            .catch(() => {})
+          await window.getTrpcVanillaClient().task.update.mutate({ id, worktreePath: null })
         },
         { repoPath: TEST_PROJECT_PATH, worktreePath: existing.worktree_path, id: taskId }
       )
@@ -227,8 +230,8 @@ test.describe('Git worktree operations', () => {
 
     await mainWindow.evaluate(
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-        await window.api.git.createWorktree({ repoPath, targetPath, branch })
-        await window.api.db.updateTask({
+        await window.getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+        await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
           worktreeParentBranch: parentBranch
@@ -275,8 +278,8 @@ test.describe('Git worktree operations', () => {
 
     await mainWindow.evaluate(
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-        await window.api.git.createWorktree({ repoPath, targetPath, branch })
-        await window.api.db.updateTask({
+        await window.getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+        await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
           worktreeParentBranch: parentBranch
@@ -330,8 +333,8 @@ test.describe('Git worktree operations', () => {
 
     await mainWindow.evaluate(
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-        await window.api.git.createWorktree({ repoPath, targetPath, branch })
-        await window.api.db.updateTask({
+        await window.getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+        await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
           worktreeParentBranch: parentBranch
@@ -360,7 +363,9 @@ test.describe('Git worktree operations', () => {
 
     await expect
       .poll(async () => {
-        const active = await mainWindow.evaluate(() => window.api.db.getTasks())
+        const active = await mainWindow.evaluate(() =>
+          window.getTrpcVanillaClient().task.getAll.query()
+        )
         return active.some((task) => task.id === created.id)
       })
       .toBe(false)

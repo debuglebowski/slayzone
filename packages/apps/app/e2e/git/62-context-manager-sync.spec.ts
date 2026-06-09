@@ -58,7 +58,7 @@ async function upsertLibrarySkill(
   electronApp?: any
 ): Promise<void> {
   const skillExists = await mainWindow.evaluate(async (slug) => {
-    const skills = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+    const skills = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
     return skills.some((item) => item.slug === slug)
   }, skillSlug)
 
@@ -84,7 +84,7 @@ async function upsertLibrarySkill(
     .poll(async () => {
       return await mainWindow.evaluate(
         async ({ slug, expectedBody }) => {
-          const skills = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+          const skills = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
           const match = skills.find((item) => item.slug === slug)
           return (
             !!match?.content.includes(`name: ${slug}`) &&
@@ -116,7 +116,9 @@ test.describe
 
       await mainWindow.evaluate(
         ({ id }) => {
-          return window.api.aiConfig.setProjectProviders(id, ['claude', 'codex'])
+          return window
+            .getTrpcVanillaClient()
+            .aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
         },
         { id: project.id }
       )
@@ -149,7 +151,7 @@ test.describe
 
       const createdPath = await mainWindow.evaluate(
         async ({ candidate }) => {
-          const files = await window.api.aiConfig.getComputerFiles()
+          const files = await window.getTrpcVanillaClient().aiConfig.getComputerFiles.query()
           const match = files.find(
             (entry) => entry.category === 'skill' && entry.name.endsWith(`/${candidate}.md`)
           )
@@ -161,7 +163,7 @@ test.describe
       if (createdPath) {
         await mainWindow.evaluate(
           async ({ filePath }) => {
-            await window.api.aiConfig.deleteComputerFile(filePath)
+            await window.getTrpcVanillaClient().aiConfig.deleteComputerFile.mutate({ filePath })
           },
           { filePath: createdPath }
         )
@@ -177,7 +179,7 @@ test.describe
       const slug = `e2e-body-only-invalid-${Date.now()}`
       await mainWindow.evaluate(
         async ({ targetSlug, content }) => {
-          await window.api.aiConfig.createItem({
+          await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
             type: 'skill',
             scope: 'library',
             slug: targetSlug,
@@ -193,7 +195,7 @@ test.describe
         .poll(
           async () => {
             return await mainWindow.evaluate(async (targetSlug) => {
-              const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+              const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
               const match = items.find((item) => item.slug === targetSlug)
               if (!match) return null
               const metadata = JSON.parse(match.metadata_json) as {
@@ -230,7 +232,7 @@ test.describe
         .poll(
           async () => {
             return await mainWindow.evaluate(async (targetSlug) => {
-              const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+              const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
               const match = items.find((item) => item.slug === targetSlug)
               if (!match) return null
               const metadata = JSON.parse(match.metadata_json) as {
@@ -245,9 +247,9 @@ test.describe
       await expect(dialog.getByText('Frontmatter is invalid')).toHaveCount(0)
 
       await mainWindow.evaluate(async (targetSlug) => {
-        const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+        const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const match = items.find((item) => item.slug === targetSlug)
-        if (match) await window.api.aiConfig.deleteItem(match.id)
+        if (match) await window.getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: match.id })
       }, slug)
 
       await closeTopDialog(mainWindow)
@@ -313,7 +315,9 @@ test.describe
     }) => {
       await mainWindow.evaluate(
         ({ id }) => {
-          return window.api.aiConfig.setProjectProviders(id, ['claude', 'codex'])
+          return window
+            .getTrpcVanillaClient()
+            .aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
         },
         { id: projectId }
       )
@@ -434,7 +438,9 @@ test.describe
         .poll(async () => {
           return await mainWindow.evaluate(
             async ({ id, projectPath }) => {
-              return window.api.aiConfig.needsSync(id, projectPath)
+              return window
+                .getTrpcVanillaClient()
+                .aiConfig.needsSync.query({ projectId: id, projectPath })
             },
             { id: projectId, projectPath: TEST_PROJECT_PATH }
           )
@@ -447,24 +453,26 @@ test.describe
     test('project-local skill can be synced to filesystem', async ({ mainWindow }) => {
       await mainWindow.evaluate(
         ({ id }) => {
-          return window.api.aiConfig.setProjectProviders(id, ['claude', 'codex'])
+          return window
+            .getTrpcVanillaClient()
+            .aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
         },
         { id: projectId }
       )
 
       const itemId = await mainWindow.evaluate(
         async ({ id, slug, content }) => {
-          const existing = await window.api.aiConfig.listItems({
+          const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({
             scope: 'project',
             projectId: id,
             type: 'skill'
           })
           const match = existing.find((item) => item.slug === slug)
           if (match) {
-            await window.api.aiConfig.updateItem({ id: match.id, content })
+            await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
             return match.id
           }
-          const created = await window.api.aiConfig.createItem({
+          const created = await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
             type: 'skill',
             scope: 'project',
             projectId: id,
@@ -478,8 +486,22 @@ test.describe
 
       await mainWindow.evaluate(
         async ({ id, itemId, projectPath }) => {
-          await window.api.aiConfig.syncLinkedFile(id, projectPath, itemId, 'claude')
-          await window.api.aiConfig.syncLinkedFile(id, projectPath, itemId, 'codex')
+          await window
+            .getTrpcVanillaClient()
+            .aiConfig.syncLinkedFile.mutate({
+              projectId: id,
+              projectPath,
+              itemId,
+              provider: 'claude'
+            })
+          await window
+            .getTrpcVanillaClient()
+            .aiConfig.syncLinkedFile.mutate({
+              projectId: id,
+              projectPath,
+              itemId,
+              provider: 'codex'
+            })
         },
         { id: projectId, itemId, projectPath: TEST_PROJECT_PATH }
       )

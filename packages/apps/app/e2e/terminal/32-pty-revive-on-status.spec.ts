@@ -42,7 +42,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Kill-notify test', status: 'in_progress' })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -61,7 +61,10 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     }, sessionId)
 
     // Move to done — triggers killPtysByTaskId in main
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, status: 'done' }), task.id)
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, status: 'done' }),
+      task.id
+    )
 
     // Part A assertion: pty:exit IPC reaches the renderer. Before the fix this
     // event would be silently dropped because killPty eagerly deleted the session
@@ -92,7 +95,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'claude-code' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' }),
       task.id
     )
     await s.refreshData()
@@ -107,7 +110,10 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     }, task.id)
 
     // Terminal → non-terminal revive should NOT fire if we were never in terminal status
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, status: 'todo' }), task.id)
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, status: 'todo' }),
+      task.id
+    )
     await mainWindow.waitForTimeout(200)
     const noopCalls = await mainWindow.evaluate(
       () => (window as unknown as { __respawnCalls: string[] }).__respawnCalls.length
@@ -117,10 +123,13 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     // Now do the full cycle: in_progress → done → in_progress.
     // Wait between writes so the renderer observes 'done' as the "previous"
     // status when the in_progress write computes the `revived` flag.
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, status: 'done' }), task.id)
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, status: 'done' }),
+      task.id
+    )
     await mainWindow.waitForTimeout(200)
     const result = await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, status: 'in_progress' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, status: 'in_progress' }),
       task.id
     )
     // sanity: status actually flipped at DB level

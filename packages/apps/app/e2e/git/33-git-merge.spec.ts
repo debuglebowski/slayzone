@@ -158,7 +158,7 @@ test.describe('Clean merge', () => {
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'Clean merge task', status: 'todo' })
     taskId = t.id
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: taskId,
       worktreePath: WORKTREE_PATH,
       worktreeParentBranch: getMainBranch()
@@ -176,7 +176,13 @@ test.describe('Clean merge', () => {
 
   test('clean merge via API returns success', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) => window.api.git.mergeWithAI(pp, wp, parent, 'test-branch'),
+      ({ pp, wp, parent }) =>
+        window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          projectPath: pp,
+          worktreePath: wp,
+          parentBranch: parent,
+          sourceBranch: 'test-branch'
+        }),
       { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
     )
     expect(result.success).toBe(true)
@@ -206,7 +212,7 @@ test.describe('Clean merge UI', () => {
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'Merge UI task', status: 'todo' })
     taskId = t.id
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: taskId,
       worktreePath: WORKTREE_PATH,
       worktreeParentBranch: getMainBranch()
@@ -238,7 +244,10 @@ test.describe('Clean merge UI', () => {
     await expect
       .poll(
         async () => {
-          const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+          const task = await mainWindow.evaluate(
+            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+            taskId
+          )
           const files = git('git ls-files').split('\n')
           return {
             status: task?.status ?? null,
@@ -265,7 +274,7 @@ test.describe('Merge with uncommitted changes', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Dirty Merge', color: '#ef4444', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Dirty merge task', status: 'todo' })
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: WORKTREE_PATH,
       worktreeParentBranch: getMainBranch()
@@ -275,7 +284,13 @@ test.describe('Merge with uncommitted changes', () => {
 
   test('returns resolving with commit step when uncommitted changes', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) => window.api.git.mergeWithAI(pp, wp, parent, 'test-branch'),
+      ({ pp, wp, parent }) =>
+        window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          projectPath: pp,
+          worktreePath: wp,
+          parentBranch: parent,
+          sourceBranch: 'test-branch'
+        }),
       { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
     )
 
@@ -302,7 +317,7 @@ test.describe('Merge with conflicts', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Conflict Test', color: '#dc2626', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Conflict task', status: 'todo' })
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: WORKTREE_PATH,
       worktreeParentBranch: getMainBranch()
@@ -312,7 +327,13 @@ test.describe('Merge with conflicts', () => {
 
   test('returns conflicted files and resolution prompt', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) => window.api.git.mergeWithAI(pp, wp, parent, 'test-branch'),
+      ({ pp, wp, parent }) =>
+        window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          projectPath: pp,
+          worktreePath: wp,
+          parentBranch: parent,
+          sourceBranch: 'test-branch'
+        }),
       { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
     )
 
@@ -324,23 +345,26 @@ test.describe('Merge with conflicts', () => {
 
   test('isMergeInProgress returns true after conflict', async ({ mainWindow }) => {
     const inProgress = await mainWindow.evaluate(
-      (pp) => window.api.git.isMergeInProgress(pp),
+      (pp) => window.getTrpcVanillaClient().worktrees.isMergeInProgress.query({ path: pp }),
       gitDir
     )
     expect(inProgress).toBe(true)
   })
 
   test('abort merge clears state', async ({ mainWindow }) => {
-    await mainWindow.evaluate((pp) => window.api.git.abortMerge(pp), gitDir)
+    await mainWindow.evaluate(
+      (pp) => window.getTrpcVanillaClient().worktrees.abortMerge.mutate({ path: pp }),
+      gitDir
+    )
 
     const inProgress = await mainWindow.evaluate(
-      (pp) => window.api.git.isMergeInProgress(pp),
+      (pp) => window.getTrpcVanillaClient().worktrees.isMergeInProgress.query({ path: pp }),
       gitDir
     )
     expect(inProgress).toBe(false)
 
     const conflicted = await mainWindow.evaluate(
-      (pp) => window.api.git.getConflictedFiles(pp),
+      (pp) => window.getTrpcVanillaClient().worktrees.getConflictedFiles.query({ path: pp }),
       gitDir
     )
     expect(conflicted).toEqual([])
@@ -360,7 +384,7 @@ test.describe('Merge with conflicts and uncommitted changes', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Both Issues', color: '#7c3aed', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Both merge task', status: 'todo' })
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: WORKTREE_PATH,
       worktreeParentBranch: getMainBranch()
@@ -370,7 +394,13 @@ test.describe('Merge with conflicts and uncommitted changes', () => {
 
   test('prompt has both commit and conflict resolution steps', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) => window.api.git.mergeWithAI(pp, wp, parent, 'test-branch'),
+      ({ pp, wp, parent }) =>
+        window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          projectPath: pp,
+          worktreePath: wp,
+          parentBranch: parent,
+          sourceBranch: 'test-branch'
+        }),
       { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
     )
 
@@ -453,7 +483,10 @@ test.describe
       await expect(mainWindow.getByText('Not a git repository')).not.toBeVisible()
 
       // Verify via API
-      const isRepo = await mainWindow.evaluate((p) => window.api.git.isGitRepo(p), NO_GIT_DIR)
+      const isRepo = await mainWindow.evaluate(
+        (p) => window.getTrpcVanillaClient().worktrees.isGitRepo.query({ path: p }),
+        NO_GIT_DIR
+      )
       expect(isRepo).toBe(true)
     })
   })

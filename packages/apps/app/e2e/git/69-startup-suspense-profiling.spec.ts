@@ -95,14 +95,14 @@ test.describe('Startup & Suspense Profiling', () => {
       const store = (window as any).__slayzone_tabStore
       if (store) {
         const state = store.getState()
-        window.api.settings.set(
-          'viewState',
-          JSON.stringify({
+        window.getTrpcVanillaClient().settings.set.mutate({
+          key: 'viewState',
+          value: JSON.stringify({
             tabs: state.tabs,
             activeTabIndex: state.activeTabIndex,
             selectedProjectId: state.selectedProjectId
           })
-        )
+        })
       }
     })
     await mainWindow.waitForTimeout(600) // Wait for debounced persistence
@@ -374,16 +374,22 @@ test.describe('Startup & Suspense Profiling', () => {
 
       // Replicate fetchTaskDetail's parallel calls
       const [task, tags, taskTags, projects, subTasks] = await Promise.all([
-        time('db.getTask', () => window.api.db.getTask(taskId)),
-        time('tags.getTags', () => window.api.tags.getTags()),
-        time('taskTags.getTagsForTask', () => window.api.taskTags.getTagsForTask(taskId)),
-        time('db.getProjects', () => window.api.db.getProjects()),
-        time('db.getSubTasks', () => window.api.db.getSubTasks(taskId))
+        time('db.getTask', () => window.getTrpcVanillaClient().task.get.query({ id: taskId })),
+        time('tags.getTags', () => window.getTrpcVanillaClient().tags.list.query()),
+        time('taskTags.getTagsForTask', () =>
+          window.getTrpcVanillaClient().tags.getForTask.query({ taskId })
+        ),
+        time('db.getProjects', () => window.getTrpcVanillaClient().projects.list.query()),
+        time('db.getSubTasks', () =>
+          window.getTrpcVanillaClient().task.getSubTasks.query({ parentId: taskId })
+        )
       ])
 
       // Sequential: parent task lookup
       if (task?.parent_id) {
-        await time('db.getTask(parent)', () => window.api.db.getTask(task.parent_id!))
+        await time('db.getTask(parent)', () =>
+          window.getTrpcVanillaClient().task.get.query({ id: task.parent_id! })
+        )
       }
 
       const totalMs = Math.round((performance.now() - totalStart) * 100) / 100

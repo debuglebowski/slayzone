@@ -64,7 +64,7 @@ test.describe('terminal atlas stability across task switches', () => {
         status: 'in_progress'
       })
       await mainWindow.evaluate(
-        (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
         t.id
       )
       taskIds.push(t.id)

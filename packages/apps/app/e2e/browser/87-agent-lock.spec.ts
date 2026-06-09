@@ -182,10 +182,16 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
     // Explicitly ensure locked state (prior tests may have left it unlocked).
     await testInvoke(mainWindow, 'browser:set-locked', views[0], true)
     await mainWindow
-      .evaluate((d) => window.api.db.setBrowserTabLocked(d.taskId, d.tabId, true), {
-        taskId,
-        tabId: views[0]
-      })
+      .evaluate(
+        (d) =>
+          window
+            .getTrpcVanillaClient()
+            .task.setBrowserTabLocked.mutate({ taskId: d.taskId, tabId: d.tabId, locked: true }),
+        {
+          taskId,
+          tabId: views[0]
+        }
+      )
       .catch(() => {})
     await expect
       .poll(async () => (await testInvoke(mainWindow, 'browser:is-locked', views[0])) as boolean, {

@@ -163,7 +163,7 @@ test.describe('MCP Server', () => {
     expect(updated.title).toBe('Updated by MCP')
 
     // Verify DB was updated
-    const dbTask = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const dbTask = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
     expect(dbTask.title).toBe('Updated by MCP')
 
     // Verify UI refreshed (MCP sends tasks:changed IPC)
@@ -194,7 +194,7 @@ test.describe('MCP Server', () => {
     expect(created.status).toBe('todo')
     expect(created.priority).toBe(2)
 
-    const dbTask = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+    const dbTask = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), created.id)
     expect(dbTask.parent_id).toBe(taskId)
     expect(dbTask.project_id).toBe(projectId)
   })
@@ -255,7 +255,7 @@ test.describe('MCP Server', () => {
     expect(updated.status).toBe('review')
     expect(updated.priority).toBe(1)
 
-    const dbTask = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const dbTask = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
     expect(dbTask.title).toBe('Multi-update')
     expect(dbTask.status).toBe('review')
     expect(dbTask.priority).toBe(1)
@@ -299,7 +299,7 @@ test.describe('MCP Server', () => {
     expect(cleared.due_date).toBeNull()
 
     // Verify DB
-    const dbTask = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const dbTask = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
     expect(dbTask.description).toBeNull()
     expect(dbTask.due_date).toBeNull()
   })
@@ -369,8 +369,8 @@ test.describe('MCP Server', () => {
 
     // Verify both in DB
     const [db1, db2] = await Promise.all([
-      mainWindow.evaluate((id) => window.api.db.getTask(id), taskId),
-      mainWindow.evaluate((id) => window.api.db.getTask(id), t2.id)
+      mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId),
+      mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t2.id)
     ])
     expect(db1.title).toBe('From session 1')
     expect(db2.title).toBe('From session 2')

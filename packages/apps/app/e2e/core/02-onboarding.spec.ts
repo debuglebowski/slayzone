@@ -7,7 +7,7 @@ test.describe('Onboarding', () => {
 
   test('onboarding is skipped when pre-seeded', async ({ mainWindow }) => {
     const completed = await mainWindow.evaluate(() =>
-      window.api.settings.get('onboarding_completed')
+      window.getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' })
     )
     expect(completed).toBe('true')
     await expect(mainWindow.getByText('Welcome to SlayZone', { exact: true })).not.toBeVisible()
@@ -61,7 +61,7 @@ test.describe('Onboarding', () => {
 
       // Verify persistence
       const completed = await mainWindow.evaluate(() =>
-        window.api.settings.get('onboarding_completed')
+        window.getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' })
       )
       expect(completed).toBe('true')
     } finally {

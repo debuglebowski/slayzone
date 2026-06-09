@@ -33,7 +33,7 @@ test.describe
       // Set task.terminal_mode='opencode' via DB instead of UI — ContextMenu
       // switcher is flaky in Playwright for non-'terminal' modes (see 22).
       await mainWindow.evaluate(
-        (id) => window.api.db.updateTask({ id, terminalMode: 'opencode' }),
+        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'opencode' }),
         taskId
       )
       await s.refreshData()
@@ -66,7 +66,10 @@ test.describe
       const lenBefore = bufBefore.length
 
       // Send a minimal prompt
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, 'hi\r'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: 'hi\r' }),
+        { id: sessionId }
+      )
 
       // Wait for buffer to grow (OpenCode produced a response)
       await expect
@@ -85,7 +88,7 @@ test.describe
       // Store a conversationId so the app resumes with --session
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { opencode: { conversationId: 'oc-prev-session' } }
           }),
@@ -116,7 +119,10 @@ test.describe
       const sessionId = getMainSessionId(taskId)
 
       // Send a prompt to trigger work
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, 'hi\r'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: 'hi\r' }),
+        { id: sessionId }
+      )
 
       // Should transition to 'running' (working)
       await waitForPtyState(mainWindow, sessionId, 'running', 15_000)

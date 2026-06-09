@@ -20,7 +20,10 @@ test.describe('Provider config roundtrip', () => {
   })
 
   test('new task has default flags from settings', async ({ mainWindow }) => {
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     // Default claude flags should be populated
     expect(task?.claude_flags).toBeTruthy()
     expect(typeof task?.claude_flags).toBe('string')
@@ -32,45 +35,64 @@ test.describe('Provider config roundtrip', () => {
   test('update conversationId for codex mode', async ({ mainWindow }) => {
     const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({ id, codexConversationId: cid }),
+      ({ id, cid }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, codexConversationId: cid }),
       { id: taskId, cid: conversationId }
     )
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.codex_conversation_id).toBe(conversationId)
   })
 
   test('update conversationId for cursor mode', async ({ mainWindow }) => {
     const conversationId = '11111111-2222-4333-8444-555555555555'
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({ id, cursorConversationId: cid }),
+      ({ id, cid }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, cursorConversationId: cid }),
       { id: taskId, cid: conversationId }
     )
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.cursor_conversation_id).toBe(conversationId)
   })
 
   test('update conversationId for gemini mode', async ({ mainWindow }) => {
     const conversationId = 'gemini-session-abc123'
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({ id, geminiConversationId: cid }),
+      ({ id, cid }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, geminiConversationId: cid }),
       { id: taskId, cid: conversationId }
     )
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.gemini_conversation_id).toBe(conversationId)
   })
 
   test('update conversationId for opencode mode', async ({ mainWindow }) => {
     const conversationId = 'opencode-session-xyz789'
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({ id, opencodeConversationId: cid }),
+      ({ id, cid }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, opencodeConversationId: cid }),
       { id: taskId, cid: conversationId }
     )
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.opencode_conversation_id).toBe(conversationId)
   })
 
   test('multiple conversation IDs coexist independently', async ({ mainWindow }) => {
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     // All previously set IDs should still be present
     expect(task?.codex_conversation_id).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
     expect(task?.cursor_conversation_id).toBe('11111111-2222-4333-8444-555555555555')
@@ -80,15 +102,21 @@ test.describe('Provider config roundtrip', () => {
 
   test('update flags for gemini mode', async ({ mainWindow }) => {
     await mainWindow.evaluate(
-      ({ id, flags }) => window.api.db.updateTask({ id, geminiFlags: flags }),
+      ({ id, flags }) => window.getTrpcVanillaClient().task.update.mutate({ id, geminiFlags: flags }),
       { id: taskId, flags: '--sandbox --verbose' }
     )
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.gemini_flags).toBe('--sandbox --verbose')
   })
 
   test('update flags does not affect other providers', async ({ mainWindow }) => {
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     // Gemini flags changed, others should be their defaults
     expect(task?.gemini_flags).toBe('--sandbox --verbose')
     // Other flags should still be their defaults (not empty)
@@ -98,10 +126,13 @@ test.describe('Provider config roundtrip', () => {
 
   test('clear a single conversation ID via null', async ({ mainWindow }) => {
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, codexConversationId: null }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, codexConversationId: null }),
       taskId
     )
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.codex_conversation_id).toBeNull()
     // Others should be unaffected
     expect(task?.cursor_conversation_id).toBe('11111111-2222-4333-8444-555555555555')
@@ -111,7 +142,7 @@ test.describe('Provider config roundtrip', () => {
   test('create task with explicit flags override', async ({ mainWindow }) => {
     const task = await mainWindow.evaluate(
       (pid) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Custom flags task',
           claudeFlags: '--my-custom-flag',
@@ -126,19 +157,24 @@ test.describe('Provider config roundtrip', () => {
   test('default flags setting is used for new tasks', async ({ mainWindow }) => {
     // Set a custom default via terminal_modes table
     await mainWindow.evaluate(() =>
-      window.api.terminalModes.update('claude-code', { defaultFlags: '--test-default-flag' })
+      window.getTrpcVanillaClient().pty.modesUpdate.mutate({
+        id: 'claude-code',
+        updates: { defaultFlags: '--test-default-flag' }
+      })
     )
 
     const task = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'Default flags task' }),
+      (pid) =>
+        window.getTrpcVanillaClient().task.create.mutate({ projectId: pid, title: 'Default flags task' }),
       projectId
     )
     expect(task?.claude_flags).toBe('--test-default-flag')
 
     // Restore default
     await mainWindow.evaluate(() =>
-      window.api.terminalModes.update('claude-code', {
-        defaultFlags: '--allow-dangerously-skip-permissions'
+      window.getTrpcVanillaClient().pty.modesUpdate.mutate({
+        id: 'claude-code',
+        updates: { defaultFlags: '--allow-dangerously-skip-permissions' }
       })
     )
   })

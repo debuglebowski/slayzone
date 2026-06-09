@@ -84,7 +84,7 @@ test.describe('Tag management', () => {
 
     // Verify tag assigned
     const assignedTags = await mainWindow.evaluate(
-      (taskId) => window.api.taskTags.getTagsForTask(taskId),
+      (taskId) => window.getTrpcVanillaClient().tags.getForTask.query({ taskId }),
       task!.id
     )
     expect(assignedTags.length).toBeGreaterThan(0)

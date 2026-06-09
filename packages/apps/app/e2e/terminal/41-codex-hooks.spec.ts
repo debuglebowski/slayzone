@@ -186,7 +186,10 @@ test.describe('Codex agent hooks', () => {
       title: 'CHC codex task',
       status: 'todo'
     })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'codex' }), task.id)
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' }),
+      task.id
+    )
 
     // The codex SessionStart hook carries the codex CLI session_id — the
     // PRIMARY resume-id capture path (no /status command needed).
@@ -209,7 +212,10 @@ test.describe('Codex agent hooks', () => {
     await expect
       .poll(
         async () => {
-          const t = await mainWindow.evaluate((id) => window.api.db.getTask(id), task.id)
+          const t = await mainWindow.evaluate(
+            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+            task.id
+          )
           const pc = (t as { provider_config?: unknown } | null)?.provider_config
           const parsed = typeof pc === 'string' ? JSON.parse(pc) : pc
           return (parsed as { codex?: { conversationId?: string } } | null)?.codex?.conversationId ?? null

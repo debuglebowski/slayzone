@@ -49,7 +49,7 @@ test.describe
 
     async function setBrowserDefaultZoom(page: Page, percent: string): Promise<void> {
       await page.evaluate(async (value) => {
-        await window.api.settings.set('browser_default_zoom', value)
+        await window.getTrpcVanillaClient().settings.set.mutate({ key: 'browser_default_zoom', value })
         window.dispatchEvent(new CustomEvent('sz:settings-changed'))
       }, percent)
     }

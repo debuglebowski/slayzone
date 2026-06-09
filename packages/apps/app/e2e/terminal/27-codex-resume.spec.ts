@@ -26,7 +26,7 @@ test.describe
 
       await mainWindow.evaluate(
         ({ id, conversationId }) => {
-          return window.api.db.updateTask({
+          return window.getTrpcVanillaClient().task.update.mutate({
             id,
             terminalMode: 'codex',
             codexConversationId: conversationId
@@ -45,7 +45,10 @@ test.describe
       const sessionId = `${taskId}:${taskId}`
       await waitForPtySession(mainWindow, sessionId)
 
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+      const task = await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+        taskId
+      )
       expect(task?.terminal_mode).toBe('codex')
       expect(task?.codex_conversation_id).toBe(codexConversationId)
     })

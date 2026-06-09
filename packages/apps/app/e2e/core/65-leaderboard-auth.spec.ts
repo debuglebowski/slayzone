@@ -9,7 +9,9 @@ test.describe('Leaderboard auth transport', () => {
 
   test('uses system deep-link auth transport', async ({ electronApp, mainWindow }) => {
     await mainWindow.evaluate(async () => {
-      await window.api.settings.set('leaderboard_enabled', '1')
+      await window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'leaderboard_enabled', value: '1' })
     })
     await mainWindow.reload()
     await mainWindow.waitForSelector('#root', { timeout: 10_000 })

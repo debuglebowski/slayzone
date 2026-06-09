@@ -59,7 +59,7 @@ test.describe('Dev server URL detection', () => {
     sessionId = getMainSessionId(taskId)
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskId
     )
     await s.refreshData()
@@ -89,7 +89,10 @@ test.describe('Dev server URL detection', () => {
     await expect(toast(mainWindow)).not.toBeVisible({ timeout: 3_000 })
 
     // Verify browser tab has the URL
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     const tabs = task?.browser_tabs?.tabs ?? []
     expect(tabs.some((t: { url: string }) => t.url === 'http://localhost:3456')).toBe(true)
   })
@@ -142,7 +145,7 @@ test.describe('Dev server detection — toast disabled', () => {
     sessionId = getMainSessionId(t.id)
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       t.id
     )
     await s.refreshData()
@@ -189,7 +192,7 @@ test.describe('Dev server detection — auto-open browser', () => {
     sessionId = getMainSessionId(t.id)
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       t.id
     )
     await s.refreshData()

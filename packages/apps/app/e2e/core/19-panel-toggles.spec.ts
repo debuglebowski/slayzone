@@ -157,7 +157,7 @@ test.describe('Panel toggles', () => {
 
     // Reorder writes the SAME setting the Settings modal uses: panel_config.order
     const savedOrder = await mainWindow.evaluate(async () => {
-      const raw = await window.api.settings.get('panel_config')
+      const raw = await window.getTrpcVanillaClient().settings.get.query({ key: 'panel_config' })
       return raw ? (JSON.parse(raw).order as string[]) : null
     })
     expect(savedOrder).not.toBeNull()

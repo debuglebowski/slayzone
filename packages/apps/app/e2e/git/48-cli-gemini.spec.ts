@@ -64,7 +64,10 @@ test.describe
       const lenBefore = bufBefore.length
 
       // Send a minimal prompt
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, 'hi\r'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: 'hi\r' }),
+        { id: sessionId }
+      )
 
       // Wait for buffer to grow (Gemini produced a response)
       await expect
@@ -83,7 +86,7 @@ test.describe
       // Store a marker conversationId so the app thinks there's a previous session
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { gemini: { conversationId: 'gemini-previous' } }
           }),
@@ -127,7 +130,10 @@ test.describe
         .toBe(true)
 
       // Send a prompt to trigger work
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, 'say ok\r'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: 'say ok\r' }),
+        { id: sessionId }
+      )
 
       // Should transition to 'running' (working detected from TUI redraw burst)
       await waitForPtyState(mainWindow, sessionId, 'running', 15_000)

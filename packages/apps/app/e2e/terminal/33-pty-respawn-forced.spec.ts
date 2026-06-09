@@ -74,7 +74,7 @@ test.describe('Forced PTY respawn via REST', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -129,7 +129,7 @@ test.describe('Forced PTY respawn via REST', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -140,7 +140,7 @@ test.describe('Forced PTY respawn via REST', () => {
 
     // Capture original createdAt; after force respawn it must change (new session).
     const originalCreatedAt = await mainWindow.evaluate(async (id) => {
-      const list = await window.api.pty.list()
+      const list = await window.getTrpcVanillaClient().pty.list.query()
       return list.find((s) => s.sessionId === id)?.createdAt ?? null
     }, sessionId)
 
@@ -150,7 +150,7 @@ test.describe('Forced PTY respawn via REST', () => {
       .poll(
         async () =>
           mainWindow.evaluate(async (id) => {
-            const list = await window.api.pty.list()
+            const list = await window.getTrpcVanillaClient().pty.list.query()
             return list.find((s) => s.sessionId === id)?.createdAt ?? null
           }, sessionId),
         { timeout: 10_000 }

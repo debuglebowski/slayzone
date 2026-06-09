@@ -20,14 +20,14 @@ test.describe('Terminal error handling', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskId
     )
     await s.refreshData()
   })
 
   test.afterAll(async ({ mainWindow }) => {
-    await mainWindow.evaluate(() => window.api.pty.setShellOverride(null))
+    await mainWindow.evaluate(() => window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null }))
   })
 
   test('invalid shell override falls back to the user shell and still allows recreation after reset', async ({
@@ -35,23 +35,36 @@ test.describe('Terminal error handling', () => {
   }) => {
     const sessionId = getMainSessionId(taskId)
 
-    await mainWindow.evaluate(() => window.api.pty.setShellOverride('/definitely/not/a/real/shell'))
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: '/definitely/not/a/real/shell' })
+    )
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Terminal error task' })
 
     await expect
-      .poll(async () => mainWindow.evaluate((id) => window.api.pty.exists(id), sessionId))
+      .poll(async () =>
+        mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }),
+          sessionId
+        )
+      )
       .toBe(true)
     await expect(mainWindow.getByText(/Failed to start terminal:/)).toHaveCount(0)
 
-    await mainWindow.evaluate(() => window.api.pty.setShellOverride(null))
+    await mainWindow.evaluate(() => window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null }))
     const createResult = await mainWindow.evaluate(
-      ({ id, cwd }) => window.api.pty.create({ sessionId: id, cwd, mode: 'terminal' }),
+      ({ id, cwd }) =>
+        window.getTrpcVanillaClient().pty.create.mutate({ sessionId: id, cwd, mode: 'terminal' }),
       { id: sessionId, cwd: TEST_PROJECT_PATH }
     )
     expect(createResult.success).toBe(true)
     await expect
-      .poll(async () => mainWindow.evaluate((id) => window.api.pty.exists(id), sessionId))
+      .poll(async () =>
+        mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }),
+          sessionId
+        )
+      )
       .toBe(true)
   })
 })

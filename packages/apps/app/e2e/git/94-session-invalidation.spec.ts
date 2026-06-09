@@ -153,7 +153,7 @@ test.describe
       const t = await s.createTask({ projectId, title: 'SI overlay', status: 'in_progress' })
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'claude-code': { conversationId: 'stale-overlay' } }
           }),
@@ -180,7 +180,7 @@ test.describe
       const t = await s.createTask({ projectId, title: 'SI fresh', status: 'in_progress' })
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'claude-code': { conversationId: 'clear-on-fresh' } }
           }),
@@ -198,7 +198,7 @@ test.describe
       await expect(mainWindow.getByRole('button', { name: 'Start fresh' })).toBeVisible()
 
       // Manual-only (issue #90 decision Q1): the id survives until the user acts.
-      const mid = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const mid = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
       expect(mid?.provider_config?.['claude-code']?.conversationId).toBe('clear-on-fresh')
 
       await mainWindow.getByRole('button', { name: 'Start fresh' }).click()
@@ -207,7 +207,7 @@ test.describe
       await expect
         .poll(
           async () => {
-            const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+            const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
             return task?.provider_config?.['claude-code']?.conversationId ?? null
           },
           { timeout: 10_000 }
@@ -228,7 +228,7 @@ test.describe
       const t = await s.createTask({ projectId, title: 'SI reset', status: 'in_progress' })
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'claude-code': { conversationId: 'reset-me' } }
           }),
@@ -250,7 +250,7 @@ test.describe
       await expect
         .poll(
           async () => {
-            const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+            const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
             return task?.provider_config?.['claude-code']?.conversationId ?? null
           },
           { timeout: 10_000 }
@@ -286,7 +286,7 @@ test.describe
       const t = await s.createTask({ projectId, title: 'SI restart', status: 'in_progress' })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'claude-code': { conversationId: cid } }
           }),
@@ -305,7 +305,7 @@ test.describe
       await mainWindow.getByRole('menuitem', { name: 'Restart terminal' }).click()
 
       // conversationId should be PRESERVED
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
       expect(task?.provider_config?.['claude-code']?.conversationId).toBe(storedId)
 
       // PTY should have been killed

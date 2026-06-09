@@ -24,31 +24,46 @@ test.describe('Chat queue persistence', () => {
     taskId = task.id
 
     await mainWindow.evaluate(
-      async (id) => window.api.db.updateTask({ id, terminalMode: 'claude-code' } as never),
+      async (id) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' } as never),
       taskId
     )
     await s.refreshData()
 
     // Materialize a main tab so chat_queue rows have a valid FK target.
     mainTabId = await mainWindow.evaluate(async (id) => {
-      const tab = await window.api.tabs.ensureMain(id, 'claude-code')
+      const tab = await window
+        .getTrpcVanillaClient()
+        .taskTerminals.ensureMain.mutate({ taskId: id, mode: 'claude-code' })
       return tab.id
     }, taskId)
   })
 
   test('push/list maintains FIFO order', async ({ mainWindow }) => {
-    await mainWindow.evaluate(async (id) => window.api.chatQueue.clear(id), mainTabId)
-
     await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.push(id, 'first send', 'first og'),
-      mainTabId
-    )
-    await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.push(id, 'second send', 'second og'),
+      async (id) => window.getTrpcVanillaClient().chat.queue.clear.mutate({ tabId: id }),
       mainTabId
     )
 
-    const list = await mainWindow.evaluate(async (id) => window.api.chatQueue.list(id), mainTabId)
+    await mainWindow.evaluate(
+      async (id) =>
+        window
+          .getTrpcVanillaClient()
+          .chat.queue.push.mutate({ tabId: id, send: 'first send', original: 'first og' }),
+      mainTabId
+    )
+    await mainWindow.evaluate(
+      async (id) =>
+        window
+          .getTrpcVanillaClient()
+          .chat.queue.push.mutate({ tabId: id, send: 'second send', original: 'second og' }),
+      mainTabId
+    )
+
+    const list = await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
+      mainTabId
+    )
     expect(list).toHaveLength(2)
     expect(list[0]?.send).toBe('first send')
     expect(list[0]?.original).toBe('first og')
@@ -57,45 +72,66 @@ test.describe('Chat queue persistence', () => {
   })
 
   test('remove drops one item and preserves the rest', async ({ mainWindow }) => {
-    const list = await mainWindow.evaluate(async (id) => window.api.chatQueue.list(id), mainTabId)
+    const list = await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
+      mainTabId
+    )
     const firstId = list[0]!.id
 
     const removed = await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.remove(id),
+      async (id) => window.getTrpcVanillaClient().chat.queue.remove.mutate({ id }),
       firstId
     )
     expect(removed).toBe(true)
 
-    const after = await mainWindow.evaluate(async (id) => window.api.chatQueue.list(id), mainTabId)
+    const after = await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
+      mainTabId
+    )
     expect(after).toHaveLength(1)
     expect(after[0]?.send).toBe('second send')
   })
 
   test('clear empties the queue for a tab', async ({ mainWindow }) => {
     const cleared = await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.clear(id),
+      async (id) => window.getTrpcVanillaClient().chat.queue.clear.mutate({ tabId: id }),
       mainTabId
     )
     expect(cleared).toBeGreaterThanOrEqual(1)
 
-    const after = await mainWindow.evaluate(async (id) => window.api.chatQueue.list(id), mainTabId)
+    const after = await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
+      mainTabId
+    )
     expect(after).toEqual([])
   })
 
   test('queue survives across re-listing (DB persistence)', async ({ mainWindow }) => {
     await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.push(id, 'persisted', 'persisted'),
+      async (id) =>
+        window
+          .getTrpcVanillaClient()
+          .chat.queue.push.mutate({ tabId: id, send: 'persisted', original: 'persisted' }),
       mainTabId
     )
 
     // Force a fresh roundtrip — list always reads SQLite, no in-memory cache.
-    const list1 = await mainWindow.evaluate(async (id) => window.api.chatQueue.list(id), mainTabId)
-    const list2 = await mainWindow.evaluate(async (id) => window.api.chatQueue.list(id), mainTabId)
+    const list1 = await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
+      mainTabId
+    )
+    const list2 = await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
+      mainTabId
+    )
     expect(list1).toEqual(list2)
     expect(list1).toHaveLength(1)
     expect(list1[0]?.send).toBe('persisted')
 
-    await mainWindow.evaluate(async (id) => window.api.chatQueue.clear(id), mainTabId)
+    await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.clear.mutate({ tabId: id }),
+      mainTabId
+    )
   })
 
   test('chat:queue-changed broadcast fires on push', async ({ mainWindow }) => {
@@ -108,35 +144,48 @@ test.describe('Chat queue persistence', () => {
             resolve(tabId)
           }
         })
-        void window.api.chatQueue.push(id, 'broadcast probe', 'broadcast probe')
+        void window
+          .getTrpcVanillaClient()
+          .chat.queue.push.mutate({ tabId: id, send: 'broadcast probe', original: 'broadcast probe' })
       })
     }, mainTabId)
     expect(observed).toBe(mainTabId)
 
-    await mainWindow.evaluate(async (id) => window.api.chatQueue.clear(id), mainTabId)
+    await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().chat.queue.clear.mutate({ tabId: id }),
+      mainTabId
+    )
   })
 
   test('FK cascade clears queue when tab deleted', async ({ mainWindow }) => {
     // Make a fresh tab so we can delete it without affecting other tests.
     const ephemeralTabId = await mainWindow.evaluate(async (id) => {
-      const tab = await window.api.tabs.create({ taskId: id, mode: 'claude-code' })
+      const tab = await window
+        .getTrpcVanillaClient()
+        .taskTerminals.create.mutate({ taskId: id, mode: 'claude-code' })
       return tab.id
     }, taskId)
 
     await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.push(id, 'will cascade', 'will cascade'),
+      async (id) =>
+        window
+          .getTrpcVanillaClient()
+          .chat.queue.push.mutate({ tabId: id, send: 'will cascade', original: 'will cascade' }),
       ephemeralTabId
     )
     const before = await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.list(id),
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
       ephemeralTabId
     )
     expect(before).toHaveLength(1)
 
-    await mainWindow.evaluate(async (id) => window.api.tabs.delete(id), ephemeralTabId)
+    await mainWindow.evaluate(
+      async (id) => window.getTrpcVanillaClient().taskTerminals.delete.mutate({ tabId: id }),
+      ephemeralTabId
+    )
 
     const after = await mainWindow.evaluate(
-      async (id) => window.api.chatQueue.list(id),
+      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
       ephemeralTabId
     )
     expect(after).toEqual([])

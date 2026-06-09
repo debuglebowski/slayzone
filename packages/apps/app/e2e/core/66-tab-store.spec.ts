@@ -20,7 +20,9 @@ async function sendIPC(electronApp: any, channel: string): Promise<void> {
 
 /** Read persisted viewState from settings */
 async function getPersistedViewState(page: Page) {
-  const raw = await page.evaluate(() => window.api.settings.get('viewState'))
+  const raw = await page.evaluate(() =>
+    window.getTrpcVanillaClient().settings.get.query({ key: 'viewState' })
+  )
   return raw ? JSON.parse(raw) : null
 }
 
@@ -141,12 +143,15 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
 
   test('closing temp task tab deletes it from DB', async ({ mainWindow, electronApp }) => {
     const s = seed(mainWindow)
-    const temp = await mainWindow.evaluate((d: any) => window.api.db.createTask(d), {
-      projectId,
-      title: 'TS temp task',
-      status: 'in_progress',
-      isTemporary: true
-    })
+    const temp = await mainWindow.evaluate(
+      (d: any) => window.getTrpcVanillaClient().task.create.mutate(d),
+      {
+        projectId,
+        title: 'TS temp task',
+        status: 'in_progress',
+        isTemporary: true
+      }
+    )
     await s.refreshData()
 
     // Keep A open so closing temp doesn't leave only home tab → window.close()
@@ -161,7 +166,9 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     await expect
       .poll(
         async () => {
-          const tasks = await mainWindow.evaluate(() => window.api.db.getTasks())
+          const tasks = await mainWindow.evaluate(() =>
+            window.getTrpcVanillaClient().task.getAll.query()
+          )
           return tasks.some((t: any) => t.id === temp.id)
         },
         { timeout: 10_000 }
@@ -216,7 +223,8 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
       reordered.tabs[j] = tmp
     }
     await mainWindow.evaluate(
-      (json: string) => window.api.settings.set('viewState', json),
+      (json: string) =>
+        window.getTrpcVanillaClient().settings.set.mutate({ key: 'viewState', value: json }),
       JSON.stringify(reordered)
     )
 

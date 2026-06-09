@@ -18,16 +18,17 @@ async function patchStore(page: Page, patch: TreePatch) {
 // view-store state — drive it through the DB. Passing `[]` unpins everything.
 async function setPinned(page: Page, taskIds: string[]) {
   await page.evaluate(async (ids) => {
-    const data = await window.api.db.loadBoardData()
+    const c = window.getTrpcVanillaClient()
+    const data = await c.task.loadBoardData.query()
     const tasks = data.tasks as Array<{ id: string; pinned?: boolean }>
     const pinSet = new Set(ids)
     for (const t of tasks) {
       if (t.pinned && !pinSet.has(t.id)) {
-        await window.api.db.updateTask({ id: t.id, pinned: false, pinOrder: 0 })
+        await c.task.update.mutate({ id: t.id, pinned: false, pinOrder: 0 })
       }
     }
     for (let i = 0; i < ids.length; i++) {
-      await window.api.db.updateTask({ id: ids[i], pinned: true, pinOrder: i })
+      await c.task.update.mutate({ id: ids[i], pinned: true, pinOrder: i })
     }
   }, taskIds)
   await seed(page).refreshData()
@@ -56,8 +57,9 @@ async function ensureProjectExpanded(page: Page, projectName: string) {
 
 async function killAllPtys(page: Page) {
   await page.evaluate(async () => {
-    const list = await window.api.pty.list()
-    for (const p of list) await window.api.pty.kill(p.sessionId).catch(() => {})
+    const c = window.getTrpcVanillaClient()
+    const list = await c.pty.list.query()
+    for (const p of list) await c.pty.kill.mutate({ sessionId: p.sessionId }).catch(() => {})
   })
 }
 
@@ -100,7 +102,7 @@ test.describe('TreeView setting combinations', () => {
 
     const c1 = await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Child in_progress',
           status: 'in_progress',
@@ -111,20 +113,24 @@ test.describe('TreeView setting combinations', () => {
     childInProgress = c1!.id
     const c2 = await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({ projectId: pid, title: 'Child done', status: 'done', parentId }),
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'Child done', status: 'done', parentId }),
       { pid: projectId, parentId: rootInProgress }
     )
     childDone = c2!.id
     const c3 = await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({ projectId: pid, title: 'Child todo', status: 'todo', parentId }),
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'Child todo', status: 'todo', parentId }),
       { pid: projectId, parentId: rootInProgress }
     )
     childTodo = c3!.id
 
     const td = await mainWindow.evaluate(
       (pid) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Temp done',
           status: 'done',
@@ -135,7 +141,7 @@ test.describe('TreeView setting combinations', () => {
     tempDone = td!.id
     const tip = await mainWindow.evaluate(
       (pid) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Temp in_progress',
           status: 'in_progress',

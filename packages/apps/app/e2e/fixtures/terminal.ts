@@ -168,15 +168,17 @@ export async function switchTerminalMode(page: Page, mode: TerminalMode): Promis
   await page.evaluate(
     async ({ id, m }) => {
       try {
-        await window.api.pty.kill(`${id}:${id}`)
+        await window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: `${id}:${id}` })
       } catch {
         /* may not exist */
       }
-      const t = await window.api.db.getTask(id)
+      const t = await window.getTrpcVanillaClient().task.get.query({ id })
       const cfg = t?.provider_config ?? null
       const cleared: Record<string, { conversationId: null }> = {}
       for (const k of Object.keys(cfg ?? {})) cleared[k] = { conversationId: null }
-      await window.api.db.updateTask({ id, terminalMode: m, providerConfig: cleared })
+      await window
+        .getTrpcVanillaClient()
+        .task.update.mutate({ id, terminalMode: m, providerConfig: cleared })
       const refresh = (window as { __slayzone_refreshData?: () => Promise<void> | void })
         .__slayzone_refreshData
       await refresh?.()
@@ -220,9 +222,13 @@ export async function waitForPtySession(
   timeoutMs = 20_000
 ): Promise<void> {
   await expect
-    .poll(async () => page.evaluate((id) => window.api.pty.exists(id), sessionId), {
-      timeout: timeoutMs
-    })
+    .poll(
+      async () =>
+        page.evaluate((id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }), sessionId),
+      {
+        timeout: timeoutMs
+      }
+    )
     .toBe(true)
 }
 
@@ -232,9 +238,13 @@ export async function waitForNoPtySession(
   timeoutMs = 20_000
 ): Promise<void> {
   await expect
-    .poll(async () => page.evaluate((id) => window.api.pty.exists(id), sessionId), {
-      timeout: timeoutMs
-    })
+    .poll(
+      async () =>
+        page.evaluate((id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }), sessionId),
+      {
+        timeout: timeoutMs
+      }
+    )
     .toBe(false)
 }
 
@@ -245,15 +255,19 @@ export async function waitForPtyState(
   timeoutMs = 10_000
 ): Promise<void> {
   await expect
-    .poll(async () => page.evaluate((id) => window.api.pty.getState(id), sessionId), {
-      timeout: timeoutMs
-    })
+    .poll(
+      async () =>
+        page.evaluate((id) => window.getTrpcVanillaClient().pty.getState.query({ sessionId: id }), sessionId),
+      {
+        timeout: timeoutMs
+      }
+    )
     .toBe(state)
 }
 
 export async function readFullBuffer(page: Page, sessionId: string): Promise<string> {
   return page.evaluate(async (id) => {
-    const buffer = await window.api.pty.getBuffer(id)
+    const buffer = await window.getTrpcVanillaClient().pty.getBuffer.query({ sessionId: id })
     return buffer ?? ''
   }, sessionId)
 }
@@ -263,16 +277,20 @@ export async function readBufferSince(
   sessionId: string,
   afterSeq: number
 ): Promise<{ currentSeq: number; chunks: Array<{ seq: number; data: string }> } | null> {
-  return page.evaluate(({ id, after }) => window.api.pty.getBufferSince(id, after), {
-    id: sessionId,
-    after: afterSeq
-  })
+  return page.evaluate(
+    ({ id, after }) =>
+      window.getTrpcVanillaClient().pty.getBufferSince.query({ sessionId: id, afterSeq: after }),
+    {
+      id: sessionId,
+      after: afterSeq
+    }
+  )
 }
 
 export async function runCommand(page: Page, sessionId: string, command: string): Promise<void> {
   await page.evaluate(
     ({ id, cmd }) => {
-      window.api.pty.write(id, `${cmd}\r`)
+      window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: `${cmd}\r` })
     },
     { id: sessionId, cmd: command }
   )

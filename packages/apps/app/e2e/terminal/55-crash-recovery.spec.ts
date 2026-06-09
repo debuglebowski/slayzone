@@ -34,7 +34,7 @@ test.describe
       await resetApp(mainWindow)
       await mainWindow.evaluate(
         (id) =>
-          window.api.terminalModes.create({
+          window.getTrpcVanillaClient().pty.modesCreate.mutate({
             id,
             label: 'Crash Overlay E2E',
             type: 'claude-code',
@@ -63,10 +63,13 @@ test.describe
       sessionId = getMainSessionId(taskId)
 
       // Set the task to the custom mode and open its terminal.
-      await mainWindow.evaluate(({ id, m }) => window.api.db.updateTask({ id, terminalMode: m }), {
-        id: taskId,
-        m: crashModeId
-      })
+      await mainWindow.evaluate(
+        ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: m }),
+        {
+          id: taskId,
+          m: crashModeId
+        }
+      )
       await s.refreshData()
 
       await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Crash overlay task' })
@@ -74,7 +77,10 @@ test.describe
     })
 
     test.afterAll(async ({ mainWindow }) => {
-      await mainWindow.evaluate((id) => window.api.terminalModes.delete(id), crashModeId)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }),
+        crashModeId
+      )
     })
 
     const ensureLiveTerminal = async (mainWindow: import('@playwright/test').Page) => {
@@ -170,7 +176,7 @@ test.describe('Doctor from terminal menu', () => {
     // the mode trigger on tasks:changed, which is what these tests probe.
     if (mode === 'claude-code') {
       await mainWindow.evaluate(
-        (id) => window.api.db.updateTask({ id, terminalMode: 'claude-code' }),
+        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' }),
         taskId
       )
       await mainWindow.evaluate(() => {

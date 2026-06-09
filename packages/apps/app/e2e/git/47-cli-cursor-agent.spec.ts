@@ -58,9 +58,11 @@ test.describe
       const sessionId = getMainSessionId(taskId)
 
       // Send a simple prompt
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, 'say the word hello\r'), {
-        id: sessionId
-      })
+      await mainWindow.evaluate(
+        ({ id }) =>
+          window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: 'say the word hello\r' }),
+        { id: sessionId }
+      )
 
       await waitForBufferContains(mainWindow, sessionId, 'hello', 60_000)
     })
@@ -69,7 +71,10 @@ test.describe
       const sessionId = getMainSessionId(taskId)
 
       // Send a prompt to trigger work
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, 'say ok\r'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: 'say ok\r' }),
+        { id: sessionId }
+      )
 
       // Should transition to 'running' (working)
       await waitForPtyState(mainWindow, sessionId, 'running', 15_000)

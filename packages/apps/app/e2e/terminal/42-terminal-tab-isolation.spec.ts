@@ -23,11 +23,11 @@ test.describe('Terminal tab keyboard isolation', () => {
     taskIdB = b.id
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskIdA
     )
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskIdB
     )
     await s.refreshData()
@@ -46,19 +46,25 @@ test.describe('Terminal tab keyboard isolation', () => {
     // Exercise the API the hotkey calls so the isolation invariant is
     // verified independently of the keybinding du jour.
     await mainWindow.evaluate(
-      (id) => window.api.tabs.create({ taskId: id, label: 'second' }),
+      (id) => window.getTrpcVanillaClient().taskTerminals.create.mutate({ taskId: id, label: 'second' }),
       taskIdB
     )
 
     await expect
       .poll(async () => {
-        const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskIdB)
+        const tabs = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+          taskIdB
+        )
         return tabs.length
       })
       .toBe(2)
 
     // Task A should still have only 1 tab (the main tab)
-    const tabsA = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskIdA)
+    const tabsA = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+      taskIdA
+    )
     expect(tabsA.length).toBe(1)
   })
 })

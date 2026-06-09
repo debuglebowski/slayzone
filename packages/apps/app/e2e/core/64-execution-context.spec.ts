@@ -209,7 +209,7 @@ test.describe('Project execution context settings', () => {
   // ---------------------------------------------------------------------------
   test('test connection shows failure for nonexistent ssh target', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(() =>
-      window.api.pty.testExecutionContext({
+      window.getTrpcVanillaClient().pty.testExecutionContext.query({
         type: 'ssh',
         target: 'user@invalid.invalid',
         workdir: '/tmp'
@@ -229,7 +229,7 @@ test.describe('Project execution context settings', () => {
     // Seed directly via API
     await mainWindow.evaluate(
       ({ id }) =>
-        window.api.db.updateProject({
+        window.getTrpcVanillaClient().projects.update.mutate({
           id,
           executionContext: { type: 'docker', container: 'seeded-container', workdir: '/app' }
         }),
@@ -249,7 +249,7 @@ test.describe('Project execution context settings', () => {
 
     // Clean up — reset to host
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateProject({ id, executionContext: null }),
+      ({ id }) => window.getTrpcVanillaClient().projects.update.mutate({ id, executionContext: null }),
       { id: projectId }
     )
     await seed(mainWindow).refreshData()

@@ -36,8 +36,9 @@ async function ensureProjectExpanded(page: Page, projectName: string) {
 
 async function killAllPtys(page: Page) {
   await page.evaluate(async () => {
-    const list = await window.api.pty.list()
-    for (const p of list) await window.api.pty.kill(p.sessionId).catch(() => {})
+    const c = window.getTrpcVanillaClient()
+    const list = await c.pty.list.query()
+    for (const p of list) await c.pty.kill.mutate({ sessionId: p.sessionId }).catch(() => {})
   })
 }
 
@@ -122,7 +123,7 @@ test.describe('TreeView multi-select', () => {
 
     subA1 = (await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'MS Sub A1',
           status: 'in_progress',
@@ -132,7 +133,7 @@ test.describe('TreeView multi-select', () => {
     ))!.id
     subA2 = (await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'MS Sub A2',
           status: 'in_progress',
@@ -142,7 +143,7 @@ test.describe('TreeView multi-select', () => {
     ))!.id
     subA3 = (await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'MS Sub A3',
           status: 'in_progress',
@@ -183,13 +184,14 @@ test.describe('TreeView multi-select', () => {
     // Reset task order/status so each test is independent.
     await mainWindow.evaluate(
       async ({ a, b, c, todo, s1, s2, s3 }) => {
-        await window.api.db.updateTasks({
+        const client = window.getTrpcVanillaClient()
+        await client.task.updateMany.mutate({
           ids: [a, b, c, s1, s2, s3],
           updates: { status: 'in_progress' }
         })
-        await window.api.db.updateTasks({ ids: [todo], updates: { status: 'todo' } })
-        await window.api.db.reorderTasks([a, b, c])
-        await window.api.db.reorderTasks([s1, s2, s3])
+        await client.task.updateMany.mutate({ ids: [todo], updates: { status: 'todo' } })
+        await client.task.reorder.mutate({ taskIds: [a, b, c] })
+        await client.task.reorder.mutate({ taskIds: [s1, s2, s3] })
       },
       { a: rootA, b: rootB, c: rootC, todo: rootTodo, s1: subA1, s2: subA2, s3: subA3 }
     )
@@ -280,14 +282,17 @@ test.describe('TreeView multi-select', () => {
   test('multi-drag: selected roots move together into target slot', async ({ mainWindow }) => {
     // Make a 4th root D so we have a clear non-selected target to drop on.
     const rootDObj = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'MS D', status: 'in_progress' }),
+      (pid) =>
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'MS D', status: 'in_progress' }),
       projectId
     )
     const rootD = rootDObj!.id
     try {
       await mainWindow.evaluate(
         async ({ a, b, c, d }) => {
-          await window.api.db.reorderTasks([a, b, c, d])
+          await window.getTrpcVanillaClient().task.reorder.mutate({ taskIds: [a, b, c, d] })
         },
         { a: rootA, b: rootB, c: rootC, d: rootD }
       )
@@ -331,7 +336,7 @@ test.describe('TreeView multi-select', () => {
         )
         .toEqual([0, 1, 2, 3])
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootD)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootD)
     }
   })
 

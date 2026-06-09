@@ -224,8 +224,9 @@ test.describe
           await page
             .waitForFunction(
               (t) => {
-                return window.api.db
-                  .getTasks()
+                return window
+                  .getTrpcVanillaClient()
+                  .task.getAll.query()
                   .then((tasks: any[]) => tasks.some((task) => task.title === t))
               },
               title,

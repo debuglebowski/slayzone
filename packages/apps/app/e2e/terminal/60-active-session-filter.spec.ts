@@ -33,7 +33,8 @@ import {
  */
 async function activeTaskIds(page: import('@playwright/test').Page): Promise<string[]> {
   return page.evaluate(async () => {
-    const [ptys, chats] = await Promise.all([window.api.pty.list(), window.api.chat.list()])
+    const c = window.getTrpcVanillaClient()
+    const [ptys, chats] = await Promise.all([c.pty.list.query(), c.pty.chatList.query()])
     const set = new Set<string>()
     for (const p of ptys) if (p.state !== 'dead') set.add(p.taskId)
     for (const c of chats) if (c.state !== 'dead') set.add(c.taskId)
@@ -67,7 +68,7 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -85,7 +86,10 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
     expect(activeWhileAlive).toContain(task.id)
 
     // Kill the PTY — main flips state→'dead' then evicts the session ~100 ms later.
-    await mainWindow.evaluate((id) => window.api.pty.kill(id), sessionId)
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: id }),
+      sessionId
+    )
 
     // Within the cleanup window the session may still be in `pty.list()` with
     // state='dead'. The filter must exclude it; the active set should clear
@@ -107,7 +111,7 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -128,7 +132,10 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
       })
     })
 
-    await mainWindow.evaluate((id) => window.api.pty.kill(id), sessionId)
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: id }),
+      sessionId
+    )
 
     // Wait until the renderer has observed state→'dead' for this session.
     await expect

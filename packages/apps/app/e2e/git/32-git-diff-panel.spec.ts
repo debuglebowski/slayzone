@@ -209,7 +209,9 @@ test.describe('Git diff panel', () => {
 
     // Enable continuous-flow mode
     await mainWindow.evaluate(async () => {
-      await window.api.settings.set('diff_continuous_flow', '1')
+      await window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'diff_continuous_flow', value: '1' })
       window.dispatchEvent(new Event('sz:settings-changed'))
     })
 
@@ -250,7 +252,9 @@ test.describe('Git diff panel', () => {
     writeFileSync(path.join(gitDir, 'base.txt'), 'line1\nline2 modified\nline3\nextra\n')
     await refresh(mainWindow)
     await mainWindow.evaluate(async () => {
-      await window.api.settings.set('diff_continuous_flow', '0')
+      await window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'diff_continuous_flow', value: '0' })
       window.dispatchEvent(new Event('sz:settings-changed'))
     })
   })
@@ -278,8 +282,12 @@ test.describe('Git diff panel', () => {
     // Together these eliminate the "diff panel shows nothing" dead-end the user
     // could hit by toggling tree-collapsed before picking a file.
     await mainWindow.evaluate(async () => {
-      await window.api.settings.set('diff_tree_collapsed', '1')
-      await window.api.settings.set('diff_continuous_flow', '0')
+      await window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'diff_tree_collapsed', value: '1' })
+      await window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'diff_continuous_flow', value: '0' })
       window.dispatchEvent(new Event('sz:settings-changed'))
     })
 
@@ -296,7 +304,9 @@ test.describe('Git diff panel', () => {
 
     // Restore default for following tests
     await mainWindow.evaluate(async () => {
-      await window.api.settings.set('diff_tree_collapsed', '0')
+      await window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'diff_tree_collapsed', value: '0' })
       window.dispatchEvent(new Event('sz:settings-changed'))
     })
   })

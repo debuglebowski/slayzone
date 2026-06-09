@@ -41,8 +41,8 @@ test.describe('Terminal session isolation', () => {
     await mainWindow.evaluate(
       (ids) => {
         return Promise.all([
-          window.api.db.updateTask({ id: ids.a, terminalMode: 'terminal' }),
-          window.api.db.updateTask({ id: ids.b, terminalMode: 'terminal' })
+          window.getTrpcVanillaClient().task.update.mutate({ id: ids.a, terminalMode: 'terminal' }),
+          window.getTrpcVanillaClient().task.update.mutate({ id: ids.b, terminalMode: 'terminal' })
         ])
       },
       { a: taskAId, b: taskBId }
@@ -70,13 +70,19 @@ test.describe('Terminal session isolation', () => {
 
     await expect
       .poll(async () => {
-        const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskAId)
+        const tabs = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+          taskAId
+        )
         const nonMain = tabs.find((tab: { id: string; isMain: boolean }) => !tab.isMain)
         return nonMain?.id ?? null
       })
       .not.toBeNull()
 
-    const taskATabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskAId)
+    const taskATabs = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+      taskAId
+    )
     const nonMainTab = taskATabs.find((tab: { id: string; isMain: boolean }) => !tab.isMain)
     expect(nonMainTab).toBeTruthy()
 

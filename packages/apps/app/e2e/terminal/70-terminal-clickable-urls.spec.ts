@@ -57,7 +57,7 @@ test.describe('Terminal clickable URLs', () => {
     sessionId = getMainSessionId(taskId)
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskId
     )
     await s.refreshData()

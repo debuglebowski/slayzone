@@ -53,7 +53,7 @@ async function createSubtasks(page: Page, parentId: string, projectId: string, c
   await page.evaluate(
     async ({ parentId, projectId, count }) => {
       for (let i = 0; i < count; i += 1) {
-        await window.api.db.createTask({
+        await window.getTrpcVanillaClient().task.create.mutate({
           projectId,
           parentId,
           title: `Subtask ${i + 1}`,
@@ -73,8 +73,9 @@ async function createSubtasks(page: Page, parentId: string, projectId: string, c
 
 async function clearSubtasks(page: Page, parentId: string) {
   await page.evaluate(async (pid) => {
-    const subs = await window.api.db.getSubTasks(pid)
-    for (const s of subs) await window.api.db.deleteTask(s.id)
+    const c = window.getTrpcVanillaClient()
+    const subs = await c.task.getSubTasks.query({ parentId: pid })
+    for (const s of subs) await c.task.delete.mutate({ id: s.id })
   }, parentId)
   await page.evaluate(async () => {
     await (
@@ -93,7 +94,7 @@ const LONG_DESCRIPTION = Array.from(
 async function seedDescription(page: Page, id: string, text: string) {
   await page.evaluate(
     async ({ id, text }) => {
-      await window.api.db.updateTask({ id, description: text })
+      await window.getTrpcVanillaClient().task.update.mutate({ id, description: text })
       await (
         window as unknown as { __slayzone_refreshData?: () => Promise<void> }
       ).__slayzone_refreshData?.()

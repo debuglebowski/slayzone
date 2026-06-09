@@ -60,7 +60,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { codex: { flags: '--sandbox workspace-write --disable apps' } }
           }),
@@ -82,7 +82,7 @@ test.describe
         )
         .toBe(true)
 
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
       expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
     })
 
@@ -113,7 +113,7 @@ test.describe
         )
         .toBe(true)
 
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
       expect(task?.provider_config?.gemini?.conversationId ?? null).toBeNull()
     })
 
@@ -139,21 +139,27 @@ test.describe
       await mainWindow.waitForTimeout(2000)
 
       // Text and \r must be separate writes (Ink TUI drops \r when concatenated with text)
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, '/stats'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: '/stats' }),
+        { id: sessionId }
+      )
       await mainWindow.waitForTimeout(200)
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, '\r'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: '\r' }),
+        { id: sessionId }
+      )
 
       await expect
         .poll(
           async () => {
-            const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+            const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
             return task?.provider_config?.gemini?.conversationId ?? null
           },
           { timeout: 15_000 }
         )
         .not.toBeNull()
 
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
       expect(task?.provider_config?.gemini?.conversationId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
       )
@@ -184,7 +190,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: {
               codex: { conversationId: cid, flags: '--sandbox workspace-write --disable apps' }
@@ -211,7 +217,7 @@ test.describe
       // Wait for any async detection to potentially overwrite
       await mainWindow.waitForTimeout(5000)
 
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
       expect(task?.provider_config?.codex?.conversationId).toBe(storedId)
     })
   })

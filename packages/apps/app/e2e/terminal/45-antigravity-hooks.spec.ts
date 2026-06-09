@@ -181,7 +181,7 @@ test.describe('Antigravity agent hooks', () => {
       .poll(
         async () => {
           const t = await mainWindow.evaluate(
-            (id) => window.api.db.getTask(id),
+            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
             task.id
           )
           return t?.provider_config?.antigravity?.conversationId ?? null

@@ -77,7 +77,7 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -97,7 +97,7 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Idempotent start', status: 'in_progress' })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()
@@ -127,7 +127,7 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
       status: 'in_progress'
     })
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       task.id
     )
     await s.refreshData()

@@ -99,11 +99,12 @@ test.describe('Session ID banners', () => {
 
     await mainWindow.evaluate(
       ({ codex, gemini, cursor, opencode }) => {
+        const c = window.getTrpcVanillaClient()
         return Promise.all([
-          window.api.db.updateTask({ id: codex, terminalMode: 'codex' }),
-          window.api.db.updateTask({ id: gemini, terminalMode: 'gemini' }),
-          window.api.db.updateTask({ id: cursor, terminalMode: 'cursor-agent' }),
-          window.api.db.updateTask({ id: opencode, terminalMode: 'opencode' })
+          c.task.update.mutate({ id: codex, terminalMode: 'codex' }),
+          c.task.update.mutate({ id: gemini, terminalMode: 'gemini' }),
+          c.task.update.mutate({ id: cursor, terminalMode: 'cursor-agent' }),
+          c.task.update.mutate({ id: opencode, terminalMode: 'opencode' })
           // claude task stays as default claude-code
         ])
       },
@@ -151,7 +152,7 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), codexTaskId)
+        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), codexTaskId)
         return task?.codex_conversation_id ?? null
       })
       .toBe(detectedId)
@@ -179,7 +180,7 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), geminiTaskId)
+        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), geminiTaskId)
         return task?.gemini_conversation_id ?? null
       })
       .toBe(detectedId)

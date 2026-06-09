@@ -148,7 +148,7 @@ test.describe('Git diff panel — worktree task', () => {
     const p = await s.createProject({ name: 'WT Diff', color: '#06b6d4', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'WT diff task', status: 'todo' })
     taskId = t.id
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: taskId,
       worktreePath: WORKTREE_PATH,
       worktreeParentBranch: getMainBranch()
@@ -293,7 +293,10 @@ test.describe('Git diff panel — auto-created worktree', () => {
     )
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          created.id
+        )
         return task?.worktree_path ?? null
       })
       .toBe(autoWorktreePath)
@@ -441,7 +444,7 @@ test.describe('Git diff panel — worktree attached after open', () => {
     mkdirSync(manualWorktreeDir, { recursive: true })
     await mainWindow.evaluate(
       ({ repoPath, targetPath, branch }) =>
-        window.api.git.createWorktree({
+        window.getTrpcVanillaClient().worktrees.createWorktree.mutate({
           repoPath,
           targetPath,
           branch
@@ -451,7 +454,7 @@ test.describe('Git diff panel — worktree attached after open', () => {
 
     // 3. Attach worktree to the task (dialog's onCreated callback path)
     const mainBranch = gitManual('git branch').includes('main') ? 'main' : 'master'
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: manualTaskId,
       worktreePath: manualWorktreePath,
       worktreeParentBranch: mainBranch
@@ -629,7 +632,7 @@ test.describe('Git diff panel — multi-repo wrapper with worktree on child', ()
       status: 'todo',
       repoName: 'child1'
     })
-    await mainWindow.evaluate((d) => window.api.db.updateTask(d), {
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: child1WorktreePath,
       worktreeParentBranch: 'main'

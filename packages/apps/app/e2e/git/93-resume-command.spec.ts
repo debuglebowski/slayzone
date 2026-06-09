@@ -160,7 +160,7 @@ test.describe
       const t = await s.createTask({ projectId, title: 'RC resume claude', status: 'in_progress' })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'claude-code': { conversationId: cid } }
           }),
@@ -191,7 +191,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { codex: { conversationId: cid } }
           }),
@@ -222,7 +222,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { gemini: { conversationId: cid } }
           }),
@@ -253,7 +253,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'cursor-agent': { conversationId: cid } }
           }),
@@ -284,7 +284,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { opencode: { conversationId: cid } }
           }),
@@ -315,7 +315,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'qwen-code': { conversationId: cid } }
           }),
@@ -346,7 +346,7 @@ test.describe
       })
       await mainWindow.evaluate(
         ({ id, cid }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { copilot: { conversationId: cid } }
           }),
@@ -376,7 +376,7 @@ test.describe
       // Use providerConfig field (not legacy codexConversationId)
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { codex: { conversationId: 'via-provider-config' } }
           }),
@@ -399,7 +399,7 @@ test.describe
       const t = await s.createTask({ projectId, title: 'RC flags test', status: 'in_progress' })
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id,
             providerConfig: { 'claude-code': { flags: '--custom-test-flag --verbose' } }
           }),

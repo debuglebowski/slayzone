@@ -27,15 +27,19 @@ test.describe('Terminal exit closes tab', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskId
     )
-    await mainWindow.evaluate(() => window.api.pty.setShellOverride('/bin/sh'))
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: '/bin/sh' })
+    )
     await s.refreshData()
   })
 
   test.afterAll(async ({ mainWindow }) => {
-    await mainWindow.evaluate(() => window.api.pty.setShellOverride(null))
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null })
+    )
   })
 
   test('exiting a secondary pure terminal closes its tab', async ({ mainWindow }) => {
@@ -51,13 +55,19 @@ test.describe('Terminal exit closes tab', () => {
 
     await expect
       .poll(async () => {
-        const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskId)
+        const tabs = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+          taskId
+        )
         const nonMain = tabs.find((tab: { id: string; isMain: boolean }) => !tab.isMain)
         return nonMain?.id ?? null
       })
       .not.toBeNull()
 
-    const tabsAfterCreate = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskId)
+    const tabsAfterCreate = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+          taskId
+        )
     const nonMainTabId = tabsAfterCreate.find(
       (tab: { id: string; isMain: boolean }) => !tab.isMain
     )!.id as string
@@ -69,7 +79,10 @@ test.describe('Terminal exit closes tab', () => {
 
     await expect
       .poll(async () => {
-        const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskId)
+        const tabs = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+          taskId
+        )
         return tabs.length
       })
       .toBe(1)

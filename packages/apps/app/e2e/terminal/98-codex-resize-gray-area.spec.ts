@@ -52,14 +52,14 @@ test.describe
       sessionId = getMainSessionId(taskId)
 
       await mainWindow.evaluate(
-        (id) => window.api.db.updateTask({ id, terminalMode: 'codex' }),
+        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' }),
         taskId
       )
       await s.refreshData()
 
       // Pre-seed terminal theme so OSC 11 responses are correct from the start
       await mainWindow.evaluate(() =>
-        window.api.pty.setTheme({
+        window.getTrpcVanillaClient().pty.setTheme.mutate({
           foreground: '#d4d4d8',
           background: '#141418',
           cursor: '#a1a1aa'
@@ -106,9 +106,12 @@ test.describe
               buf.includes('Press enter') ||
               (buf.includes('model') && (buf.includes('keep') || buf.includes('change')))
             ) {
-              await mainWindow.evaluate(({ id }) => window.api.pty.write(id, '\r'), {
-                id: sessionId
-              })
+              await mainWindow.evaluate(
+                ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: '\r' }),
+                {
+                  id: sessionId
+                }
+              )
               return 'accepted'
             }
             if (buf.includes('% left')) return 'idle'
@@ -138,14 +141,17 @@ test.describe
       // Send a prompt that generates lots of output
       await mainWindow.evaluate(
         ({ id }) =>
-          window.api.pty.write(
-            id,
-            'Write a python fizzbuzz script with detailed comments on every line'
-          ),
+          window.getTrpcVanillaClient().pty.write.mutate({
+            sessionId: id,
+            data: 'Write a python fizzbuzz script with detailed comments on every line'
+          }),
         { id: sessionId }
       )
       await mainWindow.waitForTimeout(200)
-      await mainWindow.evaluate(({ id }) => window.api.pty.write(id, '\r'), { id: sessionId })
+      await mainWindow.evaluate(
+        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: '\r' }),
+        { id: sessionId }
+      )
 
       // Wait for Codex to produce substantial output
       await expect

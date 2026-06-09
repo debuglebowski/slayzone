@@ -17,16 +17,17 @@ async function patchStore(page: Page, patch: TreePatch) {
 // view-store state — drive it through the DB. Passing `[]` unpins everything.
 async function setPinned(page: Page, taskIds: string[]) {
   await page.evaluate(async (ids) => {
-    const data = await window.api.db.loadBoardData()
+    const c = window.getTrpcVanillaClient()
+    const data = await c.task.loadBoardData.query()
     const tasks = data.tasks as Array<{ id: string; pinned?: boolean }>
     const pinSet = new Set(ids)
     for (const t of tasks) {
       if (t.pinned && !pinSet.has(t.id)) {
-        await window.api.db.updateTask({ id: t.id, pinned: false, pinOrder: 0 })
+        await c.task.update.mutate({ id: t.id, pinned: false, pinOrder: 0 })
       }
     }
     for (let i = 0; i < ids.length; i++) {
-      await window.api.db.updateTask({ id: ids[i], pinned: true, pinOrder: i })
+      await c.task.update.mutate({ id: ids[i], pinned: true, pinOrder: i })
     }
   }, taskIds)
   await seed(page).refreshData()
@@ -35,7 +36,7 @@ async function setPinned(page: Page, taskIds: string[]) {
 // Read the pinned task ids (in pin_order) straight from the DB.
 async function getPinnedIds(page: Page): Promise<string[]> {
   return page.evaluate(async () => {
-    const data = await window.api.db.loadBoardData()
+    const data = await window.getTrpcVanillaClient().task.loadBoardData.query()
     const tasks = data.tasks as Array<{ id: string; pinned?: boolean; pin_order: number }>
     return tasks
       .filter((t) => t.pinned)
@@ -67,8 +68,9 @@ async function ensureProjectExpanded(page: Page, projectName: string) {
 
 async function killAllPtys(page: Page) {
   await page.evaluate(async () => {
-    const list = await window.api.pty.list()
-    for (const p of list) await window.api.pty.kill(p.sessionId).catch(() => {})
+    const c = window.getTrpcVanillaClient()
+    const list = await c.pty.list.query()
+    for (const p of list) await c.pty.kill.mutate({ sessionId: p.sessionId }).catch(() => {})
   })
 }
 
@@ -271,7 +273,7 @@ test.describe('TreeView drag and drop', () => {
 
     subA1 = (await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Sub A1',
           status: 'in_progress',
@@ -281,7 +283,7 @@ test.describe('TreeView drag and drop', () => {
     ))!.id
     subA2 = (await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Sub A2',
           status: 'in_progress',
@@ -291,7 +293,7 @@ test.describe('TreeView drag and drop', () => {
     ))!.id
     subA3 = (await mainWindow.evaluate(
       ({ pid, parentId }) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Sub A3',
           status: 'in_progress',
@@ -333,13 +335,14 @@ test.describe('TreeView drag and drop', () => {
     // Reset order/status/priority so each test is independent.
     await mainWindow.evaluate(
       async ({ a, b, c, todo, s1, s2, s3 }) => {
-        await window.api.db.updateTasks({
+        const client = window.getTrpcVanillaClient()
+        await client.task.updateMany.mutate({
           ids: [a, b, c, s1, s2, s3],
           updates: { status: 'in_progress', priority: 3 }
         })
-        await window.api.db.updateTasks({ ids: [todo], updates: { status: 'todo', priority: 3 } })
-        await window.api.db.reorderTasks([a, b, c, todo])
-        await window.api.db.reorderTasks([s1, s2, s3])
+        await client.task.updateMany.mutate({ ids: [todo], updates: { status: 'todo', priority: 3 } })
+        await client.task.reorder.mutate({ taskIds: [a, b, c, todo] })
+        await client.task.reorder.mutate({ taskIds: [s1, s2, s3] })
       },
       { a: rootA, b: rootB, c: rootC, todo: rootTodo, s1: subA1, s2: subA2, s3: subA3 }
     )
@@ -459,9 +462,10 @@ test.describe('TreeView drag and drop', () => {
     // Set distinct priorities: A=3, B=2, C=1. Switch to priority grouping.
     await mainWindow.evaluate(
       async ({ a, b, c }) => {
-        await window.api.db.updateTasks({ ids: [a], updates: { priority: 3 } })
-        await window.api.db.updateTasks({ ids: [b], updates: { priority: 2 } })
-        await window.api.db.updateTasks({ ids: [c], updates: { priority: 1 } })
+        const client = window.getTrpcVanillaClient()
+        await client.task.updateMany.mutate({ ids: [a], updates: { priority: 3 } })
+        await client.task.updateMany.mutate({ ids: [b], updates: { priority: 2 } })
+        await client.task.updateMany.mutate({ ids: [c], updates: { priority: 1 } })
       },
       { a: rootA, b: rootB, c: rootC }
     )
@@ -490,7 +494,7 @@ test.describe('TreeView drag and drop', () => {
     // All three tasks share priority 2. Switch to priority grouping.
     await mainWindow.evaluate(
       async ({ ids }) => {
-        await window.api.db.updateTasks({ ids, updates: { priority: 2 } })
+        await window.getTrpcVanillaClient().task.updateMany.mutate({ ids, updates: { priority: 2 } })
       },
       { ids: [rootA, rootB, rootC] }
     )
@@ -551,7 +555,7 @@ test.describe('TreeView drag and drop', () => {
     // Create a temp task in_progress for this test only.
     const tempId = await mainWindow.evaluate(
       (pid) =>
-        window.api.db.createTask({
+        window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
           title: 'Temp mixed',
           status: 'in_progress',
@@ -579,7 +583,7 @@ test.describe('TreeView drag and drop', () => {
       )
       await expect(tempGroup).toHaveCount(0)
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), tempId!.id)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), tempId!.id)
     }
   })
 
@@ -946,7 +950,10 @@ test.describe('TreeView drag and drop', () => {
     mainWindow
   }) => {
     const rootDone = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      (pid) =>
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'DnD Done', status: 'done' }),
       projectId
     )
     if (!rootDone) throw new Error('failed to create rootDone')
@@ -958,8 +965,9 @@ test.describe('TreeView drag and drop', () => {
       // 'in_progress' depending on tasks-array iteration order.
       await mainWindow.evaluate(
         async ({ d, td }) => {
-          await window.api.db.updateTask({ id: d, order: 2.5 })
-          await window.api.db.updateTask({ id: td, order: 3 })
+          const client = window.getTrpcVanillaClient()
+          await client.task.update.mutate({ id: d, order: 2.5 })
+          await client.task.update.mutate({ id: td, order: 3 })
         },
         { d: rootDone.id, td: rootTodo }
       )
@@ -991,7 +999,7 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: true })
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
     }
   })
 
@@ -999,7 +1007,10 @@ test.describe('TreeView drag and drop', () => {
     mainWindow
   }) => {
     const rootDone = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      (pid) =>
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'DnD Done', status: 'done' }),
       projectId
     )
     if (!rootDone) throw new Error('failed to create rootDone')
@@ -1012,7 +1023,7 @@ test.describe('TreeView drag and drop', () => {
       // `order` field, so use `reorderTasks` (raw SQL UPDATE).
       await mainWindow.evaluate(
         ({ a, b, c, d, td }) =>
-          window.api.db.reorderTasks([a, b, c, d, td]),
+          window.getTrpcVanillaClient().task.reorder.mutate({ taskIds: [a, b, c, d, td] }),
         { a: rootA, b: rootB, c: rootC, d: rootDone.id, td: rootTodo }
       )
       await seed(mainWindow).refreshData()
@@ -1042,7 +1053,7 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'in_progress', afterRootC: true })
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
     }
   })
 
@@ -1061,7 +1072,10 @@ test.describe('TreeView drag and drop', () => {
     mainWindow
   }) => {
     const rootDone = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      (pid) =>
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'DnD Done', status: 'done' }),
       projectId
     )
     if (!rootDone) throw new Error('failed to create rootDone')
@@ -1073,8 +1087,9 @@ test.describe('TreeView drag and drop', () => {
       // 'in_progress' depending on tasks-array iteration order.
       await mainWindow.evaluate(
         async ({ d, td }) => {
-          await window.api.db.updateTask({ id: d, order: 2.5 })
-          await window.api.db.updateTask({ id: td, order: 3 })
+          const client = window.getTrpcVanillaClient()
+          await client.task.update.mutate({ id: d, order: 2.5 })
+          await client.task.update.mutate({ id: td, order: 3 })
         },
         { d: rootDone.id, td: rootTodo }
       )
@@ -1099,7 +1114,7 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
     }
   })
 
@@ -1107,7 +1122,10 @@ test.describe('TreeView drag and drop', () => {
     mainWindow
   }) => {
     const rootDone = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      (pid) =>
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'DnD Done', status: 'done' }),
       projectId
     )
     if (!rootDone) throw new Error('failed to create rootDone')
@@ -1119,8 +1137,9 @@ test.describe('TreeView drag and drop', () => {
       // 'in_progress' depending on tasks-array iteration order.
       await mainWindow.evaluate(
         async ({ d, td }) => {
-          await window.api.db.updateTask({ id: d, order: 2.5 })
-          await window.api.db.updateTask({ id: td, order: 3 })
+          const client = window.getTrpcVanillaClient()
+          await client.task.update.mutate({ id: d, order: 2.5 })
+          await client.task.update.mutate({ id: td, order: 3 })
         },
         { d: rootDone.id, td: rootTodo }
       )
@@ -1145,7 +1164,7 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
     }
   })
 
@@ -1153,7 +1172,10 @@ test.describe('TreeView drag and drop', () => {
     mainWindow
   }) => {
     const rootDone = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      (pid) =>
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'DnD Done', status: 'done' }),
       projectId
     )
     if (!rootDone) throw new Error('failed to create rootDone')
@@ -1165,8 +1187,9 @@ test.describe('TreeView drag and drop', () => {
       // 'in_progress' depending on tasks-array iteration order.
       await mainWindow.evaluate(
         async ({ d, td }) => {
-          await window.api.db.updateTask({ id: d, order: 2.5 })
-          await window.api.db.updateTask({ id: td, order: 3 })
+          const client = window.getTrpcVanillaClient()
+          await client.task.update.mutate({ id: d, order: 2.5 })
+          await client.task.update.mutate({ id: td, order: 3 })
         },
         { d: rootDone.id, td: rootTodo }
       )
@@ -1191,7 +1214,7 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
     }
   })
 
@@ -1199,7 +1222,10 @@ test.describe('TreeView drag and drop', () => {
     mainWindow
   }) => {
     const rootDone = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      (pid) =>
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'DnD Done', status: 'done' }),
       projectId
     )
     if (!rootDone) throw new Error('failed to create rootDone')
@@ -1211,8 +1237,9 @@ test.describe('TreeView drag and drop', () => {
       // 'in_progress' depending on tasks-array iteration order.
       await mainWindow.evaluate(
         async ({ d, td }) => {
-          await window.api.db.updateTask({ id: d, order: 2.5 })
-          await window.api.db.updateTask({ id: td, order: 3 })
+          const client = window.getTrpcVanillaClient()
+          await client.task.update.mutate({ id: d, order: 2.5 })
+          await client.task.update.mutate({ id: td, order: 3 })
         },
         { d: rootDone.id, td: rootTodo }
       )
@@ -1243,7 +1270,7 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
     }
   })
 

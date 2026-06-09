@@ -202,9 +202,9 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     // Create a second task
     const s = (await import('./fixtures/electron')).seed(mainWindow)
     const t2 = await s.createTask({
-      projectId: (await mainWindow.evaluate(() => window.api.db.getProjects())).find(
-        (p: any) => p.name === 'ZOrder T'
-      )!.id,
+      projectId: (
+        await mainWindow.evaluate(() => window.getTrpcVanillaClient().projects.list.query())
+      ).find((p: any) => p.name === 'ZOrder T')!.id,
       title: 'ZOrder task B',
       status: 'todo'
     })

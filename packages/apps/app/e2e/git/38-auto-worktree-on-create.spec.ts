@@ -48,7 +48,10 @@ test.describe('Auto worktree on task create', () => {
     const projectFolder = path.basename(TEST_PROJECT_PATH)
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+        const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      created.id
+    )
         return task?.worktree_path ?? null
       })
       .toBe(
@@ -74,7 +77,10 @@ test.describe('Auto worktree on task create', () => {
       status: 'todo'
     })
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      created.id
+    )
     expect(task?.worktree_path).toBeNull()
   })
 
@@ -103,7 +109,10 @@ test.describe('Auto worktree on task create', () => {
     const projectFolder = path.basename(TEST_PROJECT_PATH)
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+        const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      created.id
+    )
         return task?.worktree_path ?? null
       })
       .toBe(

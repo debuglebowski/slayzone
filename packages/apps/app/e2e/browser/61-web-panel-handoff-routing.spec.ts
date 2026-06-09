@@ -159,7 +159,7 @@ test.describe
 
       await mainWindow.evaluate(
         ({ taskId, panelId }) =>
-          window.api.db.updateTask({
+          window.getTrpcVanillaClient().task.update.mutate({
             id: taskId,
             webPanelUrls: { [panelId]: 'about:blank' }
           }),

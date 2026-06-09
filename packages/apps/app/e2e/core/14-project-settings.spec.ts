@@ -126,14 +126,15 @@ test.describe('Project settings & context menu', () => {
     // GitHub issues. Clear providers first (removes links), then delete tasks
     // (deleteTask blocks if external_links exist).
     await mainWindow.evaluate(async (pid) => {
-      await window.api.integrations
-        .clearProjectProvider({ projectId: pid, provider: 'linear' })
+      const c = window.getTrpcVanillaClient()
+      await c.integrations.clearProjectProvider
+        .mutate({ projectId: pid, provider: 'linear' })
         .catch(() => {})
-      await window.api.integrations
-        .clearProjectProvider({ projectId: pid, provider: 'github' })
+      await c.integrations.clearProjectProvider
+        .mutate({ projectId: pid, provider: 'github' })
         .catch(() => {})
-      const tasks = (await window.api.db.getTasksByProject(pid)) as Array<{ id: string }>
-      for (const task of tasks) await window.api.db.deleteTask(task.id)
+      const tasks = (await c.task.getByProject.query({ projectId: pid })) as Array<{ id: string }>
+      for (const task of tasks) await c.task.delete.mutate({ id: task.id })
     }, projectId)
     await testInvoke(mainWindow, 'integrations:test:clear-github-mocks')
     await testInvoke(mainWindow, 'integrations:test:seed-github-connection', {
@@ -155,7 +156,7 @@ test.describe('Project settings & context menu', () => {
     })
     await mainWindow.evaluate(
       ({ pid, cid }) =>
-        window.api.integrations.setProjectMapping({
+        window.getTrpcVanillaClient().integrations.setProjectMapping.mutate({
           projectId: pid,
           provider: 'github',
           connectionId: cid,
@@ -168,7 +169,7 @@ test.describe('Project settings & context menu', () => {
     )
     await mainWindow.evaluate(
       ({ pid, statuses }) =>
-        window.api.integrations.applyStatusSync({
+        window.getTrpcVanillaClient().integrations.applyStatusSync.mutate({
           projectId: pid,
           provider: 'github',
           statuses
@@ -176,7 +177,7 @@ test.describe('Project settings & context menu', () => {
       { pid: projectId, statuses: GITHUB_STATUS_OPTIONS }
     )
     const githubConnections = (await mainWindow.evaluate(() =>
-      window.api.integrations.listConnections('github')
+      window.getTrpcVanillaClient().integrations.listConnections.query({ provider: 'github' })
     )) as Array<{ id: string }>
     for (const connection of githubConnections) {
       await testInvoke(mainWindow, 'integrations:test:set-github-repositories', {
@@ -350,7 +351,7 @@ test.describe('Project settings & context menu', () => {
     await seedGithubRepoMocks(mainWindow)
     await mainWindow.evaluate(
       ({ pid, cid, repo }) =>
-        window.api.integrations.importGithubRepositoryIssues({
+        window.getTrpcVanillaClient().integrations.importGithubRepositoryIssues.mutate({
           projectId: pid,
           connectionId: cid,
           repositoryFullName: repo,
@@ -395,7 +396,7 @@ test.describe('Project settings & context menu', () => {
     await seedGithubRepoMocks(mainWindow)
     await mainWindow.evaluate(
       ({ pid, cid, repo }) =>
-        window.api.integrations.importGithubRepositoryIssues({
+        window.getTrpcVanillaClient().integrations.importGithubRepositoryIssues.mutate({
           projectId: pid,
           connectionId: cid,
           repositoryFullName: repo,
@@ -414,10 +415,13 @@ test.describe('Project settings & context menu', () => {
     )
     if (!alphaTask) throw new Error('Expected imported alpha task')
 
-    await mainWindow.evaluate(({ id, title }) => window.api.db.updateTask({ id, title }), {
-      id: alphaTask.id,
-      title: 'Repository issue alpha local changed'
-    })
+    await mainWindow.evaluate(
+      ({ id, title }) => window.getTrpcVanillaClient().task.update.mutate({ id, title }),
+      {
+        id: alphaTask.id,
+        title: 'Repository issue alpha local changed'
+      }
+    )
     await setGithubRepoIssues(mainWindow, GITHUB_REPOSITORY_ISSUES_REMOTE_AHEAD)
 
     /** Wait for button to be enabled, click it, then wait for result text in dialog. */
@@ -472,7 +476,7 @@ test.describe('Project settings & context menu', () => {
     await seedGithubRepoMocks(mainWindow)
     await mainWindow.evaluate(
       ({ pid, cid, repo }) =>
-        window.api.integrations.importGithubRepositoryIssues({
+        window.getTrpcVanillaClient().integrations.importGithubRepositoryIssues.mutate({
           projectId: pid,
           connectionId: cid,
           repositoryFullName: repo,
@@ -490,7 +494,7 @@ test.describe('Project settings & context menu', () => {
 
     const result = (await mainWindow.evaluate(
       ({ pid, cid, repo }) =>
-        window.api.integrations.importGithubRepositoryIssues({
+        window.getTrpcVanillaClient().integrations.importGithubRepositoryIssues.mutate({
           projectId: pid,
           connectionId: cid,
           repositoryFullName: repo,

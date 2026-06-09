@@ -137,7 +137,9 @@ test.describe('CLI: slay', () => {
       // Wait for notify → refreshData so getTask can find it
       await expect(mainWindow.getByText(title)).toBeVisible({ timeout: 10_000 })
 
-      const tasks = (await mainWindow.evaluate(() => window.api.db.getTasks())) as {
+      const tasks = (await mainWindow.evaluate(() =>
+        window.getTrpcVanillaClient().task.getAll.query()
+      )) as {
         title: string
         terminal_mode: string
         provider_config: Record<string, { flags?: string }>
@@ -617,7 +619,8 @@ test.describe('CLI: slay', () => {
       )
 
       await mainWindow.evaluate(
-        (shell: string) => window.api.pty.setShellOverride(shell),
+        (shell: string) =>
+          window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: shell }),
         fakeShell
       )
       const originalPath = await electronApp.evaluate(() => {
@@ -648,7 +651,9 @@ test.describe('CLI: slay', () => {
 
         runProcessesCli('processes', 'kill', id.slice(0, 8))
       } finally {
-        await mainWindow.evaluate(() => window.api.pty.setShellOverride(null))
+        await mainWindow.evaluate(() =>
+          window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null })
+        )
         await electronApp.evaluate((p: string) => {
           process.env.PATH = p
         }, originalPath)
@@ -670,7 +675,12 @@ test.describe('CLI: slay', () => {
       parentTaskId = parent.id
       // Create a subtask via the API
       await (mainWindow.evaluate as (fn: (d: unknown) => unknown, d: unknown) => Promise<unknown>)(
-        (d) => window.api.db.createTask(d as Parameters<typeof window.api.db.createTask>[0]),
+        (d) =>
+          window
+            .getTrpcVanillaClient()
+            .task.create.mutate(
+              d as Parameters<ReturnType<typeof window.getTrpcVanillaClient>['task']['create']['mutate']>[0]
+            ),
         { projectId, title: 'CLI seeded subtask', status: 'todo', parentId: parent.id }
       )
       await s.refreshData()
@@ -756,7 +766,7 @@ test.describe('CLI: slay', () => {
       expect(r.status).toBe(0)
 
       const subtasks = (await mainWindow.evaluate(
-        (pid) => window.api.db.getSubTasks(pid),
+        (pid) => window.getTrpcVanillaClient().task.getSubTasks.query({ parentId: pid }),
         parentTaskId
       )) as { title: string; provider_config: Record<string, { flags?: string }> }[]
       const subtask = subtasks.find((t) => t.title === title)!

@@ -14,7 +14,7 @@ test.describe('Worktree/project change clears conversation IDs', () => {
   const seedConversationState = async (mainWindow: import('@playwright/test').Page, id: string) => {
     await mainWindow.evaluate(
       ({ id }) =>
-        window.api.db.updateTask({
+        window.getTrpcVanillaClient().task.update.mutate({
           id,
           providerConfig: {
             'claude-code': { conversationId: 'claude-conv-aaa', flags: '--claude-flag' },
@@ -46,11 +46,15 @@ test.describe('Worktree/project change clears conversation IDs', () => {
 
     // Change worktree path without explicit providerConfig
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({ id, worktreePath: '/tmp/new-worktree' }),
+      ({ id }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, worktreePath: '/tmp/new-worktree' }),
       { id: taskId }
     )
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     // Conversation IDs should be cleared
     expect(task?.provider_config?.['claude-code']?.conversationId ?? null).toBeNull()
     expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
@@ -63,11 +67,14 @@ test.describe('Worktree/project change clears conversation IDs', () => {
     await seedConversationState(mainWindow, taskId)
 
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({ id, baseDir: '/tmp/new-base' }),
+      ({ id }) => window.getTrpcVanillaClient().task.update.mutate({ id, baseDir: '/tmp/new-base' }),
       { id: taskId }
     )
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.provider_config?.['claude-code']?.conversationId ?? null).toBeNull()
     expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
@@ -77,22 +84,25 @@ test.describe('Worktree/project change clears conversation IDs', () => {
   test('changing projectId clears conversationIds, preserves flags', async ({ mainWindow }) => {
     await seedConversationState(mainWindow, taskId)
 
-    await mainWindow.evaluate(({ id, pid }) => window.api.db.updateTask({ id, projectId: pid }), {
-      id: taskId,
-      pid: project2Id
-    })
+    await mainWindow.evaluate(
+      ({ id, pid }) => window.getTrpcVanillaClient().task.update.mutate({ id, projectId: pid }),
+      { id: taskId, pid: project2Id }
+    )
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.provider_config?.['claude-code']?.conversationId ?? null).toBeNull()
     expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
     expect(task?.provider_config?.codex?.flags).toBe('--codex-flag')
 
     // Move back for subsequent tests
-    await mainWindow.evaluate(({ id, pid }) => window.api.db.updateTask({ id, projectId: pid }), {
-      id: taskId,
-      pid: projectId
-    })
+    await mainWindow.evaluate(
+      ({ id, pid }) => window.getTrpcVanillaClient().task.update.mutate({ id, projectId: pid }),
+      { id: taskId, pid: projectId }
+    )
   })
 
   test('changing worktree with explicit providerConfig skips auto-clear', async ({
@@ -103,7 +113,7 @@ test.describe('Worktree/project change clears conversation IDs', () => {
     // Change worktree AND provide explicit providerConfig — auto-clear should NOT trigger
     await mainWindow.evaluate(
       ({ id }) =>
-        window.api.db.updateTask({
+        window.getTrpcVanillaClient().task.update.mutate({
           id,
           worktreePath: '/tmp/another-worktree',
           providerConfig: { 'claude-code': { conversationId: 'explicit-keep' } }
@@ -111,7 +121,10 @@ test.describe('Worktree/project change clears conversation IDs', () => {
       { id: taskId }
     )
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     // claude-code should have the explicitly provided value (deep merged)
     expect(task?.provider_config?.['claude-code']?.conversationId).toBe('explicit-keep')
     // codex should also survive (auto-clear was suppressed by explicit providerConfig)

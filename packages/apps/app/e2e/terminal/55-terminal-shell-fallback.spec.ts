@@ -24,7 +24,7 @@ test.describe('Terminal shell fallback on CLI crash', () => {
 
     // Create a custom terminal mode whose command always exits with code 1
     await mainWindow.evaluate((id) => {
-      return window.api.terminalModes.create({
+      return window.getTrpcVanillaClient().pty.modesCreate.mutate({
         id,
         label: 'Failing CLI',
         type: 'custom',
@@ -43,7 +43,7 @@ test.describe('Terminal shell fallback on CLI crash', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      ({ id, mode }) => window.api.db.updateTask({ id, terminalMode: mode }),
+      ({ id, mode }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: mode }),
       { id: taskId, mode: customModeId }
     )
     await s.refreshData()
@@ -52,7 +52,7 @@ test.describe('Terminal shell fallback on CLI crash', () => {
   test.afterAll(async ({ mainWindow }) => {
     if (customModeId) {
       await mainWindow
-        .evaluate((id) => window.api.terminalModes.delete(id), customModeId)
+        .evaluate((id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }), customModeId)
         .catch(() => {})
     }
   })

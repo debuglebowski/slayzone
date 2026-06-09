@@ -111,12 +111,13 @@ test.describe('Session banner behavior', () => {
 
     await mainWindow.evaluate(
       ({ noAuto, nav, d1, d2, noPty }) => {
+        const c = window.getTrpcVanillaClient()
         return Promise.all([
-          window.api.db.updateTask({ id: noAuto, terminalMode: 'codex' }),
-          window.api.db.updateTask({ id: nav, terminalMode: 'codex' }),
-          window.api.db.updateTask({ id: d1, terminalMode: 'cursor-agent' }),
-          window.api.db.updateTask({ id: d2, terminalMode: 'cursor-agent' }),
-          window.api.db.updateTask({ id: noPty, terminalMode: 'codex' })
+          c.task.update.mutate({ id: noAuto, terminalMode: 'codex' }),
+          c.task.update.mutate({ id: nav, terminalMode: 'codex' }),
+          c.task.update.mutate({ id: d1, terminalMode: 'cursor-agent' }),
+          c.task.update.mutate({ id: d2, terminalMode: 'cursor-agent' }),
+          c.task.update.mutate({ id: noPty, terminalMode: 'codex' })
         ])
       },
       {
@@ -165,7 +166,10 @@ test.describe('Session banner behavior', () => {
     expect(statusCount).toBe(0)
 
     // Session should NOT be saved
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), noAutoTaskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      noAutoTaskId
+    )
     expect(task?.codex_conversation_id ?? null).toBeNull()
   })
 
@@ -294,7 +298,10 @@ test.describe('Session banner behavior', () => {
 
     // Banner still visible, session not saved
     await expect(mainWindow.getByText('Session not saved').last()).toBeVisible()
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), noPtyTaskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      noPtyTaskId
+    )
     expect(task?.codex_conversation_id ?? null).toBeNull()
 
     // Restore pty:exists

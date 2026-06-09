@@ -36,8 +36,9 @@ async function ensureProjectExpanded(page: Page, projectName: string) {
 
 async function killAllPtys(page: Page) {
   await page.evaluate(async () => {
-    const list = await window.api.pty.list()
-    for (const p of list) await window.api.pty.kill(p.sessionId).catch(() => {})
+    const c = window.getTrpcVanillaClient()
+    const list = await c.pty.list.query()
+    for (const p of list) await c.pty.kill.mutate({ sessionId: p.sessionId }).catch(() => {})
   })
 }
 
@@ -114,11 +115,12 @@ test.describe('TreeView actions', () => {
     // Wipe every task in both projects so each test starts identical.
     await mainWindow.evaluate(
       async ({ pid, oid }) => {
-        const all = await window.api.db.getTasks()
+        const c = window.getTrpcVanillaClient()
+        const all = await c.task.getAll.query()
         const ids = all
           .filter((t: { project_id: string }) => t.project_id === pid || t.project_id === oid)
           .map((t: { id: string }) => t.id)
-        if (ids.length > 0) await window.api.db.deleteTasks(ids)
+        if (ids.length > 0) await c.task.deleteMany.mutate({ ids })
       },
       { pid: projectId, oid: otherProjectId }
     )
@@ -128,12 +130,16 @@ test.describe('TreeView actions', () => {
     rootB = (await s.createTask({ projectId, title: 'TA B', status: 'in_progress' })).id
     rootC = (await s.createTask({ projectId, title: 'TA C', status: 'in_progress' })).id
     rootD = (await s.createTask({ projectId, title: 'TA D', status: 'in_progress' })).id
-    await mainWindow.evaluate((ids) => window.api.db.reorderTasks([ids.a, ids.b, ids.c, ids.d]), {
-      a: rootA,
-      b: rootB,
-      c: rootC,
-      d: rootD
-    })
+    await mainWindow.evaluate(
+      (ids) =>
+        window.getTrpcVanillaClient().task.reorder.mutate({ taskIds: [ids.a, ids.b, ids.c, ids.d] }),
+      {
+        a: rootA,
+        b: rootB,
+        c: rootC,
+        d: rootD
+      }
+    )
 
     // Remount TreeView with a clean filter set.
     await patchStore(mainWindow, { sidebarView: 'projects' })

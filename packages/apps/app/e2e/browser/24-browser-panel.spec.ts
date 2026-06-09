@@ -292,7 +292,10 @@ test.describe('Browser panel', () => {
     await newTabBtn(mainWindow).click()
     await expect(tabEntries(mainWindow)).toHaveCount(countBefore + 1)
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
     expect(task?.browser_tabs).toBeTruthy()
     expect(task?.browser_tabs?.tabs.length ?? 0).toBeGreaterThanOrEqual(2)
 
