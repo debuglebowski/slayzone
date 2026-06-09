@@ -2826,6 +2826,17 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         browserViewManager.setHandoffPolicy(viewId, policy)
     )
 
+    // Test-only: drive the tRPC `app.browser.onShortcut` source directly. The
+    // renderer consumes browser-WCV shortcuts via that subscription (not the
+    // legacy `browser-view:shortcut` IPC, which has no renderer consumer post
+    // slice-5), so e2e can simulate a WCV keyboard shortcut without a real
+    // native keypress.
+    if (isPlaywright) {
+      ipcMain.handle('browser:__test-emit-shortcut', (_, payload: unknown) =>
+        browserViewEvents.emit('shortcut', payload)
+      )
+    }
+
     // Navigation
     ipcMain.handle('browser:navigate', (_, viewId: string, url: string) =>
       browserViewManager.navigate(viewId, url)

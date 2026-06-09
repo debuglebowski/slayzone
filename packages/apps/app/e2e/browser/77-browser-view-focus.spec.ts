@@ -1,7 +1,6 @@
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   testInvoke,
-  testEmit,
   ensureBrowserPanelVisible,
   focusForAppShortcut,
   openTaskViaSearch,
@@ -76,8 +75,10 @@ test.describe('Browser view focus (WebContentsView)', () => {
     )
     await expect(searchInput).not.toBeVisible({ timeout: 2_000 })
 
-    // Simulate Cmd+K arriving via the IPC bridge (as if pressed in WebContentsView)
-    await testEmit(mainWindow, 'browser-view:shortcut', {
+    // Simulate Cmd+K arriving from the WebContentsView via the tRPC shortcut
+    // source (the renderer consumes `app.browser.onShortcut`, not the legacy
+    // `browser-view:shortcut` IPC, which has no renderer consumer post slice-5).
+    await testInvoke(mainWindow, 'browser:__test-emit-shortcut', {
       viewId: 'test',
       key: 'k',
       shift: false,
@@ -86,8 +87,8 @@ test.describe('Browser view focus (WebContentsView)', () => {
       control: false
     })
 
-    // Search dialog should open — this proves the IPC bridge dispatches events
-    // that react-hotkeys-hook can handle
+    // Search dialog should open — this proves the shortcut source dispatches
+    // events that react-hotkeys-hook can handle
     await expect(searchInput).toBeVisible({ timeout: 3_000 })
   })
 
@@ -97,7 +98,7 @@ test.describe('Browser view focus (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     await testInvoke(mainWindow, 'browser:focus', viewId)
-    await testEmit(mainWindow, 'browser-view:shortcut', {
+    await testInvoke(mainWindow, 'browser:__test-emit-shortcut', {
       viewId,
       key: 'f',
       shift: false,
