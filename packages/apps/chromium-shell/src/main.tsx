@@ -9,9 +9,18 @@
 // dynamic import() continuation does not run before --screenshot/--dump-dom.
 // Restore the dynamic import (see main.tsx history) when settings-coupled
 // features are imported into renderer-app.
-import { setupWindowApi } from '@slayzone/window-api-shim'
+import { setNativeOverlay, setupWindowApi } from '@slayzone/window-api-shim'
 import { mountApp } from '@slayzone/renderer-app'
 
 ;(window as unknown as { api: ReturnType<typeof setupWindowApi> }).api = setupWindowApi()
+
+// cap-layout-p4 — native overlay control for the renderer. Feature-detected by
+// renderer-app (absent under electron → DOM-portal dialogs). show('dialog')
+// raises the shell-rendered dialog surface above the live embedded tab;
+// close() clears it.
+;(window as unknown as { __slayzoneNativeOverlay?: unknown }).__slayzoneNativeOverlay = {
+  show: (id: string) => setNativeOverlay(id),
+  close: () => setNativeOverlay('')
+}
 
 mountApp()

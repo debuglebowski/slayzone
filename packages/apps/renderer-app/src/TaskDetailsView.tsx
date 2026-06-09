@@ -166,6 +166,23 @@ export function TaskDetailsView() {
   }
 
   const openDemoDialog = (): void => {
+    // cap-layout-p4 — prefer the NATIVE overlay surface (dialog above the live
+    // embedded tab, nothing hidden) when the shell host exposes it AND a native
+    // tile is showing. Fall back to the DOM portal (which the occlusion policy
+    // pairs with hiding native tiles) everywhere else.
+    const native = (
+      window as unknown as { __slayzoneNativeOverlay?: { show(id: string): Promise<boolean> } }
+    ).__slayzoneNativeOverlay
+    if (native && activeTypes.has('browser')) {
+      void native.show('dialog').then((ok) => {
+        if (!ok) openDomDialog()
+      })
+      return
+    }
+    openDomDialog()
+  }
+
+  const openDomDialog = (): void => {
     useLayoutStore.getState().openOverlay({
       id: 'demo',
       kind: 'dialog',
