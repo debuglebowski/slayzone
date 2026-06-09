@@ -1,0 +1,463 @@
+From 4b2a609a890bfd4efe6fe298e9da8fe8dc36e840 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 13:56:27 +0200
+Subject: [51/66] =?UTF-8?q?feat(chromium):=20iteration-2=20=E2=80=94=20Lay?=
+ =?UTF-8?q?outMode=20fidelity=20vs=20Electron?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Phase 8.5 home-mode swap only overlaid a single chrome://slayzone-<panel>/
+WebView on top of the full 10-region grid. Electron renders distinct
+layout trees per tab type. This replaces the swap with a real mode
+branch.
+
+SlayzoneRegionContainer gains `LayoutMode {kTaskDetail,kHome,kOverlay}`
++ `SetLayoutMode`. kHome hides sidebar/taskheader/browserchrome/terminal
+and collapses the mid SlayzoneSplitView to fraction=1.0 so the tasklist
+(kanban) owns the full main-area width — structural match with the
+Electron reference. kOverlay keeps the grid mounted so
+SlayzoneOverlayManager can restore prior mode on close.
+
+SlayzoneBrowserView tracks mode, exposes `SetLayoutMode`, and wraps
+the Phase 8.5 `SetHomePanel` as a back-compat adapter (Mojo ShowHomePanel
+still resolves). Added `--slayzone-layout-mode=home|task-detail|overlay`
+CLI switch for the validation harness. Removed home_panel_webview_
+(now redundant — kanban lives in the tasklist region directly).
+
+Mojo: `LayoutHost.SetLayoutMode(LayoutMode)` + matching enum, mirrored
+on both layout.mojom copies.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ chrome/browser/slayzone/mojom/layout.mojom    |  7 ++
+ .../browser/slayzone/slayzone_layout_host.cc  | 23 +++++
+ .../browser/slayzone/slayzone_layout_host.h   |  2 +
+ .../ui/views/frame/slayzone_browser_view.cc   | 99 ++++++++-----------
+ .../ui/views/frame/slayzone_browser_view.h    | 50 ++++++----
+ .../views/frame/slayzone_region_container.cc  | 63 ++++++++++++
+ .../views/frame/slayzone_region_container.h   | 22 +++++
+ 7 files changed, 189 insertions(+), 77 deletions(-)
+
+diff --git a/chrome/browser/slayzone/mojom/layout.mojom b/chrome/browser/slayzone/mojom/layout.mojom
+index faadbbc180705..3cd5574505b96 100644
+--- a/chrome/browser/slayzone/mojom/layout.mojom
++++ b/chrome/browser/slayzone/mojom/layout.mojom
+@@ -10,6 +10,12 @@ enum RegionAxis {
+   kCross,
+ };
+ 
++enum LayoutMode {
++  kTaskDetail,
++  kHome,
++  kOverlay,
++};
++
+ // Owned by the browser process; one remote per region.
+ interface LayoutHost {
+   SetRegionVisible(string region_id, bool visible);
+@@ -17,4 +23,5 @@ interface LayoutHost {
+   FocusRegion(string region_id) => (bool ok);
+   ShowHomePanel(string panel_id) => (bool ok);
+   ShowOverlay(string overlay_id) => (bool ok);
++  SetLayoutMode(LayoutMode mode) => ();
+ };
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.cc b/chrome/browser/slayzone/slayzone_layout_host.cc
+index 471f03d17b71d..a7a4f49b9e0f4 100644
+--- a/chrome/browser/slayzone/slayzone_layout_host.cc
++++ b/chrome/browser/slayzone/slayzone_layout_host.cc
+@@ -87,3 +87,26 @@ void SlayzoneLayoutHost::ShowOverlay(const std::string& overlay_id,
+   }
+   std::move(callback).Run(overlay_manager_->SetOverlay(overlay_id));
+ }
++
++void SlayzoneLayoutHost::SetLayoutMode(
++    slayzone::layout::mojom::LayoutMode mode,
++    SetLayoutModeCallback callback) {
++  if (view_) {
++    using MojoMode = slayzone::layout::mojom::LayoutMode;
++    SlayzoneBrowserView::LayoutMode target =
++        SlayzoneBrowserView::LayoutMode::kTaskDetail;
++    switch (mode) {
++      case MojoMode::kTaskDetail:
++        target = SlayzoneBrowserView::LayoutMode::kTaskDetail;
++        break;
++      case MojoMode::kHome:
++        target = SlayzoneBrowserView::LayoutMode::kHome;
++        break;
++      case MojoMode::kOverlay:
++        target = SlayzoneBrowserView::LayoutMode::kOverlay;
++        break;
++    }
++    view_->SetLayoutMode(target);
++  }
++  std::move(callback).Run();
++}
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.h b/chrome/browser/slayzone/slayzone_layout_host.h
+index 14ca5ddc6b207..3fc99328227a8 100644
+--- a/chrome/browser/slayzone/slayzone_layout_host.h
++++ b/chrome/browser/slayzone/slayzone_layout_host.h
+@@ -48,6 +48,8 @@ class SlayzoneLayoutHost : public slayzone::layout::mojom::LayoutHost {
+                      ShowHomePanelCallback callback) override;
+   void ShowOverlay(const std::string& overlay_id,
+                    ShowOverlayCallback callback) override;
++  void SetLayoutMode(slayzone::layout::mojom::LayoutMode mode,
++                     SetLayoutModeCallback callback) override;
+ 
+  private:
+   const raw_ptr<SlayzoneBrowserView> view_;
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 3768e7607f0e9..cb1bdba3f85f2 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -42,6 +42,13 @@ namespace {
+ // AddedToWidget calls SetHomePanel(value) once the region grid is up.
+ constexpr char kSlayzoneHomePanelSwitch[] = "slayzone-home-panel";
+ 
++// Iteration-2 — dev smoke switch for layout-mode fidelity validation.
++// Accepted values: "task-detail" (default, same as absent), "home",
++// "overlay". Applied in AddedToWidget after the region grid is up. Used
++// by scripts/chromium/compare-with-electron.sh to boot the binary in a
++// specific mode per screenshot.
++constexpr char kSlayzoneLayoutModeSwitch[] = "slayzone-layout-mode";
++
+ // Back-pointer attached to every region WebView's WebContents so Phase 6.3's
+ // Mojo binders can route TabsHost receivers to the owning SlayzoneBrowserView
+ // from just the WebContents.
+@@ -126,78 +133,57 @@ void SlayzoneBrowserView::AddedToWidget() {
+   SyncInlineTabWebView();
+ 
+   // Phase 8.5 — honor `--slayzone-home-panel=<id>` for dev smoke. Invalid
+-  // ids are silently ignored; the grid stays up. Used by the verify
+-  // harness + docs/chromium/phase-8-smoke.md.
++  // ids are silently ignored; the grid stays up.
+   const base::CommandLine* cli = base::CommandLine::ForCurrentProcess();
+   if (cli->HasSwitch(kSlayzoneHomePanelSwitch)) {
+     SetHomePanel(cli->GetSwitchValueASCII(kSlayzoneHomePanelSwitch));
+   }
++  // Iteration-2 — honor `--slayzone-layout-mode=home|task-detail|overlay`
++  // for the layout-fidelity validation harness. Falls through silently on
++  // unknown values so a typo doesn't brick the region grid.
++  if (cli->HasSwitch(kSlayzoneLayoutModeSwitch)) {
++    const std::string value = cli->GetSwitchValueASCII(kSlayzoneLayoutModeSwitch);
++    if (value == "home") {
++      SetLayoutMode(LayoutMode::kHome);
++    } else if (value == "overlay") {
++      SetLayoutMode(LayoutMode::kOverlay);
++    } else if (value == "task-detail" || value.empty()) {
++      SetLayoutMode(LayoutMode::kTaskDetail);
++    }
++  }
++}
++
++void SlayzoneBrowserView::SetLayoutMode(LayoutMode mode) {
++  const auto region_mode =
++      static_cast<SlayzoneRegionContainer::LayoutMode>(mode);
++  if (layout_mode_ == mode && region_container_ &&
++      region_container_->layout_mode() == region_mode) {
++    return;
++  }
++  layout_mode_ = mode;
++  if (region_container_) {
++    region_container_->SetLayoutMode(region_mode);
++  }
++  // kHome suppresses the inline tab (browser WebContents surface) since the
++  // kanban WebUI owns the main area. kTaskDetail + kOverlay resume sync.
++  if (mode == LayoutMode::kTaskDetail || mode == LayoutMode::kOverlay) {
++    SyncInlineTabWebView();
++  }
+ }
+ 
+ bool SlayzoneBrowserView::SetHomePanel(std::string_view panel_id) {
+-  // Empty id = back to task-detail mode.
+   if (panel_id.empty()) {
+-    if (home_panel_webview_) {
+-      home_panel_webview_->SetVisible(false);
+-    }
+-    if (region_container_) {
+-      region_container_->SetVisible(true);
+-    }
+-    mode_ = Mode::kTaskDetail;
++    SetLayoutMode(LayoutMode::kTaskDetail);
+     active_home_panel_.clear();
+     return true;
+   }
+-
+-  // Allowlist — reject unknown ids without changing mode. Explicit list
+-  // rather than a "anything goes" policy so a typo doesn't silently yield
+-  // a blank region pointing at a bogus chrome:// host.
+   const bool known = std::any_of(
+       kHomePanelIds.begin(), kHomePanelIds.end(),
+       [panel_id](std::string_view known_id) { return known_id == panel_id; });
+   if (!known) {
+     return false;
+   }
+-
+-  // Lazily create the home WebView. Sized to match the region grid; when
+-  // active it covers the grid completely. Owned by the BrowserView view
+-  // tree — no separate lifetime management.
+-  if (!home_panel_webview_) {
+-    auto webview_owned = std::make_unique<views::WebView>(browser()->profile());
+-    home_panel_webview_ = AddChildView(std::move(webview_owned));
+-    home_panel_webview_->SetBoundsRect(GetLocalBounds());
+-  }
+-
+-  // Phase 8.5 — install RegionData BEFORE navigation. LoadInitialURL
+-  // triggers the WebUI BindInterface path which looks up
+-  // FromRegionWebContents; if RegionData isn't on the contents by then
+-  // the binder bails and the panel's Mojo host never gets a receiver
+-  // (symptom: sidecar sees no `<panel>:get-snapshot` traffic, the React
+-  // empty-state sticks). `GetWebContents()` on views::WebView lazy-
+-  // creates contents, so the ptr is valid after this call.
+-  if (content::WebContents* contents = home_panel_webview_->GetWebContents()) {
+-    if (!RegionData::FromWebContents(contents)) {
+-      RegionData::CreateForWebContents(contents, this);
+-    }
+-  }
+-
+-  const std::string url =
+-      base::StrCat({"chrome://slayzone-", panel_id, "/"});
+-  home_panel_webview_->LoadInitialURL(GURL(url));
+-  // Re-check RegionData post-navigation in case WebView cycled the
+-  // contents pointer during LoadInitialURL (first-load creates contents;
+-  // GetWebContents() pre-navigation already triggered creation so this
+-  // is mostly defensive).
+-  if (content::WebContents* contents = home_panel_webview_->GetWebContents()) {
+-    if (!RegionData::FromWebContents(contents)) {
+-      RegionData::CreateForWebContents(contents, this);
+-    }
+-  }
+-  home_panel_webview_->SetBoundsRect(GetLocalBounds());
+-  home_panel_webview_->SetVisible(true);
+-  if (region_container_) {
+-    region_container_->SetVisible(false);
+-  }
+-  mode_ = Mode::kHome;
++  SetLayoutMode(LayoutMode::kHome);
+   active_home_panel_ = std::string(panel_id);
+   return true;
+ }
+@@ -242,9 +228,6 @@ void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+   if (region_container_) {
+     region_container_->SetBoundsRect(GetLocalBounds());
+   }
+-  if (home_panel_webview_) {
+-    home_panel_webview_->SetBoundsRect(GetLocalBounds());
+-  }
+ }
+ 
+ void SlayzoneBrowserView::OnTabStripModelChanged(
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 4694dbd19f410..57d4cd664ecde 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -99,26 +99,41 @@ class SlayzoneBrowserView : public BrowserView {
+     return git_host_.get();
+   }
+ 
+-  // Phase 8.5 — home-tab mode. `kTaskDetail` (default) shows the
+-  // 10-region grid. `kHome` hides the grid and renders a single home
+-  // panel (one of `kHomePanelIds`) full-bleed.
+-  enum class Mode {
++  // Iteration-2 layout modes — structural parity with the Electron reference.
++  // `kTaskDetail` = the Phase 5.2 10-region grid (sidebar, taskheader,
++  // browserchrome, terminal, inline-tab + kanban/projects/tools/statusbar).
++  // `kHome` = kanban full-bleed, no per-task chrome. `kOverlay` = region grid
++  // remains mounted but a full-window overlay WebView (leaderboard / usage /
++  // context) paints above via SlayzoneOverlayManager; closing the overlay
++  // restores whichever mode was active before it opened.
++  enum class LayoutMode {
+     kTaskDetail,
+     kHome,
++    kOverlay,
+   };
+ 
+-  // The panel IDs accepted by `SetHomePanel`. Order is fixed so downstream
+-  // UI (e.g. Phase 17 panel rail) can present a stable cycle.
++  // Phase 8.5 back-compat — panel IDs accepted by `SetHomePanel`. Unused for
++  // the iteration-2 layout fidelity flow (kanban lives in the tasklist slot
++  // directly) but kept so the existing ShowHomePanel Mojo method remains
++  // callable as a thin wrapper over `SetLayoutMode(kHome)`.
+   static constexpr std::array<std::string_view, 4> kHomePanelIds = {
+       "automations", "processes", "test", "git",
+   };
+ 
+-  Mode mode() const { return mode_; }
++  LayoutMode layout_mode() const { return layout_mode_; }
+ 
+-  // Phase 8.5 — swap into home mode with the given `panel_id` loaded in the
+-  // home WebView. `panel_id` must be in `kHomePanelIds`; empty string
+-  // returns to task-detail mode. Returns `true` on successful mode change,
+-  // `false` when `panel_id` is unknown (mode unchanged).
++  // Iteration-2 — authoritatively switch layout mode. Rebuilds region
++  // visibility via SlayzoneRegionContainer::SetLayoutMode and rebinds any
++  // mode-sensitive chrome (overlay manager, inline tab webview). Idempotent;
++  // safe to call from any thread transition point (TabStripModel observer,
++  // CLI switch handler, Mojo SetLayoutMode).
++  void SetLayoutMode(LayoutMode mode);
++
++  // Phase 8.5 — legacy home-panel entry point. Kept so the Mojo
++  // ShowHomePanel method still resolves; now just a thin adapter over
++  // SetLayoutMode. Empty panel_id => kTaskDetail; known panel_id =>
++  // kHome (panel_id is retained for telemetry but no longer drives a
++  // separate WebView).
+   bool SetHomePanel(std::string_view panel_id);
+ 
+   // Phase 6.3 — returns the SlayzoneBrowserView that owns `wc` as a region
+@@ -163,14 +178,11 @@ class SlayzoneBrowserView : public BrowserView {
+   std::unique_ptr<slayzone::SlayzoneTestHost> test_host_;
+   std::unique_ptr<slayzone::SlayzoneGitHost> git_host_;
+ 
+-  // Phase 8.5 — home-tab mode state. `home_panel_webview_` is lazily
+-  // created the first time `SetHomePanel()` is called with a known id,
+-  // parented as a BrowserView child overlaying the region grid, and
+-  // retained for subsequent swaps. When `mode_ == kTaskDetail` the WebView
+-  // is hidden (if present) and the region grid is visible; in `kHome` the
+-  // inverse.
+-  Mode mode_ = Mode::kTaskDetail;
+-  raw_ptr<views::WebView> home_panel_webview_ = nullptr;
++  // Iteration-2 — authoritative layout mode. Mutated via SetLayoutMode;
++  // SlayzoneRegionContainer mirrors this for the region visibility toggle.
++  // `active_home_panel_` is retained for Phase 8.5 back-compat telemetry
++  // (ShowHomePanel's panel id); it no longer swaps a dedicated WebView.
++  LayoutMode layout_mode_ = LayoutMode::kTaskDetail;
+   std::string active_home_panel_;
+ };
+ 
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+index 701f9e37ffafb..b4ed2701c7793 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.cc
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
+ 
++#include <array>
+ #include <memory>
+ #include <string>
+ #include <string_view>
+@@ -147,10 +148,12 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+   inline_tab_webview_ = tabview_owned.get();
+   right_owned->AddChildView(std::move(tabview_owned));
+   right_owned->SetFlexForView(inline_tab_webview_, 1);
++  mid_right_pane_ = right_owned.get();
+ 
+   auto mid_split = std::make_unique<SlayzoneSplitView>(
+       SlayzoneSplitView::Orientation::kHorizontal, std::move(tasklist_wv),
+       std::move(right_owned), /*initial_fraction=*/0.5);
++  mid_split_ = mid_split.get();
+   views::View* mid = center->AddChildView(std::move(mid_split));
+   center->SetFlexForView(mid, 2);
+ 
+@@ -170,5 +173,65 @@ views::WebView* SlayzoneRegionContainer::GetRegion(std::string_view region_id) {
+   return it == regions_.end() ? nullptr : it->second.get();
+ }
+ 
++void SlayzoneRegionContainer::SetLayoutMode(LayoutMode mode) {
++  if (layout_mode_ == mode) {
++    return;
++  }
++  layout_mode_ = mode;
++
++  auto set_region_visible = [this](std::string_view id, bool visible) {
++    if (views::WebView* wv = GetRegion(id)) {
++      wv->SetVisible(visible);
++    }
++  };
++
++  // Regions hidden outside task-detail mode. Order matches
++  // Electron's home layout survey in docs/chromium/layout-modes.md.
++  constexpr std::array<std::string_view, 4> kTaskOnlyRegions = {
++      "sidebar", "taskheader", "browserchrome", "terminal",
++  };
++
++  switch (mode) {
++    case LayoutMode::kTaskDetail:
++    case LayoutMode::kOverlay:
++      // kOverlay leaves the grid intact — SlayzoneOverlayManager paints a
++      // full-bleed WebView above it, and closing the overlay restores the
++      // prior mode without a relayout round-trip. kTaskDetail unhides
++      // everything the kHome branch may have hidden.
++      for (std::string_view id : kTaskOnlyRegions) {
++        set_region_visible(id, true);
++      }
++      if (inline_tab_webview_) {
++        inline_tab_webview_->SetVisible(true);
++      }
++      if (mid_right_pane_) {
++        mid_right_pane_->SetVisible(true);
++      }
++      if (mid_split_) {
++        mid_split_->SetFraction(0.5);
++      }
++      break;
++    case LayoutMode::kHome:
++      // Electron home-tab layout: projects rail + tabbar + tasklist (kanban)
++      // full-bleed + tools rail + statusbar. No per-task chrome.
++      for (std::string_view id : kTaskOnlyRegions) {
++        set_region_visible(id, false);
++      }
++      if (inline_tab_webview_) {
++        inline_tab_webview_->SetVisible(false);
++      }
++      if (mid_right_pane_) {
++        mid_right_pane_->SetVisible(false);
++      }
++      if (mid_split_) {
++        // Tasklist owns the full main-axis length; divider collapses to the
++        // edge, right pane is hidden anyway.
++        mid_split_->SetFraction(1.0);
++      }
++      break;
++  }
++  InvalidateLayout();
++}
++
+ BEGIN_METADATA(SlayzoneRegionContainer)
+ END_METADATA
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.h b/chrome/browser/ui/views/frame/slayzone_region_container.h
+index a0fd77f4bdd82..3e57d687f8162 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.h
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.h
+@@ -22,6 +22,8 @@ namespace views {
+ class WebView;
+ }
+ 
++class SlayzoneSplitView;
++
+ // Phase 5.2 — native layout grid hosting one `views::WebView` per SlayZone
+ // region. Every named slot loads `chrome://slayzone-placeholder/<id>` until
+ // Phase 7 swaps individual slots for their real WebUIs.
+@@ -54,9 +56,29 @@ class SlayzoneRegionContainer : public views::BoxLayoutView {
+   // it as the TabStripModel selection changes.
+   views::WebView* inline_tab_webview() { return inline_tab_webview_; }
+ 
++  // Iteration-2 layout modes. `kTaskDetail` is the Phase 5.2 full 10-region
++  // grid. `kHome` hides task-only regions (sidebar, taskheader, browserchrome,
++  // terminal, inline tab) and gives the tasklist (kanban) full main-area
++  // width — structurally matches the Electron home-tab layout. `kOverlay` is
++  // tracked for bookkeeping only; the region grid stays in place and the
++  // SlayzoneOverlayManager paints a full-bleed WebView above it.
++  enum class LayoutMode {
++    kTaskDetail,
++    kHome,
++    kOverlay,
++  };
++
++  void SetLayoutMode(LayoutMode mode);
++  LayoutMode layout_mode() const { return layout_mode_; }
++
+  private:
+   base::flat_map<std::string, raw_ptr<views::WebView>> regions_;
+   raw_ptr<views::WebView> inline_tab_webview_ = nullptr;
++  // Right pane of the mid split (browserchrome URL strip + inline tab view).
++  // Hidden in kHome so the tasklist owns the whole main-area width.
++  raw_ptr<views::View> mid_right_pane_ = nullptr;
++  raw_ptr<SlayzoneSplitView> mid_split_ = nullptr;
++  LayoutMode layout_mode_ = LayoutMode::kTaskDetail;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_REGION_CONTAINER_H_
+-- 
+2.52.0
+

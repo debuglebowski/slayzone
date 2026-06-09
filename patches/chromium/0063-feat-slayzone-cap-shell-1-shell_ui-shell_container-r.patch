@@ -1,0 +1,1130 @@
+From f4cbc1d9a8f7e3e733a7e278433209afa1382d5c Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 23 Apr 2026 22:44:14 +0200
+Subject: [63/66] =?UTF-8?q?feat(slayzone):=20cap-shell-1=20=E2=80=94=20she?=
+ =?UTF-8?q?ll=5Fui=20+=20shell=5Fcontainer=20+=20registry?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+slayzone_shell_ui: chrome://slayzone-shell/ host. SimpleURLLoader server-side
+proxy to Vite dev server in dev mode (preserves chrome:// origin so Mojo
+bindings work). CSP widened in dev for inline scripts + ws://localhost HMR.
+slayzone_shell_container: replaces 14-region grid with full-bleed shell
+WebView in browser_view.
+Registry registers SlayzoneShellUI alongside existing per-region hosts.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ .../ui/views/frame/slayzone_browser_view.cc   | 149 +++----
+ .../ui/views/frame/slayzone_browser_view.h    |  18 +
+ .../views/frame/slayzone_shell_container.cc   |  87 ++++
+ .../ui/views/frame/slayzone_shell_container.h |  65 +++
+ .../ui/webui/slayzone/slayzone_shell_ui.cc    | 401 ++++++++++++++++++
+ .../ui/webui/slayzone/slayzone_shell_ui.h     | 142 +++++++
+ .../webui/slayzone/slayzone_webui_registry.cc |  52 +--
+ 7 files changed, 787 insertions(+), 127 deletions(-)
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_shell_container.cc
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_shell_container.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h
+
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 51457915ff937..304c963ff3b0e 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -27,8 +27,10 @@
+ #include "chrome/browser/slayzone/slayzone_test_host.h"
+ #include "chrome/browser/slayzone/slayzone_tools_host.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_finder.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
++#include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_user_data.h"
+ #include "ui/base/accelerators/accelerator.h"
+@@ -37,19 +39,15 @@
+ #include "ui/events/keycodes/keyboard_codes.h"
+ #include "url/gurl.h"
+ #include "ui/views/controls/webview/webview.h"
++#include "ui/views/view_utils.h"
+ 
+ namespace {
+ 
+-// Phase 8.5 — command-line switch for dev smoke. When present,
+-// AddedToWidget calls SetHomePanel(value) once the region grid is up.
+-constexpr char kSlayzoneHomePanelSwitch[] = "slayzone-home-panel";
+-
+-// Iteration-2 — dev smoke switch for layout-mode fidelity validation.
+-// Accepted values: "task-detail" (default, same as absent), "home",
+-// "overlay". Applied in AddedToWidget after the region grid is up. Used
+-// by scripts/chromium/compare-with-electron.sh to boot the binary in a
+-// specific mode per screenshot.
+-constexpr char kSlayzoneLayoutModeSwitch[] = "slayzone-layout-mode";
++// cap-shell-1 — the `--slayzone-home-panel` and `--slayzone-layout-mode`
++// CLI switches were removed from AddedToWidget along with the region grid.
++// cap-shell-2 regains equivalent dev-smoke paths via shell-side env flags
++// routed through the window.api shim. Constants retired to avoid
++// -Wunused-const-variable under Chromium's -Werror profile.
+ 
+ // Back-pointer attached to every region WebView's WebContents so Phase 6.3's
+ // Mojo binders can route TabsHost receivers to the owning SlayzoneBrowserView
+@@ -98,87 +96,51 @@ SlayzoneBrowserView::~SlayzoneBrowserView() = default;
+ void SlayzoneBrowserView::AddedToWidget() {
+   BrowserView::AddedToWidget();
+ 
+-  // Upstream chrome stays parented + visible — `BrowserViewTabbedLayoutImpl`
+-  // CHECKs that `contents_container_` is visible + parented, and similar
+-  // invariants apply to the toolbar tree. Our region grid is added as a later
+-  // sibling and overlays the whole BrowserView, so the upstream views remain
+-  // but are never seen. Phase 5.6 takes them out of the flow properly once
+-  // the layout intent API + Mojo channel land.
+-  region_container_ = AddChildView(std::make_unique<SlayzoneRegionContainer>(
+-      browser()->profile()));
+-  region_container_->SetBoundsRect(GetLocalBounds());
+-
+-  RegisterRegionFocusAccelerators();
++  // cap-shell-1 — Path-B swap. The per-region grid (SlayzoneRegionContainer)
++  // is no longer installed; chrome://slayzone-shell/ mounts Electron's
++  // extracted React tree inside one full-bleed WebView. Upstream chrome stays
++  // parented + visible for the same `BrowserViewTabbedLayoutImpl` CHECKs the
++  // region grid previously worked around.
++  shell_container_ = AddChildView(
++      std::make_unique<SlayzoneShellContainer>(browser()->profile()));
++  shell_container_->SetBoundsRect(GetLocalBounds());
++
++  // cap-shell-1 keeps overlay accelerators so Cmd+K / ESC still reach
++  // layout_host_. They are effectively no-ops in cap-shell-1 because no
++  // overlay WebView exists yet; cap-shell-2 rewires the shim so the shell's
++  // React overlay state flips instead.
++  //
++  // TODO(cap-shell-2): replace with shell-driven shortcut registration once
++  // the shell owns its own keybindings via window.api.shortcuts.
+   RegisterOverlayAccelerators();
+-
+-  // Phase 6.3 — install a back-pointer on every region WebView's WebContents
+-  // so `SlayzoneBrowserView::FromRegionWebContents` can route Mojo binder
+-  // calls (e.g. TabsHost receivers from chrome://slayzone-browserchrome/)
+-  // back to `this`. Covers every named region — cheap + uniform, costs one
+-  // pointer per region WebContents.
+-  for (std::string_view id : SlayzoneRegionContainer::kRegionIds) {
+-    views::WebView* wv = region_container_->GetRegion(id);
+-    if (!wv) {
+-      continue;
+-    }
+-    content::WebContents* contents = wv->GetWebContents();
+-    if (!contents) {
+-      continue;
+-    }
+-    RegionData::CreateForWebContents(contents, this);
+-  }
+-
+-  // Phase 6.2 — BrowserView is already a TabStripModelObserver and already
+-  // registered against the strip; we just override OnTabStripModelChanged
+-  // below and chain to the base. Sync once synchronously for the initial
+-  // paint since the first tab typically exists by AddedToWidget; subsequent
+-  // activations (and any late initial tab) flow through the override.
+-  SyncInlineTabWebView();
+-
+-  // Phase 8.5 — honor `--slayzone-home-panel=<id>` for dev smoke. Invalid
+-  // ids are silently ignored; the grid stays up.
+-  const base::CommandLine* cli = base::CommandLine::ForCurrentProcess();
+-  if (cli->HasSwitch(kSlayzoneHomePanelSwitch)) {
+-    SetHomePanel(cli->GetSwitchValueASCII(kSlayzoneHomePanelSwitch));
+-  }
+-  // Iteration-2 — honor `--slayzone-layout-mode=home|task-detail|overlay`
+-  // for the layout-fidelity validation harness. Falls through silently on
+-  // unknown values so a typo doesn't brick the region grid. cap-03: CLI
+-  // switch takes precedence over URL-derived sync; when absent, the active
+-  // tab's URL drives the initial layout mode via SyncLayoutModeToActiveTab.
+-  if (cli->HasSwitch(kSlayzoneLayoutModeSwitch)) {
+-    const std::string value = cli->GetSwitchValueASCII(kSlayzoneLayoutModeSwitch);
+-    if (value == "home") {
+-      SetLayoutMode(LayoutMode::kHome);
+-    } else if (value == "overlay") {
+-      SetLayoutMode(LayoutMode::kOverlay);
+-    } else if (value == "task-detail" || value.empty()) {
+-      SetLayoutMode(LayoutMode::kTaskDetail);
+-    }
+-  } else if (!cli->HasSwitch(kSlayzoneHomePanelSwitch)) {
+-    SyncLayoutModeToActiveTab();
+-  }
+ }
+ 
+ void SlayzoneBrowserView::SetLayoutMode(LayoutMode mode) {
+-  const auto region_mode =
+-      static_cast<SlayzoneRegionContainer::LayoutMode>(mode);
+-  if (layout_mode_ == mode && region_container_ &&
+-      region_container_->layout_mode() == region_mode) {
++  // TODO(cap-shell-2/4): cap-shell-1 retains this method for Mojo ABI
++  // compatibility (SlayzoneLayoutHost::SetLayoutMode still calls through),
++  // but the region grid is gone so the layout-mode branching is dead. The
++  // state mutation is preserved for whoever reads `layout_mode()`. cap-shell-4
++  // re-homes the inline tab WebView via BrowserViewHost mojom; cap-shell-2
++  // re-homes the overlay state via the shell's React tree.
++  if (layout_mode_ == mode) {
+     return;
+   }
+   layout_mode_ = mode;
+   if (region_container_) {
++    const auto region_mode =
++        static_cast<SlayzoneRegionContainer::LayoutMode>(mode);
+     region_container_->SetLayoutMode(region_mode);
+   }
+-  // kHome suppresses the inline tab (browser WebContents surface) since the
+-  // kanban WebUI owns the main area. kTaskDetail + kOverlay resume sync.
+   if (mode == LayoutMode::kTaskDetail || mode == LayoutMode::kOverlay) {
+     SyncInlineTabWebView();
+   }
+ }
+ 
+ bool SlayzoneBrowserView::SetHomePanel(std::string_view panel_id) {
++  // TODO(cap-shell-2): home-panel routing moves into the shell's React tree
++  // (kanban + per-panel views become React components with panel state in
++  // Zustand). This method stays wired to Mojo for ABI compatibility but no
++  // longer flips anything visible in cap-shell-1.
+   if (panel_id.empty()) {
+     SetLayoutMode(LayoutMode::kTaskDetail);
+     active_home_panel_.clear();
+@@ -202,6 +164,19 @@ SlayzoneBrowserView* SlayzoneBrowserView::FromRegionWebContents(
+   return data ? data->view() : nullptr;
+ }
+ 
++// static
++SlayzoneBrowserView* SlayzoneBrowserView::GetActiveInstance() {
++  Browser* browser = chrome::FindLastActive();
++  if (!browser) {
++    return nullptr;
++  }
++  BrowserView* bv = BrowserView::GetBrowserViewForBrowser(browser);
++  if (!bv) {
++    return nullptr;
++  }
++  return views::AsViewClass<SlayzoneBrowserView>(bv);
++}
++
+ void SlayzoneBrowserView::RegisterRegionFocusAccelerators() {
+   // Cmd+1 … Cmd+9 focus region slots 0..8 from `kRegionIds` order.
+   // Cmd+0 is left alone — upstream binds it to "reset zoom".
+@@ -257,8 +232,10 @@ bool SlayzoneBrowserView::AcceleratorPressed(
+ 
+ void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+   BrowserView::OnBoundsChanged(previous_bounds);
+-  if (region_container_) {
+-    region_container_->SetBoundsRect(GetLocalBounds());
++  // cap-shell-1 — Path-B. region_container_ is never populated; shell_container_
++  // owns the viewport.
++  if (shell_container_) {
++    shell_container_->SetBoundsRect(GetLocalBounds());
+   }
+ }
+ 
+@@ -266,20 +243,24 @@ void SlayzoneBrowserView::OnTabStripModelChanged(
+     TabStripModel* tab_strip_model,
+     const TabStripModelChange& change,
+     const TabStripSelectionChange& selection) {
++  // TODO(cap-shell-4): inline-tab WebView routing moves to BrowserViewHost
++  // mojom. cap-shell-1 keeps the observer wired so the base class still gets
++  // notified and SlayzoneTabsHost continues to observe via its own hook, but
++  // SyncInlineTabWebView/SyncLayoutModeToActiveTab are no-ops (region_container_
++  // null) until cap-shell-4 replumbs them over the shell's React tree.
+   BrowserView::OnTabStripModelChanged(tab_strip_model, change, selection);
+   if (selection.active_tab_changed() ||
+       change.type() != TabStripModelChange::kSelectionOnly) {
+     SyncInlineTabWebView();
+-    // cap-03 — the active tab's URL drives LayoutMode. When an overlay is
+-    // up we don't evict it on a tab switch; instead we update `prior_mode_`
+-    // so ESC restores to the newly-selected tab's mode. The CLI flag path
+-    // still applies at AddedToWidget and wins over the initial tab (orders
+-    // the harness's explicit choice above the URL-derived fallback).
+     SyncLayoutModeToActiveTab();
+   }
+ }
+ 
+ void SlayzoneBrowserView::SyncLayoutModeToActiveTab() {
++  // TODO(cap-shell-2): the shell's Zustand store owns tab→layout derivation;
++  // this C++ path becomes a vestige once the JsonRpcHost exposes TabsHost
++  // state to the shell renderer. Kept in cap-shell-1 so layout_mode_ still
++  // reflects the active tab for any remaining Mojo consumers.
+   content::WebContents* active =
+       browser()->tab_strip_model()->GetActiveWebContents();
+   if (!active) {
+@@ -312,6 +293,10 @@ void SlayzoneBrowserView::SyncLayoutModeToActiveTab() {
+ }
+ 
+ void SlayzoneBrowserView::SyncInlineTabWebView() {
++  // TODO(cap-shell-4): cap-shell-1 has no inline tab surface — the shell's
++  // React tree will host the inline browser via a BrowserViewHost mojom
++  // driven by browser-side geometry. Early-return preserves the existing
++  // call sites (tab observers + CLI entry points) without a crash.
+   if (!region_container_) {
+     return;
+   }
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index aca2816c4488c..a84bbb1b5967e 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -23,6 +23,7 @@ class WebView;
+ class Browser;
+ class SlayzoneLayoutHost;
+ class SlayzoneRegionContainer;
++class SlayzoneShellContainer;
+ class SlayzoneTabsHost;
+ 
+ namespace slayzone {
+@@ -66,6 +67,10 @@ class SlayzoneBrowserView : public BrowserView {
+     return region_container_;
+   }
+ 
++  // cap-shell-1 — the Path-B shell container that replaced the region grid.
++  // Returns nullptr until AddedToWidget runs.
++  SlayzoneShellContainer* shell_container() { return shell_container_; }
++
+   SlayzoneLayoutHost* layout_host() { return layout_host_.get(); }
+   SlayzoneTabsHost* tabs_host() { return tabs_host_.get(); }
+   slayzone::SlayzoneStatusbarHost* statusbar_host() {
+@@ -152,6 +157,14 @@ class SlayzoneBrowserView : public BrowserView {
+   // for per-region TabsHost connections.
+   static SlayzoneBrowserView* FromRegionWebContents(content::WebContents* wc);
+ 
++  // cap-03 — returns the first active SlayzoneBrowserView across the
++  // current BrowserList, or nullptr if none. Used by the overlay /
++  // dialogs WebUI BindInterface(LayoutHost) overloads whose WebContents
++  // is NOT a region WebView (so FromRegionWebContents returns nullptr).
++  // Desktop SlayZone runs with at most one BrowserView at a time, so this
++  // scans until the first match.
++  static SlayzoneBrowserView* GetActiveInstance();
++
+   // views::View:
+   void AddedToWidget() override;
+   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+@@ -182,6 +195,11 @@ class SlayzoneBrowserView : public BrowserView {
+   void SyncLayoutModeToActiveTab();
+ 
+   raw_ptr<SlayzoneRegionContainer> region_container_ = nullptr;
++  // cap-shell-1 — Path-B swap: AddedToWidget() creates this instead of the
++  // region grid. The legacy members (region_container_, *_host_, layout
++  // plumbing below) stay declared because cap-shell-2 rebinds the Mojo
++  // hosts to the shell's WebContents rather than recreating them.
++  raw_ptr<SlayzoneShellContainer> shell_container_ = nullptr;
+   std::unique_ptr<SlayzoneLayoutHost> layout_host_;
+   std::unique_ptr<SlayzoneTabsHost> tabs_host_;
+   std::unique_ptr<slayzone::SlayzoneStatusbarHost> statusbar_host_;
+diff --git a/chrome/browser/ui/views/frame/slayzone_shell_container.cc b/chrome/browser/ui/views/frame/slayzone_shell_container.cc
+new file mode 100644
+index 0000000000000..2d287e1f08010
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_shell_container.cc
+@@ -0,0 +1,87 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
++
++#include <memory>
++
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/browser_context.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/views/controls/webview/webview.h"
++#include "url/gurl.h"
++
++SlayzoneShellContainer::SlayzoneShellContainer(
++    content::BrowserContext* browser_context) {
++  // Manual Layout(): the shell WebView fills the container, the embedded-tab
++  // slot is explicitly positioned on top. FillLayout would lay out both as
++  // fill; we need a two-child override instead.
++  auto shell_owned = std::make_unique<views::WebView>(browser_context);
++  shell_owned->LoadInitialURL(GURL(chrome::kChromeUISlayzoneShellURL));
++  shell_webview_ = AddChildView(std::move(shell_owned));
++
++  // cap-shell-4 — overlay slot lives above shell_webview_ in Z. Starts hidden
++  // until the host calls SetEmbeddedTab{WebContents,Bounds,Visible}.
++  auto overlay_owned = std::make_unique<views::WebView>(browser_context);
++  overlay_owned->SetVisible(false);
++  embedded_tab_slot_ = AddChildView(std::move(overlay_owned));
++}
++
++SlayzoneShellContainer::~SlayzoneShellContainer() {
++  // Detach the overlay WebContents so the host — which owns the WebContents
++  // via its Entry map — can destroy them without the view holding a stale
++  // pointer after teardown.
++  if (embedded_tab_slot_) {
++    embedded_tab_slot_->SetWebContents(nullptr);
++  }
++}
++
++content::WebContents* SlayzoneShellContainer::shell_web_contents() {
++  return shell_webview_ ? shell_webview_->GetWebContents() : nullptr;
++}
++
++void SlayzoneShellContainer::SetEmbeddedTabWebContents(
++    content::WebContents* contents) {
++  if (!embedded_tab_slot_) {
++    return;
++  }
++  embedded_tab_slot_->SetWebContents(contents);
++}
++
++void SlayzoneShellContainer::SetEmbeddedTabBounds(const gfx::Rect& bounds) {
++  if (bounds == embedded_tab_bounds_) {
++    return;
++  }
++  embedded_tab_bounds_ = bounds;
++  DeprecatedLayoutImmediately();
++}
++
++void SlayzoneShellContainer::SetEmbeddedTabVisible(bool visible) {
++  if (visible == embedded_tab_visible_) {
++    return;
++  }
++  embedded_tab_visible_ = visible;
++  if (embedded_tab_slot_) {
++    embedded_tab_slot_->SetVisible(visible);
++  }
++  DeprecatedLayoutImmediately();
++}
++
++void SlayzoneShellContainer::Layout(PassKey key) {
++  const gfx::Rect contents = GetContentsBounds();
++  if (shell_webview_) {
++    shell_webview_->SetBoundsRect(contents);
++  }
++  if (embedded_tab_slot_) {
++    // Clamp the requested rect to the container so rounding / pre-paint races
++    // in the rAF bounds loop don't send the WebView offscreen.
++    gfx::Rect clamped = embedded_tab_bounds_;
++    clamped.Intersect(contents);
++    embedded_tab_slot_->SetBoundsRect(clamped);
++  }
++}
++
++BEGIN_METADATA(SlayzoneShellContainer)
++END_METADATA
+diff --git a/chrome/browser/ui/views/frame/slayzone_shell_container.h b/chrome/browser/ui/views/frame/slayzone_shell_container.h
+new file mode 100644
+index 0000000000000..ef01a7251937b
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_shell_container.h
+@@ -0,0 +1,65 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_SHELL_CONTAINER_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_SHELL_CONTAINER_H_
++
++#include "base/memory/raw_ptr.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/views/view.h"
++
++namespace content {
++class BrowserContext;
++class WebContents;
++}
++
++namespace views {
++class WebView;
++}
++
++// cap-shell-1 — full-bleed host that renders chrome://slayzone-shell/ in a
++// single views::WebView. Replaces SlayzoneRegionContainer's 14-WebView grid
++// for the Path-B shell takeover.
++//
++// cap-shell-4 — adds one overlay views::WebView stacked above the shell. The
++// embedded-tab host (owned by SlayzoneShellUI) drives WebContents attach /
++// detach + bounds updates through SetEmbeddedTab{WebContents,Bounds,Visible}.
++// The overlay slot is a single shared WebView; the host swaps WebContents
++// when the active view_id changes. Z-order: shell_webview_ is added first
++// and fills the container; embedded_tab_slot_ is added second and renders on
++// top of the shell at the last SetEmbeddedTabBounds rect.
++class SlayzoneShellContainer : public views::View {
++  METADATA_HEADER(SlayzoneShellContainer, views::View)
++
++ public:
++  explicit SlayzoneShellContainer(content::BrowserContext* browser_context);
++  SlayzoneShellContainer(const SlayzoneShellContainer&) = delete;
++  SlayzoneShellContainer& operator=(const SlayzoneShellContainer&) = delete;
++  ~SlayzoneShellContainer() override;
++
++  // Returns the WebContents hosting chrome://slayzone-shell/, or nullptr if
++  // not yet created. cap-shell-2 uses this to route Mojo binder receivers
++  // from the shell's renderer process back to the per-region hosts.
++  content::WebContents* shell_web_contents();
++
++  // cap-shell-4 — embedded-tab overlay API. The host calls these from
++  // SlayzoneEmbeddedTabHost when the active view changes, moves, or toggles
++  // visibility. Passing nullptr to SetEmbeddedTabWebContents detaches the
++  // current WebContents without destroying it (the host owns its lifetime).
++  void SetEmbeddedTabWebContents(content::WebContents* contents);
++  void SetEmbeddedTabBounds(const gfx::Rect& bounds);
++  void SetEmbeddedTabVisible(bool visible);
++
++  // views::View:
++  void Layout(PassKey key) override;
++
++ private:
++  raw_ptr<views::WebView> shell_webview_ = nullptr;
++  raw_ptr<views::WebView> embedded_tab_slot_ = nullptr;
++  gfx::Rect embedded_tab_bounds_;
++  bool embedded_tab_visible_ = false;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_SHELL_CONTAINER_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+new file mode 100644
+index 0000000000000..9bf87690f2f05
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+@@ -0,0 +1,401 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h"
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/memory/ref_counted_memory.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "chrome/browser/profiles/profile.h"
++#include "content/public/browser/storage_partition.h"
++#include "net/traffic_annotation/network_traffic_annotation.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++#include "services/network/public/mojom/url_response_head.mojom.h"
++#include "url/gurl.h"
++#include "chrome/browser/slayzone/slayzone_embedded_tab_host.h"
++#include "chrome/browser/slayzone/slayzone_json_rpc_host.h"
++#include "chrome/browser/slayzone/slayzone_native_dialog_host.h"
++#include "chrome/browser/slayzone/slayzone_projects_host.h"
++#include "chrome/browser/slayzone/slayzone_settings_host.h"
++#include "chrome/browser/slayzone/slayzone_tags_host.h"
++#include "chrome/browser/slayzone/slayzone_tasklist_host.h"
++#include "chrome/browser/slayzone/slayzone_terminal_host.h"
++#include "chrome/browser/slayzone/slayzone_windows_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
++
++namespace {
++
++// cap-shell-1 dedicated switch. Separate from --slayzone-webui-bundle-dir so
++// the per-region bundle source (packages/webui/<region>/dist/) stays untouched
++// while the shell points at packages/apps/shell/dist/. Path-B takeover later
++// can retire the per-region flag once the last region WebUIs are unplumbed.
++constexpr char kSlayzoneShellBundleDirSwitch[] = "slayzone-shell-bundle-dir";
++
++// cap-shell-dx-hmr — server-side proxy to a Vite dev server. When set, every
++// request on chrome://slayzone-shell/<path> is fetched browser-side from
++// <dev_server>/<path> via SimpleURLLoader and the body returned to the
++// renderer as if served from chrome://slayzone-shell/. Same-origin to the
++// renderer, so Mojo bindings still work. Vite's HMR WebSocket goes direct
++// from the page to ws://localhost:5173 (CSP widened in dev mode).
++constexpr char kSlayzoneShellDevServerSwitch[] = "slayzone-shell-dev-server";
++
++constexpr net::NetworkTrafficAnnotationTag kShellDevServerProxyAnnotation =
++    net::DefineNetworkTrafficAnnotation("slayzone_shell_dev_server_proxy", R"(
++        semantics {
++          sender: "SlayZone Shell WebUI"
++          description:
++            "Proxies requests from chrome://slayzone-shell/ to a developer-"
++            "supplied Vite dev server (--slayzone-shell-dev-server) so that "
++            "renderer source edits hot-swap without rebuilding the shell "
++            "bundle. Only enabled when the developer explicitly opts in via "
++            "the command-line switch."
++          trigger:
++            "Each chrome://slayzone-shell/* request when the dev-server "
++            "switch is set."
++          data: "Original request URL path (forwarded as-is to dev server)."
++          destination: OTHER
++          destination_other: "Local Vite dev server, typically localhost."
++        }
++        policy {
++          cookies_allowed: NO
++          setting:
++            "This feature is off by default. Enable by passing "
++            "--slayzone-shell-dev-server=<url> at launch."
++          policy_exception_justification:
++            "Local development tooling, no network reach beyond localhost."
++        })");
++
++constexpr std::string_view kShellMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · shell</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%;
++                 font: 12px/1.4 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; justify-content: center;
++      background: #3a1a1a; color: #fca5a5; padding: 16px;
++      text-align: center;
++    }
++  </style>
++</head>
++<body>
++  <div>
++    shell bundle missing — pass
++    <code>--slayzone-shell-bundle-dir=&lt;repo&gt;/packages/apps/shell</code>
++    and build the bundle with
++    <code>pnpm --filter @slayzone/shell build</code>.
++  </div>
++</body>
++</html>)HTML";
++
++base::FilePath ResolveShellBundleRoot() {
++  const base::CommandLine* cli = base::CommandLine::ForCurrentProcess();
++  if (!cli->HasSwitch(kSlayzoneShellBundleDirSwitch)) {
++    return base::FilePath();
++  }
++  return cli->GetSwitchValuePath(kSlayzoneShellBundleDirSwitch);
++}
++
++GURL ResolveShellDevServer() {
++  const base::CommandLine* cli = base::CommandLine::ForCurrentProcess();
++  if (!cli->HasSwitch(kSlayzoneShellDevServerSwitch)) return GURL();
++  GURL url(cli->GetSwitchValueASCII(kSlayzoneShellDevServerSwitch));
++  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS()) return GURL();
++  return url;
++}
++
++// Holds the per-loader state for an in-flight proxy fetch so it lives until
++// the SimpleURLLoader callback fires.
++struct DevProxyState {
++  std::unique_ptr<network::SimpleURLLoader> loader;
++};
++
++void OnDevProxyComplete(std::unique_ptr<DevProxyState> state,
++                        content::WebUIDataSource::GotDataCallback callback,
++                        std::optional<std::string> body) {
++  if (body.has_value()) {
++    std::move(callback).Run(
++        base::MakeRefCounted<base::RefCountedString>(std::move(*body)));
++  } else {
++    std::move(callback).Run(
++        base::MakeRefCounted<base::RefCountedString>(std::string()));
++  }
++}
++
++void ProxyShellRequestToDevServer(
++    scoped_refptr<network::SharedURLLoaderFactory> loader_factory,
++    const GURL& dev_server,
++    const std::string& path,
++    content::WebUIDataSource::GotDataCallback callback) {
++  std::string rel = path;
++  if (!rel.empty() && rel.front() == '/') rel.erase(0, 1);
++  // Empty path = index document; Vite serves it at "/".
++  GURL target = rel.empty() ? dev_server : dev_server.Resolve(rel);
++
++  auto request = std::make_unique<network::ResourceRequest>();
++  request->url = target;
++  request->method = "GET";
++  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
++  // Tell Vite to skip its index-html injection of dev-only iframes; we want
++  // the same response a browser would get on first navigation.
++  request->headers.SetHeader("Accept", "*/*");
++
++  auto state = std::make_unique<DevProxyState>();
++  state->loader = network::SimpleURLLoader::Create(
++      std::move(request), kShellDevServerProxyAnnotation);
++  // Up to 16 MiB per asset (covers source-mapped chunks comfortably).
++  network::SimpleURLLoader* raw_loader = state->loader.get();
++  raw_loader->DownloadToString(
++      loader_factory.get(),
++      base::BindOnce(&OnDevProxyComplete, std::move(state),
++                     std::move(callback)),
++      /*max_body_size=*/16 * 1024 * 1024);
++}
++
++scoped_refptr<base::RefCountedMemory> ReadShellFileOnWorker(
++    base::FilePath full_path,
++    bool is_index) {
++  std::string contents;
++  if (base::ReadFileToString(full_path, &contents)) {
++    return base::MakeRefCounted<base::RefCountedString>(std::move(contents));
++  }
++  if (is_index) {
++    return base::MakeRefCounted<base::RefCountedString>(
++        std::string(kShellMissingBundleHtml));
++  }
++  // Non-index miss — return empty so the page (already loaded) surfaces the
++  // asset miss as a console error rather than a WebContents load failure.
++  return base::MakeRefCounted<base::RefCountedString>(std::string());
++}
++
++bool ShouldHandleAnyPath(const std::string& path) {
++  return true;
++}
++
++void HandleShellRequest(
++    scoped_refptr<network::SharedURLLoaderFactory> loader_factory,
++    const std::string& path,
++    content::WebUIDataSource::GotDataCallback callback) {
++  // cap-shell-dx-hmr — when a dev server is configured, proxy the request to
++  // it server-side. The renderer sees the result on chrome://slayzone-shell/
++  // origin so Mojo bindings keep working; Vite's HMR WebSocket connects
++  // directly from the page (CSP allows ws://localhost:* in dev mode).
++  GURL dev_server = ResolveShellDevServer();
++  if (dev_server.is_valid() && loader_factory) {
++    ProxyShellRequestToDevServer(std::move(loader_factory), dev_server, path,
++                                 std::move(callback));
++    return;
++  }
++
++  base::FilePath bundle_root = ResolveShellBundleRoot();
++  if (bundle_root.empty()) {
++    std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
++        std::string(kShellMissingBundleHtml)));
++    return;
++  }
++
++  std::string rel = path;
++  if (!rel.empty() && rel.front() == '/') {
++    rel.erase(0, 1);
++  }
++  const bool is_index = rel.empty();
++  if (is_index) {
++    rel = "index.html";
++  }
++
++  const base::FilePath full = bundle_root.AppendASCII("dist").AppendASCII(rel);
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ReadShellFileOnWorker, full, is_index),
++      std::move(callback));
++}
++
++}  // namespace
++
++SlayzoneShellUI::SlayzoneShellUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui),
++      tags_host_(std::make_unique<slayzone::SlayzoneTagsHost>()),
++      settings_host_(std::make_unique<slayzone::SlayzoneSettingsHost>()) {
++  Profile* profile = Profile::FromWebUI(web_ui);
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      profile, chrome::kChromeUISlayzoneShellHost);
++
++  // cap-shell-dx-hmr — capture browser-process URLLoaderFactory so the request
++  // filter can fetch from the dev server when --slayzone-shell-dev-server is
++  // set. In prod (no dev-server switch), the factory is unused.
++  scoped_refptr<network::SharedURLLoaderFactory> loader_factory =
++      profile->GetDefaultStoragePartition()
++          ->GetURLLoaderFactoryForBrowserProcess();
++
++  source->SetRequestFilter(
++      base::BindRepeating(&ShouldHandleAnyPath),
++      base::BindRepeating(&HandleShellRequest, std::move(loader_factory)));
++
++  // cap-shell-dx-hmr — widen CSP for the Vite HMR WebSocket and the inline
++  // setup script Vite injects in dev. In prod (no --slayzone-shell-dev-server)
++  // the directives collapse to the original 'self'-anchored set.
++  const bool dev_mode = ResolveShellDevServer().is_valid();
++  const std::string dev_connect_extra =
++      dev_mode ? " ws://localhost:* wss://localhost:* http://localhost:*"
++               : std::string();
++  const std::string dev_script_extra =
++      dev_mode ? " 'unsafe-inline' 'unsafe-eval'" : std::string();
++
++  // CSP mirrors the per-region ConfigureBundleSource: Vite emits a hashed
++  // <script> + stylesheet under /assets/, and radix-ui components emit inline
++  // styles. chrome://resources is needed once cap-shell-2 wires mojo.
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ScriptSrc,
++      "script-src 'self' chrome://resources" + dev_script_extra + ";");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::StyleSrc,
++      "style-src 'self' 'unsafe-inline';");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::FontSrc,
++      "font-src 'self' data:;");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ImgSrc,
++      "img-src 'self' data: blob:;");
++  // cap-shell-1: worker-src needed because React 19 + PostHog instrument via
++  // Web Workers. blob: covers the Vite-emitted chunks. Revisit in cap-shell-3
++  // when terminal xterm.js mounts.
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::WorkerSrc,
++      "worker-src 'self' blob:;");
++  // Convex (cap-shell-2) + PostHog will need connect-src; keep 'self' + https:
++  // so the bundle stops at a cap-shell-2 problem, not a CSP one.
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ConnectSrc,
++      "connect-src 'self' https: wss:" + dev_connect_extra + ";");
++  source->DisableTrustedTypesCSP();
++}
++
++SlayzoneShellUI::~SlayzoneShellUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneShellUI)
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::tasklist::mojom::TasklistHost> receiver) {
++  // Tasklist state is per-BrowserView (cap-02 wiring); route to the active
++  // instance so the shell shares the same snapshot / write pipe as the legacy
++  // tasklist WebUI. Silent drop if no active view — the shell is per-window.
++  SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++  if (!view || !view->tasklist_host()) {
++    return;
++  }
++  view->tasklist_host()->Bind(std::move(receiver));
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::projects::mojom::ProjectsHost> receiver) {
++  SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++  if (!view || !view->projects_host()) {
++    return;
++  }
++  view->projects_host()->Bind(std::move(receiver));
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::tags::mojom::TagsHost> receiver) {
++  tags_host_->Bind(std::move(receiver));
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::settings::mojom::SettingsHost> receiver) {
++  settings_host_->Bind(std::move(receiver));
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::dialog::mojom::NativeDialogHost> receiver) {
++  if (!native_dialog_host_) {
++    native_dialog_host_ =
++        std::make_unique<slayzone::SlayzoneNativeDialogHost>(
++            web_ui()->GetWebContents());
++  }
++  native_dialog_host_->Bind(std::move(receiver));
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::embedded_tab::mojom::EmbeddedTabHost>
++        receiver) {
++  if (!embedded_tab_host_) {
++    // The embedded tab overlay lives inside SlayzoneShellContainer, which is
++    // owned by the active SlayzoneBrowserView. Shell UIs without an active
++    // browser view (headless / teardown races) get a host with no container
++    // — every call becomes a silent no-op until teardown.
++    SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++    SlayzoneShellContainer* container =
++        view ? view->shell_container() : nullptr;
++    embedded_tab_host_ = std::make_unique<slayzone::SlayzoneEmbeddedTabHost>(
++        Profile::FromWebUI(web_ui()), container);
++  }
++  embedded_tab_host_->Bind(std::move(receiver));
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::terminal::mojom::TerminalHost> receiver) {
++  auto host = std::make_unique<slayzone::SlayzoneTerminalHost>();
++  slayzone::SlayzoneTerminalHost* host_ptr = host.get();
++  host->Bind(std::move(receiver));
++  terminal_hosts_.push_back(std::move(host));
++  // Disconnect -> defer erase via PostTask so we don't destroy the receiver
++  // from inside its own disconnect handler. WeakPtr anchors on `this` so a
++  // late-firing callback after controller teardown is a safe no-op.
++  host_ptr->SetOnDisconnect(base::BindOnce(
++      [](base::WeakPtr<SlayzoneShellUI> self,
++         slayzone::SlayzoneTerminalHost* host) {
++        base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++            FROM_HERE,
++            base::BindOnce(&SlayzoneShellUI::EraseTerminalHost,
++                           std::move(self), host));
++      },
++      weak_factory_.GetWeakPtr(), host_ptr));
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::windows::mojom::WindowsHost> receiver) {
++  // Route to the process-global singleton so every shell UI (main + aux)
++  // shares one window_id namespace + one observer fan-out. Pass the caller's
++  // WebContents so CloseCurrentWindow() can resolve the caller's top-level
++  // Widget.
++  slayzone::SlayzoneWindowsHost::GetInstance()->Bind(
++      std::move(receiver), web_ui()->GetWebContents());
++}
++
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::json_rpc::mojom::JsonRpcHost> receiver) {
++  if (!json_rpc_host_) {
++    json_rpc_host_ = std::make_unique<slayzone::SlayzoneJsonRpcHost>();
++  }
++  json_rpc_host_->Bind(std::move(receiver));
++}
++
++void SlayzoneShellUI::EraseTerminalHost(slayzone::SlayzoneTerminalHost* host) {
++  terminal_hosts_.remove_if(
++      [host](const std::unique_ptr<slayzone::SlayzoneTerminalHost>& p) {
++        return p.get() == host;
++      });
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h
+new file mode 100644
+index 0000000000000..403b184d62119
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h
+@@ -0,0 +1,142 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SHELL_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SHELL_UI_H_
++
++#include <list>
++#include <memory>
++
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/slayzone/mojom/dialog.mojom.h"
++#include "chrome/browser/slayzone/mojom/embedded_tab.mojom.h"
++#include "chrome/browser/slayzone/mojom/json_rpc.mojom.h"
++#include "chrome/browser/slayzone/mojom/projects.mojom.h"
++#include "chrome/browser/slayzone/mojom/settings.mojom.h"
++#include "chrome/browser/slayzone/mojom/tags.mojom.h"
++#include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
++#include "chrome/browser/slayzone/mojom/terminal.mojom.h"
++#include "chrome/browser/slayzone/mojom/windows.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++namespace slayzone {
++class SlayzoneEmbeddedTabHost;
++class SlayzoneJsonRpcHost;
++class SlayzoneNativeDialogHost;
++class SlayzoneSettingsHost;
++class SlayzoneTagsHost;
++class SlayzoneTerminalHost;
++}  // namespace slayzone
++
++// cap-shell-1 — chrome://slayzone-shell/ WebUI. Hosts the extracted Electron
++// renderer (`packages/renderer-app/`) via the Vite-built shell bundle at
++// `packages/apps/shell/dist/`. The bundle directory is passed via the
++// dedicated `--slayzone-shell-bundle-dir` CLI switch (see run.sh).
++//
++// cap-shell-2 — wires the four priority Mojo hosts (TasklistHost / ProjectsHost
++// via the active SlayzoneBrowserView, TagsHost / SettingsHost owned by this
++// UI controller) so the window-api-shim resolves db/tags/settings reads and
++// writes. cap-shell-3..7 add per-feature hosts (terminal, browser-view,
++// windows, dialogs, long-tail JSON-RPC) as each cap lands.
++class SlayzoneShellUI : public content::WebUIController {
++ public:
++  explicit SlayzoneShellUI(content::WebUI* web_ui);
++  SlayzoneShellUI(const SlayzoneShellUI&) = delete;
++  SlayzoneShellUI& operator=(const SlayzoneShellUI&) = delete;
++  ~SlayzoneShellUI() override;
++
++  // cap-shell-2 — Mojo binder entry points. The four hosts are all the
++  // cap-shell-2 shim needs; the shell's in-page `window.api.*` calls fan
++  // out to these plus the JS-side stub-factory for every other namespace.
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::tasklist::mojom::TasklistHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::projects::mojom::ProjectsHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::tags::mojom::TagsHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::settings::mojom::SettingsHost> receiver);
++
++  // cap-shell-3 — each getRemote() call on the JS side allocates a fresh
++  // SlayzoneTerminalHost (one pty per pipe). The shim multiplexes N sessions
++  // client-side by opening N remotes. Hosts self-erase from `terminal_hosts_`
++  // on pipe disconnect via a WeakPtr-anchored PostTask.
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::terminal::mojom::TerminalHost> receiver);
++
++  // cap-shell-dialog — native OS open-folder / open-file picker. One host
++  // per SlayzoneShellUI (dialogs are serial). Sibling of the Phase 10.1
++  // `DialogHost` (same .mojom module, different interface).
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::dialog::mojom::NativeDialogHost>
++          receiver);
++
++  // cap-shell-4 — inline task browser host. One per shell UI; lazily created
++  // on first bind so we don't allocate a WebContents cache until the renderer
++  // actually mounts a <TaskBrowserView>.
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::embedded_tab::mojom::EmbeddedTabHost>
++          receiver);
++
++  // cap-shell-5 — aux-window host. Routes every bind to the process-global
++  // singleton so window_ids stay unique across every SlayzoneShellUI
++  // instance (main shell + spawned aux shells all share one window map).
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::windows::mojom::WindowsHost> receiver);
++
++  // cap-shell-6 — generic JSON-RPC passthrough to the sidecar. Long-tail
++  // shims (fs, feedback, cli-install, changelog, search, ...) call into
++  // this host instead of getting a dedicated mojom. One host per shell
++  // UI, lazily constructed.
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::json_rpc::mojom::JsonRpcHost> receiver);
++
++ private:
++  void EraseTerminalHost(slayzone::SlayzoneTerminalHost* host);
++
++  // Per-WebContents hosts (no BrowserView identity required — scalar KV /
++  // project-scoped lookups). Matches the SlayzoneSettingsUI pattern for
++  // settings_host and the SlayzoneTasklistUI pattern for tags_host.
++  std::unique_ptr<slayzone::SlayzoneTagsHost> tags_host_;
++  std::unique_ptr<slayzone::SlayzoneSettingsHost> settings_host_;
++
++  // cap-shell-3 — N-at-a-time terminal hosts. std::list so raw pointers stay
++  // stable across insert/erase (BindOnce captures the pointer as the erase
++  // key). Pipe disconnect posts a task on the current sequence which calls
++  // EraseTerminalHost(this); posting avoids destroying the receiver from
++  // inside its own disconnect handler.
++  std::list<std::unique_ptr<slayzone::SlayzoneTerminalHost>> terminal_hosts_;
++
++  // cap-shell-dialog — one native dialog host per shell UI instance. Lazily
++  // constructed on first bind so every SlayzoneShellUI has access but we
++  // don't allocate a ui::SelectFileDialog factory listener until the
++  // renderer actually calls `window.api.dialog.showOpenDialog`.
++  std::unique_ptr<slayzone::SlayzoneNativeDialogHost> native_dialog_host_;
++
++  // cap-shell-4 — one inline-task-browser host per shell UI instance. Lazily
++  // constructed on first bind so idle shells (no task-detail mounted) don't
++  // allocate a WebContents cache.
++  std::unique_ptr<slayzone::SlayzoneEmbeddedTabHost> embedded_tab_host_;
++
++  // cap-shell-6 — one JSON-RPC passthrough host per shell UI instance.
++  std::unique_ptr<slayzone::SlayzoneJsonRpcHost> json_rpc_host_;
++
++  base::WeakPtrFactory<SlayzoneShellUI> weak_factory_{this};
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneShellUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneShellUI> {
++ public:
++  SlayzoneShellUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneShellHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SHELL_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index dfd7bee2af794..e3bb56c4393e7 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -21,6 +21,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_statusbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+@@ -41,19 +42,11 @@
+ namespace slayzone {
+ namespace {
+ 
+-// Empty shell WebUI. Phase 2.5 points chrome://newtab/ at this host; later
+-// phases replace the inline body with the real Shell region (Phase 7.1).
+-// Served via SetRequestFilter so Phase 2 stays decoupled from the grit pipe;
+-// Phase 4/7 switches this to generated resources alongside every region.
+-constexpr std::string_view kShellHtml = R"HTML(<!doctype html>
+-<html lang="en">
+-<head>
+-  <meta charset="utf-8">
+-  <title>SlayZone</title>
+-  <style>:root { color-scheme: light dark; } body { margin: 0; }</style>
+-</head>
+-<body></body>
+-</html>)HTML";
++// cap-shell-1 — the inline `kShellHtml` + `ShellUI`/`ShellUIConfig` classes
++// that used to live here were removed. `chrome://slayzone-shell/` now resolves
++// to `SlayzoneShellUI` (see slayzone_shell_ui.h) which serves the Vite-built
++// bundle at `packages/apps/shell/dist/` via the
++// `--slayzone-shell-bundle-dir` CLI switch.
+ 
+ // Phase 5.2 placeholder — renders the region id baked into the URL path:
+ // `chrome://slayzone-placeholder/<id>`. Query strings are rejected by the
+@@ -90,20 +83,10 @@ constexpr std::string_view kPlaceholderHtmlSuffix = R"HTML(</div>
+ </body>
+ </html>)HTML";
+ 
+-bool ShouldHandleEmptyPath(const std::string& path) {
+-  return path.empty();
+-}
+-
+ bool ShouldHandleAnyPath(const std::string& path) {
+   return true;
+ }
+ 
+-void HandleShellRequest(const std::string& path,
+-                        content::WebUIDataSource::GotDataCallback callback) {
+-  std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
+-      std::string(kShellHtml)));
+-}
+-
+ void HandlePlaceholderRequest(
+     const std::string& path,
+     content::WebUIDataSource::GotDataCallback callback) {
+@@ -121,27 +104,6 @@ void HandlePlaceholderRequest(
+       base::MakeRefCounted<base::RefCountedString>(std::move(html)));
+ }
+ 
+-class ShellUI : public content::WebUIController {
+- public:
+-  explicit ShellUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
+-    auto* source = content::WebUIDataSource::CreateAndAdd(
+-        Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneShellHost);
+-    source->SetRequestFilter(base::BindRepeating(&ShouldHandleEmptyPath),
+-                             base::BindRepeating(&HandleShellRequest));
+-  }
+-
+-  ShellUI(const ShellUI&) = delete;
+-  ShellUI& operator=(const ShellUI&) = delete;
+-  ~ShellUI() override = default;
+-};
+-
+-class ShellUIConfig : public content::DefaultWebUIConfig<ShellUI> {
+- public:
+-  ShellUIConfig()
+-      : DefaultWebUIConfig(content::kChromeUIScheme,
+-                           chrome::kChromeUISlayzoneShellHost) {}
+-};
+-
+ class PlaceholderUI : public content::WebUIController {
+  public:
+   explicit PlaceholderUI(content::WebUI* web_ui)
+@@ -167,7 +129,7 @@ class PlaceholderUIConfig : public content::DefaultWebUIConfig<PlaceholderUI> {
+ }  // namespace
+ 
+ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+-  map.AddWebUIConfig(std::make_unique<ShellUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneShellUIConfig>());
+   map.AddWebUIConfig(std::make_unique<PlaceholderUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneAutomationsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneBrowserchromeUIConfig>());
+-- 
+2.52.0
+

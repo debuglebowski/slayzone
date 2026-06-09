@@ -1,0 +1,63 @@
+From 7831944add994f55fc7356585bd99468513c37be Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 23 Apr 2026 22:43:44 +0200
+Subject: [61/66] feat(content): WebUIDataSource MIME types for HMR + Vite
+
+GetMimeType now recognizes .tsx/.jsx/.mjs as application/javascript and
+routes /@vite/, /@fs/, /@react-refresh prefixes (browser rejects ts MIME).
+Required for chrome://slayzone-shell/ HMR via SimpleURLLoader proxy to
+Vite dev server.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ .../browser/webui/web_ui_data_source_impl.cc  | 27 +++++++++++++++++--
+ 1 file changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/content/browser/webui/web_ui_data_source_impl.cc b/content/browser/webui/web_ui_data_source_impl.cc
+index 07cdf7dde64d0..162322df3bb65 100644
+--- a/content/browser/webui/web_ui_data_source_impl.cc
++++ b/content/browser/webui/web_ui_data_source_impl.cc
+@@ -432,6 +432,15 @@ void WebUIDataSourceImpl::SetSupportedScheme(std::string_view scheme) {
+ std::string_view WebUIDataSourceImpl::GetMimeType(const GURL& url) const {
+   const std::string_view file_path = url.path();
+ 
++  // SlayZone fork (cap-shell-dx-hmr) — Vite transforms `import './foo.css'`
++  // into a JS module that injects a <style> tag. Dev-mode requests on
++  // /@fs/.../*.css therefore want application/javascript regardless of
++  // extension. Match this BEFORE the generic .css branch.
++  if (base::StartsWith(file_path, "/@fs/",
++                       base::CompareCase::INSENSITIVE_ASCII)) {
++    return "application/javascript";
++  }
++
+   if (base::EndsWith(file_path, ".css", base::CompareCase::INSENSITIVE_ASCII)) {
+     return "text/css";
+   }
+@@ -440,8 +449,22 @@ std::string_view WebUIDataSourceImpl::GetMimeType(const GURL& url) const {
+     return "application/javascript";
+   }
+ 
+-  if (base::EndsWith(file_path, ".ts", base::CompareCase::INSENSITIVE_ASCII)) {
+-    return "application/typescript";
++  // SlayZone fork (cap-shell-dx-hmr) — serve TS / TSX / JSX / MJS as JS so
++  // browsers accept them as ES module scripts (browsers reject application/
++  // typescript). Vite already transforms the bodies to plain JS; the URL
++  // extension is the only TS-y thing left. Also covers Vite virtual modules
++  // starting with /@ (vite, react-refresh, id, fs, etc.) which have no
++  // extension and would otherwise fall through to text/html.
++  if (base::EndsWith(file_path, ".ts", base::CompareCase::INSENSITIVE_ASCII) ||
++      base::EndsWith(file_path, ".tsx", base::CompareCase::INSENSITIVE_ASCII) ||
++      base::EndsWith(file_path, ".jsx", base::CompareCase::INSENSITIVE_ASCII) ||
++      base::EndsWith(file_path, ".mjs", base::CompareCase::INSENSITIVE_ASCII)) {
++    return "application/javascript";
++  }
++  if (base::StartsWith(file_path, "/@",
++                       base::CompareCase::INSENSITIVE_ASCII) ||
++      file_path.find("/node_modules/.vite/") != std::string_view::npos) {
++    return "application/javascript";
+   }
+ 
+   if (base::EndsWith(file_path, ".json",
+-- 
+2.52.0
+

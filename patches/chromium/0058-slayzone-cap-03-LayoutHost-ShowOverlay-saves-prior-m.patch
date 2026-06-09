@@ -1,0 +1,56 @@
+From 9d1b0720d1de1d74e2b43c91ddba83f1c9b1429a Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Tue, 21 Apr 2026 00:11:24 +0200
+Subject: [58/66] =?UTF-8?q?slayzone:=20cap-03=20=E2=80=94=20LayoutHost=20S?=
+ =?UTF-8?q?howOverlay=20saves=20prior=20mode=20and=20restores=20on=20empty?=
+ =?UTF-8?q?=20id?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../browser/slayzone/slayzone_layout_host.cc  | 25 +++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.cc b/chrome/browser/slayzone/slayzone_layout_host.cc
+index a7a4f49b9e0f4..6d07ae35dea95 100644
+--- a/chrome/browser/slayzone/slayzone_layout_host.cc
++++ b/chrome/browser/slayzone/slayzone_layout_host.cc
+@@ -81,11 +81,32 @@ void SlayzoneLayoutHost::ShowOverlay(const std::string& overlay_id,
+   // Empty overlay_id = close overlay; allowed ids live on
+   // SlayzoneOverlayManager::kOverlayIds. Returning false here leaves the UI
+   // in its current mode so the caller can render an inline error.
+-  if (!overlay_manager_) {
++  //
++  // cap-03 — opening an overlay captures the current LayoutMode into the
++  // browser view's `prior_mode_` and flips to kOverlay; closing restores
++  // `prior_mode_`. ESC and per-overlay X-buttons both route through the
++  // empty-id close path, so this is the single authoritative transition.
++  if (!overlay_manager_ || !view_) {
+     std::move(callback).Run(false);
+     return;
+   }
+-  std::move(callback).Run(overlay_manager_->SetOverlay(overlay_id));
++  if (overlay_id.empty()) {
++    const bool ok = overlay_manager_->SetOverlay(overlay_id);
++    if (ok) {
++      view_->SetLayoutMode(view_->prior_mode());
++    }
++    std::move(callback).Run(ok);
++    return;
++  }
++  const auto current = view_->layout_mode();
++  const bool ok = overlay_manager_->SetOverlay(overlay_id);
++  if (ok) {
++    if (current != SlayzoneBrowserView::LayoutMode::kOverlay) {
++      view_->set_prior_mode(current);
++    }
++    view_->SetLayoutMode(SlayzoneBrowserView::LayoutMode::kOverlay);
++  }
++  std::move(callback).Run(ok);
+ }
+ 
+ void SlayzoneLayoutHost::SetLayoutMode(
+-- 
+2.52.0
+

@@ -1,0 +1,88 @@
+From 140bd68783cd84635170fe1209afc190cc52316e Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Tue, 21 Apr 2026 00:11:37 +0200
+Subject: [60/66] =?UTF-8?q?slayzone:=20cap-03=20=E2=80=94=20bind=20LayoutH?=
+ =?UTF-8?q?ost=20on=20tabbar/tools/leaderboard/usage/context/dialogs=20Web?=
+ =?UTF-8?q?UIs?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ ...r_interface_binders_webui_parts_desktop.cc | 35 +++++++++++++------
+ 1 file changed, 25 insertions(+), 10 deletions(-)
+
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index f7f56854f1340..2503e209b2f26 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -697,8 +697,11 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // `SlayzoneBrowserView::AddedToWidget`. JS consumer lands in Phase 7.x.
+   registry.ForWebUI<SlayzoneBrowserchromeUI>()
+       .Add<slayzone::tabs::mojom::TabsHost>();
++  // cap-03 — tabbar also needs LayoutHost so tab-activation flips the
++  // layout mode as a belt-and-suspenders to the C++ TabStripModel observer.
+   registry.ForWebUI<SlayzoneTabbarUI>()
+-      .Add<slayzone::tabs::mojom::TabsHost>();
++      .Add<slayzone::tabs::mojom::TabsHost>()
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 7.1 — chrome://slayzone-statusbar/ binds to the per-BrowserView
+   // SlayzoneStatusbarHost which forwards snapshot queries to the sidecar.
+   registry.ForWebUI<SlayzoneStatusbarUI>()
+@@ -708,9 +711,12 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   registry.ForWebUI<SlayzoneProjectsUI>()
+       .Add<slayzone::projects::mojom::ProjectsHost>();
+   // Phase 7.9 — chrome://slayzone-tools/ binds to the per-BrowserView
+-  // SlayzoneToolsHost for tool-toggle snapshot + flip RPCs.
++  // SlayzoneToolsHost for tool-toggle snapshot + flip RPCs. cap-03 adds
++  // LayoutHost so the leaderboard/usage/context shortcut buttons and
++  // global-ESC handler drive `ShowOverlay`.
+   registry.ForWebUI<SlayzoneToolsUI>()
+-      .Add<slayzone::tools::mojom::ToolsHost>();
++      .Add<slayzone::tools::mojom::ToolsHost>()
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 8.1 — chrome://slayzone-automations/ binds to the per-BrowserView
+   // SlayzoneAutomationsHost for automation list + enable/disable toggle.
+   registry.ForWebUI<SlayzoneAutomationsUI>()
+@@ -747,22 +753,31 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+       .Add<slayzone::taskheader::mojom::TaskheaderHost>();
+   // Phase 9.1 — chrome://slayzone-leaderboard/ binds to a UI-owned
+   // SlayzoneLeaderboardHost (one per WebContents). Overlay surface; no
+-  // per-BrowserView identity required.
++  // per-BrowserView identity required. cap-03 adds LayoutHost so the
++  // overlay's X-button can call `ShowOverlay("")`.
+   registry.ForWebUI<SlayzoneLeaderboardUI>()
+-      .Add<slayzone::leaderboard::mojom::LeaderboardHost>();
++      .Add<slayzone::leaderboard::mojom::LeaderboardHost>()
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 9.2 — chrome://slayzone-usage/ binds to a UI-owned
+-  // SlayzoneUsageHost (one per WebContents). Overlay surface.
++  // SlayzoneUsageHost (one per WebContents). Overlay surface. cap-03
++  // adds LayoutHost for the X-button close.
+   registry.ForWebUI<SlayzoneUsageUI>()
+-      .Add<slayzone::usage::mojom::UsageHost>();
++      .Add<slayzone::usage::mojom::UsageHost>()
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 9.3 — chrome://slayzone-context/ binds to a UI-owned
+-  // SlayzoneContextHost (one per WebContents). Overlay surface.
++  // SlayzoneContextHost (one per WebContents). Overlay surface. cap-03
++  // adds LayoutHost for the X-button close.
+   registry.ForWebUI<SlayzoneContextUI>()
+-      .Add<slayzone::context::mojom::ContextHost>();
++      .Add<slayzone::context::mojom::ContextHost>()
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 10.1 — chrome://slayzone-dialogs/ binds to a UI-owned
+   // SlayzoneDialogsHost (one per WebContents). The host forwards
+   // Resolve/Cancel to the sidecar; the dialog id routes on the URL path.
++  // cap-03 adds LayoutHost so the search dialog inside the overlay can
++  // call `ShowOverlay("")` to close (self-dismiss on submit/ESC).
+   registry.ForWebUI<SlayzoneDialogsUI>()
+-      .Add<slayzone::dialog::mojom::DialogHost>();
++      .Add<slayzone::dialog::mojom::DialogHost>()
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 11.2 — chrome://slayzone-settings/ binds to a UI-owned
+   // SlayzoneSettingsHost (one per WebContents). Settings is a modal
+   // overlay; singleton sidecar calls suffice.
+-- 
+2.52.0
+

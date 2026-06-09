@@ -1,0 +1,175 @@
+From 9aacb7ef8a57d804328c4262b101029b73410cb2 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 23 Apr 2026 22:43:56 +0200
+Subject: [62/66] =?UTF-8?q?feat(slayzone):=20cap-shell-1=20=E2=80=94=20sla?=
+ =?UTF-8?q?yzone=5Fhello=20probe=20WebUI?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Smoke probe at chrome://slayzone-hello/ for cap-shell-1 host registration
+verification. Standalone probe — does not depend on shell_ui.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ .../ui/webui/slayzone_hello/hello_ui.cc       | 102 ++++++++++++++++++
+ .../ui/webui/slayzone_hello/hello_ui.h        |  38 +++++++
+ 2 files changed, 140 insertions(+)
+ create mode 100644 chrome/browser/ui/webui/slayzone_hello/hello_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone_hello/hello_ui.h
+
+diff --git a/chrome/browser/ui/webui/slayzone_hello/hello_ui.cc b/chrome/browser/ui/webui/slayzone_hello/hello_ui.cc
+new file mode 100644
+index 0000000000000..56e4700fddda8
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone_hello/hello_ui.cc
+@@ -0,0 +1,102 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone_hello/hello_ui.h"
++
++#include <string>
++#include <string_view>
++
++#include "base/functional/bind.h"
++#include "base/memory/ref_counted_memory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
++
++namespace {
++
++// Inline resources. Kept in the .cc so the smoke-test has zero coupling to
++// the grit resource pipeline — Phase 2.2 migrates this to generated resources
++// alongside every other chrome:// WebUI.
++constexpr std::string_view kHelloHtml = R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>chrome://hello/</title>
++  <style>
++    :root { color-scheme: light dark; }
++    body {
++      font: 14px system-ui, -apple-system, sans-serif;
++      max-width: 480px;
++      margin: 48px auto;
++      padding: 0 24px;
++    }
++    h1 { font-size: 20px; margin: 0 0 16px; }
++    p  { margin: 0 0 24px;
++         color: color-mix(in srgb, currentColor 70%, transparent); }
++    button {
++      font: inherit;
++      padding: 8px 16px;
++      border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
++      border-radius: 6px;
++      background: transparent;
++      color: inherit;
++      cursor: pointer;
++    }
++    button:hover {
++      background: color-mix(in srgb, currentColor 10%, transparent);
++    }
++    #counter { margin-left: 12px; font-variant-numeric: tabular-nums; }
++  </style>
++</head>
++<body>
++  <h1>chrome://hello/</h1>
++  <p>SlayZone Chromium fork &mdash; Phase 1 smoke test.</p>
++  <button id="tick">Tick</button>
++  <span id="counter" aria-live="polite">0</span>
++  <script src="hello.js"></script>
++</body>
++</html>)HTML";
++
++constexpr std::string_view kHelloJs = R"JS((() => {
++  const btn = document.getElementById('tick');
++  const out = document.getElementById('counter');
++  let n = 0;
++  btn.addEventListener('click', () => {
++    n += 1;
++    out.textContent = String(n);
++  });
++})();
++)JS";
++
++bool ShouldHandleHelloRequest(const std::string& path) {
++  return path.empty() || path == "hello.js";
++}
++
++void HandleHelloRequest(const std::string& path,
++                        content::WebUIDataSource::GotDataCallback callback) {
++  std::string_view body = path == "hello.js" ? kHelloJs : kHelloHtml;
++  std::move(callback).Run(
++      base::MakeRefCounted<base::RefCountedString>(std::string(body)));
++}
++
++}  // namespace
++
++HelloUI::HelloUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUIHelloHost);
++
++  // Allow the inline-ish hello.js script tag. Default Chromium WebUI CSP
++  // blocks non-resource scripts; we serve hello.js via SetRequestFilter
++  // below, but script-src still needs `self` permitted explicitly.
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ScriptSrc,
++      "script-src chrome://resources 'self';");
++
++  source->SetRequestFilter(base::BindRepeating(&ShouldHandleHelloRequest),
++                           base::BindRepeating(&HandleHelloRequest));
++}
++
++HelloUI::~HelloUI() = default;
+diff --git a/chrome/browser/ui/webui/slayzone_hello/hello_ui.h b/chrome/browser/ui/webui/slayzone_hello/hello_ui.h
+new file mode 100644
+index 0000000000000..298f15939891b
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone_hello/hello_ui.h
+@@ -0,0 +1,38 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_HELLO_HELLO_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_HELLO_HELLO_UI_H_
++
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++
++// Phase 1 smoke-test WebUI: chrome://hello/.
++// Serves a static HTML page with one button + a JS counter. Its sole purpose
++// is to prove the full build → sign → launch → custom scheme → JS chain works
++// before the real SlayZone WebUI regions land in later phases. Phase 2.2
++// replaces this one-off registration with a generic scheme handler factory.
++
++class HelloUI;
++
++class HelloUIConfig : public content::DefaultWebUIConfig<HelloUI> {
++ public:
++  HelloUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUIHelloHost) {}
++};
++
++class HelloUI : public content::WebUIController {
++ public:
++  explicit HelloUI(content::WebUI* web_ui);
++
++  HelloUI(const HelloUI&) = delete;
++  HelloUI& operator=(const HelloUI&) = delete;
++
++  ~HelloUI() override;
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_HELLO_HELLO_UI_H_
+-- 
+2.52.0
+

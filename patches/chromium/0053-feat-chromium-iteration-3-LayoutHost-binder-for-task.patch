@@ -1,0 +1,98 @@
+From 2cad5b524fe7d731ebf8fde1d572bd6ffdb01a98 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 16:17:56 +0200
+Subject: [53/66] =?UTF-8?q?feat(chromium):=20iteration-3=20=E2=80=94=20Lay?=
+ =?UTF-8?q?outHost=20binder=20for=20tasklist=20WebUI?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SlayzoneTasklistUI gains a BindInterface overload for LayoutHost so
+chrome://slayzone-tasklist/ can call SetLayoutMode. Registered in the
+WebUI interface broker. Wires tasklist card clicks → kTaskDetail mode
+transition.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ ...e_browser_interface_binders_webui_parts_desktop.cc |  8 ++++++--
+ .../browser/ui/webui/slayzone/slayzone_tasklist_ui.cc | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_tasklist_ui.h  |  3 +++
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 47f5678238aa6..f7f56854f1340 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -98,6 +98,7 @@
+ #include "chrome/browser/slayzone/mojom/statusbar.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tabs.mojom.h"
+ #include "chrome/browser/slayzone/mojom/taskheader.mojom.h"
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
+ #include "chrome/browser/slayzone/mojom/terminal.mojom.h"
+ #include "chrome/browser/slayzone/mojom/test.mojom.h"
+@@ -730,9 +731,12 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   registry.ForWebUI<SlayzoneGitUI>()
+       .Add<slayzone::git::mojom::GitHost>();
+   // Phase 7.4 — chrome://slayzone-tasklist/ binds to the per-BrowserView
+-  // SlayzoneTasklistHost for kanban column snapshots.
++  // SlayzoneTasklistHost for kanban column snapshots. Iteration-3 also
++  // exposes the per-BrowserView LayoutHost so card clicks can flip the
++  // browser view between kHome and kTaskDetail layout modes.
+   registry.ForWebUI<SlayzoneTasklistUI>()
+-      .Add<slayzone::tasklist::mojom::TasklistHost>();
++      .Add<slayzone::tasklist::mojom::TasklistHost>()
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 7.5 — chrome://slayzone-sidebar/ binds to the per-BrowserView
+   // SlayzoneSidebarHost for task-metadata snapshots.
+   registry.ForWebUI<SlayzoneSidebarUI>()
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
+index 20520bdea2d83..c02a0bfae33c6 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
+@@ -8,6 +8,7 @@
+ #include <utility>
+ 
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_tasklist_host.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+@@ -61,3 +62,13 @@ void SlayzoneTasklistUI::BindInterface(
+   }
+   view->tasklist_host()->Bind(std::move(receiver));
+ }
++
++void SlayzoneTasklistUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
+index 4a75567ae063b..afdbdd1fdade6 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
+@@ -5,6 +5,7 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKLIST_UI_H_
+ #define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKLIST_UI_H_
+ 
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -21,6 +22,8 @@ class SlayzoneTasklistUI : public content::WebUIController {
+ 
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::tasklist::mojom::TasklistHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
+ 
+  private:
+   WEB_UI_CONTROLLER_TYPE_DECL();
+-- 
+2.52.0
+

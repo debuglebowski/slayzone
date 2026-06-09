@@ -1,0 +1,42 @@
+From de970eebca11a3577efab6ba7b9f3d45c326c00b Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Tue, 21 Apr 2026 00:10:55 +0200
+Subject: [55/66] =?UTF-8?q?slayzone:=20cap-03=20=E2=80=94=20tabs.mojom=20a?=
+ =?UTF-8?q?dd=20TabType=20enum=20+=20tab=5Ftype=20field?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ chrome/browser/slayzone/mojom/tabs.mojom | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/chrome/browser/slayzone/mojom/tabs.mojom b/chrome/browser/slayzone/mojom/tabs.mojom
+index 9db53b1a0370b..5c05a2a3e9fd2 100644
+--- a/chrome/browser/slayzone/mojom/tabs.mojom
++++ b/chrome/browser/slayzone/mojom/tabs.mojom
+@@ -6,6 +6,13 @@
+ 
+ module slayzone.tabs.mojom;
+ 
++enum TabType {
++  kTaskDetail,
++  kHome,
++  kOverlay,
++  kAux,
++};
++
+ struct TabSnapshot {
+   int32 id;
+   string title;
+@@ -13,6 +20,7 @@ struct TabSnapshot {
+   bool is_loading;
+   bool can_go_back;
+   bool can_go_forward;
++  TabType tab_type;
+ };
+ 
+ interface TabObserver {
+-- 
+2.52.0
+

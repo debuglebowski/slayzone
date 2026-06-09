@@ -1,0 +1,398 @@
+From 4ec4b58d7d609ac38594ef70eed5699da040b0cc Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 23 Apr 2026 22:44:58 +0200
+Subject: [65/66] =?UTF-8?q?feat(slayzone):=20cap-shell=20=E2=80=94=20exist?=
+ =?UTF-8?q?ing=20host=20extensions=20+=20BUILD.gn=20wiring?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Existing hosts (projects/tabs/terminal) extended with cap-shell-required
+methods. dialog/projects mojoms add fields used by shell host.
+BUILD.gn + interface_binders register all new hosts (shell/embedded_tab/
+json_rpc/tags/windows/native_dialog).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ chrome/browser/BUILD.gn                       | 10 +++++
+ ...r_interface_binders_webui_parts_desktop.cc | 38 +++++++++++++++++--
+ chrome/browser/slayzone/mojom/BUILD.gn        |  4 ++
+ chrome/browser/slayzone/mojom/dialog.mojom    | 22 +++++++++++
+ chrome/browser/slayzone/mojom/projects.mojom  | 16 ++++++--
+ .../slayzone/slayzone_projects_host.cc        | 10 +++++
+ .../browser/slayzone/slayzone_projects_host.h |  2 +
+ chrome/browser/slayzone/slayzone_tabs_host.cc |  5 ++-
+ .../slayzone/slayzone_terminal_host.cc        |  4 ++
+ .../browser/slayzone/slayzone_terminal_host.h |  8 ++++
+ chrome/browser/ui/BUILD.gn                    |  4 ++
+ 11 files changed, 114 insertions(+), 9 deletions(-)
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index b5ef32efc76c8..59cfcf79505be 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -988,8 +988,14 @@ static_library("browser") {
+     "slayzone/slayzone_context_host.h",
+     "slayzone/slayzone_dialogs_host.cc",
+     "slayzone/slayzone_dialogs_host.h",
++    "slayzone/slayzone_embedded_tab_host.cc",
++    "slayzone/slayzone_embedded_tab_host.h",
++    "slayzone/slayzone_native_dialog_host.cc",
++    "slayzone/slayzone_native_dialog_host.h",
+     "slayzone/slayzone_git_host.cc",
+     "slayzone/slayzone_git_host.h",
++    "slayzone/slayzone_json_rpc_host.cc",
++    "slayzone/slayzone_json_rpc_host.h",
+     "slayzone/slayzone_layout_host.cc",
+     "slayzone/slayzone_layout_host.h",
+     "slayzone/slayzone_leaderboard_host.cc",
+@@ -1008,6 +1014,8 @@ static_library("browser") {
+     "slayzone/slayzone_statusbar_host.h",
+     "slayzone/slayzone_tabs_host.cc",
+     "slayzone/slayzone_tabs_host.h",
++    "slayzone/slayzone_tags_host.cc",
++    "slayzone/slayzone_tags_host.h",
+     "slayzone/slayzone_taskheader_host.cc",
+     "slayzone/slayzone_taskheader_host.h",
+     "slayzone/slayzone_tasklist_host.cc",
+@@ -1020,6 +1028,8 @@ static_library("browser") {
+     "slayzone/slayzone_tools_host.h",
+     "slayzone/slayzone_usage_host.cc",
+     "slayzone/slayzone_usage_host.h",
++    "slayzone/slayzone_windows_host.cc",
++    "slayzone/slayzone_windows_host.h",
+     "ssl/chrome_security_blocking_page_factory.cc",
+     "ssl/chrome_security_blocking_page_factory.h",
+     "ssl/chrome_security_state_tab_helper.cc",
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 2503e209b2f26..87ead60f702b0 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -89,7 +89,9 @@
+ #include "chrome/browser/slayzone/mojom/automations.mojom.h"
+ #include "chrome/browser/slayzone/mojom/context.mojom.h"
+ #include "chrome/browser/slayzone/mojom/dialog.mojom.h"
++#include "chrome/browser/slayzone/mojom/embedded_tab.mojom.h"
+ #include "chrome/browser/slayzone/mojom/git.mojom.h"
++#include "chrome/browser/slayzone/mojom/json_rpc.mojom.h"
+ #include "chrome/browser/slayzone/mojom/leaderboard.mojom.h"
+ #include "chrome/browser/slayzone/mojom/processes.mojom.h"
+ #include "chrome/browser/slayzone/mojom/projects.mojom.h"
+@@ -97,6 +99,7 @@
+ #include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
+ #include "chrome/browser/slayzone/mojom/statusbar.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tabs.mojom.h"
++#include "chrome/browser/slayzone/mojom/tags.mojom.h"
+ #include "chrome/browser/slayzone/mojom/taskheader.mojom.h"
+ #include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
+@@ -104,6 +107,7 @@
+ #include "chrome/browser/slayzone/mojom/test.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tools.mojom.h"
+ #include "chrome/browser/slayzone/mojom/usage.mojom.h"
++#include "chrome/browser/slayzone/mojom/windows.mojom.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_automations_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_context_ui.h"
+@@ -113,6 +117,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_statusbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+@@ -739,14 +744,18 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // Phase 7.4 — chrome://slayzone-tasklist/ binds to the per-BrowserView
+   // SlayzoneTasklistHost for kanban column snapshots. Iteration-3 also
+   // exposes the per-BrowserView LayoutHost so card clicks can flip the
+-  // browser view between kHome and kTaskDetail layout modes.
++  // browser view between kHome and kTaskDetail layout modes. cap-06 adds
++  // TagsHost so tasklist cards can attach/detach tags.
+   registry.ForWebUI<SlayzoneTasklistUI>()
+       .Add<slayzone::tasklist::mojom::TasklistHost>()
+-      .Add<slayzone::layout::mojom::LayoutHost>();
++      .Add<slayzone::layout::mojom::LayoutHost>()
++      .Add<slayzone::tags::mojom::TagsHost>();
+   // Phase 7.5 — chrome://slayzone-sidebar/ binds to the per-BrowserView
+-  // SlayzoneSidebarHost for task-metadata snapshots.
++  // SlayzoneSidebarHost for task-metadata snapshots. cap-06 adds TagsHost
++  // so the sidebar can create / attach / detach tags on the active task.
+   registry.ForWebUI<SlayzoneSidebarUI>()
+-      .Add<slayzone::sidebar::mojom::SidebarHost>();
++      .Add<slayzone::sidebar::mojom::SidebarHost>()
++      .Add<slayzone::tags::mojom::TagsHost>();
+   // Phase 7.6 — chrome://slayzone-taskheader/ binds to the per-BrowserView
+   // SlayzoneTaskheaderHost for task title + status snapshots.
+   registry.ForWebUI<SlayzoneTaskheaderUI>()
+@@ -783,6 +792,27 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // overlay; singleton sidecar calls suffice.
+   registry.ForWebUI<SlayzoneSettingsUI>()
+       .Add<slayzone::settings::mojom::SettingsHost>();
++  // cap-shell-2 — chrome://slayzone-shell/ needs the four data hosts the
++  // window-api-shim reads through. TasklistHost + ProjectsHost are routed
++  // via SlayzoneBrowserView::GetActiveInstance() (per-BrowserView cap-02
++  // wiring); TagsHost + SettingsHost are per-WebContents and owned by the
++  // SlayzoneShellUI controller directly. cap-shell-3..7 add terminal /
++  // browser-view / windows / dialogs / JSON-RPC fanout hosts.
++  //
++  // cap-shell-3 — TerminalHost: unlike the other four, each JS
++  // `TerminalHost.getRemote()` spawns a fresh SlayzoneTerminalHost (one pty
++  // per pipe). The shell's window-api-shim multiplexes N sessions by
++  // opening N remotes and keying by sessionId client-side.
++  registry.ForWebUI<SlayzoneShellUI>()
++      .Add<slayzone::tasklist::mojom::TasklistHost>()
++      .Add<slayzone::projects::mojom::ProjectsHost>()
++      .Add<slayzone::tags::mojom::TagsHost>()
++      .Add<slayzone::settings::mojom::SettingsHost>()
++      .Add<slayzone::terminal::mojom::TerminalHost>()
++      .Add<slayzone::dialog::mojom::NativeDialogHost>()
++      .Add<slayzone::embedded_tab::mojom::EmbeddedTabHost>()
++      .Add<slayzone::windows::mojom::WindowsHost>()
++      .Add<slayzone::json_rpc::mojom::JsonRpcHost>();
+   // Phase 7.7 — chrome://slayzone-terminal/ binds to a per-frame
+   // SlayzoneTerminalHost owned by the UI controller (one pty per frame).
+   registry.ForWebUI<SlayzoneTerminalUI>()
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index e0fde68836098..35b7858e941ea 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -9,7 +9,9 @@ mojom("mojom") {
+     "automations.mojom",
+     "context.mojom",
+     "dialog.mojom",
++    "embedded_tab.mojom",
+     "git.mojom",
++    "json_rpc.mojom",
+     "layout.mojom",
+     "leaderboard.mojom",
+     "processes.mojom",
+@@ -18,12 +20,14 @@ mojom("mojom") {
+     "sidebar.mojom",
+     "statusbar.mojom",
+     "tabs.mojom",
++    "tags.mojom",
+     "taskheader.mojom",
+     "tasklist.mojom",
+     "terminal.mojom",
+     "test.mojom",
+     "tools.mojom",
+     "usage.mojom",
++    "windows.mojom",
+   ]
+   webui_module_path = "/"
+ }
+diff --git a/chrome/browser/slayzone/mojom/dialog.mojom b/chrome/browser/slayzone/mojom/dialog.mojom
+index ab41c3a05df6b..892d729a314c7 100644
+--- a/chrome/browser/slayzone/mojom/dialog.mojom
++++ b/chrome/browser/slayzone/mojom/dialog.mojom
+@@ -8,3 +8,25 @@ interface DialogHost {
+   Resolve(string invocation_id, string result_json) => ();
+   Cancel(string invocation_id) => ();
+ };
++
++// cap-shell-dialog — native OS file/folder picker. Separate from the in-app
++// DialogHost above (which fronts React-rendered modals); this one fronts
++// `ui::SelectFileDialog`. Renderer calls `window.api.dialog.showOpenDialog`
++// in the window-api-shim; that fans out to `NativeDialogHost.ShowOpenDialog`
++// on the browser side. cap-shell-dialog ships only open (+ SELECT_FOLDER);
++// save + message dialogs stay STUB until cap-shell-6 proper.
++struct ShowOpenDialogOptions {
++  array<string> properties;
++  string default_path;
++  string title;
++};
++
++struct ShowOpenDialogResult {
++  bool canceled;
++  array<string> file_paths;
++};
++
++interface NativeDialogHost {
++  ShowOpenDialog(ShowOpenDialogOptions options)
++      => (ShowOpenDialogResult result);
++};
+diff --git a/chrome/browser/slayzone/mojom/projects.mojom b/chrome/browser/slayzone/mojom/projects.mojom
+index d41e3cbdc6468..a3a6774eea0bd 100644
+--- a/chrome/browser/slayzone/mojom/projects.mojom
++++ b/chrome/browser/slayzone/mojom/projects.mojom
+@@ -32,6 +32,12 @@ struct ProjectEntry {
+   // Optional hex color (e.g. "#ff5722"). Empty string when unset — renderer
+   // falls back to an auto-hued badge from `id`.
+   string color;
++
++  // Optional filesystem path to the project's repository root. Empty string
++  // when unset — TaskDetail terminal falls back to "No repository path
++  // configured". cap-shell-6 added this field to give the embedded terminal
++  // a cwd without round-tripping through a richer project-detail RPC.
++  string path;
+ };
+ 
+ // Projects rail snapshot. `active_project_id` is empty when no project is
+@@ -56,11 +62,13 @@ struct ProjectWriteResult {
+ interface ProjectsHost {
+   GetSnapshot() => (ProjectsSnapshot snapshot);
+ 
+-  // Create a new project. `color` is a hex string; empty = unset.
+-  CreateProject(string name, string color) => (ProjectWriteResult result);
++  // Create a new project. `color` is a hex string; empty = unset. `path`
++  // is the repository root; empty = unset.
++  CreateProject(string name, string color, string path)
++      => (ProjectWriteResult result);
+ 
+-  // Rename / recolor an existing project.
+-  UpdateProject(string project_id, string name, string color)
++  // Rename / recolor / repath an existing project. `path` empty = clear.
++  UpdateProject(string project_id, string name, string color, string path)
+       => (ProjectWriteResult result);
+ 
+   // Remove a project. Orphaned tasks cascade-delete (matches Electron shape).
+diff --git a/chrome/browser/slayzone/slayzone_projects_host.cc b/chrome/browser/slayzone/slayzone_projects_host.cc
+index 0e7a0dd458169..e3aecab29e719 100644
+--- a/chrome/browser/slayzone/slayzone_projects_host.cc
++++ b/chrome/browser/slayzone/slayzone_projects_host.cc
+@@ -48,6 +48,9 @@ projects::mojom::ProjectsSnapshotPtr FromDict(const base::DictValue& response) {
+       if (const std::string* color = e.FindString("color")) {
+         project->color = *color;
+       }
++      if (const std::string* path = e.FindString("path")) {
++        project->path = *path;
++      }
+       snapshot->projects.push_back(std::move(project));
+     }
+   }
+@@ -95,6 +98,9 @@ projects::mojom::ProjectWriteResultPtr WriteResultFromDict(
+     if (const std::string* color = p.FindString("color")) {
+       out->project->color = *color;
+     }
++    if (const std::string* path = p.FindString("path")) {
++      out->project->path = *path;
++    }
+   }
+   return out;
+ }
+@@ -134,21 +140,25 @@ void SlayzoneProjectsHost::GetSnapshot(GetSnapshotCallback callback) {
+ 
+ void SlayzoneProjectsHost::CreateProject(const std::string& name,
+                                           const std::string& color,
++                                          const std::string& path,
+                                           CreateProjectCallback callback) {
+   base::DictValue params;
+   params.Set("name", name);
+   params.Set("color", color);
++  params.Set("path", path);
+   CallWrite("projects:create", std::move(params), std::move(callback));
+ }
+ 
+ void SlayzoneProjectsHost::UpdateProject(const std::string& project_id,
+                                           const std::string& name,
+                                           const std::string& color,
++                                          const std::string& path,
+                                           UpdateProjectCallback callback) {
+   base::DictValue params;
+   params.Set("projectId", project_id);
+   params.Set("name", name);
+   params.Set("color", color);
++  params.Set("path", path);
+   CallWrite("projects:update", std::move(params), std::move(callback));
+ }
+ 
+diff --git a/chrome/browser/slayzone/slayzone_projects_host.h b/chrome/browser/slayzone/slayzone_projects_host.h
+index f6758457dd13f..76dc429473057 100644
+--- a/chrome/browser/slayzone/slayzone_projects_host.h
++++ b/chrome/browser/slayzone/slayzone_projects_host.h
+@@ -33,10 +33,12 @@ class SlayzoneProjectsHost : public slayzone::projects::mojom::ProjectsHost {
+   void GetSnapshot(GetSnapshotCallback callback) override;
+   void CreateProject(const std::string& name,
+                      const std::string& color,
++                     const std::string& path,
+                      CreateProjectCallback callback) override;
+   void UpdateProject(const std::string& project_id,
+                      const std::string& name,
+                      const std::string& color,
++                     const std::string& path,
+                      UpdateProjectCallback callback) override;
+   void DeleteProject(const std::string& project_id,
+                      DeleteProjectCallback callback) override;
+diff --git a/chrome/browser/slayzone/slayzone_tabs_host.cc b/chrome/browser/slayzone/slayzone_tabs_host.cc
+index 5a01323dbeef7..0fcf040a21f36 100644
+--- a/chrome/browser/slayzone/slayzone_tabs_host.cc
++++ b/chrome/browser/slayzone/slayzone_tabs_host.cc
+@@ -63,7 +63,10 @@ slayzone::tabs::mojom::TabType SlayzoneTabsHost::ClassifyUrl(const GURL& url) {
+     return slayzone::tabs::mojom::TabType::kHome;
+   }
+   if (url.SchemeIs("chrome")) {
+-    const std::string host = url.host();
++    // Chromium 148: GURL::host() returns std::string_view. Assigning into
++    // a std::string_view avoids an unnecessary allocation and keeps the
++    // comparisons zero-copy.
++    const std::string_view host = url.host();
+     if (host == "newtab") {
+       return slayzone::tabs::mojom::TabType::kHome;
+     }
+diff --git a/chrome/browser/slayzone/slayzone_terminal_host.cc b/chrome/browser/slayzone/slayzone_terminal_host.cc
+index 6d55a74d951e9..76e6c21d048db 100644
+--- a/chrome/browser/slayzone/slayzone_terminal_host.cc
++++ b/chrome/browser/slayzone/slayzone_terminal_host.cc
+@@ -136,6 +136,10 @@ void SlayzoneTerminalHost::Bind(
+   receiver_.Bind(std::move(receiver));
+ }
+ 
++void SlayzoneTerminalHost::SetOnDisconnect(base::OnceClosure on_disconnect) {
++  receiver_.set_disconnect_handler(std::move(on_disconnect));
++}
++
+ void SlayzoneTerminalHost::Start(const std::string& cwd,
+                                   uint32_t cols,
+                                   uint32_t rows,
+diff --git a/chrome/browser/slayzone/slayzone_terminal_host.h b/chrome/browser/slayzone/slayzone_terminal_host.h
+index 479d6d57ab253..fbdf457cd8573 100644
+--- a/chrome/browser/slayzone/slayzone_terminal_host.h
++++ b/chrome/browser/slayzone/slayzone_terminal_host.h
+@@ -7,6 +7,7 @@
+ 
+ #include <string>
+ 
++#include "base/functional/callback.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/values.h"
+ #include "chrome/browser/slayzone/mojom/terminal.mojom.h"
+@@ -35,6 +36,13 @@ class SlayzoneTerminalHost : public slayzone::terminal::mojom::TerminalHost {
+   void Bind(
+       mojo::PendingReceiver<slayzone::terminal::mojom::TerminalHost> receiver);
+ 
++  // cap-shell-3 — for the multi-instance SlayzoneShellUI pattern: the shell
++  // owns N SlayzoneTerminalHost instances and wants a disconnect notification
++  // to erase the unique_ptr from its container. The per-frame
++  // SlayzoneTerminalUI pattern (one host per controller) doesn't need this
++  // and leaves the handler unset.
++  void SetOnDisconnect(base::OnceClosure on_disconnect);
++
+   // slayzone::terminal::mojom::TerminalHost:
+   void Start(const std::string& cwd,
+              uint32_t cols,
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index c325b8811d826..34544b0396c79 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -206,6 +206,8 @@ static_library("ui") {
+     "webui/slayzone/slayzone_projects_ui.h",
+     "webui/slayzone/slayzone_settings_ui.cc",
+     "webui/slayzone/slayzone_settings_ui.h",
++    "webui/slayzone/slayzone_shell_ui.cc",
++    "webui/slayzone/slayzone_shell_ui.h",
+     "webui/slayzone/slayzone_sidebar_ui.cc",
+     "webui/slayzone/slayzone_sidebar_ui.h",
+     "webui/slayzone/slayzone_statusbar_ui.cc",
+@@ -4090,6 +4092,8 @@ static_library("ui") {
+       "views/frame/slayzone_browser_view.h",
+       "views/frame/slayzone_region_container.cc",
+       "views/frame/slayzone_region_container.h",
++      "views/frame/slayzone_shell_container.cc",
++      "views/frame/slayzone_shell_container.h",
+       "views/frame/slayzone_split_view.cc",
+       "views/frame/slayzone_split_view.h",
+       "views/frame/system_menu_model_builder.cc",
+-- 
+2.52.0
+

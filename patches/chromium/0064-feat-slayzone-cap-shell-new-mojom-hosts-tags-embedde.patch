@@ -1,0 +1,2244 @@
+From 687da9c8920540045502a4fb84a6ef083c4f94c9 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 23 Apr 2026 22:44:43 +0200
+Subject: [64/66] =?UTF-8?q?feat(slayzone):=20cap-shell=20=E2=80=94=20new?=
+ =?UTF-8?q?=20mojom=20hosts=20(tags/embedded=5Ftab/json=5Frpc/windows/nati?=
+ =?UTF-8?q?ve=5Fdialog)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+cap-shell-2: tags_host (TagsHost mojom).
+cap-shell-4: embedded_tab_host (BrowserViewHost geometry-driven inline browser).
+cap-shell-5: windows_host (aux windows via views::Widget) + native_dialog_host.
+cap-shell-6: json_rpc_host (generic long-tail shim escape hatch — new sidecar
+  handlers add via JsonRpcHost without chromium rebuild).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ .../browser/slayzone/mojom/embedded_tab.mojom |  97 ++++
+ chrome/browser/slayzone/mojom/json_rpc.mojom  |  29 ++
+ chrome/browser/slayzone/mojom/tags.mojom      |  32 ++
+ chrome/browser/slayzone/mojom/windows.mojom   | 143 ++++++
+ .../slayzone/slayzone_embedded_tab_host.cc    | 449 ++++++++++++++++++
+ .../slayzone/slayzone_embedded_tab_host.h     | 152 ++++++
+ .../slayzone/slayzone_json_rpc_host.cc        | 106 +++++
+ .../browser/slayzone/slayzone_json_rpc_host.h |  42 ++
+ .../slayzone/slayzone_native_dialog_host.cc   | 150 ++++++
+ .../slayzone/slayzone_native_dialog_host.h    |  75 +++
+ chrome/browser/slayzone/slayzone_tags_host.cc | 223 +++++++++
+ chrome/browser/slayzone/slayzone_tags_host.h  |  53 +++
+ .../browser/slayzone/slayzone_windows_host.cc | 431 +++++++++++++++++
+ .../browser/slayzone/slayzone_windows_host.h  | 127 +++++
+ 14 files changed, 2109 insertions(+)
+ create mode 100644 chrome/browser/slayzone/mojom/embedded_tab.mojom
+ create mode 100644 chrome/browser/slayzone/mojom/json_rpc.mojom
+ create mode 100644 chrome/browser/slayzone/mojom/tags.mojom
+ create mode 100644 chrome/browser/slayzone/mojom/windows.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_embedded_tab_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_json_rpc_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_json_rpc_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_native_dialog_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_native_dialog_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_tags_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_tags_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_windows_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_windows_host.h
+
+diff --git a/chrome/browser/slayzone/mojom/embedded_tab.mojom b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+new file mode 100644
+index 0000000000000..32de468869e20
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+@@ -0,0 +1,97 @@
++// cap-shell-4 inline-task-browser data contract.
++//
++// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory) as
++// the outer source-of-truth; the in-tree copy at
++// chrome/browser/slayzone/mojom/embedded_tab.mojom is what Chromium's mojom()
++// target compiles to C++. scripts/generate.ts regenerates TS bindings from
++// this file. The two must stay diff-identical below the module line.
++//
++// The shell's <TaskBrowserView> drives this surface via window.api.browser.*:
++//   CreateView({taskId, tabId, url, bounds, visible}) -> viewId
++//   SetBounds(viewId, bounds) on every rAF tick while mounted + visible
++//   Navigate / GoBack / GoForward / Reload / Stop / Focus(viewId, …)
++//   DestroyView(viewId) on unmount; DestroyAllForTask(taskId) on task switch
++//
++// Per-task LRU: the host keeps up to 10 WebContents cached across tab-flips
++// so back/forward history survives when the user flips tabs; the currently
++// active view is never evictable. Evicted entries are silently destroyed and
++// the renderer re-creates on next mount.
++//
++// Deviation from orchestrator's initial brief (SetActiveTab/HideActiveTab
++// keyed by task_id): the existing useBrowserViewBounds / useBrowserViewLifecycle
++// hooks in packages/domains/task-browser/ already call createView + setBounds
++// with a browser-assigned viewId. Matching that contract preserves existing
++// renderer behavior (per CLAUDE.md "never drop existing functionality").
++
++module slayzone.embedded_tab.mojom;
++
++// Bounds struct defined inline to keep this outer mojom Chromium-import-free
++// (scripts/generate.ts only roots at packages/shared/mojo-bindings/, so
++// `import "ui/gfx/geometry/mojom/geometry.mojom"` fails to resolve). The C++
++// host converts to gfx::Rect at the edge.
++struct EmbeddedTabBounds {
++  int32 x;
++  int32 y;
++  int32 width;
++  int32 height;
++};
++
++struct CreateViewParams {
++  string task_id;
++  string tab_id;
++  string url;
++  EmbeddedTabBounds bounds;
++  bool visible;
++};
++
++interface EmbeddedTabHost {
++  // Allocate a new embedded tab. Returns browser-assigned view_id; empty
++  // string on failure (unreachable container / bad params). The renderer
++  // keys every subsequent call on view_id.
++  CreateView(CreateViewParams params) => (string view_id);
++
++  // Destroy a single view and free its LRU slot.
++  DestroyView(string view_id);
++
++  // Destroy every view for task_id — task-detail unmount, project switch.
++  DestroyAllForTask(string task_id);
++
++  // Reposition the overlay WebView. Called per-rAF; no-ops if unchanged.
++  SetBounds(string view_id, EmbeddedTabBounds bounds);
++
++  // Show / hide. Hide detaches from the overlay slot; show re-attaches at
++  // the last SetBounds rect.
++  SetVisible(string view_id, bool visible);
++
++  // Navigation — no-ops when view_id is unknown.
++  Navigate(string view_id, string url);
++  GoBack(string view_id);
++  GoForward(string view_id);
++  Reload(string view_id, bool ignore_cache);
++  Stop(string view_id);
++  Focus(string view_id);
++  ToggleDevtools(string view_id);
++
++  // One observer per remote. Later Subscribe calls replace the previous
++  // observer. No event backlog — renderer only receives events for
++  // navigations that happen after Subscribe resolves.
++  Subscribe(pending_remote<EmbeddedTabObserver> observer);
++};
++
++interface EmbeddedTabObserver {
++  // Event-name schema mirrors packages/domains/task-browser/src/client/
++  // useBrowserViewEvents.ts (the Electron baseline the renderer reads). Keep
++  // names 1:1 so the shim can forward without reshaping payloads.
++  OnDidNavigate(string view_id,
++                string url,
++                bool can_go_back,
++                bool can_go_forward);
++  OnPageTitleUpdated(string view_id, string title);
++  OnDidStartLoading(string view_id);
++  OnDidStopLoading(string view_id);
++  OnDomReady(string view_id);
++  OnDidFailLoad(string view_id,
++                int32 error_code,
++                string error_description,
++                string url);
++};
+diff --git a/chrome/browser/slayzone/mojom/json_rpc.mojom b/chrome/browser/slayzone/mojom/json_rpc.mojom
+new file mode 100644
+index 0000000000000..bad7ac9c024bd
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/json_rpc.mojom
+@@ -0,0 +1,29 @@
++// cap-shell-6 generic sidecar passthrough.
++//
++// Lets renderer shims call arbitrary JSON-RPC methods on the sidecar
++// without per-method mojom plumbing. Params + result are JSON strings —
++// the shim serializes inputs and parses outputs. Keeps the browser-side
++// C++ host trivial (forward JSON to SidecarClient) while still letting
++// long-tail domains (fs, feedback, cli-install, changelog, search, ...)
++// reach sidecar handlers from the chrome://slayzone-shell origin.
++//
++// Not a replacement for typed mojoms (projects/tasklist/settings/...) —
++// those stay because they're load-bearing and change rarely. JsonRpcHost
++// is the escape hatch for everything else.
++module slayzone.json_rpc.mojom;
++
++struct JsonRpcResult {
++  // true on success; false means `error` is set + `result_json` is empty.
++  bool ok;
++  // JSON-encoded result on success (may be "null", "[]", object, ...).
++  string result_json;
++  // Human-readable error message on failure ("" on success).
++  string error;
++};
++
++interface JsonRpcHost {
++  // Call `method` with `params_json` (must parse to a JSON object or
++  // array — sidecar dispatcher will reshape as needed). Returns the
++  // result envelope.
++  Call(string method, string params_json) => (JsonRpcResult result);
++};
+diff --git a/chrome/browser/slayzone/mojom/tags.mojom b/chrome/browser/slayzone/mojom/tags.mojom
+new file mode 100644
+index 0000000000000..bf93d6d2a28b5
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/tags.mojom
+@@ -0,0 +1,32 @@
++// cap-06 tags domain data contract (in-tree mirror).
++// Source of truth: packages/shared/mojo-bindings/mojom/tags.mojom.
++// Keep diff-identical below the module line.
++
++module slayzone.tags.mojom;
++
++struct Tag {
++  string id;
++  string name;
++  string color;
++};
++
++struct TagWriteResult {
++  bool ok;
++  string error;
++  Tag tag;
++};
++
++struct TagAttachResult {
++  bool ok;
++  string error;
++};
++
++interface TagsHost {
++  GetTags() => (array<Tag> tags);
++  GetTagsForTask(string task_id) => (array<Tag> tags);
++  CreateTag(string name, string color) => (TagWriteResult result);
++  UpdateTag(string id, string name, string color) => (TagWriteResult result);
++  DeleteTag(string id) => (TagWriteResult result);
++  AttachTag(string task_id, string tag_id) => (TagAttachResult result);
++  DetachTag(string task_id, string tag_id) => (TagAttachResult result);
++};
+diff --git a/chrome/browser/slayzone/mojom/windows.mojom b/chrome/browser/slayzone/mojom/windows.mojom
+new file mode 100644
+index 0000000000000..59203f324054e
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/windows.mojom
+@@ -0,0 +1,143 @@
++// cap-shell-5 aux-window contract.
++//
++// Scope note: lives in packages/shared/mojo-bindings/ as the outer
++// source-of-truth; the in-tree copy at
++// chrome/browser/slayzone/mojom/windows.mojom is what Chromium's mojom()
++// target compiles to C++. scripts/generate.ts regenerates TS bindings from
++// this file. The two must stay diff-identical below the module line.
++//
++// Background: the Electron build spawned BrowserWindows directly from the
++// main process for splash, floating-agent, and (future) leaderboard popout.
++// Chromium has no main process — so each aux window is a standalone
++// views::Widget owned by SlayzoneWindowsHost, each hosting a views::WebView
++// that navigates back to chrome://slayzone-shell/ with a hash that tells the
++// renderer-side main.tsx dispatcher which aux React root to mount.
++//
++// Renderer keys every call on a caller-supplied window_id string. The host
++// rejects duplicate ids (you must Close() first). OnOpened / OnClosed /
++// OnFocused / OnBoundsChanged fire on the single shared observer pipe that
++// every renderer in every window can Subscribe() to — so a collapsed icon
++// in window A can react to bounds changes in window B if needed.
++//
++// SendMessage(window_id, json) is the cross-window bus: the host forwards
++// via OnMessage(window_id, json) to every subscribed observer, letting the
++// shim re-implement Electron's main-process state-machine patterns
++// (floating-agent session redirect, etc.) client-side in the renderer that
++// owns that state.
++
++module slayzone.windows.mojom;
++
++// Closed set of aux-window types the host knows how to spawn. Each maps to a
++// specific views::Widget InitParams shape + default bounds. Kept closed so
++// typos from the renderer surface as an enum-decode failure rather than a
++// misconfigured window on screen.
++enum AuxWindowType {
++  // Modeless centered top-level, no taskbar, frameless. Used for the boot
++  // splash screen — lifetime usually a few seconds until the main shell
++  // bundle signals data-ready.
++  kSplash = 0,
++
++  // Always-on-top frameless panel; z_order = kFloatingWindow so it floats
++  // above the main SlayZone window but below OS overlays (notifications,
++  // Mission Control). Used for the detached agent widget.
++  kFloatingAgent = 1,
++
++  // Regular top-level window — user-resizable, appears in taskbar. Used for
++  // the leaderboard popout (not wired in the current Electron build but the
++  // primitive exists so renderer-side popouts land here instead of the
++  // inline overlay path).
++  kLeaderboard = 2,
++
++  // Escape hatch — caller-supplied bounds, normal window type, no special
++  // z-order. Lets future callers spawn one-off aux windows without a new
++  // enum landing per use case.
++  kGeneric = 3,
++};
++
++struct WindowBounds {
++  int32 x;
++  int32 y;
++  int32 width;
++  int32 height;
++};
++
++struct OpenParams {
++  AuxWindowType type;
++
++  // Renderer-supplied stable id. Host rejects Open() if the id already
++  // refers to a live window. Close() frees the id for reuse.
++  string window_id;
++
++  // Appended to chrome://slayzone-shell/ after the hash. The shell bundle's
++  // main.tsx reads window.location.hash + search params to pick the aux
++  // React root (FloatingAgentPanel / Splash / LeaderboardPage).
++  string url_fragment;
++
++  // Initial bounds in screen coordinates. The host clamps nothing — bounds
++  // outside the primary display will render off-screen. width/height of 0
++  // uses a type-specific default.
++  WindowBounds bounds;
++
++  // Frameless flag. Mirrors Electron's `frame: false`. Orthogonal to the
++  // type — a leaderboard could be frameless, a floating-agent framed, if a
++  // caller wants it.
++  bool frameless;
++
++  // Skip OS taskbar. Default for Splash / FloatingAgent in the Electron
++  // build; leaderboard keeps taskbar visibility.
++  bool skip_taskbar;
++
++  // Whether to Show() (focus-stealing) vs ShowInactive() (keeps current
++  // focus) on initial open. The Electron floating agent used showInactive
++  // to avoid triggering its own reattach via did-become-active.
++  bool activate_on_show;
++};
++
++interface WindowsHost {
++  // Spawn a new aux window. Returns ok=false with a diagnostic `error` if:
++  //   - window_id already refers to a live window
++  //   - the host's SlayzoneShellUI is torn down (teardown race)
++  //   - url_fragment fails GURL parse
++  // The renderer's main.tsx mounts the aux React root on navigation commit;
++  // wait for OnOpened before assuming the aux window can receive SendMessage
++  // traffic.
++  Open(OpenParams params) => (bool ok, string error);
++
++  // Close the named window. No-op on unknown id.
++  Close(string window_id);
++
++  // Bring the window to the front + activate it. No-op on unknown id.
++  Focus(string window_id);
++
++  // Reposition / resize in screen coordinates. No-op on unknown id.
++  SetBounds(string window_id, WindowBounds bounds);
++
++  // Show / hide without destroy. Re-showing preserves the last SetBounds
++  // rect (Chromium restores position). No-op on unknown id.
++  SetVisible(string window_id, bool visible);
++
++  // Close the *caller's* top-level window. Lets the main shell's
++  // `window.api.window.close()` still work without needing a caller id.
++  // No-op if the caller is not hosted in a top-level Chromium window (e.g.
++  // embedded dialog WebContents).
++  CloseCurrentWindow();
++
++  // Broadcast an opaque JSON blob to every subscribed observer, tagged with
++  // window_id. The renderer is responsible for routing to the correct
++  // handler. Used by the floating-agent shim to send state updates between
++  // the main window and the detached agent without re-binding a dedicated
++  // observer pipe per feature.
++  SendMessage(string window_id, string json);
++
++  // Install / replace the single observer remote for this WindowsHost
++  // instance. One observer per shell UI; all events dispatch to it.
++  Subscribe(pending_remote<WindowsObserver> observer);
++};
++
++interface WindowsObserver {
++  OnOpened(string window_id);
++  OnClosed(string window_id);
++  OnFocused(string window_id, bool focused);
++  OnBoundsChanged(string window_id, WindowBounds bounds);
++  OnMessage(string window_id, string json);
++};
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+new file mode 100644
+index 0000000000000..7d5cbfa3281b3
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -0,0 +1,449 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_embedded_tab_host.h"
++
++#include <algorithm>
++#include <utility>
++
++#include "base/logging.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/devtools/devtools_window.h"
++#include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
++#include "content/public/browser/browser_context.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/navigation_entry.h"
++#include "content/public/browser/page.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/common/referrer.h"
++#include "net/base/net_errors.h"
++#include "ui/base/page_transition_types.h"
++#include "url/gurl.h"
++
++namespace slayzone {
++
++namespace {
++
++// Convert the mojom-side bounds struct into the views-side gfx::Rect. The
++// bounds struct is kept Chromium-import-free in the outer mojom (see
++// embedded_tab.mojom) so conversion happens at the C++ edge.
++gfx::Rect ToRect(
++    const slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr& bounds) {
++  if (!bounds) {
++    return gfx::Rect();
++  }
++  return gfx::Rect(bounds->x, bounds->y,
++                   std::max(0, bounds->width), std::max(0, bounds->height));
++}
++
++}  // namespace
++
++// Each Entry owns one content::WebContents + forwards WebContentsObserver
++// events to the parent host's mojo observer. Entries live inside entries_ —
++// erasing the unique_ptr destroys the WebContents and unregisters the
++// observer in one step.
++class SlayzoneEmbeddedTabHost::Entry : public content::WebContentsObserver {
++ public:
++  Entry(SlayzoneEmbeddedTabHost* host,
++        const std::string& view_id,
++        const std::string& task_id,
++        std::unique_ptr<content::WebContents> contents)
++      : host_(host),
++        view_id_(view_id),
++        task_id_(task_id),
++        contents_(std::move(contents)) {
++    Observe(contents_.get());
++  }
++
++  ~Entry() override = default;
++
++  content::WebContents* contents() { return contents_.get(); }
++  const std::string& view_id() const { return view_id_; }
++  const std::string& task_id() const { return task_id_; }
++
++  // content::WebContentsObserver:
++  void TitleWasSet(content::NavigationEntry* entry) override {
++    if (!entry) {
++      return;
++    }
++    host_->FirePageTitleUpdated(view_id_,
++                                 base::UTF16ToUTF8(entry->GetTitle()));
++  }
++
++  void PrimaryPageChanged(content::Page& /*page*/) override {
++    if (!contents_) {
++      return;
++    }
++    auto& controller = contents_->GetController();
++    host_->FireDidNavigate(view_id_,
++                            contents_->GetLastCommittedURL().possibly_invalid_spec(),
++                            controller.CanGoBack(),
++                            controller.CanGoForward());
++  }
++
++  void DidStartLoading() override {
++    host_->FireDidStartLoading(view_id_);
++  }
++
++  void DidStopLoading() override {
++    host_->FireDidStopLoading(view_id_);
++  }
++
++  void DOMContentLoaded(content::RenderFrameHost* render_frame_host) override {
++    // Only care about the outermost main frame — subframe / fenced-frame DOM
++    // events aren't what the renderer gates hasLoadedRealPage on.
++    if (render_frame_host && render_frame_host->GetParent() == nullptr) {
++      host_->FireDomReady(view_id_);
++    }
++  }
++
++  void DidFailLoad(content::RenderFrameHost* render_frame_host,
++                   const GURL& validated_url,
++                   int error_code) override {
++    if (render_frame_host && render_frame_host->GetParent() != nullptr) {
++      return;
++    }
++    host_->FireDidFailLoad(view_id_, error_code,
++                            net::ErrorToShortString(error_code),
++                            validated_url.possibly_invalid_spec());
++  }
++
++ private:
++  raw_ptr<SlayzoneEmbeddedTabHost> host_;
++  std::string view_id_;
++  std::string task_id_;
++  std::unique_ptr<content::WebContents> contents_;
++};
++
++SlayzoneEmbeddedTabHost::SlayzoneEmbeddedTabHost(
++    content::BrowserContext* browser_context,
++    SlayzoneShellContainer* container)
++    : browser_context_(browser_context), container_(container) {}
++
++SlayzoneEmbeddedTabHost::~SlayzoneEmbeddedTabHost() {
++  // Detach from the container before entries_ unwinds so the WebView slot
++  // doesn't hold a pointer to a WebContents we're about to destroy.
++  if (container_) {
++    container_->SetEmbeddedTabWebContents(nullptr);
++    container_->SetEmbeddedTabVisible(false);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::Bind(
++    mojo::PendingReceiver<slayzone::embedded_tab::mojom::EmbeddedTabHost>
++        receiver) {
++  receiver_.reset();
++  receiver_.Bind(std::move(receiver));
++}
++
++void SlayzoneEmbeddedTabHost::CreateView(
++    slayzone::embedded_tab::mojom::CreateViewParamsPtr params,
++    CreateViewCallback callback) {
++  LOG(INFO) << "[embedded_tab] CreateView task=" << params->task_id
++            << " tab=" << params->tab_id << " url='" << params->url
++            << "' bounds=" << (params->bounds ? params->bounds->width : 0)
++            << "x" << (params->bounds ? params->bounds->height : 0)
++            << " visible=" << params->visible
++            << " container=" << (container_ ? "yes" : "NULL")
++            << " browser_context=" << (browser_context_ ? "yes" : "NULL");
++  if (!browser_context_ || !container_) {
++    LOG(WARNING) << "[embedded_tab] CreateView aborted — missing "
++                 << (!browser_context_ ? "browser_context" : "container");
++    std::move(callback).Run(std::string());
++    return;
++  }
++
++  content::WebContents::CreateParams create_params(browser_context_);
++  std::unique_ptr<content::WebContents> contents =
++      content::WebContents::Create(create_params);
++  if (!contents) {
++    std::move(callback).Run(std::string());
++    return;
++  }
++
++  GURL url(params->url.empty() ? std::string("about:blank") : params->url);
++  if (!url.is_valid()) {
++    url = GURL("about:blank");
++  }
++  content::NavigationController::LoadURLParams load_params(url);
++  load_params.transition_type = ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
++  contents->GetController().LoadURLWithParams(load_params);
++
++  const std::string view_id = "etab-" + base::NumberToString(next_id_++);
++  auto entry = std::make_unique<Entry>(this, view_id, params->task_id,
++                                        std::move(contents));
++  entries_.emplace(view_id, std::move(entry));
++  lru_.push_back(view_id);
++
++  active_bounds_ = ToRect(params->bounds);
++  active_visible_ = params->visible;
++  SetActiveViewId(view_id);
++  EvictIfOverCap();
++
++  LOG(INFO) << "[embedded_tab] CreateView resolved view_id=" << view_id
++            << " loaded=" << url.possibly_invalid_spec();
++  std::move(callback).Run(view_id);
++}
++
++void SlayzoneEmbeddedTabHost::DestroyView(const std::string& view_id) {
++  auto it = entries_.find(view_id);
++  if (it == entries_.end()) {
++    return;
++  }
++  const bool was_active = (view_id == active_view_id_);
++  entries_.erase(it);
++  lru_.remove(view_id);
++  if (was_active) {
++    SetActiveViewId(std::string());
++  }
++}
++
++void SlayzoneEmbeddedTabHost::DestroyAllForTask(const std::string& task_id) {
++  // Collect first so we don't mutate while iterating.
++  std::vector<std::string> to_destroy;
++  for (auto& [view_id, entry] : entries_) {
++    if (entry->task_id() == task_id) {
++      to_destroy.push_back(view_id);
++    }
++  }
++  for (const std::string& view_id : to_destroy) {
++    DestroyView(view_id);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::SetBounds(
++    const std::string& view_id,
++    slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  const gfx::Rect rect = ToRect(bounds);
++  // Only the active view's bounds influence the overlay. The renderer stops
++  // the rAF loop when a view hides, so non-active SetBounds would be a bug —
++  // treat it as an implicit switch-to-active request.
++  if (view_id != active_view_id_) {
++    active_bounds_ = rect;
++    active_visible_ = true;
++    SetActiveViewId(view_id);
++    return;
++  }
++  active_bounds_ = rect;
++  RefreshContainer();
++}
++
++void SlayzoneEmbeddedTabHost::SetVisible(const std::string& view_id,
++                                          bool visible) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  if (view_id != active_view_id_) {
++    // Renderer asked us to show a non-active view: swap to it.
++    if (visible) {
++      active_visible_ = true;
++      SetActiveViewId(view_id);
++    }
++    return;
++  }
++  active_visible_ = visible;
++  RefreshContainer();
++}
++
++void SlayzoneEmbeddedTabHost::Navigate(const std::string& view_id,
++                                        const std::string& url) {
++  LOG(INFO) << "[embedded_tab] Navigate view_id=" << view_id << " url='"
++            << url << "' entries=" << entries_.size()
++            << " active=" << active_view_id_;
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    LOG(WARNING) << "[embedded_tab] Navigate dropped — unknown view_id="
++                 << view_id;
++    return;
++  }
++  GURL gurl(url);
++  if (!gurl.is_valid()) {
++    LOG(WARNING) << "[embedded_tab] Navigate dropped — invalid url='" << url
++                 << "'";
++    return;
++  }
++  content::NavigationController::LoadURLParams params(gurl);
++  params.transition_type = ui::PAGE_TRANSITION_TYPED;
++  entry->contents()->GetController().LoadURLWithParams(params);
++  TouchLru(view_id);
++}
++
++void SlayzoneEmbeddedTabHost::GoBack(const std::string& view_id) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  auto& controller = entry->contents()->GetController();
++  if (controller.CanGoBack()) {
++    controller.GoBack();
++    TouchLru(view_id);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::GoForward(const std::string& view_id) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  auto& controller = entry->contents()->GetController();
++  if (controller.CanGoForward()) {
++    controller.GoForward();
++    TouchLru(view_id);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::Reload(const std::string& view_id,
++                                      bool ignore_cache) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  entry->contents()->GetController().Reload(
++      ignore_cache ? content::ReloadType::BYPASSING_CACHE
++                   : content::ReloadType::NORMAL,
++      /*check_for_repost=*/true);
++  TouchLru(view_id);
++}
++
++void SlayzoneEmbeddedTabHost::Stop(const std::string& view_id) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  entry->contents()->Stop();
++}
++
++void SlayzoneEmbeddedTabHost::Focus(const std::string& view_id) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  entry->contents()->Focus();
++  TouchLru(view_id);
++}
++
++void SlayzoneEmbeddedTabHost::ToggleDevtools(const std::string& view_id) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
++    return;
++  }
++  DevToolsWindow::OpenDevToolsWindow(entry->contents(),
++                                      DevToolsToggleAction::Toggle(),
++                                      DevToolsOpenedByAction::kUnknown);
++}
++
++void SlayzoneEmbeddedTabHost::Subscribe(
++    mojo::PendingRemote<slayzone::embedded_tab::mojom::EmbeddedTabObserver>
++        observer) {
++  observer_.reset();
++  observer_.Bind(std::move(observer));
++}
++
++void SlayzoneEmbeddedTabHost::FireDidNavigate(const std::string& view_id,
++                                                const std::string& url,
++                                                bool can_go_back,
++                                                bool can_go_forward) {
++  if (observer_) {
++    observer_->OnDidNavigate(view_id, url, can_go_back, can_go_forward);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::FirePageTitleUpdated(const std::string& view_id,
++                                                     const std::string& title) {
++  if (observer_) {
++    observer_->OnPageTitleUpdated(view_id, title);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::FireDidStartLoading(const std::string& view_id) {
++  if (observer_) {
++    observer_->OnDidStartLoading(view_id);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::FireDidStopLoading(const std::string& view_id) {
++  if (observer_) {
++    observer_->OnDidStopLoading(view_id);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::FireDomReady(const std::string& view_id) {
++  if (observer_) {
++    observer_->OnDomReady(view_id);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::FireDidFailLoad(
++    const std::string& view_id,
++    int32_t error_code,
++    const std::string& error_description,
++    const std::string& url) {
++  if (observer_) {
++    observer_->OnDidFailLoad(view_id, error_code, error_description, url);
++  }
++}
++
++SlayzoneEmbeddedTabHost::Entry* SlayzoneEmbeddedTabHost::FindEntry(
++    const std::string& view_id) {
++  auto it = entries_.find(view_id);
++  return it == entries_.end() ? nullptr : it->second.get();
++}
++
++void SlayzoneEmbeddedTabHost::TouchLru(const std::string& view_id) {
++  lru_.remove(view_id);
++  lru_.push_back(view_id);
++}
++
++void SlayzoneEmbeddedTabHost::EvictIfOverCap() {
++  while (entries_.size() > kLruCap && lru_.size() > 1) {
++    // Front = least recent, skip past active if for some reason it's there.
++    std::string victim = lru_.front();
++    if (victim == active_view_id_) {
++      // Shouldn't happen — active is kept at the back — but guard anyway.
++      auto it = std::next(lru_.begin());
++      if (it == lru_.end()) {
++        break;
++      }
++      victim = *it;
++      lru_.erase(it);
++    } else {
++      lru_.pop_front();
++    }
++    entries_.erase(victim);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::SetActiveViewId(const std::string& view_id) {
++  if (view_id == active_view_id_) {
++    RefreshContainer();
++    return;
++  }
++  active_view_id_ = view_id;
++  if (!active_view_id_.empty()) {
++    TouchLru(active_view_id_);
++  }
++  if (container_) {
++    Entry* entry = FindEntry(active_view_id_);
++    container_->SetEmbeddedTabWebContents(entry ? entry->contents() : nullptr);
++  }
++  RefreshContainer();
++}
++
++void SlayzoneEmbeddedTabHost::RefreshContainer() {
++  if (!container_) {
++    return;
++  }
++  const bool has_active = !active_view_id_.empty();
++  container_->SetEmbeddedTabBounds(active_bounds_);
++  container_->SetEmbeddedTabVisible(has_active && active_visible_);
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+new file mode 100644
+index 0000000000000..99e4e37c86bae
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -0,0 +1,152 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_EMBEDDED_TAB_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_EMBEDDED_TAB_HOST_H_
++
++#include <list>
++#include <map>
++#include <memory>
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/slayzone/mojom/embedded_tab.mojom.h"
++#include "content/public/browser/web_contents_observer.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "ui/gfx/geometry/rect.h"
++
++class SlayzoneShellContainer;
++
++namespace content {
++class BrowserContext;
++class WebContents;
++}  // namespace content
++
++namespace slayzone {
++
++// cap-shell-4 — inline task browser.
++//
++// One SlayzoneEmbeddedTabHost per SlayzoneShellUI instance. The host owns N
++// per-view content::WebContents (keyed by host-generated view_id) and a single
++// shared views::WebView "slot" — the overlay surface in SlayzoneShellContainer
++// that renders whichever WebContents is currently active. Switching the
++// active view is SetWebContents(ptr) on the slot; no reparenting.
++//
++// Per-view WebContents cache with LRU at cap=10 — see embedded_tab.mojom for
++// rationale. The currently-active view is always at the MRU end and is never
++// evictable.
++//
++// Nav / state events flow the opposite direction: each Entry is a
++// WebContentsObserver and forwards TitleWasSet / PrimaryPageChanged /
++// DidStart-DidStopLoading into the single EmbeddedTabObserver remote the
++// renderer registered via Subscribe.
++class SlayzoneEmbeddedTabHost
++    : public slayzone::embedded_tab::mojom::EmbeddedTabHost {
++ public:
++  // `browser_context` must outlive this object. `container` may be null (e.g.
++  // shell mounted with no active browser view) — every public method becomes
++  // a no-op in that case so the renderer pipe stays alive.
++  SlayzoneEmbeddedTabHost(content::BrowserContext* browser_context,
++                          SlayzoneShellContainer* container);
++  SlayzoneEmbeddedTabHost(const SlayzoneEmbeddedTabHost&) = delete;
++  SlayzoneEmbeddedTabHost& operator=(const SlayzoneEmbeddedTabHost&) = delete;
++  ~SlayzoneEmbeddedTabHost() override;
++
++  void Bind(mojo::PendingReceiver<
++            slayzone::embedded_tab::mojom::EmbeddedTabHost> receiver);
++
++  // slayzone::embedded_tab::mojom::EmbeddedTabHost:
++  void CreateView(slayzone::embedded_tab::mojom::CreateViewParamsPtr params,
++                  CreateViewCallback callback) override;
++  void DestroyView(const std::string& view_id) override;
++  void DestroyAllForTask(const std::string& task_id) override;
++  void SetBounds(
++      const std::string& view_id,
++      slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) override;
++  void SetVisible(const std::string& view_id, bool visible) override;
++  void Navigate(const std::string& view_id,
++                const std::string& url) override;
++  void GoBack(const std::string& view_id) override;
++  void GoForward(const std::string& view_id) override;
++  void Reload(const std::string& view_id, bool ignore_cache) override;
++  void Stop(const std::string& view_id) override;
++  void Focus(const std::string& view_id) override;
++  void ToggleDevtools(const std::string& view_id) override;
++  void Subscribe(mojo::PendingRemote<
++                 slayzone::embedded_tab::mojom::EmbeddedTabObserver>
++                     observer) override;
++
++  // Entry-side callbacks. Declared public so the private Entry inner class in
++  // the .cc can reach them without friending. Signatures mirror the mojom
++  // observer interface 1:1 — see embedded_tab.mojom for rationale.
++  void FireDidNavigate(const std::string& view_id,
++                       const std::string& url,
++                       bool can_go_back,
++                       bool can_go_forward);
++  void FirePageTitleUpdated(const std::string& view_id,
++                             const std::string& title);
++  void FireDidStartLoading(const std::string& view_id);
++  void FireDidStopLoading(const std::string& view_id);
++  void FireDomReady(const std::string& view_id);
++  void FireDidFailLoad(const std::string& view_id,
++                       int32_t error_code,
++                       const std::string& error_description,
++                       const std::string& url);
++
++ private:
++  class Entry;
++
++  // LRU cap — see feedback in the binding contract. 10 open tabs at ~30-50MB
++  // each caps at ~500MB worst-case; larger caps need telemetry before we
++  // justify them.
++  static constexpr size_t kLruCap = 10;
++
++  Entry* FindEntry(const std::string& view_id);
++
++  // Push `view_id` to the MRU end (back of lru_).
++  void TouchLru(const std::string& view_id);
++
++  // Evict the least-recently-used entry if we're over kLruCap. The active
++  // view (always at the back of lru_) is never evictable.
++  void EvictIfOverCap();
++
++  // Swap the active view. Passing "" detaches.
++  void SetActiveViewId(const std::string& view_id);
++
++  // Push the current active view's visibility / bounds into the container.
++  void RefreshContainer();
++
++  raw_ptr<content::BrowserContext> browser_context_;
++  raw_ptr<SlayzoneShellContainer> container_;
++
++  std::map<std::string, std::unique_ptr<Entry>> entries_;
++
++  // LRU order: front = least recent, back = most recent (active).
++  std::list<std::string> lru_;
++
++  // Currently-active view id. Empty when no view is active.
++  std::string active_view_id_;
++
++  // Last bounds / visibility requested for the active view. Kept so
++  // RefreshContainer can push the latest state after a view swap.
++  gfx::Rect active_bounds_;
++  bool active_visible_ = false;
++
++  // Monotonic view id counter — the shim keys everything on this string.
++  uint64_t next_id_ = 1;
++
++  mojo::Receiver<slayzone::embedded_tab::mojom::EmbeddedTabHost> receiver_{
++      this};
++  mojo::Remote<slayzone::embedded_tab::mojom::EmbeddedTabObserver> observer_;
++
++  base::WeakPtrFactory<SlayzoneEmbeddedTabHost> weak_factory_{this};
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_EMBEDDED_TAB_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_json_rpc_host.cc b/chrome/browser/slayzone/slayzone_json_rpc_host.cc
+new file mode 100644
+index 0000000000000..904ed9edcce4a
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_json_rpc_host.cc
+@@ -0,0 +1,106 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_json_rpc_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++json_rpc::mojom::JsonRpcResultPtr MakeError(const std::string& message) {
++  auto out = json_rpc::mojom::JsonRpcResult::New();
++  out->ok = false;
++  out->error = message;
++  return out;
++}
++
++json_rpc::mojom::JsonRpcResultPtr ResultFromResponse(
++    const base::DictValue& response) {
++  auto out = json_rpc::mojom::JsonRpcResult::New();
++
++  // sidecar error envelope: `{error: {message: ...}}`
++  if (const base::Value* err = response.Find("error");
++      err && err->is_dict()) {
++    if (const std::string* msg = err->GetDict().FindString("message")) {
++      out->error = *msg;
++    } else {
++      out->error = "sidecar error";
++    }
++    return out;
++  }
++
++  const base::Value* result = response.Find("result");
++  if (!result) {
++    // no-response fallback — treat as null result success so renderer can
++    // disambiguate missing handler (which surfaces as error above) from
++    // fire-and-forget notifications.
++    out->ok = true;
++    out->result_json = "null";
++    return out;
++  }
++
++  std::string serialized;
++  if (!base::JSONWriter::Write(*result, &serialized)) {
++    out->ok = false;
++    out->error = "failed to serialize sidecar result";
++    return out;
++  }
++  out->ok = true;
++  out->result_json = std::move(serialized);
++  return out;
++}
++
++}  // namespace
++
++SlayzoneJsonRpcHost::SlayzoneJsonRpcHost() = default;
++SlayzoneJsonRpcHost::~SlayzoneJsonRpcHost() = default;
++
++void SlayzoneJsonRpcHost::Bind(
++    mojo::PendingReceiver<json_rpc::mojom::JsonRpcHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneJsonRpcHost::Call(const std::string& method,
++                               const std::string& params_json,
++                               CallCallback callback) {
++  // Empty params = no-arg call. Pass empty dict.
++  base::DictValue params;
++  if (!params_json.empty()) {
++    std::optional<base::Value> parsed =
++        base::JSONReader::Read(params_json, base::JSON_PARSE_RFC);
++    if (!parsed.has_value()) {
++      std::move(callback).Run(MakeError("invalid params_json"));
++      return;
++    }
++    if (parsed->is_dict()) {
++      params = std::move(*parsed).TakeDict();
++    } else if (parsed->is_list()) {
++      // Sidecar dispatcher unwraps `{params: [...]}` to positional args.
++      params.Set("params", std::move(*parsed));
++    } else {
++      std::move(callback).Run(
++          MakeError("params_json must decode to object or array"));
++      return;
++    }
++  }
++
++  SidecarClient::GetInstance()->Call(
++      method, std::move(params),
++      base::BindOnce(
++          [](CallCallback cb, base::DictValue response) {
++            std::move(cb).Run(ResultFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_json_rpc_host.h b/chrome/browser/slayzone/slayzone_json_rpc_host.h
+new file mode 100644
+index 0000000000000..76c540d5caba2
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_json_rpc_host.h
+@@ -0,0 +1,42 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_JSON_RPC_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_JSON_RPC_HOST_H_
++
++#include <string>
++
++#include "chrome/browser/slayzone/mojom/json_rpc.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// cap-shell-6 — generic JSON-RPC passthrough to the sidecar. Lets the
++// renderer's window-api-shim call arbitrary sidecar methods without a
++// dedicated typed mojom per domain. Parses the shim's JSON params string
++// into a base::Value dict, forwards to SidecarClient, re-serializes the
++// response's `result` field back into JSON for the shim to parse.
++class SlayzoneJsonRpcHost : public slayzone::json_rpc::mojom::JsonRpcHost {
++ public:
++  SlayzoneJsonRpcHost();
++  SlayzoneJsonRpcHost(const SlayzoneJsonRpcHost&) = delete;
++  SlayzoneJsonRpcHost& operator=(const SlayzoneJsonRpcHost&) = delete;
++  ~SlayzoneJsonRpcHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::json_rpc::mojom::JsonRpcHost> receiver);
++
++  // slayzone::json_rpc::mojom::JsonRpcHost:
++  void Call(const std::string& method,
++            const std::string& params_json,
++            CallCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::json_rpc::mojom::JsonRpcHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_JSON_RPC_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_native_dialog_host.cc b/chrome/browser/slayzone/slayzone_native_dialog_host.cc
+new file mode 100644
+index 0000000000000..0be1c9af65083
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_native_dialog_host.cc
+@@ -0,0 +1,150 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_native_dialog_host.h"
++
++#include <algorithm>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/shell_dialogs/select_file_dialog.h"
++#include "ui/shell_dialogs/selected_file_info.h"
++
++namespace slayzone {
++
++namespace {
++
++bool ContainsProperty(const std::vector<std::string>& properties,
++                      std::string_view needle) {
++  return std::find(properties.begin(), properties.end(), needle) !=
++         properties.end();
++}
++
++ui::SelectFileDialog::Type ChooseDialogType(
++    const std::vector<std::string>& properties) {
++  if (ContainsProperty(properties, "openDirectory")) {
++    return ui::SelectFileDialog::SELECT_FOLDER;
++  }
++  if (ContainsProperty(properties, "multiSelections")) {
++    return ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE;
++  }
++  return ui::SelectFileDialog::SELECT_OPEN_FILE;
++}
++
++}  // namespace
++
++SlayzoneNativeDialogHost::SlayzoneNativeDialogHost(
++    content::WebContents* web_contents)
++    : web_contents_(web_contents) {}
++
++SlayzoneNativeDialogHost::~SlayzoneNativeDialogHost() {
++  // Drop the dangling SelectFileDialog listener pointer so a late callback
++  // after teardown is a no-op. (The refptr release below will cancel on
++  // most platforms, but we also want the listener cleared explicitly.)
++  if (select_file_dialog_) {
++    select_file_dialog_->ListenerDestroyed();
++    select_file_dialog_.reset();
++  }
++  // If a call was still in flight, the response must fire so the renderer's
++  // pending promise doesn't hang on teardown.
++  if (pending_callback_) {
++    auto result = slayzone::dialog::mojom::ShowOpenDialogResult::New();
++    result->canceled = true;
++    std::move(pending_callback_).Run(std::move(result));
++  }
++}
++
++void SlayzoneNativeDialogHost::Bind(
++    mojo::PendingReceiver<slayzone::dialog::mojom::NativeDialogHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneNativeDialogHost::ShowOpenDialog(
++    slayzone::dialog::mojom::ShowOpenDialogOptionsPtr options,
++    ShowOpenDialogCallback callback) {
++  // Serial-only: if a picker is already up, short-circuit the new call with
++  // canceled=true. Electron's contract permits serial invocation; matching
++  // that is simpler than queueing and is what every other Chromium
++  // SelectFileDialog user does.
++  if (pending_callback_ || select_file_dialog_) {
++    auto result = slayzone::dialog::mojom::ShowOpenDialogResult::New();
++    result->canceled = true;
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  if (!web_contents_) {
++    auto result = slayzone::dialog::mojom::ShowOpenDialogResult::New();
++    result->canceled = true;
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  pending_callback_ = std::move(callback);
++
++  select_file_dialog_ = ui::SelectFileDialog::Create(
++      this, std::make_unique<ChromeSelectFilePolicy>(web_contents_));
++
++  const ui::SelectFileDialog::Type type = ChooseDialogType(options->properties);
++
++  const base::FilePath default_path =
++      options->default_path.empty()
++          ? base::FilePath()
++          : base::FilePath::FromUTF8Unsafe(options->default_path);
++
++  const std::u16string title = options->title.empty()
++                                   ? std::u16string()
++                                   : base::UTF8ToUTF16(options->title);
++
++  ui::SelectFileDialog::FileTypeInfo file_type_info;
++  file_type_info.allowed_paths =
++      ui::SelectFileDialog::FileTypeInfo::NATIVE_PATH;
++
++  select_file_dialog_->SelectFile(
++      type, title, default_path, &file_type_info, /*file_type_index=*/0,
++      /*default_extension=*/base::FilePath::StringType(),
++      web_contents_->GetTopLevelNativeWindow(),
++      /*params=*/nullptr);
++}
++
++void SlayzoneNativeDialogHost::FileSelected(const ui::SelectedFileInfo& file,
++                                            int /*index*/) {
++  auto result = slayzone::dialog::mojom::ShowOpenDialogResult::New();
++  result->canceled = false;
++  result->file_paths.push_back(file.path().AsUTF8Unsafe());
++  select_file_dialog_.reset();
++  if (pending_callback_) {
++    std::move(pending_callback_).Run(std::move(result));
++  }
++}
++
++void SlayzoneNativeDialogHost::MultiFilesSelected(
++    const std::vector<ui::SelectedFileInfo>& files) {
++  auto result = slayzone::dialog::mojom::ShowOpenDialogResult::New();
++  result->canceled = false;
++  for (const auto& f : files) {
++    result->file_paths.push_back(f.path().AsUTF8Unsafe());
++  }
++  select_file_dialog_.reset();
++  if (pending_callback_) {
++    std::move(pending_callback_).Run(std::move(result));
++  }
++}
++
++void SlayzoneNativeDialogHost::FileSelectionCanceled() {
++  auto result = slayzone::dialog::mojom::ShowOpenDialogResult::New();
++  result->canceled = true;
++  select_file_dialog_.reset();
++  if (pending_callback_) {
++    std::move(pending_callback_).Run(std::move(result));
++  }
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_native_dialog_host.h b/chrome/browser/slayzone/slayzone_native_dialog_host.h
+new file mode 100644
+index 0000000000000..b2610c1a079be
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_native_dialog_host.h
+@@ -0,0 +1,75 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_NATIVE_DIALOG_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_NATIVE_DIALOG_HOST_H_
++
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/slayzone/mojom/dialog.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++#include "ui/shell_dialogs/select_file_dialog.h"
++
++namespace content {
++class WebContents;
++}
++
++namespace slayzone {
++
++// cap-shell-dialog — browser-side fan-out for the native OS open-folder /
++// open-file picker. One per SlayzoneShellUI instance; dialogs are serial
++// (Electron's `dialog.showOpenDialog` contract blocks until dismissed), so
++// a single SelectFileDialog + single pending callback is enough. A second
++// call before the first resolves returns `canceled=true` on the new one.
++//
++// Lifetime of a single invocation:
++//   1. JS calls NativeDialogHost.ShowOpenDialog → Mojo hop → ShowOpenDialog.
++//   2. We allocate `select_file_dialog_` (scoped_refptr) via the factory,
++//      stash the Mojo response callback, and fire `SelectFile`.
++//   3. macOS shows NSOpenPanel. User picks or cancels → Listener callback
++//      runs on the UI thread → we run `pending_callback_` with the result
++//      and drop the refptr.
++class SlayzoneNativeDialogHost
++    : public slayzone::dialog::mojom::NativeDialogHost,
++      public ui::SelectFileDialog::Listener {
++ public:
++  explicit SlayzoneNativeDialogHost(content::WebContents* web_contents);
++  SlayzoneNativeDialogHost(const SlayzoneNativeDialogHost&) = delete;
++  SlayzoneNativeDialogHost& operator=(const SlayzoneNativeDialogHost&) = delete;
++  ~SlayzoneNativeDialogHost() override;
++
++  void Bind(mojo::PendingReceiver<slayzone::dialog::mojom::NativeDialogHost>
++                receiver);
++
++  // slayzone::dialog::mojom::NativeDialogHost:
++  void ShowOpenDialog(slayzone::dialog::mojom::ShowOpenDialogOptionsPtr options,
++                      ShowOpenDialogCallback callback) override;
++
++  // ui::SelectFileDialog::Listener:
++  void FileSelected(const ui::SelectedFileInfo& file, int index) override;
++  void MultiFilesSelected(
++      const std::vector<ui::SelectedFileInfo>& files) override;
++  void FileSelectionCanceled() override;
++
++ private:
++  // The WebContents is owned by the SlayzoneShellUI controller, which also
++  // owns this host. The controller tears us down before the WebContents
++  // goes away, so a raw pointer is safe.
++  const raw_ptr<content::WebContents> web_contents_;
++
++  mojo::ReceiverSet<slayzone::dialog::mojom::NativeDialogHost> receivers_;
++
++  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
++  ShowOpenDialogCallback pending_callback_;
++
++  base::WeakPtrFactory<SlayzoneNativeDialogHost> weak_factory_{this};
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_NATIVE_DIALOG_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_tags_host.cc b/chrome/browser/slayzone/slayzone_tags_host.cc
+new file mode 100644
+index 0000000000000..53775ee3a4a67
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_tags_host.cc
+@@ -0,0 +1,223 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_tags_host.h"
++
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++// Pull a `Tag` out of a JSON dict row (`{ id, name, color }`). Missing fields
++// fall back to empty strings — the renderer tolerates empty label/color.
++tags::mojom::TagPtr TagFromDict(const base::DictValue& row) {
++  auto t = tags::mojom::Tag::New();
++  if (const std::string* id = row.FindString("id")) {
++    t->id = *id;
++  }
++  if (const std::string* name = row.FindString("name")) {
++    t->name = *name;
++  }
++  if (const std::string* color = row.FindString("color")) {
++    t->color = *color;
++  }
++  return t;
++}
++
++// Sidecar `tags:list` and `tags:for-task` return a bare array under
++// `result`. Convert to array<Tag>.
++std::vector<tags::mojom::TagPtr> TagsFromListResponse(
++    const base::DictValue& response) {
++  std::vector<tags::mojom::TagPtr> out;
++  const base::Value* result = response.Find("result");
++  if (!result || !result->is_list()) {
++    return out;
++  }
++  for (const base::Value& entry : result->GetList()) {
++    if (!entry.is_dict()) {
++      continue;
++    }
++    out.push_back(TagFromDict(entry.GetDict()));
++  }
++  return out;
++}
++
++// Sidecar write-shape handlers return `{ ok, error, tag }`.
++tags::mojom::TagWriteResultPtr WriteResultFromResponse(
++    const base::DictValue& response) {
++  auto out = tags::mojom::TagWriteResult::New();
++  out->tag = tags::mojom::Tag::New();
++
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    if (const base::Value* err = response.Find("error");
++        err && err->is_dict()) {
++      if (const std::string* msg = err->GetDict().FindString("message")) {
++        out->error = *msg;
++      } else {
++        out->error = "sidecar error";
++      }
++    } else {
++      out->error = "no response";
++    }
++    return out;
++  }
++
++  out->ok = dict->FindBool("ok").value_or(false);
++  if (const std::string* err = dict->FindString("error")) {
++    out->error = *err;
++  }
++  if (const base::Value* tag = dict->Find("tag"); tag && tag->is_dict()) {
++    out->tag = TagFromDict(tag->GetDict());
++  }
++  return out;
++}
++
++// `tags:attach` / `tags:detach` return `{ ok, error }`.
++tags::mojom::TagAttachResultPtr AttachResultFromResponse(
++    const base::DictValue& response) {
++  auto out = tags::mojom::TagAttachResult::New();
++
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    if (const base::Value* err = response.Find("error");
++        err && err->is_dict()) {
++      if (const std::string* msg = err->GetDict().FindString("message")) {
++        out->error = *msg;
++      } else {
++        out->error = "sidecar error";
++      }
++    } else {
++      out->error = "no response";
++    }
++    return out;
++  }
++
++  out->ok = dict->FindBool("ok").value_or(false);
++  if (const std::string* err = dict->FindString("error")) {
++    out->error = *err;
++  }
++  return out;
++}
++
++}  // namespace
++
++SlayzoneTagsHost::SlayzoneTagsHost() = default;
++SlayzoneTagsHost::~SlayzoneTagsHost() = default;
++
++void SlayzoneTagsHost::Bind(
++    mojo::PendingReceiver<tags::mojom::TagsHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneTagsHost::GetTags(GetTagsCallback callback) {
++  SidecarClient::GetInstance()->Call(
++      "tags:list", base::DictValue(),
++      base::BindOnce(
++          [](GetTagsCallback cb, base::DictValue response) {
++            std::move(cb).Run(TagsFromListResponse(response));
++          },
++          std::move(callback)));
++}
++
++void SlayzoneTagsHost::GetTagsForTask(const std::string& task_id,
++                                      GetTagsForTaskCallback callback) {
++  base::DictValue params;
++  params.Set("taskId", task_id);
++  SidecarClient::GetInstance()->Call(
++      "tags:for-task", std::move(params),
++      base::BindOnce(
++          [](GetTagsForTaskCallback cb, base::DictValue response) {
++            std::move(cb).Run(TagsFromListResponse(response));
++          },
++          std::move(callback)));
++}
++
++void SlayzoneTagsHost::CreateTag(const std::string& name,
++                                  const std::string& color,
++                                  CreateTagCallback callback) {
++  base::DictValue params;
++  params.Set("name", name);
++  params.Set("color", color);
++  SidecarClient::GetInstance()->Call(
++      "tags:create", std::move(params),
++      base::BindOnce(
++          [](CreateTagCallback cb, base::DictValue response) {
++            std::move(cb).Run(WriteResultFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++void SlayzoneTagsHost::UpdateTag(const std::string& id,
++                                  const std::string& name,
++                                  const std::string& color,
++                                  UpdateTagCallback callback) {
++  base::DictValue params;
++  params.Set("id", id);
++  params.Set("name", name);
++  params.Set("color", color);
++  SidecarClient::GetInstance()->Call(
++      "tags:update", std::move(params),
++      base::BindOnce(
++          [](UpdateTagCallback cb, base::DictValue response) {
++            std::move(cb).Run(WriteResultFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++void SlayzoneTagsHost::DeleteTag(const std::string& id,
++                                  DeleteTagCallback callback) {
++  base::DictValue params;
++  params.Set("id", id);
++  SidecarClient::GetInstance()->Call(
++      "tags:delete", std::move(params),
++      base::BindOnce(
++          [](DeleteTagCallback cb, base::DictValue response) {
++            std::move(cb).Run(WriteResultFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++void SlayzoneTagsHost::AttachTag(const std::string& task_id,
++                                  const std::string& tag_id,
++                                  AttachTagCallback callback) {
++  base::DictValue params;
++  params.Set("taskId", task_id);
++  params.Set("tagId", tag_id);
++  SidecarClient::GetInstance()->Call(
++      "tags:attach", std::move(params),
++      base::BindOnce(
++          [](AttachTagCallback cb, base::DictValue response) {
++            std::move(cb).Run(AttachResultFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++void SlayzoneTagsHost::DetachTag(const std::string& task_id,
++                                  const std::string& tag_id,
++                                  DetachTagCallback callback) {
++  base::DictValue params;
++  params.Set("taskId", task_id);
++  params.Set("tagId", tag_id);
++  SidecarClient::GetInstance()->Call(
++      "tags:detach", std::move(params),
++      base::BindOnce(
++          [](DetachTagCallback cb, base::DictValue response) {
++            std::move(cb).Run(AttachResultFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_tags_host.h b/chrome/browser/slayzone/slayzone_tags_host.h
+new file mode 100644
+index 0000000000000..61b8dd465a240
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_tags_host.h
+@@ -0,0 +1,53 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_TAGS_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_TAGS_HOST_H_
++
++#include <string>
++
++#include "chrome/browser/slayzone/mojom/tags.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// cap-06 — browser-side TagsHost. Bound on SlayzoneSidebarUI and
++// SlayzoneTasklistUI per the cap-02 tags deferral plan (no new chrome://
++// host). All methods forward to the sidecar `tags:*` JSON-RPC handlers.
++class SlayzoneTagsHost : public slayzone::tags::mojom::TagsHost {
++ public:
++  SlayzoneTagsHost();
++  SlayzoneTagsHost(const SlayzoneTagsHost&) = delete;
++  SlayzoneTagsHost& operator=(const SlayzoneTagsHost&) = delete;
++  ~SlayzoneTagsHost() override;
++
++  void Bind(mojo::PendingReceiver<slayzone::tags::mojom::TagsHost> receiver);
++
++  // slayzone::tags::mojom::TagsHost:
++  void GetTags(GetTagsCallback callback) override;
++  void GetTagsForTask(const std::string& task_id,
++                      GetTagsForTaskCallback callback) override;
++  void CreateTag(const std::string& name,
++                 const std::string& color,
++                 CreateTagCallback callback) override;
++  void UpdateTag(const std::string& id,
++                 const std::string& name,
++                 const std::string& color,
++                 UpdateTagCallback callback) override;
++  void DeleteTag(const std::string& id, DeleteTagCallback callback) override;
++  void AttachTag(const std::string& task_id,
++                 const std::string& tag_id,
++                 AttachTagCallback callback) override;
++  void DetachTag(const std::string& task_id,
++                 const std::string& tag_id,
++                 DetachTagCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::tags::mojom::TagsHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_TAGS_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_windows_host.cc b/chrome/browser/slayzone/slayzone_windows_host.cc
+new file mode 100644
+index 0000000000000..37340c4849e4e
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_windows_host.cc
+@@ -0,0 +1,431 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_windows_host.h"
++
++#include <memory>
++#include <string>
++#include <utility>
++
++#include "base/logging.h"
++#include "base/memory/ptr_util.h"
++#include "base/no_destructor.h"
++#include "base/strings/strcat.h"
++#include "base/task/sequenced_task_runner.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/mojom/ui_base_types.mojom-shared.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/views/controls/webview/webview.h"
++#include "ui/views/widget/widget.h"
++#include "ui/views/widget/widget_delegate.h"
++#include "ui/views/widget/widget_observer.h"
++#include "url/gurl.h"
++
++namespace slayzone {
++
++namespace {
++
++// Defaults picked to mirror the Electron build. Widths in DIP.
++constexpr int kDefaultSplashWidth = 800;
++constexpr int kDefaultSplashHeight = 600;
++constexpr int kDefaultFloatingAgentWidth = 360;
++constexpr int kDefaultFloatingAgentHeight = 480;
++constexpr int kDefaultLeaderboardWidth = 900;
++constexpr int kDefaultLeaderboardHeight = 700;
++constexpr int kDefaultGenericWidth = 600;
++constexpr int kDefaultGenericHeight = 400;
++
++gfx::Rect ResolveInitialBounds(
++    slayzone::windows::mojom::AuxWindowType type,
++    const slayzone::windows::mojom::WindowBounds& bounds) {
++  int w = bounds.width;
++  int h = bounds.height;
++  if (w <= 0 || h <= 0) {
++    switch (type) {
++      case slayzone::windows::mojom::AuxWindowType::kSplash:
++        w = kDefaultSplashWidth;
++        h = kDefaultSplashHeight;
++        break;
++      case slayzone::windows::mojom::AuxWindowType::kFloatingAgent:
++        w = kDefaultFloatingAgentWidth;
++        h = kDefaultFloatingAgentHeight;
++        break;
++      case slayzone::windows::mojom::AuxWindowType::kLeaderboard:
++        w = kDefaultLeaderboardWidth;
++        h = kDefaultLeaderboardHeight;
++        break;
++      case slayzone::windows::mojom::AuxWindowType::kGeneric:
++      default:
++        w = kDefaultGenericWidth;
++        h = kDefaultGenericHeight;
++        break;
++    }
++  }
++  return gfx::Rect(bounds.x, bounds.y, w, h);
++}
++
++GURL BuildAuxUrl(const std::string& url_fragment) {
++  std::string base = chrome::kChromeUISlayzoneShellURL;
++  if (url_fragment.empty()) {
++    return GURL(base);
++  }
++  if (url_fragment.front() == '#' || url_fragment.front() == '/' ||
++      url_fragment.front() == '?') {
++    return GURL(base::StrCat({base, url_fragment}));
++  }
++  return GURL(base::StrCat({base, "#", url_fragment}));
++}
++
++}  // namespace
++
++// AuxWindow: one per open aux window. Lifetime matches the views::Widget —
++// when the OS closes the window (user X button, app teardown) the Widget
++// fires OnWidgetDestroying on us; we notify the host which erases our entry,
++// destroying this object as the map entry unwinds.
++class SlayzoneWindowsHost::AuxWindow : public views::WidgetObserver {
++ public:
++  AuxWindow(SlayzoneWindowsHost* host,
++            Profile* profile,
++            std::string window_id,
++            slayzone::windows::mojom::AuxWindowType type,
++            const GURL& url,
++            const gfx::Rect& initial_bounds,
++            bool frameless,
++            bool skip_taskbar,
++            bool activate_on_show)
++      : host_(host), window_id_(std::move(window_id)) {
++    LOG(INFO) << "[AuxWindow] ctor id=" << window_id_
++              << " type=" << static_cast<int>(type)
++              << " bounds=" << initial_bounds.ToString()
++              << " frameless=" << frameless
++              << " activate=" << activate_on_show;
++    // Built-in default WidgetDelegate is used — we skip a custom one to
++    // avoid WidgetDelegate::OwnedByWidgetPassKey's locked-down friend list.
++    // Frame removal + resizability come through InitParams directly.
++    views::Widget::InitParams params(
++        views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET,
++        views::Widget::InitParams::TYPE_WINDOW);
++    params.bounds = initial_bounds;
++    params.remove_standard_frame = frameless;
++    params.name = "SlayzoneAuxWindow-" + window_id_;
++    if (type == slayzone::windows::mojom::AuxWindowType::kFloatingAgent) {
++      params.z_order = ui::ZOrderLevel::kFloatingWindow;
++    }
++    // skip_taskbar is platform-specific; views::Widget::InitParams doesn't
++    // expose a cross-platform skip-taskbar knob — defer to a native-widget
++    // platform-specific follow-up if a real use case lands.
++    (void)skip_taskbar;
++
++    widget_ = new views::Widget();
++    widget_->Init(std::move(params));
++    LOG(INFO) << "[AuxWindow] Widget::Init done id=" << window_id_
++              << " widget=" << widget_.get();
++    widget_obs_.Observe(widget_.get());
++
++    auto webview_owned = std::make_unique<views::WebView>(profile);
++    web_view_ = widget_->SetContentsView(std::move(webview_owned));
++    web_view_->LoadInitialURL(url);
++    LOG(INFO) << "[AuxWindow] WebView attached id=" << window_id_
++              << " url=" << url.spec();
++
++    if (activate_on_show) {
++      widget_->Show();
++    } else {
++      widget_->ShowInactive();
++    }
++    LOG(INFO) << "[AuxWindow] Shown id=" << window_id_
++              << " visible=" << widget_->IsVisible()
++              << " active=" << widget_->IsActive();
++  }
++
++  AuxWindow(const AuxWindow&) = delete;
++  AuxWindow& operator=(const AuxWindow&) = delete;
++
++  ~AuxWindow() override {
++    widget_obs_.Reset();
++    if (widget_ && !widget_closing_) {
++      // Host-initiated teardown (Close() / erase). NATIVE_WIDGET_OWNS_WIDGET
++      // means widget_->Close() posts a task that destroys the Widget.
++      widget_->Close();
++      widget_ = nullptr;
++    }
++  }
++
++  void Close() {
++    if (widget_ && !widget_closing_) {
++      widget_closing_ = true;
++      widget_->Close();
++    }
++  }
++
++  void Focus() {
++    if (widget_) {
++      widget_->Activate();
++    }
++  }
++
++  void SetBounds(const gfx::Rect& bounds) {
++    if (widget_) {
++      widget_->SetBounds(bounds);
++    }
++  }
++
++  void SetVisible(bool visible) {
++    if (!widget_) {
++      return;
++    }
++    if (visible) {
++      widget_->Show();
++    } else {
++      widget_->Hide();
++    }
++  }
++
++  views::Widget* widget() { return widget_; }
++  const std::string& window_id() const { return window_id_; }
++
++  // views::WidgetObserver:
++  void OnWidgetDestroying(views::Widget* widget) override {
++    widget_obs_.Reset();
++    widget_ = nullptr;
++    // Tell the host; host erases us from the map which destroys `this`.
++    // Stack-safe because OnAuxWindowClosed copies the id out before erase.
++    const std::string id_copy = window_id_;
++    SlayzoneWindowsHost* host_copy = host_;
++    host_copy->OnAuxWindowClosed(id_copy);
++  }
++
++  void OnWidgetActivationChanged(views::Widget* widget, bool active) override {
++    host_->OnAuxWindowFocused(window_id_, active);
++  }
++
++  void OnWidgetBoundsChanged(views::Widget* widget,
++                              const gfx::Rect& new_bounds) override {
++    host_->OnAuxWindowBoundsChanged(window_id_, new_bounds);
++  }
++
++ private:
++  raw_ptr<SlayzoneWindowsHost> host_;
++  const std::string window_id_;
++  raw_ptr<views::Widget> widget_ = nullptr;
++  raw_ptr<views::WebView> web_view_ = nullptr;
++  bool widget_closing_ = false;
++  base::ScopedObservation<views::Widget, views::WidgetObserver> widget_obs_{
++      this};
++};
++
++// static
++SlayzoneWindowsHost* SlayzoneWindowsHost::GetInstance() {
++  static base::NoDestructor<SlayzoneWindowsHost> instance;
++  return instance.get();
++}
++
++SlayzoneWindowsHost::SlayzoneWindowsHost() = default;
++SlayzoneWindowsHost::~SlayzoneWindowsHost() = default;
++
++void SlayzoneWindowsHost::Bind(
++    mojo::PendingReceiver<slayzone::windows::mojom::WindowsHost> receiver,
++    content::WebContents* caller_wc) {
++  LOG(INFO) << "[WindowsHost] Bind — caller_wc=" << caller_wc
++            << " windows_size=" << windows_.size()
++            << " observers=" << observers_.size();
++  base::WeakPtr<content::WebContents> ctx;
++  if (caller_wc) {
++    ctx = caller_wc->GetWeakPtr();
++  }
++  receivers_.Add(this, std::move(receiver), std::move(ctx));
++}
++
++void SlayzoneWindowsHost::Open(
++    slayzone::windows::mojom::OpenParamsPtr params,
++    OpenCallback callback) {
++  LOG(INFO) << "[WindowsHost] Open enter "
++            << (params ? params->window_id : "<null-params>")
++            << " type=" << (params ? static_cast<int>(params->type) : -1)
++            << " url_fragment="
++            << (params ? params->url_fragment : "<null>");
++  if (!params) {
++    LOG(WARNING) << "[WindowsHost] Open — null params";
++    std::move(callback).Run(false, "null params");
++    return;
++  }
++  if (params->window_id.empty()) {
++    LOG(WARNING) << "[WindowsHost] Open — empty window_id";
++    std::move(callback).Run(false, "window_id required");
++    return;
++  }
++  if (windows_.find(params->window_id) != windows_.end()) {
++    LOG(WARNING) << "[WindowsHost] Open — window_id already open: "
++                 << params->window_id;
++    std::move(callback).Run(false, "window_id already open");
++    return;
++  }
++
++  // Capture profile from the caller's WebContents on first Open.
++  if (!profile_) {
++    if (content::WebContents* wc = CurrentContextWebContents()) {
++      profile_ = Profile::FromBrowserContext(wc->GetBrowserContext());
++    }
++  }
++  if (!profile_) {
++    LOG(WARNING) << "[WindowsHost] Open — no profile available; caller_wc null";
++    std::move(callback).Run(false, "no profile available");
++    return;
++  }
++
++  const GURL url = BuildAuxUrl(params->url_fragment);
++  if (!url.is_valid()) {
++    LOG(WARNING) << "[WindowsHost] Open — invalid url: " << url.spec();
++    std::move(callback).Run(false, "invalid url_fragment");
++    return;
++  }
++
++  const gfx::Rect bounds = ResolveInitialBounds(params->type, *params->bounds);
++  LOG(INFO) << "[WindowsHost] Open spawning Widget id=" << params->window_id
++            << " url=" << url.spec() << " bounds=" << bounds.ToString();
++
++  auto aux = std::make_unique<AuxWindow>(
++      this, profile_.get(), params->window_id, params->type, url, bounds,
++      params->frameless, params->skip_taskbar, params->activate_on_show);
++
++  const std::string id = params->window_id;
++  windows_[id] = std::move(aux);
++
++  // Fan OnOpened to every subscribed observer.
++  for (auto& obs : observers_) {
++    obs->OnOpened(id);
++  }
++
++  LOG(INFO) << "[WindowsHost] Open ok id=" << id
++            << " observers=" << observers_.size();
++  std::move(callback).Run(true, std::string());
++}
++
++void SlayzoneWindowsHost::Close(const std::string& window_id) {
++  LOG(INFO) << "[WindowsHost] Close id=" << window_id;
++  auto it = windows_.find(window_id);
++  if (it == windows_.end()) {
++    LOG(WARNING) << "[WindowsHost] Close — unknown id: " << window_id;
++    return;
++  }
++  // AuxWindow::Close() → widget->Close() → OnWidgetDestroying →
++  // OnAuxWindowClosed which erases from `windows_`. That erase deletes the
++  // AuxWindow. Posting avoids destroying the receiver from inside its own
++  // call — matches the cap-shell-3 terminal-host disconnect pattern.
++  it->second->Close();
++}
++
++void SlayzoneWindowsHost::Focus(const std::string& window_id) {
++  LOG(INFO) << "[WindowsHost] Focus id=" << window_id;
++  AuxWindow* aux = FindAuxWindow(window_id);
++  if (aux) {
++    aux->Focus();
++  } else {
++    LOG(WARNING) << "[WindowsHost] Focus — unknown id: " << window_id;
++  }
++}
++
++void SlayzoneWindowsHost::SetBounds(
++    const std::string& window_id,
++    slayzone::windows::mojom::WindowBoundsPtr bounds) {
++  if (!bounds) {
++    return;
++  }
++  AuxWindow* aux = FindAuxWindow(window_id);
++  if (aux) {
++    aux->SetBounds(gfx::Rect(bounds->x, bounds->y, bounds->width,
++                              bounds->height));
++  }
++}
++
++void SlayzoneWindowsHost::SetVisible(const std::string& window_id,
++                                      bool visible) {
++  AuxWindow* aux = FindAuxWindow(window_id);
++  if (aux) {
++    aux->SetVisible(visible);
++  }
++}
++
++void SlayzoneWindowsHost::CloseCurrentWindow() {
++  content::WebContents* wc = CurrentContextWebContents();
++  LOG(INFO) << "[WindowsHost] CloseCurrentWindow caller_wc=" << wc;
++  if (!wc) {
++    LOG(WARNING) << "[WindowsHost] CloseCurrentWindow — no caller WebContents";
++    return;
++  }
++  gfx::NativeView native_view = wc->GetNativeView();
++  views::Widget* top_level =
++      views::Widget::GetTopLevelWidgetForNativeView(native_view);
++  if (top_level) {
++    top_level->Close();
++  } else {
++    LOG(WARNING) << "[WindowsHost] CloseCurrentWindow — no top-level Widget";
++  }
++}
++
++void SlayzoneWindowsHost::SendMessage(const std::string& window_id,
++                                      const std::string& json) {
++  for (auto& obs : observers_) {
++    obs->OnMessage(window_id, json);
++  }
++}
++
++void SlayzoneWindowsHost::Subscribe(
++    mojo::PendingRemote<slayzone::windows::mojom::WindowsObserver> observer) {
++  observers_.Add(std::move(observer));
++}
++
++void SlayzoneWindowsHost::OnAuxWindowClosed(const std::string& window_id) {
++  // Fan OnClosed before erasing — observers may want to log the close.
++  for (auto& obs : observers_) {
++    obs->OnClosed(window_id);
++  }
++  // Defer erase to the next task so we don't destroy the AuxWindow from
++  // inside its own WidgetObserver callback.
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE, base::BindOnce(
++                     [](base::WeakPtr<SlayzoneWindowsHost> self,
++                        const std::string& id) {
++                       if (self) {
++                         self->windows_.erase(id);
++                       }
++                     },
++                     weak_factory_.GetWeakPtr(), window_id));
++}
++
++void SlayzoneWindowsHost::OnAuxWindowFocused(const std::string& window_id,
++                                              bool focused) {
++  for (auto& obs : observers_) {
++    obs->OnFocused(window_id, focused);
++  }
++}
++
++void SlayzoneWindowsHost::OnAuxWindowBoundsChanged(
++    const std::string& window_id,
++    const gfx::Rect& bounds) {
++  auto rect = slayzone::windows::mojom::WindowBounds::New();
++  rect->x = bounds.x();
++  rect->y = bounds.y();
++  rect->width = bounds.width();
++  rect->height = bounds.height();
++  for (auto& obs : observers_) {
++    obs->OnBoundsChanged(window_id, rect.Clone());
++  }
++}
++
++content::WebContents* SlayzoneWindowsHost::CurrentContextWebContents() {
++  const base::WeakPtr<content::WebContents>& ctx =
++      receivers_.current_context();
++  return ctx.get();
++}
++
++SlayzoneWindowsHost::AuxWindow* SlayzoneWindowsHost::FindAuxWindow(
++    const std::string& window_id) {
++  auto it = windows_.find(window_id);
++  return it == windows_.end() ? nullptr : it->second.get();
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_windows_host.h b/chrome/browser/slayzone/slayzone_windows_host.h
+new file mode 100644
+index 0000000000000..6f3b24d1b3efc
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_windows_host.h
+@@ -0,0 +1,127 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_WINDOWS_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_WINDOWS_HOST_H_
++
++#include <map>
++#include <memory>
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/no_destructor.h"
++#include "chrome/browser/slayzone/mojom/windows.mojom.h"
++#include "content/public/browser/web_contents.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++#include "mojo/public/cpp/bindings/remote_set.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/views/widget/widget_observer.h"
++
++class Profile;
++
++namespace views {
++class WebView;
++class Widget;
++}  // namespace views
++
++namespace content {
++class WebContents;
++}
++
++namespace slayzone {
++
++// cap-shell-5 — aux-window multiplexer.
++//
++// Process-global singleton; every SlayzoneShellUI's BindInterface routes to
++// the same instance so window_ids are globally unique across the app (a
++// collapsed floating-agent icon spawned from the main shell can later be
++// Close()'d by a sibling shell's renderer using the same id). Matches the
++// Electron model where a single main process owned every BrowserWindow.
++//
++// Each Open() spawns one top-level views::Widget that hosts a views::WebView
++// pointed at chrome://slayzone-shell/<url_fragment>. The shell bundle's
++// main.tsx reads the hash + search params to mount the aux React root
++// (FloatingAgentPanel / Splash / LeaderboardPage). Z-order / frame / taskbar
++// behavior is driven by AuxWindowType + the OpenParams flags.
++//
++// Observer broadcast: one RemoteSet<WindowsObserver> receives every lifecycle
++// + message event. Any renderer that Subscribe()s gets the full stream; the
++// renderer filters by window_id client-side. This lets a detached floating
++// agent and the main shell coordinate via SendMessage without a bespoke pipe
++// per feature.
++class SlayzoneWindowsHost : public slayzone::windows::mojom::WindowsHost {
++ public:
++  // Singleton accessor. The instance is created lazily on first call and
++  // never destroyed (base::NoDestructor). Profile is captured on first
++  // Open() — single-profile assumption, matches the Electron build.
++  static SlayzoneWindowsHost* GetInstance();
++
++  SlayzoneWindowsHost(const SlayzoneWindowsHost&) = delete;
++  SlayzoneWindowsHost& operator=(const SlayzoneWindowsHost&) = delete;
++
++  // Accept a new receiver. `caller_wc` is the WebContents that made the bind
++  // request — used by CloseCurrentWindow() to resolve the caller's top-level
++  // views::Widget. May be null in teardown races; CloseCurrentWindow
++  // becomes a no-op in that case.
++  void Bind(
++      mojo::PendingReceiver<slayzone::windows::mojom::WindowsHost> receiver,
++      content::WebContents* caller_wc);
++
++  // slayzone::windows::mojom::WindowsHost:
++  void Open(slayzone::windows::mojom::OpenParamsPtr params,
++            OpenCallback callback) override;
++  void Close(const std::string& window_id) override;
++  void Focus(const std::string& window_id) override;
++  void SetBounds(const std::string& window_id,
++                 slayzone::windows::mojom::WindowBoundsPtr bounds) override;
++  void SetVisible(const std::string& window_id, bool visible) override;
++  void CloseCurrentWindow() override;
++  void SendMessage(const std::string& window_id,
++                   const std::string& json) override;
++  void Subscribe(mojo::PendingRemote<slayzone::windows::mojom::WindowsObserver>
++                     observer) override;
++
++  // AuxWindow-side callbacks. Public so the AuxWindow inner class in the .cc
++  // can forward widget-observer events without friending.
++  void OnAuxWindowClosed(const std::string& window_id);
++  void OnAuxWindowFocused(const std::string& window_id, bool focused);
++  void OnAuxWindowBoundsChanged(const std::string& window_id,
++                                 const gfx::Rect& bounds);
++
++ private:
++  friend class base::NoDestructor<SlayzoneWindowsHost>;
++  class AuxWindow;
++
++  SlayzoneWindowsHost();
++  ~SlayzoneWindowsHost() override;
++
++  // Context-per-receiver: the caller's WebContents, used only by
++  // CloseCurrentWindow to find the caller's top-level Widget. Stored via
++  // mojo::ReceiverSet context so disconnect automatically clears it.
++  content::WebContents* CurrentContextWebContents();
++
++  AuxWindow* FindAuxWindow(const std::string& window_id);
++
++  // The first Open() captures this; subsequent Opens re-use it. Chromium's
++  // views::WebView(profile) constructor creates its own WebContents in the
++  // given profile's StoragePartition so aux windows share cookies / IndexedDB
++  // with the main shell WebUI.
++  raw_ptr<Profile> profile_ = nullptr;
++
++  std::map<std::string, std::unique_ptr<AuxWindow>> windows_;
++
++  mojo::ReceiverSet<slayzone::windows::mojom::WindowsHost,
++                     base::WeakPtr<content::WebContents>>
++      receivers_;
++  mojo::RemoteSet<slayzone::windows::mojom::WindowsObserver> observers_;
++
++  base::WeakPtrFactory<SlayzoneWindowsHost> weak_factory_{this};
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_WINDOWS_HOST_H_
+-- 
+2.52.0
+

@@ -1,0 +1,92 @@
+From 518fd29fde47378e8375b20bbc64379157bc75e4 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Tue, 21 Apr 2026 00:11:07 +0200
+Subject: [56/66] =?UTF-8?q?slayzone:=20cap-03=20=E2=80=94=20TabsHost=20URL?=
+ =?UTF-8?q?=E2=86=92TabType=20classifier=20in=20BuildSnapshot?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ chrome/browser/slayzone/slayzone_tabs_host.cc | 28 ++++++++++++++++++-
+ chrome/browser/slayzone/slayzone_tabs_host.h  |  6 ++++
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/slayzone/slayzone_tabs_host.cc b/chrome/browser/slayzone/slayzone_tabs_host.cc
+index 3d84507c8bb94..5a01323dbeef7 100644
+--- a/chrome/browser/slayzone/slayzone_tabs_host.cc
++++ b/chrome/browser/slayzone/slayzone_tabs_host.cc
+@@ -39,19 +39,45 @@ slayzone::tabs::mojom::TabSnapshotPtr BuildSnapshot(
+     snapshot->is_loading = false;
+     snapshot->can_go_back = false;
+     snapshot->can_go_forward = false;
++    snapshot->tab_type = slayzone::tabs::mojom::TabType::kTaskDetail;
+     return snapshot;
+   }
+   snapshot->title = base::UTF16ToUTF8(contents->GetTitle());
+-  snapshot->url = contents->GetVisibleURL().spec();
++  const GURL visible = contents->GetVisibleURL();
++  snapshot->url = visible.spec();
+   snapshot->is_loading = contents->IsLoading();
+   content::NavigationController& controller = contents->GetController();
+   snapshot->can_go_back = controller.CanGoBack();
+   snapshot->can_go_forward = controller.CanGoForward();
++  snapshot->tab_type = SlayzoneTabsHost::ClassifyUrl(visible);
+   return snapshot;
+ }
+ 
+ }  // namespace
+ 
++// cap-03 — static URL → TabType classifier, shared with
++// SlayzoneBrowserView so its TabStripModel observer can derive the same
++// mapping without a Mojo round-trip.
++slayzone::tabs::mojom::TabType SlayzoneTabsHost::ClassifyUrl(const GURL& url) {
++  if (url.is_empty() || url.spec() == "about:blank") {
++    return slayzone::tabs::mojom::TabType::kHome;
++  }
++  if (url.SchemeIs("chrome")) {
++    const std::string host = url.host();
++    if (host == "newtab") {
++      return slayzone::tabs::mojom::TabType::kHome;
++    }
++    if (host == "slayzone-leaderboard" || host == "slayzone-usage" ||
++        host == "slayzone-context" || host == "slayzone-dialogs") {
++      return slayzone::tabs::mojom::TabType::kOverlay;
++    }
++    if (host.rfind("slayzone-", 0) == 0) {
++      return slayzone::tabs::mojom::TabType::kAux;
++    }
++  }
++  return slayzone::tabs::mojom::TabType::kTaskDetail;
++}
++
+ SlayzoneTabsHost::SlayzoneTabsHost(Browser* browser) : browser_(browser) {
+   CHECK(browser_);
+   // `base::ScopedObservation<TabStripModel, TabStripModelObserver>` is
+diff --git a/chrome/browser/slayzone/slayzone_tabs_host.h b/chrome/browser/slayzone/slayzone_tabs_host.h
+index 313a3c7db4693..aa396682a2201 100644
+--- a/chrome/browser/slayzone/slayzone_tabs_host.h
++++ b/chrome/browser/slayzone/slayzone_tabs_host.h
+@@ -17,6 +17,7 @@
+ #include "mojo/public/cpp/bindings/pending_remote.h"
+ #include "mojo/public/cpp/bindings/receiver_set.h"
+ #include "mojo/public/cpp/bindings/remote_set.h"
++#include "url/gurl.h"
+ 
+ class Browser;
+ 
+@@ -45,6 +46,11 @@ class SlayzoneTabsHost : public slayzone::tabs::mojom::TabsHost,
+   SlayzoneTabsHost& operator=(const SlayzoneTabsHost&) = delete;
+   ~SlayzoneTabsHost() override;
+ 
++  // cap-03 — classify a tab URL into a TabType. Exposed so
++  // SlayzoneBrowserView can route its own TabStripModel observer through the
++  // same mapping without serializing through Mojo.
++  static slayzone::tabs::mojom::TabType ClassifyUrl(const GURL& url);
++
+   void Bind(
+       mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver);
+ 
+-- 
+2.52.0
+

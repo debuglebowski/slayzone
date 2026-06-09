@@ -1,0 +1,199 @@
+From 9e199e0bb2795fcbc16ff3b57d701b035c34de6a Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Tue, 21 Apr 2026 00:11:31 +0200
+Subject: [59/66] =?UTF-8?q?slayzone:=20cap-03=20=E2=80=94=20BrowserView=20?=
+ =?UTF-8?q?prior=5Fmode=5F=20+=20OnTabStripModelChanged=20auto-switch=20+?=
+ =?UTF-8?q?=20Cmd+K/ESC=20accelerators?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../ui/views/frame/slayzone_browser_view.cc   | 72 ++++++++++++++++++-
+ .../ui/views/frame/slayzone_browser_view.h    | 20 ++++++
+ 2 files changed, 91 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index cb1bdba3f85f2..51457915ff937 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -10,11 +10,13 @@
+ #include <string_view>
+ 
+ #include "base/command_line.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/strings/strcat.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_automations_host.h"
+ #include "chrome/browser/slayzone/slayzone_git_host.h"
+ #include "chrome/browser/slayzone/slayzone_layout_host.h"
++#include "chrome/browser/slayzone/slayzone_overlay_manager.h"
+ #include "chrome/browser/slayzone/slayzone_processes_host.h"
+ #include "chrome/browser/slayzone/slayzone_projects_host.h"
+ #include "chrome/browser/slayzone/slayzone_sidebar_host.h"
+@@ -107,6 +109,7 @@ void SlayzoneBrowserView::AddedToWidget() {
+   region_container_->SetBoundsRect(GetLocalBounds());
+ 
+   RegisterRegionFocusAccelerators();
++  RegisterOverlayAccelerators();
+ 
+   // Phase 6.3 — install a back-pointer on every region WebView's WebContents
+   // so `SlayzoneBrowserView::FromRegionWebContents` can route Mojo binder
+@@ -140,7 +143,9 @@ void SlayzoneBrowserView::AddedToWidget() {
+   }
+   // Iteration-2 — honor `--slayzone-layout-mode=home|task-detail|overlay`
+   // for the layout-fidelity validation harness. Falls through silently on
+-  // unknown values so a typo doesn't brick the region grid.
++  // unknown values so a typo doesn't brick the region grid. cap-03: CLI
++  // switch takes precedence over URL-derived sync; when absent, the active
++  // tab's URL drives the initial layout mode via SyncLayoutModeToActiveTab.
+   if (cli->HasSwitch(kSlayzoneLayoutModeSwitch)) {
+     const std::string value = cli->GetSwitchValueASCII(kSlayzoneLayoutModeSwitch);
+     if (value == "home") {
+@@ -150,6 +155,8 @@ void SlayzoneBrowserView::AddedToWidget() {
+     } else if (value == "task-detail" || value.empty()) {
+       SetLayoutMode(LayoutMode::kTaskDetail);
+     }
++  } else if (!cli->HasSwitch(kSlayzoneHomePanelSwitch)) {
++    SyncLayoutModeToActiveTab();
+   }
+ }
+ 
+@@ -205,6 +212,16 @@ void SlayzoneBrowserView::RegisterRegionFocusAccelerators() {
+   }
+ }
+ 
++void SlayzoneBrowserView::RegisterOverlayAccelerators() {
++  // cap-03 — Cmd+K opens the search overlay; ESC closes the active overlay
++  // (and restores prior mode via SlayzoneLayoutHost::ShowOverlay("")). ESC
++  // is left registered even when no overlay is active — `AcceleratorPressed`
++  // falls through to the base handler in that case so upstream shortcut
++  // behavior (e.g. clear find bar) still works.
++  AddAccelerator(ui::Accelerator(ui::VKEY_K, ui::EF_COMMAND_DOWN));
++  AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
++}
++
+ bool SlayzoneBrowserView::AcceleratorPressed(
+     const ui::Accelerator& accelerator) {
+   if (accelerator.modifiers() == ui::EF_COMMAND_DOWN &&
+@@ -220,6 +237,21 @@ bool SlayzoneBrowserView::AcceleratorPressed(
+       }
+     }
+   }
++  // cap-03 — Cmd+K opens the search overlay regardless of prior state.
++  if (layout_host_ && accelerator.modifiers() == ui::EF_COMMAND_DOWN &&
++      accelerator.key_code() == ui::VKEY_K) {
++    layout_host_->ShowOverlay("search", base::DoNothing());
++    return true;
++  }
++  // cap-03 — ESC closes the active overlay and restores prior mode. Fall
++  // through to the base handler when no overlay is active so upstream
++  // handlers (find bar, full screen, etc.) still see the key.
++  if (accelerator.key_code() == ui::VKEY_ESCAPE &&
++      accelerator.modifiers() == ui::EF_NONE && layout_host_ &&
++      layout_mode_ == LayoutMode::kOverlay) {
++    layout_host_->ShowOverlay(std::string(), base::DoNothing());
++    return true;
++  }
+   return BrowserView::AcceleratorPressed(accelerator);
+ }
+ 
+@@ -238,7 +270,45 @@ void SlayzoneBrowserView::OnTabStripModelChanged(
+   if (selection.active_tab_changed() ||
+       change.type() != TabStripModelChange::kSelectionOnly) {
+     SyncInlineTabWebView();
++    // cap-03 — the active tab's URL drives LayoutMode. When an overlay is
++    // up we don't evict it on a tab switch; instead we update `prior_mode_`
++    // so ESC restores to the newly-selected tab's mode. The CLI flag path
++    // still applies at AddedToWidget and wins over the initial tab (orders
++    // the harness's explicit choice above the URL-derived fallback).
++    SyncLayoutModeToActiveTab();
++  }
++}
++
++void SlayzoneBrowserView::SyncLayoutModeToActiveTab() {
++  content::WebContents* active =
++      browser()->tab_strip_model()->GetActiveWebContents();
++  if (!active) {
++    return;
++  }
++  const slayzone::tabs::mojom::TabType tab_type =
++      SlayzoneTabsHost::ClassifyUrl(active->GetVisibleURL());
++  LayoutMode target = LayoutMode::kTaskDetail;
++  switch (tab_type) {
++    case slayzone::tabs::mojom::TabType::kHome:
++      target = LayoutMode::kHome;
++      break;
++    case slayzone::tabs::mojom::TabType::kOverlay:
++      target = LayoutMode::kOverlay;
++      break;
++    case slayzone::tabs::mojom::TabType::kTaskDetail:
++    case slayzone::tabs::mojom::TabType::kAux:
++      target = LayoutMode::kTaskDetail;
++      break;
++  }
++  if (layout_mode_ == LayoutMode::kOverlay &&
++      target != LayoutMode::kOverlay) {
++    // Overlay is on top — keep it, but update prior_mode_ so the ESC/close
++    // path lands on the newly-selected tab's mode rather than the tab that
++    // was active when the overlay opened.
++    prior_mode_ = target;
++    return;
+   }
++  SetLayoutMode(target);
+ }
+ 
+ void SlayzoneBrowserView::SyncInlineTabWebView() {
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 57d4cd664ecde..aca2816c4488c 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -122,6 +122,15 @@ class SlayzoneBrowserView : public BrowserView {
+ 
+   LayoutMode layout_mode() const { return layout_mode_; }
+ 
++  // cap-03 — the mode that should be restored when the active overlay
++  // closes (ESC or X button). Updated by SlayzoneLayoutHost before it
++  // flips `layout_mode_` to kOverlay, and by the TabStripModel observer
++  // when the user switches tabs while an overlay is up (so ESC lands on
++  // the newly-selected tab's mode rather than the one visible when the
++  // overlay opened).
++  LayoutMode prior_mode() const { return prior_mode_; }
++  void set_prior_mode(LayoutMode mode) { prior_mode_ = mode; }
++
+   // Iteration-2 — authoritatively switch layout mode. Rebuilds region
+   // visibility via SlayzoneRegionContainer::SetLayoutMode and rebinds any
+   // mode-sensitive chrome (overlay manager, inline tab webview). Idempotent;
+@@ -159,11 +168,19 @@ class SlayzoneBrowserView : public BrowserView {
+  private:
+   // Phase 5.5 — register Cmd+1 … Cmd+9 to focus region slots by index.
+   void RegisterRegionFocusAccelerators();
++  // cap-03 — register Cmd+K (search overlay) + ESC (close overlay).
++  void RegisterOverlayAccelerators();
+ 
+   // Point `inline_tab_webview_` at the Browser's currently-active
+   // WebContents (or null if the strip is empty). Idempotent.
+   void SyncInlineTabWebView();
+ 
++  // cap-03 — derive LayoutMode from the active tab's URL (via
++  // SlayzoneTabsHost::ClassifyUrl) and call `SetLayoutMode`. When an
++  // overlay is already up, only `prior_mode_` is updated so ESC lands
++  // on the newly-selected tab's mode.
++  void SyncLayoutModeToActiveTab();
++
+   raw_ptr<SlayzoneRegionContainer> region_container_ = nullptr;
+   std::unique_ptr<SlayzoneLayoutHost> layout_host_;
+   std::unique_ptr<SlayzoneTabsHost> tabs_host_;
+@@ -183,6 +200,9 @@ class SlayzoneBrowserView : public BrowserView {
+   // `active_home_panel_` is retained for Phase 8.5 back-compat telemetry
+   // (ShowHomePanel's panel id); it no longer swaps a dedicated WebView.
+   LayoutMode layout_mode_ = LayoutMode::kTaskDetail;
++  // cap-03 — remembers the mode to restore when the active overlay
++  // closes. Stays at kTaskDetail until first overlay-open flip.
++  LayoutMode prior_mode_ = LayoutMode::kTaskDetail;
+   std::string active_home_panel_;
+ };
+ 
+-- 
+2.52.0
+

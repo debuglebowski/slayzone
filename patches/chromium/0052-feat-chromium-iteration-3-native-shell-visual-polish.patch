@@ -1,0 +1,76 @@
+From 188401df32340d5ecafe40af7eb564f2ce458265 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 15:39:06 +0200
+Subject: [52/66] =?UTF-8?q?feat(chromium):=20iteration-3=20=E2=80=94=20nat?=
+ =?UTF-8?q?ive=20shell=20visual=20polish?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SlayzoneRegionContainer gains surface-0 backdrop, between-child spacing
+(4 dip), inside-border insets (12 dip horizontal) on the body container.
+Matches Electron's bg-surface-0 + p-4 + gap-1 idiom at the native layout
+level — per-region rounded corners still live in WebUI CSS.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ .../views/frame/slayzone_region_container.cc  | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+index b4ed2701c7793..2a9669b23e321 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.cc
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+@@ -13,6 +13,10 @@
+ #include "base/strings/strcat.h"
+ #include "chrome/browser/ui/views/frame/slayzone_split_view.h"
+ #include "chrome/common/webui_url_constants.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
+ #include "content/public/browser/browser_context.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/gfx/geometry/size.h"
+@@ -91,9 +95,21 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+     return raw;
+   };
+ 
++  // Iteration-3 visual polish. Electron renders each region as a rounded
++  // panel over an `bg-surface-0` backdrop with `p-4` padding + `gap-1`
++  // between panels. We approximate at the native layout level with an
++  // opaque background + between-child spacing + inside-border insets on
++  // the body container. The rounded corners live in per-region WebUI CSS
++  // because BoxLayoutView children can't easily have clip-path rounding.
++  constexpr int kGapDip = 4;
++  constexpr int kPadDip = 12;
++  SetBackground(
++      views::CreateSolidBackground(SkColorSetRGB(0x0a, 0x0a, 0x0b)));
++
+   // Outer: vertical — shell | tabbar | body | statusbar.
+   SetOrientation(views::BoxLayout::Orientation::kVertical);
+   SetCrossAxisAlignment(views::BoxLayout::CrossAxisAlignment::kStretch);
++  SetBetweenChildSpacing(kGapDip);
+ 
+   add_region(this, "shell", /*fixed_axis_px=*/20, /*flex_weight=*/0);
+   add_region(this, "tabbar", /*fixed_axis_px=*/36, /*flex_weight=*/0);
+@@ -103,6 +119,8 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+   body_owned->SetOrientation(views::BoxLayout::Orientation::kHorizontal);
+   body_owned->SetCrossAxisAlignment(
+       views::BoxLayout::CrossAxisAlignment::kStretch);
++  body_owned->SetBetweenChildSpacing(kGapDip);
++  body_owned->SetInsideBorderInsets(gfx::Insets::VH(0, kPadDip));
+   views::BoxLayoutView* body = AddChildView(std::move(body_owned));
+   SetFlexForView(body, 1);
+ 
+@@ -113,6 +131,7 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+   center_owned->SetOrientation(views::BoxLayout::Orientation::kVertical);
+   center_owned->SetCrossAxisAlignment(
+       views::BoxLayout::CrossAxisAlignment::kStretch);
++  center_owned->SetBetweenChildSpacing(kGapDip);
+   views::BoxLayoutView* center = body->AddChildView(std::move(center_owned));
+   body->SetFlexForView(center, 1);
+ 
+-- 
+2.52.0
+

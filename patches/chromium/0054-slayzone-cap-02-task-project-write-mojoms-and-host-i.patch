@@ -1,0 +1,458 @@
+From f89bc2be476216abc6286cff67d89e89a4e4f8b0 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 22:01:22 +0200
+Subject: [54/66] slayzone: cap-02 task + project write mojoms and host impls
+
+Add Create/Update/Delete/UpdateStatus/Move methods to TasklistHost and
+Create/Update/Delete methods to ProjectsHost, all forwarding to the
+sidecar's SQLite-backed handlers. Write methods share a common
+TaskWriteResult / ProjectWriteResult envelope carrying ok + error +
+freshly-written row. MoveTask is wire-shape-only in cap-02 (sidecar
+returns a deferred error until cap-11 adds the ordering column).
+
+Read surface untouched; aggregator snapshots stay as the single source
+consumed by region polling.
+---
+ chrome/browser/slayzone/mojom/projects.mojom  |  27 ++++-
+ chrome/browser/slayzone/mojom/tasklist.mojom  |  40 ++++++-
+ .../slayzone/slayzone_projects_host.cc        |  84 ++++++++++++++
+ .../browser/slayzone/slayzone_projects_host.h |  23 ++--
+ .../slayzone/slayzone_tasklist_host.cc        | 109 ++++++++++++++++++
+ .../browser/slayzone/slayzone_tasklist_host.h |  26 ++++-
+ 6 files changed, 297 insertions(+), 12 deletions(-)
+
+diff --git a/chrome/browser/slayzone/mojom/projects.mojom b/chrome/browser/slayzone/mojom/projects.mojom
+index 807b8adf51bf5..d41e3cbdc6468 100644
+--- a/chrome/browser/slayzone/mojom/projects.mojom
++++ b/chrome/browser/slayzone/mojom/projects.mojom
+@@ -13,6 +13,10 @@
+ // through the sidecar rather than a direct Mojo method so the sidecar stays
+ // the single source of truth across every region that reads active project
+ // id (7.4 tasklist, 7.5 sidebar, 7.6 taskheader).
++//
++// cap-02 adds CreateProject/UpdateProject/DeleteProject write methods. The
++// sidecar's SQLite projects table is the authoritative store; the in-memory
++// snapshot is reshaped from SELECT on every GetSnapshot call.
+ 
+ module slayzone.projects.mojom;
+ 
+@@ -37,9 +41,28 @@ struct ProjectsSnapshot {
+   string active_project_id;
+ };
+ 
++// Result envelope for every write method. `ok`=false with non-empty `error`
++// when the sidecar refuses. On ok, `project` is the freshly-written row; on
++// delete, `project.id` echoes the deleted id, other fields empty.
++struct ProjectWriteResult {
++  bool ok;
++  string error;
++  ProjectEntry project;
++};
++
+ // Browser-side projects data provider. One remote per region WebUI that
+-// mounts. The browser forwards snapshot queries to the sidecar over the
+-// existing Unix-socket JSON-RPC channel (projects:get-snapshot method).
++// mounts. The browser forwards snapshot queries + writes to the sidecar over
++// the existing Unix-socket JSON-RPC channel.
+ interface ProjectsHost {
+   GetSnapshot() => (ProjectsSnapshot snapshot);
++
++  // Create a new project. `color` is a hex string; empty = unset.
++  CreateProject(string name, string color) => (ProjectWriteResult result);
++
++  // Rename / recolor an existing project.
++  UpdateProject(string project_id, string name, string color)
++      => (ProjectWriteResult result);
++
++  // Remove a project. Orphaned tasks cascade-delete (matches Electron shape).
++  DeleteProject(string project_id) => (ProjectWriteResult result);
+ };
+diff --git a/chrome/browser/slayzone/mojom/tasklist.mojom b/chrome/browser/slayzone/mojom/tasklist.mojom
+index 68b30d98b65aa..ebb08f27f3f83 100644
+--- a/chrome/browser/slayzone/mojom/tasklist.mojom
++++ b/chrome/browser/slayzone/mojom/tasklist.mojom
+@@ -12,6 +12,11 @@
+ // the sidecar. Drag-drop + full kanban card contents + filter-bar state come
+ // as follow-up work (tracked separately once the parity harness flags the
+ // gap visually).
++//
++// cap-02 adds the write surface. Create/Update/Delete/UpdateStatus land here
++// alongside GetSnapshot so callers get one host per region; the sidecar owns
++// the SQLite write-through. MoveTask (reorder within column) is declared but
++// intentionally unimplemented in cap-02 — drains in cap-11 polish.
+ 
+ module slayzone.tasklist.mojom;
+ 
+@@ -37,8 +42,41 @@ struct TasklistSnapshot {
+   string filter;
+ };
+ 
++// Result envelope for every write method. `ok` is false when the sidecar
++// refused (missing row, unknown column, empty title, etc.); `error` carries
++// a human-readable reason the renderer can surface in the dialog. On ok,
++// `task` is the freshly-written row; on delete, `task.id` is the deleted id
++// and the other fields are empty.
++struct TaskWriteResult {
++  bool ok;
++  string error;
++  TaskEntry task;
++};
++
+ // Browser-side tasklist data provider. One remote per region WebUI mount.
+-// Forwards snapshot queries to the sidecar (tasklist:get-snapshot).
++// Forwards snapshot queries + writes to the sidecar JSON-RPC channel.
+ interface TasklistHost {
+   GetSnapshot() => (TasklistSnapshot snapshot);
++
++  // Create a new task in `project_id` under column `column_id` with `title`.
++  // Description is created empty; sidebar edit wires up the description set.
++  CreateTask(string project_id, string column_id, string title)
++      => (TaskWriteResult result);
++
++  // Update mutable fields of an existing task. Empty `description` clears it.
++  UpdateTask(string task_id, string title, string description)
++      => (TaskWriteResult result);
++
++  // Remove a task. Persists across relaunch (SQLite row deleted, not hidden).
++  DeleteTask(string task_id) => (TaskWriteResult result);
++
++  // Kanban drag-drop target. Moves the task to `column_id`.
++  UpdateTaskStatus(string task_id, string column_id)
++      => (TaskWriteResult result);
++
++  // Reorder within a column — `index` is the 0-based position. Declared for
++  // wire-shape completeness; the cap-02 sidecar impl returns ok=false with a
++  // "deferred" error until cap-11 polish lands the ordering column.
++  MoveTask(string task_id, string column_id, uint32 index)
++      => (TaskWriteResult result);
+ };
+diff --git a/chrome/browser/slayzone/slayzone_projects_host.cc b/chrome/browser/slayzone/slayzone_projects_host.cc
+index 19b4fdc50890e..0e7a0dd458169 100644
+--- a/chrome/browser/slayzone/slayzone_projects_host.cc
++++ b/chrome/browser/slayzone/slayzone_projects_host.cc
+@@ -55,6 +55,63 @@ projects::mojom::ProjectsSnapshotPtr FromDict(const base::DictValue& response) {
+   return snapshot;
+ }
+ 
++// Translate `{ ok, error, project: { id, name, color } }` into a
++// ProjectWriteResult. On JSON-RPC error envelope, surface the RPC error.
++projects::mojom::ProjectWriteResultPtr WriteResultFromDict(
++    const base::DictValue& response) {
++  auto out = projects::mojom::ProjectWriteResult::New();
++  out->project = projects::mojom::ProjectEntry::New();
++
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    if (const base::Value* err = response.Find("error");
++        err && err->is_dict()) {
++      if (const std::string* msg = err->GetDict().FindString("message")) {
++        out->error = *msg;
++      } else {
++        out->error = "sidecar error";
++      }
++    } else {
++      out->error = "no response";
++    }
++    return out;
++  }
++
++  out->ok = dict->FindBool("ok").value_or(false);
++  if (const std::string* err = dict->FindString("error")) {
++    out->error = *err;
++  }
++  if (const base::Value* project = dict->Find("project");
++      project && project->is_dict()) {
++    const base::DictValue& p = project->GetDict();
++    if (const std::string* id = p.FindString("id")) {
++      out->project->id = *id;
++    }
++    if (const std::string* name = p.FindString("name")) {
++      out->project->name = *name;
++    }
++    if (const std::string* color = p.FindString("color")) {
++      out->project->color = *color;
++    }
++  }
++  return out;
++}
++
++template <typename Callback>
++void CallWrite(std::string_view method,
++               base::DictValue params,
++               Callback callback) {
++  SidecarClient::GetInstance()->Call(
++      method, std::move(params),
++      base::BindOnce(
++          [](Callback cb, base::DictValue response) {
++            std::move(cb).Run(WriteResultFromDict(response));
++          },
++          std::move(callback)));
++}
++
+ }  // namespace
+ 
+ SlayzoneProjectsHost::SlayzoneProjectsHost() = default;
+@@ -75,4 +132,31 @@ void SlayzoneProjectsHost::GetSnapshot(GetSnapshotCallback callback) {
+           std::move(callback)));
+ }
+ 
++void SlayzoneProjectsHost::CreateProject(const std::string& name,
++                                          const std::string& color,
++                                          CreateProjectCallback callback) {
++  base::DictValue params;
++  params.Set("name", name);
++  params.Set("color", color);
++  CallWrite("projects:create", std::move(params), std::move(callback));
++}
++
++void SlayzoneProjectsHost::UpdateProject(const std::string& project_id,
++                                          const std::string& name,
++                                          const std::string& color,
++                                          UpdateProjectCallback callback) {
++  base::DictValue params;
++  params.Set("projectId", project_id);
++  params.Set("name", name);
++  params.Set("color", color);
++  CallWrite("projects:update", std::move(params), std::move(callback));
++}
++
++void SlayzoneProjectsHost::DeleteProject(const std::string& project_id,
++                                          DeleteProjectCallback callback) {
++  base::DictValue params;
++  params.Set("projectId", project_id);
++  CallWrite("projects:delete", std::move(params), std::move(callback));
++}
++
+ }  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_projects_host.h b/chrome/browser/slayzone/slayzone_projects_host.h
+index 0d4220c39c7be..f6758457dd13f 100644
+--- a/chrome/browser/slayzone/slayzone_projects_host.h
++++ b/chrome/browser/slayzone/slayzone_projects_host.h
+@@ -5,6 +5,8 @@
+ #ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_PROJECTS_HOST_H_
+ #define CHROME_BROWSER_SLAYZONE_SLAYZONE_PROJECTS_HOST_H_
+ 
++#include <string>
++
+ #include "chrome/browser/slayzone/mojom/projects.mojom.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ #include "mojo/public/cpp/bindings/receiver_set.h"
+@@ -14,11 +16,10 @@ namespace slayzone {
+ // Phase 7.3 — browser-side implementation of
+ // `slayzone::projects::mojom::ProjectsHost`. One instance per
+ // `SlayzoneBrowserView`. `GetSnapshot` forwards to the process-wide
+-// `SidecarClient` (Phase 2.3) via JSON-RPC method `projects:get-snapshot`;
+-// the sidecar keeps the authoritative state in-process (see
+-// `packages/sidecar/src/handlers/projects.ts`).
+-class SlayzoneProjectsHost
+-    : public slayzone::projects::mojom::ProjectsHost {
++// `SidecarClient` (Phase 2.3) via JSON-RPC method `projects:get-snapshot`.
++// cap-02 adds Create / Update / Delete write methods that forward to the
++// sidecar's SQLite-backed project handlers.
++class SlayzoneProjectsHost : public slayzone::projects::mojom::ProjectsHost {
+  public:
+   SlayzoneProjectsHost();
+   SlayzoneProjectsHost(const SlayzoneProjectsHost&) = delete;
+@@ -26,11 +27,19 @@ class SlayzoneProjectsHost
+   ~SlayzoneProjectsHost() override;
+ 
+   void Bind(
+-      mojo::PendingReceiver<slayzone::projects::mojom::ProjectsHost>
+-          receiver);
++      mojo::PendingReceiver<slayzone::projects::mojom::ProjectsHost> receiver);
+ 
+   // slayzone::projects::mojom::ProjectsHost:
+   void GetSnapshot(GetSnapshotCallback callback) override;
++  void CreateProject(const std::string& name,
++                     const std::string& color,
++                     CreateProjectCallback callback) override;
++  void UpdateProject(const std::string& project_id,
++                     const std::string& name,
++                     const std::string& color,
++                     UpdateProjectCallback callback) override;
++  void DeleteProject(const std::string& project_id,
++                     DeleteProjectCallback callback) override;
+ 
+  private:
+   mojo::ReceiverSet<slayzone::projects::mojom::ProjectsHost> receivers_;
+diff --git a/chrome/browser/slayzone/slayzone_tasklist_host.cc b/chrome/browser/slayzone/slayzone_tasklist_host.cc
+index 234bcb5ae2ecd..afdf5a295f79c 100644
+--- a/chrome/browser/slayzone/slayzone_tasklist_host.cc
++++ b/chrome/browser/slayzone/slayzone_tasklist_host.cc
+@@ -71,6 +71,66 @@ tasklist::mojom::TasklistSnapshotPtr FromDict(const base::DictValue& response) {
+   return snapshot;
+ }
+ 
++// Translate a `{ ok, error, task: { id, title, status } }` sidecar reply into
++// a `TaskWriteResult`. Missing fields fall back to neutral defaults so the
++// renderer gets a well-formed struct even when the sidecar response is
++// truncated; `ok=false` is the fail path.
++tasklist::mojom::TaskWriteResultPtr WriteResultFromDict(
++    const base::DictValue& response) {
++  auto out = tasklist::mojom::TaskWriteResult::New();
++  out->task = tasklist::mojom::TaskEntry::New();
++
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    // JSON-RPC error envelope — surface the RPC error if present.
++    if (const base::Value* err = response.Find("error");
++        err && err->is_dict()) {
++      if (const std::string* msg = err->GetDict().FindString("message")) {
++        out->error = *msg;
++      } else {
++        out->error = "sidecar error";
++      }
++    } else {
++      out->error = "no response";
++    }
++    return out;
++  }
++
++  out->ok = dict->FindBool("ok").value_or(false);
++  if (const std::string* err = dict->FindString("error")) {
++    out->error = *err;
++  }
++  if (const base::Value* task = dict->Find("task"); task && task->is_dict()) {
++    const base::DictValue& t = task->GetDict();
++    if (const std::string* id = t.FindString("id")) {
++      out->task->id = *id;
++    }
++    if (const std::string* title = t.FindString("title")) {
++      out->task->title = *title;
++    }
++    if (const std::string* status = t.FindString("status")) {
++      out->task->status = *status;
++    }
++  }
++  return out;
++}
++
++// Helper to bind a write callback against the common sidecar reply shape.
++template <typename Callback>
++void CallWrite(std::string_view method,
++               base::DictValue params,
++               Callback callback) {
++  SidecarClient::GetInstance()->Call(
++      method, std::move(params),
++      base::BindOnce(
++          [](Callback cb, base::DictValue response) {
++            std::move(cb).Run(WriteResultFromDict(response));
++          },
++          std::move(callback)));
++}
++
+ }  // namespace
+ 
+ SlayzoneTasklistHost::SlayzoneTasklistHost() = default;
+@@ -91,4 +151,53 @@ void SlayzoneTasklistHost::GetSnapshot(GetSnapshotCallback callback) {
+           std::move(callback)));
+ }
+ 
++void SlayzoneTasklistHost::CreateTask(const std::string& project_id,
++                                      const std::string& column_id,
++                                      const std::string& title,
++                                      CreateTaskCallback callback) {
++  base::DictValue params;
++  params.Set("projectId", project_id);
++  params.Set("columnId", column_id);
++  params.Set("title", title);
++  CallWrite("tasks:create", std::move(params), std::move(callback));
++}
++
++void SlayzoneTasklistHost::UpdateTask(const std::string& task_id,
++                                      const std::string& title,
++                                      const std::string& description,
++                                      UpdateTaskCallback callback) {
++  base::DictValue params;
++  params.Set("taskId", task_id);
++  params.Set("title", title);
++  params.Set("description", description);
++  CallWrite("tasks:update", std::move(params), std::move(callback));
++}
++
++void SlayzoneTasklistHost::DeleteTask(const std::string& task_id,
++                                      DeleteTaskCallback callback) {
++  base::DictValue params;
++  params.Set("taskId", task_id);
++  CallWrite("tasks:delete", std::move(params), std::move(callback));
++}
++
++void SlayzoneTasklistHost::UpdateTaskStatus(const std::string& task_id,
++                                            const std::string& column_id,
++                                            UpdateTaskStatusCallback callback) {
++  base::DictValue params;
++  params.Set("taskId", task_id);
++  params.Set("columnId", column_id);
++  CallWrite("tasks:update-status", std::move(params), std::move(callback));
++}
++
++void SlayzoneTasklistHost::MoveTask(const std::string& task_id,
++                                     const std::string& column_id,
++                                     uint32_t index,
++                                     MoveTaskCallback callback) {
++  base::DictValue params;
++  params.Set("taskId", task_id);
++  params.Set("columnId", column_id);
++  params.Set("index", static_cast<int>(index));
++  CallWrite("tasks:move", std::move(params), std::move(callback));
++}
++
+ }  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_tasklist_host.h b/chrome/browser/slayzone/slayzone_tasklist_host.h
+index 25c3308129063..38af5c40dee4c 100644
+--- a/chrome/browser/slayzone/slayzone_tasklist_host.h
++++ b/chrome/browser/slayzone/slayzone_tasklist_host.h
+@@ -5,6 +5,9 @@
+ #ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKLIST_HOST_H_
+ #define CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKLIST_HOST_H_
+ 
++#include <cstdint>
++#include <string>
++
+ #include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ #include "mojo/public/cpp/bindings/receiver_set.h"
+@@ -13,8 +16,10 @@ namespace slayzone {
+ 
+ // Phase 7.4 — browser-side implementation of
+ // `slayzone::tasklist::mojom::TasklistHost`. One per `SlayzoneBrowserView`.
+-// `GetSnapshot` forwards to the process-wide `SidecarClient` (Phase 2.3)
+-// via JSON-RPC method `tasklist:get-snapshot`.
++// Snapshot queries forward to the process-wide `SidecarClient` (Phase 2.3)
++// via JSON-RPC method `tasklist:get-snapshot`. cap-02 adds Create / Update /
++// Delete / UpdateStatus / Move write methods that forward to the sidecar's
++// SQLite-backed task handlers.
+ class SlayzoneTasklistHost
+     : public slayzone::tasklist::mojom::TasklistHost {
+  public:
+@@ -28,6 +33,23 @@ class SlayzoneTasklistHost
+ 
+   // slayzone::tasklist::mojom::TasklistHost:
+   void GetSnapshot(GetSnapshotCallback callback) override;
++  void CreateTask(const std::string& project_id,
++                  const std::string& column_id,
++                  const std::string& title,
++                  CreateTaskCallback callback) override;
++  void UpdateTask(const std::string& task_id,
++                  const std::string& title,
++                  const std::string& description,
++                  UpdateTaskCallback callback) override;
++  void DeleteTask(const std::string& task_id,
++                  DeleteTaskCallback callback) override;
++  void UpdateTaskStatus(const std::string& task_id,
++                        const std::string& column_id,
++                        UpdateTaskStatusCallback callback) override;
++  void MoveTask(const std::string& task_id,
++                const std::string& column_id,
++                uint32_t index,
++                MoveTaskCallback callback) override;
+ 
+  private:
+   mojo::ReceiverSet<slayzone::tasklist::mojom::TasklistHost> receivers_;
+-- 
+2.52.0
+

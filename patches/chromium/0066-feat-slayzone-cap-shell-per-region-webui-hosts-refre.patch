@@ -1,0 +1,468 @@
+From 8753308fbe79efe892136ae905610e5f365de888 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 23 Apr 2026 22:45:15 +0200
+Subject: [66/66] =?UTF-8?q?feat(slayzone):=20cap-shell=20=E2=80=94=20per-r?=
+ =?UTF-8?q?egion=20webui=20hosts=20refresh?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Per-region WebUI hosts (context/dialogs/leaderboard/sidebar/tabbar/tasklist/
+tools/usage) updated alongside cap-shell migration. These remain wired but
+will rot as cap-shell-2..6 land — full removal in cap-shell-7.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ .../ui/webui/slayzone/slayzone_context_ui.cc        | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_context_ui.h |  4 ++++
+ .../ui/webui/slayzone/slayzone_dialogs_ui.cc        | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_dialogs_ui.h |  5 +++++
+ .../ui/webui/slayzone/slayzone_leaderboard_ui.cc    | 13 +++++++++++++
+ .../ui/webui/slayzone/slayzone_leaderboard_ui.h     |  6 ++++++
+ .../ui/webui/slayzone/slayzone_sidebar_ui.cc        |  9 ++++++++-
+ .../browser/ui/webui/slayzone/slayzone_sidebar_ui.h | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_tabbar_ui.cc | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_tabbar_ui.h  |  3 +++
+ .../ui/webui/slayzone/slayzone_tasklist_ui.cc       |  9 ++++++++-
+ .../ui/webui/slayzone/slayzone_tasklist_ui.h        | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_tools_ui.cc  | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_tools_ui.h   |  3 +++
+ .../browser/ui/webui/slayzone/slayzone_usage_ui.cc  | 11 +++++++++++
+ .../browser/ui/webui/slayzone/slayzone_usage_ui.h   |  4 ++++
+ 16 files changed, 131 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc
+index de1d00ebc501e..fd80eca35466d 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc
+@@ -9,6 +9,8 @@
+ 
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_context_host.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_contents.h"
+@@ -56,3 +58,12 @@ void SlayzoneContextUI::BindInterface(
+     mojo::PendingReceiver<slayzone::context::mojom::ContextHost> receiver) {
+   host_->Bind(std::move(receiver));
+ }
++
++void SlayzoneContextUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_context_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.h
+index d8db9e0441876..3eb66aa36c0ab 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_context_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.h
+@@ -8,6 +8,7 @@
+ #include <memory>
+ 
+ #include "chrome/browser/slayzone/mojom/context.mojom.h"
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+ #include "content/public/browser/webui_config.h"
+@@ -29,6 +30,9 @@ class SlayzoneContextUI : public content::WebUIController {
+ 
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::context::mojom::ContextHost> receiver);
++  // cap-03 — overlay X-button / Escape → LayoutHost::ShowOverlay("").
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
+ 
+  private:
+   std::unique_ptr<slayzone::SlayzoneContextHost> host_;
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc
+index e46a7ed8465ca..6c67d59c5d124 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc
+@@ -9,6 +9,8 @@
+ 
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_dialogs_host.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui.h"
+@@ -55,3 +57,12 @@ void SlayzoneDialogsUI::BindInterface(
+     mojo::PendingReceiver<slayzone::dialog::mojom::DialogHost> receiver) {
+   host_->Bind(std::move(receiver));
+ }
++
++void SlayzoneDialogsUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h
+index 694f2c0d48807..bf88c6a392c0e 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h
+@@ -8,6 +8,7 @@
+ #include <memory>
+ 
+ #include "chrome/browser/slayzone/mojom/dialog.mojom.h"
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+ #include "content/public/browser/webui_config.h"
+@@ -31,6 +32,10 @@ class SlayzoneDialogsUI : public content::WebUIController {
+ 
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::dialog::mojom::DialogHost> receiver);
++  // cap-03 — when dialog is served as the cap-03 search overlay, its
++  // ESC/cancel/submit flows call LayoutHost::ShowOverlay("") to close.
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
+ 
+  private:
+   std::unique_ptr<slayzone::SlayzoneDialogsHost> host_;
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc
+index 0b554b94af198..632008710bb35 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc
+@@ -8,7 +8,9 @@
+ #include <utility>
+ 
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_leaderboard_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_contents.h"
+@@ -58,3 +60,14 @@ void SlayzoneLeaderboardUI::BindInterface(
+         receiver) {
+   host_->Bind(std::move(receiver));
+ }
++
++void SlayzoneLeaderboardUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  // Overlay WebContents isn't a region WebView, so FromRegionWebContents
++  // returns nullptr — fall back to the active BrowserView lookup.
++  SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h
+index a8e8511b5d68d..0686cab4df047 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ 
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/leaderboard.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -38,6 +39,11 @@ class SlayzoneLeaderboardUI : public content::WebUIController {
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::leaderboard::mojom::LeaderboardHost>
+           receiver);
++  // cap-03 — overlay surface's X-button + Escape handler route close
++  // through LayoutHost::ShowOverlay(""), which restores the pre-overlay
++  // LayoutMode on the owning BrowserView.
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
+ 
+  private:
+   std::unique_ptr<slayzone::SlayzoneLeaderboardHost> host_;
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc
+index c4aa2ebd95d68..4570a7f23f325 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_sidebar_host.h"
++#include "chrome/browser/slayzone/slayzone_tags_host.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+ #include "chrome/common/webui_url_constants.h"
+@@ -42,7 +43,8 @@ constexpr std::string_view kSidebarMissingBundleHtml =
+ }  // namespace
+ 
+ SlayzoneSidebarUI::SlayzoneSidebarUI(content::WebUI* web_ui)
+-    : content::WebUIController(web_ui) {
++    : content::WebUIController(web_ui),
++      tags_host_(std::make_unique<slayzone::SlayzoneTagsHost>()) {
+   auto* source = content::WebUIDataSource::CreateAndAdd(
+       Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneSidebarHost);
+   slayzone::ConfigureBundleSource(source, "sidebar", kSidebarMissingBundleHtml);
+@@ -61,3 +63,8 @@ void SlayzoneSidebarUI::BindInterface(
+   }
+   view->sidebar_host()->Bind(std::move(receiver));
+ }
++
++void SlayzoneSidebarUI::BindInterface(
++    mojo::PendingReceiver<slayzone::tags::mojom::TagsHost> receiver) {
++  tags_host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h
+index 92e46e3f85d03..6c4c3fb195b49 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h
+@@ -5,13 +5,20 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SIDEBAR_UI_H_
+ #define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SIDEBAR_UI_H_
+ 
++#include <memory>
++
+ #include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
++#include "chrome/browser/slayzone/mojom/tags.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+ #include "content/public/browser/webui_config.h"
+ #include "content/public/common/url_constants.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ 
++namespace slayzone {
++class SlayzoneTagsHost;
++}
++
+ class SlayzoneSidebarUI : public content::WebUIController {
+  public:
+   explicit SlayzoneSidebarUI(content::WebUI* web_ui);
+@@ -21,8 +28,12 @@ class SlayzoneSidebarUI : public content::WebUIController {
+ 
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::sidebar::mojom::SidebarHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::tags::mojom::TagsHost> receiver);
+ 
+  private:
++  std::unique_ptr<slayzone::SlayzoneTagsHost> tags_host_;
++
+   WEB_UI_CONTROLLER_TYPE_DECL();
+ };
+ 
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
+index 68293c3b06af4..becc91ac3f335 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
+@@ -15,6 +15,7 @@
+ #include "base/memory/ref_counted_memory.h"
+ #include "base/task/thread_pool.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_tabs_host.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/common/webui_url_constants.h"
+@@ -148,3 +149,13 @@ void SlayzoneTabbarUI::BindInterface(
+   }
+   view->tabs_host()->Bind(std::move(receiver));
+ }
++
++void SlayzoneTabbarUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h
+index 5cafd17885427..da25600b12fbe 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h
+@@ -5,6 +5,7 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TABBAR_UI_H_
+ #define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TABBAR_UI_H_
+ 
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tabs.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -25,6 +26,8 @@ class SlayzoneTabbarUI : public content::WebUIController {
+ 
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
+ 
+  private:
+   WEB_UI_CONTROLLER_TYPE_DECL();
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
+index c02a0bfae33c6..540079c4c5747 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_layout_host.h"
++#include "chrome/browser/slayzone/slayzone_tags_host.h"
+ #include "chrome/browser/slayzone/slayzone_tasklist_host.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+@@ -42,7 +43,8 @@ constexpr std::string_view kTasklistMissingBundleHtml =
+ }  // namespace
+ 
+ SlayzoneTasklistUI::SlayzoneTasklistUI(content::WebUI* web_ui)
+-    : content::WebUIController(web_ui) {
++    : content::WebUIController(web_ui),
++      tags_host_(std::make_unique<slayzone::SlayzoneTagsHost>()) {
+   auto* source = content::WebUIDataSource::CreateAndAdd(
+       Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneTasklistHost);
+   slayzone::ConfigureBundleSource(source, "tasklist",
+@@ -72,3 +74,8 @@ void SlayzoneTasklistUI::BindInterface(
+   }
+   view->layout_host()->Bind(std::move(receiver));
+ }
++
++void SlayzoneTasklistUI::BindInterface(
++    mojo::PendingReceiver<slayzone::tags::mojom::TagsHost> receiver) {
++  tags_host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
+index afdbdd1fdade6..b4614aa566883 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
+@@ -5,7 +5,10 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKLIST_UI_H_
+ #define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKLIST_UI_H_
+ 
++#include <memory>
++
+ #include "chrome/browser/slayzone/mojom/layout.mojom.h"
++#include "chrome/browser/slayzone/mojom/tags.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -13,6 +16,10 @@
+ #include "content/public/common/url_constants.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ 
++namespace slayzone {
++class SlayzoneTagsHost;
++}
++
+ class SlayzoneTasklistUI : public content::WebUIController {
+  public:
+   explicit SlayzoneTasklistUI(content::WebUI* web_ui);
+@@ -24,8 +31,12 @@ class SlayzoneTasklistUI : public content::WebUIController {
+       mojo::PendingReceiver<slayzone::tasklist::mojom::TasklistHost> receiver);
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::tags::mojom::TagsHost> receiver);
+ 
+  private:
++  std::unique_ptr<slayzone::SlayzoneTagsHost> tags_host_;
++
+   WEB_UI_CONTROLLER_TYPE_DECL();
+ };
+ 
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.cc
+index d3531a7b9fc2f..b85b80f2da79d 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.cc
+@@ -15,6 +15,7 @@
+ #include "base/memory/ref_counted_memory.h"
+ #include "base/task/thread_pool.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_tools_host.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/common/webui_url_constants.h"
+@@ -138,3 +139,13 @@ void SlayzoneToolsUI::BindInterface(
+   }
+   view->tools_host()->Bind(std::move(receiver));
+ }
++
++void SlayzoneToolsUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h
+index 9f76342234553..b52ba7c17aec0 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h
+@@ -5,6 +5,7 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TOOLS_UI_H_
+ #define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TOOLS_UI_H_
+ 
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tools.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -27,6 +28,8 @@ class SlayzoneToolsUI : public content::WebUIController {
+ 
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::tools::mojom::ToolsHost> receiver);
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
+ 
+  private:
+   WEB_UI_CONTROLLER_TYPE_DECL();
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc
+index 4bd3eaa905315..9c0d7eac977e7 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc
+@@ -8,7 +8,9 @@
+ #include <utility>
+ 
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_usage_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_contents.h"
+@@ -56,3 +58,12 @@ void SlayzoneUsageUI::BindInterface(
+     mojo::PendingReceiver<slayzone::usage::mojom::UsageHost> receiver) {
+   host_->Bind(std::move(receiver));
+ }
++
++void SlayzoneUsageUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h
+index 8b95a85cd90d1..fb786d360633b 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ 
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/usage.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -30,6 +31,9 @@ class SlayzoneUsageUI : public content::WebUIController {
+ 
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::usage::mojom::UsageHost> receiver);
++  // cap-03 — overlay X-button / Escape → LayoutHost::ShowOverlay("").
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
+ 
+  private:
+   std::unique_ptr<slayzone::SlayzoneUsageHost> host_;
+-- 
+2.52.0
+

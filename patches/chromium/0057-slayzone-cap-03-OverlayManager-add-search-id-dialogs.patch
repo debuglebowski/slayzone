@@ -1,0 +1,65 @@
+From c31fed8e76e3d1fae0f4b932eb169bdd109f7a15 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Tue, 21 Apr 2026 00:11:18 +0200
+Subject: [57/66] =?UTF-8?q?slayzone:=20cap-03=20=E2=80=94=20OverlayManager?=
+ =?UTF-8?q?=20add=20search=20id=20+=20dialogs=20URL=20+=20active=5Foverlay?=
+ =?UTF-8?q?=20getter?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../browser/slayzone/slayzone_overlay_manager.cc  | 15 +++++++++++++--
+ .../browser/slayzone/slayzone_overlay_manager.h   |  7 +++++--
+ 2 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/slayzone/slayzone_overlay_manager.cc b/chrome/browser/slayzone/slayzone_overlay_manager.cc
+index 0540fcb5a6832..321eb921a913f 100644
+--- a/chrome/browser/slayzone/slayzone_overlay_manager.cc
++++ b/chrome/browser/slayzone/slayzone_overlay_manager.cc
+@@ -49,8 +49,19 @@ bool SlayzoneOverlayManager::SetOverlay(std::string_view overlay_id) {
+ 
+   EnsureWebView();
+ 
+-  const std::string url =
+-      base::StrCat({"chrome://slayzone-", overlay_id, "/"});
++  // cap-03 — "search" piggybacks on the Phase 10.1 dialogs host (no new
++  // chrome:// surface). The dialogs invocation decoder reads the dialog
++  // id from the URL pathname, so the route is chrome://slayzone-dialogs/
++  // search?invocation=overlay (the invocation id `overlay` is a stable
++  // marker so the host's Cancel path can tell overlay-search apart from
++  // modal-dialog invocations for telemetry). Other overlay ids map to
++  // their own chrome://slayzone-<id>/ host 1:1.
++  std::string url;
++  if (overlay_id == "search") {
++    url = "chrome://slayzone-dialogs/search?invocation=overlay";
++  } else {
++    url = base::StrCat({"chrome://slayzone-", overlay_id, "/"});
++  }
+   overlay_webview_->LoadInitialURL(GURL(url));
+   overlay_webview_->SetBoundsRect(view_->GetContentsBounds());
+   // Keep overlay at the top of the z-order so it paints over the region
+diff --git a/chrome/browser/slayzone/slayzone_overlay_manager.h b/chrome/browser/slayzone/slayzone_overlay_manager.h
+index 9f9fb77eb35bd..f322d64e6a385 100644
+--- a/chrome/browser/slayzone/slayzone_overlay_manager.h
++++ b/chrome/browser/slayzone/slayzone_overlay_manager.h
+@@ -38,11 +38,14 @@ namespace slayzone {
+ class SlayzoneOverlayManager : public views::ViewObserver {
+  public:
+   // Allowlist — overlay IDs accepted by `SetOverlay`. Typos reject rather
+-  // than silently loading a bogus chrome://slayzone-<id>/.
+-  static constexpr std::array<std::string_view, 3> kOverlayIds = {
++  // than silently loading a bogus chrome://slayzone-<id>/. cap-03 adds
++  // "search" which routes into the Phase 10.1 dialogs host rather than
++  // its own chrome:// surface (scope fence: no new chrome:// hosts).
++  static constexpr std::array<std::string_view, 4> kOverlayIds = {
+       "leaderboard",
+       "usage",
+       "context",
++      "search",
+   };
+ 
+   explicit SlayzoneOverlayManager(SlayzoneBrowserView* view);
+-- 
+2.52.0
+
