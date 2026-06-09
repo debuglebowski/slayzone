@@ -515,8 +515,14 @@ export function useGitDiffSnapshot(
   useEffect(() => {
     if (transport) return
     _setGitDiffStoreTransport({
+      // staleTime:0 — the working-tree diff is real-time; the store's own poll +
+      // fs-watcher decide WHEN to fetch, so each fetch must hit the server, never
+      // return a react-query-cached snapshot (otherwise a refresh/poll within the
+      // global staleTime shows a stale diff — empty until the cache expires).
       getWorkingDiff: (p, opts) =>
-        queryClient.fetchQuery(trpc.worktrees.getWorkingDiff.queryOptions({ path: p, opts })),
+        queryClient.fetchQuery(
+          trpc.worktrees.getWorkingDiff.queryOptions({ path: p, opts }, { staleTime: 0 })
+        ),
       watchStart: (worktreePath) => trpcClient.worktrees.watchStart.mutate({ worktreePath }),
       watchStop: (worktreePath) => trpcClient.worktrees.watchStop.mutate({ worktreePath })
     })
