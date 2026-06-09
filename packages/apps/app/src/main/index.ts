@@ -1953,6 +1953,7 @@ app
                 const win = BrowserWindow.getFocusedWindow() ?? mainWindow
                 if (win) browserViewManager.reparentView(viewId, win)
               },
+              getAllStateSnapshots: () => browserViewManager.getAllStateSnapshots(),
               events: browserViewEvents
             },
             floatingAgent: {
@@ -2829,8 +2830,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // Test-only: drive the tRPC `app.browser.onShortcut` source directly. The
     // renderer consumes browser-WCV shortcuts via that subscription (not the
     // legacy `browser-view:shortcut` IPC, which has no renderer consumer post
-    // slice-5), so e2e can simulate a WCV keyboard shortcut without a real
-    // native keypress.
+    // slice-5). A real synthesized keypress (browser:send-input-event) does NOT
+    // reliably fire the view's before-input-event in the headless harness, so we
+    // emit on the source directly — consistent with the preload __testEmit bridge.
     if (isPlaywright) {
       ipcMain.handle('browser:__test-emit-shortcut', (_, payload: unknown) =>
         browserViewEvents.emit('shortcut', payload)
