@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useSubscription, useTRPC } from '@slayzone/transport/client'
 
 export interface LoadError {
   code: number
@@ -19,6 +20,8 @@ export interface BrowserViewState {
   hasLoadedRealPage: boolean
 }
 
+type BrowserViewEvent = { viewId: string; type: string; [key: string]: unknown }
+
 const INITIAL_STATE: BrowserViewState = {
   url: '',
   title: '',
@@ -32,87 +35,90 @@ const INITIAL_STATE: BrowserViewState = {
 }
 
 export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
+  const trpc = useTRPC()
   const [state, setState] = useState<BrowserViewState>(INITIAL_STATE)
   const viewIdRef = useRef(viewId)
+  viewIdRef.current = viewId
+
+  // Reset to initial state when the view clears. Matches the old effect's
+  // `if (!viewId) setState(INITIAL_STATE)` branch exactly — a non-null →
+  // non-null viewId change intentionally carries state until new events arrive.
   useEffect(() => {
-    viewIdRef.current = viewId
-  })
+    if (!viewId) setState(INITIAL_STATE)
+  }, [viewId])
 
-  useEffect(() => {
-    if (!viewId) {
-      setState(INITIAL_STATE)
-      return
-    }
+  useSubscription(
+    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
+      enabled: !!viewId,
+      onData: (raw) => {
+        const event = raw as BrowserViewEvent
+        if (event.viewId !== viewIdRef.current) return
 
-    const unsubscribe = window.api.browser.onEvent((event) => {
-      if (event.viewId !== viewIdRef.current) return
+        switch (event.type) {
+          case 'did-navigate':
+            setState((prev) => ({
+              ...prev,
+              url: event.url as string,
+              canGoBack: event.canGoBack as boolean,
+              canGoForward: event.canGoForward as boolean,
+              error: null
+            }))
+            break
 
-      switch (event.type) {
-        case 'did-navigate':
-          setState((prev) => ({
-            ...prev,
-            url: event.url as string,
-            canGoBack: event.canGoBack as boolean,
-            canGoForward: event.canGoForward as boolean,
-            error: null
-          }))
-          break
+          case 'did-start-loading':
+            setState((prev) => ({ ...prev, isLoading: true }))
+            break
 
-        case 'did-start-loading':
-          setState((prev) => ({ ...prev, isLoading: true }))
-          break
+          case 'did-stop-loading':
+            setState((prev) => ({ ...prev, isLoading: false }))
+            break
 
-        case 'did-stop-loading':
-          setState((prev) => ({ ...prev, isLoading: false }))
-          break
+          case 'page-title-updated':
+            setState((prev) => ({ ...prev, title: event.title as string }))
+            break
 
-        case 'page-title-updated':
-          setState((prev) => ({ ...prev, title: event.title as string }))
-          break
-
-        case 'page-favicon-updated': {
-          const favicons = event.favicons as string[] | undefined
-          const favicon = favicons?.[0]
-          if (favicon) {
-            setState((prev) => ({ ...prev, favicon }))
-          }
-          break
-        }
-
-        case 'dom-ready':
-          setState((prev) => ({
-            ...prev,
-            domReady: true,
-            error: null,
-            hasLoadedRealPage:
-              prev.hasLoadedRealPage || (prev.url !== '' && prev.url !== 'about:blank')
-          }))
-          break
-
-        case 'did-fail-load':
-          setState((prev) => ({
-            ...prev,
-            isLoading: false,
-            error: {
-              code: event.errorCode as number,
-              description: event.errorDescription as string,
-              url: event.url as string
+          case 'page-favicon-updated': {
+            const favicons = event.favicons as string[] | undefined
+            const favicon = favicons?.[0]
+            if (favicon) {
+              setState((prev) => ({ ...prev, favicon }))
             }
-          }))
-          break
+            break
+          }
 
-        case 'crashed':
-          setState((prev) => ({
-            ...prev,
-            isLoading: false,
-            error: { code: -1, description: 'Renderer process crashed', url: '' }
-          }))
-          break
+          case 'dom-ready':
+            setState((prev) => ({
+              ...prev,
+              domReady: true,
+              error: null,
+              hasLoadedRealPage:
+                prev.hasLoadedRealPage || (prev.url !== '' && prev.url !== 'about:blank')
+            }))
+            break
+
+          case 'did-fail-load':
+            setState((prev) => ({
+              ...prev,
+              isLoading: false,
+              error: {
+                code: event.errorCode as number,
+                description: event.errorDescription as string,
+                url: event.url as string
+              }
+            }))
+            break
+
+          case 'crashed':
+            setState((prev) => ({
+              ...prev,
+              isLoading: false,
+              error: { code: -1, description: 'Renderer process crashed', url: '' }
+            }))
+            break
+        }
       }
     })
-
-    return unsubscribe
-  }, [viewId])
+  )
 
   return state
 }

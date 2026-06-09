@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import { useBrowserViewLifecycle } from './useBrowserViewLifecycle'
 import { useBrowserViewBounds } from './useBrowserViewBounds'
 import { useBrowserViewEvents, type BrowserViewState, type LoadError } from './useBrowserViewEvents'
@@ -53,6 +54,8 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
     onPopupRoute
   } = opts
 
+  const trpc = useTRPC()
+
   const { viewId } = useBrowserViewLifecycle({
     tabId,
     taskId,
@@ -69,7 +72,11 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   })
   const state = useBrowserViewEvents(viewId)
 
-  // Sync handoff policy updates after initial creation
+  // Sync handoff policy updates after initial creation.
+  // NOTE: every window.api.browser.* call below (setHandoffPolicy,
+  // reparentToCurrentWindow, navigate/goBack/goForward/reload/stop/executeJs/
+  // insertCss/removeCss/setZoom/focus) is an electron-native WebContentsView op
+  // and intentionally stays on the preload bridge per the migration design.
   const prevPolicyRef = useRef(desktopHandoffPolicy)
   useEffect(() => {
     if (!viewId || desktopHandoffPolicy === prevPolicyRef.current) return
@@ -94,14 +101,16 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   useEffect(() => {
     onPopupRouteRef.current = onPopupRoute
   })
-  useEffect(() => {
-    if (!viewId || !onPopupRouteRef.current) return
-    const unsub = window.api.browser.onEvent((event) => {
-      if (event.viewId !== viewId || event.type !== 'web-panel:popup-request') return
-      onPopupRouteRef.current?.(event.url as string)
+  useSubscription(
+    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
+      enabled: !!viewId,
+      onData: (raw) => {
+        const event = raw as { viewId: string; type: string; url?: string }
+        if (event.viewId !== viewId || event.type !== 'web-panel:popup-request') return
+        onPopupRouteRef.current?.(event.url as string)
+      }
     })
-    return unsub
-  }, [viewId])
+  )
 
   const actions: BrowserViewActions = useMemo(
     () => ({

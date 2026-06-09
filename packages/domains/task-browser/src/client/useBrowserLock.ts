@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { BrowserTab, BrowserTabsState } from '../shared'
 
 interface UseBrowserLockParams {
@@ -9,6 +11,10 @@ interface UseBrowserLockParams {
 }
 
 export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBrowserLockParams) {
+  const trpc = useTRPC()
+  const setLockedMutation = useMutation(trpc.task.setBrowserTabLocked.mutationOptions())
+  const setLocked = setLockedMutation.mutate
+
   // Previous agentTouched value per tab id. We auto-lock only on a live
   // `false → true` transition (i.e. observed during this session). First-time
   // observation of an already-touched tab (e.g. after app restart) records the
@@ -30,7 +36,7 @@ export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBro
       prevTouchedRef.current.set(tab.id, curr)
       if (prev === false && curr && !tab.locked) {
         toLock = tab.id
-        void window.api.db.setBrowserTabLocked(taskId, tab.id, true)
+        setLocked({ taskId, tabId: tab.id, locked: true })
       }
     }
     if (toLock) {
@@ -42,12 +48,15 @@ export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBro
         tabs: tabs.tabs.map((t) => (t.id === toLock ? { ...t, locked: true } : t))
       })
     }
-  }, [taskId, tabs, onTabsChange])
+  }, [taskId, tabs, onTabsChange, setLocked])
 
   // Listen for server-side trip events. The server also persists to DB and
   // notifies via tasks:changed, but renderer-local tabs state may have stale
   // values in flight that would clobber the flag on next writeback — stamp it
   // locally now so any pending update preserves it.
+  //
+  // NOTE: `browser.onAgentTouched` (browser:agent-touched) has no tRPC router —
+  // it stays on the Electron preload bridge (electron-native event).
   useEffect(() => {
     if (!taskId) return
     const off = window.api.browser.onAgentTouched(({ taskId: evtTaskId, tabId }) => {
@@ -67,7 +76,7 @@ export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBro
   const toggleActiveLock = () => {
     if (!activeTab || !taskId) return
     const next = !activeTab.locked
-    void window.api.db.setBrowserTabLocked(taskId, activeTab.id, next)
+    setLocked({ taskId, tabId: activeTab.id, locked: next })
     // Stamp locked locally (same reason as the auto-lock effect above) so
     // the banner shows/hides immediately rather than waiting for tasks:changed.
     onTabsChange({

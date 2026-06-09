@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { RotateCw, Plus, Puzzle, Trash2, TriangleAlert, Download } from 'lucide-react'
 import {
   Button,
@@ -52,99 +54,136 @@ export interface ExtensionsManagerViewProps {
  * and the open/close + activate/import/load/remove handlers.
  */
 export function useBrowserExtensions() {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [extensionsManagerOpen, setExtensionsManagerOpen] = useState(false)
-  const [extensions, setExtensions] = useState<InstalledBrowserExtension[]>([])
-  const [browserExtensions, setBrowserExtensions] = useState<BrowserExtensionSource[]>([])
-  const [extensionsLoading, setExtensionsLoading] = useState(false)
   const [extensionsError, setExtensionsError] = useState<string | null>(null)
 
-  const refreshExtensions = useCallback(async () => {
-    setExtensionsLoading(true)
-    setExtensionsError(null)
-    try {
-      const [installed, discovered] = await Promise.all([
-        window.api.browser.getExtensions(),
-        window.api.browser.discoverBrowserExtensions()
-      ])
-      const installedIds = new Set(installed.map((extension) => extension.id))
-      setExtensions(installed)
-      setBrowserExtensions(
-        discovered.map((browser) => ({
-          ...browser,
-          extensions: browser.extensions.map((extension) => ({
-            ...extension,
-            alreadyImported: extension.alreadyImported || installedIds.has(extension.id)
-          }))
-        }))
-      )
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to load extensions'
-      setExtensionsError(message)
-    } finally {
-      setExtensionsLoading(false)
-    }
-  }, [])
+  // Installed + discoverable lists. Both fetch only while the manager is open;
+  // the prior code refreshed them imperatively on open and after each mutation.
+  const installedQuery = useQuery(
+    trpc.app.browser.getExtensions.queryOptions(undefined, { enabled: extensionsManagerOpen })
+  ) as { data?: InstalledBrowserExtension[]; isFetching: boolean; error: unknown }
+  const discoveredQuery = useQuery(
+    trpc.app.browser.discoverBrowserExtensions.queryOptions(undefined, {
+      enabled: extensionsManagerOpen
+    })
+  ) as { data?: BrowserExtensionSource[]; isFetching: boolean; error: unknown }
 
-  useEffect(() => {
-    if (!extensionsManagerOpen) return
-    void refreshExtensions()
-  }, [extensionsManagerOpen, refreshExtensions])
+  const extensions = useMemo<InstalledBrowserExtension[]>(
+    () => installedQuery.data ?? [],
+    [installedQuery.data]
+  )
+
+  const browserExtensions = useMemo<BrowserExtensionSource[]>(() => {
+    const discovered = discoveredQuery.data ?? []
+    const installedIds = new Set(extensions.map((extension) => extension.id))
+    return discovered.map((browser) => ({
+      ...browser,
+      extensions: browser.extensions.map((extension) => ({
+        ...extension,
+        alreadyImported: extension.alreadyImported || installedIds.has(extension.id)
+      }))
+    }))
+  }, [discoveredQuery.data, extensions])
+
+  const extensionsLoading = installedQuery.isFetching || discoveredQuery.isFetching
+
+  // Surface query-level load failures the same way the old try/catch did.
+  const queryError = installedQuery.error ?? discoveredQuery.error
+  const loadErrorMessage =
+    queryError instanceof Error
+      ? queryError.message
+      : queryError
+        ? 'Failed to load extensions'
+        : null
+
+  const refreshExtensions = useCallback(async () => {
+    setExtensionsError(null)
+    await Promise.all([
+      queryClient.invalidateQueries(trpc.app.browser.getExtensions.queryFilter()),
+      queryClient.invalidateQueries(trpc.app.browser.discoverBrowserExtensions.queryFilter())
+    ])
+  }, [queryClient, trpc])
 
   const handleToggleExtensionsManager = useCallback(() => {
     setExtensionsManagerOpen((prev) => !prev)
   }, [])
 
-  const handleActivateExtension = useCallback((extensionId: string) => {
-    setExtensionsManagerOpen(false)
-    requestAnimationFrame(() => {
-      void window.api.browser.activateExtension(extensionId)
-    })
-  }, [])
+  // activateExtension manipulates the active WebContentsView (opens the
+  // extension action in the live view) but is an app.browser router proc; keep
+  // it on tRPC. Fire-and-forget after the rAF, matching the prior behavior.
+  const activateMutation = useMutation(trpc.app.browser.activateExtension.mutationOptions())
+  const handleActivateExtension = useCallback(
+    (extensionId: string) => {
+      setExtensionsManagerOpen(false)
+      requestAnimationFrame(() => {
+        activateMutation.mutate({ extensionId })
+      })
+    },
+    [activateMutation]
+  )
 
+  const importMutation = useMutation(
+    trpc.app.browser.importExtension.mutationOptions({
+      onSuccess: (result) => {
+        if (result && typeof result === 'object' && 'id' in result) {
+          void refreshExtensions()
+        } else if (result && typeof result === 'object' && 'error' in result) {
+          setExtensionsError((result as { error: string }).error)
+        }
+      }
+    })
+  )
   const handleImportExtension = useCallback(
     async (path: string, name: string) => {
       try {
-        const result = await window.api.browser.importExtension(path)
-        if ('id' in result) {
-          await refreshExtensions()
-          return
-        }
-        setExtensionsError(result.error)
+        await importMutation.mutateAsync({ extPath: path })
       } catch (error) {
         const message = error instanceof Error ? error.message : `Failed to import ${name}`
         setExtensionsError(message)
       }
     },
-    [refreshExtensions]
+    [importMutation]
   )
 
+  const loadMutation = useMutation(
+    trpc.app.browser.loadExtension.mutationOptions({
+      onSuccess: (result) => {
+        if (result && typeof result === 'object' && 'id' in result) {
+          void refreshExtensions()
+        } else if (result && typeof result === 'object' && 'error' in result) {
+          setExtensionsError((result as { error: string }).error)
+        }
+      }
+    })
+  )
   const handleLoadExtension = useCallback(async () => {
     try {
-      const result = await window.api.browser.loadExtension()
-      if (result && 'id' in result) {
-        await refreshExtensions()
-        return
-      }
-      if (result && 'error' in result) {
-        setExtensionsError(result.error)
-      }
+      await loadMutation.mutateAsync()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load unpacked extension'
       setExtensionsError(message)
     }
-  }, [refreshExtensions])
+  }, [loadMutation])
 
+  const removeMutation = useMutation(
+    trpc.app.browser.removeExtension.mutationOptions({
+      onSuccess: () => {
+        void refreshExtensions()
+      }
+    })
+  )
   const handleRemoveExtension = useCallback(
     async (extensionId: string) => {
       try {
-        await window.api.browser.removeExtension(extensionId)
-        await refreshExtensions()
+        await removeMutation.mutateAsync({ extensionId })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to remove extension'
         setExtensionsError(message)
       }
     },
-    [refreshExtensions]
+    [removeMutation]
   )
 
   return {
@@ -153,7 +192,7 @@ export function useBrowserExtensions() {
     extensions,
     browserExtensions,
     extensionsLoading,
-    extensionsError,
+    extensionsError: extensionsError ?? loadErrorMessage,
     refreshExtensions,
     handleToggleExtensionsManager,
     handleActivateExtension,

@@ -7,6 +7,8 @@ import {
   useImperativeHandle,
   createRef
 } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { cn, useShortcutAction, useShortcutDisplay } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
@@ -48,6 +50,10 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   }: BrowserPanelProps,
   ref
 ) {
+  const trpc = useTRPC()
+  const setActiveBrowserTab = useMutation(
+    trpc.app.webview.setActiveBrowserTab.mutationOptions()
+  ).mutate
   const { browserDefaultUrl, browserDefaultZoom, browserDeviceDefaults } = useAppearance()
   const elementPickerShortcut = useShortcutDisplay('browser-element-picker')
   const urlInputRef = useRef<HTMLInputElement>(null)
@@ -220,10 +226,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Per-tab webContents registration is owned by BrowserTabPlaceholder.
   useEffect(() => {
     if (!taskId) return
-    void window.api.webview.setActiveBrowserTab(taskId, tabs.activeTabId)
-  }, [taskId, tabs.activeTabId])
+    setActiveBrowserTab({ taskId, tabId: tabs.activeTabId })
+  }, [taskId, tabs.activeTabId, setActiveBrowserTab])
 
-  // Sync keyboard passthrough to main process
+  // Sync keyboard passthrough to main process.
+  // NOTE: browser.setKeyboardPassthrough manipulates the active WebContentsView
+  // (electron-native) — stays on the preload bridge per migration design.
   useEffect(() => {
     if (!activeViewId) return
     void window.api.browser.setKeyboardPassthrough(activeViewId, captureShortcuts)
@@ -238,6 +246,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Note: isActive (parent task tab visibility) is intentionally NOT a gate
   // here — when the parent tab is hidden, the active browser sub-tab keeps
   // painting and useBrowserViewBounds parks it off-screen via offScreen.
+  // browser.setVisible drives WebContentsView painting (electron-native) — bridge.
   useEffect(() => {
     for (const [tabId, ref] of tabRefsRef.current) {
       const handle = ref.current
@@ -301,21 +310,28 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   }, [activeViewState.favicon])
 
   // Handle new-tab-request events from main process (Cmd+Click / middle-click on links)
-  useEffect(() => {
-    if (!taskId) return
-    const unsubscribe = window.api.browser.onEvent((event) => {
-      if (event.type !== 'new-tab-request' || event.taskId !== taskId) return
-      const tabUrl = event.url as string
-      if (event.background) {
-        const newTab: BrowserTab = { id: generateTabId(), url: tabUrl, title: tabUrl }
-        const t = tabsRef.current
-        commitTabsUpdate({ tabs: [...t.tabs, newTab], activeTabId: t.activeTabId })
-      } else {
-        createNewTabRef.current(tabUrl)
+  useSubscription(
+    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
+      enabled: !!taskId,
+      onData: (raw) => {
+        const event = raw as {
+          type: string
+          taskId?: string
+          url?: string
+          background?: boolean
+        }
+        if (event.type !== 'new-tab-request' || event.taskId !== taskId) return
+        const tabUrl = event.url as string
+        if (event.background) {
+          const newTab: BrowserTab = { id: generateTabId(), url: tabUrl, title: tabUrl }
+          const t = tabsRef.current
+          commitTabsUpdate({ tabs: [...t.tabs, newTab], activeTabId: t.activeTabId })
+        } else {
+          createNewTabRef.current(tabUrl)
+        }
       }
     })
-    return unsubscribe
-  }, [taskId, commitTabsUpdate])
+  )
 
   // Apply the browser's own baseline zoom without tying it to app-level UI zoom.
   useEffect(() => {
@@ -325,6 +341,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   // Forward Cmd+Arrow to webpage via scope-aware shortcut system.
   // Only fires when browser scope is active (panel or WebContentsView focused).
+  // browser.sendInputEvent injects synthetic input into the WebContentsView
+  // (electron-native) — kept on the preload bridge per migration design.
   useShortcutAction('browser-scroll-top', () => {
     if (!activeViewId) return false // decline — let event propagate
     void window.api.browser.sendInputEvent(activeViewId, {
@@ -408,6 +426,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     }
     track('browser_devtools_toggled')
 
+    // DevTools open/close/query operate on the WebContentsView (electron-native)
+    // — kept on the preload bridge per migration design.
     void (async () => {
       try {
         const isOpen = await window.api.browser.isDevToolsOpen(activeViewId)

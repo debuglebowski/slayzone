@@ -1,4 +1,6 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useSubscription, useTRPC } from '@slayzone/transport/client'
 
 interface UseBrowserViewBoundsOpts {
   visible: boolean
@@ -19,6 +21,7 @@ export function useBrowserViewBounds(
   viewId: string | null,
   opts: UseBrowserViewBoundsOpts
 ): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
+  const trpc = useTRPC()
   const { visible, hidden, isResizing, offScreen } = opts
   const shouldPaint = visible && !hidden && !isResizing
   const effectivelyVisible = shouldPaint && !offScreen
@@ -35,30 +38,30 @@ export function useBrowserViewBounds(
   effectivelyVisibleRef.current = effectivelyVisible
   appZoomFactorRef.current = appZoomFactor
 
+  // Initial app zoom factor — app.meta.getZoomFactor mirrors app:get-zoom-factor.
+  const zoomQuery = useQuery(trpc.app.meta.getZoomFactor.queryOptions())
   useEffect(() => {
-    let cancelled = false
+    if (typeof zoomQuery.data === 'number') setAppZoomFactor(zoomQuery.data)
+  }, [zoomQuery.data])
 
-    void window.api.app.getZoomFactor().then((factor) => {
-      if (!cancelled) setAppZoomFactor(factor)
+  // Live zoom changes — menu.onZoomFactorChanged mirrors app:zoom-factor-changed.
+  useSubscription(
+    trpc.menu.onZoomFactorChanged.subscriptionOptions(undefined, {
+      onData: (factor) => {
+        setAppZoomFactor((current) => {
+          if (Math.abs(current - factor) < 0.0001) return current
+          lastBoundsRef.current = null
+          return factor
+        })
+      }
     })
-
-    const unsubscribe = window.api.app.onZoomFactorChanged((factor) => {
-      setAppZoomFactor((current) => {
-        if (Math.abs(current - factor) < 0.0001) return current
-        lastBoundsRef.current = null
-        return factor
-      })
-    })
-
-    return () => {
-      cancelled = true
-      unsubscribe()
-    }
-  }, [])
+  )
 
   // Sync visibility changes — drives WCV painting independent of bounds. When
   // shouldPaint is true but offScreen is true, the view keeps painting (video
   // plays) while parked off-screen by the bounds effect below.
+  // NOTE: browser.setVisible / setBounds / focus below are electron-native
+  // WebContentsView ops — kept on the preload bridge per migration design.
   useEffect(() => {
     if (!viewId) return
     void window.api.browser.setVisible(viewId, shouldPaint)

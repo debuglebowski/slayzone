@@ -1,4 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { DeviceEmulation } from '../shared'
 
@@ -36,6 +38,13 @@ export function DeviceWebview({
   forceReloadTrigger,
   onLayout
 }: DeviceWebviewProps) {
+  const trpc = useTRPC()
+  const enableEmulation = useMutation(
+    trpc.app.webview.enableDeviceEmulation.mutationOptions()
+  ).mutateAsync
+  const disableEmulation = useMutation(
+    trpc.app.webview.disableDeviceEmulation.mutationOptions()
+  ).mutate
   const webviewRef = useRef<WebviewElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [webviewReady, setWebviewReady] = useState(false)
@@ -118,18 +127,19 @@ export function DeviceWebview({
     prevEmulationRef.current = cur
 
     const wcId = wv.getWebContentsId()
-    window.api.webview
-      ?.enableDeviceEmulation(wcId, {
+    void enableEmulation({
+      webviewId: wcId,
+      params: {
         screenSize: { width: preset.width, height: preset.height },
         viewSize: { width: 0, height: 0 },
         deviceScaleFactor: preset.deviceScaleFactor,
         screenPosition: preset.mobile ? 'mobile' : 'desktop',
         userAgent: preset.userAgent
-      })
-      .then(() => {
-        if (preset.userAgent !== prevUa) wv.reload()
-      })
-  }, [preset, webviewReady])
+      }
+    }).then(() => {
+      if (preset.userAgent !== prevUa) wv.reload()
+    })
+  }, [preset, webviewReady, enableEmulation])
 
   // Navigate only when parent URL actually changes
   useEffect(() => {
@@ -159,13 +169,15 @@ export function DeviceWebview({
   }, [forceReloadTrigger, webviewReady])
 
   // Disable emulation on unmount
+  const disableEmulationRef = useRef(disableEmulation)
+  disableEmulationRef.current = disableEmulation
   useEffect(() => {
     return () => {
       const wv = webviewRef.current
       if (wv) {
         try {
           const wcId = wv.getWebContentsId()
-          window.api.webview?.disableDeviceEmulation(wcId)
+          disableEmulationRef.current({ webviewId: wcId })
         } catch {
           /* webview may be destroyed */
         }

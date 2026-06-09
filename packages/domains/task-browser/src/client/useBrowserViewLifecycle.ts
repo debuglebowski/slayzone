@@ -14,6 +14,9 @@ interface UseBrowserViewLifecycleOpts {
   desktopHandoffPolicy?: DesktopHandoffPolicy | null
 }
 
+// NOTE: browser.createView / browser.destroyView spawn and tear down the native
+// Electron WebContentsView. These are electron-native view ops and intentionally
+// stay on the preload bridge per the migration design (no tRPC cutover).
 export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
   viewId: string | null
 } {

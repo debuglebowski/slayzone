@@ -1,4 +1,6 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 
 export interface BrowserTabPlaceholderHandle {
@@ -56,6 +58,13 @@ export const BrowserTabPlaceholder = forwardRef<
   },
   ref
 ) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const registerTab = useMutation(trpc.app.webview.registerBrowserTab.mutationOptions()).mutateAsync
+  const unregisterTab = useMutation(
+    trpc.app.webview.unregisterBrowserTab.mutationOptions()
+  ).mutate
+
   const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({
     tabId,
     taskId,
@@ -89,18 +98,22 @@ export const BrowserTabPlaceholder = forwardRef<
     if (!taskId || !viewId) return
     let cancelled = false
     void (async () => {
-      const wcId = await window.api.browser.getWebContentsId(viewId)
+      const wcId = (await queryClient.fetchQuery(
+        trpc.app.browser.getWebContentsId.queryOptions({ viewId })
+      )) as number | null
       if (cancelled || wcId == null) return
-      await window.api.webview.registerBrowserTab(taskId, tabId, wcId)
+      await registerTab({ taskId, tabId, webContentsId: wcId })
     })()
     return () => {
       cancelled = true
-      void window.api.webview.unregisterBrowserTab(taskId, tabId)
+      unregisterTab({ taskId, tabId })
     }
-  }, [taskId, tabId, viewId])
+  }, [taskId, tabId, viewId, queryClient, trpc, registerTab, unregisterTab])
 
   // Sync agent-lock state to the main process. Owns its own viewId, so this
   // runs as soon as the WCV is registered — no race with parent state.
+  // NOTE: browser.setLocked (browser:set-locked) has no tRPC router — it silences
+  // OS-origin input on the WebContentsView (electron-native), stays on the bridge.
   useEffect(() => {
     if (!viewId) return
     void window.api.browser.setLocked(viewId, !!locked)

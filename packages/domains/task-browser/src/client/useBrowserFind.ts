@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import { useShortcutAction } from '@slayzone/ui'
+
+type FoundInPageEvent = {
+  viewId: string
+  type: string
+  finalUpdate?: boolean
+  activeMatchOrdinal?: number
+  matches?: number
+}
 
 interface UseBrowserFindParams {
   activeViewId: string | null
@@ -16,6 +25,7 @@ export function useBrowserFind({
   activeTabId,
   containerRef
 }: UseBrowserFindParams) {
+  const trpc = useTRPC()
   const [findMode, setFindMode] = useState(false)
   const [findText, setFindText] = useState('')
   const [findResult, setFindResult] = useState<{ active: number; total: number } | null>(null)
@@ -31,6 +41,8 @@ export function useBrowserFind({
       }
 
       focusLocalTarget()
+      // app.focusRenderer (app:focus-renderer) has no tRPC router — it pulls OS
+      // focus back to the renderer window (electron-native). Stays on the bridge.
       void window.api.app.focusRenderer().finally(() => {
         requestAnimationFrame(focusLocalTarget)
       })
@@ -43,6 +55,8 @@ export function useBrowserFind({
     setFindText('')
     setFindResult(null)
     if (activeViewId) {
+      // findInPage/stopFindInPage drive the WebContentsView's native find —
+      // electron-native view ops, kept on the bridge per migration design.
       void window.api.browser.stopFindInPage(activeViewId, 'clearSelection')
     }
   }, [activeViewId])
@@ -81,19 +95,22 @@ export function useBrowserFind({
   )
 
   // Subscribe to found-in-page results
-  useEffect(() => {
-    if (!findMode) return
-    return window.api.browser.onEvent((event) => {
-      if (event.type !== 'found-in-page') return
-      if (event.viewId !== activeViewId) return
-      if (event.finalUpdate) {
-        setFindResult({
-          active: event.activeMatchOrdinal as number,
-          total: event.matches as number
-        })
+  useSubscription(
+    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
+      enabled: findMode,
+      onData: (raw) => {
+        const event = raw as FoundInPageEvent
+        if (event.type !== 'found-in-page') return
+        if (event.viewId !== activeViewId) return
+        if (event.finalUpdate) {
+          setFindResult({
+            active: event.activeMatchOrdinal as number,
+            total: event.matches as number
+          })
+        }
       }
     })
-  }, [findMode, activeViewId])
+  )
 
   // Close find when switching tabs
   useEffect(() => {
