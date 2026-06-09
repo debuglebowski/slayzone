@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { TRPCProvider, createTrpcWsClient } from './trpc'
+import { TRPCProvider, createTrpcWsClient, _setTrpcClientSingleton } from './trpc'
 
 export type TrpcProviderProps = {
   url: string
@@ -25,11 +25,17 @@ function makeQueryClient(): QueryClient {
 
 export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
   const [queryClient] = useState(makeQueryClient)
-  const [{ wsClient, client }] = useState(() => createTrpcWsClient({ url }))
+  const [{ wsClient, client }] = useState(() => {
+    const created = createTrpcWsClient({ url })
+    // Expose to module-scope (non-React) callers via getTrpcClient().
+    _setTrpcClientSingleton(created.client)
+    return created
+  })
 
   useEffect(() => {
     return () => {
       wsClient.close()
+      _setTrpcClientSingleton(null)
     }
   }, [wsClient])
 

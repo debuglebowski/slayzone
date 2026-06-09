@@ -15,7 +15,13 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
+import {
+  getTrpcClient,
+  useSubscription,
+  useTRPC,
+  useTRPCClient
+} from '@slayzone/transport/client'
 import type { TerminalState } from '@slayzone/terminal/shared'
 
 const ALIVE_STATES: ReadonlySet<TerminalState> = new Set(['running', 'idle'])
@@ -226,21 +232,32 @@ export function useActiveTaskIds(): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
-// ONE place applies the IPC + self-heals. Module-scope (runs once per renderer
-// on first import), guarded so importing in a non-DOM context (unit tests) is a
-// no-op. Mirrors settings/useTabStore.ts eager wiring + window-attach.
+// Self-heal + event wiring. The reactive subscriptions (state-change / exit /
+// hibernated) + the initial hydrate now run via `useWireTerminalStateStore`,
+// mounted ONCE per renderer inside PtyProvider (the tRPC client isn't ready at
+// module-import time — it's set by TrpcProvider on mount — so the eager
+// `sessionList` query can't run at module scope anymore). The module-scope block
+// below only keeps the transport-agnostic self-heal triggers (focus + 15s
+// backstop) that call `pullReconcile`, which guards on the tRPC client being
+// ready, plus the E2E window handle.
 // ---------------------------------------------------------------------------
 let _reconciling = false
 async function pullReconcile(): Promise<void> {
-  if (_reconciling || typeof window === 'undefined' || !window.api?.session?.list) return
+  if (_reconciling || typeof window === 'undefined') return
   _reconciling = true
   try {
     // Pull liveness + the authoritative hibernated set together so reconcile can
     // heal 💤 in any window, not just the one that owned the session when the
     // window-targeted pty:hibernated IPC fired (the cross-window stale-dot bug).
+    // `sessionList` is the tRPC procedure (throws if the client isn't mounted yet
+    // — caught below). `tabs.listHibernatedSessions` has NO tRPC router procedure
+    // (PTY-hibernation seeding is a separate slice), so it stays on the IPC
+    // bridge; missing/early it resolves to [].
     const [sessions, hibernatedIds] = await Promise.all([
-      window.api.session.list(),
-      window.api.tabs?.listHibernatedSessions?.() ?? Promise.resolve<string[]>([])
+      getTrpcClient().pty.sessionList.query(),
+      typeof window !== 'undefined'
+        ? (window.api?.tabs?.listHibernatedSessions?.() ?? Promise.resolve<string[]>([]))
+        : Promise.resolve<string[]>([])
     ])
     useTerminalStateStore
       .getState()
@@ -249,40 +266,75 @@ async function pullReconcile(): Promise<void> {
         hibernatedIds
       )
   } catch {
-    // Best-effort; the next trigger retries.
+    // Best-effort; the next trigger retries (also covers the tRPC-client-not-yet-
+    // ready window right after boot — the React hook's initial hydrate fills it).
   } finally {
     _reconciling = false
   }
 }
 
-function wireTerminalStateStore(): void {
-  if (typeof window === 'undefined' || !window.api?.pty) return
+/**
+ * React-scope wiring for the terminal-state store. Mount ONCE per renderer
+ * (PtyProvider). Subscribes to the pty state-change / exit / hibernated event
+ * streams via tRPC subscriptions, seeds the store from the authoritative session
+ * list + hibernated set on mount, and self-heals on a dropped exit. Replaces the
+ * old module-scope IPC wiring (which can't run before TrpcProvider mounts).
+ */
+export function useWireTerminalStateStore(): void {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const store = (): TerminalStateStore => useTerminalStateStore.getState()
 
-  window.api.pty.onStateChange((sessionId, newState) => store().applyStateChange(sessionId, newState))
-  window.api.pty.onExit((sessionId) => {
-    store().applyExit(sessionId)
-    void pullReconcile()
-  })
-  window.api.pty.onHibernated((sessionId) => store().applyHibernated(sessionId))
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: ({ sessionId, newState }) =>
+        store().applyStateChange(sessionId, newState as TerminalState)
+    })
+  )
 
-  if (window.api.session?.list) {
-    window.api.session
-      .list()
+  useSubscription(
+    trpc.pty.onExit.subscriptionOptions(undefined, {
+      onData: ({ sessionId }) => {
+        store().applyExit(sessionId)
+        void pullReconcile()
+      }
+    })
+  )
+
+  useSubscription(
+    trpc.pty.onHibernated.subscriptionOptions(undefined, {
+      onData: ({ sessionId }) => store().applyHibernated(sessionId)
+    })
+  )
+
+  // Initial seed: liveness from the session list (fill-only hydrate) + the
+  // persisted hibernated set (tabs:listHibernatedSessions stays on IPC — no
+  // tRPC router procedure for it). Runs once on mount. Reads the store singleton
+  // via getState() (no extra dep) so trpcClient is the only dependency.
+  useEffect(() => {
+    const st = (): TerminalStateStore => useTerminalStateStore.getState()
+    trpcClient.pty.sessionList
+      .query()
       .then((sessions) =>
-        store().hydrate(sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })))
+        st().hydrate(sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })))
       )
       .catch(() => {})
-  }
-  if (window.api.tabs?.listHibernatedSessions) {
-    window.api.tabs
-      .listHibernatedSessions()
-      .then((ids) => ids.forEach((id) => store().applyHibernated(id)))
-      .catch(() => {})
-  }
+    if (typeof window !== 'undefined' && window.api?.tabs?.listHibernatedSessions) {
+      window.api.tabs
+        .listHibernatedSessions()
+        .then((ids) => ids.forEach((id) => st().applyHibernated(id)))
+        .catch(() => {})
+    }
+  }, [trpcClient])
+}
 
+// Self-heal triggers + E2E handle. Module-scope (runs once per renderer on first
+// import), guarded so importing in a non-DOM context (unit tests) is a no-op.
+// Mirrors settings/useTabStore.ts window-attach. The triggers call pullReconcile,
+// which no-ops until the tRPC client is mounted.
+if (typeof window !== 'undefined') {
   // Self-heal triggers: window focus + a low-freq backstop interval. A dropped
-  // pty:exit also triggers reconcile from the onExit handler above.
+  // pty:exit also triggers reconcile from the onExit subscription above.
   window.addEventListener('focus', () => void pullReconcile())
   // Module-scope wiring, not a component — useVisibleInterval (a hook) can't run
   // here. The 15s tick must keep firing so a window left in the background still
@@ -295,5 +347,3 @@ function wireTerminalStateStore(): void {
   ;(window as unknown as Record<string, unknown>).__slayzone_terminalStateStore =
     useTerminalStateStore
 }
-
-wireTerminalStateStore()

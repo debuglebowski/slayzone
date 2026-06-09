@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
+import { getTrpcClient } from '@slayzone/transport/client'
 import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
 
 // Override xterm underline styles - Claude Code outputs these and they persist incorrectly
@@ -124,11 +125,11 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
       activate: (event: MouseEvent, uri: string) => {
         const onOpenUrl = getOnOpenUrl()
         if (event.metaKey && event.shiftKey) {
-          void window.api.shell.openExternal(uri)
+          void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
         } else if (event.metaKey && onOpenUrl) {
           onOpenUrl(uri)
         } else if (event.metaKey) {
-          void window.api.shell.openExternal(uri)
+          void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
         }
       },
       hover: (e: MouseEvent, text: string) => showTooltip(e, text, urlHint),
@@ -157,11 +158,11 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
     (event, uri) => {
       const onOpenUrl = getOnOpenUrl()
       if (event.metaKey && event.shiftKey) {
-        void window.api.shell.openExternal(uri)
+        void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
       } else if (event.metaKey && onOpenUrl) {
         onOpenUrl(uri)
       } else if (event.metaKey) {
-        void window.api.shell.openExternal(uri)
+        void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
       }
     },
     (e, text) => showTooltip(e, text, urlHint),
@@ -181,7 +182,7 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
         const isInProject = resolved.startsWith(cwd + '/') || resolved === cwd
         const onOpenFile = getOnOpenFile()
         if (!isInProject) {
-          void window.api.git.revealInFinder(resolved)
+          void getTrpcClient().worktrees.revealInFinder.mutate({ path: resolved })
         } else if (onOpenFile) {
           // Pass relative path to editor panel
           const relative = resolved.startsWith(cwd + '/')
@@ -195,7 +196,7 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
               : undefined
           )
         } else {
-          void window.api.git.revealInFinder(resolved)
+          void getTrpcClient().worktrees.revealInFinder.mutate({ path: resolved })
         }
       },
       (e, text) => showTooltip(e, text, fileHint),

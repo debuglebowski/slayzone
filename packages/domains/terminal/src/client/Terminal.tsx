@@ -5,6 +5,7 @@
 // bundle and undo the boot-time split. The package's "./client/Terminal"
 // export exists only for the lazy wrapper itself.
 import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
@@ -188,6 +189,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const executionContextRef = useRef(executionContext)
   executionContextRef.current = executionContext
 
+  const trpcClient = useTRPCClient()
   const {
     subscribe,
     subscribeExit,
@@ -248,13 +250,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, [ptyState])
 
   const clearBufferWithoutRestart = useCallback(async (): Promise<void> => {
-    const result = await window.api.pty.clearBuffer(sessionId)
+    const result = await trpcClient.pty.clearBuffer.mutate({ sessionId })
     if (!result.success) return
 
     clearedSeqRef.current = result.clearedSeq
     terminalRef.current?.clear()
     terminalRef.current?.write('\x1b[0m')
-  }, [sessionId])
+  }, [sessionId, trpcClient])
 
   useImperativeHandle(ref, () => ({
     focus: () => terminalRef.current?.focus(),
@@ -278,7 +280,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         if (e.type === 'keydown') {
-          window.api.pty.write(sessionId, KITTY_SHIFT_ENTER)
+          void trpcClient.pty.write.mutate({ sessionId, data: KITTY_SHIFT_ENTER })
         }
         return false
       }
@@ -315,11 +317,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.type === 'keydown'
       ) {
         if (e.key === 'ArrowLeft') {
-          window.api.pty.write(sessionId, '\x1bb')
+          void trpcClient.pty.write.mutate({ sessionId, data: '\x1bb' })
           return false
         }
         if (e.key === 'ArrowRight') {
-          window.api.pty.write(sessionId, '\x1bf')
+          void trpcClient.pty.write.mutate({ sessionId, data: '\x1bf' })
           return false
         }
       }
@@ -333,7 +335,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
       return true
     },
-    [mode, sessionId, clearBufferWithoutRestart]
+    [mode, sessionId, clearBufferWithoutRestart, trpcClient]
   )
 
   const initTerminal = useCallback(
@@ -507,7 +509,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             resetTaskState(sessionId)
             disposeTerminal(sessionId)
             // Kill old PTY (any data it sends will be ignored)
-            await window.api.pty.kill(sessionId)
+            await trpcClient.pty.kill.mutate({ sessionId })
           } else {
             // Reattach existing terminal (container already has dimensions)
             containerRef.current.appendChild(cached.element)
@@ -535,7 +537,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             diag(sessionId, 'fit', { site: 'reattach', terminal: cached.terminal })
             // Only resize PTY if dimensions actually changed (avoids spurious SIGWINCH)
             if (cached.terminal.cols !== prevCols || cached.terminal.rows !== prevRows) {
-              window.api.pty.resize(sessionId, cached.terminal.cols, cached.terminal.rows)
+              void trpcClient.pty.resize.mutate({
+                sessionId,
+                cols: cached.terminal.cols,
+                rows: cached.terminal.rows
+              })
             }
             cached.terminal.write('\x1b[0m') // Reset ANSI state on reattach
 
@@ -583,7 +589,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             }
 
             // Sync state from backend (fixes stuck loading spinner on reattach)
-            const actualState = await window.api.pty.getState(sessionId)
+            const actualState = await trpcClient.pty.getState.query({ sessionId })
             if (signal.aborted) return // Don't setState if unmounted
             if (actualState) setPtyState(actualState)
 
@@ -592,10 +598,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             // callback's write() is a no-op — this fills that gap.
             // Use lastRenderedSeqRef (tracks xterm writes) not getLastSeq
             // (tracks PtyContext receives — advances even when terminalRef is null).
-            const missed = await window.api.pty.getBufferSince(
+            const missed = await trpcClient.pty.getBufferSince.query({
               sessionId,
-              lastRenderedSeqRef.current
-            )
+              afterSeq: lastRenderedSeqRef.current
+            })
             if (signal.aborted) return
             if (missed && missed.chunks.length > 0) {
               cached.terminal.write('\x1b[0m')
@@ -611,7 +617,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               sendInput: async (text) => {
                 cached.terminal.input(text)
               },
-              write: (data) => window.api.pty.write(sessionId, data),
+              write: (data) => trpcClient.pty.write.mutate({ sessionId, data }),
               focus: () => cached.terminal.focus(),
               clearBuffer: clearBufferWithoutRestart
             })
@@ -664,19 +670,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         terminal.attachCustomKeyEventHandler(handleTerminalKeyEvent)
 
         // Check if PTY already exists (e.g., from idle hibernation)
-        const exists = await window.api.pty.exists(sessionId)
+        const exists = await trpcClient.pty.exists.query({ sessionId })
         if (signal.aborted) return // Don't continue if unmounted
         let createCols = terminal.cols
         let createRows = terminal.rows
         if (exists) {
           // Sync state from main process (fixes stuck loading spinner)
-          const actualState = await window.api.pty.getState(sessionId)
+          const actualState = await trpcClient.pty.getState.query({ sessionId })
           if (signal.aborted) return // Don't setState if unmounted
           if (actualState) setPtyState(actualState)
 
           // Restore from backend ring buffer (single source of truth).
           // Use getBufferSince with -1 to get all chunks.
-          const result = await window.api.pty.getBufferSince(sessionId, -1)
+          const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: -1 })
           if (signal.aborted) return
           if (result) {
             for (const chunk of result.chunks) {
@@ -718,7 +724,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Capture dims before async gap so PTY starts at correct size
           createCols = terminal.cols
           createRows = terminal.rows
-          const result = await window.api.pty.create({
+          const result = await trpcClient.pty.create.mutate({
             sessionId,
             cwd,
             conversationId: effectiveConversationId,
@@ -766,7 +772,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             onFirstInputRef.current?.()
           }
           const filtered = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-          if (filtered) window.api.pty.write(sessionId, filtered)
+          if (filtered) void trpcClient.pty.write.mutate({ sessionId, data: filtered })
         })
 
         // Optimistically clear the 'running' dot when the user interrupts the
@@ -780,7 +786,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         terminal.onKey(({ domEvent }) => {
           const isInterrupt =
             domEvent.key === 'Escape' || (domEvent.key === 'c' && domEvent.ctrlKey)
-          if (isInterrupt) void window.api.pty.interrupt(sessionId)
+          if (isInterrupt) void trpcClient.pty.interrupt.mutate({ sessionId })
         })
 
         // Handle resize
@@ -800,7 +806,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               }
               if (nonEmpty > 10) terminal.write('\x1b[2J')
             }
-            window.api.pty.resize(sessionId, cols, rows)
+            void trpcClient.pty.resize.mutate({ sessionId, cols, rows })
           }, 150)
         })
 
@@ -811,7 +817,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (!exists && cols === createCols && rows === createRows) {
           // PTY was just created with these exact dims — skip redundant SIGWINCH
         } else {
-          window.api.pty.resize(sessionId, cols, rows)
+          void trpcClient.pty.resize.mutate({ sessionId, cols, rows })
         }
 
         // Inject text into terminal in a single write (avoids char-by-char IPC race)
@@ -822,7 +828,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // Expose API for programmatic input and focus
         onReadyRef.current?.({
           sendInput: injectText,
-          write: (data) => window.api.pty.write(sessionId, data),
+          write: (data) => trpcClient.pty.write.mutate({ sessionId, data }),
           focus: () => terminal.focus(),
           clearBuffer: clearBufferWithoutRestart
         })
@@ -850,7 +856,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }
       }
     },
-    [sessionId, cwd, mode, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart]
+    [
+      sessionId,
+      cwd,
+      mode,
+      resetTaskState,
+      handleTerminalKeyEvent,
+      clearBufferWithoutRestart,
+      trpcClient
+    ]
   )
 
   // Initialize terminal
@@ -1064,7 +1078,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let cancelled = false
     const replay = async () => {
       try {
-        const missed = await window.api.pty.getBufferSince(sessionId, lastRenderedSeqRef.current)
+        const missed = await trpcClient.pty.getBufferSince.query({
+          sessionId,
+          afterSeq: lastRenderedSeqRef.current
+        })
         if (cancelled || !missed || missed.chunks.length === 0) return
         // Only show overlay when there's actually data to write
         setIsReplaying(true)
@@ -1086,7 +1103,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     return () => {
       cancelled = true
     }
-  }, [isActive, sessionId])
+  }, [isActive, sessionId, trpcClient])
 
   // Sync the loading-indicator state from the reactive store. Local overrides
   // (watchdog 'dead'/'error') are transient — the next store change reasserts,
@@ -1117,16 +1134,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     wasActiveRef.current = isActive
   }, [isActive, sessionId, scheduleAtlasCorrection])
 
-  // Re-fit terminal when PTY dimensions need resync (e.g., after floating agent reattach)
+  // Re-fit terminal when PTY dimensions need resync (e.g., after floating agent reattach).
+  // `pty:resize-needed` (onResizeNeeded) has NO tRPC router subscription — it is not
+  // part of the pty router surface — so the listener stays on the IPC bridge. The
+  // follow-up resize uses the tRPC mutation.
   useEffect(() => {
     return window.api.pty.onResizeNeeded((sid) => {
       if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
       fitAddonRef.current.fit()
       diag(sessionId, 'fit', { site: 'resize-needed', terminal: terminalRef.current })
       scheduleAtlasCorrection()
-      window.api.pty.resize(sessionId, terminalRef.current.cols, terminalRef.current.rows)
+      void trpcClient.pty.resize.mutate({
+        sessionId,
+        cols: terminalRef.current.cols,
+        rows: terminalRef.current.rows
+      })
     })
-  }, [sessionId, scheduleAtlasCorrection])
+  }, [sessionId, scheduleAtlasCorrection, trpcClient])
 
   // Safety net: prevent permanent 'starting' state after init completes.
   // If the backend dies or IPC events are lost, this watchdog transitions
@@ -1134,8 +1158,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   useEffect(() => {
     if (isInitializing || initError || ptyState !== 'starting') return
     const timer = setTimeout(async () => {
-      const exists = await window.api.pty.exists(sessionId)
-      const actual = await window.api.pty.getState(sessionId)
+      const exists = await trpcClient.pty.exists.query({ sessionId })
+      const actual = await trpcClient.pty.getState.query({ sessionId })
       if (actual && actual !== 'starting' && actual !== 'dead') {
         setPtyState(actual)
         return
@@ -1149,7 +1173,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
     }, 20_000)
     return () => clearTimeout(timer)
-  }, [isInitializing, initError, ptyState, sessionId])
+  }, [isInitializing, initError, ptyState, sessionId, trpcClient])
 
   // Sync terminal theme with app theme / terminal theme settings
   useEffect(() => {
@@ -1182,13 +1206,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       t.brightCyan,
       t.brightWhite
     ].filter((c): c is string => typeof c === 'string')
-    void window.api.pty.setTheme({
+    void trpcClient.pty.setTheme.mutate({
       foreground: t.foreground ?? '#ffffff',
       background: t.background ?? '#000000',
       cursor: t.cursor ?? '#ffffff',
       ansi: ansi.length === 16 ? ansi : undefined
     })
-  }, [terminalThemeId, contentVariant])
+  }, [terminalThemeId, contentVariant, trpcClient])
 
   // Handle resize
   useEffect(() => {
@@ -1412,14 +1436,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         void navigator.clipboard.readText().then((text) => {
-          if (text) window.api.pty.write(sessionId, text)
+          if (text) void trpcClient.pty.write.mutate({ sessionId, data: text })
         })
       }
     }
 
     container.addEventListener('keydown', handleCopyPaste, true)
     return () => container.removeEventListener('keydown', handleCopyPaste, true)
-  }, [sessionId])
+  }, [sessionId, trpcClient])
 
   // Report GENUINE user interaction to main — the "user engaged" axis of the
   // idle-close (hibernation) gate. Real DOM events only (keydown/mouse/wheel/
@@ -1436,7 +1460,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       const now = performance.now()
       if (!force && now - lastTouchSentRef.current < TOUCH_THROTTLE_MS) return
       lastTouchSentRef.current = now
-      void window.api.pty.touch(sessionId)
+      void trpcClient.pty.touch.mutate({ sessionId })
     }
     const onInteract = (): void => report(false)
     const onFocus = (): void => report(true)
@@ -1453,7 +1477,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       container.removeEventListener('paste', onInteract, true)
       container.removeEventListener('focusin', onFocus, true)
     }
-  }, [sessionId])
+  }, [sessionId, trpcClient])
 
   // DIAGNOSTIC (gated by the diagnostics config in main; off → no-op): catch the
   // intermittent focus-theft regression where the xterm helper textarea blurs
@@ -1515,8 +1539,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           const now = performance.now()
           if (now - lastHealAt < REPORT_THROTTLE_MS) return
           lastHealAt = now
-          void window.api.diagnostics
-            .recordClientEvent({
+          void trpcClient.diagnostics.recordClientEvent
+            .mutate({
               event: 'terminal.focus_self_healed',
               level: 'info',
               sessionId,
@@ -1555,8 +1579,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Heavy DOM walk happens HERE — only for confirmed failures.
           const ctx = settleBlurContext(textarea, terminalRef.current?.element, container, sync)
           const cause = classifyFocusLoss(ctx)
-          void window.api.diagnostics
-            .recordClientEvent({
+          void trpcClient.diagnostics.recordClientEvent
+            .mutate({
               event: 'terminal.focus_lost_no_refocus',
               level: 'warn',
               sessionId,
@@ -1606,8 +1630,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Never lose the signal to a capture bug — emit a minimal marker so
           // the failure itself is visible in the diagnostics stream.
           try {
-            void window.api.diagnostics
-              .recordClientEvent({
+            void trpcClient.diagnostics.recordClientEvent
+              .mutate({
                 event: 'terminal.focus_lost_no_refocus',
                 level: 'warn',
                 sessionId,
@@ -1629,7 +1653,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     container.addEventListener('focusout', onFocusOut, true)
     return () => container.removeEventListener('focusout', onFocusOut, true)
-  }, [sessionId, mode])
+  }, [sessionId, mode, trpcClient])
 
   // Intercept Cmd+C / right-click Copy (xterm's native path writes raw
   // selection text, which includes trailing spaces from rendered padding).
@@ -1691,7 +1715,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (mimeType?.startsWith('image/') || file.type.startsWith('image/')) {
         // Image from clipboard (screenshot, browser copy) - save to temp
         const base64 = await fileToBase64(file)
-        const result = await window.api.files.saveTempImage(base64, mimeType || file.type)
+        const result = await trpcClient.app.files.saveTempImage.mutate({
+          base64,
+          mimeType: mimeType || file.type
+        })
         if (result.success && result.path) {
           return result.path
         }
@@ -1705,7 +1732,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       // Symmetric with handleDrop: preload's capture-phase paste listener
       // already resolved any filesystem paths (Finder-pasted files) via
-      // webUtils. Zip by index with file items.
+      // webUtils. Zip by index with file items. This is a synchronous preload-
+      // native call (webUtils.getPathForFile) with NO tRPC router procedure —
+      // it stays on the IPC bridge.
       const pastedPaths = window.api.files.getPastePaths()
 
       const paths: string[] = []
@@ -1744,6 +1773,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       // Preload's capture-phase drop listener already extracted real disk
       // paths via webUtils.getPathForFile; zip by index with the File list.
+      // Synchronous preload-native call (no tRPC router procedure) — stays on
+      // the IPC bridge.
       const droppedPaths = window.api.files.getDropPaths()
 
       try {
@@ -1799,7 +1830,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       container.removeEventListener('dragover', handleDragOver)
       container.removeEventListener('dragleave', handleDragLeave)
     }
-  }, [sessionId])
+  }, [sessionId, trpcClient])
 
   const isLoading =
     !initError && (isInitializing || isReplaying || isResuming || ptyState === 'starting')
@@ -1837,14 +1868,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setDoctorLoading(true)
     setDoctorResults(null)
     try {
-      const results = await window.api.pty.validate(mode)
+      const results = await trpcClient.pty.validate.query({ mode })
       setDoctorResults(results)
     } catch {
       setDoctorResults([{ check: 'Validation', ok: false, detail: 'Failed to run checks' }])
     } finally {
       setDoctorLoading(false)
     }
-  }, [mode])
+  }, [mode, trpcClient])
 
   const showDeadOverlay =
     ptyState === 'dead' && !isInitializing && deadExitCode !== null && mode !== 'terminal'

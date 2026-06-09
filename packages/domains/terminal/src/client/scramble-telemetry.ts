@@ -5,7 +5,7 @@
  * C scramble probe / manual settings flip), we serialize enough state to
  * diagnose the cause after the fact — GPU info, DPR, visibility, recent
  * geometry events, optional canvas screenshot — and ship it through the
- * existing `window.api.diagnostics.recordClientEvent` IPC so it lands in
+ * `diagnostics.recordClientEvent` tRPC mutation so it lands in
  * `diagnostics_events`. Future inspection (`/diagnostics` export, ad-hoc
  * SQL) sees the row with the full payload.
  *
@@ -15,6 +15,7 @@
  * `onDowngrade` (which calls this) before its own dispose for exactly
  * this reason.
  */
+import { getTrpcClient } from '@slayzone/transport/client'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { WebglAddon } from '@xterm/addon-webgl'
 import type { DowngradeReason } from './webgl-loader'
@@ -162,14 +163,14 @@ export function captureDowngradeSnapshot(
 }
 
 /**
- * Ship a captured snapshot through the renderer-side diagnostics IPC. Lands
+ * Ship a captured snapshot through the renderer-side diagnostics mutation. Lands
  * in `diagnostics_events` with `event = 'terminal.webgl_renderer_downgrade'`
  * and the full snapshot as payload (the diagnostics service JSON-serializes
  * the payload column; the screenshot data URL goes along for the ride).
  */
 export function reportDowngradeSnapshot(snapshot: DowngradeSnapshot): void {
   try {
-    window.api.diagnostics.recordClientEvent({
+    void getTrpcClient().diagnostics.recordClientEvent.mutate({
       event: 'terminal.webgl_renderer_downgrade',
       level: 'warn',
       sessionId: snapshot.sessionId,
@@ -177,7 +178,8 @@ export function reportDowngradeSnapshot(snapshot: DowngradeSnapshot): void {
       payload: snapshot as unknown as Record<string, unknown>
     })
   } catch {
-    // Diagnostics failures must never block the downgrade itself.
+    // Diagnostics failures (incl. tRPC client not yet ready) must never block
+    // the downgrade itself.
   }
 }
 
@@ -199,7 +201,7 @@ export interface RendererOkEvent {
 }
 
 /**
- * Ship a {@link RendererOkEvent} through the renderer-side diagnostics IPC.
+ * Ship a {@link RendererOkEvent} through the renderer-side diagnostics mutation.
  * Lands in `diagnostics_events` with `event = 'terminal.webgl_renderer_ok'`.
  * `level: 'info'` (not warn) — a healthy session is not a problem.
  */
@@ -215,7 +217,7 @@ export function reportRendererOk(
       tsMs: Date.now(),
       gpu: readGpuInfo(findWebglCanvas(terminal))
     }
-    window.api.diagnostics.recordClientEvent({
+    void getTrpcClient().diagnostics.recordClientEvent.mutate({
       event: 'terminal.webgl_renderer_ok',
       level: 'info',
       sessionId,
@@ -223,6 +225,7 @@ export function reportRendererOk(
       payload: event as unknown as Record<string, unknown>
     })
   } catch {
-    // Diagnostics failures must never block rendering.
+    // Diagnostics failures (incl. tRPC client not yet ready) must never block
+    // rendering.
   }
 }

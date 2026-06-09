@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { LoopConfig, CriteriaType, LoopStatus } from '@slayzone/terminal/shared'
 import {
   makeLoopController,
@@ -18,6 +19,7 @@ interface UseLoopModeOptions {
 }
 
 export function useLoopMode({ sessionId, onConfigChange }: UseLoopModeOptions) {
+  const trpcClient = useTRPCClient()
   const { subscribeState, subscribeExit, getLastSeq } = usePty()
 
   const [status, setStatus] = useState<LoopStatus>('idle')
@@ -36,10 +38,10 @@ export function useLoopMode({ sessionId, onConfigChange }: UseLoopModeOptions) {
       {
         markBoundary: () => getLastSeq(sessionId),
         send: (prompt) => {
-          window.api.pty.submit(sessionId, prompt)
+          void trpcClient.pty.submit.mutate({ sessionId, text: prompt })
         },
         readOutputSince: async (seq) => {
-          const result = await window.api.pty.getBufferSince(sessionId, seq)
+          const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: seq })
           if (!result) return null
           return result.chunks.map((c) => c.data).join('')
         },
@@ -59,7 +61,7 @@ export function useLoopMode({ sessionId, onConfigChange }: UseLoopModeOptions) {
       controller.dispose()
       controllerRef.current = null
     }
-  }, [sessionId, subscribeState, subscribeExit, getLastSeq])
+  }, [sessionId, subscribeState, subscribeExit, getLastSeq, trpcClient])
 
   const startLoop = useCallback((loopConfig: LoopConfig) => {
     onConfigChangeRef.current(loopConfig)

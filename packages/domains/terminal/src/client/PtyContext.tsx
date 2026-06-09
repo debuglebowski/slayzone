@@ -1,16 +1,16 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useRef,
   useCallback,
   useState,
   useMemo,
   type ReactNode
 } from 'react'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
 import { disposeTerminal } from './terminal-cache'
-import { useTerminalStateStore } from './useTerminalStateStore'
+import { useTerminalStateStore, useWireTerminalStateStore } from './useTerminalStateStore'
 
 // Per-task state - no buffer (backend is source of truth)
 export interface PtyState {
@@ -58,6 +58,16 @@ interface PtyContextValue {
 const PtyContext = createContext<PtyContextValue | null>(null)
 
 export function PtyProvider({ children }: { children: ReactNode }) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+
+  // Wire the reactive terminal-state store (state-change / exit / hibernated
+  // subscriptions + initial hydrate + reconcile). Lives here — PtyProvider is a
+  // singleton mounted once per renderer inside TrpcProvider — so the store's
+  // event wiring runs exactly once with a live tRPC client, instead of at module
+  // import (which would fire before the provider mounted). See useTerminalStateStore.
+  useWireTerminalStateStore()
+
   // Per-sessionId state (metadata only - backend is source of truth for buffer)
   const statesRef = useRef<Map<string, PtyState>>(new Map())
 
@@ -88,124 +98,151 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     return state
   }, [])
 
-  // Global listeners - survive all view changes
-  // Note: Only update existing state, don't create state for unknown tasks
-  // State is created when Terminal component subscribes
-  useEffect(() => {
-    const unsubData = window.api.pty.onData((sessionId, data, seq) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return
+  // Global event-stream subscriptions — survive all view changes. The server
+  // fans out ALL sessions (no per-session filter); the payload carries the
+  // sessionId, so each handler filters/looks up by sessionId exactly as the IPC
+  // path did. Kept ALWAYS enabled (no tab gating) — terminal correctness needs
+  // every frame, in order. Behavior is preserved byte-for-byte from the prior
+  // window.api.pty.on* listeners; only the transport changed.
+  //
+  // Note: only update EXISTING state, don't create state for unknown tasks —
+  // state is created when the Terminal component subscribes (the
+  // ensure-state-before-onData guard).
+  useSubscription(
+    trpc.pty.onData.subscriptionOptions(undefined, {
+      onData: ({ sessionId, data, seq }) => {
+        const state = statesRef.current.get(sessionId)
+        if (!state) return
 
-      // Drop out-of-order data (seq should be monotonically increasing)
-      if (seq <= state.lastSeq) return
-      state.lastSeq = seq
+        // Drop out-of-order data (seq should be monotonically increasing)
+        if (seq <= state.lastSeq) return
+        state.lastSeq = seq
 
-      // Notify subscribers
-      const subs = dataSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(data, seq))
-      }
-    })
-
-    const unsubExit = window.api.pty.onExit(async (sessionId, exitCode, reason) => {
-      const state = statesRef.current.get(sessionId)
-
-      if (state) {
-        state.exitCode = exitCode
-
-        // Capture crash output before the 100ms backend cleanup window closes
-        // Only capture if process exited non-zero (likely a crash)
-        if (exitCode !== 0) {
-          try {
-            const raw = await window.api.pty.getBuffer(sessionId)
-            if (raw && statesRef.current.get(sessionId)) {
-              statesRef.current.get(sessionId)!.crashOutput = raw
-            }
-          } catch {
-            // Best-effort; ignore errors
-          }
+        // Notify subscribers
+        const subs = dataSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(data, seq))
         }
       }
-
-      // Fire explicit exit subscribers (the exit event stream). Terminal STATE
-      // (→ 'dead', or preserved 'hibernated') is owned by the reactive store,
-      // which applies its own pty:exit handler + reconcile.
-      const subs = exitSubsRef.current.get(sessionId)
-      if (subs) subs.forEach((cb) => cb(exitCode, reason ?? null))
-
-      // Free xterm.js instance + this session's event-stream bookkeeping.
-      disposeTerminal(sessionId)
-      statesRef.current.delete(sessionId)
-      dataSubsRef.current.delete(sessionId)
-      exitSubsRef.current.delete(sessionId)
-      promptSubsRef.current.delete(sessionId)
-      sessionDetectedSubsRef.current.delete(sessionId)
-      devServerSubsRef.current.delete(sessionId)
-      titleSubsRef.current.delete(sessionId)
     })
+  )
 
-    // Terminal STATE lives in the reactive store (which has its own
-    // onStateChange handler). PtyContext keeps only the pending-prompt side
-    // effect: clear it when the agent leaves the alive set (dead/error).
-    const unsubStateChange = window.api.pty.onStateChange((sessionId, newState, oldState) => {
-      if (ALIVE_STATES.has(oldState) && !ALIVE_STATES.has(newState)) {
+  useSubscription(
+    trpc.pty.onExit.subscriptionOptions(undefined, {
+      onData: async ({ sessionId, exitCode, errorCode }) => {
         const state = statesRef.current.get(sessionId)
-        if (state) state.pendingPrompt = undefined
-        setPendingPromptTaskIds((prev) => {
-          if (!prev.has(sessionId)) return prev
-          const next = new Set(prev)
-          next.delete(sessionId)
-          return next
-        })
+
+        if (state) {
+          state.exitCode = exitCode ?? undefined
+
+          // Capture crash output before the 100ms backend cleanup window closes
+          // Only capture if process exited non-zero (likely a crash)
+          if (exitCode !== 0) {
+            try {
+              const raw = await trpcClient.pty.getBuffer.query({ sessionId })
+              if (raw && statesRef.current.get(sessionId)) {
+                statesRef.current.get(sessionId)!.crashOutput = raw
+              }
+            } catch {
+              // Best-effort; ignore errors
+            }
+          }
+        }
+
+        // Fire explicit exit subscribers (the exit event stream). Terminal STATE
+        // (→ 'dead', or preserved 'hibernated') is owned by the reactive store,
+        // which applies its own pty:exit handler + reconcile. `errorCode` is the
+        // structured exit reason (the old positional `reason` arg).
+        const subs = exitSubsRef.current.get(sessionId)
+        if (subs) subs.forEach((cb) => cb(exitCode ?? 0, errorCode ?? null))
+
+        // Free xterm.js instance + this session's event-stream bookkeeping.
+        disposeTerminal(sessionId)
+        statesRef.current.delete(sessionId)
+        dataSubsRef.current.delete(sessionId)
+        exitSubsRef.current.delete(sessionId)
+        promptSubsRef.current.delete(sessionId)
+        sessionDetectedSubsRef.current.delete(sessionId)
+        devServerSubsRef.current.delete(sessionId)
+        titleSubsRef.current.delete(sessionId)
       }
     })
+  )
 
-    const unsubPrompt = window.api.pty.onPrompt((sessionId, prompt) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return // Ignore prompts for unknown tasks
-
-      state.pendingPrompt = prompt
-
-      // Update global tracking
-      setPendingPromptTaskIds((prev) => new Set(prev).add(sessionId))
-
-      const subs = promptSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(prompt))
+  // Terminal STATE lives in the reactive store (which has its own
+  // onStateChange handler). PtyContext keeps only the pending-prompt side
+  // effect: clear it when the agent leaves the alive set (dead/error).
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: ({ sessionId, newState, oldState }) => {
+        if (
+          ALIVE_STATES.has(oldState as TerminalState) &&
+          !ALIVE_STATES.has(newState as TerminalState)
+        ) {
+          const state = statesRef.current.get(sessionId)
+          if (state) state.pendingPrompt = undefined
+          setPendingPromptTaskIds((prev) => {
+            if (!prev.has(sessionId)) return prev
+            const next = new Set(prev)
+            next.delete(sessionId)
+            return next
+          })
+        }
       }
     })
+  )
 
-    const unsubSessionDetected = window.api.pty.onSessionDetected((sessionId, conversationId) => {
-      const subs = sessionDetectedSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(conversationId))
+  useSubscription(
+    trpc.pty.onPrompt.subscriptionOptions(undefined, {
+      onData: ({ sessionId, prompt }) => {
+        const state = statesRef.current.get(sessionId)
+        if (!state) return // Ignore prompts for unknown tasks
+
+        state.pendingPrompt = prompt as PromptInfo
+
+        // Update global tracking
+        setPendingPromptTaskIds((prev) => new Set(prev).add(sessionId))
+
+        const subs = promptSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(prompt as PromptInfo))
+        }
       }
     })
+  )
 
-    const unsubDevServer = window.api.pty.onDevServerDetected((sessionId, url) => {
-      const subs = devServerSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(url))
+  useSubscription(
+    trpc.pty.onSessionDetected.subscriptionOptions(undefined, {
+      onData: ({ sessionId, conversationId }) => {
+        const subs = sessionDetectedSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(conversationId))
+        }
       }
     })
+  )
 
-    const unsubTitleChange = window.api.pty.onTitleChange((sessionId, title) => {
-      const subs = titleSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(title))
+  useSubscription(
+    trpc.pty.onDevServerDetected.subscriptionOptions(undefined, {
+      onData: ({ sessionId, url }) => {
+        const subs = devServerSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(url))
+        }
       }
     })
+  )
 
-    return () => {
-      unsubData()
-      unsubExit()
-      unsubStateChange()
-      unsubPrompt()
-      unsubSessionDetected()
-      unsubDevServer()
-      unsubTitleChange()
-    }
-  }, [])
+  useSubscription(
+    trpc.pty.onTitleChange.subscriptionOptions(undefined, {
+      onData: ({ sessionId, title }) => {
+        const subs = titleSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(title))
+        }
+      }
+    })
+  )
 
   const subscribe = useCallback(
     (sessionId: string, cb: DataCallback): (() => void) => {

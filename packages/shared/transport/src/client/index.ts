@@ -2,7 +2,9 @@ export {
   useTRPC,
   useTRPCClient,
   createTrpcWsClient,
-  type CreateTrpcClientOpts
+  getTrpcClient,
+  type CreateTrpcClientOpts,
+  type TrpcVanillaClient
 } from './trpc'
 export { TrpcProvider, type TrpcProviderProps } from './provider'
 // Subscription hook for the tanstack integration — single import point so

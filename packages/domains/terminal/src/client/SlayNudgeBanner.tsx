@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Info, X, Check, Loader2 } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 
 interface SlayNudgeBannerProps {
@@ -17,6 +19,8 @@ export function SlayNudgeBanner({
   onDismiss,
   onSetupComplete
 }: SlayNudgeBannerProps) {
+  const trpc = useTRPC()
+  const setupSlayMutation = useMutation(trpc.aiConfig.setupSlay.mutationOptions())
   const [infoOpen, setInfoOpen] = useState(false)
   const [setupState, setSetupState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -24,7 +28,7 @@ export function SlayNudgeBanner({
   const runSetup = async () => {
     setSetupState('running')
     setError(null)
-    const result = await window.api.aiConfig.setupSlay(projectPath, projectId)
+    const result = await setupSlayMutation.mutateAsync({ projectPath, projectId })
     if (result.ok) {
       setSetupState('done')
     } else {

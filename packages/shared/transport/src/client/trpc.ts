@@ -23,3 +23,23 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
     })
   }
 }
+
+export type TrpcVanillaClient = ReturnType<typeof createTrpcWsClient>['client']
+
+// Module-scope singleton of the SAME client React uses (set by TrpcProvider on
+// mount). Lets non-React module-scope code (zustand stores, etc.) call tRPC
+// without a hook: `getTrpcClient().router.proc.query(input)`. Throws if accessed
+// before the provider has connected — callers running at app boot (before port
+// discovery) must guard or stay on the bridge.
+let vanillaClientSingleton: TrpcVanillaClient | null = null
+
+export function _setTrpcClientSingleton(client: TrpcVanillaClient | null): void {
+  vanillaClientSingleton = client
+}
+
+export function getTrpcClient(): TrpcVanillaClient {
+  if (!vanillaClientSingleton) {
+    throw new Error('tRPC client not ready — getTrpcClient() called before TrpcProvider mounted')
+  }
+  return vanillaClientSingleton
+}

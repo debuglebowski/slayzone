@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { AgentEvent } from '../shared/agent-events'
 import {
   initialState,
@@ -7,88 +8,6 @@ import {
   type ChatTimelineState,
   type TimelineItem
 } from './chat-timeline'
-
-// We don't import ElectronAPI types here to avoid a cycle. The `chat` namespace shape
-// is duplicated as a minimal interface; the real type lives in @slayzone/types/api.ts.
-interface ChatApi {
-  hydrate: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    providerFlagsOverride?: string | null
-  }) => Promise<unknown>
-  start: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    providerFlagsOverride?: string | null
-  }) => Promise<unknown>
-  reset: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    providerFlagsOverride?: string | null
-  }) => Promise<unknown>
-  send: (tabId: string, text: string) => Promise<boolean>
-  sendToolResult: (
-    tabId: string,
-    args: { toolUseId: string; content: string; isError?: boolean }
-  ) => Promise<boolean>
-  respondPermission: (
-    tabId: string,
-    args: {
-      requestId: string
-      decision:
-        | {
-            behavior: 'allow'
-            updatedInput?: Record<string, unknown>
-            updatedPermissions?: unknown[]
-          }
-        | { behavior: 'deny'; message: string; interrupt?: boolean }
-    }
-  ) => Promise<boolean>
-  interrupt: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    providerFlagsOverride?: string | null
-  }) => Promise<unknown>
-  abortAndPop: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    providerFlagsOverride?: string | null
-  }) => Promise<{ popped: boolean; text: string | null }>
-  kill: (tabId: string) => Promise<void>
-  remove: (tabId: string) => Promise<void>
-  getBufferSince: (
-    tabId: string,
-    afterSeq: number
-  ) => Promise<Array<{ seq: number; event: AgentEvent }>>
-  inspectPermissions: (
-    taskId: string,
-    mode: string
-  ) => Promise<{
-    ok: boolean
-    hasSkipPerms: boolean
-    hasPermissionMode: boolean
-    permissionModeValue: string | null
-  }>
-  onEvent: (cb: (tabId: string, event: AgentEvent, seq: number) => void) => () => void
-  onExit: (
-    cb: (tabId: string, sessionId: string, code: number | null, signal: string | null) => void
-  ) => () => void
-}
-
-function getChatApi(): ChatApi {
-  const api = (window as unknown as { api: { chat: ChatApi } }).api
-  return api.chat
-}
 
 export interface UseChatSessionResult {
   state: ChatTimelineState
@@ -177,6 +96,8 @@ export interface UseChatSessionOpts {
  * 5. On unmount: unsubscribe only. Session persists (main keeps buffer). Tab close triggers chat:remove via useTaskTerminals.
  */
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [state, dispatch] = useReducer(reducer, undefined, initialState)
   const [hydrating, setHydrating] = useState(true)
   const lastSeqRef = useRef<number>(-1)
@@ -184,62 +105,86 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     Map<string, { requestId: string; toolName: string; input: unknown }>
   >(() => new Map())
 
+  // Per-(re)hydration mutable state shared between the always-on subscriptions
+  // and the hydrate effect. `genRef` is the staleness token (replaces the old
+  // `cancelled` flag): each hydrate run bumps it; subscription callbacks + async
+  // continuations compare against it so a tab/opts change cleanly ignores
+  // in-flight work from the previous session. `hydratedRef` gates the queue
+  // (queue events until the buffer replay completes), `liveQueueRef` holds them.
+  const genRef = useRef(0)
+  const hydratedRef = useRef(false)
+  const liveQueueRef = useRef<Array<{ event: AgentEvent; seq: number }>>([])
+
+  // Stable: only reads refs + stable setters. Applies one event to the reducer
+  // and maintains the permission-request side-channel.
+  const applyLive = useCallback((event: AgentEvent, seq: number): void => {
+    if (seq <= lastSeqRef.current) return
+    lastSeqRef.current = seq
+    dispatch({ type: 'event', event })
+
+    // Side-channel: track inbound permission requests so renderers can
+    // resolve them (e.g. AskUserQuestion answers). Drop them when the
+    // originating tool resolves (its tool_result lands) — keyed by
+    // tool_use_id so reload-after-answer doesn't resurface a stale prompt.
+    if (event.kind === 'permission-request') {
+      setPermissionRequests((prev) => {
+        const next = new Map(prev)
+        next.set(event.toolUseId, {
+          requestId: event.requestId,
+          toolName: event.toolName,
+          input: event.input
+        })
+        return next
+      })
+    } else if (event.kind === 'tool-result') {
+      setPermissionRequests((prev) => {
+        if (!prev.has(event.toolUseId)) return prev
+        const next = new Map(prev)
+        next.delete(event.toolUseId)
+        return next
+      })
+    }
+  }, [])
+
+  // Subscribe (always-on; mounted on first render, BEFORE the hydrate effect
+  // runs) so we don't miss events emitted between session spawn and the
+  // getBufferSince replay below. While hydrating, queue events instead of
+  // dispatching — `session-spawn` (and other events from the fresh subprocess)
+  // can race ahead of getBufferSince, advance lastSeqRef, and make the replay
+  // loop's `seq > lastSeqRef` filter drop the entire historical buffer. Drained
+  // after replay. Server fan-out is global; filter by tabId here. The chat
+  // event payload is the domain's own AgentEvent vocabulary (router types it as
+  // `unknown` so the boundary stays vocabulary-agnostic) — cast at the seam.
+  useSubscription(
+    trpc.chat.onEvent.subscriptionOptions(undefined, {
+      enabled: !!opts.tabId,
+      onData: ({ tabId, event, seq }) => {
+        if (tabId !== opts.tabId) return
+        if (!hydratedRef.current) {
+          liveQueueRef.current.push({ event: event as AgentEvent, seq })
+          return
+        }
+        applyLive(event as AgentEvent, seq)
+      }
+    })
+  )
+
+  useSubscription(
+    trpc.chat.onExit.subscriptionOptions(undefined, {
+      enabled: !!opts.tabId,
+      onData: ({ tabId, sessionId, code, signal }) => {
+        if (tabId !== opts.tabId) return
+        dispatch({ type: 'process-exit', sessionId, code, signal })
+      }
+    })
+  )
+
   useEffect(() => {
-    let cancelled = false
-    let hydrated = false
-    const liveQueue: Array<{ event: AgentEvent; seq: number }> = []
+    const gen = ++genRef.current
+    hydratedRef.current = false
+    liveQueueRef.current = []
     lastSeqRef.current = -1
     setHydrating(true)
-    const chat = getChatApi()
-
-    const applyLive = (event: AgentEvent, seq: number): void => {
-      if (seq <= lastSeqRef.current) return
-      lastSeqRef.current = seq
-      dispatch({ type: 'event', event })
-
-      // Side-channel: track inbound permission requests so renderers can
-      // resolve them (e.g. AskUserQuestion answers). Drop them when the
-      // originating tool resolves (its tool_result lands) — keyed by
-      // tool_use_id so reload-after-answer doesn't resurface a stale prompt.
-      if (event.kind === 'permission-request') {
-        setPermissionRequests((prev) => {
-          const next = new Map(prev)
-          next.set(event.toolUseId, {
-            requestId: event.requestId,
-            toolName: event.toolName,
-            input: event.input
-          })
-          return next
-        })
-      } else if (event.kind === 'tool-result') {
-        setPermissionRequests((prev) => {
-          if (!prev.has(event.toolUseId)) return prev
-          const next = new Map(prev)
-          next.delete(event.toolUseId)
-          return next
-        })
-      }
-    }
-
-    // Subscribe BEFORE create so we don't miss events emitted between
-    // session spawn and the getBufferSince call below. While hydrating,
-    // queue events instead of dispatching — `session-spawn` (and other
-    // events from the fresh subprocess) can race ahead of getBufferSince,
-    // advance lastSeqRef, and make the replay loop's `seq > lastSeqRef`
-    // filter drop the entire historical buffer. Drained after replay.
-    const offEvent = chat.onEvent((tabId, event, seq) => {
-      if (cancelled || tabId !== opts.tabId) return
-      if (!hydrated) {
-        liveQueue.push({ event, seq })
-        return
-      }
-      applyLive(event, seq)
-    })
-
-    const offExit = chat.onExit((tabId, sessionId, code, signal) => {
-      if (cancelled || tabId !== opts.tabId) return
-      dispatch({ type: 'process-exit', sessionId, code, signal })
-    })
 
     // Serialize: AWAIT hydrate, THEN replay. Hydrate inserts the session
     // skeleton into the main-side sessions map (seeded with persisted history)
@@ -247,7 +192,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     // guarantees session.buffer is seeded with persisted history.
     void (async () => {
       try {
-        await chat.hydrate({
+        await trpcClient.chat.hydrate.mutate({
           tabId: opts.tabId,
           taskId: opts.taskId,
           mode: opts.mode,
@@ -262,57 +207,81 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
           event: { kind: 'error', message: (e as Error).message ?? String(e) }
         })
       }
-      if (cancelled) return
+      if (gen !== genRef.current) return
       try {
-        const buffered = await chat.getBufferSince(opts.tabId, -1)
-        if (cancelled) return
+        const buffered = await trpcClient.chat.getBufferSince.query({
+          tabId: opts.tabId,
+          afterSeq: -1
+        })
+        if (gen !== genRef.current) return
         // Route replay through applyLive (not raw dispatch) so side-channel
         // state — notably `permissionRequests` for unresolved AskUserQuestion
         // prompts — repopulates on tab reattach. Without this, hydrating a tab
         // with a pending perm-request leaves the Map empty; Submit can't find
         // the prompt → falls back to `sendMessage`, but the CLI is still
         // blocked waiting on `control_response` and never responds.
-        for (const { seq, event } of buffered) applyLive(event, seq)
+        for (const { seq, event } of buffered) applyLive(event as AgentEvent, seq)
       } catch {
         /* ignore replay failures */
       } finally {
-        if (!cancelled) {
+        if (gen === genRef.current) {
           // Drain live events queued during hydration. Dedup via lastSeqRef
           // so anything already covered by the replay buffer is skipped.
-          hydrated = true
-          for (const { event, seq } of liveQueue) applyLive(event, seq)
-          liveQueue.length = 0
+          hydratedRef.current = true
+          for (const { event, seq } of liveQueueRef.current) applyLive(event, seq)
+          liveQueueRef.current = []
           setHydrating(false)
         }
       }
     })()
 
     return () => {
-      cancelled = true
-      offEvent()
-      offExit()
+      // Bump the generation so the subscriptions + any in-flight async work for
+      // this session become no-ops (matches the old `cancelled = true`).
+      genRef.current++
     }
-  }, [opts.tabId, opts.taskId, opts.mode, opts.cwd, opts.providerFlagsOverride])
+  }, [
+    opts.tabId,
+    opts.taskId,
+    opts.mode,
+    opts.cwd,
+    opts.providerFlagsOverride,
+    applyLive,
+    trpcClient
+  ])
+
+  const createOpts = (): {
+    tabId: string
+    taskId: string
+    mode: string
+    cwd: string
+    providerFlagsOverride: string | null
+  } => ({
+    tabId: opts.tabId,
+    taskId: opts.taskId,
+    mode: opts.mode,
+    cwd: opts.cwd,
+    providerFlagsOverride: opts.providerFlagsOverride ?? null
+  })
 
   // Stable ref so consumers (autocomplete `sources` useMemo, ChatPanel chatApi)
   // don't reinitialize on every parent render. dispatch is stable from useReducer.
   const sendMessage = useCallback(
     async (text: string): Promise<void> => {
-      const chat = getChatApi()
-      // Optimistic: paint the user-text immediately so the UI doesn't lag the IPC
+      // Optimistic: paint the user-text immediately so the UI doesn't lag the
       // roundtrip. Main still emits the canonical `user-message` event and the
       // reducer confirms-in-place (FIFO) when it arrives — single source of truth
       // for replay. `user-sent` is renderer-only; never persisted.
       dispatch({ type: 'user-sent', text })
       try {
-        const ok = await chat.send(opts.tabId, text)
+        const ok = await trpcClient.chat.send.mutate({ tabId: opts.tabId, text })
         if (!ok) dispatch({ type: 'user-send-failed' })
       } catch (err) {
         dispatch({ type: 'user-send-failed' })
         throw err
       }
     },
-    [opts.tabId]
+    [opts.tabId, trpcClient]
   )
 
   const sendToolResult = async (args: {
@@ -320,8 +289,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     content: string
     isError?: boolean
   }): Promise<boolean> => {
-    const chat = getChatApi()
-    return chat.sendToolResult(opts.tabId, args)
+    return trpcClient.chat.sendToolResult.mutate({ tabId: opts.tabId, args })
   }
 
   const respondPermission = async (args: {
@@ -334,7 +302,6 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         }
       | { behavior: 'deny'; message: string; interrupt?: boolean }
   }): Promise<boolean> => {
-    const chat = getChatApi()
     // Optimistic local clear so the renderer un-mounts the prompt UI as soon
     // as the user clicks. The CLI's tool_result will follow shortly and
     // confirm; the buffer-replay path also drops it via the tool-result
@@ -348,41 +315,26 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       }
       return next ?? prev
     })
-    return chat.respondPermission(opts.tabId, args)
+    return trpcClient.chat.respondPermission.mutate({ tabId: opts.tabId, args })
   }
 
   const interrupt = async (): Promise<void> => {
-    const chat = getChatApi()
     // Main records an `interrupted` event into the session buffer before kill+respawn;
     // the broadcast flows back via `chat:event` and the reducer appends the timeline
     // marker. Single source of truth → replay sees the same boundary.
-    await chat.interrupt({
-      tabId: opts.tabId,
-      taskId: opts.taskId,
-      mode: opts.mode,
-      cwd: opts.cwd,
-      providerFlagsOverride: opts.providerFlagsOverride ?? null
-    })
+    await trpcClient.chat.interrupt.mutate(createOpts())
   }
 
   const abortAndPop = async (): Promise<{ popped: boolean; text: string | null }> => {
-    const chat = getChatApi()
     // Main is authoritative: walks its own buffer to decide pop vs marker. The
     // synthetic event (`user-message-popped` or `interrupted`) flows back via
     // `chat:event`; reducer mutates the timeline. Return value tells the caller
     // whether to restore the popped text to the chat input field.
-    return chat.abortAndPop({
-      tabId: opts.tabId,
-      taskId: opts.taskId,
-      mode: opts.mode,
-      cwd: opts.cwd,
-      providerFlagsOverride: opts.providerFlagsOverride ?? null
-    })
+    return trpcClient.chat.abortAndPop.mutate(createOpts())
   }
 
   const kill = async (): Promise<void> => {
-    const chat = getChatApi()
-    await chat.kill(opts.tabId)
+    await trpcClient.chat.kill.mutate({ tabId: opts.tabId })
   }
 
   const reset = (): void => {

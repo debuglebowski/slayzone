@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Monitor, X } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   IconButton,
   getTerminalStateStyle,
@@ -33,25 +35,30 @@ interface TerminalStatusDialogProps {
 
 /** Trigger button — shows running PTY count, opens shared dialog. */
 export function TerminalStatusButton({ side = 'right' }: TerminalStatusButtonProps) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [count, setCount] = useState(0)
   const lastHashRef = useRef<string>('')
 
   const refreshPtys = useCallback(async () => {
-    const list = await window.api.pty.list()
+    const list = await trpcClient.pty.list.query()
     const hash = JSON.stringify(list.map((p) => ({ s: p.sessionId, st: p.state })))
     if (hash !== lastHashRef.current) {
       lastHashRef.current = hash
       setCount(list.length)
     }
     return hash
-  }, [])
+  }, [trpcClient])
 
   useStablePoll(refreshPtys, { enabled: true, baseDelayMs: 5000 })
 
-  useEffect(() => {
-    const unsub = window.api.pty.onStateChange(() => refreshPtys())
-    return unsub
-  }, [refreshPtys])
+  // Refresh the running-PTY count on any state transition. Server fan-out is
+  // global (no per-session filter); we don't read the payload here.
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: () => void refreshPtys()
+    })
+  )
 
   useEffect(() => {
     refreshPtys()
@@ -82,6 +89,8 @@ export function TerminalStatusButton({ side = 'right' }: TerminalStatusButtonPro
 
 /** Shared dialog — render once at app root. Controlled via useDialogStore.terminalsOpen. */
 export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialogProps) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const open = useDialogStore((s) => s.terminalsOpen)
   const closeTerminals = useDialogStore((s) => s.closeTerminals)
 
@@ -90,25 +99,31 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
   const [, tick] = useState(0)
   const lastHashRef = useRef<string>('')
 
+  const killMutation = useMutation(trpc.pty.kill.mutationOptions())
+
   const refreshPtys = useCallback(async () => {
-    const list = await window.api.pty.list()
+    const list = await trpcClient.pty.list.query()
     const hash = JSON.stringify(list.map((p) => ({ s: p.sessionId, st: p.state, c: p.createdAt })))
     if (hash !== lastHashRef.current) {
       lastHashRef.current = hash
       setPtys(list)
     }
     return hash
-  }, [])
+  }, [trpcClient])
 
   useStablePoll(refreshPtys, { enabled: open, baseDelayMs: 5000 })
 
   useVisibleInterval(() => tick((t) => t + 1), 1000, { enabled: open })
 
-  useEffect(() => {
-    const unsub = window.api.pty.onStateChange(() => refreshPtys())
-    return unsub
-  }, [refreshPtys])
+  // Refresh on any PTY state transition (server fan-out is global).
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: () => void refreshPtys()
+    })
+  )
 
+  // pty:stats (per-process CPU/RSS sampler) has no tRPC router procedure — it is
+  // not part of the pty router surface — so it stays on the IPC bridge.
   useEffect(() => {
     const unsub = window.api.pty.onStats((s) => setStats(s))
     return unsub
@@ -119,7 +134,7 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
   }, [open, refreshPtys])
 
   const handleTerminate = async (sessionId: string) => {
-    await window.api.pty.kill(sessionId)
+    await killMutation.mutateAsync({ sessionId })
     refreshPtys()
   }
 
