@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 
 /**
@@ -6,6 +7,7 @@ import type { Task } from '@slayzone/task/shared'
  * sidebar folder-tree expansion in useGitDiffFolders.
  */
 export function useGitDiffCollapse(task: Task | null) {
+  const trpcClient = useTRPCClient()
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
     () => new Set(task?.diff_collapsed_files ?? [])
   )
@@ -31,12 +33,12 @@ export function useGitDiffCollapse(task: Task | null) {
     const taskId = task.id
     const arr = [...collapsedFiles]
     saveTimerRef.current = setTimeout(() => {
-      void window.api.db.updateTask({ id: taskId, diffCollapsedFiles: arr })
+      void trpcClient.task.update.mutate({ id: taskId, diffCollapsedFiles: arr })
     }, 400)
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
-  }, [collapsedFiles, task?.id])
+  }, [collapsedFiles, task?.id, trpcClient])
 
   return { collapsedFiles, setCollapsedFiles }
 }

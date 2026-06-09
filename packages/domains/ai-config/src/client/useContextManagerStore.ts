@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
+import { getTrpcClient } from '@slayzone/transport/client'
 import type { ConfigLevel } from '../shared'
 
 export type SkillGroupBy = 'none' | 'source' | 'prefix'
@@ -200,7 +201,7 @@ useContextManagerStore.subscribe(
     if (!useContextManagerStore.getState().isLoaded) return
     if (_debounceTimer) clearTimeout(_debounceTimer)
     _debounceTimer = setTimeout(() => {
-      window.api.settings.set(DB_KEY, JSON.stringify(slice))
+      void getTrpcClient().settings.set.mutate({ key: DB_KEY, value: JSON.stringify(slice) })
     }, 500)
   },
   { equalityFn: shallow }

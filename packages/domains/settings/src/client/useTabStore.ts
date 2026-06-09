@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
+import { getTrpcClient } from '@slayzone/transport/client'
 import type { TaskStatus } from '@slayzone/task/shared'
 
 export type ActiveView = 'tabs' | 'leaderboard' | 'usage-analytics' | 'context'
@@ -629,7 +630,7 @@ useTabStore.subscribe(
     if (!useTabStore.getState().isLoaded) return
     if (_debounceTimer) clearTimeout(_debounceTimer)
     _debounceTimer = setTimeout(() => {
-      window.api.settings.set('viewState', JSON.stringify(slice))
+      void getTrpcClient().settings.set.mutate({ key: 'viewState', value: JSON.stringify(slice) })
     }, 500)
   },
   { equalityFn: shallow }
