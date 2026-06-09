@@ -6,6 +6,15 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { pressShortcut } from './shortcuts'
+import type { TrpcVanillaClient } from '@slayzone/transport/client'
+
+declare global {
+  interface Window {
+    /** Exposed by main.tsx under Playwright — the vanilla tRPC client.
+     *  Typing it here makes the page.evaluate() closures below type-checked. */
+    getTrpcVanillaClient: () => TrpcVanillaClient
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -427,7 +436,7 @@ export const test = base.extend<ElectronFixtures>({
 export function seed(page: Page) {
   return {
     createProject: (data: { name: string; color: string; path?: string }) =>
-      page.evaluate((d) => window.api.db.createProject(d), data),
+      page.evaluate((d) => window.getTrpcVanillaClient().projects.create.mutate(d), data),
 
     createTask: (data: {
       projectId: string
@@ -435,7 +444,7 @@ export function seed(page: Page) {
       status?: string
       priority?: number
       dueDate?: string
-    }) => page.evaluate((d) => window.api.db.createTask(d), data),
+    }) => page.evaluate((d) => window.getTrpcVanillaClient().task.create.mutate(d), data),
 
     updateTask: (data: {
       id: string
@@ -443,45 +452,52 @@ export function seed(page: Page) {
       priority?: number
       progress?: number
       dueDate?: string | null
-    }) => page.evaluate((d) => window.api.db.updateTask(d), data),
+    }) => page.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), data),
 
-    deleteTask: (id: string) => page.evaluate((i) => window.api.db.deleteTask(i), id),
+    deleteTask: (id: string) =>
+      page.evaluate((i) => window.getTrpcVanillaClient().task.delete.mutate({ id: i }), id),
 
-    archiveTask: (id: string) => page.evaluate((i) => window.api.db.archiveTask(i), id),
+    archiveTask: (id: string) =>
+      page.evaluate((i) => window.getTrpcVanillaClient().task.archive.mutate({ id: i }), id),
 
-    archiveTasks: (ids: string[]) => page.evaluate((i) => window.api.db.archiveTasks(i), ids),
+    archiveTasks: (ids: string[]) =>
+      page.evaluate((i) => window.getTrpcVanillaClient().task.archiveMany.mutate({ ids: i }), ids),
 
     createTag: (data: { name: string; color?: string; textColor?: string; projectId?: string }) =>
       page.evaluate(async (d) => {
-        const projectId = d.projectId ?? (await window.api.db.getProjects())[0]?.id
+        const c = window.getTrpcVanillaClient()
+        const projectId = d.projectId ?? (await c.projects.list.query())[0]?.id
         if (!projectId) {
           throw new Error('Cannot create tag without a project')
         }
-        return window.api.tags.createTag({ ...d, projectId })
+        return c.tags.create.mutate({ ...d, projectId })
       }, data),
 
     updateTag: (data: { id: string; name?: string; color?: string; textColor?: string }) =>
-      page.evaluate((d) => window.api.tags.updateTag(d), data),
+      page.evaluate((d) => window.getTrpcVanillaClient().tags.update.mutate(d), data),
 
-    deleteTag: (id: string) => page.evaluate((i) => window.api.tags.deleteTag(i), id),
+    deleteTag: (id: string) =>
+      page.evaluate((i) => window.getTrpcVanillaClient().tags.delete.mutate({ id: i }), id),
 
-    getTags: () => page.evaluate(() => window.api.tags.getTags()),
+    getTags: () => page.evaluate(() => window.getTrpcVanillaClient().tags.list.query()),
 
     setTagsForTask: (taskId: string, tagIds: string[]) =>
-      page.evaluate(({ t, tags }) => window.api.taskTags.setTagsForTask(t, tags), {
-        t: taskId,
-        tags: tagIds
-      }),
+      page.evaluate(
+        ({ t, tags }) =>
+          window.getTrpcVanillaClient().tags.setForTask.mutate({ taskId: t, tagIds: tags }),
+        { t: taskId, tags: tagIds }
+      ),
 
     addBlocker: (taskId: string, blockerTaskId: string) =>
-      page.evaluate(({ t, b }) => window.api.taskDependencies.addBlocker(t, b), {
-        t: taskId,
-        b: blockerTaskId
-      }),
+      page.evaluate(
+        ({ t, b }) =>
+          window.getTrpcVanillaClient().task.addBlocker.mutate({ taskId: t, blockerTaskId: b }),
+        { t: taskId, b: blockerTaskId }
+      ),
 
-    getProjects: () => page.evaluate(() => window.api.db.getProjects()),
+    getProjects: () => page.evaluate(() => window.getTrpcVanillaClient().projects.list.query()),
 
-    getTasks: () => page.evaluate(() => window.api.db.getTasks()),
+    getTasks: () => page.evaluate(() => window.getTrpcVanillaClient().task.getAll.query()),
 
     updateProject: (data: {
       id: string
@@ -496,24 +512,30 @@ export function seed(page: Page) {
         position: number
         category: 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled'
       }> | null
-    }) => page.evaluate((d) => window.api.db.updateProject(d), data),
+    }) => page.evaluate((d) => window.getTrpcVanillaClient().projects.update.mutate(d), data),
 
-    deleteProject: (id: string) => page.evaluate((i) => window.api.db.deleteProject(i), id),
+    deleteProject: (id: string) =>
+      page.evaluate((i) => window.getTrpcVanillaClient().projects.delete.mutate({ id: i }), id),
 
     deleteAllProjects: async () => {
       await page.evaluate(async () => {
-        const projects = await window.api.db.getProjects()
-        for (const p of projects) await window.api.db.deleteProject(p.id)
+        const c = window.getTrpcVanillaClient()
+        const projects = await c.projects.list.query()
+        for (const p of projects) await c.projects.delete.mutate({ id: p.id })
       })
     },
 
     setSetting: (key: string, value: string) =>
-      page.evaluate(({ k, v }) => window.api.settings.set(k, v), { k: key, v: value }),
+      page.evaluate(
+        ({ k, v }) => window.getTrpcVanillaClient().settings.set.mutate({ key: k, value: v }),
+        { k: key, v: value }
+      ),
 
-    getSetting: (key: string) => page.evaluate((k) => window.api.settings.get(k), key),
+    getSetting: (key: string) =>
+      page.evaluate((k) => window.getTrpcVanillaClient().settings.get.query({ key: k }), key),
 
     setTheme: (theme: 'light' | 'dark' | 'system') =>
-      page.evaluate((t) => window.api.theme.set(t), theme),
+      page.evaluate((t) => window.getTrpcVanillaClient().settings.setTheme.mutate(t), theme),
 
     // --- Artifacts ---
 
@@ -522,18 +544,22 @@ export function seed(page: Page) {
       title: string
       content?: string
       folderId?: string | null
-    }) => page.evaluate((d) => window.api.artifacts.create(d), data),
+    }) => page.evaluate((d) => window.getTrpcVanillaClient().artifacts.create.mutate(d), data),
 
     getArtifacts: (taskId: string) =>
-      page.evaluate((id) => window.api.artifacts.getByTask(id), taskId),
+      page.evaluate((id) => window.getTrpcVanillaClient().artifacts.getByTask.query({ taskId: id }), taskId),
 
-    deleteArtifact: (id: string) => page.evaluate((i) => window.api.artifacts.delete(i), id),
+    deleteArtifact: (id: string) =>
+      page.evaluate((i) => window.getTrpcVanillaClient().artifacts.delete.mutate({ id: i }), id),
 
     createArtifactFolder: (data: { taskId: string; name: string; parentId?: string | null }) =>
-      page.evaluate((d) => window.api.artifactFolders.create(d), data),
+      page.evaluate((d) => window.getTrpcVanillaClient().artifacts.foldersCreate.mutate(d), data),
 
     getArtifactFolders: (taskId: string) =>
-      page.evaluate((id) => window.api.artifactFolders.getByTask(id), taskId),
+      page.evaluate(
+        (id) => window.getTrpcVanillaClient().artifacts.foldersGetByTask.query({ taskId: id }),
+        taskId
+      ),
 
     /** Re-fetch all data from DB into React state */
     refreshData: () =>
