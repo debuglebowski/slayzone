@@ -15,13 +15,14 @@ export function ProvidersPanel() {
     })
   )
 
+  const refetchProviders = providersQuery.refetch
   useEffect(() => {
-    const handler = () => {
-      void providersQuery.refetch()
+    const handler = (): void => {
+      void refetchProviders()
     }
     window.addEventListener('sz:settings-changed', handler)
     return () => window.removeEventListener('sz:settings-changed', handler)
-  }, [providersQuery])
+  }, [refetchProviders])
 
   const providers = providersQuery.data
 
