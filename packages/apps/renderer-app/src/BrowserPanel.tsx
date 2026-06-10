@@ -65,7 +65,16 @@ export function makeBrowserPanel(host: EmbeddedTabHostApi) {
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') go()
+              else if (e.key === 'Escape') {
+                setInput(state.url)
+                setEditing(false)
+                e.currentTarget.blur()
+              }
             }}
+            // Select-all on focus so click-then-type REPLACES the pre-filled URL
+            // (standard URL-bar behavior). Without this, typing appends to the
+            // current URL → garbage → "can't navigate".
+            onFocus={(e) => e.currentTarget.select()}
             onBlur={() => setEditing(false)}
             spellCheck={false}
             style={{
