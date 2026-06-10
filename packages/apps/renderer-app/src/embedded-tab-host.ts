@@ -34,6 +34,7 @@ interface BrowserApi {
     tabId: string
     url: string
     bounds: { x: number; y: number; width: number; height: number }
+    profileKey?: string
   }): Promise<string>
   destroyView(viewId: string): Promise<void>
   setBounds(viewId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
@@ -48,6 +49,17 @@ interface BrowserApi {
 function browserApi(): BrowserApi | null {
   const api = (window as unknown as { api?: { browser?: BrowserApi } }).api
   return api?.browser ?? null
+}
+
+// Pooled-profile key applied to NEW pane views — the task's identity (own
+// Google login / 1Password). '' = the shell's default profile. The shell's
+// profile dropdown sets this; panes created afterwards open on that profile.
+let currentProfileKey = ''
+export function setEmbeddedProfileKey(key: string): void {
+  currentProfileKey = key
+}
+export function getEmbeddedProfileKey(): string {
+  return currentProfileKey
 }
 
 const DEFAULT_STATE: TabState = {
@@ -161,7 +173,7 @@ export function createEmbeddedTabHost(taskId: string, defaultUrl: string): Embed
     e.lastRect = rect
     if (e.creating) return
     e.creating = api
-      .createView({ taskId, tabId: tileId, url: e.state.url, bounds: toBounds(rect) })
+      .createView({ taskId, tabId: tileId, url: e.state.url, bounds: toBounds(rect), profileKey: currentProfileKey })
       .then((viewId) => {
         e.creating = null
         if (!viewId) return '' // transport absent — stay inert

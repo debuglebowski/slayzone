@@ -42,6 +42,10 @@ struct CreateViewParams {
   string url;
   EmbeddedTabBounds bounds;
   bool visible;
+  // Pooled-profile key for the task's identity (own cookies / Google login /
+  // extensions). Empty = the shell's default profile. Appended last to keep the
+  // struct wire-compatible.
+  string profile_key;
 };
 
 interface EmbeddedTabHost {

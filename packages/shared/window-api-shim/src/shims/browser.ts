@@ -152,6 +152,9 @@ async function createView(opts: CreateViewParams): Promise<string> {
       height: opts.bounds.height,
     },
     visible: true,
+    // Pooled-profile key for the task's identity (own Google login / 1Password).
+    // Empty = the shell's default profile.
+    profileKey: (opts as { profileKey?: string }).profileKey ?? '',
   })
   console.debug('[browser-shim] createView resolved', {
     taskId: opts.taskId,

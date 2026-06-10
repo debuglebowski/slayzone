@@ -998,6 +998,7 @@ export interface CreateViewParamsMojoType {
   url: string;
   bounds: EmbeddedTabBounds;
   visible: boolean;
+  profileKey: string;
 }
 
 
@@ -1056,8 +1057,18 @@ mojo.internal.Struct<CreateViewParamsMojoType>(
         undefined,
         undefined,
     ),
+      mojo.internal.StructField<CreateViewParamsMojoType, string>(
+        'profileKey', 40,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
     ],
-    [[0, 48],]);
+    [[0, 56],]);
 
 
 

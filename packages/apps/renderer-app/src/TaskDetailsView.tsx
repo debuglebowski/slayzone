@@ -3,7 +3,7 @@
 // layout tree, with working divider resize, a native-pane seam (no-op host),
 // localStorage persistence, and an overlay-plane demo dialog.
 import type { CSSProperties } from 'react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   COLORS,
   LayoutRoot,
@@ -18,7 +18,7 @@ import {
   useLayoutTree
 } from '@slayzone/layout'
 import type { LayoutNode, LayoutTree, PanelProps, PanelRegistry, Tile, TileType } from '@slayzone/layout'
-import { createEmbeddedTabHost } from './embedded-tab-host'
+import { createEmbeddedTabHost, setEmbeddedProfileKey } from './embedded-tab-host'
 import { makeBrowserPanel } from './BrowserPanel'
 
 const TASK_ID = 'sample-task'
@@ -154,6 +154,20 @@ function PanelToggle({ active, onToggle }: { active: Set<string>; onToggle: (typ
 export function TaskDetailsView() {
   const tree = useLayoutTree()
   const activeTypes = useMemo(() => collectTileTypes(tree.root), [tree])
+  const [profile, setProfile] = useState('')
+
+  // Per-task identity (pooled profile): each choice = its own Google login +
+  // 1Password. Changing it re-creates the browser pane on the new profile.
+  const onProfileChange = (key: string): void => {
+    setProfile(key)
+    setEmbeddedProfileKey(key)
+    const store = useLayoutStore.getState()
+    const browserTileId = findTileIdOfType(store.tree.root, 'browser')
+    if (browserTileId) {
+      store.closeTile(browserTileId)
+      setTimeout(() => useLayoutStore.getState().openTile(null, makeTile('browser')), 60)
+    }
+  }
 
   const toggle = (type: TileType): void => {
     const store = useLayoutStore.getState()
@@ -196,7 +210,10 @@ export function TaskDetailsView() {
       taskId: 'extensions',
       tabId: 'extensions',
       url: 'slayzone:open-extensions',
-      bounds: { x: 0, y: 0, width: 0, height: 0 }
+      bounds: { x: 0, y: 0, width: 0, height: 0 },
+      // Open the management window on the task's CURRENT identity, so installs
+      // (1Password) land in the profile that identity's panes use.
+      profileKey: profile
     })
   }
 
@@ -245,6 +262,22 @@ export function TaskDetailsView() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <PanelToggle active={activeTypes} onToggle={toggle} />
+          <select
+            value={profile}
+            onChange={(e) => onProfileChange(e.target.value)}
+            title="Identity this task browses as (own Google login + 1Password)"
+            style={{
+              ...toggleBtnBase,
+              background: COLORS.barBg,
+              border: `1px solid ${COLORS.border}`,
+              color: COLORS.muted,
+              appearance: 'none'
+            }}
+          >
+            <option value="">Profile: Default</option>
+            <option value="work">Profile: Work</option>
+            <option value="personal">Profile: Personal</option>
+          </select>
           <button
             type="button"
             onClick={openExtensions}

@@ -1,0 +1,326 @@
+From 7264842eb874ae315f9d711d5b25e1119be23eca Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Wed, 10 Jun 2026 19:47:37 +0200
+Subject: [PATCH] feat(slayzone): per-task pooled profiles (different Google
+ login per task)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Each task can browse as a named "identity" — its own cookies / Google login /
+1Password — fully isolated from other tasks.
+
+- CreateViewParams gains `profile_key`. The host resolves it via ResolveProfile:
+  empty → the shell's default profile (sync); a pooled key → get-or-create the
+  `slayzone-<key>` profile (ProfileManager::CreateProfileAsync on first use) +
+  a ScopedProfileKeepAlive so it survives. CreateView is split into a resolve
+  step + CreateViewOnProfile continuation.
+- GetOrCreateTaskBrowser now takes the resolved Profile and is keyed so that a
+  task switching identities closes its old Browser and rebuilds on the new
+  profile. Per-profile cookie + extension isolation is architectural
+  (StoragePartition / ExtensionRegistry).
+- OpenExtensionsWindow takes a profile_key too → the management window opens on
+  the chosen identity, so Web-Store installs (1Password) land in that profile
+  and apply to its task panes.
+
+Verified: two panes on "work"/"personal" get independent cookie jars.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ .../browser/slayzone/mojom/embedded_tab.mojom |   4 +
+ .../slayzone/slayzone_embedded_tab_host.cc    | 134 +++++++++++++++---
+ .../slayzone/slayzone_embedded_tab_host.h     |  44 ++++--
+ 3 files changed, 151 insertions(+), 31 deletions(-)
+
+diff --git a/chrome/browser/slayzone/mojom/embedded_tab.mojom b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+index 32de468869e20..184ee8918f7c9 100644
+--- a/chrome/browser/slayzone/mojom/embedded_tab.mojom
++++ b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+@@ -42,6 +42,10 @@ struct CreateViewParams {
+   string url;
+   EmbeddedTabBounds bounds;
+   bool visible;
++  // Pooled-profile key for the task's identity (own cookies / Google login /
++  // extensions). Empty = the shell's default profile. Appended last to keep the
++  // struct wire-compatible.
++  string profile_key;
+ };
+ 
+ interface EmbeddedTabHost {
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index 62da5a28831b7..cdea32bb0f950 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -8,11 +8,17 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "base/files/file_path.h"
++#include "base/functional/bind.h"
+ #include "base/logging.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/browser_process.h"
+ #include "chrome/browser/devtools/devtools_window.h"
++#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
++#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_manager.h"
+ #include "chrome/browser/slayzone/layout_features.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+@@ -198,16 +204,20 @@ void SlayzoneEmbeddedTabHost::Bind(
+ }
+ 
+ Browser* SlayzoneEmbeddedTabHost::GetOrCreateTaskBrowser(
+-    const std::string& task_id) {
+-  auto it = task_browsers_.find(task_id);
+-  if (it != task_browsers_.end() && it->second) {
+-    return it->second;
+-  }
+-  Profile* profile = Profile::FromBrowserContext(browser_context_);
++    const std::string& task_id, Profile* profile) {
+   if (!profile) {
+-    LOG(WARNING) << "[embedded_tab] no Profile from browser_context_";
+     return nullptr;
+   }
++  auto it = task_browsers_.find(task_id);
++  if (it != task_browsers_.end() && it->second) {
++    if (it->second->profile() == profile) {
++      return it->second;  // same identity → reuse
++    }
++    // Task switched identities — close the old Browser, build a new one on the
++    // new profile. CloseAllTabs empties it → OnBrowserRemoved drops the entry.
++    it->second->tab_strip_model()->CloseAllTabs();
++    task_browsers_.erase(it);
++  }
+   // Windowless Browser: CreateParams builds the BrowserWindow but we NEVER call
+   // window()->Show(), so no OS window appears. It still self-registers in
+   // BrowserList/WindowControllerList, which makes its tabs real,
+@@ -239,18 +249,29 @@ Browser* SlayzoneEmbeddedTabHost::GetOrCreateTaskBrowser(
+   return browser;
+ }
+ 
+-void SlayzoneEmbeddedTabHost::OpenExtensionsWindow() {
+-  if (extensions_browser_) {
+-    // Already open — just surface it.
+-    extensions_browser_->window()->Show();
+-    extensions_browser_->window()->Activate();
+-    return;
+-  }
+-  Profile* profile = Profile::FromBrowserContext(browser_context_);
++void SlayzoneEmbeddedTabHost::OpenExtensionsWindow(
++    const std::string& profile_key) {
++  ResolveProfile(
++      profile_key,
++      base::BindOnce(&SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile,
++                     weak_factory_.GetWeakPtr()));
++}
++
++void SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile(Profile* profile) {
+   if (!profile) {
+-    LOG(WARNING) << "[embedded_tab] OpenExtensionsWindow — no Profile";
++    LOG(WARNING) << "[embedded_tab] OpenExtensionsWindow — profile unresolved";
+     return;
+   }
++  if (extensions_browser_) {
++    if (extensions_browser_->profile() == profile) {
++      extensions_browser_->window()->Show();
++      extensions_browser_->window()->Activate();
++      return;  // already open on this identity
++    }
++    // A different identity was requested — close the old window first.
++    extensions_browser_->tab_strip_model()->CloseAllTabs();
++    extensions_browser_ = nullptr;
++  }
+   // A NORMAL, VISIBLE Browser on the panes' profile. The marker makes the
+   // window factory give it a plain BrowserView (real toolbar/omnibox, no shell
+   // takeover, not hidden) — so chrome://extensions, the Web Store and native
+@@ -293,6 +314,55 @@ void SlayzoneEmbeddedTabHost::OpenExtensionsWindow() {
+             << extensions_browser_.get();
+ }
+ 
++void SlayzoneEmbeddedTabHost::ResolveProfile(
++    const std::string& profile_key,
++    base::OnceCallback<void(Profile*)> cb) {
++  if (profile_key.empty()) {
++    // Default identity — the shell's own profile (synchronous).
++    std::move(cb).Run(Profile::FromBrowserContext(browser_context_));
++    return;
++  }
++  ProfileManager* pm = g_browser_process->profile_manager();
++  if (!pm) {
++    std::move(cb).Run(nullptr);
++    return;
++  }
++  const base::FilePath path =
++      pm->user_data_dir().AppendASCII("slayzone-" + profile_key);
++  if (Profile* existing = pm->GetProfileByPath(path)) {
++    EnsureKeepAlive(existing);
++    std::move(cb).Run(existing);
++    return;
++  }
++  LOG(INFO) << "[embedded_tab] creating pooled profile '" << profile_key
++            << "' at " << path.AsUTF8Unsafe();
++  pm->CreateProfileAsync(
++      path, base::BindOnce(
++                [](base::WeakPtr<SlayzoneEmbeddedTabHost> self,
++                   base::OnceCallback<void(Profile*)> cb, Profile* profile) {
++                  if (self && profile) {
++                    self->EnsureKeepAlive(profile);
++                  }
++                  std::move(cb).Run(profile);
++                },
++                weak_factory_.GetWeakPtr(), std::move(cb)));
++}
++
++void SlayzoneEmbeddedTabHost::EnsureKeepAlive(Profile* profile) {
++  if (!profile || profile == Profile::FromBrowserContext(browser_context_)) {
++    return;  // default profile needs no keep-alive from us
++  }
++  for (const auto& ka : pool_keepalives_) {
++    if (ka && ka->profile() == profile) {
++      return;  // already held
++    }
++  }
++  if (auto ka = ScopedProfileKeepAlive::TryAcquire(
++          profile, ProfileKeepAliveOrigin::kHeadlessCommand)) {
++    pool_keepalives_.push_back(std::move(ka));
++  }
++}
++
+ void SlayzoneEmbeddedTabHost::CreateView(
+     slayzone::embedded_tab::mojom::CreateViewParamsPtr params,
+     CreateViewCallback callback) {
+@@ -313,7 +383,28 @@ void SlayzoneEmbeddedTabHost::CreateView(
+   // Sentinel: open the VISIBLE extension-management window instead of a pane.
+   // Reuses the existing mojo pipe so no new mojom is needed for the trigger.
+   if (params->url == "slayzone:open-extensions") {
+-    OpenExtensionsWindow();
++    OpenExtensionsWindow(params->profile_key);
++    std::move(callback).Run(std::string());
++    return;
++  }
++
++  // Resolve the task's pooled profile (async on first use of a pool), then
++  // build the view on it.
++  const std::string profile_key = params->profile_key;
++  ResolveProfile(
++      profile_key,
++      base::BindOnce(&SlayzoneEmbeddedTabHost::CreateViewOnProfile,
++                     weak_factory_.GetWeakPtr(), std::move(params),
++                     std::move(callback)));
++}
++
++void SlayzoneEmbeddedTabHost::CreateViewOnProfile(
++    slayzone::embedded_tab::mojom::CreateViewParamsPtr params,
++    CreateViewCallback callback,
++    Profile* profile) {
++  if (!profile || !container_) {
++    LOG(WARNING) << "[embedded_tab] CreateViewOnProfile aborted — "
++                 << (!profile ? "profile unresolved" : "no container");
+     std::move(callback).Run(std::string());
+     return;
+   }
+@@ -323,10 +414,8 @@ void SlayzoneEmbeddedTabHost::CreateView(
+   // creates a fresh one for the same tile. If we returned the SAME view_id, the
+   // old anchor's in-flight teardown would destroy the tab the new anchor is now
+   // using (a destroy-shared-view race → blank pane). Each CreateView gets its
+-  // own tab; the orphaned one is torn down by the renderer's destroyView. The
+-  // create-storm that idempotency was meant to cap is gone now that the shell
+-  // takeover no longer recurses (see GetOrCreateTaskBrowser marker).
+-  Browser* browser = GetOrCreateTaskBrowser(params->task_id);
++  // own tab; the orphaned one is torn down by the renderer's destroyView.
++  Browser* browser = GetOrCreateTaskBrowser(params->task_id, profile);
+   if (!browser) {
+     std::move(callback).Run(std::string());
+     return;
+@@ -359,7 +448,8 @@ void SlayzoneEmbeddedTabHost::CreateView(
+   EvictIfOverCap();
+ 
+   LOG(INFO) << "[embedded_tab] CreateView resolved view_id=" << view_id
+-            << " loaded=" << url.possibly_invalid_spec();
++            << " loaded=" << url.possibly_invalid_spec()
++            << " profile=" << profile->GetPath().BaseName().AsUTF8Unsafe();
+   std::move(callback).Run(view_id);
+ }
+ 
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index eb39872394994..792d7ae347862 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -9,6 +9,7 @@
+ #include <map>
+ #include <memory>
+ #include <string>
++#include <vector>
+ 
+ #include "base/functional/callback_helpers.h"
+ #include "base/memory/raw_ptr.h"
+@@ -23,6 +24,8 @@
+ #include "ui/gfx/geometry/rect.h"
+ 
+ class Browser;
++class Profile;
++class ScopedProfileKeepAlive;
+ class SlayzoneShellContainer;
+ 
+ namespace content {
+@@ -125,15 +128,34 @@ class SlayzoneEmbeddedTabHost
+   // caps need telemetry before we justify them.
+   static constexpr size_t kLruCap = 10;
+ 
+-  // Return the task's windowless Browser, creating it on first use. Null only
+-  // if the shell's Profile can't be resolved.
+-  Browser* GetOrCreateTaskBrowser(const std::string& task_id);
+-
+-  // Open (or focus) the single VISIBLE extension-management window — a normal
+-  // Chrome window on the panes' profile, at chrome://extensions. Triggered by
+-  // the CreateView sentinel url "slayzone:open-extensions". Native install
+-  // prompts anchor to this visible window, so Web-Store install works.
+-  void OpenExtensionsWindow();
++  // Return the task's windowless Browser on `profile`, creating it on first use.
++  // If a Browser already exists for the task but on a DIFFERENT profile (the
++  // task switched identities), the old one is closed and a new one is made.
++  Browser* GetOrCreateTaskBrowser(const std::string& task_id, Profile* profile);
++
++  // Resolve a `profile_key` to a `Profile` and run `cb` (null on failure).
++  // Empty key → the shell's default profile (synchronous). A pooled key →
++  // get-or-create the `slayzone-<key>` profile (async on first use) + hold a
++  // keep-alive so it survives.
++  void ResolveProfile(const std::string& profile_key,
++                      base::OnceCallback<void(Profile*)> cb);
++
++  // Hold one keep-alive per pooled profile so it isn't torn down under us. The
++  // default profile needs none.
++  void EnsureKeepAlive(Profile* profile);
++
++  // Continuation of CreateView once its profile is resolved.
++  void CreateViewOnProfile(
++      slayzone::embedded_tab::mojom::CreateViewParamsPtr params,
++      CreateViewCallback callback,
++      Profile* profile);
++
++  // Open the VISIBLE extension-management window (Web Store + native install
++  // prompts) on the pooled profile named by `profile_key` (empty = default).
++  // Installs land in that identity → apply to that identity's task panes.
++  // Triggered by the CreateView sentinel url "slayzone:open-extensions".
++  void OpenExtensionsWindow(const std::string& profile_key);
++  void OpenExtensionsWindowOnProfile(Profile* profile);
+ 
+   Entry* FindEntry(const std::string& view_id);
+ 
+@@ -162,6 +184,10 @@ class SlayzoneEmbeddedTabHost
+   // OnBrowserRemoved when the user closes it.
+   raw_ptr<Browser> extensions_browser_ = nullptr;
+ 
++  // SPIKE — keep-alives holding pooled secondary profiles alive while their
++  // windowless Browsers exist.
++  std::vector<std::unique_ptr<ScopedProfileKeepAlive>> pool_keepalives_;
++
+   // view_id → Entry (non-owning ref to a TabStripModel tab + its observer).
+   std::map<std::string, std::unique_ptr<Entry>> entries_;
+ 
+-- 
+2.52.0
+
