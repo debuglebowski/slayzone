@@ -1,0 +1,193 @@
+From 79ac9c9fd2cfa4cff1dd998620b0f9d87b58e8b4 Mon Sep 17 00:00:00 2001
+From: debuglebowski <kh.hansson@gmail.com>
+Date: Wed, 10 Jun 2026 08:39:34 +0200
+Subject: [68/68] feat(slayzone): native dialog overlay above the live embedded
+ tab (cap-layout-p4)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SlayzoneOverlayManager gains a 'dialog' overlay id → loads the shell bundle
+at chrome://slayzone-shell/#overlay=dialog with a TRANSPARENT page background
+(SetPageBaseBackgroundColor) so the live embedded tab stays visible underneath.
+SlayzoneShellUI exposes a LayoutHost BindInterface (routes to the active
+BrowserView's LayoutHost) + binder registration, so the shell page can call
+ShowOverlay.
+
+Also fixes SlayzoneShellUI::HandleShellRequest to strip query/fragment from the
+data-source path before file resolution — the chrome:// router leaks ?/# into
+`path` on this build, so '#overlay=dialog' resolved a bogus file → empty body
+(the native-dialog-blank bug). The SPA reads ?/# from its own location.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ ...r_interface_binders_webui_parts_desktop.cc |  5 +++-
+ .../slayzone/slayzone_overlay_manager.cc      | 17 +++++++++++++
+ .../slayzone/slayzone_overlay_manager.h       |  7 +++++-
+ .../ui/webui/slayzone/slayzone_shell_ui.cc    | 24 +++++++++++++++++++
+ .../ui/webui/slayzone/slayzone_shell_ui.h     |  9 +++++++
+ 5 files changed, 60 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 87ead60f702b0..a7bea7f6b8b07 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -812,7 +812,10 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+       .Add<slayzone::dialog::mojom::NativeDialogHost>()
+       .Add<slayzone::embedded_tab::mojom::EmbeddedTabHost>()
+       .Add<slayzone::windows::mojom::WindowsHost>()
+-      .Add<slayzone::json_rpc::mojom::JsonRpcHost>();
++      .Add<slayzone::json_rpc::mojom::JsonRpcHost>()
++      // cap-layout-p4 — ShowOverlay("dialog") from the shell page raises the
++      // native dialog surface above the live embedded tab.
++      .Add<slayzone::layout::mojom::LayoutHost>();
+   // Phase 7.7 — chrome://slayzone-terminal/ binds to a per-frame
+   // SlayzoneTerminalHost owned by the UI controller (one pty per frame).
+   registry.ForWebUI<SlayzoneTerminalUI>()
+diff --git a/chrome/browser/slayzone/slayzone_overlay_manager.cc b/chrome/browser/slayzone/slayzone_overlay_manager.cc
+index 321eb921a913f..6bf7f2a52880d 100644
+--- a/chrome/browser/slayzone/slayzone_overlay_manager.cc
++++ b/chrome/browser/slayzone/slayzone_overlay_manager.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <algorithm>
+ #include <memory>
++#include <optional>
+ #include <string>
+ #include <utility>
+ 
+@@ -13,6 +14,8 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "content/public/browser/web_contents.h"
++#include "third_party/skia/include/core/SkColor.h"
+ #include "ui/views/controls/webview/webview.h"
+ #include "ui/views/view.h"
+ #include "url/gurl.h"
+@@ -59,10 +62,24 @@ bool SlayzoneOverlayManager::SetOverlay(std::string_view overlay_id) {
+   std::string url;
+   if (overlay_id == "search") {
+     url = "chrome://slayzone-dialogs/search?invocation=overlay";
++  } else if (overlay_id == "dialog") {
++    // cap-layout-p4 — shell bundle in overlay-dialog mode. Transparent page
++    // background (set below) keeps the live embedded tab visible underneath.
++    // Fragment (not query): the shell's URL data source serves the bundle for
++    // the root path only — a query string yields an empty document.
++    url = "chrome://slayzone-shell/#overlay=dialog";
+   } else {
+     url = base::StrCat({"chrome://slayzone-", overlay_id, "/"});
+   }
+   overlay_webview_->LoadInitialURL(GURL(url));
++  if (content::WebContents* contents = overlay_webview_->GetWebContents()) {
++    // cap-layout-p4 — transparent base background for the dialog surface so
++    // underlying content shows through wherever the page is transparent;
++    // opaque default for the full-bleed overlays.
++    contents->SetPageBaseBackgroundColor(
++        overlay_id == "dialog" ? std::optional<SkColor>(SK_ColorTRANSPARENT)
++                               : std::nullopt);
++  }
+   overlay_webview_->SetBoundsRect(view_->GetContentsBounds());
+   // Keep overlay at the top of the z-order so it paints over the region
+   // grid + any home-panel WebView that may be active underneath.
+diff --git a/chrome/browser/slayzone/slayzone_overlay_manager.h b/chrome/browser/slayzone/slayzone_overlay_manager.h
+index f322d64e6a385..3c30ddf9b4a1e 100644
+--- a/chrome/browser/slayzone/slayzone_overlay_manager.h
++++ b/chrome/browser/slayzone/slayzone_overlay_manager.h
+@@ -41,11 +41,16 @@ class SlayzoneOverlayManager : public views::ViewObserver {
+   // than silently loading a bogus chrome://slayzone-<id>/. cap-03 adds
+   // "search" which routes into the Phase 10.1 dialogs host rather than
+   // its own chrome:// surface (scope fence: no new chrome:// hosts).
+-  static constexpr std::array<std::string_view, 4> kOverlayIds = {
++  // "dialog" (cap-layout-p4) loads the shell bundle in overlay mode
++  // (chrome://slayzone-shell/?overlay=dialog) with a TRANSPARENT page
++  // background so the live embedded tab stays visible underneath. Modal
++  // semantics: the overlay WebView absorbs all input while shown.
++  static constexpr std::array<std::string_view, 5> kOverlayIds = {
+       "leaderboard",
+       "usage",
+       "context",
+       "search",
++      "dialog",
+   };
+ 
+   explicit SlayzoneOverlayManager(SlayzoneBrowserView* view);
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+index 9bf87690f2f05..3752508e4e424 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+@@ -34,6 +34,7 @@
+ #include "chrome/browser/slayzone/slayzone_tasklist_host.h"
+ #include "chrome/browser/slayzone/slayzone_terminal_host.h"
+ #include "chrome/browser/slayzone/slayzone_windows_host.h"
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
+ #include "chrome/common/webui_url_constants.h"
+@@ -217,6 +218,16 @@ void HandleShellRequest(
+   }
+ 
+   std::string rel = path;
++  // cap-layout-p4 — strip any query/fragment that leaked into `path` (the
++  // chrome:// data-source router includes it on this build). The shell is an
++  // SPA: the renderer reads ?query/#hash from its own location; the server
++  // only ever needs the file path. Without this, `chrome://slayzone-shell/
++  // #overlay=dialog` resolves `rel="#overlay=dialog"` → file miss → empty body
++  // (the native-dialog-overlay-blank bug).
++  const size_t cut = rel.find_first_of("?#");
++  if (cut != std::string::npos) {
++    rel.erase(cut);
++  }
+   if (!rel.empty() && rel.front() == '/') {
+     rel.erase(0, 1);
+   }
+@@ -393,6 +404,19 @@ void SlayzoneShellUI::BindInterface(
+   json_rpc_host_->Bind(std::move(receiver));
+ }
+ 
++void SlayzoneShellUI::BindInterface(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  // cap-layout-p4 — route to the active BrowserView's LayoutHost so the shell
++  // page (and the overlay-mode shell instance) can drive ShowOverlay. Silent
++  // drop when no active view (headless / teardown races) — matches the
++  // tasklist/projects binders above.
++  SlayzoneBrowserView* view = SlayzoneBrowserView::GetActiveInstance();
++  if (!view || !view->layout_host()) {
++    return;
++  }
++  view->layout_host()->Bind(std::move(receiver));
++}
++
+ void SlayzoneShellUI::EraseTerminalHost(slayzone::SlayzoneTerminalHost* host) {
+   terminal_hosts_.remove_if(
+       [host](const std::unique_ptr<slayzone::SlayzoneTerminalHost>& p) {
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h
+index 403b184d62119..247d9906e39de 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.h
+@@ -12,6 +12,7 @@
+ #include "chrome/browser/slayzone/mojom/dialog.mojom.h"
+ #include "chrome/browser/slayzone/mojom/embedded_tab.mojom.h"
+ #include "chrome/browser/slayzone/mojom/json_rpc.mojom.h"
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
+ #include "chrome/browser/slayzone/mojom/projects.mojom.h"
+ #include "chrome/browser/slayzone/mojom/settings.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tags.mojom.h"
+@@ -96,6 +97,14 @@ class SlayzoneShellUI : public content::WebUIController {
+   void BindInterface(
+       mojo::PendingReceiver<slayzone::json_rpc::mojom::JsonRpcHost> receiver);
+ 
++  // cap-layout-p4 — layout intents from the shell page. ShowOverlay("dialog")
++  // raises the native dialog surface above the live embedded tab; the
++  // overlay-mode shell instance closes itself via ShowOverlay(""). Routes to
++  // the active SlayzoneBrowserView's LayoutHost (tabbar binder pattern, but
++  // via GetActiveInstance — the shell WebContents is not a region webview).
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver);
++
+  private:
+   void EraseTerminalHost(slayzone::SlayzoneTerminalHost* host);
+ 
+-- 
+2.52.0
+

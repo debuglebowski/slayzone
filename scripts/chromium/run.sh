@@ -88,4 +88,14 @@ EXTRA_ARGS=(
   "--slayzone-shell-bundle-dir=$SLAYZONE_SHELL_BUNDLE_DIR"
 )
 
+# cap-layout-p4 — the ad-hoc-signed dev build deadlocks the browser main thread
+# in OSCrypt → KeychainPassword::GetPassword() (synchronous Keychain mutex never
+# returns without the right entitlement), so the message loop never starts and
+# the window/DevTools never come up ("Terminating after 15s with no
+# connection"). Mock keychain sidesteps it. Override with SLAYZONE_REAL_KEYCHAIN=1
+# once the build is properly codesigned with keychain-access entitlements.
+if [[ "${SLAYZONE_REAL_KEYCHAIN:-0}" != "1" ]]; then
+  EXTRA_ARGS+=("--use-mock-keychain")
+fi
+
 exec "$APP" "${EXTRA_ARGS[@]}" "$@"

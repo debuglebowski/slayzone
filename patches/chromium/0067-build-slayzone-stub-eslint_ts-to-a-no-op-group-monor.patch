@@ -1,0 +1,110 @@
+From a9b593746350ac78838347b156add8a443d5bf0b Mon Sep 17 00:00:00 2001
+From: debuglebowski <kh.hansson@gmail.com>
+Date: Wed, 10 Jun 2026 08:39:29 +0200
+Subject: [67/68] build(slayzone): stub eslint_ts to a no-op group (monorepo
+ node_modules leak)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The fork tree lives inside the SlayZone pnpm monorepo; tsc-based webui lint
+steps resolve typescript/@typescript-eslint from the MONOREPO node_modules via
+walk-up → type-instance mismatch + ts_library.py undeclared-definition asserts
+on any clean build. Stub the eslint_ts() template fork-wide (lint-only, zero
+product output). Restore once src node-module resolution is pinned to the
+vendored toolchain.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ ui/webui/resources/tools/eslint_ts.gni | 70 +++++---------------------
+ 1 file changed, 12 insertions(+), 58 deletions(-)
+
+diff --git a/ui/webui/resources/tools/eslint_ts.gni b/ui/webui/resources/tools/eslint_ts.gni
+index 7ae2070ce78d7..a38b5788973d0 100644
+--- a/ui/webui/resources/tools/eslint_ts.gni
++++ b/ui/webui/resources/tools/eslint_ts.gni
+@@ -2,69 +2,23 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-import("//third_party/node/node.gni")
+-
+ # GN rule to run ESlint type-aware checks on TypeScript files. Unlike the ESLint
+ # checks in tools/web_dev_style/eslint.config.mjs which are run on presubmit,
+ # these checks require TS type information (provided in the form of a tsconfig
+ # file) to run.
++#
++# slayzone (cap-layout-p4) — stubbed to a no-op group fork-wide. The fork tree
++# lives inside the SlayZone pnpm monorepo; tsc's bare-import resolution walks
++# above src/ and resolves typescript/@typescript-eslint from the monorepo's
++# node_modules instead of //third_party/node/node_modules (type-instance
++# mismatch + undeclared-definition assertions in ts_library.py) on any clean
++# build. This template only powers lint checks — no product output. Restore the
++# original template (see git history) once src-level node module resolution is
++# pinned to the vendored toolchain (e.g. a src/node_modules symlink).
+ 
+ template("eslint_ts") {
+-  node(target_name) {
+-    script = "//ui/webui/resources/tools/eslint_ts.py"
+-
+-    forward_variables_from(invoker,
+-                           [
+-                             "in_folder",
+-                             "in_files",
+-                             "tsconfig",
+-                             "enable_no_chrome_send",
+-                             "enable_web_component_missing_deps",
+-                             "visibility",
+-                           ])
+-
+-    inputs = [
+-      tsconfig,
+-      "//ui/webui/resources/tools/eslint/custom_loader.mjs",
+-    ]
+-    outputs = [ "$target_gen_dir/eslint.config.mjs" ]
+-
+-    deps = [ "//ui/webui/resources/tools/eslint:build_ts" ]
+-    if (defined(invoker.deps)) {
+-      deps += invoker.deps
+-    }
+-
+-    foreach(f, in_files) {
+-      extension = get_path_info(f, "extension")
+-      assert(extension == "ts")
+-      inputs += [ "${in_folder}/${f}" ]
+-    }
+-
+-    # The file holding the ESLint configuration.
+-    config_base = "${root_gen_dir}/ui/webui/resources/tools/eslint/eslint_ts.config_base.js"
+-
+-    args = [
+-             "--in_folder",
+-             rebase_path(in_folder, root_build_dir),
+-             "--out_folder",
+-             rebase_path(target_gen_dir, root_build_dir),
+-             "--config_base",
+-             rebase_path(config_base, target_gen_dir),
+-             "--tsconfig",
+-             rebase_path(tsconfig, root_build_dir),
+-             "--custom_loader_script",
+-             rebase_path("//ui/webui/resources/tools/eslint/custom_loader.mjs",
+-                         root_build_dir),
+-             "--in_files",
+-           ] + in_files
+-
+-    if (defined(enable_web_component_missing_deps) &&
+-        enable_web_component_missing_deps) {
+-      args += [ "--enable_web_component_missing_deps" ]
+-    }
+-
+-    if (defined(enable_no_chrome_send) && enable_no_chrome_send) {
+-      args += [ "--enable_no_chrome_send" ]
+-    }
++  not_needed(invoker, "*")
++  group(target_name) {
++    forward_variables_from(invoker, [ "visibility" ])
+   }
+ }
+-- 
+2.52.0
+
