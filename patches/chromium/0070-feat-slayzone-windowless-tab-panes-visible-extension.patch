@@ -1,0 +1,336 @@
+From 8a837ff645ae2bf4d0e1d5f316b44731c9a64a9d Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Wed, 10 Jun 2026 17:04:34 +0200
+Subject: [PATCH] feat(slayzone): windowless tab panes + visible
+ extension-management window
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Severs the per-task Browser's window-ness from its tab-hood so extensions
+(1Password) install and work without stray/closable windows.
+
+- SlayzoneHiddenBrowserView: the embedded-tab host's Browsers reuse the real
+  BrowserView but no-op Show/Activate/etc. — they hold extension-capable tabs
+  composited into the shell slot and NEVER surface an OS window (install /
+  window.open / target=_blank no longer pop a closable window that kills the
+  pane). browser_window_factory routes the embedded-tab marker to it.
+- Extension-management window: a NORMAL, VISIBLE Chrome window (kExtensionsBrowser
+  marker → plain BrowserView) on the shared profile, 80% centered, opened to the
+  Web Store via the "slayzone:open-extensions" CreateView sentinel. The install
+  flow needs a TABBED visible window to anchor its prompt
+  (extension_install_ui_desktop.cc), which a hidden pane can't provide — so
+  management gets its own real window; installs land in the shared profile and
+  apply to the panes. Themed dark + the SlayZone accent (#7c7cf0) so it reads as
+  ours.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ chrome/browser/slayzone/layout_features.cc    |  4 ++
+ chrome/browser/slayzone/layout_features.h     | 11 +++
+ .../slayzone/slayzone_embedded_tab_host.cc    | 71 +++++++++++++++++++
+ .../slayzone/slayzone_embedded_tab_host.h     | 10 +++
+ chrome/browser/ui/BUILD.gn                    |  2 +
+ .../ui/views/frame/browser_window_factory.cc  | 19 +++--
+ .../frame/slayzone_hidden_browser_view.cc     | 10 +++
+ .../frame/slayzone_hidden_browser_view.h      | 42 +++++++++++
+ 8 files changed, 164 insertions(+), 5 deletions(-)
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_hidden_browser_view.cc
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_hidden_browser_view.h
+
+diff --git a/chrome/browser/slayzone/layout_features.cc b/chrome/browser/slayzone/layout_features.cc
+index af073a9ac204c..be3792ca1a463 100644
+--- a/chrome/browser/slayzone/layout_features.cc
++++ b/chrome/browser/slayzone/layout_features.cc
+@@ -20,4 +20,8 @@ bool IsEmbeddedTabBrowser(const Browser* browser) {
+   return browser && browser->user_title() == kEmbeddedTabBrowserMarker;
+ }
+ 
++bool IsExtensionsBrowser(const Browser* browser) {
++  return browser && browser->user_title() == kExtensionsBrowserMarker;
++}
++
+ }  // namespace slayzone
+diff --git a/chrome/browser/slayzone/layout_features.h b/chrome/browser/slayzone/layout_features.h
+index 0605183703126..d3cfecd46f8ef 100644
+--- a/chrome/browser/slayzone/layout_features.h
++++ b/chrome/browser/slayzone/layout_features.h
+@@ -29,6 +29,17 @@ inline constexpr char kEmbeddedTabBrowserMarker[] = "__slayzone_embedded_tab__";
+ // True iff `browser` is one of the embedded-tab host's windowless Browsers.
+ bool IsEmbeddedTabBrowser(const Browser* browser);
+ 
++// Sentinel stamped into `Browser::user_title` for the single VISIBLE extension
++// management window (chrome://extensions + Web Store + native install prompts).
++// Unlike the embedded-tab Browsers this one DOES show a normal Chrome window
++// (toolbar/omnibox) — extension install/management is inherently a browser-chrome
++// activity. It shares the panes' profile so installs apply there. The window
++// factory gives it a plain `BrowserView` (no shell takeover, not hidden).
++inline constexpr char kExtensionsBrowserMarker[] = "__slayzone_extensions__";
++
++// True iff `browser` is the extension-management window.
++bool IsExtensionsBrowser(const Browser* browser);
++
+ }  // namespace slayzone
+ 
+ #endif  // CHROME_BROWSER_SLAYZONE_LAYOUT_FEATURES_H_
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index 89062058f6e52..62da5a28831b7 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -14,9 +14,12 @@
+ #include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/layout_features.h"
++#include "chrome/browser/themes/theme_service.h"
++#include "chrome/browser/themes/theme_service_factory.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_list.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
++#include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/tabs/tab_enums.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
+@@ -28,7 +31,10 @@
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_observer.h"
+ #include "net/base/net_errors.h"
++#include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/page_transition_types.h"
++#include "ui/display/display.h"
++#include "ui/display/screen.h"
+ #include "ui/gfx/geometry/size.h"
+ #include "url/gurl.h"
+ 
+@@ -233,6 +239,60 @@ Browser* SlayzoneEmbeddedTabHost::GetOrCreateTaskBrowser(
+   return browser;
+ }
+ 
++void SlayzoneEmbeddedTabHost::OpenExtensionsWindow() {
++  if (extensions_browser_) {
++    // Already open — just surface it.
++    extensions_browser_->window()->Show();
++    extensions_browser_->window()->Activate();
++    return;
++  }
++  Profile* profile = Profile::FromBrowserContext(browser_context_);
++  if (!profile) {
++    LOG(WARNING) << "[embedded_tab] OpenExtensionsWindow — no Profile";
++    return;
++  }
++  // A NORMAL, VISIBLE Browser on the panes' profile. The marker makes the
++  // window factory give it a plain BrowserView (real toolbar/omnibox, no shell
++  // takeover, not hidden) — so chrome://extensions, the Web Store and native
++  // install prompts behave exactly as in stock Chrome, and installs land in the
++  // shared profile the task panes use.
++  // Brand the SlayZone profile's Chrome UI dark + the SlayZone accent (#7c7cf0)
++  // so the extensions window — the only visible Chrome-chrome surface — reads as
++  // ours rather than stock Chrome. Profile-wide is intentional here: this IS the
++  // SlayZone app's profile. Idempotent.
++  if (ThemeService* theme = ThemeServiceFactory::GetForProfile(profile)) {
++    theme->SetBrowserColorScheme(ThemeService::BrowserColorScheme::kDark);
++    theme->SetUserColor(SkColorSetRGB(0x7c, 0x7c, 0xf0));
++  }
++
++  // Normal (tabbed) Browser — the extension install/success UI explicitly
++  // finds/creates a TABBED visible window to anchor to (see
++  // extension_install_ui_desktop.cc), so a chromeless popup would mis-route the
++  // install. Size it to 80% of the work area, centered.
++  Browser::CreateParams cp(profile, /*user_gesture=*/true);
++  cp.user_title = kExtensionsBrowserMarker;
++  if (display::Screen::HasScreen()) {
++    const gfx::Rect work =
++        display::Screen::Get()->GetPrimaryDisplay().work_area();
++    const int w = work.width() * 4 / 5;
++    const int h = work.height() * 4 / 5;
++    cp.initial_bounds = gfx::Rect(work.x() + (work.width() - w) / 2,
++                                  work.y() + (work.height() - h) / 2, w, h);
++  }
++  extensions_browser_ = Browser::Create(cp);
++  if (!extensions_browser_) {
++    LOG(WARNING) << "[embedded_tab] OpenExtensionsWindow — Browser::Create failed";
++    return;
++  }
++  chrome::AddAndReturnTabAt(extensions_browser_,
++                            GURL("https://chromewebstore.google.com/"),
++                            /*index=*/-1, /*foreground=*/true);
++  extensions_browser_->window()->Show();
++  extensions_browser_->window()->Activate();
++  LOG(INFO) << "[embedded_tab] opened extensions window browser="
++            << extensions_browser_.get();
++}
++
+ void SlayzoneEmbeddedTabHost::CreateView(
+     slayzone::embedded_tab::mojom::CreateViewParamsPtr params,
+     CreateViewCallback callback) {
+@@ -250,6 +310,14 @@ void SlayzoneEmbeddedTabHost::CreateView(
+     return;
+   }
+ 
++  // Sentinel: open the VISIBLE extension-management window instead of a pane.
++  // Reuses the existing mojo pipe so no new mojom is needed for the trigger.
++  if (params->url == "slayzone:open-extensions") {
++    OpenExtensionsWindow();
++    std::move(callback).Run(std::string());
++    return;
++  }
++
+   // NOTE: intentionally NOT idempotent on (task_id, tab_id). The renderer's
+   // NativeAnchor can remount (layout settle) → it removes the old view and
+   // creates a fresh one for the same tile. If we returned the SAME view_id, the
+@@ -553,6 +621,9 @@ void SlayzoneEmbeddedTabHost::RefreshActivePresentation(
+ }
+ 
+ void SlayzoneEmbeddedTabHost::OnBrowserRemoved(Browser* browser) {
++  if (extensions_browser_ == browser) {
++    extensions_browser_ = nullptr;
++  }
+   for (auto it = task_browsers_.begin(); it != task_browsers_.end();) {
+     if (it->second == browser) {
+       LOG(INFO) << "[embedded_tab] OnBrowserRemoved — our task Browser died task="
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index 51f02fba24e19..eb39872394994 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -129,6 +129,12 @@ class SlayzoneEmbeddedTabHost
+   // if the shell's Profile can't be resolved.
+   Browser* GetOrCreateTaskBrowser(const std::string& task_id);
+ 
++  // Open (or focus) the single VISIBLE extension-management window — a normal
++  // Chrome window on the panes' profile, at chrome://extensions. Triggered by
++  // the CreateView sentinel url "slayzone:open-extensions". Native install
++  // prompts anchor to this visible window, so Web-Store install works.
++  void OpenExtensionsWindow();
++
+   Entry* FindEntry(const std::string& view_id);
+ 
+   // Push `view_id` to the MRU end (back of lru_).
+@@ -152,6 +158,10 @@ class SlayzoneEmbeddedTabHost
+   // OnBrowserRemoved keeps this map honest.
+   std::map<std::string, raw_ptr<Browser>> task_browsers_;
+ 
++  // The single VISIBLE extension-management window, if open. Cleared by
++  // OnBrowserRemoved when the user closes it.
++  raw_ptr<Browser> extensions_browser_ = nullptr;
++
+   // view_id → Entry (non-owning ref to a TabStripModel tab + its observer).
+   std::map<std::string, std::unique_ptr<Entry>> entries_;
+ 
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 34544b0396c79..06a9c76e9647a 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -4090,6 +4090,8 @@ static_library("ui") {
+       "views/frame/shadow_overlay_view.h",
+       "views/frame/slayzone_browser_view.cc",
+       "views/frame/slayzone_browser_view.h",
++      "views/frame/slayzone_hidden_browser_view.cc",
++      "views/frame/slayzone_hidden_browser_view.h",
+       "views/frame/slayzone_region_container.cc",
+       "views/frame/slayzone_region_container.h",
+       "views/frame/slayzone_shell_container.cc",
+diff --git a/chrome/browser/ui/views/frame/browser_window_factory.cc b/chrome/browser/ui/views/frame/browser_window_factory.cc
+index 85a8e8b281b09..8b90ac8949cfa 100644
+--- a/chrome/browser/ui/views/frame/browser_window_factory.cc
++++ b/chrome/browser/ui/views/frame/browser_window_factory.cc
+@@ -11,6 +11,7 @@
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/browser_widget.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/browser/ui/views/frame/slayzone_hidden_browser_view.h"
+ #include "chrome/browser/ui/webui_browser/webui_browser.h"
+ #include "chrome/browser/ui/webui_browser/webui_browser_window.h"
+ #include "chrome/grit/branded_strings.h"
+@@ -52,13 +53,21 @@ BrowserWindow::CreateBrowserWindow(Browser* browser,
+ #if BUILDFLAG(IS_CHROMEOS)
+   view = new BrowserViewAsh(browser);
+ #else
+-  if (slayzone::IsLayoutShellEnabled() && browser->is_type_normal() &&
+-      !slayzone::IsEmbeddedTabBrowser(browser)) {
++  if (slayzone::IsEmbeddedTabBrowser(browser)) {
++    // Embedded-tab host Browser: real BrowserView machinery (no shell takeover,
++    // so no recursion) but its OS window NEVER surfaces — tabs are composited
++    // into the shell's slot. Without this it would pop a real window on
++    // install / window.open / target=_blank, which the user could close and
++    // kill the pane.
++    view = new SlayzoneHiddenBrowserView(browser);
++  } else if (slayzone::IsExtensionsBrowser(browser)) {
++    // Extension-management window: a normal, VISIBLE Chrome window
++    // (toolbar/omnibox) — NOT the shell takeover — so chrome://extensions, the
++    // Web Store, and native install prompts work as in stock Chrome.
++    view = new BrowserView(browser);
++  } else if (slayzone::IsLayoutShellEnabled() && browser->is_type_normal()) {
+     view = new SlayzoneBrowserView(browser);
+   } else {
+-    // Embedded-tab host Browsers (and non-normal windows) get a plain
+-    // BrowserView — no shell takeover, so they don't recurse into another
+-    // chrome://slayzone-shell instance.
+     view = new BrowserView(browser);
+   }
+ #endif
+diff --git a/chrome/browser/ui/views/frame/slayzone_hidden_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_hidden_browser_view.cc
+new file mode 100644
+index 0000000000000..301b4288285e9
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_hidden_browser_view.cc
+@@ -0,0 +1,10 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/slayzone_hidden_browser_view.h"
++
++SlayzoneHiddenBrowserView::SlayzoneHiddenBrowserView(Browser* browser)
++    : BrowserView(browser) {}
++
++SlayzoneHiddenBrowserView::~SlayzoneHiddenBrowserView() = default;
+diff --git a/chrome/browser/ui/views/frame/slayzone_hidden_browser_view.h b/chrome/browser/ui/views/frame/slayzone_hidden_browser_view.h
+new file mode 100644
+index 0000000000000..9bb92600c8029
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_hidden_browser_view.h
+@@ -0,0 +1,42 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_HIDDEN_BROWSER_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_HIDDEN_BROWSER_VIEW_H_
++
++#include "chrome/browser/ui/views/frame/browser_view.h"
++
++class Browser;
++
++// BrowserView for the embedded-tab host's windowless Browsers (those tagged via
++// `slayzone::IsEmbeddedTabBrowser`). Those Browsers exist ONLY as
++// extension-capable `TabStripModel` containers — their tabs are composited into
++// the SlayZone shell's own slot, so their OS window must NEVER surface.
++//
++// A plain `BrowserView` would still surface the window on the explicit-show
++// paths (`ScopedBrowserShower` during navigation, `ScopedTabbedBrowserDisplayer`
++// during extension install, `window.open`/`target=_blank`), and the user could
++// then close it — destroying the Browser and killing the live pane. We reuse all
++// of BrowserView's (battle-tested) machinery and only no-op the show / activate /
++// restore paths so the window stays headless. Tab rendering happens in the
++// shell's slot, never in this view.
++class SlayzoneHiddenBrowserView : public BrowserView {
++ public:
++  explicit SlayzoneHiddenBrowserView(Browser* browser);
++  SlayzoneHiddenBrowserView(const SlayzoneHiddenBrowserView&) = delete;
++  SlayzoneHiddenBrowserView& operator=(const SlayzoneHiddenBrowserView&) =
++      delete;
++  ~SlayzoneHiddenBrowserView() override;
++
++  // BrowserWindow (via BrowserView) — suppress everything that surfaces or
++  // focuses the OS window.
++  void Show() override {}
++  void ShowInactive() override {}
++  void Activate() override {}
++  void Minimize() override {}
++  void Maximize() override {}
++  void Restore() override {}
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_HIDDEN_BROWSER_VIEW_H_
+-- 
+2.52.0
+

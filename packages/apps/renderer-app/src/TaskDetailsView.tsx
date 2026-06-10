@@ -182,6 +182,24 @@ export function TaskDetailsView() {
     openDomDialog()
   }
 
+  const openExtensions = (): void => {
+    // Open the VISIBLE extension-management window (chrome://extensions + Web
+    // Store + native install prompts) on the shared profile. Calls the raw shim
+    // directly (NOT the pane adapter) via the "slayzone:open-extensions"
+    // sentinel — so it doesn't register a phantom pane tile.
+    const api = (
+      window as unknown as {
+        api?: { browser?: { createView(o: unknown): Promise<string> } }
+      }
+    ).api
+    void api?.browser?.createView({
+      taskId: 'extensions',
+      tabId: 'extensions',
+      url: 'slayzone:open-extensions',
+      bounds: { x: 0, y: 0, width: 0, height: 0 }
+    })
+  }
+
   const openDomDialog = (): void => {
     useLayoutStore.getState().openOverlay({
       id: 'demo',
@@ -227,6 +245,13 @@ export function TaskDetailsView() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <PanelToggle active={activeTypes} onToggle={toggle} />
+          <button
+            type="button"
+            onClick={openExtensions}
+            style={{ ...toggleBtnBase, background: COLORS.barBg, border: `1px solid ${COLORS.border}`, color: COLORS.muted }}
+          >
+            Extensions
+          </button>
           <button
             type="button"
             onClick={openDemoDialog}
