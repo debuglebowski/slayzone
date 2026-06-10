@@ -1,0 +1,774 @@
+From ce3deb3800574ff8ad5c1c083cdf1e51003b809f Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Wed, 10 Jun 2026 13:44:57 +0200
+Subject: [PATCH] feat(slayzone): extension-capable inline tabs via windowless
+ per-task Browser
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Embedded browser panes now back onto real tabs in a windowless per-task
+Browser (was bare WebContents::Create), so tabs are chrome.tabs-addressable
+and get TabHelpers — the foundation for extensions (1Password) and per-task
+profiles. Each task = its own windowId; the Browser never shows an OS window
+but still registers in BrowserList/WindowControllerList.
+
+Five fixes to render + navigate without fighting the takeover shell:
+- tag helper Browsers via user_title (kEmbeddedTabBrowserMarker) so the
+  window factory gives them a plain BrowserView, not SlayzoneBrowserView —
+  else each loads chrome://slayzone-shell, opens a pane, and recurses
+- IncrementCapturerCount keepalive: a tab in a never-shown Browser is
+  marked hidden and produces no frames
+- park a dummy active about:blank tab so content tabs stay background — a
+  BrowserView owns its active tab's RWHV (trapped in the hidden window)
+- NON-idempotent CreateView: the renderer remounts its NativeAnchor, and a
+  shared view_id let the old anchor's teardown destroy the live tab
+- re-attach the slot on PrimaryPageChanged so cross-origin render-view
+  swaps actually repaint (URL updated but page was frozen otherwise)
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ chrome/browser/slayzone/layout_features.cc    |   6 +
+ chrome/browser/slayzone/layout_features.h     |  13 +
+ .../slayzone/slayzone_embedded_tab_host.cc    | 313 ++++++++++++++----
+ .../slayzone/slayzone_embedded_tab_host.h     |  78 +++--
+ .../ui/views/frame/browser_window_factory.cc  |   6 +-
+ 5 files changed, 335 insertions(+), 81 deletions(-)
+
+diff --git a/chrome/browser/slayzone/layout_features.cc b/chrome/browser/slayzone/layout_features.cc
+index d1103c1391b23..af073a9ac204c 100644
+--- a/chrome/browser/slayzone/layout_features.cc
++++ b/chrome/browser/slayzone/layout_features.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/slayzone/layout_features.h"
+ 
++#include "chrome/browser/ui/browser.h"
++
+ namespace slayzone {
+ 
+ BASE_FEATURE(kSlayzoneLayoutShell,
+@@ -14,4 +16,8 @@ bool IsLayoutShellEnabled() {
+   return base::FeatureList::IsEnabled(kSlayzoneLayoutShell);
+ }
+ 
++bool IsEmbeddedTabBrowser(const Browser* browser) {
++  return browser && browser->user_title() == kEmbeddedTabBrowserMarker;
++}
++
+ }  // namespace slayzone
+diff --git a/chrome/browser/slayzone/layout_features.h b/chrome/browser/slayzone/layout_features.h
+index 527a9dcbcbeba..0605183703126 100644
+--- a/chrome/browser/slayzone/layout_features.h
++++ b/chrome/browser/slayzone/layout_features.h
+@@ -7,6 +7,8 @@
+ 
+ #include "base/feature_list.h"
+ 
++class Browser;
++
+ namespace slayzone {
+ 
+ // Gates the Phase 5 native layout shell (`SlayzoneBrowserView` subclass +
+@@ -16,6 +18,17 @@ BASE_DECLARE_FEATURE(kSlayzoneLayoutShell);
+ 
+ bool IsLayoutShellEnabled();
+ 
++// Sentinel stamped into `Browser::user_title` for the windowless Browsers that
++// SlayzoneEmbeddedTabHost spins up to hold inline task-browser tabs. These must
++// stay TYPE_NORMAL (so their tabs are extension-addressable) but must NOT get
++// the SlayZone shell takeover — otherwise each one loads chrome://slayzone-shell,
++// opens its own browser pane, and recurses. The window factory checks this to
++// hand them a plain BrowserView instead of SlayzoneBrowserView.
++inline constexpr char kEmbeddedTabBrowserMarker[] = "__slayzone_embedded_tab__";
++
++// True iff `browser` is one of the embedded-tab host's windowless Browsers.
++bool IsEmbeddedTabBrowser(const Browser* browser);
++
+ }  // namespace slayzone
+ 
+ #endif  // CHROME_BROWSER_SLAYZONE_LAYOUT_FEATURES_H_
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index 7d5cbfa3281b3..89062058f6e52 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -6,21 +6,30 @@
+ 
+ #include <algorithm>
+ #include <utility>
++#include <vector>
+ 
+ #include "base/logging.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/devtools/devtools_window.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/layout_features.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_list.h"
++#include "chrome/browser/ui/browser_tabstrip.h"
++#include "chrome/browser/ui/tabs/tab_enums.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/navigation_entry.h"
+ #include "content/public/browser/page.h"
++#include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_observer.h"
+-#include "content/public/common/referrer.h"
+ #include "net/base/net_errors.h"
+ #include "ui/base/page_transition_types.h"
++#include "ui/gfx/geometry/size.h"
+ #include "url/gurl.h"
+ 
+ namespace slayzone {
+@@ -41,28 +50,35 @@ gfx::Rect ToRect(
+ 
+ }  // namespace
+ 
+-// Each Entry owns one content::WebContents + forwards WebContentsObserver
+-// events to the parent host's mojo observer. Entries live inside entries_ —
+-// erasing the unique_ptr destroys the WebContents and unregisters the
+-// observer in one step.
++// Each Entry NON-owningly references one tab's content::WebContents (owned by
++// its task Browser's TabStripModel) and forwards WebContentsObserver events to
++// the parent host's mojo observer. When the underlying tab is closed (LRU,
++// window.close, Browser teardown) WebContentsDestroyed fires → the host drops
++// the view.
+ class SlayzoneEmbeddedTabHost::Entry : public content::WebContentsObserver {
+  public:
+   Entry(SlayzoneEmbeddedTabHost* host,
+         const std::string& view_id,
+         const std::string& task_id,
+-        std::unique_ptr<content::WebContents> contents)
++        const std::string& tab_id,
++        Browser* browser,
++        content::WebContents* contents)
+       : host_(host),
+         view_id_(view_id),
+         task_id_(task_id),
+-        contents_(std::move(contents)) {
+-    Observe(contents_.get());
++        tab_id_(tab_id),
++        browser_(browser),
++        contents_(contents) {
++    Observe(contents);
+   }
+ 
+   ~Entry() override = default;
+ 
+-  content::WebContents* contents() { return contents_.get(); }
++  content::WebContents* contents() { return contents_; }
++  Browser* browser() { return browser_; }
+   const std::string& view_id() const { return view_id_; }
+   const std::string& task_id() const { return task_id_; }
++  const std::string& tab_id() const { return tab_id_; }
+ 
+   // content::WebContentsObserver:
+   void TitleWasSet(content::NavigationEntry* entry) override {
+@@ -82,6 +98,9 @@ class SlayzoneEmbeddedTabHost::Entry : public content::WebContentsObserver {
+                             contents_->GetLastCommittedURL().possibly_invalid_spec(),
+                             controller.CanGoBack(),
+                             controller.CanGoForward());
++    // A primary-page change can swap the RenderWidgetHostView (cross-origin
++    // process swap). Re-attach the slot so the new page actually paints.
++    host_->RefreshActivePresentation(view_id_);
+   }
+ 
+   void DidStartLoading() override {
+@@ -111,25 +130,58 @@ class SlayzoneEmbeddedTabHost::Entry : public content::WebContentsObserver {
+                             validated_url.possibly_invalid_spec());
+   }
+ 
++  void WebContentsDestroyed() override {
++    contents_ = nullptr;
++    browser_ = nullptr;
++    Observe(nullptr);
++    // NOTE: this erases `this` Entry — must be the last statement.
++    host_->OnEntryContentsDestroyed(view_id_);
++  }
++
+  private:
+   raw_ptr<SlayzoneEmbeddedTabHost> host_;
+   std::string view_id_;
+   std::string task_id_;
+-  std::unique_ptr<content::WebContents> contents_;
++  std::string tab_id_;
++  raw_ptr<Browser> browser_;            // owning task Browser (non-owning ref)
++  raw_ptr<content::WebContents> contents_;  // owned by the TabStripModel
+ };
+ 
+ SlayzoneEmbeddedTabHost::SlayzoneEmbeddedTabHost(
+     content::BrowserContext* browser_context,
+     SlayzoneShellContainer* container)
+-    : browser_context_(browser_context), container_(container) {}
++    : browser_context_(browser_context), container_(container) {
++  BrowserList::AddObserver(this);
++}
+ 
+ SlayzoneEmbeddedTabHost::~SlayzoneEmbeddedTabHost() {
+-  // Detach from the container before entries_ unwinds so the WebView slot
+-  // doesn't hold a pointer to a WebContents we're about to destroy.
++  BrowserList::RemoveObserver(this);
++  // Release the render keepalive before tearing down the tabs it pins.
++  active_capture_ = base::ScopedClosureRunner();
++  // Detach from the container before tabs go away so the WebView slot doesn't
++  // hold a pointer to a WebContents we're about to destroy.
+   if (container_) {
+     container_->SetEmbeddedTabWebContents(nullptr);
+     container_->SetEmbeddedTabVisible(false);
+   }
++  // Drop our entries first (stops observing) so closing the task Browsers below
++  // doesn't recurse back through Entry::WebContentsDestroyed.
++  entries_.clear();
++  lru_.clear();
++  active_view_id_.clear();
++  // Close the windowless Browsers we created. Copy first — we already removed
++  // ourselves as a BrowserListObserver, so CloseAllTabs won't call back, but
++  // the map is cleared up front for clarity.
++  std::vector<Browser*> browsers;
++  for (auto& [task_id, b] : task_browsers_) {
++    if (b) {
++      browsers.push_back(b);
++    }
++  }
++  task_browsers_.clear();
++  for (Browser* b : browsers) {
++    b->tab_strip_model()->CloseAllTabs();
++  }
+ }
+ 
+ void SlayzoneEmbeddedTabHost::Bind(
+@@ -139,6 +191,48 @@ void SlayzoneEmbeddedTabHost::Bind(
+   receiver_.Bind(std::move(receiver));
+ }
+ 
++Browser* SlayzoneEmbeddedTabHost::GetOrCreateTaskBrowser(
++    const std::string& task_id) {
++  auto it = task_browsers_.find(task_id);
++  if (it != task_browsers_.end() && it->second) {
++    return it->second;
++  }
++  Profile* profile = Profile::FromBrowserContext(browser_context_);
++  if (!profile) {
++    LOG(WARNING) << "[embedded_tab] no Profile from browser_context_";
++    return nullptr;
++  }
++  // Windowless Browser: CreateParams builds the BrowserWindow but we NEVER call
++  // window()->Show(), so no OS window appears. It still self-registers in
++  // BrowserList/WindowControllerList, which makes its tabs real,
++  // extension-addressable tabs.
++  //
++  // The marker tags it as an embedded-tab Browser so the window factory hands
++  // it a plain BrowserView (NOT SlayzoneBrowserView) — without this it would
++  // install its own chrome://slayzone-shell takeover, open a browser pane, and
++  // recurse infinitely. Keep it out of session restore: it's an ephemeral tab
++  // container, not a user window.
++  Browser::CreateParams cp(profile, /*user_gesture=*/false);
++  cp.user_title = kEmbeddedTabBrowserMarker;
++  cp.omit_from_session_restore = true;
++  Browser* browser = Browser::Create(cp);
++  if (!browser) {
++    LOG(WARNING) << "[embedded_tab] Browser::Create failed for task=" << task_id;
++    return nullptr;
++  }
++  task_browsers_[task_id] = browser;
++  // Park an inert active tab in the (hidden) Browser. A BrowserView always owns
++  // its ACTIVE tab's RenderWidgetHostView — if a displayed tab were active, its
++  // pixels would be trapped in the hidden window and our slot would show
++  // nothing. With a throwaway active tab, every real content tab stays a
++  // BACKGROUND tab, whose RWHV our slot is free to composite.
++  chrome::AddAndReturnTabAt(browser, GURL("about:blank"), /*index=*/-1,
++                            /*foreground=*/true);
++  LOG(INFO) << "[embedded_tab] windowless Browser for task=" << task_id
++            << " browser=" << browser;
++  return browser;
++}
++
+ void SlayzoneEmbeddedTabHost::CreateView(
+     slayzone::embedded_tab::mojom::CreateViewParamsPtr params,
+     CreateViewCallback callback) {
+@@ -156,10 +250,16 @@ void SlayzoneEmbeddedTabHost::CreateView(
+     return;
+   }
+ 
+-  content::WebContents::CreateParams create_params(browser_context_);
+-  std::unique_ptr<content::WebContents> contents =
+-      content::WebContents::Create(create_params);
+-  if (!contents) {
++  // NOTE: intentionally NOT idempotent on (task_id, tab_id). The renderer's
++  // NativeAnchor can remount (layout settle) → it removes the old view and
++  // creates a fresh one for the same tile. If we returned the SAME view_id, the
++  // old anchor's in-flight teardown would destroy the tab the new anchor is now
++  // using (a destroy-shared-view race → blank pane). Each CreateView gets its
++  // own tab; the orphaned one is torn down by the renderer's destroyView. The
++  // create-storm that idempotency was meant to cap is gone now that the shell
++  // takeover no longer recurses (see GetOrCreateTaskBrowser marker).
++  Browser* browser = GetOrCreateTaskBrowser(params->task_id);
++  if (!browser) {
+     std::move(callback).Run(std::string());
+     return;
+   }
+@@ -168,14 +268,21 @@ void SlayzoneEmbeddedTabHost::CreateView(
+   if (!url.is_valid()) {
+     url = GURL("about:blank");
+   }
+-  content::NavigationController::LoadURLParams load_params(url);
+-  load_params.transition_type = ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
+-  contents->GetController().LoadURLWithParams(load_params);
++  // Real tab via the standard tabstrip path → TabHelpers::AttachTabHelpers
++  // fires → extension-addressable tab. Added as a background tab; we drive
++  // which one is shown via SetActiveViewId, not the Browser's foreground.
++  content::WebContents* contents = chrome::AddAndReturnTabAt(
++      browser, url, /*index=*/-1, /*foreground=*/false);
++  if (!contents) {
++    std::move(callback).Run(std::string());
++    return;
++  }
+ 
+   const std::string view_id = "etab-" + base::NumberToString(next_id_++);
+-  auto entry = std::make_unique<Entry>(this, view_id, params->task_id,
+-                                        std::move(contents));
+-  entries_.emplace(view_id, std::move(entry));
++  entries_.emplace(view_id, std::make_unique<Entry>(this, view_id,
++                                                     params->task_id,
++                                                     params->tab_id, browser,
++                                                     contents));
+   lru_.push_back(view_id);
+ 
+   active_bounds_ = ToRect(params->bounds);
+@@ -189,28 +296,44 @@ void SlayzoneEmbeddedTabHost::CreateView(
+ }
+ 
+ void SlayzoneEmbeddedTabHost::DestroyView(const std::string& view_id) {
+-  auto it = entries_.find(view_id);
+-  if (it == entries_.end()) {
++  Entry* entry = FindEntry(view_id);
++  if (!entry) {
+     return;
+   }
+-  const bool was_active = (view_id == active_view_id_);
+-  entries_.erase(it);
+-  lru_.remove(view_id);
+-  if (was_active) {
+-    SetActiveViewId(std::string());
++  Browser* browser = entry->browser();
++  content::WebContents* contents = entry->contents();
++  if (browser && contents) {
++    const int idx =
++        browser->tab_strip_model()->GetIndexOfWebContents(contents);
++    if (idx != TabStripModel::kNoTab) {
++      // Closing the tab fires Entry::WebContentsDestroyed →
++      // OnEntryContentsDestroyed (the single cleanup path).
++      browser->tab_strip_model()->CloseWebContentsAt(idx,
++                                                      TabCloseTypes::CLOSE_NONE);
++      return;
++    }
+   }
++  // No live tab to close — drop the bookkeeping directly.
++  OnEntryContentsDestroyed(view_id);
+ }
+ 
+ void SlayzoneEmbeddedTabHost::DestroyAllForTask(const std::string& task_id) {
+-  // Collect first so we don't mutate while iterating.
+-  std::vector<std::string> to_destroy;
+-  for (auto& [view_id, entry] : entries_) {
++  auto it = task_browsers_.find(task_id);
++  if (it != task_browsers_.end() && it->second) {
++    // Close the whole windowless Browser. Each tab close cleans its Entry, and
++    // the emptied Browser self-destructs → OnBrowserRemoved drops the map slot.
++    it->second->tab_strip_model()->CloseAllTabs();
++    return;
++  }
++  // No browser for the task — drop any stray entries.
++  std::vector<std::string> ids;
++  for (auto& [vid, entry] : entries_) {
+     if (entry->task_id() == task_id) {
+-      to_destroy.push_back(view_id);
++      ids.push_back(vid);
+     }
+   }
+-  for (const std::string& view_id : to_destroy) {
+-    DestroyView(view_id);
++  for (const std::string& vid : ids) {
++    OnEntryContentsDestroyed(vid);
+   }
+ }
+ 
+@@ -223,8 +346,8 @@ void SlayzoneEmbeddedTabHost::SetBounds(
+   }
+   const gfx::Rect rect = ToRect(bounds);
+   // Only the active view's bounds influence the overlay. The renderer stops
+-  // the rAF loop when a view hides, so non-active SetBounds would be a bug —
+-  // treat it as an implicit switch-to-active request.
++  // the rAF loop when a view hides, so non-active SetBounds is an implicit
++  // switch-to-active request.
+   if (view_id != active_view_id_) {
+     active_bounds_ = rect;
+     active_visible_ = true;
+@@ -242,7 +365,6 @@ void SlayzoneEmbeddedTabHost::SetVisible(const std::string& view_id,
+     return;
+   }
+   if (view_id != active_view_id_) {
+-    // Renderer asked us to show a non-active view: swap to it.
+     if (visible) {
+       active_visible_ = true;
+       SetActiveViewId(view_id);
+@@ -259,7 +381,7 @@ void SlayzoneEmbeddedTabHost::Navigate(const std::string& view_id,
+             << url << "' entries=" << entries_.size()
+             << " active=" << active_view_id_;
+   Entry* entry = FindEntry(view_id);
+-  if (!entry) {
++  if (!entry || !entry->contents()) {
+     LOG(WARNING) << "[embedded_tab] Navigate dropped — unknown view_id="
+                  << view_id;
+     return;
+@@ -278,7 +400,7 @@ void SlayzoneEmbeddedTabHost::Navigate(const std::string& view_id,
+ 
+ void SlayzoneEmbeddedTabHost::GoBack(const std::string& view_id) {
+   Entry* entry = FindEntry(view_id);
+-  if (!entry) {
++  if (!entry || !entry->contents()) {
+     return;
+   }
+   auto& controller = entry->contents()->GetController();
+@@ -290,7 +412,7 @@ void SlayzoneEmbeddedTabHost::GoBack(const std::string& view_id) {
+ 
+ void SlayzoneEmbeddedTabHost::GoForward(const std::string& view_id) {
+   Entry* entry = FindEntry(view_id);
+-  if (!entry) {
++  if (!entry || !entry->contents()) {
+     return;
+   }
+   auto& controller = entry->contents()->GetController();
+@@ -303,7 +425,7 @@ void SlayzoneEmbeddedTabHost::GoForward(const std::string& view_id) {
+ void SlayzoneEmbeddedTabHost::Reload(const std::string& view_id,
+                                       bool ignore_cache) {
+   Entry* entry = FindEntry(view_id);
+-  if (!entry) {
++  if (!entry || !entry->contents()) {
+     return;
+   }
+   entry->contents()->GetController().Reload(
+@@ -315,7 +437,7 @@ void SlayzoneEmbeddedTabHost::Reload(const std::string& view_id,
+ 
+ void SlayzoneEmbeddedTabHost::Stop(const std::string& view_id) {
+   Entry* entry = FindEntry(view_id);
+-  if (!entry) {
++  if (!entry || !entry->contents()) {
+     return;
+   }
+   entry->contents()->Stop();
+@@ -323,7 +445,7 @@ void SlayzoneEmbeddedTabHost::Stop(const std::string& view_id) {
+ 
+ void SlayzoneEmbeddedTabHost::Focus(const std::string& view_id) {
+   Entry* entry = FindEntry(view_id);
+-  if (!entry) {
++  if (!entry || !entry->contents()) {
+     return;
+   }
+   entry->contents()->Focus();
+@@ -332,7 +454,7 @@ void SlayzoneEmbeddedTabHost::Focus(const std::string& view_id) {
+ 
+ void SlayzoneEmbeddedTabHost::ToggleDevtools(const std::string& view_id) {
+   Entry* entry = FindEntry(view_id);
+-  if (!entry) {
++  if (!entry || !entry->contents()) {
+     return;
+   }
+   DevToolsWindow::OpenDevToolsWindow(entry->contents(),
+@@ -391,6 +513,57 @@ void SlayzoneEmbeddedTabHost::FireDidFailLoad(
+   }
+ }
+ 
++void SlayzoneEmbeddedTabHost::OnEntryContentsDestroyed(
++    const std::string& view_id) {
++  // Copy — `view_id` may alias the Entry's own member, which the erase below
++  // frees.
++  const std::string id = view_id;
++  auto it = entries_.find(id);
++  if (it == entries_.end()) {
++    return;
++  }
++  const bool was_active = (id == active_view_id_);
++  entries_.erase(it);
++  lru_.remove(id);
++  if (was_active) {
++    SetActiveViewId(std::string());
++  }
++}
++
++void SlayzoneEmbeddedTabHost::RefreshActivePresentation(
++    const std::string& view_id) {
++  if (view_id != active_view_id_ || !container_) {
++    return;
++  }
++  Entry* entry = FindEntry(view_id);
++  content::WebContents* contents = entry ? entry->contents() : nullptr;
++  if (!contents) {
++    return;
++  }
++  // Re-take the render keepalive for the (possibly swapped) RWHV + force shown.
++  active_capture_ = contents->IncrementCapturerCount(
++      gfx::Size(), /*stay_hidden=*/false, /*stay_awake=*/false,
++      /*is_activity=*/true);
++  contents->WasShown();
++  // Toggle the slot's WebContents so the views::WebView detaches the old
++  // render-view and re-attaches the current one.
++  container_->SetEmbeddedTabWebContents(nullptr);
++  container_->SetEmbeddedTabWebContents(contents);
++  RefreshContainer();
++}
++
++void SlayzoneEmbeddedTabHost::OnBrowserRemoved(Browser* browser) {
++  for (auto it = task_browsers_.begin(); it != task_browsers_.end();) {
++    if (it->second == browser) {
++      LOG(INFO) << "[embedded_tab] OnBrowserRemoved — our task Browser died task="
++                << it->first << " browser=" << browser;
++      it = task_browsers_.erase(it);
++    } else {
++      ++it;
++    }
++  }
++}
++
+ SlayzoneEmbeddedTabHost::Entry* SlayzoneEmbeddedTabHost::FindEntry(
+     const std::string& view_id) {
+   auto it = entries_.find(view_id);
+@@ -404,20 +577,27 @@ void SlayzoneEmbeddedTabHost::TouchLru(const std::string& view_id) {
+ 
+ void SlayzoneEmbeddedTabHost::EvictIfOverCap() {
+   while (entries_.size() > kLruCap && lru_.size() > 1) {
+-    // Front = least recent, skip past active if for some reason it's there.
+     std::string victim = lru_.front();
+     if (victim == active_view_id_) {
+-      // Shouldn't happen — active is kept at the back — but guard anyway.
+-      auto it = std::next(lru_.begin());
+-      if (it == lru_.end()) {
+-        break;
+-      }
+-      victim = *it;
+-      lru_.erase(it);
+-    } else {
+-      lru_.pop_front();
++      // Active is normally at the MRU end; guard anyway by taking the next.
++      victim = *std::next(lru_.begin());
+     }
++    Entry* entry = FindEntry(victim);
++    Browser* browser = entry ? entry->browser() : nullptr;
++    content::WebContents* contents = entry ? entry->contents() : nullptr;
++    // Detach from our tracking FIRST so entries_.size() drops deterministically
++    // (the underlying tab close may be async). Destroying the Entry stops it
++    // observing, so the subsequent close won't recurse back into us.
+     entries_.erase(victim);
++    lru_.remove(victim);
++    if (browser && contents) {
++      const int idx =
++          browser->tab_strip_model()->GetIndexOfWebContents(contents);
++      if (idx != TabStripModel::kNoTab) {
++        browser->tab_strip_model()->CloseWebContentsAt(
++            idx, TabCloseTypes::CLOSE_NONE);
++      }
++    }
+   }
+ }
+ 
+@@ -430,9 +610,26 @@ void SlayzoneEmbeddedTabHost::SetActiveViewId(const std::string& view_id) {
+   if (!active_view_id_.empty()) {
+     TouchLru(active_view_id_);
+   }
++  // Release the previous tab's render keepalive before switching.
++  active_capture_ = base::ScopedClosureRunner();
++  content::WebContents* contents = nullptr;
++  Entry* entry = FindEntry(active_view_id_);
++  if (entry) {
++    contents = entry->contents();
++    if (contents) {
++      // Deliberately do NOT ActivateTabAt — the tab must stay a BACKGROUND tab
++      // so the hidden BrowserView doesn't own its RWHV (see GetOrCreateTask
++      // Browser). Pin it "user-visible" so it keeps producing frames despite
++      // being backgrounded; our slot composites the result. stay_awake=false so
++      // a backgrounded pane doesn't block system sleep.
++      active_capture_ = contents->IncrementCapturerCount(
++          gfx::Size(), /*stay_hidden=*/false, /*stay_awake=*/false,
++          /*is_activity=*/true);
++      contents->WasShown();
++    }
++  }
+   if (container_) {
+-    Entry* entry = FindEntry(active_view_id_);
+-    container_->SetEmbeddedTabWebContents(entry ? entry->contents() : nullptr);
++    container_->SetEmbeddedTabWebContents(contents);
+   }
+   RefreshContainer();
+ }
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index 99e4e37c86bae..51f02fba24e19 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -10,9 +10,11 @@
+ #include <memory>
+ #include <string>
+ 
++#include "base/functional/callback_helpers.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/slayzone/mojom/embedded_tab.mojom.h"
++#include "chrome/browser/ui/browser_list_observer.h"
+ #include "content/public/browser/web_contents_observer.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ #include "mojo/public/cpp/bindings/pending_remote.h"
+@@ -20,6 +22,7 @@
+ #include "mojo/public/cpp/bindings/remote.h"
+ #include "ui/gfx/geometry/rect.h"
+ 
++class Browser;
+ class SlayzoneShellContainer;
+ 
+ namespace content {
+@@ -29,24 +32,27 @@ class WebContents;
+ 
+ namespace slayzone {
+ 
+-// cap-shell-4 — inline task browser.
++// cap-layout (Option B) — inline task browser backed by REAL tabs.
+ //
+-// One SlayzoneEmbeddedTabHost per SlayzoneShellUI instance. The host owns N
+-// per-view content::WebContents (keyed by host-generated view_id) and a single
+-// shared views::WebView "slot" — the overlay surface in SlayzoneShellContainer
+-// that renders whichever WebContents is currently active. Switching the
+-// active view is SetWebContents(ptr) on the slot; no reparenting.
++// One SlayzoneEmbeddedTabHost per SlayzoneShellUI instance. Each task gets its
++// own *windowless* Browser (`Browser::Create`, never `window()->Show()`):
++// registered in BrowserList/WindowControllerList so its tabs are real,
++// extension-addressable tabs (TabHelpers::AttachTabHelpers fires via
++// `chrome::AddAndReturnTabAt`), but no OS window ever appears — the active
++// tab's WebContents is composited into the single shared views::WebView "slot"
++// in SlayzoneShellContainer (SetWebContents(ptr); no reparenting).
+ //
+-// Per-view WebContents cache with LRU at cap=10 — see embedded_tab.mojom for
+-// rationale. The currently-active view is always at the MRU end and is never
+-// evictable.
++// task_id → windowless Browser (task_browsers_). view_id → Entry, which
++// NON-owningly references one tab's WebContents (the TabStripModel owns it) and
++// observes it for nav/title/loading events forwarded to the renderer's
++// EmbeddedTabObserver. Tab teardown (LRU evict, window.close, task close) flows
++// back through Entry::WebContentsDestroyed → OnEntryContentsDestroyed; a dead
++// Browser flows through BrowserListObserver::OnBrowserRemoved.
+ //
+-// Nav / state events flow the opposite direction: each Entry is a
+-// WebContentsObserver and forwards TitleWasSet / PrimaryPageChanged /
+-// DidStart-DidStopLoading into the single EmbeddedTabObserver remote the
+-// renderer registered via Subscribe.
++// LRU cap = 10 tabs across the host; eviction closes the least-recent tab.
+ class SlayzoneEmbeddedTabHost
+-    : public slayzone::embedded_tab::mojom::EmbeddedTabHost {
++    : public slayzone::embedded_tab::mojom::EmbeddedTabHost,
++      public BrowserListObserver {
+  public:
+   // `browser_context` must outlive this object. `container` may be null (e.g.
+   // shell mounted with no active browser view) — every public method becomes
+@@ -98,24 +104,42 @@ class SlayzoneEmbeddedTabHost
+                        const std::string& error_description,
+                        const std::string& url);
+ 
++  // Entry tells us its underlying tab WebContents was destroyed (closed by us,
++  // by the page, or by Browser teardown). Single cleanup path for a view.
++  void OnEntryContentsDestroyed(const std::string& view_id);
++
++  // Entry tells us its page committed a navigation. If it's the active view,
++  // re-attach the slot to the (possibly swapped) RenderWidgetHostView and
++  // re-assert visibility — otherwise a cross-origin navigation leaves the slot
++  // showing the previous page's frozen render-view.
++  void RefreshActivePresentation(const std::string& view_id);
++
++  // BrowserListObserver — a tracked windowless Browser died (e.g. its last tab
++  // closed). Drop it from task_browsers_.
++  void OnBrowserRemoved(Browser* browser) override;
++
+  private:
+   class Entry;
+ 
+-  // LRU cap — see feedback in the binding contract. 10 open tabs at ~30-50MB
+-  // each caps at ~500MB worst-case; larger caps need telemetry before we
+-  // justify them.
++  // LRU cap — 10 open tabs at ~30-50MB each caps at ~500MB worst-case; larger
++  // caps need telemetry before we justify them.
+   static constexpr size_t kLruCap = 10;
+ 
++  // Return the task's windowless Browser, creating it on first use. Null only
++  // if the shell's Profile can't be resolved.
++  Browser* GetOrCreateTaskBrowser(const std::string& task_id);
++
+   Entry* FindEntry(const std::string& view_id);
+ 
+   // Push `view_id` to the MRU end (back of lru_).
+   void TouchLru(const std::string& view_id);
+ 
+-  // Evict the least-recently-used entry if we're over kLruCap. The active
+-  // view (always at the back of lru_) is never evictable.
++  // Evict (close the tab of) the least-recently-used entry while over kLruCap.
++  // The active view (back of lru_) is never evicted.
+   void EvictIfOverCap();
+ 
+-  // Swap the active view. Passing "" detaches.
++  // Swap the active view: activate its tab in the owning Browser + composite
++  // its WebContents into the slot. Passing "" detaches.
+   void SetActiveViewId(const std::string& view_id);
+ 
+   // Push the current active view's visibility / bounds into the container.
+@@ -124,6 +148,11 @@ class SlayzoneEmbeddedTabHost
+   raw_ptr<content::BrowserContext> browser_context_;
+   raw_ptr<SlayzoneShellContainer> container_;
+ 
++  // task_id → windowless Browser. raw_ptr — Browsers self-own (BrowserList);
++  // OnBrowserRemoved keeps this map honest.
++  std::map<std::string, raw_ptr<Browser>> task_browsers_;
++
++  // view_id → Entry (non-owning ref to a TabStripModel tab + its observer).
+   std::map<std::string, std::unique_ptr<Entry>> entries_;
+ 
+   // LRU order: front = least recent, back = most recent (active).
+@@ -132,11 +161,16 @@ class SlayzoneEmbeddedTabHost
+   // Currently-active view id. Empty when no view is active.
+   std::string active_view_id_;
+ 
+-  // Last bounds / visibility requested for the active view. Kept so
+-  // RefreshContainer can push the latest state after a view swap.
++  // Last bounds / visibility requested for the active view.
+   gfx::Rect active_bounds_;
+   bool active_visible_ = false;
+ 
++  // Keepalive that pins the currently-displayed tab's WebContents to keep
++  // rendering ("user-visible") even though its owning windowless Browser marks
++  // it hidden. Released/re-taken on every active-view switch. Without it the
++  // pane is blank — the hidden Browser stops the renderer producing frames.
++  base::ScopedClosureRunner active_capture_;
++
+   // Monotonic view id counter — the shim keys everything on this string.
+   uint64_t next_id_ = 1;
+ 
+diff --git a/chrome/browser/ui/views/frame/browser_window_factory.cc b/chrome/browser/ui/views/frame/browser_window_factory.cc
+index f76fb65c5f0f6..85a8e8b281b09 100644
+--- a/chrome/browser/ui/views/frame/browser_window_factory.cc
++++ b/chrome/browser/ui/views/frame/browser_window_factory.cc
+@@ -52,9 +52,13 @@ BrowserWindow::CreateBrowserWindow(Browser* browser,
+ #if BUILDFLAG(IS_CHROMEOS)
+   view = new BrowserViewAsh(browser);
+ #else
+-  if (slayzone::IsLayoutShellEnabled() && browser->is_type_normal()) {
++  if (slayzone::IsLayoutShellEnabled() && browser->is_type_normal() &&
++      !slayzone::IsEmbeddedTabBrowser(browser)) {
+     view = new SlayzoneBrowserView(browser);
+   } else {
++    // Embedded-tab host Browsers (and non-normal windows) get a plain
++    // BrowserView — no shell takeover, so they don't recurse into another
++    // chrome://slayzone-shell instance.
+     view = new BrowserView(browser);
+   }
+ #endif
+-- 
+2.52.0
+
