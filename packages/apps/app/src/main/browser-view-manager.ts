@@ -1,6 +1,15 @@
-import { clipboard, Menu, shell, WebContentsView, session, type BrowserWindow } from 'electron'
+import {
+  clipboard,
+  Menu,
+  shell,
+  WebContentsView,
+  session,
+  webContents,
+  type BrowserWindow
+} from 'electron'
 import { join } from 'path'
 import { EventEmitter } from 'node:events'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { menuEvents } from './menu-events'
 
 // tRPC event stream — dual-emitted alongside the legacy `browser:*` /
@@ -141,6 +150,9 @@ let viewCounter = 0
 export class BrowserViewManager {
   private views = new Map<string, ViewEntry>()
   private mainWindow: BrowserWindow | null = null
+  /** viewId → ts of the last deliberate focus request (focus API / CLI click).
+   * The nav focus-steal guard treats focus gains near these as intentional. */
+  private explicitFocusAt = new Map<string, number>()
   private allHidden = false
   private chromeExtensions: ElectronChromeExtensions | null = null
   private lastCreateTaskFromLinkSignature = ''
@@ -272,6 +284,7 @@ export class BrowserViewManager {
     }
 
     this.views.delete(viewId)
+    this.explicitFocusAt.delete(viewId)
     this.removeFromWindow(entry)
 
     // Restore focus to main renderer after removing native view.
@@ -509,6 +522,7 @@ export class BrowserViewManager {
   focus(viewId: string): void {
     const wc = this.getWebContents(viewId)
     if (!wc) return
+    this.explicitFocusAt.set(viewId, Date.now())
     wc.focus()
   }
 
@@ -740,6 +754,7 @@ export class BrowserViewManager {
     const wc = this.getWebContents(viewId)
     if (!wc) return false
 
+    this.explicitFocusAt.set(viewId, Date.now())
     wc.focus()
     const modifierMask = modifiers.reduce((mask, modifier) => {
       switch (modifier) {
@@ -1233,10 +1248,51 @@ export class BrowserViewManager {
       browserViewEvents.emit('shortcut', cmdShortcut) // tRPC app.browser.onShortcut
     })
 
+    // Navigation focus-steal guard: Chromium hands keyboard focus to a WCV
+    // when its main frame commits a navigation — reload included, and even
+    // while the view is hidden (reproduced on Electron 41; flaky because it
+    // requires the window to be OS-key). A panel must only gain focus from
+    // deliberate user action, never because its page reloaded under it (e.g.
+    // a vite full-reload triggered by an agent's file edit) while the user
+    // types in a terminal. Snapshot the focus owner when a load starts; if
+    // focus lands here during the load without real user input in this view
+    // or an explicit focus request, hand it straight back.
+    let navFocusOwner: Electron.WebContents | null = null
+    let navGuardUntil = 0 // Infinity while loading, then a short post-load grace
+    let lastRealUserInputAt = 0
+
+    wc.on('did-start-navigation', (details) => {
+      if (!details.isMainFrame || details.isSameDocument) return
+      const focused = webContents.getFocusedWebContents()
+      navFocusOwner = focused && focused.id !== wc.id ? focused : null
+      navGuardUntil = navFocusOwner ? Infinity : 0
+    })
+
     // Notify renderer when WebContentsView gains focus so it can
     // show the glow and update focus tracking (focusin never fires
     // in the renderer DOM when a separate web contents has focus).
     wc.on('focus', () => {
+      const now = Date.now()
+      const guardActive = navGuardUntil === Infinity || now < navGuardUntil
+      if (guardActive && navFocusOwner && !navFocusOwner.isDestroyed()) {
+        const userActedHere = now - lastRealUserInputAt < 1000
+        const explicitlyRequested = now - (this.explicitFocusAt.get(viewId) ?? 0) < 1000
+        if (!userActedHere && !explicitlyRequested) {
+          const owner = navFocusOwner
+          navGuardUntil = 0 // one restore per navigation — never fight the user
+          setImmediate(() => {
+            if (!owner.isDestroyed()) owner.focus()
+          })
+          recordDiagnosticEvent({
+            level: 'info',
+            source: 'browser',
+            event: 'browser.focus_steal_prevented',
+            taskId: entry.taskId,
+            payload: { viewId, kind: entry.kind, url: wc.getURL() }
+          })
+          return // stolen, not genuine — skip glow + engagement below
+        }
+      }
       // Idle-close engagement: focusing this view (e.g. opening the browser
       // panel) is genuine interaction with the task — keep its main agent's
       // idle clock fresh so it isn't hibernated out from under an active user.
@@ -1255,6 +1311,11 @@ export class BrowserViewManager {
     // leaves the agent's "user engaged" clock stale → it hibernates while in use.
     let lastEngagementTouchAt = 0
     wc.on('input-event', (_e, input) => {
+      // Real user interaction inside this view — focus gains near this are
+      // genuine, so the nav focus-steal guard must not undo them.
+      if (input.type === 'mouseDown' || input.type === 'rawKeyDown' || input.type === 'keyDown') {
+        lastRealUserInputAt = Date.now()
+      }
       if (!isEngagementInputType(input.type)) return
       const now = Date.now()
       if (!shouldReportEngagement(lastEngagementTouchAt, now)) return
@@ -1291,6 +1352,10 @@ export class BrowserViewManager {
     })
 
     wc.on('did-stop-loading', () => {
+      // Keep the steal guard armed briefly past load end — the focus grab can
+      // land just after loading flips off (and at setVisible(true) for views
+      // that reloaded while hidden).
+      if (navGuardUntil === Infinity) navGuardUntil = Date.now() + 300
       send({ viewId, type: 'did-stop-loading' })
     })
 
@@ -1377,6 +1442,7 @@ export class BrowserViewManager {
 
     wc.on('destroyed', () => {
       this.views.delete(viewId)
+      this.explicitFocusAt.delete(viewId)
     })
   }
 }

@@ -8,6 +8,7 @@ export type DiagnosticSource =
   | 'git'
   | 'gh'
   | 'task'
+  | 'browser'
   | 'settings'
   | 'db'
   | 'usage'
