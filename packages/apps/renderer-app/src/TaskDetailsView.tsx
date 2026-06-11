@@ -23,9 +23,11 @@ import {
   createEmbeddedTabHost,
   listExtensions,
   onExtensionsChanged,
+  onNewView,
   openExtensionOptions,
   openExtensionPopup,
   openExtensionsModal,
+  registerBrowserAdoption,
   setEmbeddedProfileKey,
   setExtensionsModalBounds,
   type ExtensionInfo
@@ -75,6 +77,20 @@ function findTileIdOfType(node: LayoutNode | null, type: TileType): string | nul
   if (isSplit(node)) {
     for (const child of node.children) {
       const found = findTileIdOfType(child, type)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+// The id of the pane that holds a tile of `type` (so a new view can be inserted
+// there as a sibling tab). Null if no such tile is open.
+function findPaneIdOfType(node: LayoutNode | null, type: TileType): string | null {
+  if (!node) return null
+  if (isPane(node)) return node.tiles.some((t) => t.type === type) ? node.id : null
+  if (isSplit(node)) {
+    for (const child of node.children) {
+      const found = findPaneIdOfType(child, type)
       if (found) return found
     }
   }
@@ -167,6 +183,20 @@ export function TaskDetailsView() {
   const activeTypes = useMemo(() => collectTileTypes(tree.root), [tree])
   const [profile, setProfile] = useState('')
   const [extOpen, setExtOpen] = useState(false)
+
+  // A page in a browser pane opened a new view (window.open / target=_blank):
+  // open it as a new browser TAB in the browser pane, bound to the host's
+  // already-created view (adoption), and foreground it.
+  useEffect(() => {
+    return onNewView(({ viewId, url }) => {
+      const store = useLayoutStore.getState()
+      const tile = makeTile('browser')
+      const paneId = findPaneIdOfType(store.tree.root, 'browser')
+      registerBrowserAdoption(tile.id, viewId, url)
+      store.openTile(paneId, tile)
+      if (paneId) store.setActiveTab(paneId, tile.id)
+    })
+  }, [])
 
   // Per-task identity (pooled profile): each choice = its own Google login +
   // 1Password. Changing it re-creates the browser pane on the new profile.

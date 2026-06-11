@@ -87,6 +87,11 @@ async function ensureObserver(): Promise<void> {
     router.onExtensionsChanged.addListener(() => {
       fanOut({ type: 'extensions-changed' } as unknown as EventPayload)
     })
+    // A pane page opened a new view (window.open / target=_blank). Carry the
+    // task + view id so the renderer can open a tab bound to it via attachView.
+    router.onNewView.addListener((taskId: string, viewId: string, url: string) => {
+      fanOut({ type: 'new-view', taskId, viewId, url } as unknown as EventPayload)
+    })
 
     remote.subscribe(router.$.bindNewPipeAndPassRemote())
   })()
@@ -209,6 +214,16 @@ async function setBounds(
 async function setVisible(viewId: string, visible: boolean): Promise<void> {
   const remote = await embeddedTabRemote()
   remote.setVisible(viewId, visible)
+}
+
+// Adopt an existing host-side view (created when a pane page did window.open /
+// target=_blank, surfaced via the 'new-view' event) into a renderer tile.
+async function attachView(
+  viewId: string,
+  bounds: { x: number; y: number; width: number; height: number },
+): Promise<void> {
+  const remote = await embeddedTabRemote()
+  remote.attachView(viewId, bounds)
 }
 
 // Extensions inlay-modal helpers. The window itself is opened via createView
@@ -344,6 +359,7 @@ export const browserShim = {
 
   setBounds,
   setVisible,
+  attachView,
   setExtensionsBounds,
   closeExtensions,
   listExtensions,

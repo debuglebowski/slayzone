@@ -73,6 +73,12 @@ interface EmbeddedTabHost {
   // Reposition the overlay WebView. Called per-rAF; no-ops if unchanged.
   SetBounds(string view_id, EmbeddedTabBounds bounds);
 
+  // Adopt an EXISTING view (created host-side when a pane page opened a new
+  // window/tab via window.open / target=_blank, surfaced via OnNewView) into a
+  // renderer tile — composites it like CreateView but reuses the view_id rather
+  // than minting/loading a fresh tab.
+  AttachView(string view_id, EmbeddedTabBounds bounds);
+
   // Show / hide. Hide detaches from the overlay slot; show re-attaches at
   // the last SetBounds rect.
   SetVisible(string view_id, bool visible);
@@ -130,4 +136,9 @@ interface EmbeddedTabObserver {
   // (install / uninstall / enable / disable) — the extension bar should
   // re-list. No payload: the renderer re-lists for its current identity.
   OnExtensionsChanged();
+
+  // A pane page opened a new view (window.open / target=_blank). The host has
+  // already created the tab + view_id; the renderer should open a new browser
+  // tab in `task_id`'s pane bound to `view_id` (via AttachView, not CreateView).
+  OnNewView(string task_id, string view_id, string url);
 };

@@ -168,18 +168,34 @@ function PaneView(props: { pane: PaneNode; rect: Rect; registry: PanelRegistry; 
         ) : null}
       </header>
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-        {active ? <TileBody tile={active} registry={registry} host={host} /> : null}
+        {/* Render ALL tiles (inactive ones display:none) so a tab's native view
+            persists across tab switches — only the active tab composites. */}
+        {pane.tiles.map((t) => (
+          <div
+            key={t.id}
+            style={{ position: 'absolute', inset: 0, display: t.id === active?.id ? 'block' : 'none' }}
+          >
+            <TileBody tile={t} registry={registry} host={host} active={t.id === active?.id} />
+          </div>
+        ))}
         {tileDragActive ? <PaneDropZones paneId={pane.id} /> : null}
       </div>
     </section>
   )
 }
 
-function TileBody(props: { tile: Tile; registry: PanelRegistry; host: NativeSurfaceHost }) {
-  const { tile, registry, host } = props
+function TileBody(props: {
+  tile: Tile
+  registry: PanelRegistry
+  host: NativeSurfaceHost
+  active: boolean
+}) {
+  const { tile, registry, host, active } = props
   const Comp = resolvePanel(registry, tile.type)
   if (tile.renderKind === 'native') {
-    const anchor = <NativeAnchor tileId={tile.id} host={host} label={`${tile.title} (native pane)`} />
+    const anchor = (
+      <NativeAnchor tileId={tile.id} host={host} label={`${tile.title} (native pane)`} active={active} />
+    )
     if (Comp) return <Comp tile={tile} anchor={anchor} />
     return anchor
   }

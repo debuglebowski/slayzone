@@ -15,15 +15,30 @@ interface NativeAnchorProps {
   tileId: string
   host: NativeSurfaceHost
   label?: string
+  // Whether this tile is the ACTIVE tab in its pane. Inactive-tab tiles stay
+  // MOUNTED (so their native view isn't destroyed) but must NOT composite —
+  // otherwise two browser tabs fight over the host's single active view.
+  active?: boolean
 }
 
-export function NativeAnchor({ tileId, host, label }: NativeAnchorProps) {
+export function NativeAnchor({ tileId, host, label, active = true }: NativeAnchorProps) {
   const ref = useRef<HTMLDivElement | null>(null)
-  const visible = useNativeTilesVisible()
+  const globalVisible = useNativeTilesVisible()
+  const visible = globalVisible && active
 
+  // Remove the host view ONLY on true unmount (tile closed / pane removed) —
+  // NOT when the tile merely goes inactive (tab switch). Kept separate so the
+  // place-loop effect can re-run on visibility changes without destroying it.
+  useEffect(() => {
+    return () => host.remove(tileId)
+  }, [tileId, host])
+
+  // Place loop — only while visible (active tab + not policy-hidden). Skipped
+  // when inactive so a hidden tab (display:none → 0×0 rect) never composites
+  // or steals the active view.
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || !visible) return
     let raf = 0
     const publish = (): void => {
       raf = 0
@@ -50,12 +65,11 @@ export function NativeAnchor({ tileId, host, label }: NativeAnchorProps) {
       ro.disconnect()
       window.removeEventListener('resize', schedule)
       if (raf) cancelAnimationFrame(raf)
-      host.remove(tileId)
     }
-  }, [tileId, host])
+  }, [tileId, host, visible])
 
   // Engine-derived visibility → native surface. On reveal, re-publish the rect
-  // (it may have moved while hidden, e.g. hide-during-drag).
+  // (it may have moved while hidden, e.g. hide-during-drag or tab switch).
   useEffect(() => {
     host.setVisible(tileId, visible)
     if (visible) {

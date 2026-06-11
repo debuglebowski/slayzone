@@ -38,6 +38,7 @@ export interface EmbeddedTabHostInterface {
   destroyView(viewId: string): void;
   destroyAllForTask(taskId: string): void;
   setBounds(viewId: string, bounds: EmbeddedTabBounds): void;
+  attachView(viewId: string, bounds: EmbeddedTabBounds): void;
   setVisible(viewId: string, visible: boolean): void;
   navigate(viewId: string, url: string): void;
   goBack(viewId: string): void;
@@ -122,11 +123,25 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
         false);
   }
 
+  attachView(
+      viewId: string,
+      bounds: EmbeddedTabBounds): void {
+    this.proxy.sendMessage(
+        4,
+        EmbeddedTabHost_AttachView_ParamsSpec.$,
+        null,
+        [
+          viewId,
+          bounds
+        ],
+        false);
+  }
+
   setVisible(
       viewId: string,
       visible: boolean): void {
     this.proxy.sendMessage(
-        4,
+        5,
         EmbeddedTabHost_SetVisible_ParamsSpec.$,
         null,
         [
@@ -140,7 +155,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
       viewId: string,
       url: string): void {
     this.proxy.sendMessage(
-        5,
+        6,
         EmbeddedTabHost_Navigate_ParamsSpec.$,
         null,
         [
@@ -153,7 +168,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   goBack(
       viewId: string): void {
     this.proxy.sendMessage(
-        6,
+        7,
         EmbeddedTabHost_GoBack_ParamsSpec.$,
         null,
         [
@@ -165,7 +180,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   goForward(
       viewId: string): void {
     this.proxy.sendMessage(
-        7,
+        8,
         EmbeddedTabHost_GoForward_ParamsSpec.$,
         null,
         [
@@ -178,7 +193,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
       viewId: string,
       ignoreCache: boolean): void {
     this.proxy.sendMessage(
-        8,
+        9,
         EmbeddedTabHost_Reload_ParamsSpec.$,
         null,
         [
@@ -191,7 +206,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   stop(
       viewId: string): void {
     this.proxy.sendMessage(
-        9,
+        10,
         EmbeddedTabHost_Stop_ParamsSpec.$,
         null,
         [
@@ -203,7 +218,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   focus(
       viewId: string): void {
     this.proxy.sendMessage(
-        10,
+        11,
         EmbeddedTabHost_Focus_ParamsSpec.$,
         null,
         [
@@ -215,7 +230,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   toggleDevtools(
       viewId: string): void {
     this.proxy.sendMessage(
-        11,
+        12,
         EmbeddedTabHost_ToggleDevtools_ParamsSpec.$,
         null,
         [
@@ -227,7 +242,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   subscribe(
       observer: EmbeddedTabObserverRemote): void {
     this.proxy.sendMessage(
-        12,
+        13,
         EmbeddedTabHost_Subscribe_ParamsSpec.$,
         null,
         [
@@ -239,7 +254,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   setExtensionsBounds(
       bounds: EmbeddedTabBounds): void {
     this.proxy.sendMessage(
-        13,
+        14,
         EmbeddedTabHost_SetExtensionsBounds_ParamsSpec.$,
         null,
         [
@@ -250,7 +265,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
 
   closeExtensions(): void {
     this.proxy.sendMessage(
-        14,
+        15,
         EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
         null,
         [
@@ -262,7 +277,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
       profileKey: string): Promise<{
         extensions: ExtensionInfo[], }> {
     return this.proxy.sendMessage(
-        15,
+        16,
         EmbeddedTabHost_ListExtensions_ParamsSpec.$,
         EmbeddedTabHost_ListExtensions_ResponseParamsSpec.$,
         [
@@ -274,7 +289,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   openExtensionOptions(
       extensionId: string): void {
     this.proxy.sendMessage(
-        16,
+        17,
         EmbeddedTabHost_OpenExtensionOptions_ParamsSpec.$,
         null,
         [
@@ -286,7 +301,7 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
   openExtensionPopup(
       extensionId: string): void {
     this.proxy.sendMessage(
-        17,
+        18,
         EmbeddedTabHost_OpenExtensionPopup_ParamsSpec.$,
         null,
         [
@@ -345,84 +360,90 @@ export class EmbeddedTabHostReceiver {
         false);
     this.helper_internal_.registerHandler(
         4,
+        EmbeddedTabHost_AttachView_ParamsSpec.$,
+        null,
+        impl.attachView.bind(impl),
+        false);
+    this.helper_internal_.registerHandler(
+        5,
         EmbeddedTabHost_SetVisible_ParamsSpec.$,
         null,
         impl.setVisible.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        5,
+        6,
         EmbeddedTabHost_Navigate_ParamsSpec.$,
         null,
         impl.navigate.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        6,
+        7,
         EmbeddedTabHost_GoBack_ParamsSpec.$,
         null,
         impl.goBack.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        7,
+        8,
         EmbeddedTabHost_GoForward_ParamsSpec.$,
         null,
         impl.goForward.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        8,
+        9,
         EmbeddedTabHost_Reload_ParamsSpec.$,
         null,
         impl.reload.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        9,
+        10,
         EmbeddedTabHost_Stop_ParamsSpec.$,
         null,
         impl.stop.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        10,
+        11,
         EmbeddedTabHost_Focus_ParamsSpec.$,
         null,
         impl.focus.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        11,
+        12,
         EmbeddedTabHost_ToggleDevtools_ParamsSpec.$,
         null,
         impl.toggleDevtools.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        12,
+        13,
         EmbeddedTabHost_Subscribe_ParamsSpec.$,
         null,
         impl.subscribe.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        13,
+        14,
         EmbeddedTabHost_SetExtensionsBounds_ParamsSpec.$,
         null,
         impl.setExtensionsBounds.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        14,
+        15,
         EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
         null,
         impl.closeExtensions.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        15,
+        16,
         EmbeddedTabHost_ListExtensions_ParamsSpec.$,
         EmbeddedTabHost_ListExtensions_ResponseParamsSpec.$,
         impl.listExtensions.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        16,
+        17,
         EmbeddedTabHost_OpenExtensionOptions_ParamsSpec.$,
         null,
         impl.openExtensionOptions.bind(impl),
         false);
     this.helper_internal_.registerHandler(
-        17,
+        18,
         EmbeddedTabHost_OpenExtensionPopup_ParamsSpec.$,
         null,
         impl.openExtensionPopup.bind(impl),
@@ -468,6 +489,8 @@ export class EmbeddedTabHostCallbackRouter {
   destroyAllForTask: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
     (taskId: string,) => any>;
   setBounds: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    (viewId: string,bounds: EmbeddedTabBounds,) => any>;
+  attachView: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
     (viewId: string,bounds: EmbeddedTabBounds,) => any>;
   setVisible: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
     (viewId: string,visible: boolean,) => any>;
@@ -547,12 +570,22 @@ export class EmbeddedTabHostCallbackRouter {
         null,
         this.setBounds.createReceiverHandler(false /* expectsResponse */),
         false);
-    this.setVisible =
+    this.attachView =
         new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
             this.router_);
 
     this.helper_internal_.registerHandler(
         4,
+        EmbeddedTabHost_AttachView_ParamsSpec.$,
+        null,
+        this.attachView.createReceiverHandler(false /* expectsResponse */),
+        false);
+    this.setVisible =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        5,
         EmbeddedTabHost_SetVisible_ParamsSpec.$,
         null,
         this.setVisible.createReceiverHandler(false /* expectsResponse */),
@@ -562,7 +595,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        5,
+        6,
         EmbeddedTabHost_Navigate_ParamsSpec.$,
         null,
         this.navigate.createReceiverHandler(false /* expectsResponse */),
@@ -572,7 +605,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        6,
+        7,
         EmbeddedTabHost_GoBack_ParamsSpec.$,
         null,
         this.goBack.createReceiverHandler(false /* expectsResponse */),
@@ -582,7 +615,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        7,
+        8,
         EmbeddedTabHost_GoForward_ParamsSpec.$,
         null,
         this.goForward.createReceiverHandler(false /* expectsResponse */),
@@ -592,7 +625,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        8,
+        9,
         EmbeddedTabHost_Reload_ParamsSpec.$,
         null,
         this.reload.createReceiverHandler(false /* expectsResponse */),
@@ -602,7 +635,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        9,
+        10,
         EmbeddedTabHost_Stop_ParamsSpec.$,
         null,
         this.stop.createReceiverHandler(false /* expectsResponse */),
@@ -612,7 +645,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        10,
+        11,
         EmbeddedTabHost_Focus_ParamsSpec.$,
         null,
         this.focus.createReceiverHandler(false /* expectsResponse */),
@@ -622,7 +655,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        11,
+        12,
         EmbeddedTabHost_ToggleDevtools_ParamsSpec.$,
         null,
         this.toggleDevtools.createReceiverHandler(false /* expectsResponse */),
@@ -632,7 +665,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        12,
+        13,
         EmbeddedTabHost_Subscribe_ParamsSpec.$,
         null,
         this.subscribe.createReceiverHandler(false /* expectsResponse */),
@@ -642,7 +675,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        13,
+        14,
         EmbeddedTabHost_SetExtensionsBounds_ParamsSpec.$,
         null,
         this.setExtensionsBounds.createReceiverHandler(false /* expectsResponse */),
@@ -652,7 +685,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        14,
+        15,
         EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
         null,
         this.closeExtensions.createReceiverHandler(false /* expectsResponse */),
@@ -662,7 +695,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        15,
+        16,
         EmbeddedTabHost_ListExtensions_ParamsSpec.$,
         EmbeddedTabHost_ListExtensions_ResponseParamsSpec.$,
         this.listExtensions.createReceiverHandler(true /* expectsResponse */),
@@ -672,7 +705,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        16,
+        17,
         EmbeddedTabHost_OpenExtensionOptions_ParamsSpec.$,
         null,
         this.openExtensionOptions.createReceiverHandler(false /* expectsResponse */),
@@ -682,7 +715,7 @@ export class EmbeddedTabHostCallbackRouter {
             this.router_);
 
     this.helper_internal_.registerHandler(
-        17,
+        18,
         EmbeddedTabHost_OpenExtensionPopup_ParamsSpec.$,
         null,
         this.openExtensionPopup.createReceiverHandler(false /* expectsResponse */),
@@ -727,6 +760,7 @@ export interface EmbeddedTabObserverInterface {
   onDomReady(viewId: string): void;
   onDidFailLoad(viewId: string, errorCode: number, errorDescription: string, url: string): void;
   onExtensionsChanged(): void;
+  onNewView(taskId: string, viewId: string, url: string): void;
 }
 
 export class EmbeddedTabObserverRemote implements EmbeddedTabObserverInterface {
@@ -840,6 +874,22 @@ export class EmbeddedTabObserverRemote implements EmbeddedTabObserverInterface {
         ],
         false);
   }
+
+  onNewView(
+      taskId: string,
+      viewId: string,
+      url: string): void {
+    this.proxy.sendMessage(
+        7,
+        EmbeddedTabObserver_OnNewView_ParamsSpec.$,
+        null,
+        [
+          taskId,
+          viewId,
+          url
+        ],
+        false);
+  }
 };
 
 /**
@@ -907,6 +957,12 @@ export class EmbeddedTabObserverReceiver {
         null,
         impl.onExtensionsChanged.bind(impl),
         false);
+    this.helper_internal_.registerHandler(
+        7,
+        EmbeddedTabObserver_OnNewView_ParamsSpec.$,
+        null,
+        impl.onNewView.bind(impl),
+        false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
 }
@@ -955,6 +1011,8 @@ export class EmbeddedTabObserverCallbackRouter {
     (viewId: string,errorCode: number,errorDescription: string,url: string,) => any>;
   onExtensionsChanged: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
     () => any>;
+  onNewView: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    (taskId: string,viewId: string,url: string,) => any>;
   onConnectionError: mojo.internal.interfaceSupport.ConnectionErrorEventRouter;
 
   constructor() {
@@ -1035,6 +1093,16 @@ export class EmbeddedTabObserverCallbackRouter {
         null,
         this.onExtensionsChanged.createReceiverHandler(false /* expectsResponse */),
         false);
+    this.onNewView =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        7,
+        EmbeddedTabObserver_OnNewView_ParamsSpec.$,
+        null,
+        this.onNewView.createReceiverHandler(false /* expectsResponse */),
+        false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
 
@@ -1069,6 +1137,9 @@ export const EmbeddedTabHost_DestroyAllForTask_ParamsSpec: { $: mojo.internal.Mo
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabHost_SetBounds_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabHost_AttachView_ParamsSpec: { $: mojo.internal.MojomType } =
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabHost_SetVisible_ParamsSpec: { $: mojo.internal.MojomType } =
@@ -1135,6 +1206,9 @@ export const EmbeddedTabObserver_OnDidFailLoad_ParamsSpec: { $: mojo.internal.Mo
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabObserver_OnExtensionsChanged_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabObserver_OnNewView_ParamsSpec: { $: mojo.internal.MojomType } =
     { $: {} as unknown as mojo.internal.MojomType };
 
 
@@ -1483,6 +1557,44 @@ mojo.internal.Struct<EmbeddedTabHost_SetBounds_ParamsMojoType>(
         undefined,
     ),
       mojo.internal.StructField<EmbeddedTabHost_SetBounds_ParamsMojoType, EmbeddedTabBounds>(
+        'bounds', 8,
+        0,
+        EmbeddedTabBoundsSpec.$,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 24],]);
+
+
+
+
+
+export interface EmbeddedTabHost_AttachView_ParamsMojoType {
+  viewId: string;
+  bounds: EmbeddedTabBounds;
+}
+
+
+export type EmbeddedTabHost_AttachView_Params = EmbeddedTabHost_AttachView_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabHost_AttachView_ParamsMojoType>(
+    EmbeddedTabHost_AttachView_ParamsSpec.$,
+    'EmbeddedTabHost_AttachView_Params',
+    [
+      mojo.internal.StructField<EmbeddedTabHost_AttachView_ParamsMojoType, string>(
+        'viewId', 0,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+      mojo.internal.StructField<EmbeddedTabHost_AttachView_ParamsMojoType, EmbeddedTabBounds>(
         'bounds', 8,
         0,
         EmbeddedTabBoundsSpec.$,
@@ -2176,6 +2288,55 @@ mojo.internal.Struct<EmbeddedTabObserver_OnExtensionsChanged_ParamsMojoType>(
     [
     ],
     [[0, 8],]);
+
+
+
+
+
+export interface EmbeddedTabObserver_OnNewView_ParamsMojoType {
+  taskId: string;
+  viewId: string;
+  url: string;
+}
+
+
+export type EmbeddedTabObserver_OnNewView_Params = EmbeddedTabObserver_OnNewView_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabObserver_OnNewView_ParamsMojoType>(
+    EmbeddedTabObserver_OnNewView_ParamsSpec.$,
+    'EmbeddedTabObserver_OnNewView_Params',
+    [
+      mojo.internal.StructField<EmbeddedTabObserver_OnNewView_ParamsMojoType, string>(
+        'taskId', 0,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+      mojo.internal.StructField<EmbeddedTabObserver_OnNewView_ParamsMojoType, string>(
+        'viewId', 8,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+      mojo.internal.StructField<EmbeddedTabObserver_OnNewView_ParamsMojoType, string>(
+        'url', 16,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 32],]);
 
 
 

@@ -38,6 +38,7 @@ interface BrowserApi {
   }): Promise<string>
   destroyView(viewId: string): Promise<void>
   setBounds(viewId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
+  attachView?(viewId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
   setVisible(viewId: string, visible: boolean): Promise<void>
   navigate(viewId: string, url: string): Promise<void>
   goBack(viewId: string): Promise<void>
@@ -113,6 +114,31 @@ export function onExtensionsChanged(cb: () => void): () => void {
   })
 }
 
+// Page-opened views (window.open / target=_blank) the host surfaced via
+// onNewView, waiting for their renderer tile to mount. tileId → {viewId, url}.
+const pendingAdoptions = new Map<string, { viewId: string; url: string }>()
+
+// Bind a not-yet-mounted browser tile to an EXISTING host view (rather than
+// creating a fresh tab). Call right before opening the tile.
+export function registerBrowserAdoption(tileId: string, viewId: string, url: string): void {
+  pendingAdoptions.set(tileId, { viewId, url })
+}
+
+// Subscribe to page-opened views. The host already made the tab + view_id; the
+// caller opens a browser tab bound to it (registerBrowserAdoption + openTile).
+export function onNewView(
+  cb: (e: { taskId: string; viewId: string; url: string }) => void
+): () => void {
+  const api = browserApi()
+  if (!api) return () => undefined
+  return api.onEvent((evt) => {
+    if ((evt as { type?: string }).type === 'new-view') {
+      const e = evt as unknown as { taskId: string; viewId: string; url: string }
+      cb({ taskId: e.taskId, viewId: e.viewId, url: e.url })
+    }
+  })
+}
+
 function browserApi(): BrowserApi | null {
   const api = (window as unknown as { api?: { browser?: BrowserApi } }).api
   return api?.browser ?? null
@@ -160,6 +186,10 @@ function toBounds(rect: Rect): { x: number; y: number; width: number; height: nu
 export function createEmbeddedTabHost(taskId: string, defaultUrl: string): EmbeddedTabHostApi {
   const entries = new Map<string, Entry>()
   const byViewId = new Map<string, string>() // viewId → tileId
+  // Adopted views can't be recreated (they're the page's real tab), so their
+  // destroy on unmount is DEFERRED — a NativeAnchor remount (layout settle)
+  // re-places immediately and cancels it, reusing the same view. tileId → timer.
+  const pendingDestroys = new Map<string, ReturnType<typeof setTimeout>>()
   let eventsWired = false
 
   const entryFor = (tileId: string): Entry => {
@@ -234,7 +264,31 @@ export function createEmbeddedTabHost(taskId: string, defaultUrl: string): Embed
     const e = entryFor(tileId)
     if (e.destroyed) return
     if (e.viewId) {
-      void api.setBounds(e.viewId, toBounds(rect))
+      // attachView (not setBounds) so the host makes THIS view active — required
+      // once a pane has multiple browser tabs: the shown tab's view must be the
+      // composited one. Idempotent for the single-tab case (already active).
+      if (api.attachView) void api.attachView(e.viewId, toBounds(rect))
+      else void api.setBounds(e.viewId, toBounds(rect))
+      return
+    }
+    // Page-opened view (window.open / target=_blank): adopt the existing host
+    // view instead of creating a fresh tab.
+    const adoption = pendingAdoptions.get(tileId)
+    if (adoption && api.attachView) {
+      // Cancel a deferred destroy from a just-fired remount — reuse the SAME
+      // adopted view rather than letting it be destroyed. Keep pendingAdoptions
+      // (don't consume) so any further remount can re-adopt too.
+      const pd = pendingDestroys.get(tileId)
+      if (pd) {
+        clearTimeout(pd)
+        pendingDestroys.delete(tileId)
+      }
+      e.viewId = adoption.viewId
+      e.state = { ...e.state, url: adoption.url }
+      e.lastRect = rect
+      byViewId.set(adoption.viewId, tileId)
+      void api.attachView(adoption.viewId, toBounds(rect))
+      emit(e)
       return
     }
     e.lastRect = rect
@@ -272,12 +326,26 @@ export function createEmbeddedTabHost(taskId: string, defaultUrl: string): Embed
       const e = entries.get(tileId)
       if (!e) return
       e.destroyed = true
-      const api = browserApi()
-      if (api && e.viewId) {
-        byViewId.delete(e.viewId)
-        void api.destroyView(e.viewId)
-      }
       entries.delete(tileId)
+      const api = browserApi()
+      const viewId = e.viewId
+      if (pendingAdoptions.has(tileId)) {
+        // Adopted view: DEFER the destroy. If this was a remount, the fresh
+        // mount re-adopts within a frame and cancels this timer (reuse). If it
+        // was a real close, the timer fires and tears the page's tab down.
+        if (viewId) byViewId.delete(viewId)
+        const timer = setTimeout(() => {
+          pendingDestroys.delete(tileId)
+          pendingAdoptions.delete(tileId)
+          if (api && viewId) void api.destroyView(viewId)
+        }, 400)
+        pendingDestroys.set(tileId, timer)
+        return
+      }
+      if (api && viewId) {
+        byViewId.delete(viewId)
+        void api.destroyView(viewId)
+      }
     },
     navigate(tileId: string, url: string): void {
       const e = entryFor(tileId)

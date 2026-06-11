@@ -1,0 +1,230 @@
+From 7e98056b978a96566ac17a4885c6fbce2b5004f8 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 11 Jun 2026 22:17:46 +0200
+Subject: =?UTF-8?q?feat(slayzone):=20in-pane=20window.open=20/=20target=3D?=
+ =?UTF-8?q?=5Fblank=20=E2=86=92=20adopt=20as=20a=20pane=20tab?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A page in a browser pane that opens a new window/tab (window.open, target=_blank,
+Cmd+click) previously created a lost background tab in the task's windowless
+Browser. The host now observes each task Browser's TabStripModel: a tab it did
+NOT create (guarded via creating_owned_tab_ around our own AddAndReturnTabAt) is
+adopted — minted a view_id + Entry — and surfaced to the renderer via a new
+OnNewView(task_id, view_id, url) observer event. The renderer opens a browser tab
+bound to that EXISTING view via a new AttachView(view_id, bounds) (composites it
+without minting/loading a fresh tab). The TabStripModelObserver base auto-cleans
+its observation when a model is destroyed.
+
+NEW_TAB dispositions only — sized window.open popups (NEW_POPUP, e.g. OAuth) open
+a separate Browser and are a follow-on phase.
+---
+ .../browser/slayzone/mojom/embedded_tab.mojom | 11 +++
+ .../slayzone/slayzone_embedded_tab_host.cc    | 74 +++++++++++++++++++
+ .../slayzone/slayzone_embedded_tab_host.h     | 26 ++++++-
+ 3 files changed, 110 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/slayzone/mojom/embedded_tab.mojom b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+index b12c0529a6aaa..1aa37f11f3d34 100644
+--- a/chrome/browser/slayzone/mojom/embedded_tab.mojom
++++ b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+@@ -73,6 +73,12 @@ interface EmbeddedTabHost {
+   // Reposition the overlay WebView. Called per-rAF; no-ops if unchanged.
+   SetBounds(string view_id, EmbeddedTabBounds bounds);
+ 
++  // Adopt an EXISTING view (created host-side when a pane page opened a new
++  // window/tab via window.open / target=_blank, surfaced via OnNewView) into a
++  // renderer tile — composites it like CreateView but reuses the view_id rather
++  // than minting/loading a fresh tab.
++  AttachView(string view_id, EmbeddedTabBounds bounds);
++
+   // Show / hide. Hide detaches from the overlay slot; show re-attaches at
+   // the last SetBounds rect.
+   SetVisible(string view_id, bool visible);
+@@ -130,4 +136,9 @@ interface EmbeddedTabObserver {
+   // (install / uninstall / enable / disable) — the extension bar should
+   // re-list. No payload: the renderer re-lists for its current identity.
+   OnExtensionsChanged();
++
++  // A pane page opened a new view (window.open / target=_blank). The host has
++  // already created the tab + view_id; the renderer should open a new browser
++  // tab in `task_id`'s pane bound to `view_id` (via AttachView, not CreateView).
++  OnNewView(string task_id, string view_id, string url);
+ };
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index 3f74cc296431c..9f12f355d47a2 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -330,6 +330,10 @@ Browser* SlayzoneEmbeddedTabHost::GetOrCreateTaskBrowser(
+   // BACKGROUND tab, whose RWHV our slot is free to composite.
+   chrome::AddAndReturnTabAt(browser, GURL("about:blank"), /*index=*/-1,
+                             /*foreground=*/true);
++  // Observe AFTER parking about:blank (so that insert isn't seen as foreign).
++  // From here on, any tab inserted that we didn't create = a page-opened
++  // window/tab (window.open / target=_blank) → adopt it as a new pane view.
++  browser->tab_strip_model()->AddObserver(this);
+   LOG(INFO) << "[embedded_tab] windowless Browser for task=" << task_id
+             << " browser=" << browser;
+   return browser;
+@@ -713,8 +717,12 @@ void SlayzoneEmbeddedTabHost::CreateViewOnProfile(
+   // Real tab via the standard tabstrip path → TabHelpers::AttachTabHelpers
+   // fires → extension-addressable tab. Added as a background tab; we drive
+   // which one is shown via SetActiveViewId, not the Browser's foreground.
++  // Guard the tab-strip observer so this (our own) insert isn't adopted as a
++  // page-opened view.
++  creating_owned_tab_ = true;
+   content::WebContents* contents = chrome::AddAndReturnTabAt(
+       browser, url, /*index=*/-1, /*foreground=*/false);
++  creating_owned_tab_ = false;
+   if (!contents) {
+     std::move(callback).Run(std::string());
+     return;
+@@ -1048,6 +1056,72 @@ void SlayzoneEmbeddedTabHost::EvictIfOverCap() {
+   }
+ }
+ 
++void SlayzoneEmbeddedTabHost::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (change.type() != TabStripModelChange::kInserted || creating_owned_tab_) {
++    return;  // not an insert, or it's a tab WE created (CreateView)
++  }
++  const TabStripModelChange::Insert* insert = change.GetInsert();
++  if (!insert) {
++    return;
++  }
++  // Which task owns this model?
++  Browser* owner = nullptr;
++  std::string task_id;
++  for (const auto& [tid, browser] : task_browsers_) {
++    if (browser && browser->tab_strip_model() == tab_strip_model) {
++      owner = browser;
++      task_id = tid;
++      break;
++    }
++  }
++  if (!owner) {
++    return;
++  }
++  for (const auto& cwi : insert->contents) {
++    AdoptForeignTab(task_id, owner, cwi.contents);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::AdoptForeignTab(
++    const std::string& task_id,
++    Browser* browser,
++    content::WebContents* contents) {
++  if (!contents) {
++    return;
++  }
++  // Mint a view for the page-opened tab and tell the renderer to show it as a
++  // new tab in the task's pane (via AttachView, not CreateView).
++  const std::string view_id = "etab-" + base::NumberToString(next_id_++);
++  const std::string tab_id = "popup-" + view_id;
++  entries_.emplace(view_id,
++                   std::make_unique<Entry>(this, view_id, task_id, tab_id,
++                                           browser, contents));
++  lru_.push_back(view_id);
++  EvictIfOverCap();
++  const std::string url = contents->GetVisibleURL().possibly_invalid_spec();
++  LOG(INFO) << "[embedded_tab] adopted page-opened view " << view_id
++            << " task=" << task_id << " url=" << url;
++  if (observer_) {
++    observer_->OnNewView(task_id, view_id, url);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::AttachView(
++    const std::string& view_id,
++    slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) {
++  if (!FindEntry(view_id)) {
++    LOG(WARNING) << "[embedded_tab] AttachView — unknown view " << view_id;
++    return;
++  }
++  active_bounds_ = ToRect(bounds);
++  active_visible_ = true;
++  TouchLru(view_id);
++  SetActiveViewId(view_id);  // composite the already-existing WebContents
++}
++
+ void SlayzoneEmbeddedTabHost::SetActiveViewId(const std::string& view_id) {
+   if (view_id == active_view_id_) {
+     RefreshContainer();
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index 38d7808b3fa87..6add753b7a7b4 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -17,6 +17,7 @@
+ #include "base/scoped_multi_source_observation.h"
+ #include "chrome/browser/slayzone/mojom/embedded_tab.mojom.h"
+ #include "chrome/browser/ui/browser_list_observer.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+ #include "content/public/browser/web_contents_observer.h"
+ #include "extensions/browser/extension_registry.h"
+ #include "extensions/browser/extension_registry_observer.h"
+@@ -60,7 +61,8 @@ namespace slayzone {
+ class SlayzoneEmbeddedTabHost
+     : public slayzone::embedded_tab::mojom::EmbeddedTabHost,
+       public BrowserListObserver,
+-      public extensions::ExtensionRegistryObserver {
++      public extensions::ExtensionRegistryObserver,
++      public TabStripModelObserver {
+  public:
+   // `browser_context` must outlive this object. `container` may be null (e.g.
+   // shell mounted with no active browser view) — every public method becomes
+@@ -82,6 +84,9 @@ class SlayzoneEmbeddedTabHost
+   void SetBounds(
+       const std::string& view_id,
+       slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) override;
++  void AttachView(
++      const std::string& view_id,
++      slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) override;
+   void SetVisible(const std::string& view_id, bool visible) override;
+   void Navigate(const std::string& view_id,
+                 const std::string& url) override;
+@@ -144,6 +149,15 @@ class SlayzoneEmbeddedTabHost
+       extensions::UnloadedExtensionReason reason) override;
+   void OnShutdown(extensions::ExtensionRegistry* registry) override;
+ 
++  // TabStripModelObserver — a tab inserted into a task Browser that we did NOT
++  // create (window.open / target=_blank) → adopt it as a new pane view and
++  // surface it to the renderer via OnNewView. (Base class auto-removes the
++  // observation when a model is destroyed.)
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++
+  private:
+   class Entry;
+   class NagHider;
+@@ -202,6 +216,12 @@ class SlayzoneEmbeddedTabHost
+   // Fire OnExtensionsChanged to the renderer (if an observer is bound).
+   void NotifyExtensionsChanged();
+ 
++  // Adopt a page-opened tab as a new view (mint view_id + Entry, fire
++  // OnNewView). `browser` owns `contents` and is the task's windowless Browser.
++  void AdoptForeignTab(const std::string& task_id,
++                       Browser* browser,
++                       content::WebContents* contents);
++
+   Entry* FindEntry(const std::string& view_id);
+ 
+   // Push `view_id` to the MRU end (back of lru_).
+@@ -255,6 +275,10 @@ class SlayzoneEmbeddedTabHost
+   gfx::Rect active_bounds_;
+   bool active_visible_ = false;
+ 
++  // True only while WE add a tab to a task Browser (CreateView) — so our own
++  // inserts aren't adopted by OnTabStripModelChanged as page-opened views.
++  bool creating_owned_tab_ = false;
++
+   // Keepalive that pins the currently-displayed tab's WebContents to keep
+   // rendering ("user-visible") even though its owning windowless Browser marks
+   // it hidden. Released/re-taken on every active-view switch. Without it the
+-- 
+2.52.0
+
