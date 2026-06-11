@@ -226,6 +226,29 @@ async function closeExtensions(): Promise<void> {
   remote.closeExtensions()
 }
 
+// SlayZone extension bar: list the modal identity's installed extensions, and
+// open one's options/settings page in the open inlay.
+async function listExtensions(profileKey: string): Promise<
+  Array<{ id: string; name: string; enabled: boolean; hasOptions: boolean }>
+> {
+  if (!hasMojo()) return []
+  const remote = await embeddedTabRemote()
+  const { extensions } = await remote.listExtensions(profileKey)
+  return extensions
+}
+
+async function openExtensionOptions(extensionId: string): Promise<void> {
+  if (!hasMojo()) return
+  const remote = await embeddedTabRemote()
+  remote.openExtensionOptions(extensionId)
+}
+
+async function openExtensionPopup(extensionId: string): Promise<void> {
+  if (!hasMojo()) return
+  const remote = await embeddedTabRemote()
+  remote.openExtensionPopup(extensionId)
+}
+
 async function navigate(viewId: string, url: string): Promise<void> {
   console.debug('[browser-shim] navigate', { viewId, url })
   const remote = await embeddedTabRemote()
@@ -318,6 +341,9 @@ export const browserShim = {
   setVisible,
   setExtensionsBounds,
   closeExtensions,
+  listExtensions,
+  openExtensionOptions,
+  openExtensionPopup,
   hideAll: async (): Promise<void> => {
     // Shim-side fan-out over registered viewIds. Host has no bulk-visibility
     // method on the current mojom — the renderer expects per-id transitions

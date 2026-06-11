@@ -48,6 +48,18 @@ interface BrowserApi {
   // React modal card). Optional — absent on plain-browser dev.
   setExtensionsBounds?(bounds: { x: number; y: number; width: number; height: number }): Promise<void>
   closeExtensions?(): Promise<void>
+  listExtensions?(profileKey: string): Promise<ExtensionInfo[]>
+  openExtensionOptions?(extensionId: string): Promise<void>
+  openExtensionPopup?(extensionId: string): Promise<void>
+}
+
+// One installed extension, for the SlayZone extension bar.
+export interface ExtensionInfo {
+  id: string
+  name: string
+  enabled: boolean
+  hasOptions: boolean
+  hasPopup: boolean
 }
 
 type Box = { x: number; y: number; width: number; height: number }
@@ -77,6 +89,18 @@ export function setExtensionsModalBounds(body: Box): void {
 }
 export function closeExtensionsModal(): void {
   void browserApi()?.closeExtensions?.()
+}
+
+// Extension bar: list the modal identity's installed extensions; open one's
+// settings (options page) in the inlay. Inert when the transport is absent.
+export async function listExtensions(profileKey: string): Promise<ExtensionInfo[]> {
+  return (await browserApi()?.listExtensions?.(profileKey)) ?? []
+}
+export function openExtensionOptions(extensionId: string): void {
+  void browserApi()?.openExtensionOptions?.(extensionId)
+}
+export function openExtensionPopup(extensionId: string): void {
+  void browserApi()?.openExtensionPopup?.(extensionId)
 }
 
 function browserApi(): BrowserApi | null {

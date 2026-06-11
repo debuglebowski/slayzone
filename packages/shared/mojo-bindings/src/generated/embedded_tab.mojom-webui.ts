@@ -49,6 +49,10 @@ export interface EmbeddedTabHostInterface {
   subscribe(observer: EmbeddedTabObserverRemote): void;
   setExtensionsBounds(bounds: EmbeddedTabBounds): void;
   closeExtensions(): void;
+  listExtensions(profileKey: string): Promise<{
+        extensions: ExtensionInfo[], }>;
+  openExtensionOptions(extensionId: string): void;
+  openExtensionPopup(extensionId: string): void;
 }
 
 export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
@@ -253,6 +257,43 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
         ],
         false);
   }
+
+  listExtensions(
+      profileKey: string): Promise<{
+        extensions: ExtensionInfo[], }> {
+    return this.proxy.sendMessage(
+        15,
+        EmbeddedTabHost_ListExtensions_ParamsSpec.$,
+        EmbeddedTabHost_ListExtensions_ResponseParamsSpec.$,
+        [
+          profileKey
+        ],
+        false);
+  }
+
+  openExtensionOptions(
+      extensionId: string): void {
+    this.proxy.sendMessage(
+        16,
+        EmbeddedTabHost_OpenExtensionOptions_ParamsSpec.$,
+        null,
+        [
+          extensionId
+        ],
+        false);
+  }
+
+  openExtensionPopup(
+      extensionId: string): void {
+    this.proxy.sendMessage(
+        17,
+        EmbeddedTabHost_OpenExtensionPopup_ParamsSpec.$,
+        null,
+        [
+          extensionId
+        ],
+        false);
+  }
 };
 
 /**
@@ -368,6 +409,24 @@ export class EmbeddedTabHostReceiver {
         null,
         impl.closeExtensions.bind(impl),
         false);
+    this.helper_internal_.registerHandler(
+        15,
+        EmbeddedTabHost_ListExtensions_ParamsSpec.$,
+        EmbeddedTabHost_ListExtensions_ResponseParamsSpec.$,
+        impl.listExtensions.bind(impl),
+        false);
+    this.helper_internal_.registerHandler(
+        16,
+        EmbeddedTabHost_OpenExtensionOptions_ParamsSpec.$,
+        null,
+        impl.openExtensionOptions.bind(impl),
+        false);
+    this.helper_internal_.registerHandler(
+        17,
+        EmbeddedTabHost_OpenExtensionPopup_ParamsSpec.$,
+        null,
+        impl.openExtensionPopup.bind(impl),
+        false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
 }
@@ -432,6 +491,12 @@ export class EmbeddedTabHostCallbackRouter {
     (bounds: EmbeddedTabBounds,) => any>;
   closeExtensions: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
     () => any>;
+  listExtensions: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    (profileKey: string,) => any>;
+  openExtensionOptions: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    (extensionId: string,) => any>;
+  openExtensionPopup: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    (extensionId: string,) => any>;
   onConnectionError: mojo.internal.interfaceSupport.ConnectionErrorEventRouter;
 
   constructor() {
@@ -591,6 +656,36 @@ export class EmbeddedTabHostCallbackRouter {
         EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
         null,
         this.closeExtensions.createReceiverHandler(false /* expectsResponse */),
+        false);
+    this.listExtensions =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        15,
+        EmbeddedTabHost_ListExtensions_ParamsSpec.$,
+        EmbeddedTabHost_ListExtensions_ResponseParamsSpec.$,
+        this.listExtensions.createReceiverHandler(true /* expectsResponse */),
+        false);
+    this.openExtensionOptions =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        16,
+        EmbeddedTabHost_OpenExtensionOptions_ParamsSpec.$,
+        null,
+        this.openExtensionOptions.createReceiverHandler(false /* expectsResponse */),
+        false);
+    this.openExtensionPopup =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        17,
+        EmbeddedTabHost_OpenExtensionPopup_ParamsSpec.$,
+        null,
+        this.openExtensionPopup.createReceiverHandler(false /* expectsResponse */),
         false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
@@ -929,6 +1024,9 @@ export const EmbeddedTabBoundsSpec: { $: mojo.internal.MojomType } =
 export const CreateViewParamsSpec: { $: mojo.internal.MojomType } =
     { $: {} as unknown as mojo.internal.MojomType };
 
+export const ExtensionInfoSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
 export const EmbeddedTabHost_CreateView_ParamsSpec: { $: mojo.internal.MojomType } =
     { $: {} as unknown as mojo.internal.MojomType };
 
@@ -975,6 +1073,18 @@ export const EmbeddedTabHost_SetExtensionsBounds_ParamsSpec: { $: mojo.internal.
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabHost_CloseExtensions_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabHost_ListExtensions_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabHost_ListExtensions_ResponseParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabHost_OpenExtensionOptions_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabHost_OpenExtensionPopup_ParamsSpec: { $: mojo.internal.MojomType } =
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabObserver_OnDidNavigate_ParamsSpec: { $: mojo.internal.MojomType } =
@@ -1135,6 +1245,77 @@ mojo.internal.Struct<CreateViewParamsMojoType>(
     ),
     ],
     [[0, 56],]);
+
+
+
+
+
+export interface ExtensionInfoMojoType {
+  id: string;
+  name: string;
+  enabled: boolean;
+  hasOptions: boolean;
+  hasPopup: boolean;
+}
+
+
+export type ExtensionInfo = ExtensionInfoMojoType;
+mojo.internal.Struct<ExtensionInfoMojoType>(
+    ExtensionInfoSpec.$,
+    'ExtensionInfo',
+    [
+      mojo.internal.StructField<ExtensionInfoMojoType, string>(
+        'id', 0,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+      mojo.internal.StructField<ExtensionInfoMojoType, string>(
+        'name', 8,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+      mojo.internal.StructField<ExtensionInfoMojoType, boolean>(
+        'enabled', 16,
+        0,
+        mojo.internal.Bool,
+        false,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+      mojo.internal.StructField<ExtensionInfoMojoType, boolean>(
+        'hasOptions', 16,
+        1,
+        mojo.internal.Bool,
+        false,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+      mojo.internal.StructField<ExtensionInfoMojoType, boolean>(
+        'hasPopup', 16,
+        2,
+        mojo.internal.Bool,
+        false,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 32],]);
 
 
 
@@ -1600,6 +1781,114 @@ mojo.internal.Struct<EmbeddedTabHost_CloseExtensions_ParamsMojoType>(
     [
     ],
     [[0, 8],]);
+
+
+
+
+
+export interface EmbeddedTabHost_ListExtensions_ParamsMojoType {
+  profileKey: string;
+}
+
+
+export type EmbeddedTabHost_ListExtensions_Params = EmbeddedTabHost_ListExtensions_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabHost_ListExtensions_ParamsMojoType>(
+    EmbeddedTabHost_ListExtensions_ParamsSpec.$,
+    'EmbeddedTabHost_ListExtensions_Params',
+    [
+      mojo.internal.StructField<EmbeddedTabHost_ListExtensions_ParamsMojoType, string>(
+        'profileKey', 0,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 16],]);
+
+
+
+
+
+export interface EmbeddedTabHost_ListExtensions_ResponseParamsMojoType {
+  extensions: ExtensionInfo[];
+}
+
+
+export type EmbeddedTabHost_ListExtensions_ResponseParams = EmbeddedTabHost_ListExtensions_ResponseParamsMojoType;
+mojo.internal.Struct<EmbeddedTabHost_ListExtensions_ResponseParamsMojoType>(
+    EmbeddedTabHost_ListExtensions_ResponseParamsSpec.$,
+    'EmbeddedTabHost_ListExtensions_ResponseParams',
+    [
+      mojo.internal.StructField<EmbeddedTabHost_ListExtensions_ResponseParamsMojoType, ExtensionInfo[]>(
+        'extensions', 0,
+        0,
+        mojo.internal.Array(ExtensionInfoSpec.$, false),
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 16],]);
+
+
+
+
+
+export interface EmbeddedTabHost_OpenExtensionOptions_ParamsMojoType {
+  extensionId: string;
+}
+
+
+export type EmbeddedTabHost_OpenExtensionOptions_Params = EmbeddedTabHost_OpenExtensionOptions_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabHost_OpenExtensionOptions_ParamsMojoType>(
+    EmbeddedTabHost_OpenExtensionOptions_ParamsSpec.$,
+    'EmbeddedTabHost_OpenExtensionOptions_Params',
+    [
+      mojo.internal.StructField<EmbeddedTabHost_OpenExtensionOptions_ParamsMojoType, string>(
+        'extensionId', 0,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 16],]);
+
+
+
+
+
+export interface EmbeddedTabHost_OpenExtensionPopup_ParamsMojoType {
+  extensionId: string;
+}
+
+
+export type EmbeddedTabHost_OpenExtensionPopup_Params = EmbeddedTabHost_OpenExtensionPopup_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabHost_OpenExtensionPopup_ParamsMojoType>(
+    EmbeddedTabHost_OpenExtensionPopup_ParamsSpec.$,
+    'EmbeddedTabHost_OpenExtensionPopup_Params',
+    [
+      mojo.internal.StructField<EmbeddedTabHost_OpenExtensionPopup_ParamsMojoType, string>(
+        'extensionId', 0,
+        0,
+        mojo.internal.String,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 16],]);
 
 
 

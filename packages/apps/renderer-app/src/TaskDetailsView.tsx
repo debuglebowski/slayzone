@@ -21,9 +21,13 @@ import type { LayoutNode, LayoutTree, PanelProps, PanelRegistry, Tile, TileType 
 import {
   closeExtensionsModal,
   createEmbeddedTabHost,
+  listExtensions,
+  openExtensionOptions,
+  openExtensionPopup,
   openExtensionsModal,
   setEmbeddedProfileKey,
-  setExtensionsModalBounds
+  setExtensionsModalBounds,
+  type ExtensionInfo
 } from './embedded-tab-host'
 import { makeBrowserPanel } from './BrowserPanel'
 
@@ -311,9 +315,108 @@ export function TaskDetailsView() {
 const segBtn: CSSProperties = { ...toggleBtnBase, padding: '5px 10px' }
 const MODAL_MAX_W = 1600
 
+// One icon in the extension bar. Loads the real extension icon from
+// chrome://extension-icon; falls back to a letter avatar if it can't load. The
+// icon opens the extension's popup (its action UI, e.g. the 1Password vault);
+// a small gear opens its settings/options page when it has one.
+function ExtIcon({
+  ext,
+  onPopup,
+  onOptions
+}: {
+  ext: ExtensionInfo
+  onPopup: () => void
+  onOptions: () => void
+}) {
+  const [broken, setBroken] = useState(false)
+  // Primary action: popup if it has one, else settings, else nothing.
+  const primary = ext.hasPopup ? onPopup : ext.hasOptions ? onOptions : undefined
+  return (
+    <div style={{ position: 'relative', width: 44, height: 44, flex: '0 0 auto' }}>
+      <button
+        type="button"
+        onClick={primary}
+        disabled={!primary}
+        title={ext.hasPopup ? ext.name : ext.hasOptions ? `${ext.name} — settings` : `${ext.name} (no UI)`}
+        style={{
+          width: 44,
+          height: 44,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: 'none',
+          borderRadius: 10,
+          cursor: primary ? 'pointer' : 'default',
+          background: COLORS.barBg,
+          padding: 0,
+          opacity: primary ? 1 : 0.5
+        }}
+      >
+        {broken ? (
+          <span style={{ fontSize: 16, fontWeight: 700, color: COLORS.muted }}>
+            {ext.name.slice(0, 1).toUpperCase()}
+          </span>
+        ) : (
+          <img
+            src={`chrome://extension-icon/${ext.id}/32/1`}
+            alt={ext.name}
+            width={28}
+            height={28}
+            style={{ borderRadius: 6 }}
+            onError={() => setBroken(true)}
+          />
+        )}
+      </button>
+      {ext.hasOptions && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOptions()
+          }}
+          title={`${ext.name} settings`}
+          style={{
+            position: 'absolute',
+            right: -3,
+            bottom: -3,
+            width: 18,
+            height: 18,
+            borderRadius: 9,
+            border: `1px solid ${COLORS.border}`,
+            background: COLORS.bg,
+            color: COLORS.muted,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 10,
+            lineHeight: 1,
+            padding: 0
+          }}
+        >
+          ⚙
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose: () => void }) {
   const [view, setView] = useState<'store' | 'manage'>('store')
+  const [exts, setExts] = useState<ExtensionInfo[]>([])
   const bodyRef = useRef<HTMLDivElement | null>(null)
+
+  // List the identity's installed extensions for the rail. Re-list on view
+  // change so a freshly-installed extension shows after navigating the store.
+  useEffect(() => {
+    let alive = true
+    void listExtensions(profileKey).then((list) => {
+      if (alive) setExts(list)
+    })
+    return () => {
+      alive = false
+    }
+  }, [profileKey, view])
 
   // Pin the inlay window under the body panel. Open on mount / view-switch;
   // re-publish bounds on resize + for a short burst (scrim fade / layout settle).
@@ -417,8 +520,45 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
         </button>
       </div>
 
-      {/* The chromeless inlay window is pinned over this panel. */}
-      <div ref={bodyRef} onClick={(e) => e.stopPropagation()} style={{ ...panelBase, flex: 1, borderRadius: 12, overflow: 'hidden' }} />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: '100%', maxWidth: MODAL_MAX_W, flex: 1, minHeight: 0, display: 'flex', gap: 8 }}
+      >
+        {/* Extension bar — the identity's installed extensions; click an icon
+            to open its settings in the body. */}
+        <div
+          style={{
+            width: 60,
+            flex: '0 0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 6,
+            padding: 8,
+            borderRadius: 12,
+            background: COLORS.bg,
+            border: `1px solid ${COLORS.border}`,
+            overflowY: 'auto'
+          }}
+        >
+          {exts.length === 0 ? (
+            <span style={{ fontSize: 9, color: COLORS.faint, textAlign: 'center', lineHeight: 1.3, marginTop: 4 }}>
+              No extensions
+            </span>
+          ) : (
+            exts.map((e) => (
+              <ExtIcon
+                key={e.id}
+                ext={e}
+                onPopup={() => openExtensionPopup(e.id)}
+                onOptions={() => openExtensionOptions(e.id)}
+              />
+            ))
+          )}
+        </div>
+        {/* The chromeless inlay window is pinned over this panel. */}
+        <div ref={bodyRef} style={{ flex: 1, minWidth: 0, borderRadius: 12, background: COLORS.bg, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }} />
+      </div>
     </div>
   )
 }

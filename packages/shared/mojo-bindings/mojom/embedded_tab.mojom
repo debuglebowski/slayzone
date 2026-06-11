@@ -48,6 +48,16 @@ struct CreateViewParams {
   string profile_key;
 };
 
+// One installed extension, for the SlayZone extension bar. Icon is built on the
+// renderer side from the id (chrome://extension-icon/<id>/<size>/1).
+struct ExtensionInfo {
+  string id;
+  string name;
+  bool enabled;
+  bool has_options;
+  bool has_popup;
+};
+
 interface EmbeddedTabHost {
   // Allocate a new embedded tab. Returns browser-assigned view_id; empty
   // string on failure (unreachable container / bad params). The renderer
@@ -89,6 +99,14 @@ interface EmbeddedTabHost {
   // card's body; CloseExtensions tears the window down on close/X/scrim.
   SetExtensionsBounds(EmbeddedTabBounds bounds);
   CloseExtensions();
+
+  // SlayZone extension bar. List the installed extensions for the modal's
+  // identity (profile_key; empty = default), and open a given extension's
+  // options/settings page in the currently-open inlay.
+  ListExtensions(string profile_key) => (array<ExtensionInfo> extensions);
+  OpenExtensionOptions(string extension_id);
+  // Open an extension's action popup (e.g. the 1Password vault) in the inlay.
+  OpenExtensionPopup(string extension_id);
 };
 
 interface EmbeddedTabObserver {

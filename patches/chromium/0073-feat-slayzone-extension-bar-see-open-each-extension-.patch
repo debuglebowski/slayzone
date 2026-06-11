@@ -1,0 +1,245 @@
+From f6bf32a46ced901384dc38a4bdf887b1f4d671b4 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 11 Jun 2026 10:19:06 +0200
+Subject: =?UTF-8?q?feat(slayzone):=20extension=20bar=20=E2=80=94=20see=20+?=
+ =?UTF-8?q?=20open=20each=20extension=20in=20the=20modal?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The chromeless inlay removed Chrome's extension toolbar, leaving installed
+extensions (1Password) with no entry point. Add a minimal one: a rail in the
+extensions modal that lists the identity's extensions and opens each one's UI.
+
+- mojom: ListExtensions(profile_key) => array<ExtensionInfo{id, name, enabled,
+  has_options, has_popup}>; OpenExtensionOptions(id); OpenExtensionPopup(id).
+- Host: enumerate ExtensionRegistry::Get(profile)->enabled_extensions() (skip
+  component + non-extension); has_options via OptionsPageInfo, has_popup via
+  ExtensionActionManager/ExtensionAction. OpenExtensionOptions →
+  ExtensionTabUtil::OpenOptionsPage; OpenExtensionPopup → navigate the inlay's
+  active tab to the action's popup URL (the extension's own UI, e.g. the
+  1Password vault).
+- slayzone_shell_ui: widen the img-src CSP with chrome://extension-icon so the
+  rail renders real extension icons.
+
+Per-identity (Work's extensions vs Personal's). Verified: 1Password's icon + its
+popup UI load in the modal body.
+---
+ .../browser/slayzone/mojom/embedded_tab.mojom |  18 +++
+ .../slayzone/slayzone_embedded_tab_host.cc    | 107 ++++++++++++++++++
+ .../slayzone/slayzone_embedded_tab_host.h     |   8 ++
+ .../ui/webui/slayzone/slayzone_shell_ui.cc    |   4 +-
+ 4 files changed, 136 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/slayzone/mojom/embedded_tab.mojom b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+index ed71667213627..234991c80a791 100644
+--- a/chrome/browser/slayzone/mojom/embedded_tab.mojom
++++ b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+@@ -48,6 +48,16 @@ struct CreateViewParams {
+   string profile_key;
+ };
+ 
++// One installed extension, for the SlayZone extension bar. Icon is built on the
++// renderer side from the id (chrome://extension-icon/<id>/<size>/1).
++struct ExtensionInfo {
++  string id;
++  string name;
++  bool enabled;
++  bool has_options;
++  bool has_popup;
++};
++
+ interface EmbeddedTabHost {
+   // Allocate a new embedded tab. Returns browser-assigned view_id; empty
+   // string on failure (unreachable container / bad params). The renderer
+@@ -89,6 +99,14 @@ interface EmbeddedTabHost {
+   // card's body; CloseExtensions tears the window down on close/X/scrim.
+   SetExtensionsBounds(EmbeddedTabBounds bounds);
+   CloseExtensions();
++
++  // SlayZone extension bar. List the installed extensions for the modal's
++  // identity (profile_key; empty = default), and open a given extension's
++  // options/settings page in the currently-open inlay.
++  ListExtensions(string profile_key) => (array<ExtensionInfo> extensions);
++  OpenExtensionOptions(string extension_id);
++  // Open an extension's action popup (e.g. the 1Password vault) in the inlay.
++  OpenExtensionPopup(string extension_id);
+ };
+ 
+ interface EmbeddedTabObserver {
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index cb581f9f6453e..31ab6fccd89e2 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -15,6 +15,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/devtools/devtools_window.h"
++#include "chrome/browser/extensions/extension_tab_util.h"
+ #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+ #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -38,6 +39,13 @@
+ #include "content/public/common/referrer.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_observer.h"
++#include "extensions/browser/extension_action.h"
++#include "extensions/browser/extension_action_manager.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/common/extension.h"
++#include "extensions/common/extension_set.h"
++#include "extensions/common/manifest.h"
++#include "extensions/common/manifest_handlers/options_page_info.h"
+ #include "net/base/net_errors.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/page_transition_types.h"
+@@ -373,6 +381,105 @@ void SlayzoneEmbeddedTabHost::CloseExtensions() {
+   }
+ }
+ 
++void SlayzoneEmbeddedTabHost::ListExtensions(const std::string& profile_key,
++                                             ListExtensionsCallback callback) {
++  ResolveProfile(
++      profile_key,
++      base::BindOnce(&SlayzoneEmbeddedTabHost::ListExtensionsOnProfile,
++                     weak_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void SlayzoneEmbeddedTabHost::ListExtensionsOnProfile(
++    ListExtensionsCallback callback,
++    Profile* profile) {
++  std::vector<slayzone::embedded_tab::mojom::ExtensionInfoPtr> out;
++  if (profile) {
++    extensions::ExtensionActionManager* action_manager =
++        extensions::ExtensionActionManager::Get(profile);
++    if (extensions::ExtensionRegistry* registry =
++            extensions::ExtensionRegistry::Get(profile)) {
++      for (const auto& ext : registry->enabled_extensions()) {
++        // User-facing extensions only — skip component/built-in + themes/apps.
++        if (extensions::Manifest::IsComponentLocation(ext->location()) ||
++            !ext->is_extension()) {
++          continue;
++        }
++        extensions::ExtensionAction* action =
++            action_manager ? action_manager->GetExtensionAction(*ext) : nullptr;
++        auto info = slayzone::embedded_tab::mojom::ExtensionInfo::New();
++        info->id = ext->id();
++        info->name = ext->name();
++        info->enabled = true;  // enabled_extensions() only
++        info->has_options =
++            extensions::OptionsPageInfo::HasOptionsPage(ext.get());
++        info->has_popup =
++            action &&
++            action->HasPopup(extensions::ExtensionAction::kDefaultTabId);
++        out.push_back(std::move(info));
++      }
++    }
++  }
++  std::move(callback).Run(std::move(out));
++}
++
++void SlayzoneEmbeddedTabHost::OpenExtensionOptions(
++    const std::string& extension_id) {
++  if (!extensions_browser_) {
++    return;  // the modal (inlay) isn't open
++  }
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(extensions_browser_->profile());
++  if (!registry) {
++    return;
++  }
++  const extensions::Extension* ext =
++      registry->enabled_extensions().GetByID(extension_id);
++  if (!ext || !extensions::OptionsPageInfo::HasOptionsPage(ext)) {
++    return;
++  }
++  // Canonical options-page open (handles open-in-tab vs embedded
++  // chrome://extensions?options=… correctly). Lands as the inlay's active tab.
++  extensions::ExtensionTabUtil::OpenOptionsPage(ext, extensions_browser_);
++}
++
++void SlayzoneEmbeddedTabHost::OpenExtensionPopup(
++    const std::string& extension_id) {
++  if (!extensions_browser_) {
++    return;  // the modal (inlay) isn't open
++  }
++  Profile* profile = extensions_browser_->profile();
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(profile);
++  if (!registry) {
++    return;
++  }
++  const extensions::Extension* ext =
++      registry->enabled_extensions().GetByID(extension_id);
++  if (!ext) {
++    return;
++  }
++  extensions::ExtensionAction* action =
++      extensions::ExtensionActionManager::Get(profile)->GetExtensionAction(
++          *ext);
++  if (!action ||
++      !action->HasPopup(extensions::ExtensionAction::kDefaultTabId)) {
++    return;
++  }
++  const GURL popup_url =
++      action->GetPopupUrl(extensions::ExtensionAction::kDefaultTabId);
++  if (!popup_url.is_valid()) {
++    return;
++  }
++  // The action popup (e.g. the 1Password vault) is just an extension page —
++  // load it as the inlay's active tab. Not a true anchored bubble, but it
++  // surfaces the extension's UI (and its in-app settings) in the modal body.
++  if (content::WebContents* wc =
++          extensions_browser_->tab_strip_model()->GetActiveWebContents()) {
++    wc->GetController().LoadURL(popup_url, content::Referrer(),
++                               ui::PAGE_TRANSITION_TYPED, std::string());
++  }
++}
++
+ void SlayzoneEmbeddedTabHost::ResolveProfile(
+     const std::string& profile_key,
+     base::OnceCallback<void(Profile*)> cb) {
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index 3e5a6b10dc76b..2af086ba6828e 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -93,6 +93,10 @@ class SlayzoneEmbeddedTabHost
+   void SetExtensionsBounds(
+       slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) override;
+   void CloseExtensions() override;
++  void ListExtensions(const std::string& profile_key,
++                      ListExtensionsCallback callback) override;
++  void OpenExtensionOptions(const std::string& extension_id) override;
++  void OpenExtensionPopup(const std::string& extension_id) override;
+ 
+   // Entry-side callbacks. Declared public so the private Entry inner class in
+   // the .cc can reach them without friending. Signatures mirror the mojom
+@@ -175,6 +179,10 @@ class SlayzoneEmbeddedTabHost
+   // Re-pin the open extensions inlay window to `body` (no-op if none open).
+   void PositionExtensionsInlay(const gfx::Rect& body);
+ 
++  // Continuation of ListExtensions once its profile is resolved.
++  void ListExtensionsOnProfile(ListExtensionsCallback callback,
++                               Profile* profile);
++
+   Entry* FindEntry(const std::string& view_id);
+ 
+   // Push `view_id` to the MRU end (back of lru_).
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+index 3752508e4e424..33350565a6952 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+@@ -289,7 +289,9 @@ SlayzoneShellUI::SlayzoneShellUI(content::WebUI* web_ui)
+       "font-src 'self' data:;");
+   source->OverrideContentSecurityPolicy(
+       network::mojom::CSPDirectiveName::ImgSrc,
+-      "img-src 'self' data: blob:;");
++      // chrome://extension-icon lets the SlayZone extension bar render real
++      // extension icons (1Password etc.) in the rail.
++      "img-src 'self' data: blob: chrome://extension-icon;");
+   // cap-shell-1: worker-src needed because React 19 + PostHog instrument via
+   // Web Workers. blob: covers the Vite-emitted chunks. Revisit in cap-shell-3
+   // when terminal xterm.js mounts.
+-- 
+2.52.0
+
