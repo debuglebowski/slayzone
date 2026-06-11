@@ -1,0 +1,77 @@
+From 14398b5e001b4aa17322697a877735a8bbd5354c Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Fri, 12 Jun 2026 00:03:15 +0200
+Subject: =?UTF-8?q?fix(slayzone):=20extensions=20modal=20=E2=80=94=20keep?=
+ =?UTF-8?q?=20shell=20focused=20+=20hide=20inlay=20from=20window=20manager?=
+ =?UTF-8?q?s?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+With the extensions modal (inlay) open, the inlay stole key focus from the shell
+and external window managers (Magnet etc.) resized the inlay instead of the main
+window. Two fixes:
+
+- The host shows the inlay with ShowInactive (not Show) so the SHELL keeps key
+  focus — window managers act on the main window with no "click the background
+  first" dance. The user clicks into the inlay's web content to type (Web Store
+  search / 1Password).
+- BrowserNativeWidgetMac hides the inlay NSWindow from the Accessibility API
+  (setAccessibilityElement:NO), so window managers skip it even if it does gain
+  focus (they resize the AX focused window, bypassing the `movable`/non-resizable
+  flags). Trade-off: VoiceOver can't navigate the inlay's web content as a
+  separate window.
+---
+ .../browser/slayzone/slayzone_embedded_tab_host.cc   | 12 ++++++++++--
+ .../ui/views/frame/browser_native_widget_mac.mm      |  5 +++++
+ 2 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index 9f12f355d47a2..c901f20b6af2f 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -368,7 +368,11 @@ void SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile(
+         }
+       }
+       PositionExtensionsInlay(body);
+-      extensions_browser_->window()->Show();
++      // ShowInactive (not Show): the inlay must NOT steal key focus from the shell —
++  // the shell stays the focused window so window managers (Magnet) act on it,
++  // and there's no "click the background first" dance. The user clicks into the
++  // inlay's web content when they want to type (search / 1Password).
++  extensions_browser_->window()->ShowInactive();
+       return;
+     }
+     // A different identity was requested — tear the old window down first.
+@@ -424,7 +428,11 @@ void SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile(
+       w->SetBounds(BodyToScreen(body));
+     }
+   }
+-  extensions_browser_->window()->Show();
++  // ShowInactive (not Show): the inlay must NOT steal key focus from the shell —
++  // the shell stays the focused window so window managers (Magnet) act on it,
++  // and there's no "click the background first" dance. The user clicks into the
++  // inlay's web content when they want to type (search / 1Password).
++  extensions_browser_->window()->ShowInactive();
+   LOG(INFO) << "[embedded_tab] opened extensions inlay browser="
+             << extensions_browser_.get();
+ }
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+index c1a891273501d..3984fbdbf93b2 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
++++ b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+@@ -539,6 +539,11 @@ NativeWidgetMacNSWindow* BrowserNativeWidgetMac::CreateNSWindow(
+     // programmatically via Widget::SetBounds (movable only gates user drags).
+     ns_window.movable = NO;
+     ns_window.movableByWindowBackground = NO;
++    // Hide the inlay from the Accessibility API so external window managers
++    // (Magnet etc., which resize the AX focused window and bypass `movable`)
++    // skip it and act on the shell window instead. Trade-off: VoiceOver can't
++    // navigate the inlay's web content as a separate window.
++    [ns_window setAccessibilityElement:NO];
+   }
+ 
+   return ns_window;
+-- 
+2.52.0
+
