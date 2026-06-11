@@ -86,6 +86,10 @@ fi
 EXTRA_ARGS=(
   "--slayzone-webui-bundle-dir=$SLAYZONE_WEBUI_BUNDLE_DIR"
   "--slayzone-shell-bundle-dir=$SLAYZONE_SHELL_BUNDLE_DIR"
+  # Suppress the "Chrome didn't shut down correctly / Restore pages?" bubble —
+  # SlayZone manages its own task/session state; the crash-restore prompt (esp.
+  # after dev kills) is noise. Gates HasPendingUncleanExit (startup_browser_creator).
+  "--hide-crash-restore-bubble"
 )
 
 # cap-layout-p4 — the ad-hoc-signed dev build deadlocks the browser main thread

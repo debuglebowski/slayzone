@@ -1,0 +1,174 @@
+From 6107e5cd66ef59403bb5664d31c44e94f47323b5 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 11 Jun 2026 14:02:51 +0200
+Subject: feat(slayzone): hide the Web Store "Switch to Chrome?" nag in the
+ inlay
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+That nag is served only to non-Chrome browsers via Google's proprietary
+X-Client-Data signal — which a Chromium fork can't legitimately satisfy, so the
+UA brand alone can't suppress it (and faking X-Client-Data is a bad idea, it
+steers Google's field-trial config). Instead, a NagHider WebContentsObserver on
+the extensions inlay's Web Store tab injects, at navigation COMMIT
+(document-start, so no flash), an isolated-world script that hides the promo by
+TEXT match ("recommends using chrome" / "switch to chrome"), piercing shadow
+roots and re-hiding via a throttled MutationObserver. Selector-free → durable;
+needs refreshing only if Google changes the wording.
+---
+ .../slayzone/slayzone_embedded_tab_host.cc    | 82 +++++++++++++++++++
+ .../slayzone/slayzone_embedded_tab_host.h     |  4 +
+ 2 files changed, 86 insertions(+)
+
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index 546c7327dab92..3f74cc296431c 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/slayzone/slayzone_embedded_tab_host.h"
+ 
+ #include <algorithm>
++#include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+@@ -31,9 +32,11 @@
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
++#include "chrome/common/chrome_isolated_world_ids.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/navigation_entry.h"
++#include "content/public/browser/navigation_handle.h"
+ #include "content/public/browser/page.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/common/referrer.h"
+@@ -72,8 +75,79 @@ gfx::Rect ToRect(
+                    std::max(0, bounds->width), std::max(0, bounds->height));
+ }
+ 
++// Injected into the Web Store tab to hide Google's "Switch to Chrome?" promo —
++// a cosmetic nag served only to non-Chrome browsers (gated by Google's
++// proprietary X-Client-Data signal, which a Chromium fork can't legitimately
++// satisfy). Matches by the promo's TEXT (not a brittle class), pierces shadow
++// roots, and re-hides via a throttled MutationObserver since the card mounts
++// after load. The `< 300` char guard ensures we hide the small promo card, not
++// a large ancestor that merely contains the text. Selector-free → durable, but
++// if Google changes the wording this needs refreshing.
++constexpr char kHideSwitchToChromeScript[] = R"JS(
++(function(){
++  var RE=/recommends using chrome|switch to chrome/i;
++  var last=0;
++  function run(){
++    try{
++      var stack=[document];
++      while(stack.length){
++        var root=stack.pop();
++        var all=root.querySelectorAll?root.querySelectorAll('*'):[];
++        for(var i=0;i<all.length;i++){
++          var el=all[i];
++          if(el.shadowRoot)stack.push(el.shadowRoot);
++          var t=el.textContent||'';
++          if(t.length<300&&RE.test(t)){
++            el.style.setProperty('display','none','important');
++          }
++        }
++      }
++    }catch(e){}
++  }
++  run();
++  try{
++    new MutationObserver(function(){
++      var now=Date.now();
++      if(now-last<400)return;
++      last=now;run();
++    }).observe(document.documentElement||document,{childList:true,subtree:true});
++  }catch(e){}
++})();
++)JS";
++
+ }  // namespace
+ 
++// Observes the extensions inlay's Web Store tab and re-injects the
++// "Switch to Chrome?" promo hider on every main-frame load (the inlay reuses
++// one WebContents across Store↔Manage, so a single observer suffices).
++class SlayzoneEmbeddedTabHost::NagHider : public content::WebContentsObserver {
++ public:
++  explicit NagHider(content::WebContents* contents)
++      : content::WebContentsObserver(contents) {}
++
++  // Inject at navigation COMMIT (document-start), not load-complete — so the
++  // script's MutationObserver is watching before the page renders the nag,
++  // hiding it as it mounts instead of after it has already painted (no flash).
++  void DidFinishNavigation(content::NavigationHandle* handle) override {
++    if (!handle->IsInPrimaryMainFrame() || !handle->HasCommitted() ||
++        handle->IsSameDocument()) {
++      return;
++    }
++    if (handle->GetURL().host() != "chromewebstore.google.com") {
++      return;  // only the Web Store shows the nag
++    }
++    content::WebContents* contents = web_contents();
++    if (!contents) {
++      return;
++    }
++    if (content::RenderFrameHost* rfh = contents->GetPrimaryMainFrame()) {
++      rfh->ExecuteJavaScriptInIsolatedWorld(
++          base::UTF8ToUTF16(std::string_view(kHideSwitchToChromeScript)),
++          base::NullCallback(), ISOLATED_WORLD_ID_CHROME_INTERNAL);
++    }
++  }
++};
++
+ // Each Entry NON-owningly references one tab's content::WebContents (owned by
+ // its task Browser's TabStripModel) and forwards WebContentsObserver events to
+ // the parent host's mojo observer. When the underlying tab is closed (LRU,
+@@ -330,6 +404,13 @@ void SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile(
+   chrome::AddAndReturnTabAt(extensions_browser_, target,
+                             /*index=*/-1, /*foreground=*/true);
+ 
++  // Hide Google's "Switch to Chrome?" promo in the Web Store tab (one observer
++  // on the inlay's WebContents, which persists across Store↔Manage).
++  if (content::WebContents* wc =
++          extensions_browser_->tab_strip_model()->GetActiveWebContents()) {
++    nag_hider_ = std::make_unique<NagHider>(wc);
++  }
++
+   if (BrowserView* bv =
+           BrowserView::GetBrowserViewForBrowser(extensions_browser_)) {
+     if (views::Widget* w = bv->GetWidget()) {
+@@ -917,6 +998,7 @@ void SlayzoneEmbeddedTabHost::RefreshActivePresentation(
+ void SlayzoneEmbeddedTabHost::OnBrowserRemoved(Browser* browser) {
+   if (extensions_browser_ == browser) {
+     extensions_browser_ = nullptr;
++    nag_hider_.reset();
+   }
+   for (auto it = task_browsers_.begin(); it != task_browsers_.end();) {
+     if (it->second == browser) {
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index 369d82f809b0f..38d7808b3fa87 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -146,6 +146,7 @@ class SlayzoneEmbeddedTabHost
+ 
+  private:
+   class Entry;
++  class NagHider;
+ 
+   // LRU cap — 10 open tabs at ~30-50MB each caps at ~500MB worst-case; larger
+   // caps need telemetry before we justify them.
+@@ -228,6 +229,9 @@ class SlayzoneEmbeddedTabHost
+   // OnBrowserRemoved when the user closes it.
+   raw_ptr<Browser> extensions_browser_ = nullptr;
+ 
++  // Hides Google's "Switch to Chrome?" nag in the open inlay's Web Store tab.
++  std::unique_ptr<NagHider> nag_hider_;
++
+   // SPIKE — keep-alives holding pooled secondary profiles alive while their
+   // windowless Browsers exist.
+   std::vector<std::unique_ptr<ScopedProfileKeepAlive>> pool_keepalives_;
+-- 
+2.52.0
+
