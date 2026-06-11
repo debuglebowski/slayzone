@@ -1,0 +1,63 @@
+From 4e137eddbb4f95e4fb0fb49074f776b55afd7f8a Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 11 Jun 2026 22:48:51 +0200
+Subject: =?UTF-8?q?feat(slayzone):=20in-pane=20window.open=20popups=20?=
+ =?UTF-8?q?=E2=86=92=20pane=20tab=20(NEW=5FPOPUP,=20OAuth)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Phase 2 of in-pane new-window adoption. A windowless task Browser has no OS
+window to host a popup; a sized window.open (with window features, e.g. an OAuth
+flow) requests NEW_POPUP → a separate visible Browser (a stray window, or a
+shell-takeover recursion). Convert NEW_POPUP → NEW_BACKGROUND_TAB for embedded-tab
+(task) Browsers in Browser::AddNewContents (mirrors the existing Mac-fullscreen
+popup→tab conversion) → the popup becomes a background tab that the
+TabStripModelObserver (patch 0076) adopts into the task's pane.
+
+Background, NOT foreground: a foreground tab would become the hidden Browser's
+active tab and trap its RWHV in the never-shown BrowserView (blank pane); content
+tabs must stay background so our slot composites them. The renderer foregrounds
+the new PANE tab itself on OnNewView.
+
+Verified via CDP: a sized window.open adds a pane tile (no stray window).
+---
+ chrome/browser/ui/browser.cc | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+index 8f8852b2af1ac..db4cbba03bd15 100644
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -97,6 +97,7 @@
+ #include "chrome/browser/ui/browser_command_controller.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_finder.h"
++#include "chrome/browser/slayzone/layout_features.h"
+ #include "chrome/browser/ui/browser_list.h"
+ #include "chrome/browser/ui/browser_live_tab_context.h"
+ #include "chrome/browser/ui/browser_manager_service.h"
+@@ -2070,6 +2071,20 @@ content::WebContents* Browser::AddNewContents(
+     const blink::mojom::WindowFeatures& window_features,
+     bool user_gesture,
+     bool* was_blocked) {
++  // SlayZone: a windowless embedded-tab (task) Browser has no OS window to host
++  // a popup, and we want page-opened popups (window.open with features, OAuth)
++  // to become pane TABS — adopted into the task's pane by the
++  // SlayzoneEmbeddedTabHost TabStripModelObserver — rather than a stray window
++  // (or a shell-takeover recursion). Convert to a BACKGROUND tab (not
++  // foreground): a foreground tab would become the hidden Browser's active tab,
++  // trapping its RWHV in the never-shown BrowserView (blank pane); content tabs
++  // must stay background so our slot is free to composite them. The renderer
++  // foregrounds the new PANE tab itself on OnNewView.
++  if (slayzone::IsEmbeddedTabBrowser(this) &&
++      disposition == WindowOpenDisposition::NEW_POPUP) {
++    disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
++  }
++
+   FullscreenController* fullscreen_controller = browser_window_features()
+                                                     ->exclusive_access_manager()
+                                                     ->fullscreen_controller();
+-- 
+2.52.0
+
