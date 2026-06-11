@@ -22,6 +22,7 @@ import {
   closeExtensionsModal,
   createEmbeddedTabHost,
   listExtensions,
+  onExtensionsChanged,
   openExtensionOptions,
   openExtensionPopup,
   openExtensionsModal,
@@ -410,11 +411,18 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
   // change so a freshly-installed extension shows after navigating the store.
   useEffect(() => {
     let alive = true
-    void listExtensions(profileKey).then((list) => {
-      if (alive) setExts(list)
-    })
+    const refresh = (): void => {
+      void listExtensions(profileKey).then((list) => {
+        if (alive) setExts(list)
+      })
+    }
+    refresh()
+    // Live updates: the host pushes a change event on install/uninstall so a
+    // freshly-installed extension appears without reopening the modal.
+    const unsub = onExtensionsChanged(refresh)
     return () => {
       alive = false
+      unsub()
     }
   }, [profileKey, view])
 

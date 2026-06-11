@@ -103,6 +103,16 @@ export function openExtensionPopup(extensionId: string): void {
   void browserApi()?.openExtensionPopup?.(extensionId)
 }
 
+// The host pushes this when the observed identity's installed extensions change
+// (install / uninstall / enable / disable). Subscribe so the bar re-lists live.
+export function onExtensionsChanged(cb: () => void): () => void {
+  const api = browserApi()
+  if (!api) return () => undefined
+  return api.onEvent((evt) => {
+    if ((evt as { type?: string }).type === 'extensions-changed') cb()
+  })
+}
+
 function browserApi(): BrowserApi | null {
   const api = (window as unknown as { api?: { browser?: BrowserApi } }).api
   return api?.browser ?? null

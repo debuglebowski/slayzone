@@ -82,6 +82,11 @@ async function ensureObserver(): Promise<void> {
         fanOut({ viewId, type: 'did-fail-load', errorCode, errorDescription, url })
       },
     )
+    // Extension bar: the host's ExtensionRegistry observer fired — installs /
+    // uninstalls. No viewId; the rail re-lists for its current identity.
+    router.onExtensionsChanged.addListener(() => {
+      fanOut({ type: 'extensions-changed' } as unknown as EventPayload)
+    })
 
     remote.subscribe(router.$.bindNewPipeAndPassRemote())
   })()

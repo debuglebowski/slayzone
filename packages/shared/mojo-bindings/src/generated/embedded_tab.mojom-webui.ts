@@ -726,6 +726,7 @@ export interface EmbeddedTabObserverInterface {
   onDidStopLoading(viewId: string): void;
   onDomReady(viewId: string): void;
   onDidFailLoad(viewId: string, errorCode: number, errorDescription: string, url: string): void;
+  onExtensionsChanged(): void;
 }
 
 export class EmbeddedTabObserverRemote implements EmbeddedTabObserverInterface {
@@ -829,6 +830,16 @@ export class EmbeddedTabObserverRemote implements EmbeddedTabObserverInterface {
         ],
         false);
   }
+
+  onExtensionsChanged(): void {
+    this.proxy.sendMessage(
+        6,
+        EmbeddedTabObserver_OnExtensionsChanged_ParamsSpec.$,
+        null,
+        [
+        ],
+        false);
+  }
 };
 
 /**
@@ -890,6 +901,12 @@ export class EmbeddedTabObserverReceiver {
         null,
         impl.onDidFailLoad.bind(impl),
         false);
+    this.helper_internal_.registerHandler(
+        6,
+        EmbeddedTabObserver_OnExtensionsChanged_ParamsSpec.$,
+        null,
+        impl.onExtensionsChanged.bind(impl),
+        false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
 }
@@ -936,6 +953,8 @@ export class EmbeddedTabObserverCallbackRouter {
     (viewId: string,) => any>;
   onDidFailLoad: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
     (viewId: string,errorCode: number,errorDescription: string,url: string,) => any>;
+  onExtensionsChanged: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    () => any>;
   onConnectionError: mojo.internal.interfaceSupport.ConnectionErrorEventRouter;
 
   constructor() {
@@ -1005,6 +1024,16 @@ export class EmbeddedTabObserverCallbackRouter {
         EmbeddedTabObserver_OnDidFailLoad_ParamsSpec.$,
         null,
         this.onDidFailLoad.createReceiverHandler(false /* expectsResponse */),
+        false);
+    this.onExtensionsChanged =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        6,
+        EmbeddedTabObserver_OnExtensionsChanged_ParamsSpec.$,
+        null,
+        this.onExtensionsChanged.createReceiverHandler(false /* expectsResponse */),
         false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
@@ -1103,6 +1132,9 @@ export const EmbeddedTabObserver_OnDomReady_ParamsSpec: { $: mojo.internal.Mojom
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabObserver_OnDidFailLoad_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabObserver_OnExtensionsChanged_ParamsSpec: { $: mojo.internal.MojomType } =
     { $: {} as unknown as mojo.internal.MojomType };
 
 
@@ -2128,6 +2160,22 @@ mojo.internal.Struct<EmbeddedTabObserver_OnDidFailLoad_ParamsMojoType>(
     ),
     ],
     [[0, 40],]);
+
+
+
+
+
+export interface EmbeddedTabObserver_OnExtensionsChanged_ParamsMojoType {
+}
+
+
+export type EmbeddedTabObserver_OnExtensionsChanged_Params = EmbeddedTabObserver_OnExtensionsChanged_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabObserver_OnExtensionsChanged_ParamsMojoType>(
+    EmbeddedTabObserver_OnExtensionsChanged_ParamsSpec.$,
+    'EmbeddedTabObserver_OnExtensionsChanged_Params',
+    [
+    ],
+    [[0, 8],]);
 
 
 

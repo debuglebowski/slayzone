@@ -1,0 +1,159 @@
+From 07424ad6e999df5e092309f316a729500dd3d5bd Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 11 Jun 2026 11:48:58 +0200
+Subject: =?UTF-8?q?feat(slayzone):=20extension=20bar=20=E2=80=94=20live=20?=
+ =?UTF-8?q?re-list=20on=20install/uninstall?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The bar listed extensions once on open, so a freshly-installed extension didn't
+appear until the modal was reopened. Observe the listed identity's
+ExtensionRegistry and push a change event so the rail re-lists live.
+
+- mojom: EmbeddedTabObserver gains OnExtensionsChanged() (no payload — the
+  renderer re-lists for its current identity).
+- Host implements extensions::ExtensionRegistryObserver via a
+  ScopedMultiSourceObservation; ListExtensions starts observing that profile's
+  registry (idempotent); OnExtensionLoaded / OnExtensionUnloaded → fire
+  OnExtensionsChanged; OnShutdown drops the observation.
+---
+ .../browser/slayzone/mojom/embedded_tab.mojom |  5 +++
+ .../slayzone/slayzone_embedded_tab_host.cc    | 31 +++++++++++++++++++
+ .../slayzone/slayzone_embedded_tab_host.h     | 26 +++++++++++++++-
+ 3 files changed, 61 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/slayzone/mojom/embedded_tab.mojom b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+index 234991c80a791..b12c0529a6aaa 100644
+--- a/chrome/browser/slayzone/mojom/embedded_tab.mojom
++++ b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+@@ -125,4 +125,9 @@ interface EmbeddedTabObserver {
+                 int32 error_code,
+                 string error_description,
+                 string url);
++
++  // The installed-extension set changed for a profile the host is observing
++  // (install / uninstall / enable / disable) — the extension bar should
++  // re-list. No payload: the renderer re-lists for its current identity.
++  OnExtensionsChanged();
+ };
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index 31ab6fccd89e2..546c7327dab92 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -398,6 +398,11 @@ void SlayzoneEmbeddedTabHost::ListExtensionsOnProfile(
+         extensions::ExtensionActionManager::Get(profile);
+     if (extensions::ExtensionRegistry* registry =
+             extensions::ExtensionRegistry::Get(profile)) {
++      // Observe this identity's registry so installs/uninstalls push a live
++      // re-list to the bar (idempotent — only adds once per registry).
++      if (!registry_observations_.IsObservingSource(registry)) {
++        registry_observations_.AddObservation(registry);
++      }
+       for (const auto& ext : registry->enabled_extensions()) {
+         // User-facing extensions only — skip component/built-in + themes/apps.
+         if (extensions::Manifest::IsComponentLocation(ext->location()) ||
+@@ -480,6 +485,32 @@ void SlayzoneEmbeddedTabHost::OpenExtensionPopup(
+   }
+ }
+ 
++void SlayzoneEmbeddedTabHost::OnExtensionLoaded(
++    content::BrowserContext* /*browser_context*/,
++    const extensions::Extension* /*extension*/) {
++  NotifyExtensionsChanged();
++}
++
++void SlayzoneEmbeddedTabHost::OnExtensionUnloaded(
++    content::BrowserContext* /*browser_context*/,
++    const extensions::Extension* /*extension*/,
++    extensions::UnloadedExtensionReason /*reason*/) {
++  NotifyExtensionsChanged();
++}
++
++void SlayzoneEmbeddedTabHost::OnShutdown(
++    extensions::ExtensionRegistry* registry) {
++  if (registry_observations_.IsObservingSource(registry)) {
++    registry_observations_.RemoveObservation(registry);
++  }
++}
++
++void SlayzoneEmbeddedTabHost::NotifyExtensionsChanged() {
++  if (observer_) {
++    observer_->OnExtensionsChanged();
++  }
++}
++
+ void SlayzoneEmbeddedTabHost::ResolveProfile(
+     const std::string& profile_key,
+     base::OnceCallback<void(Profile*)> cb) {
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index 2af086ba6828e..369d82f809b0f 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -14,9 +14,12 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
++#include "base/scoped_multi_source_observation.h"
+ #include "chrome/browser/slayzone/mojom/embedded_tab.mojom.h"
+ #include "chrome/browser/ui/browser_list_observer.h"
+ #include "content/public/browser/web_contents_observer.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/browser/extension_registry_observer.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ #include "mojo/public/cpp/bindings/pending_remote.h"
+ #include "mojo/public/cpp/bindings/receiver.h"
+@@ -56,7 +59,8 @@ namespace slayzone {
+ // LRU cap = 10 tabs across the host; eviction closes the least-recent tab.
+ class SlayzoneEmbeddedTabHost
+     : public slayzone::embedded_tab::mojom::EmbeddedTabHost,
+-      public BrowserListObserver {
++      public BrowserListObserver,
++      public extensions::ExtensionRegistryObserver {
+  public:
+   // `browser_context` must outlive this object. `container` may be null (e.g.
+   // shell mounted with no active browser view) — every public method becomes
+@@ -129,6 +133,17 @@ class SlayzoneEmbeddedTabHost
+   // closed). Drop it from task_browsers_.
+   void OnBrowserRemoved(Browser* browser) override;
+ 
++  // extensions::ExtensionRegistryObserver — the observed identity's enabled
++  // extension set changed (install / uninstall / enable / disable). Nudge the
++  // renderer to re-list the extension bar live.
++  void OnExtensionLoaded(content::BrowserContext* browser_context,
++                         const extensions::Extension* extension) override;
++  void OnExtensionUnloaded(
++      content::BrowserContext* browser_context,
++      const extensions::Extension* extension,
++      extensions::UnloadedExtensionReason reason) override;
++  void OnShutdown(extensions::ExtensionRegistry* registry) override;
++
+  private:
+   class Entry;
+ 
+@@ -183,6 +198,9 @@ class SlayzoneEmbeddedTabHost
+   void ListExtensionsOnProfile(ListExtensionsCallback callback,
+                                Profile* profile);
+ 
++  // Fire OnExtensionsChanged to the renderer (if an observer is bound).
++  void NotifyExtensionsChanged();
++
+   Entry* FindEntry(const std::string& view_id);
+ 
+   // Push `view_id` to the MRU end (back of lru_).
+@@ -214,6 +232,12 @@ class SlayzoneEmbeddedTabHost
+   // windowless Browsers exist.
+   std::vector<std::unique_ptr<ScopedProfileKeepAlive>> pool_keepalives_;
+ 
++  // Observes the ExtensionRegistry of every profile the bar has listed, so
++  // install/uninstall/enable/disable pushes OnExtensionsChanged to the renderer.
++  base::ScopedMultiSourceObservation<extensions::ExtensionRegistry,
++                                     extensions::ExtensionRegistryObserver>
++      registry_observations_{this};
++
+   // view_id → Entry (non-owning ref to a TabStripModel tab + its observer).
+   std::map<std::string, std::unique_ptr<Entry>> entries_;
+ 
+-- 
+2.52.0
+

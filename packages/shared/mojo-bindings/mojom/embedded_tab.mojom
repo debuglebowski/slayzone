@@ -125,4 +125,9 @@ interface EmbeddedTabObserver {
                 int32 error_code,
                 string error_description,
                 string url);
+
+  // The installed-extension set changed for a profile the host is observing
+  // (install / uninstall / enable / disable) — the extension bar should
+  // re-list. No payload: the renderer re-lists for its current identity.
+  OnExtensionsChanged();
 };
