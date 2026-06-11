@@ -346,16 +346,25 @@ export function TaskDetailsView() {
 const segBtn: CSSProperties = { ...toggleBtnBase, padding: '5px 10px' }
 const MODAL_MAX_W = 1600
 
-// One icon in the extension bar. Loads the real extension icon from
-// chrome://extension-icon; falls back to a letter avatar if it can't load. The
-// icon opens the extension's popup (its action UI, e.g. the 1Password vault);
-// a small gear opens its settings/options page when it has one.
+// The modal's single active selection — the segmented control treats Web Store,
+// Manage, and each extension as mutually-exclusive tabs (one is highlighted).
+type ExtSelected =
+  | { kind: 'store' }
+  | { kind: 'manage' }
+  | { kind: 'ext'; id: string; mode: 'popup' | 'options' }
+
+// One icon in the header's extension toolbar. Loads the real extension icon
+// from chrome://extension-icon; falls back to a letter avatar if it can't load.
+// The icon opens the extension's popup (its action UI, e.g. the 1Password
+// vault); a small gear opens its settings/options page when it has one.
 function ExtIcon({
   ext,
+  active,
   onPopup,
   onOptions
 }: {
   ext: ExtensionInfo
+  active: boolean
   onPopup: () => void
   onOptions: () => void
 }) {
@@ -363,37 +372,37 @@ function ExtIcon({
   // Primary action: popup if it has one, else settings, else nothing.
   const primary = ext.hasPopup ? onPopup : ext.hasOptions ? onOptions : undefined
   return (
-    <div style={{ position: 'relative', width: 44, height: 44, flex: '0 0 auto' }}>
+    <div style={{ position: 'relative', width: 28, height: 28, flex: '0 0 auto' }}>
       <button
         type="button"
         onClick={primary}
         disabled={!primary}
         title={ext.hasPopup ? ext.name : ext.hasOptions ? `${ext.name} — settings` : `${ext.name} (no UI)`}
         style={{
-          width: 44,
-          height: 44,
+          width: 28,
+          height: 28,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           border: 'none',
-          borderRadius: 10,
+          borderRadius: 7,
           cursor: primary ? 'pointer' : 'default',
-          background: COLORS.barBg,
+          background: active ? COLORS.activeBg : 'transparent',
           padding: 0,
           opacity: primary ? 1 : 0.5
         }}
       >
         {broken ? (
-          <span style={{ fontSize: 16, fontWeight: 700, color: COLORS.muted }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.muted }}>
             {ext.name.slice(0, 1).toUpperCase()}
           </span>
         ) : (
           <img
             src={`chrome://extension-icon/${ext.id}/32/1`}
             alt={ext.name}
-            width={28}
-            height={28}
-            style={{ borderRadius: 6 }}
+            width={20}
+            height={20}
+            style={{ borderRadius: 5 }}
             onError={() => setBroken(true)}
           />
         )}
@@ -408,11 +417,11 @@ function ExtIcon({
           title={`${ext.name} settings`}
           style={{
             position: 'absolute',
-            right: -3,
-            bottom: -3,
-            width: 18,
-            height: 18,
-            borderRadius: 9,
+            right: -2,
+            bottom: -2,
+            width: 14,
+            height: 14,
+            borderRadius: 7,
             border: `1px solid ${COLORS.border}`,
             background: COLORS.bg,
             color: COLORS.muted,
@@ -420,7 +429,7 @@ function ExtIcon({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 10,
+            fontSize: 9,
             lineHeight: 1,
             padding: 0
           }}
@@ -433,12 +442,14 @@ function ExtIcon({
 }
 
 function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose: () => void }) {
-  const [view, setView] = useState<'store' | 'manage'>('store')
+  const [selected, setSelected] = useState<ExtSelected>({ kind: 'store' })
   const [exts, setExts] = useState<ExtensionInfo[]>([])
   const bodyRef = useRef<HTMLDivElement | null>(null)
 
-  // List the identity's installed extensions for the rail. Re-list on view
-  // change so a freshly-installed extension shows after navigating the store.
+  // Switching identity resets the active tab to the Web Store.
+  useEffect(() => setSelected({ kind: 'store' }), [profileKey])
+
+  // List the identity's installed extensions for the toolbar.
   useEffect(() => {
     let alive = true
     const refresh = (): void => {
@@ -454,7 +465,7 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
       alive = false
       unsub()
     }
-  }, [profileKey, view])
+  }, [profileKey])
 
   // Pin the inlay window under the body panel. Open on mount / view-switch;
   // re-publish bounds on resize + for a short burst (scrim fade / layout settle).
@@ -465,7 +476,15 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
       const r = el.getBoundingClientRect()
       return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
     }
-    openExtensionsModal(box(), profileKey, view)
+    // Navigate the inlay to the active selection. Web Store/Manage open (or
+    // reuse) the inlay; an extension selection navigates the already-open inlay
+    // to its popup (icon) or options page (gear).
+    if (selected.kind === 'ext') {
+      if (selected.mode === 'options') openExtensionOptions(selected.id)
+      else openExtensionPopup(selected.id)
+    } else {
+      openExtensionsModal(box(), profileKey, selected.kind)
+    }
     const ro = new ResizeObserver(() => setExtensionsModalBounds(box()))
     ro.observe(el)
     const onWin = (): void => setExtensionsModalBounds(box())
@@ -482,7 +501,7 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
       window.removeEventListener('resize', onWin)
       cancelAnimationFrame(raf)
     }
-  }, [profileKey, view])
+  }, [profileKey, selected])
 
   // Tear the inlay window down when the modal unmounts.
   useEffect(() => () => closeExtensionsModal(), [])
@@ -527,76 +546,76 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 12,
-          padding: '8px 12px',
+          padding: '6px 10px',
           borderRadius: 10
         }}
       >
-        <span style={{ fontSize: 14, fontWeight: 700 }}>Extensions</span>
+        <span style={{ fontSize: 14, fontWeight: 700, flex: '0 0 auto' }}>Extensions</span>
+        {/* Centered control: Web Store | Manage, with the identity's extensions
+            appended on the right (click → popup, ⚙ → settings). */}
         <div
           style={{
             display: 'inline-flex',
+            alignItems: 'center',
             gap: 4,
             padding: 3,
             borderRadius: 8,
             background: COLORS.barBg,
-            border: `1px solid ${COLORS.border}`
+            border: `1px solid ${COLORS.border}`,
+            maxWidth: '70%',
+            minWidth: 0
           }}
         >
-          {(['store', 'manage'] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              style={{ ...segBtn, background: view === v ? COLORS.activeBg : 'transparent', color: view === v ? COLORS.text : COLORS.muted }}
-            >
-              {v === 'store' ? 'Web Store' : 'Manage'}
-            </button>
-          ))}
+          {(['store', 'manage'] as const).map((v) => {
+            const on = selected.kind === v
+            return (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setSelected({ kind: v })}
+                style={{ ...segBtn, flex: '0 0 auto', background: on ? COLORS.activeBg : 'transparent', color: on ? COLORS.text : COLORS.muted }}
+              >
+                {v === 'store' ? 'Web Store' : 'Manage'}
+              </button>
+            )
+          })}
+          {exts.length > 0 && (
+            <>
+              <div style={{ width: 1, height: 18, background: COLORS.border, flex: '0 0 auto', margin: '0 2px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 2, overflowX: 'auto', minWidth: 0 }}>
+                {exts.map((e) => (
+                  <ExtIcon
+                    key={e.id}
+                    ext={e}
+                    active={selected.kind === 'ext' && selected.id === e.id}
+                    onPopup={() => setSelected({ kind: 'ext', id: e.id, mode: 'popup' })}
+                    onOptions={() => setSelected({ kind: 'ext', id: e.id, mode: 'options' })}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
-        <button type="button" onClick={onClose} style={{ ...segBtn, color: COLORS.muted }}>
+        <button type="button" onClick={onClose} style={{ ...segBtn, color: COLORS.muted, flex: '0 0 auto' }}>
           ✕
         </button>
       </div>
 
+      {/* The chromeless inlay window is pinned over this full-width panel. */}
       <div
+        ref={bodyRef}
         onClick={(e) => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: MODAL_MAX_W, flex: 1, minHeight: 0, display: 'flex', gap: 8 }}
-      >
-        {/* Extension bar — the identity's installed extensions; click an icon
-            to open its settings in the body. */}
-        <div
-          style={{
-            width: 60,
-            flex: '0 0 auto',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 6,
-            padding: 8,
-            borderRadius: 12,
-            background: COLORS.bg,
-            border: `1px solid ${COLORS.border}`,
-            overflowY: 'auto'
-          }}
-        >
-          {exts.length === 0 ? (
-            <span style={{ fontSize: 9, color: COLORS.faint, textAlign: 'center', lineHeight: 1.3, marginTop: 4 }}>
-              No extensions
-            </span>
-          ) : (
-            exts.map((e) => (
-              <ExtIcon
-                key={e.id}
-                ext={e}
-                onPopup={() => openExtensionPopup(e.id)}
-                onOptions={() => openExtensionOptions(e.id)}
-              />
-            ))
-          )}
-        </div>
-        {/* The chromeless inlay window is pinned over this panel. */}
-        <div ref={bodyRef} style={{ flex: 1, minWidth: 0, borderRadius: 12, background: COLORS.bg, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }} />
-      </div>
+        style={{
+          width: '100%',
+          maxWidth: MODAL_MAX_W,
+          flex: 1,
+          minHeight: 0,
+          borderRadius: 12,
+          background: COLORS.bg,
+          border: `1px solid ${COLORS.border}`,
+          overflow: 'hidden'
+        }}
+      />
     </div>
   )
 }
