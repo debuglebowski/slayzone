@@ -3,7 +3,7 @@
 // layout tree, with working divider resize, a native-pane seam (no-op host),
 // localStorage persistence, and an overlay-plane demo dialog.
 import type { CSSProperties } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   COLORS,
   LayoutRoot,
@@ -18,7 +18,13 @@ import {
   useLayoutTree
 } from '@slayzone/layout'
 import type { LayoutNode, LayoutTree, PanelProps, PanelRegistry, Tile, TileType } from '@slayzone/layout'
-import { createEmbeddedTabHost, setEmbeddedProfileKey } from './embedded-tab-host'
+import {
+  closeExtensionsModal,
+  createEmbeddedTabHost,
+  openExtensionsModal,
+  setEmbeddedProfileKey,
+  setExtensionsModalBounds
+} from './embedded-tab-host'
 import { makeBrowserPanel } from './BrowserPanel'
 
 const TASK_ID = 'sample-task'
@@ -155,6 +161,7 @@ export function TaskDetailsView() {
   const tree = useLayoutTree()
   const activeTypes = useMemo(() => collectTileTypes(tree.root), [tree])
   const [profile, setProfile] = useState('')
+  const [extOpen, setExtOpen] = useState(false)
 
   // Per-task identity (pooled profile): each choice = its own Google login +
   // 1Password. Changing it re-creates the browser pane on the new profile.
@@ -197,24 +204,12 @@ export function TaskDetailsView() {
   }
 
   const openExtensions = (): void => {
-    // Open the VISIBLE extension-management window (chrome://extensions + Web
-    // Store + native install prompts) on the shared profile. Calls the raw shim
-    // directly (NOT the pane adapter) via the "slayzone:open-extensions"
-    // sentinel — so it doesn't register a phantom pane tile.
-    const api = (
-      window as unknown as {
-        api?: { browser?: { createView(o: unknown): Promise<string> } }
-      }
-    ).api
-    void api?.browser?.createView({
-      taskId: 'extensions',
-      tabId: 'extensions',
-      url: 'slayzone:open-extensions',
-      bounds: { x: 0, y: 0, width: 0, height: 0 },
-      // Open the management window on the task's CURRENT identity, so installs
-      // (1Password) land in the profile that identity's panes use.
-      profileKey: profile
-    })
+    // Open the extensions modal: a real SlayZone modal (scrim + themed card +
+    // header) whose body is a chromeless, borderless, child browser window
+    // (Web Store / chrome://extensions + native install prompts) pinned to the
+    // card's body rect. Opened on the task's CURRENT identity, so installs
+    // (1Password) land in the profile that identity's panes use.
+    setExtOpen(true)
   }
 
   const openDomDialog = (): void => {
@@ -300,6 +295,130 @@ export function TaskDetailsView() {
           <LayoutRoot registry={REGISTRY} host={EMBEDDED_HOST} />
         </div>
       </div>
+
+      {extOpen && <ExtensionsModal profileKey={profile} onClose={() => setExtOpen(false)} />}
+    </div>
+  )
+}
+
+// Extensions modal — a real SlayZone modal whose body is the chromeless inlay
+// window. The scrim + header pill + body panel are drawn here (React, in the
+// shell); the native inlay window is pinned over the body panel's screen rect
+// (reported via getBoundingClientRect → host → child-window bounds). Header and
+// body are separate rounded panels so the inlay's uniform rounded corners (mac
+// applies a single radius) line up with a rounded content panel, with the
+// title/switch/close in a pill above it.
+const segBtn: CSSProperties = { ...toggleBtnBase, padding: '5px 10px' }
+const MODAL_MAX_W = 1600
+
+function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose: () => void }) {
+  const [view, setView] = useState<'store' | 'manage'>('store')
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+
+  // Pin the inlay window under the body panel. Open on mount / view-switch;
+  // re-publish bounds on resize + for a short burst (scrim fade / layout settle).
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    const box = (): { x: number; y: number; width: number; height: number } => {
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
+    }
+    openExtensionsModal(box(), profileKey, view)
+    const ro = new ResizeObserver(() => setExtensionsModalBounds(box()))
+    ro.observe(el)
+    const onWin = (): void => setExtensionsModalBounds(box())
+    window.addEventListener('resize', onWin)
+    let raf = 0
+    let n = 0
+    const tick = (): void => {
+      setExtensionsModalBounds(box())
+      if (++n < 20) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', onWin)
+      cancelAnimationFrame(raf)
+    }
+  }, [profileKey, view])
+
+  // Tear the inlay window down when the modal unmounts.
+  useEffect(() => () => closeExtensionsModal(), [])
+
+  // Escape closes.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const panelBase: CSSProperties = {
+    width: '100%',
+    maxWidth: MODAL_MAX_W,
+    background: COLORS.bg,
+    border: `1px solid ${COLORS.border}`
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        padding: '4vh 4vw',
+        background: 'rgba(0,0,0,0.5)'
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          ...panelBase,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '8px 12px',
+          borderRadius: 10
+        }}
+      >
+        <span style={{ fontSize: 14, fontWeight: 700 }}>Extensions</span>
+        <div
+          style={{
+            display: 'inline-flex',
+            gap: 4,
+            padding: 3,
+            borderRadius: 8,
+            background: COLORS.barBg,
+            border: `1px solid ${COLORS.border}`
+          }}
+        >
+          {(['store', 'manage'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              style={{ ...segBtn, background: view === v ? COLORS.activeBg : 'transparent', color: view === v ? COLORS.text : COLORS.muted }}
+            >
+              {v === 'store' ? 'Web Store' : 'Manage'}
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={onClose} style={{ ...segBtn, color: COLORS.muted }}>
+          ✕
+        </button>
+      </div>
+
+      {/* The chromeless inlay window is pinned over this panel. */}
+      <div ref={bodyRef} onClick={(e) => e.stopPropagation()} style={{ ...panelBase, flex: 1, borderRadius: 12, overflow: 'hidden' }} />
     </div>
   )
 }

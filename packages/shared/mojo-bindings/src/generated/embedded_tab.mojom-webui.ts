@@ -47,6 +47,8 @@ export interface EmbeddedTabHostInterface {
   focus(viewId: string): void;
   toggleDevtools(viewId: string): void;
   subscribe(observer: EmbeddedTabObserverRemote): void;
+  setExtensionsBounds(bounds: EmbeddedTabBounds): void;
+  closeExtensions(): void;
 }
 
 export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
@@ -229,6 +231,28 @@ export class EmbeddedTabHostRemote implements EmbeddedTabHostInterface {
         ],
         false);
   }
+
+  setExtensionsBounds(
+      bounds: EmbeddedTabBounds): void {
+    this.proxy.sendMessage(
+        13,
+        EmbeddedTabHost_SetExtensionsBounds_ParamsSpec.$,
+        null,
+        [
+          bounds
+        ],
+        false);
+  }
+
+  closeExtensions(): void {
+    this.proxy.sendMessage(
+        14,
+        EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
+        null,
+        [
+        ],
+        false);
+  }
 };
 
 /**
@@ -332,6 +356,18 @@ export class EmbeddedTabHostReceiver {
         null,
         impl.subscribe.bind(impl),
         false);
+    this.helper_internal_.registerHandler(
+        13,
+        EmbeddedTabHost_SetExtensionsBounds_ParamsSpec.$,
+        null,
+        impl.setExtensionsBounds.bind(impl),
+        false);
+    this.helper_internal_.registerHandler(
+        14,
+        EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
+        null,
+        impl.closeExtensions.bind(impl),
+        false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
 }
@@ -392,6 +428,10 @@ export class EmbeddedTabHostCallbackRouter {
     (viewId: string,) => any>;
   subscribe: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
     (observer: EmbeddedTabObserverRemote,) => any>;
+  setExtensionsBounds: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    (bounds: EmbeddedTabBounds,) => any>;
+  closeExtensions: mojo.internal.interfaceSupport.InterfaceCallbackReceiver<
+    () => any>;
   onConnectionError: mojo.internal.interfaceSupport.ConnectionErrorEventRouter;
 
   constructor() {
@@ -531,6 +571,26 @@ export class EmbeddedTabHostCallbackRouter {
         EmbeddedTabHost_Subscribe_ParamsSpec.$,
         null,
         this.subscribe.createReceiverHandler(false /* expectsResponse */),
+        false);
+    this.setExtensionsBounds =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        13,
+        EmbeddedTabHost_SetExtensionsBounds_ParamsSpec.$,
+        null,
+        this.setExtensionsBounds.createReceiverHandler(false /* expectsResponse */),
+        false);
+    this.closeExtensions =
+        new mojo.internal.interfaceSupport.InterfaceCallbackReceiver(
+            this.router_);
+
+    this.helper_internal_.registerHandler(
+        14,
+        EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
+        null,
+        this.closeExtensions.createReceiverHandler(false /* expectsResponse */),
         false);
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
@@ -909,6 +969,12 @@ export const EmbeddedTabHost_ToggleDevtools_ParamsSpec: { $: mojo.internal.Mojom
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabHost_Subscribe_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabHost_SetExtensionsBounds_ParamsSpec: { $: mojo.internal.MojomType } =
+    { $: {} as unknown as mojo.internal.MojomType };
+
+export const EmbeddedTabHost_CloseExtensions_ParamsSpec: { $: mojo.internal.MojomType } =
     { $: {} as unknown as mojo.internal.MojomType };
 
 export const EmbeddedTabObserver_OnDidNavigate_ParamsSpec: { $: mojo.internal.MojomType } =
@@ -1491,6 +1557,49 @@ mojo.internal.Struct<EmbeddedTabHost_Subscribe_ParamsMojoType>(
     ),
     ],
     [[0, 16],]);
+
+
+
+
+
+export interface EmbeddedTabHost_SetExtensionsBounds_ParamsMojoType {
+  bounds: EmbeddedTabBounds;
+}
+
+
+export type EmbeddedTabHost_SetExtensionsBounds_Params = EmbeddedTabHost_SetExtensionsBounds_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabHost_SetExtensionsBounds_ParamsMojoType>(
+    EmbeddedTabHost_SetExtensionsBounds_ParamsSpec.$,
+    'EmbeddedTabHost_SetExtensionsBounds_Params',
+    [
+      mojo.internal.StructField<EmbeddedTabHost_SetExtensionsBounds_ParamsMojoType, EmbeddedTabBounds>(
+        'bounds', 0,
+        0,
+        EmbeddedTabBoundsSpec.$,
+        null,
+        false /* nullable */,
+        0,
+        undefined,
+        undefined,
+    ),
+    ],
+    [[0, 16],]);
+
+
+
+
+
+export interface EmbeddedTabHost_CloseExtensions_ParamsMojoType {
+}
+
+
+export type EmbeddedTabHost_CloseExtensions_Params = EmbeddedTabHost_CloseExtensions_ParamsMojoType;
+mojo.internal.Struct<EmbeddedTabHost_CloseExtensions_ParamsMojoType>(
+    EmbeddedTabHost_CloseExtensions_ParamsSpec.$,
+    'EmbeddedTabHost_CloseExtensions_Params',
+    [
+    ],
+    [[0, 8],]);
 
 
 

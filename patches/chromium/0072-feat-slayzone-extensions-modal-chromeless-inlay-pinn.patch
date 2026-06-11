@@ -1,0 +1,567 @@
+From 5ecddc622d2af7651c17934b6a61dde54d3fc7dc Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 11 Jun 2026 09:35:38 +0200
+Subject: =?UTF-8?q?feat(slayzone):=20extensions=20modal=20=E2=80=94=20chro?=
+ =?UTF-8?q?meless=20inlay=20pinned=20under=20a=20React=20card?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Replace the detached extension-management window with a real SlayZone modal:
+the React shell draws the scrim/card/header, and the Web Store renders in a
+chromeless child browser "inlay" pinned over the card's body rect.
+
+- SlayzoneInlayBrowserView: a chromeless BrowserView. The tab strip region is a
+  DIRECT child of BrowserView (added last so it paints on top) — a sibling of
+  top_container, not inside it — so it's hidden on its own, alongside
+  top_container (toolbar/bookmark). contents_container fills the window. The Web
+  Store stays the normal ACTIVE tab so install prompts/autofill anchor as in
+  stock Chrome.
+- BrowserNativeWidgetMac (gated on kExtensionsBrowserMarker): kFrameless (no
+  traffic lights, mirrors document-PiP), rounded corners (12) + translucent, no
+  window open/close animation, non-movable NSWindow; can_resize=false via
+  CreateParams so the user can't drag or resize it.
+- Host: open the inlay as a child of the shell window (Widget::Reparent) pinned
+  to the React card's body rect (BodyToScreen: CSS px → screen DIPs via the
+  container origin). SetExtensionsBounds tracks modal move/resize; CloseExtensions
+  tears it down; the Store|Manage switch navigates the inlay's active tab.
+
+Verified live: locked (no move/resize), instant (no anim), rounded, chrome-free.
+---
+ .../browser/slayzone/mojom/embedded_tab.mojom |   9 ++
+ .../slayzone/slayzone_embedded_tab_host.cc    | 142 +++++++++++++-----
+ .../slayzone/slayzone_embedded_tab_host.h     |  30 +++-
+ chrome/browser/ui/BUILD.gn                    |   2 +
+ .../views/frame/browser_native_widget_mac.mm  |  39 ++++-
+ .../ui/views/frame/browser_window_factory.cc  |  11 +-
+ .../frame/slayzone_inlay_browser_view.cc      |  52 +++++++
+ .../views/frame/slayzone_inlay_browser_view.h |  46 ++++++
+ 8 files changed, 281 insertions(+), 50 deletions(-)
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_inlay_browser_view.cc
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_inlay_browser_view.h
+
+diff --git a/chrome/browser/slayzone/mojom/embedded_tab.mojom b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+index 184ee8918f7c9..ed71667213627 100644
+--- a/chrome/browser/slayzone/mojom/embedded_tab.mojom
++++ b/chrome/browser/slayzone/mojom/embedded_tab.mojom
+@@ -80,6 +80,15 @@ interface EmbeddedTabHost {
+   // observer. No event backlog — renderer only receives events for
+   // navigations that happen after Subscribe resolves.
+   Subscribe(pending_remote<EmbeddedTabObserver> observer);
++
++  // Extensions "inlay" modal. The window itself is opened via CreateView with
++  // url "slayzone:open-extensions" (its `bounds` = the modal body rect, in CSS
++  // px relative to the shell's web viewport; `profile_key` = the identity).
++  // While the modal is open the renderer reports body-rect changes (modal
++  // move/resize) so the chromeless child window stays pinned over the React
++  // card's body; CloseExtensions tears the window down on close/X/scrim.
++  SetExtensionsBounds(EmbeddedTabBounds bounds);
++  CloseExtensions();
+ };
+ 
+ interface EmbeddedTabObserver {
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+index cdea32bb0f950..cb581f9f6453e 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.cc
+@@ -28,12 +28,14 @@
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/tabs/tab_enums.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/slayzone_shell_container.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/navigation_entry.h"
+ #include "content/public/browser/page.h"
+ #include "content/public/browser/render_frame_host.h"
++#include "content/public/common/referrer.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_observer.h"
+ #include "net/base/net_errors.h"
+@@ -41,7 +43,9 @@
+ #include "ui/base/page_transition_types.h"
+ #include "ui/display/display.h"
+ #include "ui/display/screen.h"
++#include "ui/gfx/geometry/point.h"
+ #include "ui/gfx/geometry/size.h"
++#include "ui/views/widget/widget.h"
+ #include "url/gurl.h"
+ 
+ namespace slayzone {
+@@ -249,71 +253,126 @@ Browser* SlayzoneEmbeddedTabHost::GetOrCreateTaskBrowser(
+   return browser;
+ }
+ 
+-void SlayzoneEmbeddedTabHost::OpenExtensionsWindow(
+-    const std::string& profile_key) {
++void SlayzoneEmbeddedTabHost::OpenExtensionsWindow(const std::string& profile_key,
++                                                   const gfx::Rect& body,
++                                                   const GURL& target) {
+   ResolveProfile(
+       profile_key,
+       base::BindOnce(&SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile,
+-                     weak_factory_.GetWeakPtr()));
++                     weak_factory_.GetWeakPtr(), body, target));
+ }
+ 
+-void SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile(Profile* profile) {
+-  if (!profile) {
+-    LOG(WARNING) << "[embedded_tab] OpenExtensionsWindow — profile unresolved";
++void SlayzoneEmbeddedTabHost::OpenExtensionsWindowOnProfile(
++    const gfx::Rect& body,
++    const GURL& target,
++    Profile* profile) {
++  if (!profile || !container_) {
++    LOG(WARNING) << "[embedded_tab] OpenExtensions — profile/container missing";
+     return;
+   }
+   if (extensions_browser_) {
+     if (extensions_browser_->profile() == profile) {
++      // Already open on this identity — navigate to the requested destination
++      // (Store|Manage switch), re-pin to the (possibly new) body rect, surface.
++      if (content::WebContents* wc =
++              extensions_browser_->tab_strip_model()->GetActiveWebContents()) {
++        if (wc->GetVisibleURL() != target) {
++          wc->GetController().LoadURL(target, content::Referrer(),
++                                      ui::PAGE_TRANSITION_TYPED, std::string());
++        }
++      }
++      PositionExtensionsInlay(body);
+       extensions_browser_->window()->Show();
+-      extensions_browser_->window()->Activate();
+-      return;  // already open on this identity
++      return;
+     }
+-    // A different identity was requested — close the old window first.
+-    extensions_browser_->tab_strip_model()->CloseAllTabs();
++    // A different identity was requested — tear the old window down first.
++    extensions_browser_->window()->Close();  // OnBrowserRemoved clears the ptr
+     extensions_browser_ = nullptr;
+   }
+-  // A NORMAL, VISIBLE Browser on the panes' profile. The marker makes the
+-  // window factory give it a plain BrowserView (real toolbar/omnibox, no shell
+-  // takeover, not hidden) — so chrome://extensions, the Web Store and native
+-  // install prompts behave exactly as in stock Chrome, and installs land in the
+-  // shared profile the task panes use.
+-  // Brand the SlayZone profile's Chrome UI dark + the SlayZone accent (#7c7cf0)
+-  // so the extensions window — the only visible Chrome-chrome surface — reads as
+-  // ours rather than stock Chrome. Profile-wide is intentional here: this IS the
+-  // SlayZone app's profile. Idempotent.
++
++  // chrome://extensions and the Web Store render dark so the inlay matches the
++  // SlayZone modal card even though no browser chrome shows. Profile-wide is
++  // fine — this IS a SlayZone profile. Idempotent.
+   if (ThemeService* theme = ThemeServiceFactory::GetForProfile(profile)) {
+     theme->SetBrowserColorScheme(ThemeService::BrowserColorScheme::kDark);
+     theme->SetUserColor(SkColorSetRGB(0x7c, 0x7c, 0xf0));
+   }
+ 
+-  // Normal (tabbed) Browser — the extension install/success UI explicitly
+-  // finds/creates a TABBED visible window to anchor to (see
+-  // extension_install_ui_desktop.cc), so a chromeless popup would mis-route the
+-  // install. Size it to 80% of the work area, centered.
++  // A normal (tabbed) Browser tagged as the extensions inlay → the window
++  // factory gives it SlayzoneInlayBrowserView (chromeless) and
++  // BrowserNativeWidgetMac the frameless + rounded config. The Web Store is the
++  // ACTIVE tab so install prompts/autofill anchor normally. Created directly at
++  // the body's screen rect (no first-paint flash), then reparented as a child
++  // of the shell so it tracks/closes with it and shows no separate dock icon.
+   Browser::CreateParams cp(profile, /*user_gesture=*/true);
+   cp.user_title = kExtensionsBrowserMarker;
+-  if (display::Screen::HasScreen()) {
+-    const gfx::Rect work =
+-        display::Screen::Get()->GetPrimaryDisplay().work_area();
+-    const int w = work.width() * 4 / 5;
+-    const int h = work.height() * 4 / 5;
+-    cp.initial_bounds = gfx::Rect(work.x() + (work.width() - w) / 2,
+-                                  work.y() + (work.height() - h) / 2, w, h);
+-  }
++  cp.omit_from_session_restore = true;
++  cp.initial_bounds = BodyToScreen(body);
++  // A modal body, not a window: the user must not resize/maximize it. This
++  // drives BrowserView::SetCanResize(false) → NativeWidgetMac drops the
++  // resizable style mask. The host still resizes it programmatically (SetBounds)
++  // to track the React card.
++  cp.can_resize = false;
++  cp.can_maximize = false;
+   extensions_browser_ = Browser::Create(cp);
+   if (!extensions_browser_) {
+-    LOG(WARNING) << "[embedded_tab] OpenExtensionsWindow — Browser::Create failed";
++    LOG(WARNING) << "[embedded_tab] OpenExtensions — Browser::Create failed";
+     return;
+   }
+-  chrome::AddAndReturnTabAt(extensions_browser_,
+-                            GURL("https://chromewebstore.google.com/"),
++  chrome::AddAndReturnTabAt(extensions_browser_, target,
+                             /*index=*/-1, /*foreground=*/true);
++
++  if (BrowserView* bv =
++          BrowserView::GetBrowserViewForBrowser(extensions_browser_)) {
++    if (views::Widget* w = bv->GetWidget()) {
++      if (views::Widget* shell = container_->GetWidget()) {
++        w->Reparent(shell);
++      }
++      w->SetBounds(BodyToScreen(body));
++    }
++  }
+   extensions_browser_->window()->Show();
+-  extensions_browser_->window()->Activate();
+-  LOG(INFO) << "[embedded_tab] opened extensions window browser="
++  LOG(INFO) << "[embedded_tab] opened extensions inlay browser="
+             << extensions_browser_.get();
+ }
+ 
++gfx::Rect SlayzoneEmbeddedTabHost::BodyToScreen(const gfx::Rect& body) const {
++  // `body` is CSS px relative to the shell's web viewport; the container fills
++  // that viewport, so its screen origin maps CSS (0,0). CSS px ↔ DIP 1:1 — the
++  // same convention the embedded-tab slot bounds use.
++  if (!container_) {
++    return body;
++  }
++  const gfx::Point origin = container_->GetBoundsInScreen().origin();
++  return gfx::Rect(origin.x() + body.x(), origin.y() + body.y(), body.width(),
++                   body.height());
++}
++
++void SlayzoneEmbeddedTabHost::PositionExtensionsInlay(const gfx::Rect& body) {
++  if (!extensions_browser_) {
++    return;
++  }
++  if (BrowserView* bv =
++          BrowserView::GetBrowserViewForBrowser(extensions_browser_)) {
++    if (views::Widget* w = bv->GetWidget()) {
++      w->SetBounds(BodyToScreen(body));
++    }
++  }
++}
++
++void SlayzoneEmbeddedTabHost::SetExtensionsBounds(
++    slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) {
++  // Renderer reports the modal body rect on move/resize — keep the chromeless
++  // child window pinned under the React card.
++  PositionExtensionsInlay(ToRect(bounds));
++}
++
++void SlayzoneEmbeddedTabHost::CloseExtensions() {
++  if (extensions_browser_) {
++    extensions_browser_->window()->Close();  // OnBrowserRemoved clears the ptr
++  }
++}
++
+ void SlayzoneEmbeddedTabHost::ResolveProfile(
+     const std::string& profile_key,
+     base::OnceCallback<void(Profile*)> cb) {
+@@ -382,8 +441,15 @@ void SlayzoneEmbeddedTabHost::CreateView(
+ 
+   // Sentinel: open the VISIBLE extension-management window instead of a pane.
+   // Reuses the existing mojo pipe so no new mojom is needed for the trigger.
+-  if (params->url == "slayzone:open-extensions") {
+-    OpenExtensionsWindow(params->profile_key);
++  if (params->url == "slayzone:open-extensions" ||
++      params->url == "slayzone:open-extensions#manage") {
++    // The modal's Store|Manage segmented switch picks the inlay's destination;
++    // "configuration" (an extension's options page) is reached by navigating
++    // within chrome://extensions itself.
++    const GURL target = (params->url == "slayzone:open-extensions#manage")
++                            ? GURL("chrome://extensions/")
++                            : GURL("https://chromewebstore.google.com/");
++    OpenExtensionsWindow(params->profile_key, ToRect(params->bounds), target);
+     std::move(callback).Run(std::string());
+     return;
+   }
+diff --git a/chrome/browser/slayzone/slayzone_embedded_tab_host.h b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+index 792d7ae347862..3e5a6b10dc76b 100644
+--- a/chrome/browser/slayzone/slayzone_embedded_tab_host.h
++++ b/chrome/browser/slayzone/slayzone_embedded_tab_host.h
+@@ -24,6 +24,7 @@
+ #include "ui/gfx/geometry/rect.h"
+ 
+ class Browser;
++class GURL;
+ class Profile;
+ class ScopedProfileKeepAlive;
+ class SlayzoneShellContainer;
+@@ -89,6 +90,9 @@ class SlayzoneEmbeddedTabHost
+   void Subscribe(mojo::PendingRemote<
+                  slayzone::embedded_tab::mojom::EmbeddedTabObserver>
+                      observer) override;
++  void SetExtensionsBounds(
++      slayzone::embedded_tab::mojom::EmbeddedTabBoundsPtr bounds) override;
++  void CloseExtensions() override;
+ 
+   // Entry-side callbacks. Declared public so the private Entry inner class in
+   // the .cc can reach them without friending. Signatures mirror the mojom
+@@ -150,12 +154,26 @@ class SlayzoneEmbeddedTabHost
+       CreateViewCallback callback,
+       Profile* profile);
+ 
+-  // Open the VISIBLE extension-management window (Web Store + native install
+-  // prompts) on the pooled profile named by `profile_key` (empty = default).
+-  // Installs land in that identity → apply to that identity's task panes.
+-  // Triggered by the CreateView sentinel url "slayzone:open-extensions".
+-  void OpenExtensionsWindow(const std::string& profile_key);
+-  void OpenExtensionsWindowOnProfile(Profile* profile);
++  // Open the extensions "inlay": a chromeless, borderless, rounded window
++  // (Web Store + chrome://extensions + native install prompts) on the pooled
++  // profile named by `profile_key` (empty = default), reparented as a child of
++  // the shell and pinned over the React modal's body rect `body` (CSS px,
++  // shell-viewport-relative). Installs land in that identity → apply to its
++  // task panes. Triggered by the CreateView sentinel url
++  // "slayzone:open-extensions".
++  void OpenExtensionsWindow(const std::string& profile_key,
++                            const gfx::Rect& body,
++                            const GURL& target);
++  void OpenExtensionsWindowOnProfile(const gfx::Rect& body,
++                                     const GURL& target,
++                                     Profile* profile);
++
++  // Map a modal body rect (CSS px, shell-viewport-relative) to screen DIPs via
++  // the container's screen origin.
++  gfx::Rect BodyToScreen(const gfx::Rect& body) const;
++
++  // Re-pin the open extensions inlay window to `body` (no-op if none open).
++  void PositionExtensionsInlay(const gfx::Rect& body);
+ 
+   Entry* FindEntry(const std::string& view_id);
+ 
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 06a9c76e9647a..e428368a96c74 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -4092,6 +4092,8 @@ static_library("ui") {
+       "views/frame/slayzone_browser_view.h",
+       "views/frame/slayzone_hidden_browser_view.cc",
+       "views/frame/slayzone_hidden_browser_view.h",
++      "views/frame/slayzone_inlay_browser_view.cc",
++      "views/frame/slayzone_inlay_browser_view.h",
+       "views/frame/slayzone_region_container.cc",
+       "views/frame/slayzone_region_container.h",
+       "views/frame/slayzone_shell_container.cc",
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+index d6d2a757c2b63..c1a891273501d 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
++++ b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+@@ -16,6 +16,7 @@
+ #include "chrome/browser/browsing_data/browsing_data_important_sites_util.h"
+ #include "chrome/browser/global_keyboard_shortcuts_mac.h"
+ #include "chrome/browser/media/router/media_router_feature.h"
++#include "chrome/browser/slayzone/layout_features.h"
+ #include "chrome/browser/ui/browser_command_controller.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+@@ -43,6 +44,7 @@
+ #import "components/omnibox/common/omnibox_feature_configs.h"
+ #import "components/remote_cocoa/app_shim/native_widget_mac_nswindow.h"
+ #import "components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h"
++#include "ui/gfx/geometry/rounded_corners_f.h"
+ #import "components/remote_cocoa/app_shim/window_touch_bar_delegate.h"
+ #include "components/remote_cocoa/common/application.mojom.h"
+ #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
+@@ -479,7 +481,21 @@ void BrowserNativeWidgetMac::PopulateCreateWindowParams(
+                        NSWindowStyleMaskMiniaturizable |
+                        NSWindowStyleMaskResizable;
+   CHECK(browser_view_);
+-  if (browser_view_->GetIsPictureInPictureType()) {
++  if (slayzone::IsExtensionsBrowser(browser_view_->browser())) {
++    // The SlayZone extensions "inlay": a chromeless, borderless window that is
++    // reparented as a child of the shell and pinned over a React modal's body
++    // rect. Frameless (no titlebar, no traffic lights) so it reads as the
++    // modal's content surface, not a separate OS window. Mirrors the PiP path,
++    // which is the in-tree precedent for a frameless mac browser window.
++    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
++    // No Resizable mask — the user must not be able to drag the inlay's edges
++    // (it's a modal body). The host still resizes it programmatically via
++    // Widget::SetBounds to track the React card; setFrame ignores this flag.
++    params->style_mask =
++        NSWindowStyleMaskFullSizeContentView | NSWindowStyleMaskTitled;
++    params->window_title_hidden = true;
++    params->titlebar_appears_transparent = true;
++  } else if (browser_view_->GetIsPictureInPictureType()) {
+     // Picture in Picture windows, even if they are part of a web app, draw
+     // their own title bar and decorations.  Note that `GetIsWebAppType()` might
+     // also be true here, so it's important that this check is first.
+@@ -502,7 +518,10 @@ void BrowserNativeWidgetMac::PopulateCreateWindowParams(
+   } else {
+     params->window_class = remote_cocoa::mojom::WindowClass::kDefault;
+   }
+-  params->animation_enabled = true;
++  // The extensions inlay is a modal "body", not a window — no open/close
++  // window animation (it should just appear pinned under the React card).
++  params->animation_enabled =
++      !slayzone::IsExtensionsBrowser(browser_view_->browser());
+ }
+ 
+ NativeWidgetMacNSWindow* BrowserNativeWidgetMac::CreateNSWindow(
+@@ -514,6 +533,14 @@ NativeWidgetMacNSWindow* BrowserNativeWidgetMac::CreateNSWindow(
+                window:ns_window];
+   [ns_window setWindowTouchBarDelegate:touch_bar_delegate_];
+ 
++  if (slayzone::IsExtensionsBrowser(browser_view_->browser())) {
++    // The inlay is a modal body, not a draggable window: the user must not be
++    // able to move it independently of the shell. The host still positions it
++    // programmatically via Widget::SetBounds (movable only gates user drags).
++    ns_window.movable = NO;
++    ns_window.movableByWindowBackground = NO;
++  }
++
+   return ns_window;
+ }
+ 
+@@ -568,6 +595,14 @@ views::Widget::InitParams BrowserNativeWidgetMac::GetWidgetParams(
+     views::Widget::InitParams::Ownership ownership) {
+   views::Widget::InitParams params(ownership);
+   params.native_widget = this;
++  if (browser_view_ &&
++      slayzone::IsExtensionsBrowser(browser_view_->browser())) {
++    // Round the inlay's corners to match the React modal card; translucent so
++    // the corner cut-outs reveal the scrim behind (applied as the content
++    // layer's cornerRadius by native_widget_ns_window_bridge).
++    params.rounded_corners = gfx::RoundedCornersF(12);
++    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
++  }
+   return params;
+ }
+ 
+diff --git a/chrome/browser/ui/views/frame/browser_window_factory.cc b/chrome/browser/ui/views/frame/browser_window_factory.cc
+index 8b90ac8949cfa..7eb52ee5cc286 100644
+--- a/chrome/browser/ui/views/frame/browser_window_factory.cc
++++ b/chrome/browser/ui/views/frame/browser_window_factory.cc
+@@ -12,6 +12,7 @@
+ #include "chrome/browser/ui/views/frame/browser_widget.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/views/frame/slayzone_hidden_browser_view.h"
++#include "chrome/browser/ui/views/frame/slayzone_inlay_browser_view.h"
+ #include "chrome/browser/ui/webui_browser/webui_browser.h"
+ #include "chrome/browser/ui/webui_browser/webui_browser_window.h"
+ #include "chrome/grit/branded_strings.h"
+@@ -61,10 +62,12 @@ BrowserWindow::CreateBrowserWindow(Browser* browser,
+     // kill the pane.
+     view = new SlayzoneHiddenBrowserView(browser);
+   } else if (slayzone::IsExtensionsBrowser(browser)) {
+-    // Extension-management window: a normal, VISIBLE Chrome window
+-    // (toolbar/omnibox) — NOT the shell takeover — so chrome://extensions, the
+-    // Web Store, and native install prompts work as in stock Chrome.
+-    view = new BrowserView(browser);
++    // Extension-management window: a VISIBLE window hosting the Web Store /
++    // chrome://extensions as a normal active tab (install prompts + autofill
++    // work as in stock Chrome), but with NO browser chrome. Paired with the
++    // frameless+rounded+child config in BrowserNativeWidgetMac, it becomes the
++    // chromeless "body" of a real SlayZone React modal drawn by the shell above.
++    view = new SlayzoneInlayBrowserView(browser);
+   } else if (slayzone::IsLayoutShellEnabled() && browser->is_type_normal()) {
+     view = new SlayzoneBrowserView(browser);
+   } else {
+diff --git a/chrome/browser/ui/views/frame/slayzone_inlay_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_inlay_browser_view.cc
+new file mode 100644
+index 0000000000000..768ca0ce4dbbc
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_inlay_browser_view.cc
+@@ -0,0 +1,52 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/slayzone_inlay_browser_view.h"
++
++#include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
++#include "chrome/browser/ui/views/frame/top_container_view.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/views/view.h"
++
++SlayzoneInlayBrowserView::SlayzoneInlayBrowserView(Browser* browser)
++    : BrowserView(browser) {}
++
++SlayzoneInlayBrowserView::~SlayzoneInlayBrowserView() = default;
++
++bool SlayzoneInlayBrowserView::IsToolbarVisible() const {
++  return false;
++}
++
++bool SlayzoneInlayBrowserView::IsBookmarkBarVisible() const {
++  return false;
++}
++
++void SlayzoneInlayBrowserView::Layout(PassKey /*key*/) {
++  // PassKey is non-copyable; forward to the superclass via the views helper
++  // (constructs its own key), then adjust.
++  LayoutSuperclass<BrowserView>(this);
++
++  // The React modal (in the shell) draws the frame; this window is only the
++  // web "body". Hide the whole chrome strip and give the contents the entire
++  // client area, regardless of what BrowserViewTabbedLayoutImpl computed
++  // (tabstrip presence is not a clean per-browser override point).
++  //
++  // The tab strip region is a DIRECT child of BrowserView (added last so it
++  // "paints on top of everything"), a SIBLING of top_container — NOT inside it.
++  // So hiding top_container alone leaves the tab strip's "+" new-tab button
++  // floating over the page; it must be hidden on its own.
++  if (views::View* tabs = tab_strip_view()) {
++    tabs->SetVisible(false);
++  }
++  // SetVisible(false) — NOT just zero bounds: views don't clip children to
++  // their parent's bounds, so a zero-sized top_container still PAINTS its
++  // children (toolbar / bookmark bar). Hiding it stops its descendants painting.
++  if (views::View* top = top_container()) {
++    top->SetVisible(false);
++    top->SetBoundsRect(gfx::Rect());
++  }
++  if (views::View* contents = contents_container()) {
++    contents->SetBoundsRect(GetLocalBounds());
++  }
++}
+diff --git a/chrome/browser/ui/views/frame/slayzone_inlay_browser_view.h b/chrome/browser/ui/views/frame/slayzone_inlay_browser_view.h
+new file mode 100644
+index 0000000000000..e209edd67f400
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_inlay_browser_view.h
+@@ -0,0 +1,46 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_INLAY_BROWSER_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_INLAY_BROWSER_VIEW_H_
++
++#include "chrome/browser/ui/views/frame/browser_view.h"
++
++class Browser;
++
++// BrowserView for the single VISIBLE extension-management window
++// (`slayzone::IsExtensionsBrowser`). It hosts the Web Store / chrome://extensions
++// as a normal ACTIVE tab — so install confirm dialogs, the post-install bubble,
++// and 1Password autofill all work exactly as in stock Chrome — but renders with
++// NO browser chrome (no tabstrip, toolbar, bookmark bar). Paired with the
++// frameless+rounded+child-window config in `BrowserNativeWidgetMac` (gated on the
++// same `IsExtensionsBrowser` marker), the window becomes a chromeless, borderless,
++// rounded rectangle parented to the SlayZone shell — the "body" of a real React
++// SlayZone modal whose scrim/card/header/close are drawn by the shell above it.
++//
++// Chrome is suppressed two ways (belt + suspenders): the `IsToolbarVisible` /
++// `IsBookmarkBarVisible` overrides keep the layout from reserving space, and the
++// `Layout` override forcibly collapses `top_container()` and gives
++// `contents_container()` the entire window — robust regardless of the upstream
++// `BrowserViewTabbedLayoutImpl` (whose tabstrip presence is not a clean override
++// point). The active tab's WebContents renders normally (the window IS visible),
++// so none of the windowless-pane traps (capturer pinning, RWHV ownership) apply.
++class SlayzoneInlayBrowserView : public BrowserView {
++ public:
++  explicit SlayzoneInlayBrowserView(Browser* browser);
++  SlayzoneInlayBrowserView(const SlayzoneInlayBrowserView&) = delete;
++  SlayzoneInlayBrowserView& operator=(const SlayzoneInlayBrowserView&) = delete;
++  ~SlayzoneInlayBrowserView() override;
++
++  // BrowserWindow (via BrowserView) — report all chrome hidden so the layout
++  // delegate reserves no space for it.
++  bool IsToolbarVisible() const override;
++  bool IsBookmarkBarVisible() const override;
++
++  // views::View — after upstream layout, collapse the chrome strip and give the
++  // web contents the full window. This is the authoritative chromeless guarantee.
++  void Layout(PassKey key) override;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_INLAY_BROWSER_VIEW_H_
+-- 
+2.52.0
+

@@ -206,6 +206,26 @@ async function setVisible(viewId: string, visible: boolean): Promise<void> {
   remote.setVisible(viewId, visible)
 }
 
+// Extensions inlay-modal helpers. The window itself is opened via createView
+// with url "slayzone:open-extensions"; these keep the chromeless child window
+// pinned under the React modal card (on move/resize) and tear it down on close.
+async function setExtensionsBounds(bounds: {
+  x: number
+  y: number
+  width: number
+  height: number
+}): Promise<void> {
+  if (!hasMojo()) return
+  const remote = await embeddedTabRemote()
+  remote.setExtensionsBounds(bounds)
+}
+
+async function closeExtensions(): Promise<void> {
+  if (!hasMojo()) return
+  const remote = await embeddedTabRemote()
+  remote.closeExtensions()
+}
+
 async function navigate(viewId: string, url: string): Promise<void> {
   console.debug('[browser-shim] navigate', { viewId, url })
   const remote = await embeddedTabRemote()
@@ -296,6 +316,8 @@ export const browserShim = {
 
   setBounds,
   setVisible,
+  setExtensionsBounds,
+  closeExtensions,
   hideAll: async (): Promise<void> => {
     // Shim-side fan-out over registered viewIds. Host has no bulk-visibility
     // method on the current mojom — the renderer expects per-id transitions

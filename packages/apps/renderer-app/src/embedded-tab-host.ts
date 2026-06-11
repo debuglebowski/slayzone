@@ -44,6 +44,39 @@ interface BrowserApi {
   goForward(viewId: string): Promise<void>
   reload(viewId: string, ignoreCache?: boolean): Promise<void>
   onEvent(cb: (evt: Record<string, unknown>) => void): () => void
+  // Extensions inlay-modal surface (chromeless child window pinned under the
+  // React modal card). Optional — absent on plain-browser dev.
+  setExtensionsBounds?(bounds: { x: number; y: number; width: number; height: number }): Promise<void>
+  closeExtensions?(): Promise<void>
+}
+
+type Box = { x: number; y: number; width: number; height: number }
+
+// Extensions inlay modal. `openExtensionsModal` opens the chromeless child
+// window (Web Store / chrome://extensions) on `profileKey`, pinned over `body`
+// (the React modal's body rect, CSS px in the shell viewport).
+// `setExtensionsModalBounds` re-pins on modal move/resize; `closeExtensionsModal`
+// tears it down. All inert when window.api.browser is absent.
+export function openExtensionsModal(
+  body: Box,
+  profileKey: string,
+  view: 'store' | 'manage' = 'store'
+): void {
+  const api = browserApi()
+  if (!api) return
+  void api.createView({
+    taskId: 'extensions',
+    tabId: 'extensions',
+    url: view === 'manage' ? 'slayzone:open-extensions#manage' : 'slayzone:open-extensions',
+    bounds: body,
+    profileKey
+  })
+}
+export function setExtensionsModalBounds(body: Box): void {
+  void browserApi()?.setExtensionsBounds?.(body)
+}
+export function closeExtensionsModal(): void {
+  void browserApi()?.closeExtensions?.()
 }
 
 function browserApi(): BrowserApi | null {

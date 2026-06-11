@@ -80,6 +80,15 @@ interface EmbeddedTabHost {
   // observer. No event backlog — renderer only receives events for
   // navigations that happen after Subscribe resolves.
   Subscribe(pending_remote<EmbeddedTabObserver> observer);
+
+  // Extensions "inlay" modal. The window itself is opened via CreateView with
+  // url "slayzone:open-extensions" (its `bounds` = the modal body rect, in CSS
+  // px relative to the shell's web viewport; `profile_key` = the identity).
+  // While the modal is open the renderer reports body-rect changes (modal
+  // move/resize) so the chromeless child window stays pinned over the React
+  // card's body; CloseExtensions tears the window down on close/X/scrim.
+  SetExtensionsBounds(EmbeddedTabBounds bounds);
+  CloseExtensions();
 };
 
 interface EmbeddedTabObserver {
