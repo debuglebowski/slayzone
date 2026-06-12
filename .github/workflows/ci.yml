@@ -44,6 +44,9 @@ jobs:
       - name: Lint theme tokens
         run: pnpm lint:theme
 
+      - name: Lint server boundary (electron-free guard)
+        run: pnpm lint:server-boundary
+
       - name: Typecheck
         run: pnpm typecheck
 
