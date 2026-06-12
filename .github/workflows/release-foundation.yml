@@ -182,7 +182,10 @@ jobs:
             os: ubuntu-latest
             build_args: --linux --x64
           - name: windows
-            os: windows-latest
+            # Pinned: windows-latest now redirects to windows-2025-vs2026, whose
+            # VS 2026 toolset isn't detected by node-gyp 9 (via @electron/rebuild).
+            # Unpin once electron-builder/@electron/rebuild ship node-gyp >= 11.4.
+            os: windows-2025
             build_args: --win --x64 --arm64
 
     runs-on: ${{ matrix.os }}
