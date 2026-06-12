@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   Button,
   Card,
@@ -13,23 +13,19 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
-  useVisibleInterval
+  SelectValue
 } from '@slayzone/ui'
 import type { DiagnosticsConfig } from '@slayzone/types'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function DiagnosticsSettingsTab() {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig | null>(null)
   const [retentionDaysInput, setRetentionDaysInput] = useState('14')
   const [exportRange, setExportRange] = useState<'15m' | '1h' | '24h' | '7d'>('1h')
   const [exportingDiagnostics, setExportingDiagnostics] = useState(false)
   const [diagnosticsMessage, setDiagnosticsMessage] = useState('')
-  const [sidecarStatus, setSidecarStatus] = useState<Awaited<
-    ReturnType<typeof window.api.app.getSidecarStatus>
-  > | null>(null)
-  const mountedRef = useRef(true)
 
   const diagnosticsConfigQuery = useQuery(trpc.diagnostics.getConfig.queryOptions())
   const setDiagnosticsConfigMutation = useMutation(trpc.diagnostics.setConfig.mutationOptions())
@@ -42,25 +38,14 @@ export function DiagnosticsSettingsTab() {
     }
   }, [diagnosticsConfigQuery.data])
 
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
   // Poll the dark-launch side-car status while this tab is mounted. 5s feels
-  // live; 3s was unnecessarily aggressive for a manual settings screen.
-  // app.getSidecarStatus / app.revealSidecarLog have no tRPC router yet, so
-  // they stay on window.api.
-  useVisibleInterval(
-    () => {
-      void window.api.app.getSidecarStatus().then((s) => {
-        if (mountedRef.current) setSidecarStatus(s)
-      })
-    },
-    5000,
-    { runOnVisible: true }
+  // live; the interval pauses while the window is unfocused (react-query
+  // default), matching the old useVisibleInterval behavior.
+  const sidecarStatusQuery = useQuery(
+    trpc.app.meta.getSidecarStatus.queryOptions(undefined, { refetchInterval: 5000 })
   )
+  const sidecarStatus = sidecarStatusQuery.data ?? null
+  const revealSidecarLogMutation = useMutation(trpc.app.meta.revealSidecarLog.mutationOptions())
 
   const updateDiagnosticsConfig = async (partial: Partial<DiagnosticsConfig>) => {
     const next = await setDiagnosticsConfigMutation.mutateAsync(partial)
@@ -80,17 +65,29 @@ export function DiagnosticsSettingsTab() {
         '24h': now - 24 * 60 * 60 * 1000,
         '7d': now - 7 * 24 * 60 * 60 * 1000
       }
-      const result = await window.api.diagnostics.export({
+      const appVersion = await trpcClient.app.meta.getVersion.query()
+      const bundle = await trpcClient.diagnostics.exportBundle.query({
         fromTsMs: fromByRange[exportRange],
-        toTsMs: now
+        toTsMs: now,
+        appVersion
       })
-      if (result.success) {
-        setDiagnosticsMessage(`Exported ${result.eventCount ?? 0} events`)
-      } else if (result.canceled) {
-        setDiagnosticsMessage('Export canceled')
-      } else {
-        setDiagnosticsMessage(result.error ?? 'Export failed')
+      if (!bundle) {
+        setDiagnosticsMessage('Export failed')
+        return
       }
+      // Browser-native download (replaces the IPC save-dialog path).
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `slayzone-diagnostics-${exportRange}-${new Date(now)
+        .toISOString()
+        .replace(/[:.]/g, '-')}.json`
+      anchor.click()
+      URL.revokeObjectURL(url)
+      setDiagnosticsMessage(`Exported ${bundle.events.length} events`)
+    } catch (err) {
+      setDiagnosticsMessage(err instanceof Error ? err.message : 'Export failed')
     } finally {
       setExportingDiagnostics(false)
     }
@@ -252,7 +249,7 @@ export function DiagnosticsSettingsTab() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => window.api.app.revealSidecarLog()}
+            onClick={() => revealSidecarLogMutation.mutate()}
           >
             Reveal log file
           </Button>

@@ -55,8 +55,7 @@ export function createPtyEnricher(db: SlayzoneDb): (raw: PtyInfo[]) => Promise<P
  * Thin IPC wrappers over the electron-free tab store (`../server`). Both these
  * `tabs:*` handlers and the tRPC `taskTerminals` router call the same store, so
  * they share one implementation while IPC + tRPC coexist (renderer cutover +
- * handler deletion land in a later slice). `tabs:listHibernatedSessions` stays
- * local — it's PTY-hibernation seeding, not tab CRUD.
+ * handler deletion land in a later slice).
  */
 export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   // List tabs for a task

@@ -23,7 +23,7 @@ import {
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
 import { listChatSessions } from './chat-transport-manager'
-import { claimWarmShell } from './warm-process-manager'
+import { claimWarmShell, setProjectTabCounts } from './warm-process-manager'
 import { getAdapter, type ExecutionContext } from '../adapters'
 import type {
   TerminalMode,
@@ -85,9 +85,10 @@ function mapModeRow(row: any): TerminalModeInfo {
  * transports coexist (renderer cutover is slice 5). Mirrors the chat/task
  * `createXOps` pattern; injected into the transport layer via `setPtyDeps`.
  *
- * NOTE: `warm:setProjectTabCounts` is deliberately NOT here — it is per-window
- * state keyed by `event.sender.id` + a `destroyed` hook, which needs the
- * deferred `ctx.windowId` tRPC capability. It stays IPC-only until that lands.
+ * `warmSetProjectTabCounts` is per-window state: the IPC handler keys it by
+ * `event.sender.id`, the tRPC proc by `ctx.windowId` (same webContents id).
+ * Window-close cleanup lives host-side (`wireWarmWindowCleanup`), independent
+ * of which transport pushed the counts.
  */
 export function createPtyOps(db: SlayzoneDb) {
   // Set database reference for notifications.
@@ -388,6 +389,11 @@ export function createPtyOps(db: SlayzoneDb) {
 
   const ptySetShellOverride = (value: string | null) => setShellOverride(value)
 
+  // Warm-process gate: a window's full per-project open-task-tab snapshot.
+  // Idempotent (full snapshot each time) so dropped messages self-heal.
+  const warmSetProjectTabCounts = (windowId: number, counts: Record<string, number>): void =>
+    setProjectTabCounts(windowId, counts)
+
   return {
     terminalModesList,
     terminalModesTest,
@@ -417,6 +423,7 @@ export function createPtyOps(db: SlayzoneDb) {
     sessionGetState,
     ptySetTheme,
     ptyValidate,
-    ptySetShellOverride
+    ptySetShellOverride,
+    warmSetProjectTabCounts
   }
 }

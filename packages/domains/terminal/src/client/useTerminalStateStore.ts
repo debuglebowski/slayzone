@@ -308,8 +308,7 @@ export function useWireTerminalStateStore(): void {
   )
 
   // Initial seed: liveness from the session list (fill-only hydrate) + the
-  // persisted hibernated set (tabs:listHibernatedSessions stays on IPC — no
-  // tRPC router procedure for it). Runs once on mount. Reads the store singleton
+  // persisted hibernated set. Runs once on mount. Reads the store singleton
   // via getState() (no extra dep) so trpcClient is the only dependency.
   useEffect(() => {
     const st = (): TerminalStateStore => useTerminalStateStore.getState()
@@ -319,12 +318,10 @@ export function useWireTerminalStateStore(): void {
         st().hydrate(sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })))
       )
       .catch(() => {})
-    if (typeof window !== 'undefined' && window.api?.tabs?.listHibernatedSessions) {
-      window.api.tabs
-        .listHibernatedSessions()
-        .then((ids) => ids.forEach((id) => st().applyHibernated(id)))
-        .catch(() => {})
-    }
+    trpcClient.taskTerminals.listHibernatedSessions
+      .query()
+      .then((ids) => ids.forEach((id) => st().applyHibernated(id)))
+      .catch(() => {})
   }, [trpcClient])
 }
 

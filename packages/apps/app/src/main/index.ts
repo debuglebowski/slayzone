@@ -234,6 +234,7 @@ import { SettingsService } from '@slayzone/settings/server'
 import {
   registerPtyHandlers,
   getPtyHandlerChannels,
+  wireWarmWindowCleanup,
   registerUsageHandlers,
   killAllPtys,
   shutdownAllPtys,
@@ -498,6 +499,25 @@ let mcpCleanup: (() => void) | null = null
 let trpcCleanup: (() => void) | null = null
 let sidecarCleanup: (() => void) | null = null
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
+
+// Shared by the `app:get-sidecar-status` / `app:reveal-sidecar-log` IPC
+// handlers and the tRPC `app.meta.*` procs (one impl, both transports).
+function getSidecarStatusSnapshot(): import('./sidecar-server-supervisor').SidecarStatus {
+  return (
+    sidecarServerHandle?.getStatus() ?? {
+      health: 'starting' as const,
+      port: null,
+      pid: null,
+      restarts: 0,
+      dbPath: null,
+      uptimeMs: null
+    }
+  )
+}
+
+function revealSidecarLogInFinder(): void {
+  shell.showItemInFolder(join(ensureDataRoot(), 'logs', 'sidecar.log'))
+}
 let quitDrainComplete = false
 let quitSubprocessCleanupPromise: Promise<void> | null = null
 const QUIT_SUBPROCESS_TERM_GRACE_MS = 1500
@@ -1607,6 +1627,9 @@ app
     registerThemeHandlers(ipcMain, db)
     const usageOps = registerUsageHandlers(ipcMain, db)
     registerPtyHandlers(ipcMain, db)
+    // Warm-process tab-count cleanup on window death — covers both the IPC and
+    // tRPC push paths (registered before any renderer window is created).
+    wireWarmWindowCleanup(app)
     logBoot('pty handlers registered')
 
     setupFloatingGlobalAgentPanel(() => currentOverrides)
@@ -1872,6 +1895,8 @@ app
             appAdjustZoom: (command) => applyAppZoom(command),
             appRestartForUpdate: () => restartForUpdate(),
             appCheckForUpdates: () => checkForUpdates(),
+            appGetSidecarStatus: getSidecarStatusSnapshot,
+            appRevealSidecarLog: revealSidecarLogInFinder,
             appWindowGetContentBounds: () => mainWindow?.getContentBounds() ?? null,
             appWindowGetDisplayScaleFactor: () => {
               if (!mainWindow || mainWindow.isDestroyed()) return null
@@ -2637,21 +2662,10 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ipcMain.handle('app:getVersion', () => app.getVersion())
     ipcMain.handle('app:get-trpc-port', () => awaitTrpcPort())
     // Read-only side-car (dark-launch) status for the Diagnostics settings tab.
-    ipcMain.handle('app:get-sidecar-status', () => {
-      return (
-        sidecarServerHandle?.getStatus() ?? {
-          health: 'starting' as const,
-          port: null,
-          pid: null,
-          restarts: 0,
-          dbPath: null,
-          uptimeMs: null
-        }
-      )
-    })
-    ipcMain.handle('app:reveal-sidecar-log', () => {
-      shell.showItemInFolder(join(ensureDataRoot(), 'logs', 'sidecar.log'))
-    })
+    // Same impls as the tRPC `app.meta.getSidecarStatus` / `revealSidecarLog`
+    // procs (coexistence until the legacy IPC surface drops).
+    ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())
+    ipcMain.handle('app:reveal-sidecar-log', () => revealSidecarLogInFinder())
     ipcMain.handle('app:is-tests-panel-enabled', () => isLabEnabled('labs_tests_panel'))
     ipcMain.on('app:is-tests-panel-enabled-sync', (event) => {
       event.returnValue = isLabEnabled('labs_tests_panel')

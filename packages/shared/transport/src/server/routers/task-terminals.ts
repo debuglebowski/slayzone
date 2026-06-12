@@ -8,6 +8,7 @@ import {
   updateTabRow,
   deleteTab,
   ensureMainTab,
+  listHibernatedSessionIds,
   tabsEvents,
   type TabsChangedPayload
 } from '@slayzone/task-terminals/server'
@@ -21,8 +22,7 @@ import { router, publicProcedure } from '../trpc'
 // the `tabs:changed` broadcast. Both the still-registered IPC handlers and these
 // procedures call the same electron-free store (@slayzone/task-terminals/server),
 // so IPC + tRPC coexist over one implementation. Renderer cutover + handler
-// deletion are a later slice. `tabs:listHibernatedSessions` is excluded — it's
-// PTY-hibernation seeding (separate slice), not tab CRUD.
+// deletion are a later slice.
 //
 // create/update pass their shapes through unchecked (mirror the diagnostics /
 // test-panel routers — the still-live IPC path validates by TypeScript only).
@@ -33,6 +33,9 @@ export const taskTerminalsRouter = router({
   list: publicProcedure
     .input(z.object({ taskId: z.string() }))
     .query(({ ctx, input }) => listTabsForTask(ctx.db, input.taskId)),
+
+  /** Main-tab session ids flagged hibernated — seeds the renderer's 💤 dots at boot. */
+  listHibernatedSessions: publicProcedure.query(({ ctx }) => listHibernatedSessionIds(ctx.db)),
 
   create: publicProcedure
     .input(createInput)

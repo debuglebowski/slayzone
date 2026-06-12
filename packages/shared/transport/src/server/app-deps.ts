@@ -361,6 +361,19 @@ export type AppDeps = {
   appRestartForUpdate: () => Promise<void>
   appCheckForUpdates: () => Promise<void>
 
+  // side-car supervisor (dark-launch) — read-only status + log reveal for the
+  // Diagnostics settings tab. Shape mirrors the host's `SidecarStatus`
+  // (transport stays decoupled from the supervisor module).
+  appGetSidecarStatus: () => {
+    health: 'starting' | 'ready' | 'restarting' | 'failed'
+    port: number | null
+    pid: number | null
+    restarts: number
+    dbPath: string | null
+    uptimeMs: number | null
+  }
+  appRevealSidecarLog: () => void
+
   // window
   appWindowGetContentBounds: () => {
     x: number

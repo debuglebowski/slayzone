@@ -8,8 +8,7 @@ import { getPtyDeps } from '../app-deps'
 // `webContents.send('pty:*')` event surface as subscriptions. Ops + the event
 // emitter are injected via `setPtyDeps()` (electron + node-pty coupled). The
 // renderer is still on IPC until slice 5; the same ops/emitter back both
-// transports (dual-emit in pty-manager). `warm:setProjectTabCounts` stays
-// IPC-only — it needs the deferred `ctx.windowId` capability.
+// transports (dual-emit in pty-manager).
 const anyInput = z.unknown()
 const ops = (): ReturnType<typeof getPtyDeps>['ops'] => getPtyDeps().ops
 
@@ -94,6 +93,15 @@ export const ptyRouter = router({
   setShellOverride: publicProcedure
     .input(z.object({ value: z.string().nullable() }))
     .mutation(({ input }) => ops().ptySetShellOverride(input.value)),
+  // Warm-process gate: this window's full per-project open-task-tab snapshot,
+  // keyed by ctx.windowId (same webContents id the IPC path reads off
+  // event.sender). Window-close cleanup is host-side (wireWarmWindowCleanup).
+  warmSetProjectTabCounts: publicProcedure
+    .input(z.object({ counts: z.record(z.string(), z.number()) }))
+    .mutation(({ ctx, input }) => {
+      if (ctx.windowId == null) throw new Error('windowId required')
+      ops().warmSetProjectTabCounts(ctx.windowId, input.counts)
+    }),
 
   // Streaming subscriptions — mirror the dual-emitted pty events (pty-manager
   // `ptyEvents`). High-frequency `onData` rides the observable's internal queue

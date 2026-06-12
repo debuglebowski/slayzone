@@ -43,16 +43,17 @@ export const diagnosticsRouter = router({
   }),
 
   // Returns the export bundle directly to the renderer; the client triggers a
-  // browser-native download (createObjectURL + anchor). The IPC `diagnostics:export`
-  // handler keeps Electron's save-file dialog for now — that UX coupling is dropped
-  // when the renderer cuts over in slice 5.
+  // browser-native download (createObjectURL + anchor) — the Diagnostics tab is
+  // on this path. The legacy IPC `diagnostics:export` handler (save-file dialog)
+  // stays registered until the IPC surface drops (slice 8). `platform` defaults
+  // to the server host's platform — the renderer has no clean source for it.
   exportBundle: publicProcedure
-    .input(exportRequestInput.extend({ appVersion: z.string(), platform: z.string() }))
+    .input(exportRequestInput.extend({ appVersion: z.string(), platform: z.string().optional() }))
     .query(({ input }) =>
       buildExportBundle({
         request: { fromTsMs: input.fromTsMs, toTsMs: input.toTsMs },
         appVersion: input.appVersion,
-        platform: input.platform
+        platform: input.platform ?? process.platform
       })
     )
 })

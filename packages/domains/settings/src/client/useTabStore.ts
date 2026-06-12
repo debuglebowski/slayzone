@@ -671,7 +671,7 @@ let _warmDebounceTimer: ReturnType<typeof setTimeout> | null = null
 useTabStore.subscribe(
   (state) => ({ tabs: state.tabs, _taskLookup: state._taskLookup }),
   ({ tabs, _taskLookup }) => {
-    if (typeof window === 'undefined' || !window.api?.warm) return
+    if (typeof window === 'undefined') return
     const counts: Record<string, number> = {}
     for (const tab of tabs) {
       if (tab.type !== 'task') continue
@@ -681,7 +681,17 @@ useTabStore.subscribe(
     }
     if (_warmDebounceTimer) clearTimeout(_warmDebounceTimer)
     _warmDebounceTimer = setTimeout(() => {
-      void window.api.warm.setProjectTabCounts(counts)
+      // getTrpcClient throws until initTrpcClient runs (main.tsx boot). The only
+      // firing that can land that early is the module-scope hydration push, whose
+      // counts are empty (no _taskLookup yet) — safe to drop; the next tab change
+      // re-pushes the full snapshot.
+      try {
+        getTrpcClient()
+          .pty.warmSetProjectTabCounts.mutate({ counts })
+          .catch(() => {})
+      } catch {
+        /* tRPC client not ready (boot) */
+      }
     }, 150)
   },
   { equalityFn: shallow }

@@ -83,10 +83,13 @@ import {
   mergePr,
   getPrDiff,
   getGhUser,
-  editPrComment
+  editPrComment,
+  worktreesEvents
 } from '@slayzone/worktrees/server'
 import type {
   CreateWorktreeOpts,
+  CreateWorktreePhase,
+  CreateWorktreePhaseEvent,
   CreatePrInput,
   MergePrInput,
   EditPrCommentInput
@@ -117,9 +120,28 @@ export const worktreesRouter = router({
   detectWorktrees: publicProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => detectWorktreesWithColors(input.repoPath)),
-  createWorktree: publicProcedure
-    .input(u)
-    .mutation(({ ctx, input }) => createWorktreeWithSetup(ctx.db, input as CreateWorktreeOpts)),
+  createWorktree: publicProcedure.input(u).mutation(({ ctx, input }) => {
+    const opts = input as CreateWorktreeOpts
+    const { requestId } = opts
+    const onPhase = requestId
+      ? (phase: CreateWorktreePhase): void => {
+          worktreesEvents.emit('createWorktree:phase', { requestId, phase })
+        }
+      : undefined
+    return createWorktreeWithSetup(ctx.db, opts, onPhase)
+  }),
+  /** Phase progress for one createWorktree call, correlated by its requestId. */
+  onCreateWorktreePhase: publicProcedure.input(obj({ requestId: s })).subscription(({ input }) =>
+    observable<CreateWorktreePhaseEvent>((emit) => {
+      const handler = (event: CreateWorktreePhaseEvent): void => {
+        if (event.requestId === input.requestId) emit.next(event)
+      }
+      worktreesEvents.on('createWorktree:phase', handler)
+      return () => {
+        worktreesEvents.off('createWorktree:phase', handler)
+      }
+    })
+  ),
   removeWorktree: publicProcedure
     .input(obj({ repoPath: s, worktreePath: s, branchHint: s.optional() }))
     .mutation(({ input }) => removeWorktree(input.repoPath, input.worktreePath, input.branchHint)),

@@ -167,7 +167,10 @@ export const appLevelRouter = router({
       .input(z.object({ command: z.enum(['in', 'out', 'reset']) }))
       .mutation(({ input }) => getAppDeps().appAdjustZoom(input.command)),
     restartForUpdate: publicProcedure.mutation(() => getAppDeps().appRestartForUpdate()),
-    checkForUpdates: publicProcedure.mutation(() => getAppDeps().appCheckForUpdates())
+    checkForUpdates: publicProcedure.mutation(() => getAppDeps().appCheckForUpdates()),
+    // Dark-launch side-car supervisor status (Diagnostics settings tab).
+    getSidecarStatus: publicProcedure.query(() => getAppDeps().appGetSidecarStatus()),
+    revealSidecarLog: publicProcedure.mutation(() => getAppDeps().appRevealSidecarLog())
   }),
 
   // Window

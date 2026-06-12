@@ -243,6 +243,17 @@ export function composeServer(opts: {
     appAdjustZoom: stub('appAdjustZoom'),
     appRestartForUpdate: stub('appRestartForUpdate'),
     appCheckForUpdates: stub('appCheckForUpdates'),
+    // Read-path: a renderer served BY this server is asking about the server
+    // itself — report self status instead of a supervisor snapshot.
+    appGetSidecarStatus: () => ({
+      health: 'ready' as const,
+      port: boundPort || null,
+      pid: process.pid,
+      restarts: 0,
+      dbPath: null,
+      uptimeMs: Math.round(process.uptime() * 1000)
+    }),
+    appRevealSidecarLog: stub('appRevealSidecarLog'),
 
     appWindowGetContentBounds: () => null,
     appWindowGetDisplayScaleFactor: () => null,

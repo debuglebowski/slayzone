@@ -182,8 +182,10 @@ export async function resolveSubmoduleInitBehavior(
 
 // ── Worktree creation (create → copy ignored → submodules → setup script) ─────
 /**
- * `onPhase` lets the IPC handler stream `git:createWorktree:phase` progress to
- * the requesting renderer; the tRPC path omits it (no per-request sender yet).
+ * `onPhase` streams phase progress to the requesting renderer: the IPC handler
+ * wires it to `webContents.send('git:createWorktree:phase')`, the tRPC
+ * `createWorktree` mutation to `worktreesEvents` (consumed by the
+ * `onCreateWorktreePhase` subscription, correlated by requestId).
  */
 export async function createWorktreeWithSetup(
   db: SlayzoneDb,

@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import type { IpcMain } from 'electron'
+import type { App, IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   TerminalMode,
@@ -21,6 +21,18 @@ const PTY_HANDLER_CHANNELS: string[] = []
 /** Channels bound by registerPtyHandlers (populated after the first call). */
 export function getPtyHandlerChannels(): readonly string[] {
   return PTY_HANDLER_CHANNELS
+}
+
+/**
+ * Drop a window's warm-process tab-count contribution when its webContents
+ * dies. Registered app-wide at boot so cleanup holds no matter which transport
+ * (IPC `warm:setProjectTabCounts` or tRPC `pty.warmSetProjectTabCounts`)
+ * pushed the counts. `clearWindowTabCounts` no-ops for ids that never pushed.
+ */
+export function wireWarmWindowCleanup(app: App): void {
+  app.on('web-contents-created', (_event, webContents) => {
+    webContents.once('destroyed', () => clearWindowTabCounts(webContents.id))
+  })
 }
 
 /**
@@ -80,23 +92,12 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
 
   // Warm-process gate: the renderer pushes its full per-project open-task-tab snapshot
   // (keyed by projectId). Main unions across windows to decide which projects keep a warm
-  // shell. Idempotent — a full snapshot each time, so dropped messages self-heal. A window's
-  // contribution is cleared when its webContents is destroyed.
-  //
-  // Stays IPC-only (not in the tRPC pty router): it is per-window state keyed by
-  // `event.sender.id` + a `destroyed` hook, which needs the deferred `ctx.windowId`
-  // tRPC capability. Mirror it into the router when windowId context lands.
-  const warmHookedSenders = new Set<number>()
+  // shell. Idempotent — a full snapshot each time, so dropped messages self-heal.
+  // Mirrored by the tRPC `pty.warmSetProjectTabCounts` proc (`ctx.windowId` = same
+  // webContents id as `event.sender.id`). Window-close cleanup for BOTH transports
+  // lives in `wireWarmWindowCleanup` (host-owned window lifecycle, not per-call hooks).
   handle('warm:setProjectTabCounts', (event, counts: Record<string, number>) => {
-    const windowId = event.sender.id
-    setProjectTabCounts(windowId, counts)
-    if (!warmHookedSenders.has(windowId)) {
-      warmHookedSenders.add(windowId)
-      event.sender.once('destroyed', () => {
-        warmHookedSenders.delete(windowId)
-        clearWindowTabCounts(windowId)
-      })
-    }
+    setProjectTabCounts(event.sender.id, counts)
   })
 
   handle('pty:getState', (_, sessionId: string) => ops.ptyGetState(sessionId))

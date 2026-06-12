@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, toast } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -31,6 +31,7 @@ export function CreateWorktreeDialog({
   onCreated
 }: CreateWorktreeDialogProps) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const showOpenDialogMutation = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
   const createWorktreeMutation = useMutation(trpc.worktrees.createWorktree.mutationOptions())
@@ -58,11 +59,13 @@ export function CreateWorktreeDialog({
     setError(null)
     setPhase(null)
 
-    // NOTE: `onCreateWorktreePhase` has no tRPC subscription proc (createWorktree
-    // is a plain mutation server-side, no phase observable), so it stays on
-    // window.api. The requestId still flows through the createWorktree input.
+    // Phase progress streams over the `worktrees.onCreateWorktreePhase` tRPC
+    // subscription, correlated by the requestId passed to createWorktree.
     const requestId = crypto.randomUUID()
-    const unsubscribe = window.api.git.onCreateWorktreePhase(requestId, setPhase)
+    const phaseSubscription = trpcClient.worktrees.onCreateWorktreePhase.subscribe(
+      { requestId },
+      { onData: (event) => setPhase(event.phase) }
+    )
 
     try {
       // Capture parent branch before creating worktree
@@ -89,7 +92,7 @@ export function CreateWorktreeDialog({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create worktree')
     } finally {
-      unsubscribe()
+      phaseSubscription.unsubscribe()
       setLoading(false)
       setPhase(null)
     }
