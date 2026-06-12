@@ -142,6 +142,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../../domains/processes
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
@@ -441,9 +444,30 @@ importers:
 
   packages/apps/server:
     dependencies:
+      '@slayzone/automations':
+        specifier: workspace:*
+        version: link:../../domains/automations
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../../domains/diagnostics
+      '@slayzone/feedback':
+        specifier: workspace:*
+        version: link:../../domains/feedback
+      '@slayzone/integrations':
+        specifier: workspace:*
+        version: link:../../domains/integrations
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../../domains/processes
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../../domains/task
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../../domains/terminal
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
@@ -456,6 +480,9 @@ importers:
       bufferutil:
         specifier: ^4.1.0
         version: 4.1.0
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
       superjson:
         specifier: ^2.2.1
         version: 2.2.6
@@ -850,6 +877,25 @@ importers:
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.8
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/domains/processes:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
+      '@slayzone/types':
+        specifier: workspace:*
+        version: link:../../shared/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.1
+        version: 22.19.7
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1894,6 +1940,9 @@ importers:
 
   packages/shared/transport:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.26.0
+        version: 1.26.0(zod@4.3.5)
       '@slayzone/agent-turns':
         specifier: workspace:*
         version: link:../../domains/agent-turns
@@ -1969,6 +2018,9 @@ importers:
       bufferutil:
         specifier: ^4.1.0
         version: 4.1.0
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
       react:
         specifier: ^19.0.0
         version: 19.2.3
@@ -1988,6 +2040,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.8

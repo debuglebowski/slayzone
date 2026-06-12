@@ -1,0 +1,24 @@
+{
+  "name": "@slayzone/processes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/server/index.ts",
+  "types": "./src/server/index.ts",
+  "exports": {
+    ".": "./src/server/index.ts",
+    "./server": "./src/server/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/types": "workspace:*"
+  }
+}

@@ -7,7 +7,8 @@ export type StartServerConfig = {
   port?: number
   /** Override SLAYZONE_HOST. Defaults to 127.0.0.1. */
   host?: string
-  /** Reserved for slice 3+. MCP is not started by the side-car this slice. */
+  /** Unused: MCP + REST are muxed onto the single tRPC/health port. Kept for
+   *  config-shape compat until the supervisor's env contract drops it. */
   mcpPort?: number
   /**
    * Pre-opened DB handle. When provided the side-car does NOT open its own

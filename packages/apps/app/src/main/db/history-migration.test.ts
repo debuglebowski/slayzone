@@ -3,7 +3,7 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/history-migration.test.ts
  */
 import Database from 'better-sqlite3'
-import { runMigrations } from './migrations.js'
+import { runMigrations } from '@slayzone/transport/db-bootstrap'
 
 let passed = 0
 let failed = 0

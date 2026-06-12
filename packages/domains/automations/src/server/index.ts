@@ -9,3 +9,4 @@ export {
   listAutomationRuns,
   clearAutomationRuns
 } from './automations-store'
+export { AutomationEngine, cronMatches, type AutomationTriggerBus } from './engine'

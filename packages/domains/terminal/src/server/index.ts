@@ -30,3 +30,47 @@ export {
 // Cross-domain seam: server-side callers (integrations sync) invoke the no-op
 // default; the Electron host injects the real pty-killing impl at boot.
 export { onTaskReachedTerminal, setOnTaskReachedTerminalHandler } from './task-events'
+
+// PTY/chat runtime (slice 6c inversion: electron-free, host-bridged). The
+// Electron entry configures the real window/theme/bus bridge at import time;
+// the standalone server keeps the inert defaults and wires these ops into the
+// transport registries directly.
+export {
+  configurePtyHost,
+  getPtyHostBridge,
+  onPtyHostBus,
+  type PtyHostBridge,
+  type PtySessionWindow,
+  type IpcMainLike
+} from './pty-host'
+export { createPtyOps, type PtyCreateOpts } from './runtime/pty-store'
+export {
+  ptyEvents,
+  type PtyEventMap,
+  listPtys,
+  hasPty,
+  getBuffer,
+  writePty,
+  submitPty,
+  killPty,
+  requestEnsureAlive,
+  type EnsureAliveResult,
+  subscribeToPtyData,
+  subscribeToStateChange,
+  onSessionChange,
+  getState,
+  findSessionByTaskIdAndMode,
+  transitionStateFromHook,
+  markSessionActiveFromHook,
+  noteSessionConversationId,
+  setSessionAwaitingInput,
+  killPtysByTaskId
+} from './runtime/pty-manager'
+export { createChatOps, type ChatOps, type ChatMode } from './runtime/chat-handlers'
+export {
+  createChatQueueOps,
+  chatQueueEvents,
+  type ChatQueueOps,
+  type ChatQueueEventMap
+} from './runtime/chat-queue-handlers'
+export { chatEvents, type ChatEventMap } from './runtime/chat-transport-manager'

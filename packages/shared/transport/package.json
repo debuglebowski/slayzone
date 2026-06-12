@@ -8,12 +8,15 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/server/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./txns": "./src/txns/index.ts",
+    "./db-bootstrap": "./src/db-bootstrap/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
@@ -39,6 +42,7 @@
     "@trpc/server": "^11.17.0",
     "@trpc/tanstack-react-query": "^11.17.0",
     "bufferutil": "^4.1.0",
+    "express": "^5.2.1",
     "superjson": "^2.2.1",
     "utf-8-validate": "^6.0.6",
     "ws": "^8.18.0",
@@ -49,6 +53,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
     "@types/react": "^19.2.7",
     "@types/ws": "^8.5.13",
     "typescript": "^5.9.3"

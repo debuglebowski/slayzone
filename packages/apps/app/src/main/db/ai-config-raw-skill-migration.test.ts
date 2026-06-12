@@ -3,7 +3,7 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/apps/app/src/main/db/ai-config-raw-skill-migration.test.ts
  */
 import Database from 'better-sqlite3'
-import { runMigrations } from './migrations.js'
+import { runMigrations } from '@slayzone/transport/db-bootstrap'
 
 let passed = 0
 let failed = 0

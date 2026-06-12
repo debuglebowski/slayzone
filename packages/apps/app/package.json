@@ -47,6 +47,7 @@
     "@slayzone/markdown": "workspace:*",
     "@slayzone/onboarding": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/processes": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/shortcuts": "workspace:*",

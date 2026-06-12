@@ -350,9 +350,9 @@ import {
   killTaskProcesses,
   killAllProcesses,
   shutdownAllProcesses,
-  processEvents
-} from './process-manager'
-import { createStatsPoller } from './pid-stats'
+  processEvents,
+  createStatsPoller
+} from '@slayzone/processes/server'
 import { registerExportImportHandlers } from './export-import'
 import { notifyEvents } from './notify-renderer'
 import { menuEvents } from './menu-events'
@@ -1765,9 +1765,11 @@ app
     // CLI discovers the port via settings and the renderer doesn't talk to it.
     setImmediate(() => {
       logBoot('mcp server import dispatched')
-      import('./mcp-server')
-        .then((mod) => {
-          mod.startMcpServer(db, { automationEngine })
+      // MCP + REST now live in @slayzone/transport/server (slice 6) — the app
+      // injects its electron capability set; the standalone server injects its own.
+      Promise.all([import('@slayzone/transport/server'), import('./mcp-rest-deps')])
+        .then(([mod, depsMod]) => {
+          void mod.startMcpServer(depsMod.buildMcpRestDeps(db, automationEngine))
           mcpCleanup = () => mod.stopMcpServer()
           logBoot('mcp server started')
         })
@@ -2019,8 +2021,8 @@ app
       import('./sidecar-server-supervisor')
         .then(({ startSidecarServer }) => {
           const scriptPath = is.dev
-            ? join(app.getAppPath(), '../server/dist/bin.js')
-            : join(process.resourcesPath, 'server', 'bin.js')
+            ? join(app.getAppPath(), '../server/dist/bin.cjs')
+            : join(process.resourcesPath, 'server', 'bin.cjs')
           const supervisor = startSidecarServer({
             execPath: process.execPath,
             scriptPath,
@@ -2028,7 +2030,20 @@ app
             env: {
               ...process.env,
               SLAYZONE_STORE_DIR: ensureDataRoot(),
-              SLAYZONE_DB_PATH: getDatabasePath()
+              SLAYZONE_DB_PATH: getDatabasePath(),
+              // Packaged resolution: only bin.js is copied to Resources/server,
+              // so createRequire's walk-up never finds node_modules. Point the
+              // resolver at the unpacked natives (better-sqlite3, node-pty) the
+              // app ships anyway — same ABI, ELECTRON_RUN_AS_NODE shares it.
+              ...(app.isPackaged
+                ? {
+                    NODE_PATH: join(
+                      process.resourcesPath,
+                      'app.asar.unpacked',
+                      'node_modules'
+                    )
+                  }
+                : {})
             },
             logger: (line) => logBoot(line),
             onReady: () => {
@@ -3106,8 +3121,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         await settings.warmCache(['labs_tests_panel', 'labs_loop_mode'])
 
         // 8. Restart MCP + tRPC (after table drop so ports persist to fresh settings table)
-        const mcpMod = await import('./mcp-server')
-        mcpMod.startMcpServer(db, { automationEngine })
+        const mcpMod = await import('@slayzone/transport/server')
+        const { buildMcpRestDeps } = await import('./mcp-rest-deps')
+        void mcpMod.startMcpServer(buildMcpRestDeps(db, automationEngine))
         mcpCleanup = () => mcpMod.stopMcpServer()
         const trpcMod = await import('@slayzone/transport/server')
         trpcMod.startTrpcServer({ db, dataRoot: getTrpcDataRoot(), automationEngine })

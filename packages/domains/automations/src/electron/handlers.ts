@@ -12,7 +12,7 @@ import {
   listAutomationRuns,
   clearAutomationRuns
 } from '@slayzone/automations/server'
-import type { AutomationEngine } from './engine'
+import type { AutomationEngine } from '@slayzone/automations/server'
 
 /**
  * IPC surface for the automations domain. The DB ops live in the shared

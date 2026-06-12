@@ -1,16 +1,18 @@
 import { build } from 'esbuild'
 
-// Single self-contained bundle. better-sqlite3 + ws native deps stay external
-// (loaded via createRequire at runtime). bin.ts pulls in the whole src/ graph.
+// Single self-contained CJS bundle. Native deps (better-sqlite3, node-pty) +
+// ws's optional accelerators stay external and resolve via require() at
+// runtime — CJS so that BOTH the node_modules walk-up (dev: repo root) AND
+// NODE_PATH (packaged: app.asar.unpacked/node_modules, set by the supervisor)
+// work. An ESM bundle would import externals with the ESM resolver, which
+// ignores NODE_PATH entirely — that broke the packaged side-car. `.cjs`
+// extension because package.json is "type": "module".
 await build({
   entryPoints: ['src/bin.ts'],
-  outfile: 'dist/bin.js',
+  outfile: 'dist/bin.cjs',
   bundle: true,
   platform: 'node',
-  format: 'esm',
+  format: 'cjs',
   target: 'node20',
-  external: ['better-sqlite3', 'bufferutil', 'utf-8-validate'],
-  banner: {
-    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
-  }
+  external: ['better-sqlite3', 'bufferutil', 'utf-8-validate', 'node-pty']
 })

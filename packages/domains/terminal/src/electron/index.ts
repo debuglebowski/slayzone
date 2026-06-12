@@ -1,11 +1,26 @@
+import { BrowserWindow, nativeTheme, ipcMain } from 'electron'
+import { configurePtyHost } from '../server/pty-host'
+
+// Wire the pty/chat runtime's host bridge to the real Electron primitives at
+// entry-import time — before any re-exported runtime fn can run. The runtime
+// itself is electron-free (slice 6c inversion); this side effect is what makes
+// the Electron app behave exactly as before. The standalone server never
+// imports this entry and keeps the inert defaults.
+configurePtyHost({
+  getAllWindows: () => BrowserWindow.getAllWindows(),
+  getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
+  isDarkTheme: () => nativeTheme.shouldUseDarkColors,
+  bus: ipcMain
+})
+
 export { registerPtyHandlers, getPtyHandlerChannels } from './handlers'
-export { createPtyOps, type PtyCreateOpts } from './pty-store'
+export { createPtyOps, type PtyCreateOpts } from '../server/runtime/pty-store'
 export { registerUsageHandlers, buildUsageOps } from './usage'
 export {
   initWarmProcessManager,
   teardownAllWarm,
   getWarmStatus
-} from './warm-process-manager'
+} from '../server/runtime/warm-process-manager'
 export {
   killAllPtys,
   shutdownAllPtys,
@@ -55,7 +70,7 @@ export {
   notifyGlobalStateListeners,
   ptyEvents,
   type PtyEventMap
-} from './pty-manager'
+} from '../server/runtime/pty-manager'
 export { resolveUserShell, getShellStartupArgs, whichBinary, getEnrichedPath } from '../server/shell-env'
 export { syncTerminalModes } from '../server/startup-sync'
 export { isHookDrivenMode, HOOK_DRIVEN_MODES } from '../server/adapters'
@@ -69,18 +84,18 @@ export {
   chatModeToFlags,
   type ChatMode,
   type ChatOps
-} from './chat-handlers'
+} from '../server/runtime/chat-handlers'
 export {
   createChatQueueOps,
   chatQueueEvents,
   type ChatQueueOps,
   type ChatQueueEventMap
-} from './chat-queue-handlers'
+} from '../server/runtime/chat-queue-handlers'
 export {
   setSpawnedTabRecorder as setChatSpawnedTabRecorder,
   chatEvents,
   type ChatEventMap
-} from './chat-transport-manager'
+} from '../server/runtime/chat-transport-manager'
 export {
   encodeClaudeProjectDir,
   claudeProjectDir,
@@ -90,8 +105,8 @@ export {
   listClaudeTranscriptIds,
   type ClaudeTranscriptMeta
 } from '../server/claude-transcripts'
-export { beginTerminalShutdown } from './shutdown'
-export { listSessions, getSessionState } from './session-registry'
+export { beginTerminalShutdown } from '../server/runtime/shutdown'
+export { listSessions, getSessionState } from '../server/runtime/session-registry'
 export { getAutoModeEligibility, type AutoModeEligibility } from '../server/auto-mode-eligibility'
 export { supportsChatMode } from '../server/agents/registry'
 export {

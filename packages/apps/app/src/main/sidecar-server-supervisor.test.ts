@@ -14,7 +14,7 @@
  * so backoff timing + permanent failure are deterministic and fast. Timing
  * constants are shrunk through the additive `opts.timing` override (defaults
  * unchanged in production). The parent-death case spawns the real built
- * dist/bin.js to exercise the side-car's own self-exit path.
+ * dist/bin.cjs to exercise the side-car's own self-exit path.
  *
  * Run with:
  *   ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm \
@@ -404,7 +404,7 @@ test('stop() is graceful and idempotent', async () => {
 
 test('parent-death: the real built side-car self-exits when stdin closes', async () => {
   const here = path.dirname(fileURLToPath(import.meta.url))
-  const binJs = path.resolve(here, '../../..', 'server/dist/bin.js')
+  const binJs = path.resolve(here, '../../..', 'server/dist/bin.cjs')
   if (!fs.existsSync(binJs)) {
     console.log(`  ⊘ skipped — ${binJs} not built (run pnpm build first)`)
     return

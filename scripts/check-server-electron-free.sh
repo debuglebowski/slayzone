@@ -41,6 +41,30 @@ if [ -n "$hit" ]; then
   fail=1
 fi
 
+# (2b) Server-side code must not STATICALLY value-import a domain's /electron
+#      entry — it drags the whole electron-coupled cluster (pty-manager, …)
+#      into the standalone bundle, which then crashes on the `electron` npm
+#      shim at module load (this exact bug shipped via integrations/sync.ts).
+#      `import type` (erased) and dynamic `import('…')` (lazy + caught) are
+#      allowed, so strip both before searching — perl handles the multiline
+#      type-import form a line-based grep can't.
+for p in packages/apps/server/src packages/shared/transport/src packages/domains/*/src/server; do
+  [ -d "$p" ] || continue
+  hit=$(find "$p" -name "*.ts" -not -name "*.test.ts" -print0 2>/dev/null | xargs -0 perl -0777 -ne '
+    my $src = $_;
+    $src =~ s/import\s+type\s+\{[^}]*\}\s+from\s+'\''[^'\'']*'\''//gs;   # multiline type imports
+    $src =~ s/import\s*\(\s*'\''[^'\'']*'\''\s*\)//gs;                    # dynamic imports
+    while ($src =~ /from\s+'\''(\@slayzone\/[a-z0-9-]+\/electron)'\''/g) {
+      print "$ARGV: static value import of $1\n";
+    }
+  ' 2>/dev/null || true)
+  if [ -n "$hit" ]; then
+    echo "Server-side code must not statically import a domain /electron entry ($p):"
+    echo "$hit"
+    fail=1
+  fi
+done
+
 # (3) Renderer / client code must not import the legacy conversation-id helpers.
 #     They read the mutable provider_config field directly, bypassing the
 #     append-only task_conversations ledger + provenance gate. The renderer

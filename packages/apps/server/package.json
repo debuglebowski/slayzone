@@ -9,17 +9,25 @@
     ".": "./src/index.ts"
   },
   "bin": {
-    "slayzone-server": "./dist/bin.js"
+    "slayzone-server": "./dist/bin.cjs"
   },
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/automations": "workspace:*",
+    "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/feedback": "workspace:*",
+    "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/processes": "workspace:*",
+    "@slayzone/task": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@trpc/server": "^11.17.0",
     "better-sqlite3": "^12.8.0",
+    "node-pty": "^1.1.0",
     "bufferutil": "^4.1.0",
     "superjson": "^2.2.1",
     "utf-8-validate": "^6.0.6",

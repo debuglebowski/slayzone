@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import path from 'path'
 import { getDbName } from '@slayzone/platform'
-import { LATEST_MIGRATION_VERSION } from './migrations'
+import { LATEST_MIGRATION_VERSION } from '@slayzone/transport/db-bootstrap'
 import { createDbBridge, type DbBridge } from './db-bridge'
 import { createDiagBridge, type DiagBridge } from './diag-bridge'
 import type { LegacyMigrationPaths } from './worker-protocol'

@@ -86,40 +86,40 @@ run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
 run_test packages/domains/automations/src/shared/types.test.ts
 run_test packages/domains/automations/src/shared/ai.test.ts
-run_test_electron_strict_loader packages/domains/automations/src/main/handlers.test.ts
-run_test_electron_strict_loader packages/domains/automations/src/main/engine.test.ts
+run_test_electron_strict_loader packages/domains/automations/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/domains/automations/src/server/engine.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
-run_test packages/domains/terminal/src/main/filter-buffer-data.test.ts
+run_test packages/domains/terminal/src/server/filter-buffer-data.test.ts
 run_test packages/domains/terminal/src/client/webgl-loader.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
-run_test packages/domains/terminal/src/main/state-machine.test.ts
+run_test packages/domains/terminal/src/server/state-machine.test.ts
 # Terminal — idle-close engagement (browser/other-panel interaction keeps agent warm)
 run_test packages/domains/terminal/src/server/engagement.test.ts
-run_test packages/domains/terminal/src/main/session-error-gate.test.ts
+run_test packages/domains/terminal/src/server/session-error-gate.test.ts
 # Terminal — fresh-vs-resume decision (restart-clobber invariant: known id ⇒ resume)
-run_test packages/domains/terminal/src/main/spawn-conversation.test.ts
-run_test packages/domains/terminal/src/main/claude-transcripts.test.ts
-run_test packages/domains/terminal/src/main/adapters/claude-adapter.test.ts
-run_test packages/domains/terminal/src/main/adapters/antigravity-adapter.test.ts
-run_test packages/domains/terminal/src/main/adapters/hook-driven-modes.test.ts
+run_test packages/domains/terminal/src/server/spawn-conversation.test.ts
+run_test packages/domains/terminal/src/server/claude-transcripts.test.ts
+run_test packages/domains/terminal/src/server/adapters/claude-adapter.test.ts
+run_test packages/domains/terminal/src/server/adapters/antigravity-adapter.test.ts
+run_test packages/domains/terminal/src/server/adapters/hook-driven-modes.test.ts
 
 # Terminal — Codex Chat (codex-chat mode) driver + transport + adapter
-run_test packages/domains/terminal/src/main/agents/codex/codex-app-server-client.test.ts
-run_test packages/domains/terminal/src/main/agents/codex/codex-chat-session.test.ts
-run_test packages/domains/terminal/src/main/adapters/codex-adapter.test.ts
+run_test packages/domains/terminal/src/server/agents/codex/codex-app-server-client.test.ts
+run_test packages/domains/terminal/src/server/agents/codex/codex-chat-session.test.ts
+run_test packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)
-run_test packages/domains/terminal/src/main/chat-transport-manager.test.ts
+run_test packages/domains/terminal/src/server/runtime/chat-transport-manager.test.ts
 
 # Terminal — warm-process pool (per-project gate + adopt-match). Strict+electron:
 # pty-manager pulls in `electron`; a fake spawnShell is injected so no real shells spawn.
-run_test_electron_strict_loader packages/domains/terminal/src/main/warm-process-manager.test.ts
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/warm-process-manager.test.ts
 # Terminal — createPty warm-shell adoption branch (fake pty/win/db, no real spawn).
-run_test_electron_strict_loader packages/domains/terminal/src/main/adopt-pty.test.ts
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
-run_test_electron_strict_loader packages/domains/terminal/src/main/createpty-resolver.test.ts
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 
 run_test_no_loader() {
   echo ""
@@ -159,19 +159,19 @@ run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.te
 
 # Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
 run_test_electron_loader packages/domains/task/src/main/events.test.ts
-run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/archive.test.ts
-run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/archive-many.test.ts
-run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/create.test.ts
-run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/delete.test.ts
-run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/unarchive.test.ts
-run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/update.test.ts
-run_test_electron_loader packages/apps/app/src/main/rest-api/agent-hook-attention.test.ts
-run_test_electron_loader packages/apps/app/src/main/mcp-tools/archive-task.test.ts
-run_test_electron_loader packages/apps/app/src/main/mcp-tools/archive-many-task.test.ts
-run_test_electron_loader packages/apps/app/src/main/mcp-tools/create-task.test.ts
-run_test_electron_loader packages/apps/app/src/main/mcp-tools/delete-task.test.ts
-run_test_electron_loader packages/apps/app/src/main/mcp-tools/unarchive-task.test.ts
-run_test_electron_loader packages/apps/app/src/main/mcp-tools/update-task.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/archive.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/archive-many.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/create.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/delete.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/unarchive.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/update.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-many-task.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/delete-task.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/unarchive-task.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/update-task.test.ts
 run_test_electron_loader packages/apps/cli/test/tasks-rest.test.ts
 
 # CLI command tests (need Electron Node for better-sqlite3 + ESM interop).

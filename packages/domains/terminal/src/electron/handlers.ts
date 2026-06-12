@@ -7,8 +7,8 @@ import type {
   UpdateTerminalModeInput
 } from '@slayzone/terminal/shared'
 import type { ExecutionContext } from '../server/adapters'
-import { createPtyOps, type PtyCreateOpts } from './pty-store'
-import { setProjectTabCounts, clearWindowTabCounts } from './warm-process-manager'
+import { createPtyOps, type PtyCreateOpts } from '../server/runtime/pty-store'
+import { setProjectTabCounts, clearWindowTabCounts } from '../server/runtime/warm-process-manager'
 
 /**
  * Every IPC channel registerPtyHandlers binds, recorded automatically by the

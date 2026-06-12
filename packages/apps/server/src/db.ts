@@ -9,8 +9,11 @@ import {
   type BatchOp,
   type RunResult,
   type TxnName,
+  type TxnParams,
   type TxnResult
 } from '@slayzone/platform'
+import { domainTxnRegistry } from '@slayzone/transport/txns'
+import { bootstrapSchema } from '@slayzone/transport/db-bootstrap'
 
 /**
  * Resolves the SQLite path the side-car should open.
@@ -46,8 +49,8 @@ export function getDatabasePathFromEnv(): string {
  * block the UI thread. The standalone side-car has no UI thread to protect, so
  * it runs better-sqlite3 directly and wraps each call in a resolved promise —
  * satisfying the one `SlayzoneDb` contract every domain/router consumer now
- * expects, without a worker. `namedTxn` is unsupported here (the named-txn
- * registry is app-side); the tRPC router the side-car serves does not use it.
+ * expects, without a worker. `namedTxn` dispatches against the shared domain
+ * registry (`@slayzone/transport/txns`); app-only txns are absent by design.
  */
 class SyncSlayzoneDb implements SlayzoneDb {
   constructor(private readonly db: Database.Database) {}
@@ -73,8 +76,18 @@ class SyncSlayzoneDb implements SlayzoneDb {
     return this.db.transaction(() => ops.map((op) => this.db.prepare(op.sql)[op.type](...op.params)))()
   }
 
-  async namedTxn<K extends TxnName>(): Promise<Awaited<TxnResult<K>>> {
-    throw new Error('namedTxn is not supported in the standalone server')
+  async namedTxn<K extends TxnName>(name: K, params: TxnParams<K>): Promise<Awaited<TxnResult<K>>> {
+    // Domain txns only — the two app-only sources (export-import, reset-for-test)
+    // have all their call sites inside apps/app and are deliberately absent here.
+    const fn = (domainTxnRegistry as Record<string, (db: Database.Database, p: unknown) => unknown>)[
+      name as string
+    ]
+    if (!fn) {
+      throw new Error(
+        `Unknown named transaction "${String(name)}" — not registered in the standalone server (app-only txns live in apps/app)`
+      )
+    }
+    return (await fn(this.db, params)) as Awaited<TxnResult<K>>
   }
 
   async backup(destPath: string): Promise<void> {
@@ -98,8 +111,11 @@ class SyncSlayzoneDb implements SlayzoneDb {
   }
 }
 
-export function openServerDatabase(): SlayzoneDb {
+export function openServerDatabase(opts?: { bootstrapSchema?: boolean }): SlayzoneDb {
   const db = new Database(getDatabasePathFromEnv())
   for (const pragma of DB_PRAGMAS) db.pragma(pragma)
+  // Standalone boots own their schema (the Electron host's DB worker does the
+  // equivalent on its side, plus legacy-path migration + pre-migration backup).
+  if (opts?.bootstrapSchema) bootstrapSchema(db)
   return new SyncSlayzoneDb(db)
 }

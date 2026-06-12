@@ -4,7 +4,7 @@
  */
 import Database from 'better-sqlite3'
 import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects/shared'
-import { runMigrations } from './migrations.js'
+import { runMigrations } from '@slayzone/transport/db-bootstrap'
 import { normalizeProjectStatusData } from './status-normalization.js'
 
 let passed = 0

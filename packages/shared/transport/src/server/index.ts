@@ -20,3 +20,23 @@ export {
 export { setMenuEvents, getMenuEvents, type MenuEventMap } from './app-deps'
 export { setAppDeps, getAppDeps, type AppDeps, type FloatingAgentState } from './app-deps'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
+
+// MCP server + REST API (moved from the Electron main in slice 6 so the
+// standalone @slayzone/server can host them too — capability-slot injected).
+export {
+  startMcpServer,
+  stopMcpServer,
+  createMcpRestApp,
+  type McpRestAppHandle
+} from './http/mcp-server'
+export { registerRestApi } from './http/rest-api'
+export type {
+  RestApiDeps,
+  TerminalStateBridge,
+  TaskOpsBus,
+  PtyAccess,
+  ProcessesAccess,
+  BrowserAccess,
+  BrowserWc,
+  ArtifactExportAccess
+} from './http/rest-api/types'
