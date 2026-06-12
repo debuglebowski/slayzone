@@ -124,7 +124,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
@@ -147,7 +147,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
@@ -182,10 +182,7 @@ jobs:
             os: ubuntu-latest
             build_args: --linux --x64
           - name: windows
-            # Pinned: windows-latest now redirects to windows-2025-vs2026, whose
-            # VS 2026 toolset isn't detected by node-gyp 9 (via @electron/rebuild).
-            # Unpin once electron-builder/@electron/rebuild ship node-gyp >= 11.4.
-            os: windows-2025
+            os: windows-latest
             build_args: --win --x64 --arm64
 
     runs-on: ${{ matrix.os }}
@@ -202,7 +199,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install Python setuptools (needed by node-gyp on macOS)
