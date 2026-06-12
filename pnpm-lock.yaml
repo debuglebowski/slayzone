@@ -199,6 +199,9 @@ importers:
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@4.1.18)
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.10.2(@types/react@19.2.8)(immer@11.1.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)

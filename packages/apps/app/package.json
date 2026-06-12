@@ -66,6 +66,7 @@
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@tailwindcss/typography": "^0.5.19",
+    "@tanstack/react-query": "^5.100.9",
     "@xyflow/react": "^12.10.2",
     "better-sqlite3": "^12.8.0",
     "clsx": "^2.1.1",
