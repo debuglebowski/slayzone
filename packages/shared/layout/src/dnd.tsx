@@ -18,7 +18,6 @@ import {
   useSensors
 } from '@dnd-kit/core'
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
-import type { Tile } from './types'
 import type { PaneEdge } from './tree-ops'
 import { findPaneOfTile, findTile } from './tree-ops'
 import { getLayoutStore, useLayoutStore } from './store'
