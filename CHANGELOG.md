@@ -1,6 +1,188 @@
 # Changelog
 
 
+## v0.35.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.34.0...v0.35.0)
+
+### 🚀 Enhancements
+
+- **transport:** Worktrees router (P14 — mega; 84 procedures + 2 subs) ([637394dc](https://github.com/debuglebowski/slayzone/commit/637394dc))
+- **transport:** Pty router (P17 — 28 procs + 12 subs, dual-emit) ([b3fe5139](https://github.com/debuglebowski/slayzone/commit/b3fe5139))
+- **transport:** Notify subs (P20 — tasks-changed/settings-changed via notifyEvents EventEmitter; replaces 'tasks:changed'/'settings:changed' webContents.send broadcasts) ([3ae97bd8](https://github.com/debuglebowski/slayzone/commit/3ae97bd8))
+- **transport:** Ai-config router (P15) ([466581e3](https://github.com/debuglebowski/slayzone/commit/466581e3))
+- **transport:** App-level router (P19 — backup/clipboard/screenshot/leaderboard/export-import/usage, 22 handlers) ([e93b1e16](https://github.com/debuglebowski/slayzone/commit/e93b1e16))
+- **transport:** Files+shell routers (P19b — 4 handlers) ([a49e7be7](https://github.com/debuglebowski/slayzone/commit/a49e7be7))
+- **transport:** Db:feedback router (P19c — 6 handlers) ([94b0e639](https://github.com/debuglebowski/slayzone/commit/94b0e639))
+- **transport:** Processes router (P19d — 9 handlers + 4 streaming subs) ([2e03b33c](https://github.com/debuglebowski/slayzone/commit/2e03b33c))
+- **transport:** App.meta router (P19e — 6 metadata handlers) ([f60aa802](https://github.com/debuglebowski/slayzone/commit/f60aa802))
+- **transport:** App meta+window+auth (P19f — 9 handlers) ([81ec8e12](https://github.com/debuglebowski/slayzone/commit/81ec8e12))
+- **transport:** Browser router (P19g — 47 handlers) ([3a9294b6](https://github.com/debuglebowski/slayzone/commit/3a9294b6))
+- **transport:** Floating-agent router (P19h — 10 handlers + 3 streaming subs) ([fa556572](https://github.com/debuglebowski/slayzone/commit/fa556572))
+- **transport:** Webview tab registry router (P19i — 3 handlers) ([3e6a342e](https://github.com/debuglebowski/slayzone/commit/3e6a342e))
+- **terminal:** Auto-classify root cause of xterm focus-loss ([50ccc575](https://github.com/debuglebowski/slayzone/commit/50ccc575))
+- **transport:** Task-windows + panel ownership router (P19j — 12 handlers + 5 streaming subs, per-WS windowId on context) ([1a4bdbe7](https://github.com/debuglebowski/slayzone/commit/1a4bdbe7))
+- **transport:** Webview devtools (P19k — 3 simple webview handlers) ([13b6f404](https://github.com/debuglebowski/slayzone/commit/13b6f404))
+- **transport:** Dialog router (P19l — 1 handler) ([c0df121d](https://github.com/debuglebowski/slayzone/commit/c0df121d))
+- **transport:** Full webview router (P19m — 6 webview handlers + onShortcut sub) ([bc3961a5](https://github.com/debuglebowski/slayzone/commit/bc3961a5))
+- **transport:** Window.close router (P19n — uses ctx.windowId) ([c5e5589b](https://github.com/debuglebowski/slayzone/commit/c5e5589b))
+- **transport:** Browser-view events router (P22 — onEvent/onShortcut/onFocused/onCreateTaskFromLink subs) ([5ab0a67b](https://github.com/debuglebowski/slayzone/commit/5ab0a67b))
+- **transport:** Menu router (P21 — 19 menu/app subscriptions, dual-emitted alongside legacy app:* webContents.send broadcasts; coexistence until slice 5) ([24f59330](https://github.com/debuglebowski/slayzone/commit/24f59330))
+- **shell:** Bootstrap chromium-fork host skeleton in monorepo ([0badb6f8](https://github.com/debuglebowski/slayzone/commit/0badb6f8))
+- **chromium-shell:** TaskDetailsView — title header, panel toggle, fill-width panels ([ef480639](https://github.com/debuglebowski/slayzone/commit/ef480639))
+- **transport:** Add feedback tRPC router ([7f1fd539](https://github.com/debuglebowski/slayzone/commit/7f1fd539))
+- **layout:** @slayzone/layout renderer-authoritative framework + port TaskDetailsView ([d694a338](https://github.com/debuglebowski/slayzone/commit/d694a338))
+- **projects:** ProjectGroups tRPC router + renderer cutover ([5af07d97](https://github.com/debuglebowski/slayzone/commit/5af07d97))
+- **pty:** TRPC ackEnsureAlive mutation + onStats/onResizeNeeded subs ([614784e3](https://github.com/debuglebowski/slayzone/commit/614784e3))
+- **transport:** Automations.onChanged + telemetry.onIpcEvent subs ([da547e5b](https://github.com/debuglebowski/slayzone/commit/da547e5b))
+- **app:** Window-control tRPC mutations (traffic-light + buttons) ([c19a121a](https://github.com/debuglebowski/slayzone/commit/c19a121a))
+- **transport:** Type floatingAgent/browser payloads + cutover ([bf3834d1](https://github.com/debuglebowski/slayzone/commit/bf3834d1))
+- **chromium-shell:** Light up native browser pane via EmbeddedTabHost ([a7d240bc](https://github.com/debuglebowski/slayzone/commit/a7d240bc))
+- **layout:** Engine-owned native-tile occlusion policy + resize strategies ([fdba2c65](https://github.com/debuglebowski/slayzone/commit/fdba2c65))
+- **chromium-shell:** Native dialog overlay above the live embedded tab (P4 renderer) ([3155bb6f](https://github.com/debuglebowski/slayzone/commit/3155bb6f))
+- **layout:** Drag-rearrange + tabbed panes (P5) ([68832438](https://github.com/debuglebowski/slayzone/commit/68832438))
+- **chromium:** Windowless panes + extension-management window (patch 0070) ([d34f27a6](https://github.com/debuglebowski/slayzone/commit/d34f27a6))
+- **chromium:** Per-task pooled profiles — different Google login per task (patch 0071) ([840c39a5](https://github.com/debuglebowski/slayzone/commit/840c39a5))
+- **chromium:** Extensions modal — chromeless inlay under a React card (patch 0072) ([3d0e9887](https://github.com/debuglebowski/slayzone/commit/3d0e9887))
+- **chromium:** Extension bar — see + open each extension in the modal (patch 0073) ([afc7f9de](https://github.com/debuglebowski/slayzone/commit/afc7f9de))
+- **chromium:** Extension bar — live re-list on install/uninstall (patch 0074) ([28f5c575](https://github.com/debuglebowski/slayzone/commit/28f5c575))
+- **chromium:** Suppress Web Store "Switch to Chrome" + "Restore pages" popups (patch 0075) ([ca898862](https://github.com/debuglebowski/slayzone/commit/ca898862))
+- **chromium:** In-pane window.open / target=_blank → adopt as a pane tab (patch 0076) ([142aa87d](https://github.com/debuglebowski/slayzone/commit/142aa87d))
+- **chromium:** In-pane window.open popups → pane tab (patch 0077) ([f026d95d](https://github.com/debuglebowski/slayzone/commit/f026d95d))
+- **chromium:** Extensions modal — extensions as tabs in the segmented control ([ab67b9f2](https://github.com/debuglebowski/slayzone/commit/ab67b9f2))
+
+### 🔥 Performance
+
+- **search:** Preload Cmd+K chunk, 60ms open anim ([a40626b7](https://github.com/debuglebowski/slayzone/commit/a40626b7))
+
+### 🩹 Fixes
+
+- **terminal:** Keep pane focus on panel resize ([2ed25eec](https://github.com/debuglebowski/slayzone/commit/2ed25eec))
+- **task:** Append-only conversation ledger with provenance gate ([ed8ca45a](https://github.com/debuglebowski/slayzone/commit/ed8ca45a))
+- **task:** Pre-mint sessionId for fresh PTY spawns + renderer reads from ledger ([b69c56a0](https://github.com/debuglebowski/slayzone/commit/b69c56a0))
+- **task:** Funnel updateTask conv-id changes through ledger; correct read SQL ([2bd41bac](https://github.com/debuglebowski/slayzone/commit/2bd41bac))
+- **terminal:** Stop conversation-id clobber on app restart ([be8d9cb3](https://github.com/debuglebowski/slayzone/commit/be8d9cb3))
+- **terminal:** Self-heal xterm focus-steal ([a9af141c](https://github.com/debuglebowski/slayzone/commit/a9af141c))
+- **app:** Restore renderer boot under tRPC providers ([e27c09b9](https://github.com/debuglebowski/slayzone/commit/e27c09b9))
+- **tasks:** __slayzone_refreshData invalidates all tRPC queries ([521fa5bd](https://github.com/debuglebowski/slayzone/commit/521fa5bd))
+- **task-terminals:** Kill two infinite tRPC mutation loops ([cecf1d75](https://github.com/debuglebowski/slayzone/commit/cecf1d75))
+- **ai-config:** Stabilize providers settings-changed listener dep ([35d62bf8](https://github.com/debuglebowski/slayzone/commit/35d62bf8))
+- **app:** Pass windowId on the tRPC WS connection ([3f1bd5cb](https://github.com/debuglebowski/slayzone/commit/3f1bd5cb))
+- **renderer:** Purge unstable useMutation objects from hook deps + add lint guard ([0534bec3](https://github.com/debuglebowski/slayzone/commit/0534bec3))
+- **idle-close:** Panel use keeps idle agent warm ([64d70ffc](https://github.com/debuglebowski/slayzone/commit/64d70ffc))
+- **sidebar:** Home icon always opens project kanban ([ee90cdc2](https://github.com/debuglebowski/slayzone/commit/ee90cdc2))
+- **worktrees:** Working-tree diff must bypass react-query cache (staleTime:0) ([ae3d4f1c](https://github.com/debuglebowski/slayzone/commit/ae3d4f1c))
+- **settings:** Panel-settings reads settings with staleTime:0 (P19) ([5a1a41a0](https://github.com/debuglebowski/slayzone/commit/5a1a41a0))
+- **task:** TRPC task mutations fire notifyTasksChanged (P19 slice 5) ([048d77d5](https://github.com/debuglebowski/slayzone/commit/048d77d5))
+- **browser:** Project-scope new-task URL fallback ([9b3fa36a](https://github.com/debuglebowski/slayzone/commit/9b3fa36a))
+- **browser:** Replay nav-state snapshot to late onEvent subscribers ([655569c4](https://github.com/debuglebowski/slayzone/commit/655569c4))
+- **window-api-shim:** Repair typecheck — lost tsconfig paths + drift vs main types ([a12e2066](https://github.com/debuglebowski/slayzone/commit/a12e2066))
+- **renderer-app:** Overlay-dialog mode keys on #hash, not ?query ([e0a55786](https://github.com/debuglebowski/slayzone/commit/e0a55786))
+- **chromium-shell:** URL bar selects-all on focus (+ Esc to revert) ([d51a4e2b](https://github.com/debuglebowski/slayzone/commit/d51a4e2b))
+- **task-terminals:** Focus new-task terminal on attach ([4c29b642](https://github.com/debuglebowski/slayzone/commit/4c29b642))
+- **browser:** Prevent WCV navigation from stealing focus ([e02e96f7](https://github.com/debuglebowski/slayzone/commit/e02e96f7))
+- **chromium:** Extensions modal — keep shell focused + hide inlay from window managers (patch 0078) ([2749f967](https://github.com/debuglebowski/slayzone/commit/2749f967))
+
+### 💅 Refactors
+
+- **ai-config:** Split SkillMarketplace into hook + panel components ([3d1edd1c](https://github.com/debuglebowski/slayzone/commit/3d1edd1c))
+- **ai-config:** Split McpServersPanel into hooks + panels + dialogs ([ec4034a1](https://github.com/debuglebowski/slayzone/commit/ec4034a1))
+- **projects:** Split IntegrationsTab into hook + section files ([7b48daec](https://github.com/debuglebowski/slayzone/commit/7b48daec))
+- **settings:** Split AiProvidersSettingsTab into hook + view components ([f21a5d9b](https://github.com/debuglebowski/slayzone/commit/f21a5d9b))
+- **worktrees:** Split PullRequestTab ([7042ff7a](https://github.com/debuglebowski/slayzone/commit/7042ff7a))
+- **projects:** Split ProjectIntegrationSetupWizard into steps + state hook ([263daba6](https://github.com/debuglebowski/slayzone/commit/263daba6))
+- **file-editor:** Split EditorFileTree into hooks + renders + utils ([84c5e0c3](https://github.com/debuglebowski/slayzone/commit/84c5e0c3))
+- **worktrees:** Split GitDiffPanel into hooks ([e2ac02b9](https://github.com/debuglebowski/slayzone/commit/e2ac02b9))
+- **task-browser:** Split BrowserPanel god-component into hooks + sub-components ([d4d5d63c](https://github.com/debuglebowski/slayzone/commit/d4d5d63c))
+- **settings:** Split PanelsSettingsTab ([d1883e3a](https://github.com/debuglebowski/slayzone/commit/d1883e3a))
+- **sidebar:** Split TreeView into focused sibling files ([51c73751](https://github.com/debuglebowski/slayzone/commit/51c73751))
+- **chat:** Split ChatPanel into hooks + presentational parts ([fc6bf642](https://github.com/debuglebowski/slayzone/commit/fc6bf642))
+- **task:** Split TaskDetailPage god-component into hooks + sub-components ([38e9bacf](https://github.com/debuglebowski/slayzone/commit/38e9bacf))
+- **automations:** Split AutomationDialog into focused siblings ([e0ef7c1b](https://github.com/debuglebowski/slayzone/commit/e0ef7c1b))
+- **terminal:** Split Terminal.tsx into focused sibling modules ([f361a673](https://github.com/debuglebowski/slayzone/commit/f361a673))
+- **ai-config:** Split ContextItemEditor into hook + subcomponents ([2739d7c7](https://github.com/debuglebowski/slayzone/commit/2739d7c7))
+- **worktrees:** Split DiffView into focused sibling modules ([a8efc3b1](https://github.com/debuglebowski/slayzone/commit/a8efc3b1))
+- **file-editor:** Split FileEditorView into hooks + panes + utils ([b5c9b749](https://github.com/debuglebowski/slayzone/commit/b5c9b749))
+- **worktrees:** Split CommitGraph into layout/colors/svg/row modules ([5b91afcf](https://github.com/debuglebowski/slayzone/commit/5b91afcf))
+- **worktrees:** Split UnifiedGitPanel into focused siblings ([4ba7deb9](https://github.com/debuglebowski/slayzone/commit/4ba7deb9))
+- **task:** Split TaskMetadataSidebar into card files ([03f51612](https://github.com/debuglebowski/slayzone/commit/03f51612))
+- **ai-config:** Split McpFlatSection into hooks + dialog components ([7a69fdf4](https://github.com/debuglebowski/slayzone/commit/7a69fdf4))
+- **task-artifacts:** Split ArtifactsPanel into hooks + components ([05cbd54b](https://github.com/debuglebowski/slayzone/commit/05cbd54b))
+- **tasks:** Split KanbanListView into focused sibling files ([4ef1f8e0](https://github.com/debuglebowski/slayzone/commit/4ef1f8e0))
+- **ai-config:** Split ItemSection into hook + detail + sibling files ([b2f8831a](https://github.com/debuglebowski/slayzone/commit/b2f8831a))
+- **task:** Split ProcessesPanel into focused siblings ([1bdf9ecd](https://github.com/debuglebowski/slayzone/commit/1bdf9ecd))
+- **leaderboard:** Split LeaderboardPage into hooks + sub-components ([cbcc4775](https://github.com/debuglebowski/slayzone/commit/cbcc4775))
+- **sidebar:** Split SidebarFooterIcons into focused siblings ([239649fb](https://github.com/debuglebowski/slayzone/commit/239649fb))
+- **ai-config:** Split ProjectContextTree ([0ef2e438](https://github.com/debuglebowski/slayzone/commit/0ef2e438))
+- **worktrees:** Split WorktreesTab into focused siblings ([f8176fd4](https://github.com/debuglebowski/slayzone/commit/f8176fd4))
+- **app:** Split App.tsx into focused siblings ([3091d02c](https://github.com/debuglebowski/slayzone/commit/3091d02c))
+- **onboarding:** Split OnboardingDialog into per-step siblings ([6dc5a573](https://github.com/debuglebowski/slayzone/commit/6dc5a573))
+- **worktrees:** Split BranchesTab into focused siblings ([bf3b6303](https://github.com/debuglebowski/slayzone/commit/bf3b6303))
+- **editor:** Split RichTextEditor into focused siblings ([d474484e](https://github.com/debuglebowski/slayzone/commit/d474484e))
+- **search:** Split SearchDialog into focused siblings ([71309571](https://github.com/debuglebowski/slayzone/commit/71309571))
+- **ai-config:** Split ContextManagerSettings ([279a3546](https://github.com/debuglebowski/slayzone/commit/279a3546))
+- Clear safe react-hooks lint warnings ([c3023714](https://github.com/debuglebowski/slayzone/commit/c3023714))
+- **worktrees:** Share composite git ops between IPC + tRPC ([4aaddd21](https://github.com/debuglebowski/slayzone/commit/4aaddd21))
+- **transport:** Single-instance app ops + explicit files-op names ([36b0b324](https://github.com/debuglebowski/slayzone/commit/36b0b324))
+- **transport:** Finalize IPC→tRPC + REST split (P2 followup) ([242de9bf](https://github.com/debuglebowski/slayzone/commit/242de9bf))
+- **domains:** Split Wave A — server/ + electron/ (slice 4) ([e6cd1057](https://github.com/debuglebowski/slayzone/commit/e6cd1057))
+- **domains:** Split Wave B1 — server/ + electron/ (slice 4) ([1c5479be](https://github.com/debuglebowski/slayzone/commit/1c5479be))
+- **domains:** Split Wave B2 — worktrees server/ + electron/ (slice 4) ([8c1c2566](https://github.com/debuglebowski/slayzone/commit/8c1c2566))
+- **domains:** Split Wave B3 — feedback + task-artifacts (slice 4) ([417b7cac](https://github.com/debuglebowski/slayzone/commit/417b7cac))
+- **domains:** Split Wave C2 — task server/ + electron/ (slice 4) ([f67a0cbc](https://github.com/debuglebowski/slayzone/commit/f67a0cbc))
+- **domains:** Split Wave C3 — terminal server/ + electron/ (slice 4) ([d02857ac](https://github.com/debuglebowski/slayzone/commit/d02857ac))
+- **domains:** Split Wave C1 — integrations server/ + electron/ (slice 4) ([92f777db](https://github.com/debuglebowski/slayzone/commit/92f777db))
+- **domains:** Split final pass — file-editor + settings (slice 4) ([1c65da39](https://github.com/debuglebowski/slayzone/commit/1c65da39))
+- **transport:** Renderer cutover infra — tanstack-react-query + e2e vanilla client + tRPC dataRoot ([34f40031](https://github.com/debuglebowski/slayzone/commit/34f40031))
+- **tags:** Convert CreateTagDialog to tRPC hooks ([97447fe1](https://github.com/debuglebowski/slayzone/commit/97447fe1))
+- **agent-turns:** Convert useAgentTurns to tRPC query + subscription ([4e948ee7](https://github.com/debuglebowski/slayzone/commit/4e948ee7))
+- **usage-analytics:** Convert useUsageAnalytics to tRPC ([2fed684f](https://github.com/debuglebowski/slayzone/commit/2fed684f))
+- **automations:** Convert AutomationsPanel/Card/Dialog to tRPC ([ad110d6e](https://github.com/debuglebowski/slayzone/commit/ad110d6e))
+- **test-panel:** Convert TestsTab/TestPanel to tRPC ([24637a80](https://github.com/debuglebowski/slayzone/commit/24637a80))
+- **task-artifacts:** Convert artifacts client to tRPC ([3089747f](https://github.com/debuglebowski/slayzone/commit/3089747f))
+- **file-editor:** Convert editor + file-tree client to tRPC ([c32bc599](https://github.com/debuglebowski/slayzone/commit/c32bc599))
+- **settings:** Convert settings/theme/tabs client to tRPC ([5472f52c](https://github.com/debuglebowski/slayzone/commit/5472f52c))
+- **projects:** Convert projects client to tRPC ([338a84ec](https://github.com/debuglebowski/slayzone/commit/338a84ec))
+- **task-browser:** Convert browser panel client to tRPC ([e04dd670](https://github.com/debuglebowski/slayzone/commit/e04dd670))
+- **worktrees:** Convert git/worktree/PR client to tRPC ([80d7595e](https://github.com/debuglebowski/slayzone/commit/80d7595e))
+- **ai-config:** Convert ai-config client to tRPC ([45bd8853](https://github.com/debuglebowski/slayzone/commit/45bd8853))
+- **task-terminals:** Convert chat/terminal client to tRPC ([42298c9d](https://github.com/debuglebowski/slayzone/commit/42298c9d))
+- **terminal:** Convert terminal/PTY client to tRPC ([0a282703](https://github.com/debuglebowski/slayzone/commit/0a282703))
+- **task:** Convert task-detail client to tRPC ([8ae54be6](https://github.com/debuglebowski/slayzone/commit/8ae54be6))
+- **tasks:** Convert board data spine to tRPC, preserve refreshData ([0f5e9840](https://github.com/debuglebowski/slayzone/commit/0f5e9840))
+- **telemetry,onboarding:** Convert clients to tRPC ([daf1cb60](https://github.com/debuglebowski/slayzone/commit/daf1cb60))
+- **app:** Convert renderer shell/components to tRPC ([be2297c0](https://github.com/debuglebowski/slayzone/commit/be2297c0))
+- **client:** Migrate persist writes off window.api to tRPC (P19 slice 5) ([17514b58](https://github.com/debuglebowski/slayzone/commit/17514b58))
+
+### 📖 Documentation
+
+- **task:** Warn about updateTask funnel's HONORED-by-convention boundary ([c5535292](https://github.com/debuglebowski/slayzone/commit/c5535292))
+- **e2e:** Justify browser/77 guarded shortcut handler (P19) ([668efe5e](https://github.com/debuglebowski/slayzone/commit/668efe5e))
+
+### 📦 Build
+
+- **chromium:** Pin toolchain + mock-keychain + export P4 patches 0067-0068 ([0139ab4c](https://github.com/debuglebowski/slayzone/commit/0139ab4c))
+- **chromium:** Export patch 0069 — extension-capable inline tabs (Option B s1) ([a3dd9fa2](https://github.com/debuglebowski/slayzone/commit/a3dd9fa2))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.34.0 ([d15b8c04](https://github.com/debuglebowski/slayzone/commit/d15b8c04))
+- Add chromium dev scripts, rename host pkg -> @slayzone/chromium-shell ([592ca6cc](https://github.com/debuglebowski/slayzone/commit/592ca6cc))
+- **chromium:** Export cap-shell fork commits as patches 0051-0066 ([48042b02](https://github.com/debuglebowski/slayzone/commit/48042b02))
+
+### ✅ Tests
+
+- **e2e:** Seed helpers use vanilla tRPC client (P19 fixtures) ([64faab4e](https://github.com/debuglebowski/slayzone/commit/64faab4e))
+- **e2e:** Swap per-spec window.api calls to vanilla tRPC client (P19) ([01fb9035](https://github.com/debuglebowski/slayzone/commit/01fb9035))
+- **e2e:** Drive close-active-task via real menu item (P19) ([a4f82a8c](https://github.com/debuglebowski/slayzone/commit/a4f82a8c))
+- **task:** Port 4 client tests off window.api to tRPC mocks ([a5838f17](https://github.com/debuglebowski/slayzone/commit/a5838f17))
+- **e2e:** Browser/77 drives shortcuts via tRPC source, not dropped IPC (P19) ([7532dd02](https://github.com/debuglebowski/slayzone/commit/7532dd02))
+- **e2e:** Core/66 temp-delete closes via real menu item, not dead IPC (P19) ([1ce72532](https://github.com/debuglebowski/slayzone/commit/1ce72532))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.34.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.33.1...v0.34.0)

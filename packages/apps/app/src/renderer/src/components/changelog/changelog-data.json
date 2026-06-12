@@ -1,5 +1,62 @@
 [
   {
+    "version": "0.35.0",
+    "date": "2026-06-12",
+    "tagline": "Focus, fixes, foundations",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Secret project 1",
+        "description": "Hint: check the commits"
+      },
+      {
+        "category": "feature",
+        "title": "Secret project 2",
+        "description": "Hint: check the commits"
+      },
+      {
+        "category": "feature",
+        "title": "Secret project 3",
+        "description": "You'll see"
+      },
+      {
+        "category": "improvement",
+        "title": "Instant search",
+        "description": "The Cmd+K search dialog preloads and opens with a snappier animation."
+      },
+      {
+        "category": "improvement",
+        "title": "Panel use keeps agents awake",
+        "description": "Working in a task's browser panel counts as activity, so auto-hibernate no longer pauses an agent you're actively using."
+      },
+      {
+        "category": "fix",
+        "title": "Conversations survive restarts",
+        "description": "An append-only conversation ledger stops conversation IDs from being clobbered, so agent sessions resume correctly after app restarts."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal focus stays put",
+        "description": "The terminal keeps focus through panel resizes and browser navigation, new-task terminals focus on open, and focus steals self-heal."
+      },
+      {
+        "category": "fix",
+        "title": "Browser panel stuck loading",
+        "description": "The browser panel no longer shows a perpetual loading spinner after fast navigations."
+      },
+      {
+        "category": "fix",
+        "title": "Always-fresh git diffs",
+        "description": "The working-tree diff panel always shows your current changes instead of stale cached ones."
+      },
+      {
+        "category": "fix",
+        "title": "Home icon opens project kanban",
+        "description": "Clicking a project's home icon in the sidebar reliably opens its kanban board."
+      }
+    ]
+  },
+  {
     "version": "0.34.0",
     "date": "2026-06-05",
     "tagline": "Sessions, selection, speed",
