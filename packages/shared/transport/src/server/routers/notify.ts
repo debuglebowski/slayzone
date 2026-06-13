@@ -27,5 +27,16 @@ export const notifyRouter = router({
       ev.on('settings-changed', handler)
       return () => ev.off('settings-changed', handler)
     })
+  ),
+  // Supervised embedded server exhausted its restart backoff (slice 7) —
+  // carries a payload (unlike the refresh signals above) so the renderer's
+  // persistent toast can say how many attempts were made and why.
+  onEmbeddedServerFailed: publicProcedure.subscription(() =>
+    observable<{ attempts: number; message: string }>((emit) => {
+      const handler = (payload: { attempts: number; message: string }): void => emit.next(payload)
+      const ev = getNotifyEvents()
+      ev.on('embedded-server-failed', handler)
+      return () => ev.off('embedded-server-failed', handler)
+    })
   )
 })

@@ -639,11 +639,23 @@ export interface ElectronAPI {
     }>
     getVersion: () => Promise<string>
     getTrpcPort: () => Promise<number>
+    getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
+    relaunch: () => Promise<void>
+    setBootSettings: (payload: {
+      server_mode?: 'local' | 'remote'
+      remote_server_url?: string
+    }) => Promise<{ ok: true }>
+    probeServerHealth: (url: string) => Promise<{
+      ok: boolean
+      normalizedUrl?: string
+      error?: string
+    }>
     getSidecarStatus: () => Promise<{
       health: 'starting' | 'ready' | 'restarting' | 'failed'
       port: number | null
       pid: number | null
       restarts: number
+      totalRespawns: number
       dbPath: string | null
       uptimeMs: number | null
     }>

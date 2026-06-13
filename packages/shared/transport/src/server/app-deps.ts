@@ -138,6 +138,12 @@ export type NotifyEventMap = {
   'tasks-changed': []
   /** Settings changed — renderer refetches affected config. No payload. */
   'settings-changed': []
+  /**
+   * The supervised embedded @slayzone/server exhausted its restart backoff
+   * (slice 7) — renderer shows a persistent toast. Emitted by the Electron
+   * host's sidecar supervisor `onPermanentFailure`.
+   */
+  'embedded-server-failed': [{ attempts: number; message: string }]
 }
 
 let notifyEvents: TypedEmitter<NotifyEventMap> | null = null
@@ -369,6 +375,7 @@ export type AppDeps = {
     port: number | null
     pid: number | null
     restarts: number
+    totalRespawns: number
     dbPath: string | null
     uptimeMs: number | null
   }

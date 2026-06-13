@@ -823,6 +823,20 @@ function App(): React.JSX.Element {
         setFloatingGlobalAgentPanelState({ kind: s.kind as FloatingStateKind, mode: s.mode })
     })
   )
+
+  // Embedded @slayzone/server exhausted its restart backoff (slice 7).
+  // Persistent toast (no auto-dismiss) — calm copy, since while the sidecar is
+  // dark the app keeps running on the in-process server unaffected.
+  useSubscription(
+    trpc.notify.onEmbeddedServerFailed.subscriptionOptions(undefined, {
+      onData: ({ attempts, message }) =>
+        toast.error('Background server failed', {
+          id: 'embedded-server-failed',
+          duration: Infinity,
+          description: `Gave up after ${attempts} restart attempts: ${message}. See Settings → Diagnostics for the server log.`
+        })
+    })
+  )
   // Hide sidebar panel when manually detached (auto mode keeps panel visible to avoid layout flash).
   const hideSidebarPanel =
     floatingGlobalAgentPanelState.kind === 'detached' &&

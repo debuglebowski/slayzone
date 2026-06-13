@@ -250,6 +250,7 @@ export function composeServer(opts: {
       port: boundPort || null,
       pid: process.pid,
       restarts: 0,
+      totalRespawns: 0,
       dbPath: null,
       uptimeMs: Math.round(process.uptime() * 1000)
     }),

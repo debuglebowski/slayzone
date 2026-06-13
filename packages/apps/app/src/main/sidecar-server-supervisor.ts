@@ -68,6 +68,12 @@ export type SidecarStatus = {
   pid: number | null
   /** Restart attempts since the last 60s healthy streak. */
   restarts: number
+  /**
+   * Lifetime respawns (spawns after the first). Unlike `restarts`, never
+   * reset — a healthy-crash immediate respawn counts here even though it
+   * doesn't consume a backoff attempt. Crash-recovery tests assert on this.
+   */
+  totalRespawns: number
   /** Absolute DB path the side-car was told to open. */
   dbPath: string | null
   /** Milliseconds the side-car has been continuously healthy, or null. */
@@ -125,6 +131,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   let health: SidecarHealth = 'starting'
   let readySince: number | null = null
   let attempt = 0
+  let spawnCount = 0
   let stopped = false
   let backoffTimer: NodeJS.Timeout | null = null
   let healthyTimer: NodeJS.Timeout | null = null
@@ -208,6 +215,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           stdio: ['pipe', 'pipe', 'pipe']
         })
         child = proc
+        spawnCount += 1
         opts.logger(`[supervisor] spawned pid=${proc.pid} port=${freePort}`)
 
         const pipe = (chunk: Buffer): void => {
@@ -265,6 +273,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
       port,
       pid: child?.pid ?? null,
       restarts: attempt,
+      totalRespawns: Math.max(0, spawnCount - 1),
       dbPath: opts.env.SLAYZONE_DB_PATH ?? null,
       uptimeMs: readySince === null ? null : Date.now() - readySince
     }),

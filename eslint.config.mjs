@@ -25,7 +25,11 @@ export default defineConfig(
       '**/.e2e-runtime/**',
       '**/.e2e-userdata/**',
       '.claude/worktrees/**',
-      'convex/_generated/**'
+      'convex/_generated/**',
+      // Local-only chromium fork tree (gitignored, ~70GB) — flat config does
+      // not honor .gitignore, and linting it OOMs + reports thousands of
+      // third-party errors. CI never has this dir; the ignore is for dev runs.
+      'chromium/**'
     ]
   },
   {

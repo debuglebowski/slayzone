@@ -342,6 +342,46 @@ async function launchElectronWithRetry(args: {
   )
 }
 
+/**
+ * Launch a SECOND, fully isolated Electron instance with its own fresh
+ * userdata dir — for specs that must control boot-time state (e.g. seeding
+ * boot-config.json before launch) and can't use the shared worker app.
+ * Caller owns the lifecycle: always `await close()` in a finally block.
+ */
+export async function launchIsolatedElectron(opts: {
+  /** Unique name for the runtime dir, e.g. the spec slug. */
+  name: string
+  /** Runs after the userdata dir exists, before Electron launches. */
+  seedUserData?: (userDataDir: string) => void
+}): Promise<{
+  app: ElectronApplication
+  page: Page
+  userDataDir: string
+  close: () => Promise<void>
+}> {
+  const root = path.join(RUNTIME_ROOT_DIR, `isolated-${opts.name}-${process.pid}-${Date.now()}`)
+  const userDataDir = path.join(root, 'userdata')
+  const artifactsDir = path.join(root, 'artifacts')
+  ensureDir(userDataDir)
+  ensureDir(artifactsDir)
+  opts.seedUserData?.(userDataDir)
+
+  const executablePath = require('electron') as unknown as string
+  const launched = await launchElectronWithRetry({
+    userDataDir,
+    workerArtifactsDir: artifactsDir,
+    executablePath
+  })
+  return {
+    app: launched.app,
+    page: launched.page,
+    userDataDir,
+    close: async () => {
+      await launched.app.close().catch(() => {})
+    }
+  }
+}
+
 export const test = base.extend<ElectronFixtures>({
   electronApp: [
     async ({}, use, workerInfo) => {

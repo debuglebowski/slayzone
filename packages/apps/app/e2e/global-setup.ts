@@ -1,4 +1,7 @@
 import { execSync } from 'child_process'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 /** Kill processes whose full command line matches `pattern`. */
 function killStale(pattern: string, label: string): void {
@@ -34,4 +37,15 @@ export default function globalSetup(): void {
   killStale('Electron.*out/main/index\\.js', 'Electron')
   killStale('server/dist/bin\\.js', 'side-car')
   killStale('server/bin\\.js', 'side-car')
+
+  // Under Playwright the app loads from out/main, so the sidecar's dev
+  // scriptPath (`app.getAppPath()/../server/dist/bin.cjs`) resolves to
+  // out/server/... — the root build doesn't create that link. Idempotent.
+  const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const linkPath = path.join(appDir, 'out', 'server')
+  if (!fs.existsSync(linkPath)) {
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true })
+    fs.symlinkSync(path.join('..', '..', 'server'), linkPath)
+    console.log('[global-setup] Created out/server symlink for the side-car')
+  }
 }

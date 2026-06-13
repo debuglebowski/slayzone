@@ -246,6 +246,20 @@ const api: ElectronAPI = {
     getProtocolClientStatus: () => ipcRenderer.invoke('app:get-protocol-client-status'),
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getTrpcPort: () => ipcRenderer.invoke('app:get-trpc-port') as Promise<number>,
+    getServerUrl: () =>
+      ipcRenderer.invoke('app:get-server-url') as Promise<{
+        mode: 'local' | 'remote'
+        url: string
+      }>,
+    relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
+    setBootSettings: (payload: { server_mode?: 'local' | 'remote'; remote_server_url?: string }) =>
+      ipcRenderer.invoke('app:set-boot-settings', payload) as Promise<{ ok: true }>,
+    probeServerHealth: (url: string) =>
+      ipcRenderer.invoke('app:probe-server-health', url) as Promise<{
+        ok: boolean
+        normalizedUrl?: string
+        error?: string
+      }>,
     getSidecarStatus: () => ipcRenderer.invoke('app:get-sidecar-status'),
     revealSidecarLog: () => ipcRenderer.invoke('app:reveal-sidecar-log'),
     isTestsPanelEnabled: () => ipcRenderer.invoke('app:is-tests-panel-enabled'),

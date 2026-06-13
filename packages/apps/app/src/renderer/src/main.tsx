@@ -9,6 +9,7 @@ import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
 import { FloatingGlobalAgentPanel } from './components/global-agent-panel/FloatingGlobalAgentPanel'
+import { RemoteConfigScreen } from './components/RemoteConfigScreen'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
 import { getDiagnosticsContext } from './lib/diagnosticsClient'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
@@ -17,6 +18,15 @@ import { MaybeProfiler } from './lib/perfProfiler'
 const params = new URLSearchParams(window.location.search)
 const isFloatingGlobalAgentPanel = params.get('floating') === 'global-agent-panel'
 const taskWindowId = params.get('taskWindow')
+
+// windowId in the WS query → server ctx.windowId (= webContents.id). Required
+// by claimSession + panel-ownership procs; without it they throw "windowId
+// required". The base URL comes from getServerUrl (local: embedded port;
+// remote: user-configured — which may already carry a query).
+function withWindowId(serverUrl: string, windowId: number | null | undefined): string {
+  if (windowId == null) return serverUrl
+  return `${serverUrl}${serverUrl.includes('?') ? '&' : '?'}windowId=${windowId}`
+}
 
 window.addEventListener('error', (event) => {
   window.api.diagnostics.recordClientError({
@@ -45,10 +55,10 @@ window.addEventListener('unhandledrejection', (event) => {
 // Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
 // Still needs TrpcProvider: ThemeProvider (and PtyProvider) now talk tRPC.
 if (isFloatingGlobalAgentPanel) {
-  Promise.all([window.api.app.getTrpcPort(), window.api.panels.getWindowId()]).then(
-    ([trpcPort, windowId]) => {
+  Promise.all([window.api.app.getServerUrl(), window.api.panels.getWindowId()]).then(
+    ([server, windowId]) => {
       createRoot(document.getElementById('root')!).render(
-        <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc?windowId=${windowId}`}>
+        <TrpcProvider url={withWindowId(server.url, windowId)}>
           <PtyProvider>
             <ThemeProvider>
               <FloatingGlobalAgentPanel />
@@ -60,10 +70,12 @@ if (isFloatingGlobalAgentPanel) {
   )
 } else if (taskWindowId) {
   // Secondary task window: full TaskDetailPage scoped to one task. No tab store / sidebar.
-  Promise.all([window.api.app.getTrpcPort(), window.api.panels.getWindowId()]).then(
-    ([trpcPort, windowId]) => {
+  // No RemoteConfigScreen fallback here — secondary windows can only be opened
+  // from a main window that already has a working server connection.
+  Promise.all([window.api.app.getServerUrl(), window.api.panels.getWindowId()]).then(
+    ([server, windowId]) => {
       createRoot(document.getElementById('root')!).render(
-        <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc?windowId=${windowId}`}>
+        <TrpcProvider url={withWindowId(server.url, windowId)}>
           <PtyProvider>
             <ThemeProvider>
               <UndoProvider>
@@ -77,19 +89,33 @@ if (isFloatingGlobalAgentPanel) {
   )
 } else {
   window.api.app.bootMark?.('renderer script entered')
-  // Wait for tab store + tRPC port discovery before rendering. Tab store
-  // hydrates from SQLite (prevents effect race wiping persisted tabs); tRPC
-  // port is needed to construct the WS URL passed to TrpcProvider.
+  // Wait for tab store + server URL discovery before rendering. Tab store
+  // hydrates from SQLite (prevents effect race wiping persisted tabs); the
+  // server URL (local: embedded port; remote: configured host) is needed to
+  // construct the WS URL passed to TrpcProvider.
   Promise.all([
     tabStoreReady,
-    window.api.app.getTrpcPort(),
+    window.api.app.getServerUrl(),
     window.api.panels.getWindowId()
-  ]).then(([, trpcPort, windowId]) => {
+  ]).then(async ([, server, windowId]) => {
     window.api.app.bootMark?.('tabStoreReady resolved')
 
-    // windowId in the WS query → server ctx.windowId (= webContents.id). Required
-    // by claimSession + panel-ownership procs; without it they throw "windowId required".
-    const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc?windowId=${windowId}`
+    // Remote mode with a missing/unreachable server → render the recovery
+    // screen instead of mounting TrpcProvider against a dead URL (it would
+    // WS-reconnect-loop forever behind a blank window). Probe runs main-side.
+    if (server.mode === 'remote') {
+      const reachable = server.url
+        ? (await window.api.app.probeServerHealth(server.url)).ok
+        : false
+      if (!reachable) {
+        createRoot(document.getElementById('root')!).render(
+          <RemoteConfigScreen initialUrl={server.url} />
+        )
+        return
+      }
+    }
+
+    const trpcUrl = withWindowId(server.url, windowId)
     // Initialize the tRPC client singleton NOW (before prefetch / React mount) so
     // module-scope callers — incl. taskDetailCache.prefetch below and getTrpcClient()
     // in stores — work. TrpcProvider reuses this same client (one WS connection).

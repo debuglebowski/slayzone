@@ -42,6 +42,7 @@ import {
   type ViewBounds
 } from './browser-view-manager'
 import { attachRendererCsp } from './renderer-csp'
+import { probeRemoteHealth, readBootConfig, writeBootSettings } from './boot-config'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   isBlockedExternalProtocolUrl,
@@ -509,6 +510,7 @@ function getSidecarStatusSnapshot(): import('./sidecar-server-supervisor').Sidec
       port: null,
       pid: null,
       restarts: 0,
+      totalRespawns: 0,
       dbPath: null,
       uptimeMs: null
     }
@@ -1207,6 +1209,18 @@ app
   .whenReady()
   .then(async () => {
     logBoot('whenReady begin')
+
+    // Pre-boot server-mode config (slice 7). A tiny JSON file — NOT a settings
+    // row, since in remote mode the settings DB lives on the remote server.
+    // Local (default): everything below runs as always. Remote: the local
+    // backend machinery (in-process tRPC, MCP/REST for the CLI, the sidecar,
+    // integration pollers + push handlers) is skipped — the renderer connects
+    // to the user-configured remote @slayzone/server, which owns all of that.
+    const bootConfig = readBootConfig(getTrpcDataRoot())
+    const isRemoteMode = bootConfig.server_mode === 'remote'
+    logBoot(
+      `server mode: ${bootConfig.server_mode}${isRemoteMode ? ` (${bootConfig.remote_server_url ?? 'no url'})` : ''}`
+    )
     if (SHOULD_REGISTER_PROTOCOL_CLIENT) {
       let registered = false
       if (process.defaultApp) {
@@ -1786,7 +1800,9 @@ app
     // a heavy module graph (~70ms sync work even though it returns a Promise),
     // and nothing on first paint depends on the server being listening — the
     // CLI discovers the port via settings and the renderer doesn't talk to it.
-    setImmediate(() => {
+    // Remote mode: skipped — the CLI against the local DB would show different
+    // data than the renderer (remote DB). CLI remote support is slice 10.
+    if (!isRemoteMode) setImmediate(() => {
       logBoot('mcp server import dispatched')
       // MCP + REST now live in @slayzone/transport/server (slice 6) — the app
       // injects its electron capability set; the standalone server injects its own.
@@ -1801,7 +1817,9 @@ app
         })
     })
 
-    setImmediate(() => {
+    // Remote mode: the renderer's tRPC WS goes to the remote server — starting
+    // the in-process one would only invite split-brain connections.
+    if (!isRemoteMode) setImmediate(() => {
       logBoot('trpc server import dispatched')
       import('@slayzone/transport/server')
         .then((mod) => {
@@ -2039,9 +2057,11 @@ app
 
     // Dark-launch the @slayzone/server side-car (slice 2.5). It is spawned +
     // supervised but nothing depends on it yet — the renderer still uses the
-    // in-process tRPC server above. A permanent failure here is log-only, no
-    // user impact. Slice 2.6 flips the renderer onto the side-car.
-    setImmediate(() => {
+    // in-process tRPC server above. A permanent failure is surfaced via the
+    // notify.onEmbeddedServerFailed sub (persistent toast) but is non-fatal.
+    // Slice 9 flips the renderer onto the side-car. Remote mode: skipped — a
+    // local backend rehearsal is pointless when the backend runs elsewhere.
+    if (!isRemoteMode) setImmediate(() => {
       logBoot('sidecar server supervisor import dispatched')
       import('./sidecar-server-supervisor')
         .then(({ startSidecarServer }) => {
@@ -2079,6 +2099,13 @@ app
                 '[supervisor] sidecar permanent failure (dark-launch, non-fatal):',
                 info
               )
+              // Persistent toast via the notify.onEmbeddedServerFailed sub.
+              notifyEvents.emit('embedded-server-failed', {
+                attempts: info.attempts,
+                message: String(
+                  info.lastError instanceof Error ? info.lastError.message : info.lastError
+                )
+              })
             }
           })
           sidecarServerHandle = supervisor
@@ -2152,12 +2179,17 @@ app
       })
     }
 
-    linearSyncPoller = startSyncPoller(db, notifyTasksChanged)
-    discoveryPoller = startDiscoveryPoller(db, notifyTasksChanged)
-    logBoot('integration pollers started (sync 10s, discovery 60s)')
+    // Remote mode: integration pollers + push handlers run on the remote
+    // server against its DB — running them here would sync into the local DB
+    // nobody is looking at (and double-sync against providers).
+    if (!isRemoteMode) {
+      linearSyncPoller = startSyncPoller(db, notifyTasksChanged)
+      discoveryPoller = startDiscoveryPoller(db, notifyTasksChanged)
+      logBoot('integration pollers started (sync 10s, discovery 60s)')
+    }
 
     // Push to providers immediately after local task edits (skip in E2E — tests exercise push explicitly)
-    if (!isPlaywright) {
+    if (!isPlaywright && !isRemoteMode) {
       ipcMain.on('db:tasks:update:done', (_event, taskId: string) => {
         void pushTaskAfterEdit(db, taskId, {
           pushGithubTask: integrationHandles.pushGithubTask
@@ -2165,7 +2197,7 @@ app
       })
     }
 
-    if (!isPlaywright) {
+    if (!isPlaywright && !isRemoteMode) {
       // Push new tasks to providers (two_way sync)
       ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
         void pushNewTaskToProviders(db, taskId, projectId).then(async () => {
@@ -2351,7 +2383,20 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // name the dynamic in-process tRPC WS port exactly (a static meta tag
     // can't). Registered before any window loads — createWindow() runs at the
     // end of whenReady — so every app document is covered.
-    attachRendererCsp(session.defaultSession, awaitTrpcPort, is.dev)
+    // The connect-src origin is mode-aware: local = the in-process WS port,
+    // remote = the exact configured ws(s) origin (never the scheme-wide floor).
+    attachRendererCsp(
+      session.defaultSession,
+      async () => {
+        if (isRemoteMode) {
+          const url = bootConfig.remote_server_url
+          return url ? new URL(url).origin : ''
+        }
+        const port = await awaitTrpcPort()
+        return port > 0 ? `ws://127.0.0.1:${port}` : ''
+      },
+      is.dev
+    )
 
     // Block external app protocol launches from webviews by registering no-op handlers.
     // External protocol URLs (figma://, slack://, etc.) bypass will-navigate entirely —
@@ -2661,6 +2706,49 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
     ipcMain.handle('app:getVersion', () => app.getVersion())
     ipcMain.handle('app:get-trpc-port', () => awaitTrpcPort())
+    // Bootstrap IPCs for the server-mode toggle (slice 7) — the last new IPC
+    // before slice 8 drops the legacy bridge. These three CANNOT be tRPC: they
+    // decide which server the tRPC client connects to in the first place.
+    //
+    // Returns the WS URL the renderer should connect to + the active mode.
+    // Local: waits for the embedded server's port (up to 5s). Remote: the
+    // pre-boot configured URL (may be '' — renderer shows RemoteConfigScreen).
+    ipcMain.handle('app:get-server-url', async () => {
+      if (isRemoteMode) {
+        return { mode: 'remote' as const, url: bootConfig.remote_server_url ?? '' }
+      }
+      const port = await awaitTrpcPort()
+      return { mode: 'local' as const, url: port > 0 ? `ws://127.0.0.1:${port}/trpc` : '' }
+    })
+    // Full process restart — the embedded-server start/skip decision happens at
+    // boot, so a Local↔Remote switch needs a relaunch. No-op under Playwright:
+    // the harness owns the process; a detached relaunch would orphan the run
+    // (specs assert the boot-config file + cover remote boot via a fresh launch).
+    ipcMain.handle('app:relaunch', () => {
+      if (isPlaywright) {
+        logBoot('app:relaunch skipped (PLAYWRIGHT)')
+        return
+      }
+      app.relaunch()
+      app.exit(0)
+    })
+    // Writes the pre-boot config file. Throws on an unnormalizable URL.
+    ipcMain.handle(
+      'app:set-boot-settings',
+      (_event, payload: { server_mode?: 'local' | 'remote'; remote_server_url?: string }) => {
+        writeBootSettings(getTrpcDataRoot(), {
+          server_mode: payload?.server_mode,
+          remote_server_url: payload?.remote_server_url
+        })
+        return { ok: true as const }
+      }
+    )
+    // Main-side GET /health probe — the renderer can't fetch it itself (CSP
+    // floor only allows ws(s) connects; /health sets no CORS headers), and the
+    // RemoteConfigScreen needs it before any tRPC client exists.
+    ipcMain.handle('app:probe-server-health', (_event, rawUrl: string) =>
+      probeRemoteHealth(typeof rawUrl === 'string' ? rawUrl : '')
+    )
     // Read-only side-car (dark-launch) status for the Diagnostics settings tab.
     // Same impls as the tRPC `app.meta.getSidecarStatus` / `revealSidecarLog`
     // procs (coexistence until the legacy IPC surface drops).
@@ -3134,23 +3222,28 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         // Re-warm cache after settings table was dropped + re-migrated
         await settings.warmCache(['labs_tests_panel', 'labs_loop_mode'])
 
-        // 8. Restart MCP + tRPC (after table drop so ports persist to fresh settings table)
-        const mcpMod = await import('@slayzone/transport/server')
-        const { buildMcpRestDeps } = await import('./mcp-rest-deps')
-        void mcpMod.startMcpServer(buildMcpRestDeps(db, automationEngine))
-        mcpCleanup = () => mcpMod.stopMcpServer()
-        const trpcMod = await import('@slayzone/transport/server')
-        trpcMod.startTrpcServer({ db, dataRoot: getTrpcDataRoot(), automationEngine })
-        trpcCleanup = () => trpcMod.stopTrpcServer()
-        // Wait for both servers to be listening
-        await new Promise<void>((resolve) => {
-          const check = (): void => {
-            const g = globalThis as Record<string, unknown>
-            if (g.__mcpPort && g.__trpcPort) resolve()
-            else setTimeout(check, 10)
-          }
-          check()
-        })
+        // 8. Restart MCP + tRPC (after table drop so ports persist to fresh
+        // settings table). Remote mode: neither ever started — restarting them
+        // here would boot local servers nothing connects to (and the wait below
+        // would hang forever on ports that never publish).
+        if (!isRemoteMode) {
+          const mcpMod = await import('@slayzone/transport/server')
+          const { buildMcpRestDeps } = await import('./mcp-rest-deps')
+          void mcpMod.startMcpServer(buildMcpRestDeps(db, automationEngine))
+          mcpCleanup = () => mcpMod.stopMcpServer()
+          const trpcMod = await import('@slayzone/transport/server')
+          trpcMod.startTrpcServer({ db, dataRoot: getTrpcDataRoot(), automationEngine })
+          trpcCleanup = () => trpcMod.stopTrpcServer()
+          // Wait for both servers to be listening
+          await new Promise<void>((resolve) => {
+            const check = (): void => {
+              const g = globalThis as Record<string, unknown>
+              if (g.__mcpPort && g.__trpcPort) resolve()
+              else setTimeout(check, 10)
+            }
+            check()
+          })
+        }
 
         // 9. Re-init process manager
         initProcessManager(db)

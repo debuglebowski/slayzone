@@ -198,6 +198,8 @@ fi
 echo ""
 echo "=== vitest (jsdom client suites) ==="
 if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**' \
+  packages/apps/app/src/main/boot-config.test.ts \
+  packages/apps/app/src/main/renderer-csp.test.ts \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \

@@ -244,6 +244,7 @@ test('/health probe drives the child to ready + exposes status', async () => {
     assertEq(status.port, port, 'status.port matches getPort')
     assert(typeof status.pid === 'number' && status.pid! > 0, 'status.pid set')
     assertEq(status.restarts, 0, 'status.restarts is 0 on clean start')
+    assertEq(status.totalRespawns, 0, 'status.totalRespawns is 0 on clean start')
     assertEq(status.dbPath, dbSentinel, 'status.dbPath echoes SLAYZONE_DB_PATH')
     assert(typeof status.uptimeMs === 'number' && status.uptimeMs! >= 0, 'uptimeMs set')
 
@@ -352,6 +353,9 @@ test('a ready child that exits respawns immediately — no backoff, no attempt++
     )
     await waitFor(() => handle.getHealth() === 'ready', 5_000, 'never returned to ready')
     assertEq(handle.getStatus().restarts, 0, 'restarts stayed 0 across a ready-child respawn')
+    // The lifetime counter DOES move — crash e2e asserts on it since `restarts`
+    // never increments on the healthy-crash immediate-respawn path.
+    assertEq(handle.getStatus().totalRespawns, 1, 'totalRespawns counts the respawn')
   } finally {
     await handle.stop()
   }
