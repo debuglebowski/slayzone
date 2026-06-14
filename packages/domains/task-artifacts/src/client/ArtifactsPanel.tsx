@@ -52,7 +52,7 @@ import {
 } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
 import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
 import {
   getEffectiveRenderMode,
@@ -334,7 +334,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
         e.preventDefault()
         setDragOver(false)
         if (dragArtifactIdsRef.current.length) return
-        const filePaths = window.api.files.getDropPaths()
+        const filePaths = electronBootstrap.getDropPaths()
         for (const fp of filePaths) {
           try {
             await uploadDir(fp)

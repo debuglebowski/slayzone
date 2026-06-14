@@ -138,10 +138,12 @@ test.describe('Chat queue persistence', () => {
     // Subscribe in renderer, capture next event for this tab, then push.
     const observed = await mainWindow.evaluate(async (id) => {
       return new Promise<string>((resolve) => {
-        const off = window.api.chatQueue.onChanged((tabId) => {
+        const sub = window.getTrpcVanillaClient().chat.onQueueChanged.subscribe(undefined, {
+          onData: ({ tabId }) => {
           if (tabId === id) {
-            off()
+              sub.unsubscribe()
             resolve(tabId)
+          }
           }
         })
         void window

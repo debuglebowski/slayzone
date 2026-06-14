@@ -155,7 +155,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Replaces window.api.theme.onChange: fires on OS dark/light toggle (when
+  // Replaces the old preload theme listener: fires on OS dark/light toggle (when
   // source === 'system') or an explicit setTheme.
   useSubscription(
     trpc.settings.onThemeChanged.subscriptionOptions(undefined, {

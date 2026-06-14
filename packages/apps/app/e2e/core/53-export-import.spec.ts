@@ -9,18 +9,49 @@ import {
 } from '../fixtures/electron'
 import fs from 'fs'
 import path from 'path'
+import type { Page } from '@playwright/test'
 
-declare global {
-  interface Window {
-    __testInvoke: (channel: string, ...args: unknown[]) => Promise<unknown>
-  }
+type ExportImportResult = {
+  success: boolean
+  error?: string
+  projectCount?: number
+  taskCount?: number
+  importedProjects?: Array<{ id: string; name: string }>
 }
 
-function testInvoke(page: import('@playwright/test').Page, channel: string, ...args: unknown[]) {
-  return page.evaluate(({ ch, a }) => window.__testInvoke(ch, ...a), {
-    ch: channel,
-    a: args
-  }) as Promise<any>
+const exportImportTest = {
+  exportAllToPath: (page: Page, filePath: string) =>
+    page.evaluate((p) => {
+      return window.getTrpcVanillaClient().app.exportImport.testExportAllToPath.mutate({
+        filePath: p
+      })
+    }, filePath) as Promise<ExportImportResult>,
+  exportProjectToPath: (page: Page, projectId: string, filePath: string) =>
+    page.evaluate(
+      ({ pid, p }) => {
+        return window.getTrpcVanillaClient().app.exportImport.testExportProjectToPath.mutate({
+          projectId: pid,
+          filePath: p
+        })
+      },
+      { pid: projectId, p: filePath }
+    ) as Promise<ExportImportResult>,
+  importFromPath: (page: Page, filePath: string) =>
+    page.evaluate((p) => {
+      return window.getTrpcVanillaClient().app.exportImport.testImportFromPath.mutate({
+        filePath: p
+      })
+    }, filePath) as Promise<ExportImportResult>,
+  setTaskParent: (page: Page, taskId: string, parentId: string | null) =>
+    page.evaluate(
+      ({ tid, pid }) => {
+        return window.getTrpcVanillaClient().app.exportImport.testSetTaskParent.mutate({
+          taskId: tid,
+          parentId: pid
+        })
+      },
+      { tid: taskId, pid: parentId }
+    )
 }
 
 test.describe('Export & Import', () => {
@@ -57,7 +88,7 @@ test.describe('Export & Import', () => {
       status: 'inbox',
       priority: 3
     })
-    const t3 = await s.createTask({
+    await s.createTask({
       projectId,
       title: 'EX Task Gamma',
       status: 'done',
@@ -75,7 +106,7 @@ test.describe('Export & Import', () => {
 
   test('export all projects to file', async ({ mainWindow }) => {
     const filePath = path.join(exportDir, 'all-export.slay')
-    const result = await testInvoke(mainWindow, 'export-import:test:export-all-to-path', filePath)
+    const result = await exportImportTest.exportAllToPath(mainWindow, filePath)
 
     expect(result.success).toBe(true)
     expect(fs.existsSync(filePath)).toBe(true)
@@ -93,12 +124,7 @@ test.describe('Export & Import', () => {
 
   test('export single project to file', async ({ mainWindow }) => {
     const filePath = path.join(exportDir, 'project-export.slay')
-    const result = await testInvoke(
-      mainWindow,
-      'export-import:test:export-project-to-path',
-      projectId,
-      filePath
-    )
+    const result = await exportImportTest.exportProjectToPath(mainWindow, projectId, filePath)
 
     expect(result.success).toBe(true)
 
@@ -123,7 +149,7 @@ test.describe('Export & Import', () => {
     const projectsBefore = await s.getProjects()
     const tasksBefore = await s.getTasks()
 
-    const result = await testInvoke(mainWindow, 'export-import:test:import-from-path', filePath)
+    const result = await exportImportTest.importFromPath(mainWindow, filePath)
     expect(result.success).toBe(true)
     expect(result.projectCount).toBe(1)
     expect(result.taskCount).toBe(3)
@@ -185,7 +211,7 @@ test.describe('Export & Import', () => {
     const filePath = path.join(exportDir, 'project-export.slay')
     const s = seed(mainWindow)
 
-    const result = await testInvoke(mainWindow, 'export-import:test:import-from-path', filePath)
+    const result = await exportImportTest.importFromPath(mainWindow, filePath)
     expect(result.success).toBe(true)
 
     await s.refreshData()
@@ -204,9 +230,8 @@ test.describe('Export & Import', () => {
 
   test('export nonexistent project fails', async ({ mainWindow }) => {
     const filePath = path.join(exportDir, 'fail.slay')
-    const result = await testInvoke(
+    const result = await exportImportTest.exportProjectToPath(
       mainWindow,
-      'export-import:test:export-project-to-path',
       'nonexistent-id',
       filePath
     )
@@ -218,7 +243,7 @@ test.describe('Export & Import', () => {
     const filePath = path.join(exportDir, 'bad.slay')
     fs.writeFileSync(filePath, '{"meta":{"version":999}}', 'utf8')
 
-    const result = await testInvoke(mainWindow, 'export-import:test:import-from-path', filePath)
+    const result = await exportImportTest.importFromPath(mainWindow, filePath)
     expect(result.success).toBe(false)
     expect(result.error).toContain('Unsupported export version')
   })
@@ -239,28 +264,22 @@ test.describe('Export & Import', () => {
     const orphan = await s.createTask({ projectId: fkProject.id, title: 'FK Orphan' })
 
     // Wire parent_id via test-only IPC (disables FK checks to seed stale ref).
-    await testInvoke(mainWindow, 'export-import:test:set-task-parent', child.id, parent.id)
-    await testInvoke(
+    await exportImportTest.setTaskParent(mainWindow, child.id, parent.id)
+    await exportImportTest.setTaskParent(
       mainWindow,
-      'export-import:test:set-task-parent',
       orphan.id,
       '00000000-0000-4000-8000-000000000000'
     )
 
     const filePath = path.join(exportDir, 'fk-project.slay')
-    const exportResult = await testInvoke(
+    const exportResult = await exportImportTest.exportProjectToPath(
       mainWindow,
-      'export-import:test:export-project-to-path',
       fkProject.id,
       filePath
     )
     expect(exportResult.success).toBe(true)
 
-    const importResult = await testInvoke(
-      mainWindow,
-      'export-import:test:import-from-path',
-      filePath
-    )
+    const importResult = await exportImportTest.importFromPath(mainWindow, filePath)
     expect(importResult.success).toBe(true)
     expect(importResult.error).toBeUndefined()
     expect(importResult.taskCount).toBe(3)

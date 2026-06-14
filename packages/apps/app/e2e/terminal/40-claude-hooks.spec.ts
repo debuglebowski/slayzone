@@ -68,10 +68,12 @@ test.describe('Claude agent hooks', () => {
     // Subscribe in renderer before firing.
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__hookEvents = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__hookEvents as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__hookEvents as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__hookUnsub = unsub
+      ;(window as Record<string, unknown>).__hookUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -113,10 +115,12 @@ test.describe('Claude agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__hookEvents2 = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__hookEvents2 as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__hookEvents2 as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__hookUnsub2 = unsub
+      ;(window as Record<string, unknown>).__hookUnsub2 = () => sub.unsubscribe()
     })
 
     const { status } = await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {

@@ -107,6 +107,7 @@ export async function ensureBrowserPanelHidden(page: Page): Promise<void> {
 // ── Task navigation ─────────────────────────────────────────────────
 
 export async function openTaskViaSearch(page: Page, title: string): Promise<void> {
+  await focusForAppShortcut(page)
   await pressShortcut(page, 'search')
   const input = page.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
   await expect(input).toBeVisible()

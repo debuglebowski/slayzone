@@ -1,4 +1,4 @@
-import { ipcMain, app, webContents } from 'electron'
+import { app, webContents } from 'electron'
 import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { mkdirSync, writeFileSync } from 'fs'
@@ -27,10 +27,4 @@ export async function captureBrowserViewScreenshot(
   } catch {
     return { success: false }
   }
-}
-
-export function registerScreenshotHandlers(browserViewManager: BrowserViewManager): void {
-  ipcMain.handle('screenshot:captureView', (_event, viewId: string) =>
-    captureBrowserViewScreenshot(browserViewManager, viewId)
-  )
 }

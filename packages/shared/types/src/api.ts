@@ -396,8 +396,34 @@ export interface PtyCreateOptions {
   rows?: number
 }
 
-// ElectronAPI interface - the IPC contract between renderer and main
+// Bootstrap-only preload contract. Domain/backend calls use tRPC over WebSocket.
 export interface ElectronAPI {
+  app: {
+    getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
+    getWindowId: () => Promise<number | null>
+    relaunch: () => Promise<void>
+    setBootSettings: (payload: {
+      server_mode?: 'local' | 'remote'
+      remote_server_url?: string
+    }) => Promise<{ ok: true }>
+    probeServerHealth: (url: string) => Promise<{
+      ok: boolean
+      normalizedUrl?: string
+      error?: string
+    }>
+    isPlaywright: boolean
+    dataReady: () => void
+    bootMark: (label: string) => void
+  }
+  files: {
+    getDropPaths: () => string[]
+    getPastePaths: () => string[]
+  }
+}
+
+// Legacy surface kept private during slice 8 cleanup so old references fail
+// against Window.api while unrelated historical type aliases above stay stable.
+export interface _LegacyElectronAPI {
   db: {
     // Projects
     getProjects: () => Promise<Project[]>

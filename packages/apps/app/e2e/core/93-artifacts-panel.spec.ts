@@ -412,7 +412,7 @@ test.describe('Artifacts panel', () => {
 
     // Resolve disk path for external write
     const filePath = await mainWindow.evaluate(
-      (id) => (window as any).api.artifacts.getFilePath(id),
+      (id) => window.getTrpcVanillaClient().artifacts.getFilePath.query({ id }),
       artifact.id
     )
     expect(filePath).toBeTruthy()

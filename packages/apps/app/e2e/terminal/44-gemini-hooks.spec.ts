@@ -65,10 +65,12 @@ test.describe('Gemini agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__geminiEvents = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__geminiEvents as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__geminiEvents as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__geminiUnsub = unsub
+      ;(window as Record<string, unknown>).__geminiUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -112,10 +114,12 @@ test.describe('Gemini agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__geminiEvents2 = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__geminiEvents2 as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__geminiEvents2 as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__geminiUnsub2 = unsub
+      ;(window as Record<string, unknown>).__geminiUnsub2 = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {

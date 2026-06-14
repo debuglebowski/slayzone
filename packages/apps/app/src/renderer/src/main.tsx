@@ -1,17 +1,22 @@
 import './assets/main.css'
 
 import { createRoot } from 'react-dom/client'
-import { ThemeProvider, tabStoreReady, useTabStore } from '@slayzone/settings'
+import { ThemeProvider, loadTabStoreState, useTabStore } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
-import { TrpcProvider, initTrpcClient } from '@slayzone/transport/client'
-import { UndoProvider } from '@slayzone/ui'
+import {
+  TrpcProvider,
+  electronBootstrap,
+  getTrpcClient,
+  initTrpcClient
+} from '@slayzone/transport/client'
+import { setShortcutBackend, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
 import { FloatingGlobalAgentPanel } from './components/global-agent-panel/FloatingGlobalAgentPanel'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
-import { getDiagnosticsContext } from './lib/diagnosticsClient'
+import { getDiagnosticsContext, recordClientError } from './lib/diagnosticsClient'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
 
@@ -29,7 +34,7 @@ function withWindowId(serverUrl: string, windowId: number | null | undefined): s
 }
 
 window.addEventListener('error', (event) => {
-  window.api.diagnostics.recordClientError({
+  recordClientError({
     type: 'window.error',
     message: event.message || 'Unknown window error',
     stack: event.error?.stack ?? null,
@@ -44,7 +49,7 @@ window.addEventListener('unhandledrejection', (event) => {
   const reason = event.reason
   const message = reason instanceof Error ? reason.message : String(reason ?? 'Unknown rejection')
   const stack = reason instanceof Error ? reason.stack : null
-  window.api.diagnostics.recordClientError({
+  recordClientError({
     type: 'window.unhandledrejection',
     message,
     stack,
@@ -55,7 +60,7 @@ window.addEventListener('unhandledrejection', (event) => {
 // Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
 // Still needs TrpcProvider: ThemeProvider (and PtyProvider) now talk tRPC.
 if (isFloatingGlobalAgentPanel) {
-  Promise.all([window.api.app.getServerUrl(), window.api.panels.getWindowId()]).then(
+  Promise.all([electronBootstrap.getServerUrl(), electronBootstrap.getWindowId()]).then(
     ([server, windowId]) => {
       createRoot(document.getElementById('root')!).render(
         <TrpcProvider url={withWindowId(server.url, windowId)}>
@@ -72,7 +77,7 @@ if (isFloatingGlobalAgentPanel) {
   // Secondary task window: full TaskDetailPage scoped to one task. No tab store / sidebar.
   // No RemoteConfigScreen fallback here — secondary windows can only be opened
   // from a main window that already has a working server connection.
-  Promise.all([window.api.app.getServerUrl(), window.api.panels.getWindowId()]).then(
+  Promise.all([electronBootstrap.getServerUrl(), electronBootstrap.getWindowId()]).then(
     ([server, windowId]) => {
       createRoot(document.getElementById('root')!).render(
         <TrpcProvider url={withWindowId(server.url, windowId)}>
@@ -88,24 +93,19 @@ if (isFloatingGlobalAgentPanel) {
     }
   )
 } else {
-  window.api.app.bootMark?.('renderer script entered')
+  electronBootstrap.bootMark('renderer script entered')
   // Wait for tab store + server URL discovery before rendering. Tab store
   // hydrates from SQLite (prevents effect race wiping persisted tabs); the
   // server URL (local: embedded port; remote: configured host) is needed to
   // construct the WS URL passed to TrpcProvider.
-  Promise.all([
-    tabStoreReady,
-    window.api.app.getServerUrl(),
-    window.api.panels.getWindowId()
-  ]).then(async ([, server, windowId]) => {
-    window.api.app.bootMark?.('tabStoreReady resolved')
+  Promise.all([electronBootstrap.getServerUrl(), electronBootstrap.getWindowId()]).then(async ([server, windowId]) => {
 
     // Remote mode with a missing/unreachable server → render the recovery
     // screen instead of mounting TrpcProvider against a dead URL (it would
     // WS-reconnect-loop forever behind a blank window). Probe runs main-side.
     if (server.mode === 'remote') {
       const reachable = server.url
-        ? (await window.api.app.probeServerHealth(server.url)).ok
+        ? (await electronBootstrap.probeServerHealth(server.url)).ok
         : false
       if (!reachable) {
         createRoot(document.getElementById('root')!).render(
@@ -120,6 +120,21 @@ if (isFloatingGlobalAgentPanel) {
     // module-scope callers — incl. taskDetailCache.prefetch below and getTrpcClient()
     // in stores — work. TrpcProvider reuses this same client (one WS connection).
     initTrpcClient(trpcUrl)
+    // Wire the shortcut store's persistence to tRPC (was the preload
+    // global). @slayzone/ui has no transport dependency, so the host injects the
+    // backend. Closures are lazy — they call getTrpcClient() only when invoked,
+    // which is always after the init above.
+    setShortcutBackend({
+      get: (key) => getTrpcClient().settings.get.query({ key }),
+      set: async (key, value) => {
+        await getTrpcClient().settings.set.mutate({ key, value })
+      },
+      notifyChanged: () => {
+        void getTrpcClient().app.shortcuts.changed.mutate()
+      }
+    })
+    await loadTabStoreState()
+    electronBootstrap.bootMark('tabStoreReady resolved')
 
     // Prefetch task details for open tabs — warms Suspense cache before React mounts.
     // Fire-and-forget: the cache's resolved-value tracking + notify ensures immediate
@@ -130,7 +145,7 @@ if (isFloatingGlobalAgentPanel) {
 
     // E2E: expose the vanilla tRPC client so specs can call
     // page.evaluate(() => window.getTrpcVanillaClient().task.getAll.query()).
-    if (window.api.app.isPlaywright) {
+    if (electronBootstrap.isPlaywright()) {
       ;(
         window as typeof window & {
           getTrpcVanillaClient?: () => ReturnType<typeof initTrpcClient>['client']
@@ -138,7 +153,7 @@ if (isFloatingGlobalAgentPanel) {
       ).getTrpcVanillaClient = () => initTrpcClient(trpcUrl).client
     }
     performance.mark('sz:reactMount')
-    window.api.app.bootMark?.('reactMount')
+    electronBootstrap.bootMark('reactMount')
     createRoot(document.getElementById('root')!).render(
       // TrpcProvider must be OUTERMOST: ConvexAuthBootstrap (and Pty/Theme/
       // Telemetry providers) now call tRPC hooks, so they need the tRPC context.

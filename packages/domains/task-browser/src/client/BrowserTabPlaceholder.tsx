@@ -64,6 +64,7 @@ export const BrowserTabPlaceholder = forwardRef<
   const unregisterTab = useMutation(
     trpc.app.webview.unregisterBrowserTab.mutationOptions()
   ).mutate
+  const setViewLocked = useMutation(trpc.app.browser.setLocked.mutationOptions()).mutate
 
   const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({
     tabId,
@@ -110,14 +111,10 @@ export const BrowserTabPlaceholder = forwardRef<
     }
   }, [taskId, tabId, viewId, queryClient, trpc, registerTab, unregisterTab])
 
-  // Sync agent-lock state to the main process. Owns its own viewId, so this
-  // runs as soon as the WCV is registered — no race with parent state.
-  // NOTE: browser.setLocked (browser:set-locked) has no tRPC router — it silences
-  // OS-origin input on the WebContentsView (electron-native), stays on the bridge.
   useEffect(() => {
     if (!viewId) return
-    void window.api.browser.setLocked(viewId, !!locked)
-  }, [viewId, locked])
+    setViewLocked({ viewId, locked: !!locked })
+  }, [viewId, locked, setViewLocked])
 
   return (
     <div

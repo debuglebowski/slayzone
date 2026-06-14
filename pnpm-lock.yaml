@@ -318,7 +318,7 @@ importers:
         specifier: ^1.0.0
         version: 1.0.0
       electron:
-        specifier: ^41.0.3
+        specifier: 41.0.3
         version: 41.0.3
       electron-builder:
         specifier: ~26.15.2

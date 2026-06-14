@@ -67,10 +67,12 @@ test.describe('OpenCode agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__opencodeHookEvents = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__opencodeHookEvents as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__opencodeHookEvents as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__opencodeHookUnsub = unsub
+      ;(window as Record<string, unknown>).__opencodeHookUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -127,10 +129,12 @@ test.describe('OpenCode agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__opencodePermEvents = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__opencodePermEvents as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__opencodePermEvents as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__opencodePermUnsub = unsub
+      ;(window as Record<string, unknown>).__opencodePermUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {

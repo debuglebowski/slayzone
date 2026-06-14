@@ -155,9 +155,9 @@ export const useContextManagerStore = create<ContextManagerViewState>()(
 const DB_KEY = 'context_manager_view_state'
 
 export const contextManagerStoreReady: Promise<void> =
-  typeof window !== 'undefined' && window.api?.settings
-    ? window.api.settings
-        .get(DB_KEY)
+  typeof window !== 'undefined'
+    ? Promise.resolve()
+        .then(() => getTrpcClient().settings.get.query({ key: DB_KEY }))
         .then((value) => {
           if (value) {
             try {

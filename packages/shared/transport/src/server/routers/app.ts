@@ -194,7 +194,19 @@ export const appLevelRouter = router({
       .input(z.object({ visible: z.boolean() }))
       .mutation(({ ctx, input }) =>
         getAppDeps().appWindowSetWindowButtonVisibility(ctx.windowId ?? null, input.visible)
-      )
+      ),
+    // Pull OS keyboard focus back to this connection's renderer (browser find).
+    // Fire-and-forget, no windowId guard (graceful no-op if unresolved) so the
+    // renderer's focus calls never reject. Was the `app:focus-renderer` IPC.
+    focusRenderer: publicProcedure.mutation(({ ctx }) =>
+      getAppDeps().appFocusRenderer(ctx.windowId ?? null)
+    )
+  }),
+
+  // Shortcuts — rebuild the native menu after the renderer persists custom
+  // shortcut overrides. Was the `shortcuts:changed` IPC (preload bootstrap-only).
+  shortcuts: router({
+    changed: publicProcedure.mutation(() => getAppDeps().appRebuildMenuForShortcuts())
   }),
 
   // Auth
@@ -230,6 +242,9 @@ export const appLevelRouter = router({
     setVisible: publicProcedure
       .input(z.object({ viewId: z.string(), visible: z.boolean() }))
       .mutation(({ input }) => getAppDeps().browser.setVisible(input.viewId, input.visible)),
+    setLocked: publicProcedure
+      .input(z.object({ viewId: z.string(), locked: z.boolean() }))
+      .mutation(({ input }) => getAppDeps().browser.setLocked(input.viewId, input.locked)),
     hideAll: publicProcedure.mutation(() => getAppDeps().browser.hideAll()),
     showAll: publicProcedure.mutation(() => getAppDeps().browser.showAll()),
     setHandoffPolicy: publicProcedure

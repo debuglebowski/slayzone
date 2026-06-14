@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
+import { useVisibleInterval } from '@slayzone/ui'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 
 export interface OpenFile {
@@ -41,6 +42,7 @@ export function useFileEditor(
   initialEditorState?: EditorOpenFilesState | null
 ) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const writeFileMutation = useMutation(trpc.fileEditor.writeFile.mutationOptions())
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
@@ -129,10 +131,18 @@ export function useFileEditor(
           return
         }
 
-        const result = await queryClient.fetchQuery(
-          trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath })
-        )
+        const result = await trpcClient.fileEditor.readFile.query({ rootPath: projectPath, filePath })
         if (result.tooLarge || result.content == null) return
+        const current = openFilesRef.current.find((f) => f.path === filePath)
+        if (
+          current &&
+          current.content === result.content &&
+          current.originalContent === result.content &&
+          !current.diskChanged &&
+          !current.deleted
+        ) {
+          return
+        }
         setOpenFiles((prev) =>
           prev.map((f) =>
             f.path === filePath
@@ -152,10 +162,38 @@ export function useFileEditor(
           return next
         })
       } catch {
-        // File may have been deleted
+        const current = openFilesRef.current.find((f) => f.path === filePath)
+        if (!current) return
+        const dirty = current.content !== current.originalContent
+        if (dirty) {
+          setOpenFiles((prev) => {
+            const next = prev.map((f) =>
+              f.path === filePath ? { ...f, deleted: true, diskChanged: true } : f
+            )
+            openFilesRef.current = next
+            return next
+          })
+          return
+        }
+        setOpenFiles((prev) => {
+          const next = prev.filter((f) => f.path !== filePath)
+          openFilesRef.current = next
+          return next
+        })
+        setActiveFilePath((curActive) => {
+          if (curActive !== filePath) return curActive
+          const nextFiles = openFilesRef.current
+          return nextFiles.length > 0 ? nextFiles[nextFiles.length - 1].path : null
+        })
+        setFileVersions((prev) => {
+          if (!prev.has(filePath)) return prev
+          const next = new Map(prev)
+          next.delete(filePath)
+          return next
+        })
       }
     },
-    [projectPath, queryClient, trpc]
+    [projectPath, trpcClient]
   )
 
   const projectPathRef = useRef(projectPath)
@@ -163,6 +201,13 @@ export function useFileEditor(
 
   const openFilesRef = useRef(openFiles)
   openFilesRef.current = openFiles
+  const setOpenFilesAndRef = useCallback((updater: (prev: OpenFile[]) => OpenFile[]) => {
+    setOpenFiles((prev) => {
+      const next = updater(prev)
+      openFilesRef.current = next
+      return next
+    })
+  }, [])
 
   const reloadFileRef = useRef(reloadFile)
   reloadFileRef.current = reloadFile
@@ -269,6 +314,15 @@ export function useFileEditor(
     }
   }, [])
 
+  // Low-frequency fallback for missed watcher events. Only clean text files are
+  // auto-reloaded; dirty tabs keep their draft and rely on the changed marker.
+  useVisibleInterval(() => {
+    for (const file of openFilesRef.current) {
+      if (file.binary || file.tooLarge || file.content !== file.originalContent) continue
+      void reloadFileRef.current(file.path)
+    }
+  }, 1_500)
+
   // --- Open / close / save ---
   const openFile = useCallback(
     async (filePath: string, options?: OpenFileOptions) => {
@@ -293,7 +347,7 @@ export function useFileEditor(
       try {
         // Binary files (images, PDFs) — rendered via slz-file:// protocol, no content needed
         if (isBinaryFile(filePath)) {
-          setOpenFiles((prev) => {
+          setOpenFilesAndRef((prev) => {
             if (prev.some((f) => f.path === filePath)) return prev
             return [...prev, { path: filePath, content: null, originalContent: null, binary: true }]
           })
@@ -306,7 +360,7 @@ export function useFileEditor(
           trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath })
         )
         if (result.tooLarge) {
-          setOpenFiles((prev) => {
+          setOpenFilesAndRef((prev) => {
             if (prev.some((f) => f.path === filePath)) return prev
             return [
               ...prev,
@@ -323,7 +377,7 @@ export function useFileEditor(
           track('editor_file_opened', { from })
           return
         }
-        setOpenFiles((prev) => {
+        setOpenFilesAndRef((prev) => {
           if (prev.some((f) => f.path === filePath)) return prev
           return [
             ...prev,
@@ -336,7 +390,7 @@ export function useFileEditor(
         pendingOpen.current = null
       }
     },
-    [projectPath, openFiles, queryClient, trpc]
+    [projectPath, openFiles, queryClient, setOpenFilesAndRef, trpc]
   )
 
   const openFileForced = useCallback(

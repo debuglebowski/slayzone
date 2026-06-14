@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 interface DesktopHandoffPolicy {
   protocol: string
@@ -20,6 +21,7 @@ interface UseBrowserViewLifecycleOpts {
 export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
   viewId: string | null
 } {
+  const trpcClient = useTRPCClient()
   const { tabId, taskId, url, partition, kind, desktopHandoffPolicy } = opts
   const [viewId, setViewId] = useState<string | null>(null)
   const mountedRef = useRef(true)
@@ -36,7 +38,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
       if (!mountedRef.current || currentTabIdRef.current !== tabId) return
 
       try {
-        const id = await window.api.browser.createView({
+        const id = await trpcClient.app.browser.createView.mutate({
           taskId,
           tabId,
           partition,
@@ -56,12 +58,12 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
         }
 
         if (!mountedRef.current || currentTabIdRef.current !== tabId) {
-          void window.api.browser.destroyView(id)
+          void trpcClient.app.browser.destroyView.mutate({ viewId: id as string })
           return
         }
 
-        createdViewId = id
-        setViewId(id)
+        createdViewId = id as string
+        setViewId(id as string)
       } catch (err) {
         console.error('[useBrowserViewLifecycle] createView failed:', err)
         // Retry on failure (e.g., main process not ready)
@@ -77,13 +79,13 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
       mountedRef.current = false
       if (retryTimer) clearTimeout(retryTimer)
       if (createdViewId) {
-        void window.api.browser.destroyView(createdViewId)
+        void trpcClient.app.browser.destroyView.mutate({ viewId: createdViewId })
       }
       setViewId(null)
     }
     // url/partition are initial values only — intentional
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, taskId])
+  }, [tabId, taskId, trpcClient])
 
   return { viewId }
 }

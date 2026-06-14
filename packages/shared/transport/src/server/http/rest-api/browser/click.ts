@@ -27,7 +27,14 @@ export function registerBrowserClickRoute(app: Express, deps: RestApiDeps): void
         res.status(404).json(result)
         return
       }
-      await markTabAgentTouched(deps.db, deps.notifyRenderer, taskId, bwc.tabId, deps.legacyBroadcast)
+      await markTabAgentTouched(
+        deps.db,
+        deps.notifyRenderer,
+        taskId,
+        bwc.tabId,
+        deps.legacyBroadcast,
+        deps.menu
+      )
       res.json(result)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })

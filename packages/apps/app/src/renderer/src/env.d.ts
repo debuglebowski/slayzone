@@ -8,6 +8,11 @@ interface ImportMetaEnv {
 
 declare global {
   interface Window {
+    /**
+     * Intentional bootstrap-only preload surface. Domain calls use tRPC.
+     */
     api: ElectronAPI
+    __testInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
+    __testEmit?: (channel: string, data: unknown) => void
   }
 }

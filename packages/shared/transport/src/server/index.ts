@@ -18,6 +18,11 @@ export {
   type TelemetryEventMap
 } from './app-deps'
 export { setMenuEvents, getMenuEvents, type MenuEventMap } from './app-deps'
+export {
+  setAgentLifecycleEvents,
+  getAgentLifecycleEvents,
+  type AgentLifecycleEventMap
+} from './app-deps'
 export { setAppDeps, getAppDeps, type AppDeps, type FloatingAgentState } from './app-deps'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
 

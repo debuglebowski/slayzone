@@ -1,4 +1,5 @@
 import { getTrpcClient } from '@slayzone/transport/client'
+import type { ClientErrorEventInput } from '@slayzone/types'
 
 type DiagnosticsContext = Record<string, unknown>
 
@@ -25,5 +26,13 @@ export function recordDiagnosticsTimeline(event: string, payload?: Record<string
     })
   } catch {
     // ignore diagnostics failures (incl. tRPC client not yet ready)
+  }
+}
+
+export function recordClientError(input: ClientErrorEventInput): void {
+  try {
+    void getTrpcClient().diagnostics.recordClientError.mutate(input)
+  } catch {
+    // ignore diagnostics failures before tRPC boot / during crash paths
   }
 }

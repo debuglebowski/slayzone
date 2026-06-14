@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import {
+  electronBootstrap,
+  useTRPC,
+  useTRPCClient,
+  useSubscription
+} from '@slayzone/transport/client'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
@@ -107,7 +112,7 @@ export function useTasksData(): UseTasksDataReturn {
   // tRPC router, so it stays on the IPC bridge.
   useEffect(() => {
     performance.mark('sz:loadBoardData:start')
-    window.api.app.bootMark?.('loadBoardData start')
+    electronBootstrap.bootMark('loadBoardData start')
   }, [])
 
   // Project groups loaded imperatively via the `projectGroups` tRPC router and
@@ -144,8 +149,8 @@ export function useTasksData(): UseTasksDataReturn {
     if (boardQ.isPending) return
     performance.mark('sz:loadBoardData:end')
     performance.mark('sz:dataReady')
-    window.api.app.bootMark?.('dataReady (loadBoardData done)')
-    window.api.app.dataReady()
+    electronBootstrap.bootMark('dataReady (loadBoardData done)')
+    electronBootstrap.dataReady()
     // Fire exactly once, on the first non-pending state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardQ.isPending])

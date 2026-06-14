@@ -290,34 +290,35 @@ export const taskWindowsOps = {
   }
 }
 
-export function setupTaskWindows(): void {
-  // Legacy IPC handlers — delegate to taskWindowsOps (slice 5 drops these).
-  ipcMain.handle('task-window:open', (_e, taskId: string) => taskWindowsOps.open(taskId))
-  ipcMain.handle('task-window:close', (_e, taskId: string) => taskWindowsOps.close(taskId))
-  ipcMain.handle('task-window:list', () => taskWindowsOps.list())
-  ipcMain.handle('task-window:set-primary-active', (event, taskId: string | null) =>
-    taskWindowsOps.setPrimaryActive(taskId, event.sender.id)
-  )
-  ipcMain.handle('task-window:get-primary-active', () => taskWindowsOps.getPrimaryActive())
-  ipcMain.handle('panels:claim', (event, taskId: string, panelId: string) =>
-    taskWindowsOps.claimPanel(taskId, panelId, event.sender.id)
-  )
-  ipcMain.handle('panels:release', (event, taskId: string, panelId: string) =>
-    taskWindowsOps.releasePanel(taskId, panelId, event.sender.id)
-  )
-  ipcMain.handle('panels:release-all-for-task', (event, taskId: string) =>
-    taskWindowsOps.releaseAllForTask(taskId, event.sender.id)
-  )
-  ipcMain.handle('panels:get-ownership', (_e, taskId: string) =>
-    taskWindowsOps.getOwnership(taskId)
-  )
-  ipcMain.handle('panels:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
-  ipcMain.handle('panels:claim-and-close-other', (event, taskId: string, panelId: string) =>
-    taskWindowsOps.claimAndCloseOther(taskId, panelId, event.sender.id)
-  )
-  ipcMain.handle('pty:claim-session', (event, sessionId: string) =>
-    taskWindowsOps.claimSession(sessionId, event.sender.id)
-  )
+export function setupTaskWindows(options?: { enableIpcHandlers?: boolean }): void {
+  if (options?.enableIpcHandlers !== false) {
+    ipcMain.handle('task-window:open', (_e, taskId: string) => taskWindowsOps.open(taskId))
+    ipcMain.handle('task-window:close', (_e, taskId: string) => taskWindowsOps.close(taskId))
+    ipcMain.handle('task-window:list', () => taskWindowsOps.list())
+    ipcMain.handle('task-window:set-primary-active', (event, taskId: string | null) =>
+      taskWindowsOps.setPrimaryActive(taskId, event.sender.id)
+    )
+    ipcMain.handle('task-window:get-primary-active', () => taskWindowsOps.getPrimaryActive())
+    ipcMain.handle('panels:claim', (event, taskId: string, panelId: string) =>
+      taskWindowsOps.claimPanel(taskId, panelId, event.sender.id)
+    )
+    ipcMain.handle('panels:release', (event, taskId: string, panelId: string) =>
+      taskWindowsOps.releasePanel(taskId, panelId, event.sender.id)
+    )
+    ipcMain.handle('panels:release-all-for-task', (event, taskId: string) =>
+      taskWindowsOps.releaseAllForTask(taskId, event.sender.id)
+    )
+    ipcMain.handle('panels:get-ownership', (_e, taskId: string) =>
+      taskWindowsOps.getOwnership(taskId)
+    )
+    ipcMain.handle('panels:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
+    ipcMain.handle('panels:claim-and-close-other', (event, taskId: string, panelId: string) =>
+      taskWindowsOps.claimAndCloseOther(taskId, panelId, event.sender.id)
+    )
+    ipcMain.handle('pty:claim-session', (event, sessionId: string) =>
+      taskWindowsOps.claimSession(sessionId, event.sender.id)
+    )
+  }
 
   app.on('before-quit', () => {
     for (const entry of taskWindows.values()) {

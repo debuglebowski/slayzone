@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useSubscription } from '@slayzone/transport/client'
-import { Button } from '@slayzone/ui'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { Button, useVisibleInterval } from '@slayzone/ui'
 import { RichTextEditor } from '@slayzone/editor'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { EditorView as CMEditorView } from '@codemirror/view'
@@ -114,11 +113,10 @@ export function ArtifactContentEditor({
   onSearchMatchCountChange: (count: number) => void
 }) {
   const trpc = useTRPC()
-  const queryClient = useQueryClient()
+  const trpcClient = useTRPCClient()
   const getMtime = useCallback(
-    (id: string): Promise<number | null> =>
-      queryClient.fetchQuery(trpc.artifacts.getMtime.queryOptions({ id })),
-    [queryClient, trpc]
+    (id: string): Promise<number | null> => trpcClient.artifacts.getMtime.query({ id }),
+    [trpcClient]
   )
   const {
     notesFontFamily,
@@ -222,6 +220,31 @@ export function ArtifactContentEditor({
         }
       }
     })
+  )
+
+  // fs.watch can miss rapid writes on some platforms. Poll mtime while visible
+  // so external changes still surface before an autosave can clobber them.
+  useVisibleInterval(
+    () => {
+      if (isBinary) return
+      void (async () => {
+        const currentMtime = await getMtime(artifact.id)
+        const baseline = baselineMtimeRef.current
+        if (currentMtime == null) return
+        if (baseline == null) {
+          baselineMtimeRef.current = currentMtime
+          return
+        }
+        if (currentMtime <= baseline) return
+        if (isDirtyRef.current) {
+          setExternalChangePending(true)
+        } else {
+          await loadFromDisk()
+        }
+      })()
+    },
+    1_000,
+    { enabled: !isBinary }
   )
 
   const handleChange = useCallback(

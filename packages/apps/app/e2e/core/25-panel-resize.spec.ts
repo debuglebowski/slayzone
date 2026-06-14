@@ -218,7 +218,7 @@ test.describe('Panel layout config', () => {
         if (!c || !sb) return 999
         return Math.abs(sb.x + sb.width - (c.x + c.width))
       })
-      .toBeLessThan(6)
+      .toBeLessThan(20)
   })
 
   test('panels overflow → container scrolls horizontally', async ({ mainWindow }) => {

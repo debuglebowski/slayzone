@@ -10,19 +10,6 @@ import {
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import type { Page, Locator } from '@playwright/test'
 
-declare global {
-  interface Window {
-    __testInvoke: (channel: string, ...args: unknown[]) => Promise<unknown>
-  }
-}
-
-function testInvoke(page: import('@playwright/test').Page, channel: string, ...args: unknown[]) {
-  return page.evaluate(({ ch, a }) => window.__testInvoke(ch, ...a), {
-    ch: channel,
-    a: args
-  }) as Promise<any>
-}
-
 /** Click a testid-identified button via evaluate (immune to element detach).
  *  Waits for the button to not be disabled before clicking. */
 async function clickByTestId(mainWindow: Page, testId: string): Promise<void> {
@@ -116,6 +103,61 @@ const GITHUB_STATUS_OPTIONS = [
   { id: 'gh-status-done', name: 'Done', color: 'green' }
 ]
 
+const githubTest = {
+  clearMocks: (page: Page) =>
+    page.evaluate(() => window.getTrpcVanillaClient().integrations.testClearGithubMocks.mutate()),
+  seedConnection: (
+    page: Page,
+    input: {
+      id?: string
+      projectId?: string
+      token?: string
+      repositories?: Array<{
+        id: string
+        owner: string
+        name: string
+        fullName: string
+        private: boolean
+      }>
+    }
+  ) =>
+    page.evaluate(
+      (payload) =>
+        window.getTrpcVanillaClient().integrations.testSeedGithubConnection.mutate(payload),
+      input
+    ),
+  setRepositories: (
+    page: Page,
+    input: {
+      connectionId: string
+      repositories: Array<{
+        id: string
+        owner: string
+        name: string
+        fullName: string
+        private: boolean
+      }>
+    }
+  ) =>
+    page.evaluate(
+      (payload) =>
+        window.getTrpcVanillaClient().integrations.testSetGithubRepositories.mutate(payload),
+      input
+    ),
+  setRepositoryIssues: (
+    page: Page,
+    input: {
+      repositoryFullName: string
+      issues: typeof GITHUB_REPOSITORY_ISSUES
+    }
+  ) =>
+    page.evaluate(
+      (payload) =>
+        window.getTrpcVanillaClient().integrations.testSetGithubRepositoryIssues.mutate(payload),
+      input
+    )
+}
+
 test.describe('Project settings & context menu', () => {
   let projectAbbrev: string
   let projectId: string
@@ -136,8 +178,8 @@ test.describe('Project settings & context menu', () => {
       const tasks = (await c.task.getByProject.query({ projectId: pid })) as Array<{ id: string }>
       for (const task of tasks) await c.task.delete.mutate({ id: task.id })
     }, projectId)
-    await testInvoke(mainWindow, 'integrations:test:clear-github-mocks')
-    await testInvoke(mainWindow, 'integrations:test:seed-github-connection', {
+    await githubTest.clearMocks(mainWindow)
+    await githubTest.seedConnection(mainWindow, {
       id: GITHUB_REPO_CONNECTION_ID,
       projectId,
       repositories: [
@@ -150,7 +192,7 @@ test.describe('Project settings & context menu', () => {
         }
       ]
     })
-    await testInvoke(mainWindow, 'integrations:test:set-github-repository-issues', {
+    await githubTest.setRepositoryIssues(mainWindow, {
       repositoryFullName: GITHUB_REPOSITORY_FULL_NAME,
       issues: GITHUB_REPOSITORY_ISSUES
     })
@@ -180,7 +222,7 @@ test.describe('Project settings & context menu', () => {
       window.getTrpcVanillaClient().integrations.listConnections.query({ provider: 'github' })
     )) as Array<{ id: string }>
     for (const connection of githubConnections) {
-      await testInvoke(mainWindow, 'integrations:test:set-github-repositories', {
+      await githubTest.setRepositories(mainWindow, {
         connectionId: connection.id,
         repositories: [
           {
@@ -199,7 +241,7 @@ test.describe('Project settings & context menu', () => {
     mainWindow: import('@playwright/test').Page,
     issues: typeof GITHUB_REPOSITORY_ISSUES
   ) => {
-    await testInvoke(mainWindow, 'integrations:test:set-github-repository-issues', {
+    await githubTest.setRepositoryIssues(mainWindow, {
       repositoryFullName: GITHUB_REPOSITORY_FULL_NAME,
       issues
     })
@@ -543,19 +585,23 @@ test.describe('Project settings & context menu', () => {
     })
     await mainWindow.getByTestId('save-project-columns').click()
 
-    const updatedTasks = await s.getTasks()
-    const updatedTask = updatedTasks.find(
-      (t: { id: string; status: string }) => t.id === remapTask.id
-    )
-    expect(updatedTask?.status).toBe('inbox')
+    await expect
+      .poll(async () => {
+        const refreshedProjects = await s.getProjects()
+        const refreshedProject = refreshedProjects.find((p: { id: string }) => p.id === project.id) as
+          | { columns_config: Array<{ id: string }> | null }
+          | undefined
+        return Boolean(refreshedProject?.columns_config?.some((column) => column.id === 'review'))
+      })
+      .toBe(false)
 
-    const refreshedProjects = await s.getProjects()
-    const refreshedProject = refreshedProjects.find((p: { id: string }) => p.id === project.id) as {
-      columns_config: Array<{ id: string }> | null
-    }
-    expect(
-      Boolean(refreshedProject?.columns_config?.some((column) => column.id === 'review'))
-    ).toBe(false)
+    await expect
+      .poll(async () => {
+        const updatedTasks = await s.getTasks()
+        return updatedTasks.find((t: { id: string; status: string }) => t.id === remapTask.id)
+          ?.status
+      })
+      .toBe('inbox')
   })
 
   test('edit project name in settings dialog', async ({ mainWindow }) => {

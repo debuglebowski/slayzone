@@ -126,9 +126,11 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
     // died — before `pty.list()` has had time to evict it.
     await mainWindow.evaluate(() => {
       ;(window as unknown as { __deadAt: number | null }).__deadAt = null
-      window.api.pty.onStateChange((_id, newState) => {
-        const g = window as unknown as { __deadAt: number | null }
-        if (newState === 'dead' && g.__deadAt === null) g.__deadAt = Date.now()
+      window.getTrpcVanillaClient().pty.onStateChange.subscribe(undefined, {
+        onData: ({ newState }) => {
+          const g = window as unknown as { __deadAt: number | null }
+          if (newState === 'dead' && g.__deadAt === null) g.__deadAt = Date.now()
+        }
       })
     })
 

@@ -10,7 +10,7 @@
 // throw. cap-shell-7 revisits if any renderer path actually demands them
 // (keyboard passthrough, device emulation, per-webview DevTools).
 
-import type { ElectronAPI } from '@slayzone/types'
+import type { _LegacyElectronAPI as ElectronAPI } from '@slayzone/types'
 
 type WebviewNS = ElectronAPI['webview']
 

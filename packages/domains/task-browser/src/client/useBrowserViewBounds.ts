@@ -1,6 +1,6 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 
 interface UseBrowserViewBoundsOpts {
   visible: boolean
@@ -22,6 +22,7 @@ export function useBrowserViewBounds(
   opts: UseBrowserViewBoundsOpts
 ): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const { visible, hidden, isResizing, offScreen } = opts
   const shouldPaint = visible && !hidden && !isResizing
   const effectivelyVisible = shouldPaint && !offScreen
@@ -60,12 +61,10 @@ export function useBrowserViewBounds(
   // Sync visibility changes — drives WCV painting independent of bounds. When
   // shouldPaint is true but offScreen is true, the view keeps painting (video
   // plays) while parked off-screen by the bounds effect below.
-  // NOTE: browser.setVisible / setBounds / focus below are electron-native
-  // WebContentsView ops — kept on the preload bridge per migration design.
   useEffect(() => {
     if (!viewId) return
-    void window.api.browser.setVisible(viewId, shouldPaint)
-  }, [viewId, shouldPaint])
+    void trpcClient.app.browser.setVisible.mutate({ viewId, visible: shouldPaint })
+  }, [viewId, shouldPaint, trpcClient])
 
   // Park bounds off-screen when shouldPaint && offScreen. One-shot per transition:
   // the rAF loop is gated on effectivelyVisible (= !offScreen), so it won't fight
@@ -76,14 +75,17 @@ export function useBrowserViewBounds(
     const last = lastBoundsRef.current
     const width = last?.width && last.width > 0 ? last.width : FALLBACK_PARK_WIDTH
     const height = last?.height && last.height > 0 ? last.height : FALLBACK_PARK_HEIGHT
-    void window.api.browser.setBounds(viewId, {
+    void trpcClient.app.browser.setBounds.mutate({
+      viewId,
+      bounds: {
       x: OFF_SCREEN_X,
       y: OFF_SCREEN_Y,
       width,
       height
+      }
     })
     lastBoundsRef.current = null
-  }, [viewId, shouldPaint, offScreen])
+  }, [viewId, shouldPaint, offScreen, trpcClient])
 
   // Track whether we've hidden this view due to a dialog overlay
   const [hiddenByOverlay, setHiddenByOverlay] = useState(false)
@@ -126,11 +128,11 @@ export function useBrowserViewBounds(
       if (overlaps && !hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = true
         setHiddenByOverlay(true)
-        void window.api.browser.setVisible(vid, false)
+        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: false })
       } else if (!overlaps && hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = false
         setHiddenByOverlay(false)
-        void window.api.browser.setVisible(vid, true)
+        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: true })
       }
 
       // Only sync bounds when not hidden by overlay
@@ -154,7 +156,10 @@ export function useBrowserViewBounds(
         ) {
           lastBoundsRef.current = { x, y, width, height }
           if (width > 0 && height > 0) {
-            void window.api.browser.setBounds(vid, { x, y, width, height })
+            void trpcClient.app.browser.setBounds.mutate({
+              viewId: vid,
+              bounds: { x, y, width, height }
+            })
           }
         }
       }
@@ -165,7 +170,7 @@ export function useBrowserViewBounds(
     if (!rafRef.current) {
       rafRef.current = requestAnimationFrame(tick)
     }
-  }, [])
+  }, [trpcClient])
 
   const stopLoop = useCallback(() => {
     if (rafRef.current) {
@@ -188,9 +193,9 @@ export function useBrowserViewBounds(
   const handleMouseDown = useCallback(() => {
     const vid = viewIdRef.current
     if (vid) {
-      void window.api.browser.focus(vid)
+      void trpcClient.app.browser.focus.mutate({ viewId: vid })
     }
-  }, [])
+  }, [trpcClient])
 
   // Callback ref — handles conditional mounting
   const placeholderRef = useCallback(

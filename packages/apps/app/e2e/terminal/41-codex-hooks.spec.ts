@@ -65,10 +65,12 @@ test.describe('Codex agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__codexHookEvents = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__codexHookEvents as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__codexHookEvents as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__codexHookUnsub = unsub
+      ;(window as Record<string, unknown>).__codexHookUnsub = () => sub.unsubscribe()
     })
 
     // Codex native hooks deliver the event as JSON on stdin (hook_event_name).
@@ -121,10 +123,12 @@ test.describe('Codex agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__codexStartEvents = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__codexStartEvents as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__codexStartEvents as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__codexStartUnsub = unsub
+      ;(window as Record<string, unknown>).__codexStartUnsub = () => sub.unsubscribe()
     })
 
     const res = spawnSync('bash', [scriptPath], {

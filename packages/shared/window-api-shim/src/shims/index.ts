@@ -1,4 +1,4 @@
-import type { ElectronAPI } from '@slayzone/types'
+import type { _LegacyElectronAPI as ElectronAPI } from '@slayzone/types'
 import { dbShim } from './db'
 import { tagsShim, taskTagsShim } from './tags'
 import { settingsShim } from './settings'

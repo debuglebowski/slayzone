@@ -8,7 +8,7 @@ import {
   createRef
 } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { cn, useShortcutAction, useShortcutDisplay } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
@@ -51,6 +51,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   ref
 ) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const setActiveBrowserTab = useMutation(
     trpc.app.webview.setActiveBrowserTab.mutationOptions()
   ).mutate
@@ -234,8 +235,11 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // (electron-native) — stays on the preload bridge per migration design.
   useEffect(() => {
     if (!activeViewId) return
-    void window.api.browser.setKeyboardPassthrough(activeViewId, captureShortcuts)
-  }, [activeViewId, captureShortcuts])
+    void trpcClient.app.browser.setKeyboardPassthrough.mutate({
+      viewId: activeViewId,
+      enabled: captureShortcuts
+    })
+  }, [activeViewId, captureShortcuts, trpcClient])
 
   // Update URL bar when active tab changes
   useEffect(() => {
@@ -252,9 +256,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       const handle = ref.current
       if (!handle?.viewId) continue
       const shouldBeVisible = tabId === tabs.activeTabId && !extensionsManagerOpen
-      void window.api.browser.setVisible(handle.viewId, shouldBeVisible)
+      void trpcClient.app.browser.setVisible.mutate({
+        viewId: handle.viewId,
+        visible: shouldBeVisible
+      })
     }
-  }, [tabs.activeTabId, extensionsManagerOpen])
+  }, [tabs.activeTabId, extensionsManagerOpen, trpcClient])
 
   // Refs for stable event handler closures (avoids tearing down listeners on every tabs change)
   const tabsRef = useRef(tabs)
@@ -345,19 +352,25 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // (electron-native) — kept on the preload bridge per migration design.
   useShortcutAction('browser-scroll-top', () => {
     if (!activeViewId) return false // decline — let event propagate
-    void window.api.browser.sendInputEvent(activeViewId, {
-      type: 'keyDown',
-      keyCode: 'Up',
-      modifiers: ['meta']
+    void trpcClient.app.browser.sendInputEvent.mutate({
+      viewId: activeViewId,
+      input: {
+        type: 'keyDown',
+        keyCode: 'Up',
+        modifiers: ['meta']
+      }
     })
     return undefined
   })
   useShortcutAction('browser-scroll-bottom', () => {
     if (!activeViewId) return false
-    void window.api.browser.sendInputEvent(activeViewId, {
-      type: 'keyDown',
-      keyCode: 'Down',
-      modifiers: ['meta']
+    void trpcClient.app.browser.sendInputEvent.mutate({
+      viewId: activeViewId,
+      input: {
+        type: 'keyDown',
+        keyCode: 'Down',
+        modifiers: ['meta']
+      }
     })
     return undefined
   })
@@ -430,19 +443,19 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     // — kept on the preload bridge per migration design.
     void (async () => {
       try {
-        const isOpen = await window.api.browser.isDevToolsOpen(activeViewId)
+        const isOpen = await trpcClient.app.browser.isDevToolsOpen.query({ viewId: activeViewId })
         if (isOpen) {
-          await window.api.browser.closeDevTools(activeViewId)
+          await trpcClient.app.browser.closeDevTools.mutate({ viewId: activeViewId })
           setDevToolsOpen(false)
         } else {
-          await window.api.browser.openDevTools(activeViewId, 'bottom')
+          await trpcClient.app.browser.openDevTools.mutate({ viewId: activeViewId, mode: 'bottom' })
           setDevToolsOpen(true)
         }
       } catch {
         // DevTools toggle failed silently
       }
     })()
-  }, [multiDeviceMode, webviewReady, activeViewId])
+  }, [multiDeviceMode, webviewReady, activeViewId, trpcClient])
 
   const toggleCaptureShortcuts = useCallback(() => {
     setCaptureShortcuts((prev) => !prev)

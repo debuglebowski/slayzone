@@ -1,5 +1,4 @@
 import { clipboard } from 'electron'
-import type { IpcMain } from 'electron'
 import { existsSync } from 'fs'
 
 const PLIST_HEADER =
@@ -122,12 +121,4 @@ export function hasFilePaths(): boolean {
     .split(/\r?\n/)
     .map((s) => s.trim())
     .some((s) => (s.startsWith('/') && existsSync(s)) || s.startsWith('file://'))
-}
-
-export function registerClipboardHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('clipboard:writeFilePaths', (_e, paths: string[]) => {
-    writeFilePaths(paths)
-  })
-  ipcMain.handle('clipboard:readFilePaths', () => readFilePaths())
-  ipcMain.handle('clipboard:hasFiles', () => hasFilePaths())
 }

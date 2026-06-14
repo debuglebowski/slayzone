@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { useBrowserViewLifecycle } from './useBrowserViewLifecycle'
 import { useBrowserViewBounds } from './useBrowserViewBounds'
 import { useBrowserViewEvents, type BrowserViewState, type LoadError } from './useBrowserViewEvents'
@@ -55,6 +55,7 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   } = opts
 
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
 
   const { viewId } = useBrowserViewLifecycle({
     tabId,
@@ -72,29 +73,27 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   })
   const state = useBrowserViewEvents(viewId)
 
-  // Sync handoff policy updates after initial creation.
-  // NOTE: every window.api.browser.* call below (setHandoffPolicy,
-  // reparentToCurrentWindow, navigate/goBack/goForward/reload/stop/executeJs/
-  // insertCss/removeCss/setZoom/focus) is an electron-native WebContentsView op
-  // and intentionally stays on the preload bridge per the migration design.
   const prevPolicyRef = useRef(desktopHandoffPolicy)
   useEffect(() => {
     if (!viewId || desktopHandoffPolicy === prevPolicyRef.current) return
     prevPolicyRef.current = desktopHandoffPolicy
-    void window.api.browser.setHandoffPolicy(viewId, desktopHandoffPolicy ?? null)
-  }, [viewId, desktopHandoffPolicy])
+    void trpcClient.app.browser.setHandoffPolicy.mutate({
+      viewId,
+      policy: desktopHandoffPolicy ?? null
+    })
+  }, [viewId, desktopHandoffPolicy, trpcClient])
 
   // Multi-window: ensure WCV is parented to THIS window. Called on mount + on window focus
   // so the view follows whichever window currently renders the BrowserPanel.
   useEffect(() => {
     if (!viewId) return
-    void window.api.browser.reparentToCurrentWindow(viewId)
+    void trpcClient.app.browser.reparentToCurrentWindow.mutate({ viewId })
     const onFocus = () => {
-      void window.api.browser.reparentToCurrentWindow(viewId)
+      void trpcClient.app.browser.reparentToCurrentWindow.mutate({ viewId })
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [viewId])
+  }, [viewId, trpcClient])
 
   // Handle web-panel:popup-request events
   const onPopupRouteRef = useRef(onPopupRoute)
@@ -115,35 +114,39 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   const actions: BrowserViewActions = useMemo(
     () => ({
       navigate: (u: string) => {
-        if (viewId) void window.api.browser.navigate(viewId, u)
+        if (viewId) void trpcClient.app.browser.navigate.mutate({ viewId, url: u })
       },
       goBack: () => {
-        if (viewId) void window.api.browser.goBack(viewId)
+        if (viewId) void trpcClient.app.browser.goBack.mutate({ viewId })
       },
       goForward: () => {
-        if (viewId) void window.api.browser.goForward(viewId)
+        if (viewId) void trpcClient.app.browser.goForward.mutate({ viewId })
       },
       reload: (ignoreCache?: boolean) => {
-        if (viewId) void window.api.browser.reload(viewId, ignoreCache)
+        if (viewId) void trpcClient.app.browser.reload.mutate({ viewId, ignoreCache })
       },
       stop: () => {
-        if (viewId) void window.api.browser.stop(viewId)
+        if (viewId) void trpcClient.app.browser.stop.mutate({ viewId })
       },
       executeJs: (code: string) =>
-        viewId ? window.api.browser.executeJs(viewId, code) : Promise.resolve(undefined),
+        viewId
+          ? trpcClient.app.browser.executeJs.mutate({ viewId, code })
+          : Promise.resolve(undefined),
       insertCss: (css: string) =>
-        viewId ? window.api.browser.insertCss(viewId, css) : Promise.resolve(''),
+        viewId
+          ? (trpcClient.app.browser.insertCss.mutate({ viewId, css }) as Promise<string>)
+          : Promise.resolve(''),
       removeCss: (key: string) => {
-        if (viewId) void window.api.browser.removeCss(viewId, key)
+        if (viewId) void trpcClient.app.browser.removeCss.mutate({ viewId, key })
       },
       setZoom: (factor: number) => {
-        if (viewId) void window.api.browser.setZoom(viewId, factor)
+        if (viewId) void trpcClient.app.browser.setZoom.mutate({ viewId, factor })
       },
       focus: () => {
-        if (viewId) void window.api.browser.focus(viewId)
+        if (viewId) void trpcClient.app.browser.focus.mutate({ viewId })
       }
     }),
-    [viewId]
+    [viewId, trpcClient]
   )
 
   return { viewId, state, actions, placeholderRef, hiddenByOverlay }

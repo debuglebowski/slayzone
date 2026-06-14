@@ -8,6 +8,7 @@ export {
   type TrpcVanillaClient
 } from './trpc'
 export { TrpcProvider, type TrpcProviderProps } from './provider'
+export { electronBootstrap } from './electron-bootstrap'
 // Subscription hook for the tanstack integration — single import point so
 // renderer code gets it from the transport barrel (not @trpc/* directly).
 export { useSubscription } from '@trpc/tanstack-react-query'

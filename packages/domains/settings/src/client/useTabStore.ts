@@ -560,32 +560,28 @@ export const useTabStore = create<TabState>()(
   }))
 )
 
-// Eagerly load persisted state at module scope — runs before any component mounts,
-// eliminating race conditions between store hydration and React effects.
-export const tabStoreReady: Promise<void> =
-  typeof window !== 'undefined' && window.api?.settings
-    ? (performance.mark('sz:tabStore:start'), window.api.settings.get('viewState'))
-        .then((value) => {
-          if (value) {
-            try {
-              useTabStore.getState()._loadState(JSON.parse(value))
-            } catch {
-              useTabStore.setState({ isLoaded: true })
-            }
-          } else {
-            useTabStore
-              .getState()
-              ._loadState({ tabs: [], activeTabIndex: 0, selectedProjectId: '' })
-          }
-        })
-        .catch(() => {
-          // IPC failure — render with default state rather than permanent white screen
-          useTabStore.setState({ isLoaded: true })
-        })
-        .finally(() => {
-          performance.mark('sz:tabStore:end')
-        })
-    : Promise.resolve()
+export async function loadTabStoreState(): Promise<void> {
+  if (typeof window === 'undefined') return
+  performance.mark('sz:tabStore:start')
+  try {
+    const value = await getTrpcClient().settings.get.query({ key: 'viewState' })
+    if (value) {
+      try {
+        useTabStore.getState()._loadState(JSON.parse(value))
+      } catch {
+        useTabStore.setState({ isLoaded: true })
+      }
+    } else {
+      useTabStore.getState()._loadState({ tabs: [], activeTabIndex: 0, selectedProjectId: '' })
+    }
+  } catch {
+    useTabStore.setState({ isLoaded: true })
+  } finally {
+    performance.mark('sz:tabStore:end')
+  }
+}
+
+export const tabStoreReady: Promise<void> = Promise.resolve()
 
 // Debounced persistence — subscribe to tab/index/project changes and save
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null

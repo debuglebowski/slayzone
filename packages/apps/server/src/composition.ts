@@ -261,6 +261,9 @@ export function composeServer(opts: {
     // Window-cosmetic setters no-op off-window in the Electron host too.
     appWindowSetTrafficLightPosition: () => {},
     appWindowSetWindowButtonVisibility: () => {},
+    appFocusRenderer: () => {},
+    // No native menu on a headless host.
+    appRebuildMenuForShortcuts: () => {},
 
     authGithubSystemSignIn: stub('authGithubSystemSignIn'),
     dialogShowOpenDialog: stub('dialogShowOpenDialog'),
@@ -272,6 +275,7 @@ export function composeServer(opts: {
       destroyAllForTask: stub('browser.destroyAllForTask'),
       setBounds: stub('browser.setBounds'),
       setVisible: stub('browser.setVisible'),
+      setLocked: stub('browser.setLocked'),
       hideAll: stub('browser.hideAll'),
       showAll: stub('browser.showAll'),
       setHandoffPolicy: stub('browser.setHandoffPolicy'),

@@ -1,5 +1,6 @@
 import { observable } from '@trpc/server/observable'
 import type { UpdateStatus } from '@slayzone/types'
+import { z } from 'zod'
 import { router, publicProcedure } from '../trpc'
 import { getMenuEvents } from '../app-deps'
 
@@ -15,6 +16,12 @@ import { getMenuEvents } from '../app-deps'
  * throw at import.
  */
 export const menuRouter = router({
+  testEmit: publicProcedure
+    .input(z.object({ event: z.enum(['close-current-focus', 'close-active-task']) }))
+    .mutation(({ input }) => {
+      if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+      getMenuEvents().emit(input.event)
+    }),
   onGoHome: publicProcedure.subscription(() =>
     observable<void>((emit) => {
       const h = (): void => emit.next()
@@ -171,6 +178,18 @@ export const menuRouter = router({
       const ev = getMenuEvents()
       ev.on('browser-create-tab', h)
       return () => ev.off('browser-create-tab', h)
+    })
+  ),
+  // Fires when a `slay tasks browser` mutation (click/eval/type/navigate) trips
+  // a tab. The renderer stamps `agentTouched: true` locally so a stale tabs-JSON
+  // writeback can't clobber the server's sticky flag (replaces the old
+  // electron-native browser-agent preload bridge).
+  onBrowserAgentTouched: publicProcedure.subscription(() =>
+    observable<{ taskId: string; tabId: string }>((emit) => {
+      const h = (payload: { taskId: string; tabId: string }): void => emit.next(payload)
+      const ev = getMenuEvents()
+      ev.on('browser-agent-touched', h)
+      return () => ev.off('browser-agent-touched', h)
     })
   )
 })

@@ -17,7 +17,7 @@
 // the C++ host LOG(WARNING)s and no-ops on unknown ids rather than the shim
 // eating the call silently.
 
-import type { ElectronAPI } from '@slayzone/types'
+import type { _LegacyElectronAPI as ElectronAPI } from '@slayzone/types'
 import type { EmbeddedTabObserverCallbackRouter } from '@slayzone/mojo-bindings'
 import { embeddedTabRemote } from '../transport/mojo'
 

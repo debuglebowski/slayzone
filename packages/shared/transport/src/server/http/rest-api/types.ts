@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal/shared'
-import type { MenuEventMap } from '../../app-deps'
+import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
 
 /**
  * Pluggable bridge to the PTY state machine. The Electron host wires the live
@@ -105,9 +105,10 @@ export interface RestApiDeps {
   /** Cross-cutting "data changed" ping (tasks + settings refetch). */
   notifyRenderer: () => void
   automationEngine?: { executeManual(id: string): Promise<unknown> }
-  /** Legacy `webContents.send` fan-out — Electron host only. Absent (standalone
-   *  server: no windows) the emits drop silently. Deleted in slice 8. */
+  /** Legacy test-only broadcast spy. Production hosts should not set this. */
   legacyBroadcast?: (channel: string, ...args: unknown[]) => void
+  /** Hook-driven agent lifecycle events. */
+  agentLifecycle?: TypedEmitter<AgentLifecycleEventMap>
   /** Menu / app-shortcut bus — the SAME host-owned emitter injected via
    *  `setMenuEvents` (threaded here directly so route handlers never race the
    *  registry's async init). */

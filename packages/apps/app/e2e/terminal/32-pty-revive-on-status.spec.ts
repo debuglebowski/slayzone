@@ -51,11 +51,13 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Kill-notify test' })
     await waitForPtySession(mainWindow, sessionId)
 
-    // Subscribe to pty:exit on the renderer so we can assert the IPC actually fired.
+    // Subscribe to PTY exit in the renderer so we can assert the event fired.
     await mainWindow.evaluate((id) => {
       ;(window as unknown as { __ptyExits: string[] }).__ptyExits = []
-      window.api.pty.onExit((s) => {
-        ;(window as unknown as { __ptyExits: string[] }).__ptyExits.push(s)
+      window.getTrpcVanillaClient().pty.onExit.subscribe(undefined, {
+        onData: ({ sessionId }) => {
+          ;(window as unknown as { __ptyExits: string[] }).__ptyExits.push(sessionId)
+        }
       })
       return id
     }, sessionId)
@@ -103,8 +105,10 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     // Subscribe before any status changes
     await mainWindow.evaluate((id) => {
       ;(window as unknown as { __respawnCalls: string[] }).__respawnCalls = []
-      window.api.pty.onRespawnSuggested((t) => {
-        ;(window as unknown as { __respawnCalls: string[] }).__respawnCalls.push(t)
+      window.getTrpcVanillaClient().pty.onRespawnSuggested.subscribe(undefined, {
+        onData: ({ taskId }) => {
+          ;(window as unknown as { __respawnCalls: string[] }).__respawnCalls.push(taskId)
+        }
       })
       return id
     }, task.id)

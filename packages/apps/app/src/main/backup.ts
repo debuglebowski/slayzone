@@ -1,5 +1,4 @@
 import { app, shell } from 'electron'
-import type { IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import fs from 'fs'
 import path from 'path'
@@ -251,23 +250,4 @@ export function buildBackupOps(db: SlayzoneDb) {
       shell.openPath(getBackupsDir())
     }
   }
-}
-
-export function registerBackupHandlers(ipcMain: IpcMain, db: SlayzoneDb): ReturnType<typeof buildBackupOps> {
-  const ops = buildBackupOps(db)
-
-  ipcMain.handle('backup:list', () => ops.list())
-  ipcMain.handle('backup:create', (_, name?: string) => ops.create(name))
-  ipcMain.handle('backup:rename', (_, filename: string, name: string) => ops.rename(filename, name))
-  ipcMain.handle('backup:delete', (_, filename: string) => ops.delete(filename))
-  ipcMain.handle('backup:restore', (_, filename: string) => ops.restore(filename))
-  ipcMain.handle('backup:getSettings', () => ops.getSettings())
-  ipcMain.handle('backup:setSettings', (_, partial: Partial<BackupSettings>) =>
-    ops.setSettings(partial)
-  )
-  ipcMain.handle('backup:revealInFinder', () => ops.revealInFinder())
-
-  // Return the ops so the host shares ONE instance with setAppDeps (matches the
-  // chat/pty pattern — IPC + tRPC back the same implementation).
-  return ops
 }

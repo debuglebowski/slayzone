@@ -11,6 +11,7 @@
 import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { CliInstallResult } from '@slayzone/platform'
+import type { AgentLifecycleEvent } from '@slayzone/terminal/shared'
 import type {
   createChatOps,
   createChatQueueOps,
@@ -232,6 +233,7 @@ export type MenuEventMap = {
   'browser-create-tab': [
     payload: { taskId: string; tabId: string; url?: string; background?: boolean }
   ]
+  'browser-agent-touched': [payload: { taskId: string; tabId: string }]
 }
 
 let menuEvents: TypedEmitter<MenuEventMap> | null = null
@@ -244,6 +246,24 @@ export function getMenuEvents(): TypedEmitter<MenuEventMap> {
   if (!menuEvents)
     throw new Error('menuEvents not initialized — call setMenuEvents() in main host first')
   return menuEvents
+}
+
+export type AgentLifecycleEventMap = {
+  event: [event: AgentLifecycleEvent]
+}
+
+let agentLifecycleEvents: TypedEmitter<AgentLifecycleEventMap> | null = null
+
+export function setAgentLifecycleEvents(ev: TypedEmitter<AgentLifecycleEventMap>): void {
+  agentLifecycleEvents = ev
+}
+
+export function getAgentLifecycleEvents(): TypedEmitter<AgentLifecycleEventMap> {
+  if (!agentLifecycleEvents)
+    throw new Error(
+      'agentLifecycleEvents not initialized — call setAgentLifecycleEvents() in main host first'
+    )
+  return agentLifecycleEvents
 }
 
 // App-level ops — the grab-bag of main-process capabilities (backup, clipboard,
@@ -367,6 +387,11 @@ export type AppDeps = {
   appRestartForUpdate: () => Promise<void>
   appCheckForUpdates: () => Promise<void>
 
+  // shortcuts — rebuild the native app menu from the persisted custom-shortcut
+  // overrides after the renderer writes them (was the `shortcuts:changed` IPC).
+  // No-op on a headless host (no native menu).
+  appRebuildMenuForShortcuts: () => void
+
   // side-car supervisor (dark-launch) — read-only status + log reveal for the
   // Diagnostics settings tab. Shape mirrors the host's `SidecarStatus`
   // (transport stays decoupled from the supervisor module).
@@ -398,6 +423,11 @@ export type AppDeps = {
     pos: { x: number; y: number } | null
   ) => void
   appWindowSetWindowButtonVisibility: (windowId: number | null, visible: boolean) => void
+  // Pull OS keyboard focus back to the connection's renderer webContents (e.g.
+  // so the browser find input receives keys instead of a focused WCV). Graceful
+  // no-op when the window can't be resolved / isn't focused. windowId is the
+  // caller's webContents id (ctx.windowId), matching `windowClose`.
+  appFocusRenderer: (windowId: number | null) => void
 
   // auth
   authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>
@@ -419,6 +449,8 @@ export type AppDeps = {
     destroyAllForTask: (taskId: string) => unknown
     setBounds: (viewId: string, bounds: unknown) => unknown
     setVisible: (viewId: string, visible: boolean) => unknown
+    /** Agent lock: drop OS-origin input while keeping the view rendering. */
+    setLocked: (viewId: string, locked: boolean) => unknown
     hideAll: () => unknown
     showAll: () => unknown
     setHandoffPolicy: (viewId: string, policy: unknown) => unknown

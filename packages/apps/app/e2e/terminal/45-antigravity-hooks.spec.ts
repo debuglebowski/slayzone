@@ -69,10 +69,12 @@ test.describe('Antigravity agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__agEvents = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__agEvents as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__agEvents as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__agUnsub = unsub
+      ;(window as Record<string, unknown>).__agUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -116,10 +118,12 @@ test.describe('Antigravity agent hooks', () => {
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__agEvents2 = []
-      const unsub = window.api.agentLifecycle.onEvent((ev) => {
-        ;((window as Record<string, unknown>).__agEvents2 as unknown[]).push(ev)
+      const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
+        onData: (ev) => {
+          ;((window as Record<string, unknown>).__agEvents2 as unknown[]).push(ev)
+        }
       })
-      ;(window as Record<string, unknown>).__agUnsub2 = unsub
+      ;(window as Record<string, unknown>).__agUnsub2 = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {

@@ -1,7 +1,6 @@
 import {
   app,
   BrowserWindow,
-  ipcMain,
   powerMonitor,
   autoUpdater as nativeAutoUpdater
 } from 'electron'
@@ -13,7 +12,6 @@ import electronUpdater from 'electron-updater'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { menuEvents } from './menu-events'
 
-const RENDERER_DRAIN_TIMEOUT_MS = 5_000
 let isRestarting = false
 
 let autoUpdater: typeof electronUpdater.autoUpdater | null = null
@@ -45,7 +43,6 @@ function getAutoUpdater() {
       const win = BrowserWindow.getAllWindows()[0]
       win?.setProgressBar(-1)
       menuEvents.emit('update-status', { type: 'downloaded', version: info.version })
-      win?.webContents.send('app:update-status', { type: 'downloaded', version: info.version }) // slice 5: drop legacy send
     })
 
     // On macOS, MacUpdater uses native Squirrel to stage the update after electron-updater
@@ -90,29 +87,6 @@ export function initAutoUpdater(): void {
   })
 }
 
-async function waitForRendererDrain(): Promise<'ready' | 'timeout' | 'no-window'> {
-  const win = BrowserWindow.getAllWindows()[0]
-  if (!win || win.isDestroyed()) return 'no-window'
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      ipcMain.removeListener('app:update-drain-ready', onReady)
-      resolve('timeout')
-    }, RENDERER_DRAIN_TIMEOUT_MS)
-    const onReady = (): void => {
-      clearTimeout(timer)
-      resolve('ready')
-    }
-    ipcMain.once('app:update-drain-ready', onReady)
-    try {
-      win.webContents.send('app:update-drain-request')
-    } catch {
-      clearTimeout(timer)
-      ipcMain.removeListener('app:update-drain-ready', onReady)
-      resolve('no-window')
-    }
-  })
-}
-
 export async function restartForUpdate(): Promise<void> {
   if (isRestarting) return
   isRestarting = true
@@ -141,12 +115,11 @@ export async function restartForUpdate(): Promise<void> {
       // and quit once staging completes. This is expected — no action needed here.
     }
 
-    const drainResult = await waitForRendererDrain()
     recordDiagnosticEvent({
       level: 'info',
       source: 'main',
       event: 'app.update.drain',
-      payload: { result: drainResult }
+      payload: { result: 'skipped-preload-removed' }
     })
 
     autoUpdater.quitAndInstall(false, true)
@@ -162,7 +135,6 @@ export async function restartForUpdate(): Promise<void> {
 
 function sendUpdateStatus(status: import('@slayzone/types').UpdateStatus): void {
   menuEvents.emit('update-status', status)
-  BrowserWindow.getAllWindows()[0]?.webContents.send('app:update-status', status) // slice 5: drop legacy send
 }
 
 export async function checkForUpdates(): Promise<void> {

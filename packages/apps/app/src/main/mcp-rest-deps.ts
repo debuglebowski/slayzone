@@ -27,8 +27,8 @@ import {
   renderToPng
 } from '@slayzone/task/electron'
 import { notifyRenderer } from './notify-renderer'
-import { broadcastToWindows } from './broadcast-to-windows'
 import { menuEvents } from './menu-events'
+import { agentLifecycleEvents } from './agent-lifecycle-events'
 import { listAllProcesses, killProcess, subscribeToProcessLogs } from '@slayzone/processes/server'
 import {
   getBrowserWebContents,
@@ -52,7 +52,7 @@ export function buildMcpRestDeps(
     db,
     notifyRenderer,
     automationEngine,
-    legacyBroadcast: broadcastToWindows,
+    agentLifecycle: agentLifecycleEvents,
     menu: menuEvents,
     taskBus: ipcMain,
     pty: {

@@ -16,7 +16,11 @@ export {
   type ShortcutDefinition,
   type ShortcutScope
 } from './shortcut-definitions'
-export { useShortcutStore } from './useShortcutStore'
+export {
+  useShortcutStore,
+  setShortcutBackend,
+  type ShortcutBackend
+} from './useShortcutStore'
 export { useShortcutDisplay } from './useShortcutDisplay'
 export { useShortcutAction } from './useShortcutAction'
 export { projectColorBg, type ProjectColorVariant } from './project-color'

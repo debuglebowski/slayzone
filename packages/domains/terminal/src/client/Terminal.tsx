@@ -5,7 +5,12 @@
 // bundle and undo the boot-time split. The package's "./client/Terminal"
 // export exists only for the lazy wrapper itself.
 import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import {
+  electronBootstrap,
+  useTRPC,
+  useTRPCClient,
+  useSubscription
+} from '@slayzone/transport/client'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
@@ -1737,7 +1742,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // webUtils. Zip by index with file items. This is a synchronous preload-
       // native call (webUtils.getPathForFile) with NO tRPC router procedure —
       // it stays on the IPC bridge.
-      const pastedPaths = window.api.files.getPastePaths()
+      const pastedPaths = electronBootstrap.getPastePaths()
 
       const paths: string[] = []
       let fileIdx = 0
@@ -1777,7 +1782,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // paths via webUtils.getPathForFile; zip by index with the File list.
       // Synchronous preload-native call (no tRPC router procedure) — stays on
       // the IPC bridge.
-      const droppedPaths = window.api.files.getDropPaths()
+      const droppedPaths = electronBootstrap.getDropPaths()
 
       try {
         const paths: string[] = []

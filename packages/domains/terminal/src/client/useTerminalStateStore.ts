@@ -250,14 +250,13 @@ async function pullReconcile(): Promise<void> {
     // heal 💤 in any window, not just the one that owned the session when the
     // window-targeted pty:hibernated IPC fired (the cross-window stale-dot bug).
     // `sessionList` is the tRPC procedure (throws if the client isn't mounted yet
-    // — caught below). `tabs.listHibernatedSessions` has NO tRPC router procedure
-    // (PTY-hibernation seeding is a separate slice), so it stays on the IPC
-    // bridge; missing/early it resolves to [].
+    // — caught below). The hibernated-set seed has NO tRPC router procedure yet
+    // (PTY-hibernation seeding is a separate slice) and the old
+    // The old hibernated-session preload bridge is gone (preload is
+    // bootstrap-only), so it resolves to [] until that procedure lands.
     const [sessions, hibernatedIds] = await Promise.all([
       getTrpcClient().pty.sessionList.query(),
-      typeof window !== 'undefined'
-        ? (window.api?.tabs?.listHibernatedSessions?.() ?? Promise.resolve<string[]>([]))
-        : Promise.resolve<string[]>([])
+      Promise.resolve<string[]>([])
     ])
     useTerminalStateStore
       .getState()

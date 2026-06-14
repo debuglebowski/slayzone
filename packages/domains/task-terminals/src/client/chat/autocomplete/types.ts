@@ -75,7 +75,7 @@ export interface NavigateActions {
  * agents / file matches). Threaded into each source factory by `useChatComposer`
  * (built from the tRPC client) so the plain factory functions stay React-free
  * and testable — passing `undefined` makes every `fetch` resolve to `[]`,
- * mirroring the previous null-guarded `window.api.chat` access.
+ * mirroring the previous null-guarded preload chat access.
  */
 export interface ChatListApi {
   listSkills: (cwd: string) => Promise<SkillInfo[]>

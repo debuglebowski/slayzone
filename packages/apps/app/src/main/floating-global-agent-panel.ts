@@ -585,10 +585,11 @@ export function attachFloatingGlobalAgentPanel(win: BrowserWindow): void {
 }
 
 export function setupFloatingGlobalAgentPanel(
-  overridesGetter?: () => Record<string, string | null>
+  overridesGetter?: () => Record<string, string | null>,
+  options?: { enableIpcHandlers?: boolean }
 ): void {
   if (overridesGetter) getShortcutOverrides = overridesGetter
-  setupFloatingGlobalAgentPanelIpc()
+  if (options?.enableIpcHandlers !== false) setupFloatingGlobalAgentPanelIpc()
 
   // did-resign-active = app-level signal, fires only when user leaves our
   // app entirely (ignores menu/tooltip transient blur). Detach trigger.

@@ -6,7 +6,7 @@
 // STUB until cap-shell-6 proper. The stubs return empty-shape results so
 // callers don't throw.
 
-import type { ElectronAPI } from '@slayzone/types'
+import type { _LegacyElectronAPI as ElectronAPI } from '@slayzone/types'
 import { nativeDialogRemote } from '../transport/mojo'
 
 type DialogNS = ElectronAPI['dialog']

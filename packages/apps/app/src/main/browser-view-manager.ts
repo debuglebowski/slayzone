@@ -838,7 +838,6 @@ export class BrowserViewManager {
       source: payload.source
     }
 
-    this.mainWindow.webContents.send('browser:create-task-from-link', intent) // legacy IPC (slice 5 drops)
     browserViewEvents.emit('create-task-from-link', intent) // tRPC app.browser.onCreateTaskFromLink
     return true
   }
@@ -871,7 +870,6 @@ export class BrowserViewManager {
           background: false,
           taskId: entry.taskId
         }
-        this.mainWindow.webContents.send('browser:event', newTabEvent) // legacy IPC (slice 5 drops)
         browserViewEvents.emit('event', newTabEvent) // tRPC app.browser.onEvent
         return true
       }
@@ -1076,10 +1074,6 @@ export class BrowserViewManager {
     const wc = view.webContents
     const entry = this.views.get(viewId)!
     const send = (event: BrowserViewEvent) => {
-      const win = this.windowFor(entry)
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('browser:event', event) // legacy IPC (slice 5 drops)
-      }
       browserViewEvents.emit('event', event) // tRPC app.browser.onEvent
     }
 
@@ -1179,10 +1173,6 @@ export class BrowserViewManager {
           control: false,
           kind: entry.kind
         }
-        const win = this.mainWindow
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('browser-view:shortcut', escapeShortcut) // legacy IPC (slice 5 drops)
-        }
         browserViewEvents.emit('shortcut', escapeShortcut) // tRPC app.browser.onShortcut
         return
       }
@@ -1208,27 +1198,22 @@ export class BrowserViewManager {
       // Cmd+Shift+R: reload the app (renderer)
       if (key === 'r' && input.meta && input.shift && !input.alt) {
         menuEvents.emit('reload-app')
-        win.webContents.send('app:reload-app') // slice 5: drop legacy send
         return
       }
       if (key === ',' && input.meta && input.shift) {
         menuEvents.emit('open-project-settings')
-        win.webContents.send('app:open-project-settings') // slice 5: drop legacy send
         return
       }
       if (key === ',' && input.meta) {
         menuEvents.emit('open-settings')
-        win.webContents.send('app:open-settings') // slice 5: drop legacy send
         return
       }
       if (key === 's' && input.meta && input.shift) {
         menuEvents.emit('screenshot-trigger')
-        win.webContents.send('app:screenshot-trigger') // slice 5: drop legacy send
         return
       }
       if (input.key === '§' && input.meta) {
         menuEvents.emit('go-home')
-        win.webContents.send('app:go-home') // slice 5: drop legacy send
         return
       }
 
@@ -1244,7 +1229,6 @@ export class BrowserViewManager {
         control: Boolean(input.control),
         kind: entry.kind
       }
-      win.webContents.send('browser-view:shortcut', cmdShortcut) // legacy IPC (slice 5 drops)
       browserViewEvents.emit('shortcut', cmdShortcut) // tRPC app.browser.onShortcut
     })
 
@@ -1298,9 +1282,6 @@ export class BrowserViewManager {
       // idle clock fresh so it isn't hibernated out from under an active user.
       touchTaskMainSession(entry.taskId)
       browserViewEvents.emit('focused', { viewId }) // tRPC app.browser.onFocused
-      const win = this.mainWindow
-      if (!win || win.isDestroyed()) return
-      win.webContents.send('browser-view:focused', { viewId }) // legacy IPC (slice 5 drops)
     })
 
     // Idle-close engagement (ongoing): typing / clicking / scrolling inside the

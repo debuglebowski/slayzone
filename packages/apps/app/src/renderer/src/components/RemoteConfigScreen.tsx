@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { electronBootstrap } from '@slayzone/transport/client'
 
 interface Props {
   // url may be empty (never configured) or stale (server unreachable). The
@@ -31,12 +32,12 @@ export function RemoteConfigScreen({ initialUrl }: Props) {
   // fallback in main). The normal signal comes from useTasksData, which never
   // mounts on this path — fire it explicitly or the user stares at nothing.
   useEffect(() => {
-    window.api.app.dataReady()
+    electronBootstrap.dataReady()
   }, [])
 
   const runProbe = async (): Promise<void> => {
     setProbe({ kind: 'probing' })
-    const result = await window.api.app.probeServerHealth(url)
+    const result = await electronBootstrap.probeServerHealth(url)
     if (result.ok && result.normalizedUrl) {
       setProbe({ kind: 'ok', normalizedUrl: result.normalizedUrl })
     } else {
@@ -49,12 +50,12 @@ export function RemoteConfigScreen({ initialUrl }: Props) {
     try {
       // Local fallback only flips the mode — never persists the (possibly
       // garbage) URL from the input. setBootSettings rejects invalid URLs.
-      await window.api.app.setBootSettings(
+      await electronBootstrap.setBootSettings(
         mode === 'remote'
           ? { server_mode: mode, remote_server_url: url.trim() }
           : { server_mode: mode }
       )
-      await window.api.app.relaunch()
+      await electronBootstrap.relaunch()
       // app.relaunch() exits the process; only the Playwright no-op gets here.
     } catch (err) {
       setProbe({ kind: 'fail', reason: err instanceof Error ? err.message : String(err) })

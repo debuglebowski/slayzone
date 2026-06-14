@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useVisibleInterval } from '@slayzone/ui'
 import type { DirEntry, GitFileStatus } from '../shared'
 import { STATUS_PRIORITY, compactChildren } from './EditorFileTree.utils'
 
@@ -27,11 +28,16 @@ export function useFileTreeData({
   onReady
 }: UseFileTreeDataArgs) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   // Map of dirPath -> children entries (lazy loaded)
   const [dirContents, setDirContents] = useState<Map<string, DirEntry[]>>(new Map())
+  const dirContentsRef = useRef(dirContents)
+  dirContentsRef.current = dirContents
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set())
   const expandedFolders = controlledExpanded ?? internalExpanded
+  const expandedFoldersRef = useRef(expandedFolders)
+  expandedFoldersRef.current = expandedFolders
   const controlledRef = useRef(controlledExpanded)
   controlledRef.current = controlledExpanded
   const setExpandedFolders = useCallback(
@@ -109,9 +115,9 @@ export function useFileTreeData({
 
   const loadDir = useCallback(
     async (dirPath: string) => {
-      const items = await queryClient.fetchQuery(
-        trpc.fileEditor.readDir.queryOptions({ rootPath: projectPath, dirPath })
-      )
+      const input = { rootPath: projectPath, dirPath }
+      const items = await trpcClient.fileEditor.readDir.query(input)
+      queryClient.setQueryData(trpc.fileEditor.readDir.queryKey(input), items)
       setDirContents((prev) => {
         const next = new Map(prev)
         next.set(dirPath, items)
@@ -119,8 +125,51 @@ export function useFileTreeData({
       })
       return items
     },
-    [projectPath, queryClient, trpc]
+    [projectPath, queryClient, trpc, trpcClient]
   )
+  const loadDirRef = useRef(loadDir)
+  loadDirRef.current = loadDir
+  const watchRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useSubscription(
+    trpc.fileEditor.watch.subscriptionOptions(
+      { rootPath: projectPath },
+      {
+        onData: (event) => {
+          const normalize = (p: string) => p.replace(/\/+$/, '')
+          if (normalize(event.root) !== normalize(projectPath)) return
+
+          const slash = event.relPath.lastIndexOf('/')
+          const parentDir = slash >= 0 ? event.relPath.slice(0, slash) : ''
+          const dirsToRefresh = new Set<string>([''])
+          if (parentDir && dirContentsRef.current.has(parentDir)) {
+            dirsToRefresh.add(parentDir)
+          }
+          for (const dir of expandedFoldersRef.current) dirsToRefresh.add(dir)
+
+          if (watchRefreshTimer.current) clearTimeout(watchRefreshTimer.current)
+          watchRefreshTimer.current = setTimeout(() => {
+            void queryClient.invalidateQueries(trpc.fileEditor.readDir.queryFilter())
+            for (const dir of dirsToRefresh) void loadDirRef.current(dir)
+          }, 100)
+        }
+      }
+    )
+  )
+
+  useEffect(() => {
+    return () => {
+      if (watchRefreshTimer.current) clearTimeout(watchRefreshTimer.current)
+    }
+  }, [])
+
+  // fs.watch can miss early create/delete events on some platforms while the
+  // WebSocket subscription is settling. Keep a cheap polling fallback for the
+  // visible directories only; watcher events still provide fast refreshes.
+  useVisibleInterval(() => {
+    void loadDirRef.current('')
+    for (const dir of expandedFoldersRef.current) void loadDirRef.current(dir)
+  }, 1_500)
 
   // Load root + persisted expanded folders on mount
   const onReadyRef = useRef(onReady)
@@ -134,6 +183,12 @@ export function useFileTreeData({
   // Reload expanded dirs on external file changes + clear collapsed folder caches
   useEffect(() => {
     if (!refreshKey) return
+    void queryClient.invalidateQueries(
+      trpc.fileEditor.readDir.queryFilter()
+    )
+    void queryClient.invalidateQueries(
+      trpc.fileEditor.gitStatus.queryFilter({ rootPath: projectPath })
+    )
     loadDir('')
     expandedFolders.forEach((dir) => loadDir(dir))
     setDirContents((prev) => {

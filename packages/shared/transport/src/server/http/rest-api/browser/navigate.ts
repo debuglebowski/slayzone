@@ -33,7 +33,8 @@ export function registerBrowserNavigateRoute(app: Express, deps: RestApiDeps): v
           deps.notifyRenderer,
           taskId,
           result.tabId,
-          deps.legacyBroadcast
+          deps.legacyBroadcast,
+          deps.menu
         )
       res.json({ ok: true, url: result.wc.getURL() })
     } catch (err) {

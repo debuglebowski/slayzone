@@ -103,7 +103,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // sessionId, so each handler filters/looks up by sessionId exactly as the IPC
   // path did. Kept ALWAYS enabled (no tab gating) — terminal correctness needs
   // every frame, in order. Behavior is preserved byte-for-byte from the prior
-  // window.api.pty.on* listeners; only the transport changed.
+  // old preload PTY listeners; only the transport changed.
   //
   // Note: only update EXISTING state, don't create state for unknown tasks —
   // state is created when the Terminal component subscribes (the

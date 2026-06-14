@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { useShortcutAction } from '@slayzone/ui'
 
 type FoundInPageEvent = {
@@ -26,6 +26,7 @@ export function useBrowserFind({
   containerRef
 }: UseBrowserFindParams) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [findMode, setFindMode] = useState(false)
   const [findText, setFindText] = useState('')
   const [findResult, setFindResult] = useState<{ active: number; total: number } | null>(null)
@@ -41,13 +42,11 @@ export function useBrowserFind({
       }
 
       focusLocalTarget()
-      // app.focusRenderer (app:focus-renderer) has no tRPC router — it pulls OS
-      // focus back to the renderer window (electron-native). Stays on the bridge.
-      void window.api.app.focusRenderer().finally(() => {
+      void trpcClient.app.window.focusRenderer.mutate().finally(() => {
         requestAnimationFrame(focusLocalTarget)
       })
     },
-    [containerRef]
+    [containerRef, trpcClient]
   )
 
   const closeFindMode = useCallback(() => {
@@ -55,11 +54,12 @@ export function useBrowserFind({
     setFindText('')
     setFindResult(null)
     if (activeViewId) {
-      // findInPage/stopFindInPage drive the WebContentsView's native find —
-      // electron-native view ops, kept on the bridge per migration design.
-      void window.api.browser.stopFindInPage(activeViewId, 'clearSelection')
+      void trpcClient.app.browser.stopFindInPage.mutate({
+        viewId: activeViewId,
+        action: 'clearSelection'
+      })
     }
-  }, [activeViewId])
+  }, [activeViewId, trpcClient])
 
   const openFindMode = useCallback(() => {
     if (multiDeviceMode || extensionsManagerOpen) return
@@ -75,9 +75,13 @@ export function useBrowserFind({
   const findNext = useCallback(
     (forward: boolean) => {
       if (!activeViewId || !findText) return
-      void window.api.browser.findInPage(activeViewId, findText, { forward, findNext: true })
+      void trpcClient.app.browser.findInPage.mutate({
+        viewId: activeViewId,
+        text: findText,
+        options: { forward, findNext: true }
+      })
     },
-    [activeViewId, findText]
+    [activeViewId, findText, trpcClient]
   )
 
   const handleFindTextChange = useCallback(
@@ -85,13 +89,20 @@ export function useBrowserFind({
       setFindText(text)
       if (!activeViewId) return
       if (text) {
-        void window.api.browser.findInPage(activeViewId, text, { forward: true })
+        void trpcClient.app.browser.findInPage.mutate({
+          viewId: activeViewId,
+          text,
+          options: { forward: true }
+        })
       } else {
-        void window.api.browser.stopFindInPage(activeViewId, 'clearSelection')
+        void trpcClient.app.browser.stopFindInPage.mutate({
+          viewId: activeViewId,
+          action: 'clearSelection'
+        })
         setFindResult(null)
       }
     },
-    [activeViewId]
+    [activeViewId, trpcClient]
   )
 
   // Subscribe to found-in-page results

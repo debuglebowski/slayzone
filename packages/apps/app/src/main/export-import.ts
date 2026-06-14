@@ -1,4 +1,4 @@
-import { app, dialog, BrowserWindow, type IpcMain } from 'electron'
+import { app, dialog, BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
@@ -240,10 +240,7 @@ async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
 
     const result = await importBundle(db, bundle)
 
-    // Notify renderer to refresh
-    const mainWin = BrowserWindow.getAllWindows()[0]
     notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
-    if (mainWin) mainWin.webContents.send('tasks:changed') // legacy IPC (slice 5 drops)
 
     return result
   } catch (e) {
@@ -305,9 +302,7 @@ export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImpo
           return { success: false, error: `Unsupported export version: ${bundle.meta?.version}` }
         }
         const result = await importBundle(db, bundle)
-        const mainWin = BrowserWindow.getAllWindows()[0]
         notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
-        if (mainWin) mainWin.webContents.send('tasks:changed') // legacy IPC (slice 5 drops)
         return result
       } catch (e) {
         return { success: false, error: String(e) }
@@ -332,46 +327,5 @@ export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImpo
     }
   }
 
-  return ops
-}
-
-export function registerExportImportHandlers(
-  ipcMain: IpcMain,
-  db: SlayzoneDb,
-  isTest = false
-): ExportImportOps {
-  const ops = buildExportImportOps(db, isTest)
-
-  ipcMain.handle('export-import:export-all', () => ops.exportAll())
-  ipcMain.handle('export-import:export-project', (_, projectId: string) =>
-    ops.exportProject(projectId)
-  )
-  ipcMain.handle('export-import:import', () => ops.importBundle())
-
-  // Test-only handlers that bypass native file dialogs
-  if (ops.testExportAllToPath) {
-    ipcMain.handle('export-import:test:export-all-to-path', (_, filePath: string) =>
-      ops.testExportAllToPath!(filePath)
-    )
-  }
-  if (ops.testExportProjectToPath) {
-    ipcMain.handle(
-      'export-import:test:export-project-to-path',
-      (_, projectId: string, filePath: string) => ops.testExportProjectToPath!(projectId, filePath)
-    )
-  }
-  if (ops.testImportFromPath) {
-    ipcMain.handle('export-import:test:import-from-path', (_, filePath: string) =>
-      ops.testImportFromPath!(filePath)
-    )
-  }
-  if (ops.testSetTaskParent) {
-    ipcMain.handle(
-      'export-import:test:set-task-parent',
-      (_, taskId: string, parentId: string | null) => ops.testSetTaskParent!(taskId, parentId)
-    )
-  }
-
-  // Return the ops so the host shares ONE instance with setAppDeps.
   return ops
 }

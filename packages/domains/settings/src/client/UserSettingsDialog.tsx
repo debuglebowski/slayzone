@@ -76,6 +76,15 @@ export function UserSettingsDialog({
     if (open && m) setDefaultTerminalMode(m as TerminalMode)
   }, [open, defaultModeQuery.data])
 
+  useEffect(() => {
+    if (!open) return
+    const onSettingsChanged = () => {
+      void defaultModeQuery.refetch()
+    }
+    window.addEventListener('sz:settings-changed', onSettingsChanged)
+    return () => window.removeEventListener('sz:settings-changed', onSettingsChanged)
+  }, [open, defaultModeQuery.refetch])
+
   const onDefaultTerminalModeChange = useCallback(
     (mode: TerminalMode) => {
       setDefaultTerminalMode(mode)
@@ -86,8 +95,10 @@ export function UserSettingsDialog({
   )
 
   useEffect(() => {
-    if (open) setActiveTab(initialTab)
-  }, [open, initialTab])
+    if (!open) return
+    setActiveTab(initialTab)
+    void defaultModeQuery.refetch()
+  }, [open, initialTab, defaultModeQuery.refetch])
 
   const navigateTo = (tab: string) => {
     setActiveTab(tab)

@@ -8,12 +8,12 @@ SlayZone is an Electron desktop app organized as a **pnpm monorepo** following t
 ┌─────────────────────────────────────────────────────────────┐
 │                    Electron Main                             │
 │  ┌─────────────┐  ┌─────────────────────────────────────┐   │
-│  │   SQLite    │  │  Domain Handlers (injected)          │   │
+│  │   SQLite    │  │  Embedded @slayzone/server           │   │
 │  │  (better-   │  │  terminal, task, projects, tags,     │   │
 │  │  sqlite3)   │  │  settings                            │   │
 │  └─────────────┘  └─────────────────────────────────────┘   │
 └────────────────────────────┬────────────────────────────────┘
-                             │ IPC (contextBridge)
+                             │ tRPC v11 over WebSocket
 ┌────────────────────────────┴────────────────────────────────┐
 │                    Electron Renderer                         │
 │  ┌──────────────────────────────────────────────────────┐   │
@@ -42,7 +42,8 @@ packages/
 │   └── worktrees/         # @slayzone/worktrees - Git worktrees
 │       └── DOMAIN.md      # Each domain has DOMAIN.md
 └── shared/
-    ├── types/             # @slayzone/types - ElectronAPI contract
+    ├── transport/         # @slayzone/transport - tRPC client/server routers
+    ├── types/             # @slayzone/types - shared app/domain contracts
     ├── ui/                # @slayzone/ui - Radix/shadcn components
     └── editor/            # @slayzone/editor - Milkdown rich text
 ```
@@ -56,7 +57,7 @@ domain/
 ├── DOMAIN.md           # Domain documentation
 └── src/
     ├── shared/         # Types, contracts (exported as ./shared)
-    ├── main/           # Electron main handlers (exported as ./main)
+    ├── server/         # Domain ops/routers/server integration
     └── client/         # React components, hooks (exported as ./client)
 ```
 
@@ -75,15 +76,19 @@ domain/
 
 ## Data Flow
 
+Renderer data goes through `@slayzone/transport` tRPC. Electron preload is intentionally
+bootstrap-only: server URL/mode, relaunch/settings for server mode, boot marks, and
+native file path extraction for drag/drop or paste.
+
 ### Task Creation
 ```
 CreateTaskDialog (task/client)
     ↓
-window.api.db.createTask()
+getTrpcClient().task.create.mutate()
     ↓
-preload/index.ts → ipcRenderer.invoke
+@slayzone/transport over ws://127.0.0.1:<port>/trpc
     ↓
-task/main/handlers.ts → SQLite
+@slayzone/server task router → SQLite
     ↓
 Response → useTasksData → KanbanBoard re-render
 ```
@@ -92,7 +97,7 @@ Response → useTasksData → KanbanBoard re-render
 ```
 Terminal (terminal/client)
     ↓
-window.api.pty.create(taskId, cwd, mode)
+getTrpcClient().pty.create.mutate({ taskId, cwd, mode })
     ↓
 terminal/main/pty-manager.ts → node-pty spawn
     ↓
@@ -111,7 +116,7 @@ Allowed domain dependencies:
 ```
 task → terminal, worktrees (TerminalMode, GitPanel)
 tasks → task, terminal (types, usePty)
-types → all domains (ElectronAPI contract)
+transport → all renderer clients (tRPC contract)
 ```
 
 ## Logo & Icons
@@ -145,4 +150,4 @@ To change the app icon:
 | SQLite + better-sqlite3 | Cross-process, sync access |
 | node-pty | Real PTY for Claude Code CLI |
 | Clara philosophy | AI-comprehensible codebase structure |
-| IPC→tRPC transport migration (8 slices) | Transport moving from `ipcMain` to tRPC-over-WebSocket. Per domain, tRPC router + IPC handler coexist during migration — both delegate to the **same domain ops** (single source of truth), IPC/REST cut later (renderer = slice 5, legacy IPC = slice 8). Every channel falls in one bucket: **tRPC-covered** (domain ops, dual-emit) · **REST-for-CLI** (`apps/cli` talks to the app over loopback HTTP — `apps/app/src/main/rest-api/`) · **Electron-only-IPC** (WebContentsView browser, webview, native window/menu, file dialogs, node-pty acks — stay in main) · **app-bootstrap** (port discovery, relaunch). Roadmap + rationale: parent-intent artifact `2e715da6` and `packages/shared/transport/src/server/app-deps.ts`. |
+| IPC→tRPC transport migration (8 slices) | Renderer transport is tRPC-over-WebSocket end to end. The preload bridge is bootstrap-only and must not grow: server URL/mode, relaunch/boot settings, boot marks, and native file-path extraction. Domain calls, browser/window/menu events, diagnostics, settings, terminal, and task data go through `@slayzone/transport`. REST remains only for CLI/MCP loopback APIs. Guard: `pnpm lint:window-api`. |

@@ -1,4 +1,3 @@
-import type { IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { LocalLeaderboardStats } from '@slayzone/types'
 import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/server'
@@ -54,8 +53,4 @@ export async function getLocalLeaderboardStats(db: SlayzoneDb): Promise<LocalLea
   }
 
   return { days }
-}
-
-export function registerLeaderboardHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
-  ipcMain.handle('leaderboard:get-local-stats', () => getLocalLeaderboardStats(db))
 }

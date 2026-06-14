@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { electronBootstrap } from '@slayzone/transport/client'
 import { Button, Input, Label, toast } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
@@ -26,7 +27,7 @@ export function ServerSettingsTab() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    void window.api.app.getServerUrl().then((server) => {
+    void electronBootstrap.getServerUrl().then((server) => {
       setMode(server.mode)
       setSavedMode(server.mode)
       // Local mode reports the embedded port URL — only a configured remote
@@ -42,7 +43,7 @@ export function ServerSettingsTab() {
 
   const validateUrl = async (): Promise<void> => {
     setProbe({ kind: 'probing' })
-    const result = await window.api.app.probeServerHealth(url)
+    const result = await electronBootstrap.probeServerHealth(url)
     if (result.ok && result.normalizedUrl) {
       setProbe({ kind: 'ok', normalizedUrl: result.normalizedUrl })
     } else {
@@ -53,12 +54,12 @@ export function ServerSettingsTab() {
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
-      await window.api.app.setBootSettings(
+      await electronBootstrap.setBootSettings(
         mode === 'remote' ? { server_mode: mode, remote_server_url: url } : { server_mode: mode }
       )
       // Mode change always requires a relaunch — embedded-server start/skip
       // is decided at boot time in main. The button label is the consent.
-      await window.api.app.relaunch()
+      await electronBootstrap.relaunch()
       // Under Playwright relaunch is a no-op — reflect the saved state.
       setSavedMode(mode)
       setSavedUrl(url.trim())

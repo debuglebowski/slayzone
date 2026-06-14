@@ -6,7 +6,7 @@
 // the 30 remaining namespaces so the renderer never throws on access.
 // cap-shell-3..7 replace the stubs namespace-by-namespace.
 
-import type { ElectronAPI } from '@slayzone/types'
+import type { _LegacyElectronAPI as ElectronAPI } from '@slayzone/types'
 import { buildApi } from './shims/index'
 import { installTestInvoke } from './shims/test-invoke'
 

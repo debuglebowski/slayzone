@@ -17,6 +17,7 @@
       "!**/.e2e-userdata/**",
       "!.claude/worktrees/**",
       "!**/convex/_generated/**",
+      "!packages/shared/mojo-bindings/src/generated/**",
       "!**/*.astro",
       "!**/*.css",
       "!pnpm-lock.yaml",
@@ -366,9 +367,9 @@
         "packages/apps/app/e2e/**/*.ts",
         "packages/apps/cli/src/commands/tasks/artifacts.ts",
         "packages/domains/agent-turns/**/*.{ts,tsx}",
-        "packages/domains/integrations/src/main/markdown.ts",
-        "packages/domains/task/src/client/ProcessesPanel.tsx",
-        "packages/domains/worktrees/src/client/GitDiffPanel.tsx"
+        "packages/domains/integrations/src/server/markdown.ts",
+        "packages/domains/task/src/client/ProcessesPanel.utils.ts",
+        "packages/domains/worktrees/src/client/GitDiffPanel.utils.ts"
       ],
       "linter": {
         "rules": { "suspicious": { "noControlCharactersInRegex": "off" } }

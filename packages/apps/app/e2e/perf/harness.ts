@@ -117,7 +117,7 @@ async function installInstrumentation(page: Page): Promise<void> {
       }
     }
 
-    // Recursively wrap every function on window.api so contextBridge-exposed
+    // Recursively wrap contextBridge-exposed functions so preload calls
     // namespaces (db, settings, theme, tags, …) get measured per call.
     const api = (window as unknown as { api?: Record<string, unknown> }).api
     if (api && typeof api === 'object') {

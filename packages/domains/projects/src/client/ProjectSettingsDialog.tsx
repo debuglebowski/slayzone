@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
@@ -77,9 +77,7 @@ export function ProjectSettingsDialog({
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
   const checkIntegrationLock = useCallback(async () => {
-    // `window.api.app.isPlaywright` is a synchronous preload flag (no tRPC proc) —
-    // leave it as-is.
-    if (!project || window.api.app.isPlaywright) {
+    if (!project || electronBootstrap.isPlaywright()) {
       setLockedByProvider(null)
       return
     }

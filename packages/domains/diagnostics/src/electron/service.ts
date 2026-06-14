@@ -325,7 +325,8 @@ async function runExport(request: DiagnosticsExportRequest): Promise<Diagnostics
 export function registerDiagnosticsHandlers(
   ipcMain: IpcMain,
   db: SlayzoneDb,
-  eventsDb: SlayzoneDb
+  eventsDb: SlayzoneDb,
+  options?: { enableIpcHandlers?: boolean }
 ): void {
   // Bind the data core's DBs (main settings DB + separate diagnostics events
   // DB), warm the config cache and flush any pre-bind buffered events.
@@ -337,6 +338,8 @@ export function registerDiagnosticsHandlers(
     getDb: getDiagnosticsDb,
     getConfig: getDiagnosticsConfig
   })
+
+  if (options?.enableIpcHandlers === false) return
 
   ipcMain.handle('diagnostics:getConfig', () => getDiagnosticsConfig())
 

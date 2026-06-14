@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import type { BrowserTab, BrowserTabsState } from '../shared'
 
 interface UseBrowserLockParams {
@@ -50,26 +50,39 @@ export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBro
     }
   }, [taskId, tabs, onTabsChange, setLocked])
 
+  // Latest tabs / onTabsChange kept in refs so the subscription handler reads
+  // fresh values without re-subscribing (tearing down the WS sub) on every tab
+  // update.
+  const tabsRef = useRef(tabs)
+  const onTabsChangeRef = useRef(onTabsChange)
+  useEffect(() => {
+    tabsRef.current = tabs
+    onTabsChangeRef.current = onTabsChange
+  }, [tabs, onTabsChange])
+
   // Listen for server-side trip events. The server also persists to DB and
   // notifies via tasks:changed, but renderer-local tabs state may have stale
   // values in flight that would clobber the flag on next writeback — stamp it
   // locally now so any pending update preserves it.
   //
-  // NOTE: `browser.onAgentTouched` (browser:agent-touched) has no tRPC router —
-  // it stays on the Electron preload bridge (electron-native event).
-  useEffect(() => {
-    if (!taskId) return
-    const off = window.api.browser.onAgentTouched(({ taskId: evtTaskId, tabId }) => {
-      if (evtTaskId !== taskId) return
-      const target = tabs.tabs.find((t) => t.id === tabId)
-      if (!target || target.agentTouched === true) return
-      onTabsChange({
-        ...tabs,
-        tabs: tabs.tabs.map((t) => (t.id === tabId ? { ...t, agentTouched: true } : t))
-      })
+  // Rides `menu.onBrowserAgentTouched` (tRPC over WS) — was the electron-native
+  // The old preload browser-agent listener before preload became
+  // bootstrap-only.
+  useSubscription(
+    trpc.menu.onBrowserAgentTouched.subscriptionOptions(undefined, {
+      enabled: !!taskId,
+      onData: ({ taskId: evtTaskId, tabId }) => {
+        if (evtTaskId !== taskId) return
+        const tabsState = tabsRef.current
+        const target = tabsState.tabs.find((t) => t.id === tabId)
+        if (!target || target.agentTouched === true) return
+        onTabsChangeRef.current({
+          ...tabsState,
+          tabs: tabsState.tabs.map((t) => (t.id === tabId ? { ...t, agentTouched: true } : t))
+        })
+      }
     })
-    return off
-  }, [taskId, tabs, onTabsChange])
+  )
 
   const activeLocked = !!activeTab?.locked
 

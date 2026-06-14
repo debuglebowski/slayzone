@@ -371,7 +371,7 @@ export function registerAgentHookRoute(
       type,
       timestamp: Date.now()
     }
-    deps.legacyBroadcast?.('agent:lifecycle', event)
+    deps.agentLifecycle?.emit('event', event)
 
     // PRIMARY resume-id capture — persist the CLI session id into
     // provider_config[agentId].conversationId for the capture agents. Gated to

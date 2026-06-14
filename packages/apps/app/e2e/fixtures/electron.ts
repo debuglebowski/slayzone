@@ -472,7 +472,7 @@ export const test = base.extend<ElectronFixtures>({
   ]
 })
 
-/** Seed helpers — call window.api methods to create test data without UI interaction */
+/** Seed helpers — use the vanilla tRPC client to create test data without UI interaction. */
 export function seed(page: Page) {
   return {
     createProject: (data: { name: string; color: string; path?: string }) =>
@@ -647,7 +647,10 @@ export async function clickProject(page: Page, abbrev: string) {
 
 /** Click the + button in the sidebar to add a project */
 export async function clickAddProject(page: Page) {
-  await sidebar(page).locator('button[title="Add project"]').click()
+  const button = sidebar(page)
+    .locator('button[aria-label="Add project"], button[title="Add project"], button[title^="Add project"]')
+    .first()
+  await button.click()
 }
 
 /** Click the settings button in the sidebar footer */
@@ -754,8 +757,9 @@ export async function openProjectSettings(page: Page, abbrev: string): Promise<L
       }
     } else {
       const projectId = await page.evaluate((projectAbbrev) => {
-        return window.api.db
-          .getProjects()
+        return window
+          .getTrpcVanillaClient()
+          .projects.list.query()
           .then(
             (projects) =>
               projects.find((project) => project.name.slice(0, 2).toUpperCase() === projectAbbrev)

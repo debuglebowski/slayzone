@@ -207,14 +207,9 @@ import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
 import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
-import { registerBackupHandlers, startAutoBackup, stopAutoBackup } from './backup'
-// Domain handlers
-import { registerProjectHandlers } from '@slayzone/projects/electron'
+import { buildBackupOps, startAutoBackup, stopAutoBackup } from './backup'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
-  registerTaskHandlers,
-  registerTaskTemplateHandlers,
-  registerFilesHandlers,
   filesPathExists,
   filesSaveTempImage
 } from '@slayzone/task/electron'
@@ -224,19 +219,11 @@ import {
   handleAttentionTransition,
   taskOps
 } from '@slayzone/task/server'
-import { registerTagHandlers } from '@slayzone/tags/electron'
-import { registerFeedbackHandlers } from '@slayzone/feedback/electron'
-import {
-  registerSettingsHandlers,
-  registerThemeHandlers,
-  wireNativeThemeBridge
-} from '@slayzone/settings/electron'
+import { buildFeedbackOps } from '@slayzone/feedback/server'
+import { wireNativeThemeBridge } from '@slayzone/settings/electron'
 import { SettingsService } from '@slayzone/settings/server'
 import {
-  registerPtyHandlers,
-  getPtyHandlerChannels,
   wireWarmWindowCleanup,
-  registerUsageHandlers,
   killAllPtys,
   shutdownAllPtys,
   killPtysByTaskId,
@@ -247,7 +234,9 @@ import {
   onSessionChange,
   onGlobalStateChange,
   onPtyInputSubmit,
-  registerChatHandlers,
+  buildUsageOps,
+  createChatOps,
+  createChatQueueOps,
   shutdownChatTransports,
   killAllChatTransports,
   setOnHostKillHandler,
@@ -284,15 +273,8 @@ import {
   taskWindowsOps,
   taskWindowsEvents
 } from './task-windows'
-import {
-  registerTerminalTabsHandlers,
-  createPtyEnricher,
-  markTabSpawned,
-  markTabHibernated
-} from '@slayzone/task-terminals/electron'
-import { registerWorktreeHandlers } from '@slayzone/worktrees/electron'
+import { createPtyEnricher, markTabSpawned, markTabHibernated } from '@slayzone/task-terminals/electron'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
-import { registerAgentTurnsHandlers, initAgentTurnsBroadcast } from '@slayzone/agent-turns/electron'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import {
   registerDiagnosticsHandlers,
@@ -313,8 +295,7 @@ import {
   type LockOutcome
 } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
-import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
-import { registerIntegrationHandlers, getSafeStorageCipher } from '@slayzone/integrations/electron'
+import { getSafeStorageCipher } from '@slayzone/integrations/electron'
 import {
   startSyncPoller,
   pushTaskAfterEdit,
@@ -323,16 +304,14 @@ import {
   pushUnarchiveToProviders,
   startDiscoveryPoller,
   resetSyncFlags,
-  setCredentialCipher
+  setCredentialCipher,
+  createIntegrationOps,
+  ensureIntegrationSchema
 } from '@slayzone/integrations/server'
-import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/electron'
-import { registerHistoryHandlers } from '@slayzone/history/electron'
-import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
-import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/electron'
-import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/electron'
-import { registerScreenshotHandlers, captureBrowserViewScreenshot } from './screenshot'
+import { closeAllWatchers } from '@slayzone/file-editor/electron'
+import { AutomationEngine } from '@slayzone/automations/electron'
+import { captureBrowserViewScreenshot } from './screenshot'
 import {
-  registerClipboardHandlers,
   writeFilePaths,
   readFilePaths,
   hasFilePaths
@@ -355,12 +334,13 @@ import {
   processEvents,
   createStatsPoller
 } from '@slayzone/processes/server'
-import { registerExportImportHandlers } from './export-import'
+import { buildExportImportOps } from './export-import'
 import { notifyEvents } from './notify-renderer'
 import { menuEvents } from './menu-events'
 import { automationsEvents } from './automations-events'
 import { telemetryEvents } from './telemetry-events'
-import { registerLeaderboardHandlers, getLocalLeaderboardStats } from './leaderboard'
+import { agentLifecycleEvents } from './agent-lifecycle-events'
+import { getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
@@ -854,7 +834,6 @@ function handleOAuthDeepLink(url: string): void {
   if (parsed.hostname === 'task' && normalizedPath.length > 1) {
     const taskId = normalizedPath.slice(1)
     menuEvents.emit('open-task', { taskId })
-    mainWindow?.webContents.send('app:open-task', taskId) // slice 5: drop legacy send
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.show()
@@ -923,17 +902,14 @@ app.on('open-url', (event, url) => {
 
 function emitOpenSettings(): void {
   menuEvents.emit('open-settings')
-  mainWindow?.webContents.send('app:open-settings') // slice 5: drop legacy send
 }
 
 function emitOpenProjectSettings(): void {
   menuEvents.emit('open-project-settings')
-  mainWindow?.webContents.send('app:open-project-settings') // slice 5: drop legacy send
 }
 
 function emitNewTemporaryTask(): void {
   menuEvents.emit('new-temporary-task')
-  mainWindow?.webContents.send('app:new-temporary-task') // slice 5: drop legacy send
 }
 
 function getCliSrc(): string {
@@ -1112,7 +1088,6 @@ function createMainWindow(): void {
     if (matchesElectronInput(ei, getEffectiveKeys('go-home', currentOverrides))) {
       event.preventDefault()
       menuEvents.emit('go-home')
-      mainWindow?.webContents.send('app:go-home') // slice 5: drop legacy send
       return
     }
 
@@ -1132,31 +1107,26 @@ function createMainWindow(): void {
     if (matchesElectronInput(ei, getEffectiveKeys('terminal-screenshot', currentOverrides))) {
       event.preventDefault()
       menuEvents.emit('screenshot-trigger')
-      mainWindow?.webContents.send('app:screenshot-trigger') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('reload-browser', currentOverrides))) {
       event.preventDefault()
       menuEvents.emit('reload-browser')
-      mainWindow?.webContents.send('app:reload-browser') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('reload-app', currentOverrides))) {
       event.preventDefault()
       menuEvents.emit('reload-app')
-      mainWindow?.webContents.send('app:reload-app') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('global-agent-panel', currentOverrides))) {
       event.preventDefault()
       menuEvents.emit('toggle-global-agent-panel')
-      mainWindow?.webContents.send('app:toggle-global-agent-panel') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('agent-status-panel', currentOverrides))) {
       event.preventDefault()
       menuEvents.emit('toggle-agent-status-panel')
-      mainWindow?.webContents.send('app:toggle-agent-status-panel') // slice 5: drop legacy send
     }
   })
 
@@ -1438,7 +1408,6 @@ app
               accelerator: getMenuAccelerator('sync-session-id', overrides),
               click: () => {
                 menuEvents.emit('sync-session-id')
-                mainWindow?.webContents.send('app:sync-session-id') // slice 5: drop legacy send
               }
             }
           ]
@@ -1466,7 +1435,6 @@ app
               registerAccelerator: false,
               click: () => {
                 menuEvents.emit('reload-browser')
-                mainWindow?.webContents.send('app:reload-browser') // slice 5: drop legacy send
               }
             },
             {
@@ -1475,7 +1443,6 @@ app
               registerAccelerator: false,
               click: () => {
                 menuEvents.emit('reload-app')
-                mainWindow?.webContents.send('app:reload-app') // slice 5: drop legacy send
               }
             },
             { role: 'toggleDevTools' },
@@ -1518,7 +1485,6 @@ app
                   return
                 }
                 menuEvents.emit('close-current-focus')
-                mainWindow?.webContents.send('app:close-current-focus') // slice 5: drop legacy send
               }
             },
             {
@@ -1526,7 +1492,6 @@ app
               accelerator: getMenuAccelerator('close-task', overrides),
               click: () => {
                 menuEvents.emit('close-active-task')
-                mainWindow?.webContents.send('app:close-active-task') // slice 5: drop legacy send
               }
             },
             { type: 'separator' },
@@ -1554,15 +1519,14 @@ app
       buildAppMenu(currentOverrides)
     })
 
-    // Register diagnostics first so IPC handlers below are instrumented.
+    // Bind diagnostics first so tRPC diagnostics works and IPC below is instrumented.
     // Flushes any events buffered before this point (boot.start, crash detect, lock outcome).
-    registerDiagnosticsHandlers(ipcMain, db, diagDb)
+    registerDiagnosticsHandlers(ipcMain, db, diagDb, { enableIpcHandlers: isPlaywright })
     setIpcSuccessHook((channel, args, result) => {
       const entry = IPC_TELEMETRY_MAP[channel]
       if (!entry) return
       const props = entry.props(args, result)
       if (props === undefined) return
-      mainWindow?.webContents.send('telemetry:ipc-event', entry.event, props) // legacy IPC (bridge drops)
       telemetryEvents.emit('ipc-event', entry.event, props) // tRPC telemetry.onIpcEvent source
     })
     logBoot('diagnostics IPC registered')
@@ -1611,7 +1575,6 @@ app
     // Register domain handlers (inject ipcMain and db)
     const notifyTasksChanged = (): void => {
       notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
-      mainWindow?.webContents.send('tasks:changed') // legacy IPC (slice 5 drops)
     }
 
     // Self-heal a stale/phantom Claude conversation id before a resume builds
@@ -1623,31 +1586,20 @@ app
     // renderer hint from the ledger so a null hint can't mint over a known
     // conversation (the restart-clobber fix).
     registerConversationResolver(db)
-    registerProjectHandlers(ipcMain, db)
-    registerTaskHandlers(ipcMain, db, notifyTasksChanged, ensureDataRoot())
-    registerTaskTemplateHandlers(ipcMain, db)
-    registerTagHandlers(ipcMain, db)
-    registerHistoryHandlers(ipcMain, db)
-    registerSettingsHandlers(ipcMain, settings)
-    // Build ops ONCE here; share the same instance with the tRPC router via
-    // setAppDeps below (matches the chat/pty pattern — one impl, both transports).
-    const feedbackOps = registerFeedbackHandlers(ipcMain, db)
-    logBoot('core domain handlers registered')
+    const feedbackOps = buildFeedbackOps(db)
+    logBoot('core domain ops built')
 
     // Single OS→app theme listener. Both the tRPC `settings.onThemeChanged`
-    // subscription and the IPC `theme:changed` broadcast (registerThemeHandlers)
-    // derive from this one bus. Permanent — survives the slice-5 IPC removal.
+    // subscription and native OS theme changes derive from this one bus.
     wireNativeThemeBridge()
-    registerThemeHandlers(ipcMain, db)
-    const usageOps = registerUsageHandlers(ipcMain, db)
-    registerPtyHandlers(ipcMain, db)
+    const usageOps = buildUsageOps(db)
     // Warm-process tab-count cleanup on window death — covers both the IPC and
     // tRPC push paths (registered before any renderer window is created).
     wireWarmWindowCleanup(app)
-    logBoot('pty handlers registered')
+    logBoot('terminal runtime wired')
 
-    setupFloatingGlobalAgentPanel(() => currentOverrides)
-    setupTaskWindows()
+    setupFloatingGlobalAgentPanel(() => currentOverrides, { enableIpcHandlers: isPlaywright })
+    setupTaskWindows({ enableIpcHandlers: isPlaywright })
     logBoot('floating global agent panel + task windows set up')
 
     // Task automation: auto-move tasks on terminal state change
@@ -1690,17 +1642,8 @@ app
       ;(globalThis as Record<string, unknown>).__markSessionUserInput = markSessionUserInput
       ;(globalThis as Record<string, unknown>).__clearSessionUserInputMark =
         clearSessionUserInputMark
-      ;(globalThis as Record<string, unknown>).__restorePtyHandlers = () => {
-        // Remove exactly the channels registerPtyHandlers binds (self-tracked, so
-        // the list can never drift out of sync), then re-register.
-        for (const ch of getPtyHandlerChannels()) {
-          ipcMain.removeHandler(ch)
-        }
-        registerPtyHandlers(ipcMain, db)
-      }
     }
 
-    registerTerminalTabsHandlers(ipcMain, db)
     setPtyEnricher(createPtyEnricher(db))
     // Wire the per-tab `was_spawned` flag so pty + chat spawn/exit handlers
     // can flip it without importing the task-terminals package (would cycle).
@@ -1738,13 +1681,13 @@ app
         return row?.path ?? null
       }
     })
-    logBoot('terminal-tabs handlers registered')
-    // Build the chat ops once (IPC handlers) and hand the SAME instances to the
-    // tRPC chat router via setChatDeps below — single source of truth, both
-    // transports coexist until the renderer drops IPC (slice 5).
-    const chatHandlerOps = registerChatHandlers(ipcMain, db, {
+    logBoot('terminal tab runtime wired')
+    const chatHandlerOps = {
+      ops: createChatOps(db, {
       onChatEvent: initChatTurnSubscriber(db)
-    })
+      }),
+      queueOps: createChatQueueOps(db)
+    }
     // One-shot: backfill `chatMode` for tasks that pre-date the chat-mode UI so
     // upgraded users keep their current `--allow-dangerously-skip-permissions`
     // behavior instead of suddenly hitting denials.
@@ -1758,43 +1701,31 @@ app
     } catch (err) {
       console.error('[chat-handlers] backfillChatModes failed:', err)
     }
-    registerFilesHandlers(ipcMain)
-    registerWorktreeHandlers(ipcMain, db)
-    registerAgentTurnsHandlers(ipcMain, db)
-    // Legacy IPC bridge for agent-turn changes — pure domain emits on
-    // agentTurnsEvents; this mirrors onto webContents.send until renderer drops IPC.
-    initAgentTurnsBroadcast()
-    logBoot('files+worktree+agent-turns registered')
+    logBoot('files+worktree+agent-turns tRPC-only')
     // xterm-mode turn detection: every Enter press in a PTY = turn boundary.
     onPtyInputSubmit(initPtyTurnSubscriber(db))
-    registerAiConfigHandlers(ipcMain, db)
-    logBoot('ai-config handlers registered')
+    logBoot('ai-config tRPC-only')
     // Inject the Electron safeStorage cipher into the electron-free credential store.
     setCredentialCipher(getSafeStorageCipher())
-    const integrationHandles = await registerIntegrationHandlers(ipcMain, db, {
-      enableTestChannels: isPlaywright
-    })
-    logBoot('integration handlers registered')
-    registerFileEditorHandlers(ipcMain)
-    registerClipboardHandlers(ipcMain)
-    registerScreenshotHandlers(browserViewManager)
-    const exportImportOps = registerExportImportHandlers(ipcMain, db, isPlaywright)
-    registerLeaderboardHandlers(ipcMain, db)
-    registerTestPanelHandlers(ipcMain, db)
-    logBoot('misc handlers registered (file-editor/clipboard/screenshot/export/leaderboard/tests)')
+    await ensureIntegrationSchema(db)
+    const integrationOps = createIntegrationOps(db, { enableTestChannels: isPlaywright })
+    const integrationHandles = {
+      ops: integrationOps,
+      pushGithubTask: integrationOps.pushGithubTask
+    }
+    logBoot('integration ops built')
+    const exportImportOps = buildExportImportOps(db, isPlaywright)
+    logBoot('misc tRPC ops built')
     const notifyAutomationsChanged = (): void => {
-      mainWindow?.webContents.send('automations:changed') // legacy IPC (bridge drops)
       automationsEvents.emit('changed') // tRPC automations.onChanged source
       notifyTasksChanged()
     }
     const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
-    registerAutomationHandlers(ipcMain, db, automationEngine)
     automationEngine.start(ipcMain)
     powerMonitor.on('resume', () => automationEngine.runCatchup())
-    registerUsageAnalyticsHandlers(ipcMain, db)
-    const backupOps = registerBackupHandlers(ipcMain, db)
+    const backupOps = buildBackupOps(db)
     startAutoBackup(db)
-    logBoot('domain IPC handlers registered')
+    logBoot('domain tRPC ops registered')
 
     // Start MCP server off the boot critical path. The dynamic import resolves
     // a heavy module graph (~70ms sync work even though it returns a Promise),
@@ -1858,6 +1789,7 @@ app
           // REST/MCP task-open routes dual-emit on (alongside the legacy `app:*`
           // broadcasts), so `menu.*` subs and IPC coexist (renderer cutover is slice 5).
           mod.setMenuEvents(menuEvents)
+          mod.setAgentLifecycleEvents(agentLifecycleEvents)
           // App-level ops — the SAME single instances the IPC handlers built and
           // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
           // implementation, both transports coexist (renderer cutover is slice 5).
@@ -1913,6 +1845,12 @@ app
             appAdjustZoom: (command) => applyAppZoom(command),
             appRestartForUpdate: () => restartForUpdate(),
             appCheckForUpdates: () => checkForUpdates(),
+            appRebuildMenuForShortcuts: () => {
+              void (async () => {
+                currentOverrides = await settings.getShortcutOverrides()
+                buildAppMenu(currentOverrides)
+              })()
+            },
             appGetSidecarStatus: getSidecarStatusSnapshot,
             appRevealSidecarLog: revealSidecarLogInFinder,
             appWindowGetContentBounds: () => mainWindow?.getContentBounds() ?? null,
@@ -1940,6 +1878,13 @@ app
               const win = wc ? BrowserWindow.fromWebContents(wc) : null
               if (win) win.setWindowButtonVisibility(visible)
             },
+            appFocusRenderer: (windowId) => {
+              if (windowId == null) return
+              const wc = webContents.fromId(windowId)
+              const win = wc ? BrowserWindow.fromWebContents(wc) : null
+              if (!wc || !win || win.isDestroyed() || !win.isFocused()) return
+              wc.focus()
+            },
             // Browser view ops — same BrowserViewManager singleton + shared
             // browserExtensionOps the `browser:*` IPC handlers use (coexistence
             // until slice 5). browserExtensionOps is defined below in this
@@ -1950,6 +1895,7 @@ app
               destroyAllForTask: (taskId) => browserViewManager.destroyAllForTask(taskId),
               setBounds: (viewId, bounds) => browserViewManager.setBounds(viewId, bounds as never),
               setVisible: (viewId, visible) => browserViewManager.setVisible(viewId, visible),
+              setLocked: (viewId, locked) => browserViewManager.setLocked(viewId, locked),
               hideAll: () => browserViewManager.hideAll(),
               showAll: () => browserViewManager.showAll(),
               setHandoffPolicy: (viewId, policy) =>
@@ -2669,26 +2615,29 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // IPC test
     ipcMain.on('ping', () => console.log('pong'))
 
-    // Shell: open external URLs (restrict to safe schemes) — logic lives in
-    // ./shell-open, shared with the tRPC app.shell router (coexistence til slice 5)
-    ipcMain.handle(
-      'shell:open-external',
-      (
-        _event,
-        url: string,
-        options?: {
-          blockDesktopHandoff?: boolean
-          desktopHandoff?: DesktopHandoffPolicy
-        }
-      ) => shellOpenExternal(url, options)
-    )
+    // Legacy renderer IPC handles are kept only for Playwright's __testInvoke
+    // bridge while tests finish moving to tRPC. Production renderer transport is
+    // bootstrap IPC + tRPC over WebSocket.
+    if (isPlaywright) {
+      ipcMain.handle(
+        'shell:open-external',
+        (
+          _event,
+          url: string,
+          options?: {
+            blockDesktopHandoff?: boolean
+            desktopHandoff?: DesktopHandoffPolicy
+          }
+        ) => shellOpenExternal(url, options)
+      )
 
-    ipcMain.handle('shell:open-path', (_event, absPath: string) => shellOpenPath(absPath))
+      ipcMain.handle('shell:open-path', (_event, absPath: string) => shellOpenPath(absPath))
 
-    ipcMain.handle(
-      'auth:github-system-sign-in',
-      (_event, input: { convexUrl: string; redirectTo: string }) => githubSystemSignIn(input)
-    )
+      ipcMain.handle(
+        'auth:github-system-sign-in',
+        (_event, input: { convexUrl: string; redirectTo: string }) => githubSystemSignIn(input)
+      )
+    }
 
     ipcMain.on('app:data-ready', () => {
       if (rendererDataReady) return
@@ -2704,8 +2653,11 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       if (typeof label === 'string') logBoot(`renderer: ${label}`)
     })
 
-    ipcMain.handle('app:getVersion', () => app.getVersion())
-    ipcMain.handle('app:get-trpc-port', () => awaitTrpcPort())
+    if (isPlaywright) {
+      ipcMain.handle('app:getVersion', () => app.getVersion())
+      ipcMain.handle('app:get-trpc-port', () => awaitTrpcPort())
+    }
+    ipcMain.handle('app:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
     // Bootstrap IPCs for the server-mode toggle (slice 7) — the last new IPC
     // before slice 8 drops the legacy bridge. These three CANNOT be tRPC: they
     // decide which server the tRPC client connects to in the first place.
@@ -2749,155 +2701,135 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ipcMain.handle('app:probe-server-health', (_event, rawUrl: string) =>
       probeRemoteHealth(typeof rawUrl === 'string' ? rawUrl : '')
     )
-    // Read-only side-car (dark-launch) status for the Diagnostics settings tab.
-    // Same impls as the tRPC `app.meta.getSidecarStatus` / `revealSidecarLog`
-    // procs (coexistence until the legacy IPC surface drops).
-    ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())
-    ipcMain.handle('app:reveal-sidecar-log', () => revealSidecarLogInFinder())
-    ipcMain.handle('app:is-tests-panel-enabled', () => isLabEnabled('labs_tests_panel'))
-    ipcMain.on('app:is-tests-panel-enabled-sync', (event) => {
-      event.returnValue = isLabEnabled('labs_tests_panel')
-    })
-    ipcMain.handle('app:is-loop-mode-enabled', () => isLabEnabled('labs_loop_mode'))
-    ipcMain.on('app:is-loop-mode-enabled-sync', (event) => {
-      event.returnValue = isLabEnabled('labs_loop_mode')
-    })
-    ipcMain.handle('app:get-protocol-client-status', () => protocolClientStatus)
-    ipcMain.handle('app:get-zoom-factor', () => mainWindow?.webContents.zoomFactor ?? 1)
-    ipcMain.handle('app:adjust-zoom', (_event, command: AppZoomCommand) => applyAppZoom(command))
-    ipcMain.handle('app:focus-renderer', (event) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win || win.isDestroyed() || !win.isFocused()) return
-      event.sender.focus()
-    })
-    ipcMain.handle('app:restart-for-update', () => restartForUpdate())
-    ipcMain.handle('app:check-for-updates', () => checkForUpdates())
-    ipcMain.handle('app:cli-status', () => checkCliInstalled())
-    ipcMain.handle('app:install-cli', () => installCli(getCliSrc()))
+    if (isPlaywright) {
+      ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())
+      ipcMain.handle('app:reveal-sidecar-log', () => revealSidecarLogInFinder())
+      ipcMain.handle('app:is-tests-panel-enabled', () => isLabEnabled('labs_tests_panel'))
+      ipcMain.on('app:is-tests-panel-enabled-sync', (event) => {
+        event.returnValue = isLabEnabled('labs_tests_panel')
+      })
+      ipcMain.handle('app:is-loop-mode-enabled', () => isLabEnabled('labs_loop_mode'))
+      ipcMain.on('app:is-loop-mode-enabled-sync', (event) => {
+        event.returnValue = isLabEnabled('labs_loop_mode')
+      })
+      ipcMain.handle('app:get-protocol-client-status', () => protocolClientStatus)
+      ipcMain.handle('app:get-zoom-factor', () => mainWindow?.webContents.zoomFactor ?? 1)
+      ipcMain.handle('app:adjust-zoom', (_event, command: AppZoomCommand) => applyAppZoom(command))
+      ipcMain.handle('app:focus-renderer', (event) => {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        if (!win || win.isDestroyed() || !win.isFocused()) return
+        event.sender.focus()
+      })
+      ipcMain.handle('app:restart-for-update', () => restartForUpdate())
+      ipcMain.handle('app:check-for-updates', () => checkForUpdates())
+      ipcMain.handle('app:cli-status', () => checkCliInstalled())
+      ipcMain.handle('app:install-cli', () => installCli(getCliSrc()))
 
-    // Window close
-    ipcMain.handle('window:close', (event) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (win) win.close()
-    })
+      ipcMain.handle('window:close', (event) => {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        if (win) win.close()
+      })
 
-    // Adjust macOS traffic-light position. Pass null to restore default.
-    ipcMain.handle(
-      'window:set-traffic-light-position',
-      (event, pos: { x: number; y: number } | null) => {
+      ipcMain.handle(
+        'window:set-traffic-light-position',
+        (event, pos: { x: number; y: number } | null) => {
+          if (process.platform !== 'darwin') return
+          const win = BrowserWindow.fromWebContents(event.sender)
+          if (!win) return
+          win.setWindowButtonPosition(pos ?? { x: 10, y: 12 })
+        }
+      )
+
+      ipcMain.handle('window:set-window-button-visibility', (event, visible: boolean) => {
         if (process.platform !== 'darwin') return
         const win = BrowserWindow.fromWebContents(event.sender)
         if (!win) return
-        win.setWindowButtonPosition(pos ?? { x: 10, y: 12 })
-      }
-    )
+        win.setWindowButtonVisibility(visible)
+      })
 
-    // Show/hide macOS traffic-light buttons (close/min/max).
-    ipcMain.handle('window:set-window-button-visibility', (event, visible: boolean) => {
-      if (process.platform !== 'darwin') return
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win) return
-      win.setWindowButtonVisibility(visible)
-    })
+      ipcMain.handle(
+        'dialog:showOpenDialog',
+        async (
+          _,
+          options: {
+            title?: string
+            defaultPath?: string
+            properties?: Array<
+              | 'openFile'
+              | 'openDirectory'
+              | 'multiSelections'
+              | 'showHiddenFiles'
+              | 'createDirectory'
+              | 'promptToCreate'
+              | 'noResolveAliases'
+              | 'treatPackageAsDirectory'
+              | 'dontAddToRecent'
+            >
+            filters?: Array<{ name: string; extensions: string[] }>
+          }
+        ) => dialog.showOpenDialog(options)
+      )
 
-    // Dialog
-    ipcMain.handle(
-      'dialog:showOpenDialog',
-      async (
-        _,
-        options: {
-          title?: string
-          defaultPath?: string
-          properties?: Array<
-            | 'openFile'
-            | 'openDirectory'
-            | 'multiSelections'
-            | 'showHiddenFiles'
-            | 'createDirectory'
-            | 'promptToCreate'
-            | 'noResolveAliases'
-            | 'treatPackageAsDirectory'
-            | 'dontAddToRecent'
-          >
-          filters?: Array<{ name: string; extensions: string[] }>
+      ipcMain.handle(
+        'webview:register-browser-tab',
+        (_, taskId: string, tabId: string, webContentsId: number) => {
+          registerBrowserTab(taskId, tabId, webContentsId)
         }
-      ) => {
-        return dialog.showOpenDialog(options)
-      }
-    )
-
-    // Browser panel registry (CLI browser control — per-tab)
-    ipcMain.handle(
-      'webview:register-browser-tab',
-      (_, taskId: string, tabId: string, webContentsId: number) => {
-        registerBrowserTab(taskId, tabId, webContentsId)
-      }
-    )
-    ipcMain.handle('webview:unregister-browser-tab', (_, taskId: string, tabId: string) => {
-      unregisterBrowserTab(taskId, tabId)
-    })
-    ipcMain.handle('webview:set-active-browser-tab', (_, taskId: string, tabId: string | null) => {
-      setActiveBrowserTab(taskId, tabId)
-    })
-
-    // Webview shortcut interception — state + impl lifted to module-scope
-    // webviewOps; handlers below delegate (legacy IPC, slice 5 drops).
-    ipcMain.handle('webview:register-shortcuts', (event, webviewId: number) =>
-      webviewOps.registerShortcuts(webviewId, event.sender.id)
-    )
-
-    ipcMain.handle(
-      'webview:set-keyboard-passthrough',
-      (_event, webviewId: number, enabled: boolean) =>
-        webviewOps.setKeyboardPassthrough(webviewId, enabled)
-    )
-
-    ipcMain.handle(
-      'webview:set-desktop-handoff-policy',
-      (_, webviewId: number, policy: DesktopHandoffPolicy | null) =>
-        webviewOps.setDesktopHandoffPolicy(webviewId, policy)
-    )
-
-    ipcMain.handle(
-      'webview:open-devtools-bottom',
-      (_, webviewId: number, options?: { probe?: boolean }) =>
-        webviewOps.openDevToolsBottom(webviewId, options)
-    )
-
-    // legacy IPC (slice 5 drops) — delegate to shared webviewOps
-    ipcMain.handle('webview:close-devtools', (_, webviewId: number) =>
-      webviewOps.closeDevTools(webviewId)
-    )
-
-    ipcMain.handle('webview:open-devtools-detached', (_, webviewId: number) =>
-      webviewOps.openDevToolsDetached(webviewId)
-    )
-
-    // Inline DevTools IPC handlers removed — DevTools now docked natively via browser-view-manager
-
-    ipcMain.handle('webview:is-devtools-opened', (_, webviewId: number) =>
-      webviewOps.isDevToolsOpened(webviewId)
-    )
-
-    // Webview device emulation
-    ipcMain.handle(
-      'webview:enable-device-emulation',
-      (
-        _,
-        webviewId: number,
-        params: {
-          screenSize: { width: number; height: number }
-          viewSize: { width: number; height: number }
-          deviceScaleFactor: number
-          screenPosition: 'mobile' | 'desktop'
-          userAgent?: string
+      )
+      ipcMain.handle('webview:unregister-browser-tab', (_, taskId: string, tabId: string) => {
+        unregisterBrowserTab(taskId, tabId)
+      })
+      ipcMain.handle(
+        'webview:set-active-browser-tab',
+        (_, taskId: string, tabId: string | null) => {
+          setActiveBrowserTab(taskId, tabId)
         }
-      ) => webviewOps.enableDeviceEmulation(webviewId, params)
-    )
-
-    ipcMain.handle('webview:disable-device-emulation', (_, webviewId: number) =>
-      webviewOps.disableDeviceEmulation(webviewId)
-    )
+      )
+      ipcMain.handle('webview:register-shortcuts', (_event, webviewId: number) =>
+        webviewOps.registerShortcuts(webviewId)
+      )
+      ipcMain.handle(
+        'webview:set-keyboard-passthrough',
+        (_event, webviewId: number, enabled: boolean) =>
+          webviewOps.setKeyboardPassthrough(webviewId, enabled)
+      )
+      ipcMain.handle(
+        'webview:set-desktop-handoff-policy',
+        (_, webviewId: number, policy: DesktopHandoffPolicy | null) =>
+          webviewOps.setDesktopHandoffPolicy(webviewId, policy)
+      )
+      ipcMain.handle(
+        'webview:open-devtools-bottom',
+        (_, webviewId: number, options?: { probe?: boolean }) =>
+          webviewOps.openDevToolsBottom(webviewId, options)
+      )
+      ipcMain.handle('webview:close-devtools', (_, webviewId: number) =>
+        webviewOps.closeDevTools(webviewId)
+      )
+      ipcMain.handle('webview:open-devtools-detached', (_, webviewId: number) =>
+        webviewOps.openDevToolsDetached(webviewId)
+      )
+      ipcMain.handle('webview:is-devtools-opened', (_, webviewId: number) =>
+        webviewOps.isDevToolsOpened(webviewId)
+      )
+      ipcMain.handle(
+        'webview:enable-device-emulation',
+        (
+          _,
+          webviewId: number,
+          params: {
+            screenSize: { width: number; height: number }
+            viewSize: { width: number; height: number }
+            deviceScaleFactor: number
+            screenPosition: 'mobile' | 'desktop'
+            userAgent?: string
+          }
+        ) => webviewOps.enableDeviceEmulation(webviewId, params)
+      )
+      ipcMain.handle('webview:disable-device-emulation', (_, webviewId: number) =>
+        webviewOps.disableDeviceEmulation(webviewId)
+      )
+    }
 
     // --- Browser View Manager (WebContentsView) ---
     // Wire handoff policy mirror so main-process hardening listeners see WCV policies
@@ -2909,102 +2841,88 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
     })
 
-    // Lifecycle
-    ipcMain.handle('browser:create-view', (_, opts: CreateViewOpts) =>
-      browserViewManager.createView(opts)
-    )
-    ipcMain.handle('browser:reparent-to-current-window', (event, viewId: string) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win || win.isDestroyed()) return { ok: false }
-      const ok = browserViewManager.reparentView(viewId, win)
-      return { ok }
-    })
-    ipcMain.handle('browser:destroy-view', (_, viewId: string) =>
-      browserViewManager.destroyView(viewId)
-    )
-    ipcMain.handle('browser:destroy-all-for-task', (_, taskId: string) =>
-      browserViewManager.destroyAllForTask(taskId)
-    )
-
-    // Bounds & visibility
-    ipcMain.handle('browser:set-bounds', (_, viewId: string, bounds: ViewBounds) =>
-      browserViewManager.setBounds(viewId, bounds)
-    )
-    ipcMain.handle('browser:set-visible', (_, viewId: string, visible: boolean) =>
-      browserViewManager.setVisible(viewId, visible)
-    )
-    ipcMain.handle('browser:set-locked', (_, viewId: string, locked: boolean) =>
-      browserViewManager.setLocked(viewId, locked)
-    )
-    ipcMain.handle('browser:hide-all', () => browserViewManager.hideAll())
-    ipcMain.handle('browser:show-all', () => browserViewManager.showAll())
-    ipcMain.handle(
-      'browser:set-handoff-policy',
-      (_, viewId: string, policy: DesktopHandoffPolicy | null) =>
-        browserViewManager.setHandoffPolicy(viewId, policy)
-    )
-
-    // Test-only: drive the tRPC `app.browser.onShortcut` source directly. The
-    // renderer consumes browser-WCV shortcuts via that subscription (not the
-    // legacy `browser-view:shortcut` IPC, which has no renderer consumer post
-    // slice-5). A real synthesized keypress (browser:send-input-event) does NOT
-    // reliably fire the view's before-input-event in the headless harness, so we
-    // emit on the source directly — consistent with the preload __testEmit bridge.
     if (isPlaywright) {
+      ipcMain.handle('browser:create-view', (_, opts: CreateViewOpts) =>
+        browserViewManager.createView(opts)
+      )
+      ipcMain.handle('browser:reparent-to-current-window', (event, viewId: string) => {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        if (!win || win.isDestroyed()) return { ok: false }
+        const ok = browserViewManager.reparentView(viewId, win)
+        return { ok }
+      })
+      ipcMain.handle('browser:destroy-view', (_, viewId: string) =>
+        browserViewManager.destroyView(viewId)
+      )
+      ipcMain.handle('browser:destroy-all-for-task', (_, taskId: string) =>
+        browserViewManager.destroyAllForTask(taskId)
+      )
+      ipcMain.handle('browser:set-bounds', (_, viewId: string, bounds: ViewBounds) =>
+        browserViewManager.setBounds(viewId, bounds)
+      )
+      ipcMain.handle('browser:set-visible', (_, viewId: string, visible: boolean) =>
+        browserViewManager.setVisible(viewId, visible)
+      )
+      ipcMain.handle('browser:set-locked', (_, viewId: string, locked: boolean) =>
+        browserViewManager.setLocked(viewId, locked)
+      )
+      ipcMain.handle('browser:hide-all', () => browserViewManager.hideAll())
+      ipcMain.handle('browser:show-all', () => browserViewManager.showAll())
+      ipcMain.handle(
+        'browser:set-handoff-policy',
+        (_, viewId: string, policy: DesktopHandoffPolicy | null) =>
+          browserViewManager.setHandoffPolicy(viewId, policy)
+      )
       ipcMain.handle('browser:__test-emit-shortcut', (_, payload: unknown) =>
         browserViewEvents.emit('shortcut', payload)
       )
+      ipcMain.handle('browser:navigate', (_, viewId: string, url: string) =>
+        browserViewManager.navigate(viewId, url)
+      )
+      ipcMain.handle('browser:go-back', (_, viewId: string) => browserViewManager.goBack(viewId))
+      ipcMain.handle('browser:go-forward', (_, viewId: string) =>
+        browserViewManager.goForward(viewId)
+      )
+      ipcMain.handle('browser:reload', (_, viewId: string, ignoreCache?: boolean) =>
+        browserViewManager.reload(viewId, ignoreCache)
+      )
+      ipcMain.handle('browser:stop', (_, viewId: string) => browserViewManager.stop(viewId))
+      ipcMain.handle('browser:execute-js', (_, viewId: string, code: string) =>
+        browserViewManager.executeJs(viewId, code)
+      )
+      ipcMain.handle('browser:insert-css', (_, viewId: string, css: string) =>
+        browserViewManager.insertCss(viewId, css)
+      )
+      ipcMain.handle('browser:remove-css', (_, viewId: string, key: string) =>
+        browserViewManager.removeCss(viewId, key)
+      )
+      ipcMain.handle('browser:set-zoom', (_, viewId: string, factor: number) =>
+        browserViewManager.setZoom(viewId, factor)
+      )
+      ipcMain.handle('browser:focus', (_, viewId: string) => browserViewManager.focus(viewId))
+      ipcMain.handle(
+        'browser:find-in-page',
+        (
+          _,
+          viewId: string,
+          text: string,
+          options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }
+        ) => browserViewManager.findInPage(viewId, text, options)
+      )
+      ipcMain.handle(
+        'browser:stop-find-in-page',
+        (_, viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') =>
+          browserViewManager.stopFindInPage(viewId, action)
+      )
+      ipcMain.handle('browser:set-keyboard-passthrough', (_, viewId: string, enabled: boolean) =>
+        browserViewManager.setKeyboardPassthrough(viewId, enabled)
+      )
+      ipcMain.handle(
+        'browser:send-input-event',
+        (_, viewId: string, input: Electron.KeyboardInputEvent) =>
+          browserViewManager.sendInputEvent(viewId, input)
+      )
     }
-
-    // Navigation
-    ipcMain.handle('browser:navigate', (_, viewId: string, url: string) =>
-      browserViewManager.navigate(viewId, url)
-    )
-    ipcMain.handle('browser:go-back', (_, viewId: string) => browserViewManager.goBack(viewId))
-    ipcMain.handle('browser:go-forward', (_, viewId: string) =>
-      browserViewManager.goForward(viewId)
-    )
-    ipcMain.handle('browser:reload', (_, viewId: string, ignoreCache?: boolean) =>
-      browserViewManager.reload(viewId, ignoreCache)
-    )
-    ipcMain.handle('browser:stop', (_, viewId: string) => browserViewManager.stop(viewId))
-
-    // Content
-    ipcMain.handle('browser:execute-js', (_, viewId: string, code: string) =>
-      browserViewManager.executeJs(viewId, code)
-    )
-    ipcMain.handle('browser:insert-css', (_, viewId: string, css: string) =>
-      browserViewManager.insertCss(viewId, css)
-    )
-    ipcMain.handle('browser:remove-css', (_, viewId: string, key: string) =>
-      browserViewManager.removeCss(viewId, key)
-    )
-    ipcMain.handle('browser:set-zoom', (_, viewId: string, factor: number) =>
-      browserViewManager.setZoom(viewId, factor)
-    )
-    ipcMain.handle('browser:focus', (_, viewId: string) => browserViewManager.focus(viewId))
-    ipcMain.handle(
-      'browser:find-in-page',
-      (
-        _,
-        viewId: string,
-        text: string,
-        options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }
-      ) => browserViewManager.findInPage(viewId, text, options)
-    )
-    ipcMain.handle(
-      'browser:stop-find-in-page',
-      (_, viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') =>
-        browserViewManager.stopFindInPage(viewId, action)
-    )
-    ipcMain.handle('browser:set-keyboard-passthrough', (_, viewId: string, enabled: boolean) =>
-      browserViewManager.setKeyboardPassthrough(viewId, enabled)
-    )
-    ipcMain.handle(
-      'browser:send-input-event',
-      (_, viewId: string, input: Electron.KeyboardInputEvent) =>
-        browserViewManager.sendInputEvent(viewId, input)
-    )
     ipcMain.on(
       'browser:request-create-task-from-link',
       (event, payload: { url?: unknown; linkText?: unknown }) => {
@@ -3024,43 +2942,35 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       void shell.openExternal(url)
     })
 
-    // DevTools
-    ipcMain.handle(
-      'browser:open-devtools',
-      (_, viewId: string, mode: 'bottom' | 'right' | 'undocked' | 'detach') =>
-        browserViewManager.openDevTools(viewId, mode)
-    )
-    ipcMain.handle('browser:close-devtools', (_, viewId: string) =>
-      browserViewManager.closeDevTools(viewId)
-    )
-    ipcMain.handle('browser:is-devtools-open', (_, viewId: string) =>
-      browserViewManager.isDevToolsOpen(viewId)
-    )
-
-    // Chrome extension management — delegate to shared browserExtensionOps
-    // (same impl behind tRPC app.browser.*). legacy IPC (slice 5 drops).
-    ipcMain.handle('browser:get-extensions', () => browserExtensionOps.getExtensions())
-    ipcMain.handle('browser:load-extension', () => browserExtensionOps.loadExtension())
-    ipcMain.handle('browser:remove-extension', (_, extensionId: string) =>
-      browserExtensionOps.removeExtension(extensionId)
-    )
-    ipcMain.handle('browser:discover-browser-extensions', () =>
-      browserExtensionOps.discoverBrowserExtensions()
-    )
-    ipcMain.handle('browser:import-extension', (_, extPath: string) =>
-      browserExtensionOps.importExtension(extPath)
-    )
-    ipcMain.handle('browser:activate-extension', (_, extensionId: string) =>
-      browserExtensionOps.activateExtension(extensionId)
-    )
-
-    // Non-test handle: needed by CLI browser registry
-    ipcMain.handle('browser:get-web-contents-id', (_, viewId: string) =>
-      browserViewManager.getWebContentsId(viewId)
-    )
-
-    // Test-only handles
     if (isPlaywright) {
+      ipcMain.handle(
+        'browser:open-devtools',
+        (_, viewId: string, mode: 'bottom' | 'right' | 'undocked' | 'detach') =>
+          browserViewManager.openDevTools(viewId, mode)
+      )
+      ipcMain.handle('browser:close-devtools', (_, viewId: string) =>
+        browserViewManager.closeDevTools(viewId)
+      )
+      ipcMain.handle('browser:is-devtools-open', (_, viewId: string) =>
+        browserViewManager.isDevToolsOpen(viewId)
+      )
+      ipcMain.handle('browser:get-extensions', () => browserExtensionOps.getExtensions())
+      ipcMain.handle('browser:load-extension', () => browserExtensionOps.loadExtension())
+      ipcMain.handle('browser:remove-extension', (_, extensionId: string) =>
+        browserExtensionOps.removeExtension(extensionId)
+      )
+      ipcMain.handle('browser:discover-browser-extensions', () =>
+        browserExtensionOps.discoverBrowserExtensions()
+      )
+      ipcMain.handle('browser:import-extension', (_, extPath: string) =>
+        browserExtensionOps.importExtension(extPath)
+      )
+      ipcMain.handle('browser:activate-extension', (_, extensionId: string) =>
+        browserExtensionOps.activateExtension(extensionId)
+      )
+      ipcMain.handle('browser:get-web-contents-id', (_, viewId: string) =>
+        browserViewManager.getWebContentsId(viewId)
+      )
       ipcMain.handle(
         'app:get-renderer-zoom-factor',
         () => mainWindow?.webContents.zoomFactor ?? null
@@ -3203,7 +3113,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.zoomLevel = 0
           menuEvents.emit('zoom-factor-changed', mainWindow.webContents.zoomFactor)
-          mainWindow.webContents.send('app:zoom-factor-changed', mainWindow.webContents.zoomFactor) // slice 5: drop legacy send
         }
 
         // 6. Clear oauth state
@@ -3278,68 +3187,56 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     const ptyStatsPoller = createStatsPoller(
       () => getPtyPids(),
       (stats) => {
-        mainWindow?.webContents.send('pty:stats', stats) // legacy IPC (bridge drops)
         ptyEvents.emit('stats', stats) // tRPC pty.onStats source
       }
     )
     onSessionChange(() => ptyStatsPoller.ensureStarted())
 
-    // Register process IPC handlers
-    ipcMain.handle(
-      'processes:create',
-      (
-        _event,
-        projectId: string | null,
-        taskId: string | null,
-        label: string,
-        command: string,
-        cwd: string,
-        autoRestart: boolean
-      ) => {
-        return createProcess(projectId, taskId, label, command, cwd, autoRestart)
-      }
-    )
-    ipcMain.handle(
-      'processes:spawn',
-      (
-        _event,
-        projectId: string | null,
-        taskId: string | null,
-        label: string,
-        command: string,
-        cwd: string,
-        autoRestart: boolean
-      ) => {
-        return spawnProcess(projectId, taskId, label, command, cwd, autoRestart)
-      }
-    )
-    ipcMain.handle(
-      'processes:update',
-      (_event, processId: string, updates: Parameters<typeof updateProcess>[1]) => {
-        return updateProcess(processId, updates)
-      }
-    )
-    ipcMain.handle('processes:stop', (_event, processId: string) => {
-      return stopProcess(processId)
-    })
-    ipcMain.handle('processes:kill', (_event, processId: string) => {
-      return killProcess(processId)
-    })
-    ipcMain.handle('processes:restart', (_event, processId: string) => {
-      return restartProcess(processId)
-    })
-    ipcMain.handle(
-      'processes:listForTask',
-      (_event, taskId: string | null, projectId: string | null) => {
-        return listForTask(taskId, projectId)
-      }
-    )
-    ipcMain.handle('processes:listAll', () => {
-      return listAllProcesses()
-    })
-    ipcMain.handle('processes:killTask', (_event, taskId: string) => {
-      killTaskProcesses(taskId)
-    })
+    if (isPlaywright) {
+      ipcMain.handle(
+        'processes:create',
+        (
+          _event,
+          projectId: string | null,
+          taskId: string | null,
+          label: string,
+          command: string,
+          cwd: string,
+          autoRestart: boolean
+        ) => createProcess(projectId, taskId, label, command, cwd, autoRestart)
+      )
+      ipcMain.handle(
+        'processes:spawn',
+        (
+          _event,
+          projectId: string | null,
+          taskId: string | null,
+          label: string,
+          command: string,
+          cwd: string,
+          autoRestart: boolean
+        ) => spawnProcess(projectId, taskId, label, command, cwd, autoRestart)
+      )
+      ipcMain.handle(
+        'processes:update',
+        (_event, processId: string, updates: Parameters<typeof updateProcess>[1]) =>
+          updateProcess(processId, updates)
+      )
+      ipcMain.handle('processes:stop', (_event, processId: string) => stopProcess(processId))
+      ipcMain.handle('processes:kill', (_event, processId: string) => killProcess(processId))
+      ipcMain.handle('processes:restart', (_event, processId: string) =>
+        restartProcess(processId)
+      )
+      ipcMain.handle(
+        'processes:listForTask',
+        (_event, taskId: string | null, projectId: string | null) =>
+          listForTask(taskId, projectId)
+      )
+      ipcMain.handle('processes:listAll', () => listAllProcesses())
+      ipcMain.handle('processes:killTask', (_event, taskId: string) => {
+        killTaskProcesses(taskId)
+      })
+    }
 
     app.on('activate', function () {
       // On macOS it's common to re-create a window in the app when the
@@ -3373,8 +3270,7 @@ const webviewDesktopHandoffPolicyCleanupRegistered = new Set<number>()
 // setAppDeps webview closures) can own it across both transports.
 const registeredWebviews = new Set<number>()
 const keyboardPassthroughWebviews = new Set<number>()
-// tRPC shortcut stream — dual-emitted alongside the legacy `webview:shortcut`
-// webContents.send in registerShortcuts (coexistence until slice 5).
+// tRPC shortcut stream for browser-tab keyboard handling.
 const webviewEvents = new EventEmitter() as EventEmitter & {
   on(
     event: 'shortcut',
@@ -3406,9 +3302,8 @@ const webviewOps = {
     wc.setUserAgent(_chromeUa)
     return true
   },
-  // callerWcId (the renderer that registered) receives the legacy IPC
-  // `webview:shortcut`; tRPC subscribers receive it via webviewEvents.
-  registerShortcuts: (webviewId: number, callerWcId?: number) => {
+  // tRPC subscribers receive browser-tab shortcuts via webviewEvents.
+  registerShortcuts: (webviewId: number) => {
     if (registeredWebviews.has(webviewId)) return
     const wc = webContents.fromId(webviewId)
     if (!wc) return
@@ -3422,9 +3317,6 @@ const webviewOps = {
         e.preventDefault()
         const key = input.key.toLowerCase()
         const shift = Boolean(input.shift)
-        if (callerWcId != null) {
-          webContents.fromId(callerWcId)?.send('webview:shortcut', { key, shift, webviewId }) // legacy IPC (slice 5 drops)
-        }
         webviewEvents.emit('shortcut', { webviewId, key, shift }) // tRPC app.webview.onShortcut
       }
     })

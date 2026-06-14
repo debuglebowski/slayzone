@@ -2,7 +2,7 @@ import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
 // QUARANTINED 2026-05-16: WebPanelView post-Meta+o doesn't register a view
-// (listViews empty). Helpers migrated to window.api.browser.listViews; the
+// (listViews empty). Helpers query the browser router directly; the
 // panel-toggle → useBrowserView createView path likely blocked by ownership
 // claim or another render guard. Needs source-side trace.
 test.describe
@@ -37,7 +37,7 @@ test.describe
     const getWebPanelViewId = async (mainWindow: import('@playwright/test').Page) => {
       return await mainWindow.evaluate(async () => {
         type V = { viewId: string; partition: string; kind: string }
-        const views = (await window.api.browser.listViews()) as V[]
+        const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
         return wp?.viewId ?? null
       })
@@ -46,7 +46,7 @@ test.describe
     const getWebPanelUrl = async (mainWindow: import('@playwright/test').Page) => {
       return await mainWindow.evaluate(async () => {
         type V = { viewId: string; partition: string; kind: string; url: string }
-        const views = (await window.api.browser.listViews()) as V[]
+        const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
         return wp?.url ?? 'no-webview'
       })
@@ -55,12 +55,14 @@ test.describe
     const resetWebPanelToAboutBlank = async (mainWindow: import('@playwright/test').Page) => {
       return await mainWindow.evaluate(async () => {
         type V = { viewId: string; partition: string; kind: string; url: string }
-        const views = (await window.api.browser.listViews()) as V[]
+        const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
         if (!wp) return 'no-webview'
-        await window.api.browser.navigate(wp.viewId, 'about:blank')
+        await window
+          .getTrpcVanillaClient()
+          .app.browser.navigate.mutate({ viewId: wp.viewId, url: 'about:blank' })
         await new Promise((resolve) => setTimeout(resolve, 700))
-        const after = (await window.api.browser.listViews()) as V[]
+        const after = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         return after.find((v) => v.viewId === wp.viewId)?.url ?? 'no-webview'
       })
     }
@@ -71,16 +73,16 @@ test.describe
     ) => {
       return await mainWindow.evaluate(async (targetUrl) => {
         type V = { viewId: string; partition: string; kind: string; url: string }
-        const views = (await window.api.browser.listViews()) as V[]
+        const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
         if (!wp) return 'no-webview'
         // Inject a synthetic window.open via executeJs to provoke the popup handler.
-        await window.api.browser.executeJs(
-          wp.viewId,
-          `window.open(${JSON.stringify(targetUrl)}, '_blank')`
-        )
+        await window.getTrpcVanillaClient().app.browser.executeJs.mutate({
+          viewId: wp.viewId,
+          code: `window.open(${JSON.stringify(targetUrl)}, '_blank')`
+        })
         await new Promise((resolve) => setTimeout(resolve, 900))
-        const after = (await window.api.browser.listViews()) as V[]
+        const after = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         return after.find((v) => v.viewId === wp.viewId)?.url ?? 'no-webview'
       }, popupUrl)
     }
@@ -221,8 +223,11 @@ test.describe
     }) => {
       const result = await mainWindow.evaluate(async () => {
         try {
-          await window.api.shell.openExternal('http://127.0.0.1:38495/open', {
-            desktopHandoff: { protocol: 'figma', hostScope: 'figma.com' }
+          await window.getTrpcVanillaClient().app.shell.openExternal.mutate({
+            url: 'http://127.0.0.1:38495/open',
+            options: {
+              desktopHandoff: { protocol: 'figma', hostScope: 'figma.com' }
+            }
           })
           return { blocked: false, error: null }
         } catch (error) {

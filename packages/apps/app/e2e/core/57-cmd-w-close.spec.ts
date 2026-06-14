@@ -5,21 +5,10 @@ import type { Page } from '@playwright/test'
 import fs from 'fs'
 import path from 'path'
 
-// Simulate the menu accelerator click by sending IPC directly from the main process.
-// This is more reliable than keyboard.press for native menu accelerators in Playwright.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function sendIPC(electronApp: any, channel: string): Promise<void> {
-  await electronApp.evaluate(
-    (
-      { BrowserWindow }: { BrowserWindow: typeof Electron.CrossProcessExports.BrowserWindow },
-      ch: string
-    ) => {
-      BrowserWindow.getAllWindows()
-        .find((w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:'))
-        ?.webContents.send(ch)
-    },
-    channel
-  )
+async function emitMenu(page: Page, event: 'close-current-focus' | 'close-active-task') {
+  await page.evaluate((eventName) => {
+    return window.getTrpcVanillaClient().menu.testEmit.mutate({ event: eventName })
+  }, event)
 }
 
 test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
@@ -140,10 +129,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
 
   // ── Terminal group tabs ──────────────────────────────────────────────────
 
-  test('Cmd+W closes extra terminal group when terminal is focused', async ({
-    mainWindow,
-    electronApp
-  }) => {
+  test('Cmd+W closes extra terminal group when terminal is focused', async ({ mainWindow }) => {
     await closeOpenDialogs(mainWindow)
     await expect(terminalGroupTabs(mainWindow)).toHaveCount(1, { timeout: 3_000 })
 
@@ -171,8 +157,8 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
     await focusTerminal(mainWindow)
     await expect
       .poll(
-        async () => {
-          await sendIPC(electronApp, 'app:close-current-focus')
+          async () => {
+          await emitMenu(mainWindow, 'close-current-focus')
           await mainWindow.waitForTimeout(80)
           return await terminalGroupTabs(mainWindow).count()
         },
@@ -182,13 +168,12 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
   })
 
   test('Cmd+W closes the task tab when only the main terminal group remains', async ({
-    mainWindow,
-    electronApp
+    mainWindow
   }) => {
     await expect(terminalGroupTabs(mainWindow)).toHaveCount(1, { timeout: 2_000 })
 
     await focusTerminal(mainWindow)
-    await sendIPC(electronApp, 'app:close-current-focus')
+    await emitMenu(mainWindow, 'close-current-focus')
 
     await expect(mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible')).toHaveCount(
       0,
@@ -201,10 +186,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
 
   // ── Editor file tabs ─────────────────────────────────────────────────────
 
-  test('Cmd+W closes active editor file when editor is focused', async ({
-    mainWindow,
-    electronApp
-  }) => {
+  test('Cmd+W closes active editor file when editor is focused', async ({ mainWindow }) => {
     await closeOpenDialogs(mainWindow)
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
@@ -230,7 +212,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
       await expect
         .poll(
           async () => {
-            await sendIPC(electronApp, 'app:close-current-focus')
+            await emitMenu(mainWindow, 'close-current-focus')
             await mainWindow.waitForTimeout(80)
             return await editorTab(mainWindow, editorFixtureFile)
               .isVisible({ timeout: 200 })
@@ -240,7 +222,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
         )
         .toBe(false)
     } else {
-      await sendIPC(electronApp, 'app:close-current-focus')
+      await emitMenu(mainWindow, 'close-current-focus')
       await expect(mainWindow.locator('[data-panel-id="editor"]:visible')).toBeVisible({
         timeout: 3_000
       })
@@ -248,8 +230,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
   })
 
   test('Cmd+W closes active editor file when rich markdown pane is focused', async ({
-    mainWindow,
-    electronApp
+    mainWindow
   }) => {
     await closeOpenDialogs(mainWindow)
     await goHome(mainWindow)
@@ -275,7 +256,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
     const hadFileTab = await fileTab.isVisible({ timeout: 500 }).catch(() => false)
     if (!hadFileTab) return
 
-    await sendIPC(electronApp, 'app:close-current-focus')
+    await emitMenu(mainWindow, 'close-current-focus')
 
     // File tab should be gone, task tab should still be present
     await expect(fileTab).toHaveCount(0, { timeout: 3_000 })
@@ -284,10 +265,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
 
   // ── Browser tabs ─────────────────────────────────────────────────────────
 
-  test('Cmd+W closes extra browser tab when browser is focused', async ({
-    mainWindow,
-    electronApp
-  }) => {
+  test('Cmd+W closes extra browser tab when browser is focused', async ({ mainWindow }) => {
     // Ensure browser panel is open
     if (
       !(await urlInput(mainWindow)
@@ -315,16 +293,16 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
     // Focus the URL bar (inside [data-browser-panel])
     await urlInput(mainWindow).click()
 
-    await sendIPC(electronApp, 'app:close-current-focus')
+    await emitMenu(mainWindow, 'close-current-focus')
 
     await expect(browserTabEntries(mainWindow)).toHaveCount(initial, { timeout: 3_000 })
   })
 
-  test('Cmd+W does not close the last browser tab', async ({ mainWindow, electronApp }) => {
+  test('Cmd+W does not close the last browser tab', async ({ mainWindow }) => {
     const count = await browserTabEntries(mainWindow).count()
 
     await urlInput(mainWindow).click()
-    await sendIPC(electronApp, 'app:close-current-focus')
+    await emitMenu(mainWindow, 'close-current-focus')
 
     const countAfter = await browserTabEntries(mainWindow).count()
     // Some builds collapse the browser panel when only one tab remains.
@@ -337,13 +315,13 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
 
   // ── Task tab ─────────────────────────────────────────────────────────────
 
-  test('Cmd+Shift+W closes the active task tab', async ({ mainWindow, electronApp }) => {
+  test('Cmd+Shift+W closes the active task tab', async ({ mainWindow }) => {
     // Ensure the CmdW task tab is active
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
     await openTaskViaSearch(mainWindow, 'CmdW task')
 
-    await sendIPC(electronApp, 'app:close-active-task')
+    await emitMenu(mainWindow, 'close-active-task')
 
     // Title input for "CmdW task" should no longer be visible
     await expect(async () => {

@@ -5,6 +5,7 @@ export { applyTheme } from './apply-theme'
 export {
   useTabStore,
   tabStoreReady,
+  loadTabStoreState,
   type Tab,
   type ActiveView,
   type TreeGroupBy,

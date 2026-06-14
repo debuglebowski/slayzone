@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useShortcutStore } from './useShortcutStore'
+import { setShortcutBackend, useShortcutStore } from './useShortcutStore'
 
-// Mock window.api
+// Mock the injected persistence backend (was window.api.settings / .shortcuts).
 const mockSettings = {
   get: vi.fn<(key: string) => Promise<string | null>>(),
   set: vi.fn<(key: string, value: string) => Promise<void>>()
 }
 const mockShortcuts = { changed: vi.fn() }
 
-Object.defineProperty(globalThis, 'window', {
-  value: { api: { settings: mockSettings, shortcuts: mockShortcuts } },
-  writable: true
+setShortcutBackend({
+  get: (key) => mockSettings.get(key),
+  set: (key, value) => mockSettings.set(key, value),
+  notifyChanged: () => mockShortcuts.changed()
 })
 
 beforeEach(() => {

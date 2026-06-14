@@ -1,4 +1,4 @@
-export type { ElectronAPI, PtyCreateOptions, ChatSessionInfo } from './api'
+export type { ElectronAPI, _LegacyElectronAPI, PtyCreateOptions, ChatSessionInfo } from './api'
 export type {
   DiagnosticsConfig,
   DiagnosticsExportRequest,

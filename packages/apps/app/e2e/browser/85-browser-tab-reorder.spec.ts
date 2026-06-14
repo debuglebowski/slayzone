@@ -21,11 +21,8 @@ interface BrowserTab {
 
 async function readTabIds(page: Page, taskId: string): Promise<string[]> {
   const task = (await page.evaluate(async (id) => {
-    return (
-      window as unknown as {
-        api: { db: { getTask: (id: string) => Promise<Record<string, unknown> | null> } }
-      }
-    ).api.db.getTask(id)
+    const tasks = await window.getTrpcVanillaClient().task.getAll.query()
+    return tasks.find((task) => task.id === id) ?? null
   }, taskId)) as { browser_tabs?: { tabs?: BrowserTab[] } | null } | null
   return task?.browser_tabs?.tabs?.map((t) => t.id) ?? []
 }

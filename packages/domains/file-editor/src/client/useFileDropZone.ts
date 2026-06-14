@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
 
 export interface FileDropZoneHandlers {
   onDragOver: (e: React.DragEvent) => void
@@ -60,7 +60,7 @@ export function useFileDropZone(
 
       // Paths extracted by preload's capture-phase drop listener
       // (contextBridge proxies File objects, so webUtils must run in preload)
-      const paths = window.api.files.getDropPaths()
+      const paths = electronBootstrap.getDropPaths()
       if (!paths.length) return
 
       const normalizedRoot = projectPath.replace(/\/+$/, '') + '/'
