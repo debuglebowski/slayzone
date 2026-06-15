@@ -249,13 +249,29 @@ async function launchElectronWithRetry(args: {
     let stopAttemptLogCapture: (() => void) | undefined
 
     try {
+      // Sanitize the inherited env. When e2e runs from inside a *dogfooding*
+      // SlayZone terminal (the dev app spawns the PTY), the parent leaks a pile
+      // of runtime vars that silently override the per-worker isolation this
+      // fixture sets up below — and corrupt the whole suite:
+      //   • ELECTRON_RUN_AS_NODE=1 → the Electron binary boots as plain Node, so
+      //     it rejects Playwright's --remote-debugging-port=0 ("bad option") and
+      //     every spec fails at (0ms) with "Process failed to launch!".
+      //   • ELECTRON_RENDERER_URL → points the renderer at the host dev-server.
+      //   • SLAYZONE_STORE_DIR / SLAYZONE_DB_PATH → getTrpcDataRoot() resolves to
+      //     the REAL dev data root instead of the worker dir, so specs read/write
+      //     the real boot-config.json + data dir (e.g. 100-server-settings-toggle
+      //     flips the real app to remote mode → 102-sidecar-crash-recovery + the
+      //     rest boot sidecar-less and cascade-fail).
+      //   • SLAYZONE_SUPERVISED / SLAYZONE_PORT / SLAYZONE_HOST* / SLAYZONE_MCP_PORT
+      //     / SLAYZONE_TASK_ID … → dogfood host/task wiring the app must not see.
+      // Strip every ELECTRON_*/SLAYZONE_* from the inherited copy; the explicit
+      // `env:` literal below re-adds exactly the ones e2e needs.
       const launchEnv: Record<string, string> = {}
       for (const [key, value] of Object.entries(process.env)) {
         if (value == null) continue
+        if (/^(ELECTRON_|SLAYZONE_)/.test(key)) continue
         launchEnv[key] = value
       }
-      // Prevent host shell dev-server overrides from leaking into deterministic e2e launches.
-      delete launchEnv.ELECTRON_RENDERER_URL
 
       const bootLogPath = path.join(attemptArtifactsDir, 'boot.log')
       ensureDir(attemptArtifactsDir)
