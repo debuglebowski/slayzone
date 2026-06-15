@@ -266,6 +266,48 @@ export function getAgentLifecycleEvents(): TypedEmitter<AgentLifecycleEventMap> 
   return agentLifecycleEvents
 }
 
+// Task-trigger bus — the AutomationEngine's `start(bus)` listens here for
+// `db:taskTags:setForTask:done` (the tag-change trigger). Legacy host emitted it
+// on `ipcMain`; the tRPC `tags.setForTask` path never did (the pre-existing
+// trigger gap). The side-car sets this to the SAME EventEmitter it passes to
+// `engine.start()`, so `tags.setForTask` can fire the trigger. Nullable — when
+// unset (host/standalone with no started engine) the tags path just no-ops it.
+export type TaskTriggerBus = {
+  emit: (channel: string, ...args: unknown[]) => boolean
+}
+
+let taskTriggerBus: TaskTriggerBus | null = null
+
+export function setTaskTriggerBus(bus: TaskTriggerBus): void {
+  taskTriggerBus = bus
+}
+
+export function getTaskTriggerBus(): TaskTriggerBus | null {
+  return taskTriggerBus
+}
+
+// Power-resume bus — Electron `powerMonitor.on('resume')` is host-only, but the
+// AutomationEngine (which runs catchup on wake) lives in the side-car after the
+// slice-9 cutover. The host fires `resume` on this emitter; the capability
+// bridge forwards it to the side-car, which calls `automationEngine.runCatchup()`.
+export type PowerResumeEventMap = {
+  resume: []
+}
+
+let powerResumeEvents: TypedEmitter<PowerResumeEventMap> | null = null
+
+export function setPowerResumeEvents(ev: TypedEmitter<PowerResumeEventMap>): void {
+  powerResumeEvents = ev
+}
+
+export function getPowerResumeEvents(): TypedEmitter<PowerResumeEventMap> {
+  if (!powerResumeEvents)
+    throw new Error(
+      'powerResumeEvents not initialized — call setPowerResumeEvents() in main host first'
+    )
+  return powerResumeEvents
+}
+
 // App-level ops — the grab-bag of main-process capabilities (backup, clipboard,
 // screenshot, leaderboard, export/import, usage, …) that the `app` router wraps.
 // Each is electron- or DB-coupled, so `import type` only here; the Electron-main
@@ -350,6 +392,9 @@ export type AppDeps = {
     }
   ) => void
   shellOpenPath: (absPath: string) => Promise<string>
+  // Reveal + select an item in the OS file manager (Electron shell only) —
+  // backs file-editor `showInFinder`. Forwarded over the capability bridge.
+  shellShowItemInFolder: (absPath: string) => void
 
   // db:feedback (6 ops — pure DB). Threads/messages typed as `unknown` so
   // transport stays decoupled from @slayzone/feedback (host conforms via casts).
@@ -428,6 +473,18 @@ export type AppDeps = {
   // no-op when the window can't be resolved / isn't focused. windowId is the
   // caller's webContents id (ctx.windowId), matching `windowClose`.
   appFocusRenderer: (windowId: number | null) => void
+  // Raise/show+focus the main window — the CLI/agent `tasks/open` foreground
+  // path. Forwarded over the capability bridge so the side-car's REST route can
+  // bring the Electron host window forward. No-op off-window (standalone).
+  appRaiseMainWindow: () => void
+
+  // Theme — Electron `nativeTheme`-backed (resolves 'system' against the OS), so
+  // host-only. The `settings.*Theme` tRPC procedures resolve these (forwarded
+  // over the capability bridge); the `theme:changed` event streams back on the
+  // bridge's `theme` channel → the side-car's settingsEvents → onThemeChanged.
+  themeGetEffective: () => 'dark' | 'light'
+  themeGetSource: () => 'system' | 'light' | 'dark'
+  themeSet: (pref: 'light' | 'dark' | 'system') => Promise<'dark' | 'light'>
 
   // auth
   authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>

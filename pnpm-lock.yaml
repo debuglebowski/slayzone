@@ -462,6 +462,9 @@ importers:
       '@slayzone/processes':
         specifier: workspace:*
         version: link:../../domains/processes
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../../domains/settings
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
@@ -471,6 +474,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@trpc/client':
+        specifier: ^11.17.0
+        version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
       '@trpc/server':
         specifier: ^11.17.0
         version: 11.17.0(typescript@5.9.3)

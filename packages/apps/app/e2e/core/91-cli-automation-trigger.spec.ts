@@ -24,14 +24,22 @@ test.describe('CLI: automation triggers (end-to-end)', () => {
     const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_DB_DIR!)
     dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
 
-    mcpPort = await electronApp.evaluate(async () => {
-      for (let i = 0; i < 20; i++) {
-        const p = (globalThis as Record<string, unknown>).__mcpPort
-        if (p) return p as number
-        await new Promise((r) => setTimeout(r, 250))
+    // Slice 9 cutover: the SIDE-CAR is the discoverable backend (it owns the
+    // AutomationEngine + writes settings.mcp_server_port). The CLI hits the
+    // side-car — NOT the host's __mcpPort (whose engine is now unstarted). Read
+    // the port the side-car published, exactly like the production CLI does.
+    for (let i = 0; i < 40; i++) {
+      const db = openDb()
+      const row = db
+        .prepare("SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1")
+        .get() as { value: string } | undefined
+      db.close()
+      if (row?.value) {
+        mcpPort = parseInt(row.value, 10)
+        break
       }
-      return 0
-    })
+      await new Promise((r) => setTimeout(r, 250))
+    }
     expect(mcpPort).toBeTruthy()
 
     const s = seed(mainWindow)

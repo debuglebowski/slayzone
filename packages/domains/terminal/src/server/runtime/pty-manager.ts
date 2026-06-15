@@ -2750,14 +2750,19 @@ export function requestEnsureAlive(
       resolve(r)
     }
     pendingEnsureAliveAcks.set(reqId, (result) => finish(result))
-    // tRPC mirror: emit once (the request is idempotent by reqId). The IPC ack
-    // path (pty:ensure-alive:ack) still drives the retry/resolve below.
-    ptyEvents.emit('ensure-alive', taskId, reqId, opts.force)
     const send = (): void => {
       if (liveWindow.isDestroyed()) {
         finish('timeout')
         return
       }
+      // tRPC mirror — re-emitted on every retry (NOT just once) so a renderer
+      // that subscribes to `pty.onEnsureAlive` AFTER the first tick (e.g. a
+      // TaskDetailPage still mounting from a just-fired `open-task`) still
+      // catches the request. The renderer dedupes by reqId, so re-emits are
+      // idempotent. Load-bearing under the side-car cutover, where the IPC
+      // `webContents.send` below targets a no-op stub window (output + ack now
+      // flow exclusively over tRPC: ptyEvents + the pty.ackEnsureAlive mutation).
+      ptyEvents.emit('ensure-alive', taskId, reqId, opts.force)
       try {
         liveWindow.webContents.send('pty:ensure-alive', taskId, reqId, opts.force)
       } catch {

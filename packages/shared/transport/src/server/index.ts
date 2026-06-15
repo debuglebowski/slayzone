@@ -25,6 +25,22 @@ export {
 } from './app-deps'
 export { setAppDeps, getAppDeps, type AppDeps, type FloatingAgentState } from './app-deps'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
+export {
+  setPowerResumeEvents,
+  getPowerResumeEvents,
+  type PowerResumeEventMap
+} from './app-deps'
+export { setTaskTriggerBus, getTaskTriggerBus, type TaskTriggerBus } from './app-deps'
+
+// Capability bridge — host↔side-car seam (slice 9). The Electron host serves
+// `capabilityBridgeRouter`; the side-car forwards its Electron-only `AppDeps`
+// calls over it and re-emits host events from the `events` stream.
+export {
+  capabilityBridgeRouter,
+  type CapabilityBridgeRouter,
+  type CapabilityEventFrame,
+  type CapabilityEventChannel
+} from './capability-bridge'
 
 // MCP server + REST API (moved from the Electron main in slice 6 so the
 // standalone @slayzone/server can host them too — capability-slot injected).

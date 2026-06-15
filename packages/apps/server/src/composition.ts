@@ -9,6 +9,8 @@ import {
   setAutomationsEvents,
   setTelemetryEvents,
   setMenuEvents,
+  setAgentLifecycleEvents,
+  setTaskTriggerBus,
   setAppDeps,
   setPtyDeps,
   setChatDeps,
@@ -17,9 +19,11 @@ import {
   type AutomationsEventMap,
   type TelemetryEventMap,
   type MenuEventMap,
+  type AgentLifecycleEventMap,
   type RestApiDeps,
   type FloatingAgentState
 } from '@slayzone/transport/server'
+import { createHostBridge, type HostBridge } from './host-bridge.js'
 import { taskOps, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 import {
   createPtyOps,
@@ -44,7 +48,11 @@ import {
   transitionStateFromHook,
   markSessionActiveFromHook,
   noteSessionConversationId,
-  setSessionAwaitingInput
+  setSessionAwaitingInput,
+  configurePtyHost,
+  onTaskReachedTerminal,
+  broadcastRespawnRequest,
+  type PtySessionWindow
 } from '@slayzone/terminal/server'
 import { createIntegrationOps, ensureIntegrationSchema } from '@slayzone/integrations/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
@@ -113,12 +121,36 @@ export function composeServer(opts: {
   standalone: boolean
 }): ServerComposition {
   const { db, dataRoot } = opts
+  const supervised = !opts.standalone
+
+  // Late-bound bound port (set once listen() resolves). Declared up front so the
+  // host bridge can report it as the renderer-facing tRPC port (the renderer is
+  // connected to THIS side-car, not the host).
+  let boundPort = 0
+
+  // --- Host capability bridge (supervised only) ------------------------------
+  // When supervised by the Electron host, Electron-only capabilities (browser-WCV,
+  // clipboard, dialogs, backup, task-windows, floating-agent, native menus, …)
+  // can't run in this plain-node process — they forward to the host over the
+  // bridge, and host-originated events (native menus, power-resume) stream back.
+  // Truly standalone (no host): bridge stays null and the fail-loud stubs apply.
+  const hostCapUrl = process.env.SLAYZONE_HOST_CAP_URL
+  const bridge: HostBridge | null =
+    supervised && hostCapUrl
+      ? createHostBridge(hostCapUrl, { getTrpcPort: () => boundPort })
+      : null
 
   // --- Cross-domain event buses (this process's own instances) --------------
   const notifyEvents = new TypedEmitter<NotifyEventMap>()
   const automationsEvents = new TypedEmitter<AutomationsEventMap>()
   const telemetryEvents = new TypedEmitter<TelemetryEventMap>()
-  const menuEvents = new TypedEmitter<MenuEventMap>()
+  // Native menu/app-shortcut events originate in the Electron host; when bridged
+  // they arrive on `bridge.menuEvents`, which ALSO carries this process's own
+  // emits (the MCP REST task-open route). Standalone: a local inert emitter.
+  const menuEvents = bridge ? bridge.menuEvents : new TypedEmitter<MenuEventMap>()
+  // Agent-lifecycle (hook-driven turn/state) — the agent-hook REST route lands
+  // on THIS process now (pty runs here), so the side-car owns this bus.
+  const agentLifecycleEvents = new TypedEmitter<AgentLifecycleEventMap>()
 
   const notifyRenderer = (): void => {
     notifyEvents.emit('tasks-changed')
@@ -129,6 +161,7 @@ export function composeServer(opts: {
   setAutomationsEvents(automationsEvents)
   setTelemetryEvents(telemetryEvents)
   setMenuEvents(menuEvents)
+  setAgentLifecycleEvents(agentLifecycleEvents)
 
   // --- Task ops --------------------------------------------------------------
   // Completion-event bus the task ops emit on (Electron host: ipcMain). Nothing
@@ -139,12 +172,34 @@ export function composeServer(opts: {
     getDataRoot: () => dataRoot,
     killTaskProcesses,
     killPtysByTaskId,
-    recordDiagnosticEvent
-    // requestPtyRespawn / onReachedTerminal: renderer-facing — no-op defaults.
+    recordDiagnosticEvent,
+    // PTY lifecycle now lives in THIS process (slice 9), so the task-status
+    // hooks must run here: status→terminal kills the task's PTYs (→ pty:exit
+    // streams to the renderer), status→in_progress suggests a respawn.
+    onReachedTerminal: onTaskReachedTerminal,
+    requestPtyRespawn: broadcastRespawnRequest
   })
   setTaskDeps({ ops: taskOps, onMutation: notifyRenderer })
 
-  // --- PTY + chat runtime (host bridge stays inert: no windows, tRPC-only) ----
+  // --- PTY + chat runtime --------------------------------------------------
+  // Configure the pty-host bridge with a STUB window. node-pty spawns in THIS
+  // process and its output fans out via `ptyEvents` (tRPC subscriptions), but
+  // `ptyCreate`/`requestEnsureAlive` still require a non-null target window
+  // (the guard pre-dates the tRPC fan-out; the window is otherwise only used by
+  // legacy `webContents.send` redirect, a harmless no-op here). Without this the
+  // windowless side-car returns "No window found" and terminals never spawn.
+  // Theme: dark default (no nativeTheme off-Electron); ack flows via the tRPC
+  // `pty.ackEnsureAlive` mutation, so the command bus stays inert.
+  const stubPtyWindow: PtySessionWindow = {
+    isDestroyed: () => false,
+    webContents: { send: () => {}, getURL: () => '' }
+  }
+  configurePtyHost({
+    getAllWindows: () => [stubPtyWindow],
+    getFocusedWindow: () => stubPtyWindow,
+    isDarkTheme: () => true,
+    bus: { on: () => undefined }
+  })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
   setChatDeps({
     ops: createChatOps(db),
@@ -159,7 +214,10 @@ export function composeServer(opts: {
   const feedbackOps = buildFeedbackOps(db)
 
   // --- Processes ---------------------------------------------------------------
-  if (opts.standalone) void initProcessManager(db)
+  // This process owns the process-manager runtime: the renderer drives process
+  // ops here (supervised) and standalone owns its own. The Electron host no
+  // longer inits it in local mode (would double-spawn auto-restart processes).
+  void initProcessManager(db)
   setProcessesDeps({
     create: createProcess,
     spawn: spawnProcess,
@@ -179,12 +237,25 @@ export function composeServer(opts: {
     notifyRenderer()
   }
   const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
+  // Single-owner engine (slice 9): this is the one process that sees EVERY task
+  // mutation — the renderer's tRPC mutations AND the CLI/MCP REST data routes
+  // both run here, and `taskEvents` is process-local. So start the engine here
+  // (cron + task-event + tag triggers). The Electron host's engine is NOT started
+  // in local mode — two engines on the shared DB would double-fire. Electron-only
+  // `powerMonitor 'resume'` is forwarded over the bridge → runCatchup().
+  automationEngine.start(taskBus)
+  // Expose the engine's bus so the tRPC `tags.setForTask` path can fire the
+  // tag-change trigger (`db:taskTags:setForTask:done`) — closes the slice-7 gap.
+  setTaskTriggerBus(taskBus)
+  bridge?.powerResume.on('resume', () => void automationEngine.runCatchup())
 
-  // --- App-level deps: real where pure, fail-loud stubs where electron-bound ---
-  let boundPort = 0
-  const silentEmitter = new EventEmitter()
-
-  setAppDeps({
+  // --- App-level deps: forwarded to the host when bridged (supervised), else
+  // fail-loud stubs (truly standalone — no Electron host to forward to).
+  if (bridge) {
+    setAppDeps(bridge.appDeps)
+  } else {
+    const silentEmitter = new EventEmitter()
+    setAppDeps({
     // backup — file-level DB copies + Finder reveal live with the Electron host
     // until the slice-7 router split relocates the data half.
     backupList: stub('backupList'),
@@ -215,6 +286,7 @@ export function composeServer(opts: {
 
     shellOpenExternal: stub('shellOpenExternal'),
     shellOpenPath: stub('shellOpenPath'),
+    shellShowItemInFolder: stub('shellShowItemInFolder'),
 
     feedbackListThreads: feedbackOps.listThreads,
     feedbackCreateThread: feedbackOps.createThread,
@@ -262,6 +334,12 @@ export function composeServer(opts: {
     appWindowSetTrafficLightPosition: () => {},
     appWindowSetWindowButtonVisibility: () => {},
     appFocusRenderer: () => {},
+    // No window to raise on a headless host.
+    appRaiseMainWindow: () => {},
+    // No nativeTheme off-Electron — remote/standalone UI hides theme controls.
+    themeGetEffective: () => 'dark',
+    themeGetSource: () => 'dark',
+    themeSet: async () => 'dark',
     // No native menu on a headless host.
     appRebuildMenuForShortcuts: () => {},
 
@@ -373,17 +451,26 @@ export function composeServer(opts: {
       claimSession: stub('taskWindows.claimSession'),
       events: silentEmitter as AppDeps['taskWindows']['events']
     }
-  })
+    })
+  }
 
   // --- REST deps (capability slots; absent → 501) ------------------------------
   const restDeps: RestApiDeps = {
     db,
     notifyRenderer,
     automationEngine,
+    agentLifecycle: agentLifecycleEvents,
     menu: menuEvents,
     taskBus,
-    // browser / artifactExport / windowActions / legacyBroadcast: absent —
-    // those are Electron-shell capabilities (routes 501).
+    // Raise the host window for the CLI/agent `tasks/open` foreground path. The
+    // route itself runs HERE (emits the `open-task` menu event on the side-car's
+    // bus → renderer); only the window raise is bridged to the Electron host.
+    windowActions: bridge
+      ? { raiseMainWindow: () => void bridge.appDeps.appRaiseMainWindow() }
+      : undefined,
+    // browser / artifactExport: Electron-only (live WebContents / offscreen
+    // renderer). Their routes are reverse-proxied to the host's REST in server.ts
+    // (supervised); absent here so a non-proxied hit still 501s in standalone.
     pty: {
       listPtys,
       hasPty,
@@ -410,6 +497,10 @@ export function composeServer(opts: {
       subscribeToLogs: subscribeToProcessLogs
     }
   }
+
+  // Open the host event stream + prime the browser snapshot cache. Done last so
+  // the local emitters (set via setAppDeps above) exist before frames arrive.
+  bridge?.connect()
 
   return {
     notifyRenderer,

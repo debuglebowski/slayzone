@@ -64,7 +64,8 @@ export {
   markSessionActiveFromHook,
   noteSessionConversationId,
   setSessionAwaitingInput,
-  killPtysByTaskId
+  killPtysByTaskId,
+  broadcastRespawnRequest
 } from './runtime/pty-manager'
 export { createChatOps, type ChatOps, type ChatMode } from './runtime/chat-handlers'
 export {

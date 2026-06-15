@@ -195,37 +195,53 @@ async function getPreferredPort(db: RestApiDeps['db']): Promise<number> {
   }
 }
 
-export async function startMcpServer(deps: RestApiDeps): Promise<void> {
+export async function startMcpServer(
+  deps: RestApiDeps,
+  opts: { writePort?: boolean } = {}
+): Promise<{ port: number }> {
+  // writePort=false: bind + serve, but DON'T claim `settings.mcp_server_port`.
+  // The slice-9 host keeps a REST server only as a reverse-proxy target; the
+  // side-car owns the discoverable port (CLI/agents/external MCP hit it).
+  const writePort = opts.writePort ?? true
   const port = await getPreferredPort(deps.db)
 
   stopMcpServer()
   const handle = createMcpRestApp(deps)
   appHandle = handle
 
-  async function onListening(): Promise<void> {
-    const addr = httpServer!.address()
-    const actualPort = typeof addr === 'object' && addr ? addr.port : port
-    ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
-    try {
-      await deps.db
-        .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)")
-        .run(String(actualPort))
-    } catch {
-      /* non-fatal — CLI falls back to default port */
+  return await new Promise<{ port: number }>((resolve) => {
+    const onListening = async (): Promise<void> => {
+      const addr = httpServer!.address()
+      const actualPort = typeof addr === 'object' && addr ? addr.port : port
+      // Only the CANONICAL server claims the discovery globals/settings. The
+      // slice-9 host runs writePort:false purely as a reverse-proxy target, so it
+      // must NOT set `__mcpPort` — agents + tests resolve the SIDE-CAR port (the
+      // host sets its `__mcpPort` to the side-car port via the supervisor onReady).
+      if (writePort) {
+        ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
+        try {
+          await deps.db
+            .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)")
+            .run(String(actualPort))
+        } catch {
+          /* non-fatal — CLI falls back to default port */
+        }
+      }
+      console.log(`[MCP] Server listening on http://127.0.0.1:${actualPort}/mcp`)
+      resolve({ port: actualPort })
     }
-    console.log(`[MCP] Server listening on http://127.0.0.1:${actualPort}/mcp`)
-  }
 
-  httpServer = handle.app.listen(port, '127.0.0.1')
-  httpServer.on('listening', onListening)
-  httpServer.on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE' && port !== 0) {
-      console.warn(`[MCP] Port ${port} in use, falling back to dynamic port`)
-      httpServer = handle.app.listen(0, '127.0.0.1')
-      httpServer.on('listening', onListening)
-      httpServer.on('error', (err2) => console.error(`[MCP] Server error:`, err2))
-    } else {
-      console.error(`[MCP] Server error:`, err)
-    }
+    httpServer = handle.app.listen(port, '127.0.0.1')
+    httpServer.on('listening', () => void onListening())
+    httpServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && port !== 0) {
+        console.warn(`[MCP] Port ${port} in use, falling back to dynamic port`)
+        httpServer = handle.app.listen(0, '127.0.0.1')
+        httpServer.on('listening', () => void onListening())
+        httpServer.on('error', (err2) => console.error(`[MCP] Server error:`, err2))
+      } else {
+        console.error(`[MCP] Server error:`, err)
+      }
+    })
   })
 }

@@ -1,32 +1,19 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { TRPCError } from '@trpc/server'
 import { SettingsService, settingsEvents } from '@slayzone/settings/server'
 import { router, publicProcedure } from '../trpc'
+import { getAppDeps } from '../app-deps'
 
 const themeInput = z.enum(['light', 'dark', 'system'])
 
 /**
- * Theme procedures dynamically import @slayzone/settings/theme — the narrow
- * nativeTheme-only surface (no IPC/handler-registration barrel) — because that
- * API is Electron-main-only. In standalone server mode the import fails and they
- * throw a clear error (remote-mode UI hides the theme controls). settings
- * get/set/getAll stay on the electron-free /server import so they work headless.
+ * Theme is Electron `nativeTheme`-backed (host-only), so the theme procedures
+ * resolve the injected `AppDeps` — on the Electron host these run the real
+ * nativeTheme API; when the renderer talks to the side-car they are forwarded
+ * over the capability bridge to the host. The `theme:changed` event streams back
+ * on the bridge's `theme` channel into this process's `settingsEvents`, which
+ * `onThemeChanged` wraps. settings get/set/getAll stay electron-free (ctx.db).
  */
-async function getThemeModule(): Promise<typeof import('@slayzone/settings/theme') | null> {
-  try {
-    return await import('@slayzone/settings/theme')
-  } catch {
-    return null
-  }
-}
-
-const themeUnavailable = (): never => {
-  throw new TRPCError({
-    code: 'PRECONDITION_FAILED',
-    message: 'Theme unavailable in this server context (Electron-only)'
-  })
-}
 
 /**
  * Mirrors the 3 `db:settings:*` + 3 `theme:*` IPC handlers (settings/main) plus
@@ -47,22 +34,15 @@ export const settingsRouter = router({
 
   getAll: publicProcedure.query(({ ctx }) => SettingsService.forDatabase(ctx.db).getAll()),
 
-  // --- Theme (Electron-only) ---
+  // --- Theme (Electron nativeTheme — host-only, via injected AppDeps) ---
 
-  getEffectiveTheme: publicProcedure.query(async () => {
-    const mod = await getThemeModule()
-    return mod ? mod.getEffectiveTheme() : themeUnavailable()
-  }),
+  getEffectiveTheme: publicProcedure.query(() => getAppDeps().themeGetEffective()),
 
-  getThemeSource: publicProcedure.query(async () => {
-    const mod = await getThemeModule()
-    return mod ? mod.getThemeSource() : themeUnavailable()
-  }),
+  getThemeSource: publicProcedure.query(() => getAppDeps().themeGetSource()),
 
-  setTheme: publicProcedure.input(themeInput).mutation(async ({ ctx, input }) => {
-    const mod = await getThemeModule()
-    return mod ? mod.setTheme(ctx.db, input) : themeUnavailable()
-  }),
+  setTheme: publicProcedure
+    .input(themeInput)
+    .mutation(({ input }) => getAppDeps().themeSet(input)),
 
   /**
    * Replaces the `theme:changed` broadcast. Fires when nativeTheme.on('updated')

@@ -19,6 +19,7 @@ import {
 } from '@slayzone/file-editor/server'
 import type { SearchFilesOptions } from '@slayzone/file-editor/shared'
 import { router, publicProcedure } from '../trpc'
+import { getAppDeps } from '../app-deps'
 
 const searchOptions = z.unknown() as unknown as z.ZodType<SearchFilesOptions>
 
@@ -96,11 +97,9 @@ export const fileEditorRouter = router({
       const abs = input.targetPath
         ? assertWithinRoot(input.rootPath, input.targetPath)
         : path.resolve(input.rootPath)
-      const electron = (await import('electron').catch(() => null)) as typeof import('electron') | null
-      if (!electron?.shell?.showItemInFolder) {
-        throw new Error('showInFinder unavailable in this server context (Electron-only)')
-      }
-      electron.shell.showItemInFolder(abs)
+      // Electron shell op (host-only) — forwarded over the capability bridge so
+      // it runs in the Electron host when the renderer talks to the side-car.
+      getAppDeps().shellShowItemInFolder(abs)
     }),
 
   /**

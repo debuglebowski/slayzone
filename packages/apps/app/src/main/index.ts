@@ -221,6 +221,11 @@ import {
 } from '@slayzone/task/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
+import {
+  getEffectiveTheme as nativeGetEffectiveTheme,
+  getThemeSource as nativeGetThemeSource,
+  setTheme as nativeSetTheme
+} from '@slayzone/settings/theme'
 import { SettingsService } from '@slayzone/settings/server'
 import {
   wireWarmWindowCleanup,
@@ -340,6 +345,8 @@ import { menuEvents } from './menu-events'
 import { automationsEvents } from './automations-events'
 import { telemetryEvents } from './telemetry-events'
 import { agentLifecycleEvents } from './agent-lifecycle-events'
+import { powerResumeEvents } from './power-resume-events'
+import { startHostCapabilityServer } from './host-capability-server'
 import { getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
@@ -480,6 +487,27 @@ let mcpCleanup: (() => void) | null = null
 let trpcCleanup: (() => void) | null = null
 let sidecarCleanup: (() => void) | null = null
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
+// Local cutover (slice 9): the side-car must be spawned with the host's
+// capability-bridge + REST URLs in env, but those servers start on their own
+// async paths. These promises let the sidecar-spawn block await both ports.
+let resolveHostCapUrl!: (url: string) => void
+const hostCapUrlPromise = new Promise<string>((r) => {
+  resolveHostCapUrl = r
+})
+let resolveHostRestUrl!: (url: string) => void
+const hostRestUrlPromise = new Promise<string>((r) => {
+  resolveHostRestUrl = r
+})
+// Resolves once the side-car supervisor handle exists, so `app:get-server-url`
+// (called early on renderer boot) can await it before reading the port.
+let resolveSidecarHandle!: (
+  h: import('./sidecar-server-supervisor').SidecarServerHandle
+) => void
+const sidecarHandlePromise = new Promise<
+  import('./sidecar-server-supervisor').SidecarServerHandle
+>((r) => {
+  resolveSidecarHandle = r
+})
 
 // Shared by the `app:get-sidecar-status` / `app:reveal-sidecar-log` IPC
 // handlers and the tRPC `app.meta.*` procs (one impl, both transports).
@@ -1721,39 +1749,58 @@ app
       notifyTasksChanged()
     }
     const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
-    automationEngine.start(ipcMain)
-    powerMonitor.on('resume', () => automationEngine.runCatchup())
+    // Local cutover (slice 9): the SIDE-CAR owns the single AutomationEngine — it
+    // sees every task mutation (renderer tRPC + CLI/MCP REST both run there, and
+    // taskEvents is process-local). The host engine stays constructed-but-UNSTARTED
+    // (still satisfies the MCP REST executeManual dep) so two engines never
+    // double-fire on the shared DB. powerMonitor is host-only → forward 'resume'
+    // over the capability bridge so the side-car engine runs catchup after wake.
+    // Remote mode keeps host ownership (no local side-car).
+    if (isRemoteMode) {
+      automationEngine.start(ipcMain)
+      powerMonitor.on('resume', () => automationEngine.runCatchup())
+    } else {
+      powerMonitor.on('resume', () => powerResumeEvents.emit('resume'))
+    }
     const backupOps = buildBackupOps(db)
     startAutoBackup(db)
     logBoot('domain tRPC ops registered')
 
-    // Start MCP server off the boot critical path. The dynamic import resolves
-    // a heavy module graph (~70ms sync work even though it returns a Promise),
-    // and nothing on first paint depends on the server being listening — the
-    // CLI discovers the port via settings and the renderer doesn't talk to it.
-    // Remote mode: skipped — the CLI against the local DB would show different
-    // data than the renderer (remote DB). CLI remote support is slice 10.
+    // Host REST server (slice 9 local cutover). The SIDE-CAR now owns the
+    // discoverable `mcp_server_port` (CLI + agents + external MCP hit it). The
+    // host keeps a REST server ONLY as the reverse-proxy target for the
+    // Electron-only routes the side-car can't serve itself — browser-automation
+    // (live WebContents) + artifact export (offscreen renderer). So it binds a
+    // port and publishes its URL to the sidecar spawn, but does NOT write the
+    // discovery port (writePort:false). Off the boot critical path.
+    // Remote mode: skipped — CLI remote support is slice 10.
     if (!isRemoteMode) setImmediate(() => {
-      logBoot('mcp server import dispatched')
-      // MCP + REST now live in @slayzone/transport/server (slice 6) — the app
-      // injects its electron capability set; the standalone server injects its own.
+      logBoot('host rest server import dispatched')
       Promise.all([import('@slayzone/transport/server'), import('./mcp-rest-deps')])
-        .then(([mod, depsMod]) => {
-          void mod.startMcpServer(depsMod.buildMcpRestDeps(db, automationEngine))
+        .then(async ([mod, depsMod]) => {
+          const { port } = await mod.startMcpServer(
+            depsMod.buildMcpRestDeps(db, automationEngine),
+            { writePort: false }
+          )
           mcpCleanup = () => mod.stopMcpServer()
-          logBoot('mcp server started')
+          resolveHostRestUrl(`http://127.0.0.1:${port}`)
+          logBoot(`host rest server started (port ${port}, reverse-proxy target)`)
         })
         .catch((err) => {
-          console.error('[MCP] Failed to start server:', err)
+          console.error('[MCP] Failed to start host REST server:', err)
         })
     })
 
-    // Remote mode: the renderer's tRPC WS goes to the remote server — starting
-    // the in-process one would only invite split-brain connections.
+    // Slice 9 local cutover: the renderer connects to the SIDE-CAR for data; the
+    // host serves a capability bridge the side-car forwards Electron-only calls
+    // to. The data-dep registry sets below are now harmless no-ops on the host
+    // (no in-process appRouter server reads them) — left in place to minimise
+    // churn; only setAppDeps/setMenuEvents/setPowerResumeEvents back the bridge.
+    // Remote mode: skipped (renderer connects to the remote server).
     if (!isRemoteMode) setImmediate(() => {
-      logBoot('trpc server import dispatched')
+      logBoot('host capability server import dispatched')
       import('@slayzone/transport/server')
-        .then((mod) => {
+        .then(async (mod) => {
           // Inject the electron-coupled chat ops + streaming emitters BEFORE the
           // server starts accepting connections, so the first chat procedure /
           // subscription can't hit an uninitialized getChatDeps().
@@ -1784,12 +1831,15 @@ app
           // `telemetry.onIpcEvent` subs and IPC coexist (bridge drops later).
           mod.setAutomationsEvents(automationsEvents)
           mod.setTelemetryEvents(telemetryEvents)
-          // Menu / app-shortcut bus — same instance the native menus, the
-          // before-input-event accelerator handler, the auto-updater, and the
-          // REST/MCP task-open routes dual-emit on (alongside the legacy `app:*`
-          // broadcasts), so `menu.*` subs and IPC coexist (renderer cutover is slice 5).
+          // Menu / app-shortcut bus — native menus, the before-input-event
+          // accelerator handler, the auto-updater, and protocol deep-links emit
+          // here. Post-cutover the host capability bridge streams these to the
+          // side-car, whose `menu.*` subscriptions deliver them to the renderer.
           mod.setMenuEvents(menuEvents)
           mod.setAgentLifecycleEvents(agentLifecycleEvents)
+          // Power-resume bus — host `powerMonitor 'resume'` (see above) forwarded
+          // over the capability bridge so the side-car engine runs cron catchup.
+          mod.setPowerResumeEvents(powerResumeEvents)
           // App-level ops — the SAME single instances the IPC handlers built and
           // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
           // implementation, both transports coexist (renderer cutover is slice 5).
@@ -1827,6 +1877,7 @@ app
                   | undefined
               ),
             shellOpenPath,
+            shellShowItemInFolder: (absPath: string) => shell.showItemInFolder(absPath),
             feedbackListThreads: feedbackOps.listThreads,
             feedbackCreateThread: feedbackOps.createThread,
             feedbackGetMessages: feedbackOps.getMessages,
@@ -1885,6 +1936,21 @@ app
               if (!wc || !win || win.isDestroyed() || !win.isFocused()) return
               wc.focus()
             },
+            // Raise/show+focus the main window — the CLI/agent `tasks/open`
+            // foreground path, forwarded from the side-car REST over the bridge.
+            appRaiseMainWindow: () => {
+              const win = mainWindow ?? BrowserWindow.getAllWindows()[0]
+              if (!win || win.isDestroyed()) return
+              if (win.isMinimized()) win.restore()
+              win.show()
+              win.focus()
+            },
+            // Theme — Electron nativeTheme. The side-car's `settings.*Theme`
+            // procedures forward here over the bridge; `theme:changed` streams
+            // back (wireNativeThemeBridge → settingsEvents → bridge `theme` chan).
+            themeGetEffective: () => nativeGetEffectiveTheme(),
+            themeGetSource: () => nativeGetThemeSource(),
+            themeSet: (pref) => nativeSetTheme(db, pref),
             // Browser view ops — same BrowserViewManager singleton + shared
             // browserExtensionOps the `browser:*` IPC handlers use (coexistence
             // until slice 5). browserExtensionOps is defined below in this
@@ -1992,25 +2058,33 @@ app
             killTask: killTaskProcesses,
             events: processEvents
           })
-          mod.startTrpcServer({ db, dataRoot: getTrpcDataRoot(), automationEngine })
-          trpcCleanup = () => mod.stopTrpcServer()
-          logBoot('trpc server started')
+          // Cutover: no in-process appRouter server. The host serves the
+          // capability bridge (setAppDeps/setMenuEvents/setPowerResumeEvents
+          // above back it); the side-car forwards its Electron-only AppDeps calls
+          // here and streams host menu/power events back. startTrpcServer retired.
+          const capServer = await startHostCapabilityServer({
+            db,
+            dataRoot: getTrpcDataRoot()
+          })
+          trpcCleanup = () => void capServer.stop()
+          resolveHostCapUrl(`ws://127.0.0.1:${capServer.port}/cap`)
+          logBoot(`host capability server started (port ${capServer.port})`)
         })
         .catch((err) => {
-          console.error('[tRPC] Failed to start server:', err)
+          console.error('[host-cap] Failed to start capability server:', err)
         })
     })
 
-    // Dark-launch the @slayzone/server side-car (slice 2.5). It is spawned +
-    // supervised but nothing depends on it yet — the renderer still uses the
-    // in-process tRPC server above. A permanent failure is surfaced via the
-    // notify.onEmbeddedServerFailed sub (persistent toast) but is non-fatal.
-    // Slice 9 flips the renderer onto the side-car. Remote mode: skipped — a
-    // local backend rehearsal is pointless when the backend runs elsewhere.
+    // Slice 9 LIVE side-car: the renderer now connects here for all data. The
+    // side-car is spawned with the host's capability-bridge + REST URLs so it can
+    // forward Electron-only work back to the host (capabilities + browser/export
+    // REST). We await both host servers' ports before spawning. A permanent
+    // failure surfaces via notify.onEmbeddedServerFailed (persistent toast).
+    // Remote mode: skipped — the backend runs elsewhere.
     if (!isRemoteMode) setImmediate(() => {
       logBoot('sidecar server supervisor import dispatched')
-      import('./sidecar-server-supervisor')
-        .then(({ startSidecarServer }) => {
+      Promise.all([import('./sidecar-server-supervisor'), hostCapUrlPromise, hostRestUrlPromise])
+        .then(([{ startSidecarServer }, hostCapUrl, hostRestUrl]) => {
           const scriptPath = is.dev
             ? join(app.getAppPath(), '../server/dist/bin.cjs')
             : join(process.resourcesPath, 'server', 'bin.cjs')
@@ -2022,6 +2096,10 @@ app
               ...process.env,
               SLAYZONE_STORE_DIR: ensureDataRoot(),
               SLAYZONE_DB_PATH: getDatabasePath(),
+              // Capability bridge (renderer Electron-only calls + host events) and
+              // the host REST reverse-proxy target (browser-automation + export).
+              SLAYZONE_HOST_CAP_URL: hostCapUrl,
+              SLAYZONE_HOST_REST_URL: hostRestUrl,
               // Packaged resolution: only bin.js is copied to Resources/server,
               // so createRequire's walk-up never finds node_modules. Point the
               // resolver at the unpacked natives (better-sqlite3, node-pty) the
@@ -2037,8 +2115,12 @@ app
                 : {})
             },
             logger: (line) => logBoot(line),
-            onReady: () => {
-              /* supervisor logger already emits the ready line */
+            onReady: (info) => {
+              // Post-cutover the SIDE-CAR is the canonical MCP/REST backend. Point
+              // the host's `__mcpPort` at it so anything resolving the discoverable
+              // port in the host process (e2e helpers, diagnostics) targets the
+              // side-car — NOT the host's writePort:false reverse-proxy REST.
+              ;(globalThis as Record<string, unknown>).__mcpPort = info.port
             },
             onPermanentFailure: (info) => {
               console.error(
@@ -2055,6 +2137,7 @@ app
             }
           })
           sidecarServerHandle = supervisor
+          resolveSidecarHandle(supervisor)
           sidecarCleanup = () => void supervisor.stop()
           logBoot('sidecar server supervisor started')
         })
@@ -2338,8 +2421,10 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           const url = bootConfig.remote_server_url
           return url ? new URL(url).origin : ''
         }
-        const port = await awaitTrpcPort()
-        return port > 0 ? `ws://127.0.0.1:${port}` : ''
+        // Local cutover (slice 9): the renderer connects to the side-car on a
+        // loopback port that can change across respawns. A loopback port-wildcard
+        // is safe (only local processes) and survives a respawn-on-new-port.
+        return 'ws://127.0.0.1:*'
       },
       is.dev
     )
@@ -2655,7 +2740,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
     if (isPlaywright) {
       ipcMain.handle('app:getVersion', () => app.getVersion())
-      ipcMain.handle('app:get-trpc-port', () => awaitTrpcPort())
+      // Post-cutover the renderer's tRPC backend is the side-car (the in-process
+      // server is retired). Report the side-car port; remote mode has no local port.
+      ipcMain.handle('app:get-trpc-port', async () => {
+        if (isRemoteMode) return 0
+        try {
+          const handle = await sidecarHandlePromise
+          await handle.waitForReady()
+          return handle.getPort() ?? 0
+        } catch {
+          return 0
+        }
+      })
     }
     ipcMain.handle('app:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
     // Bootstrap IPCs for the server-mode toggle (slice 7) — the last new IPC
@@ -2669,8 +2765,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       if (isRemoteMode) {
         return { mode: 'remote' as const, url: bootConfig.remote_server_url ?? '' }
       }
-      const port = await awaitTrpcPort()
-      return { mode: 'local' as const, url: port > 0 ? `ws://127.0.0.1:${port}/trpc` : '' }
+      // Local cutover (slice 9): the renderer connects to the SIDE-CAR. Await the
+      // supervisor handle (the spawn setImmediate may not have run yet), then its
+      // first ready (rejects on permanent failure → empty url → renderer surfaces
+      // the embedded-server-failed toast).
+      try {
+        const handle = await sidecarHandlePromise
+        await handle.waitForReady()
+        const port = handle.getPort()
+        return { mode: 'local' as const, url: port ? `ws://127.0.0.1:${port}/trpc` : '' }
+      } catch {
+        return { mode: 'local' as const, url: '' }
+      }
     })
     // Full process restart — the embedded-server start/skip decision happens at
     // boot, so a Local↔Remote switch needs a relaunch. No-op under Playwright:
@@ -3070,8 +3176,16 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       )
     }
 
-    initProcessManager(db)
-    logBoot('process manager initialized')
+    // Local cutover (slice 9): the SIDE-CAR owns the process-manager runtime
+    // (renderer drives process ops there). Host init would double-spawn
+    // auto-restart processes against the shared DB. Remote mode keeps host
+    // ownership (no local side-car; remote process support is slice 10).
+    if (isRemoteMode) {
+      initProcessManager(db)
+      logBoot('process manager initialized (remote mode, host-owned)')
+    } else {
+      logBoot('process manager init skipped (side-car owns it)')
+    }
 
     // Reset all main-process state + DB for test isolation (Playwright only)
     if (isPlaywright) {
@@ -3093,13 +3207,10 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           discoveryPoller = null
         }
 
-        // 3. Stop MCP + tRPC servers (restarted after table drop so ports persist)
-        mcpCleanup?.()
-        mcpCleanup = null
-        ;(globalThis as Record<string, unknown>).__mcpPort = undefined
-        trpcCleanup?.()
-        trpcCleanup = null
-        ;(globalThis as Record<string, unknown>).__trpcPort = undefined
+        // 3. Local cutover (slice 9): KEEP the host capability + REST servers up
+        // on their stable ports — the respawned side-car (step 8) reconnects to
+        // them via its fixed env URLs. Stopping them here would strand the
+        // restarted side-car. Remote mode: nothing was started, nothing to stop.
 
         // 4. Close file watchers
         closeAllWatchers()
@@ -3131,31 +3242,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         // Re-warm cache after settings table was dropped + re-migrated
         await settings.warmCache(['labs_tests_panel', 'labs_loop_mode'])
 
-        // 8. Restart MCP + tRPC (after table drop so ports persist to fresh
-        // settings table). Remote mode: neither ever started — restarting them
-        // here would boot local servers nothing connects to (and the wait below
-        // would hang forever on ports that never publish).
-        if (!isRemoteMode) {
-          const mcpMod = await import('@slayzone/transport/server')
-          const { buildMcpRestDeps } = await import('./mcp-rest-deps')
-          void mcpMod.startMcpServer(buildMcpRestDeps(db, automationEngine))
-          mcpCleanup = () => mcpMod.stopMcpServer()
-          const trpcMod = await import('@slayzone/transport/server')
-          trpcMod.startTrpcServer({ db, dataRoot: getTrpcDataRoot(), automationEngine })
-          trpcCleanup = () => trpcMod.stopTrpcServer()
-          // Wait for both servers to be listening
-          await new Promise<void>((resolve) => {
-            const check = (): void => {
-              const g = globalThis as Record<string, unknown>
-              if (g.__mcpPort && g.__trpcPort) resolve()
-              else setTimeout(check, 10)
-            }
-            check()
-          })
+        // 8. Restart the side-car so it re-opens the freshly-migrated DB and
+        // re-warms every cache (settings, process registry, pty/chat sessions,
+        // automation engine) — the renderer's data backend. The host cap/REST
+        // servers stayed up (step 3), so the respawned child reconnects with the
+        // same env URLs on the sticky port, and the renderer's tRPC client
+        // reconnects automatically. Remote mode: no local side-car.
+        if (!isRemoteMode && sidecarServerHandle) {
+          await sidecarServerHandle.restart()
+          await sidecarServerHandle.waitForReady()
         }
 
-        // 9. Re-init process manager
-        initProcessManager(db)
+        // 9. Process manager is owned + re-inited by the side-car on restart.
         return { ok: true }
       })
 
@@ -3167,8 +3265,42 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         for (const k of keys) out[k] = process.env[k]
         return out
       })
-      ipcMain.handle('e2e:get-mcp-port', () => {
-        return (globalThis as Record<string, unknown>).__mcpPort ?? null
+      ipcMain.handle('e2e:get-mcp-port', async () => {
+        // Post-cutover the discoverable backend (CLI + agent-hooks + external
+        // MCP) is the SIDE-CAR — production agents spawned by the side-car PTY
+        // get its port. The host's __mcpPort is only the reverse-proxy target.
+        if (isRemoteMode) return (globalThis as Record<string, unknown>).__mcpPort ?? null
+        try {
+          const handle = await sidecarHandlePromise
+          await handle.waitForReady()
+          return handle.getPort() ?? null
+        } catch {
+          return (globalThis as Record<string, unknown>).__mcpPort ?? null
+        }
+      })
+      // Spy/stub a HOST AppDeps method through the capability bridge. Post-cutover
+      // the renderer's `app.*` capability calls route renderer→sidecar→bridge→host
+      // getAppDeps()[method] (resolved fresh per invoke), so wrapping the host's
+      // entry here records every bridged call. Replaces the old IPC-handler mocks
+      // that the renderer abandoned for tRPC in slice 8. Reads at
+      // `globalThis.__appDepSpies[method] = { calls, lastArgs }`. Optional
+      // `fakeResult` short-circuits the real impl (deterministic/offline).
+      ipcMain.handle('e2e:spy-app-dep', async (_e, method: string, fakeResult?: unknown) => {
+        const mod = await import('@slayzone/transport/server')
+        const deps = mod.getAppDeps() as unknown as Record<string, (...a: unknown[]) => unknown>
+        const g = globalThis as Record<string, unknown>
+        const spies = (g.__appDepSpies ??= {}) as Record<
+          string,
+          { calls: number; lastArgs: unknown[] | null }
+        >
+        spies[method] = { calls: 0, lastArgs: null }
+        const original = deps[method]
+        deps[method] = (...args: unknown[]) => {
+          spies[method].calls += 1
+          spies[method].lastArgs = args
+          return fakeResult !== undefined ? fakeResult : original?.(...args)
+        }
+        return { ok: true }
       })
     }
 

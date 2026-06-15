@@ -16,31 +16,17 @@ test.describe('Leaderboard auth transport', () => {
     await mainWindow.reload()
     await mainWindow.waitForSelector('#root', { timeout: 10_000 })
 
-    await electronApp.evaluate(({ ipcMain }) => {
-      const g = globalThis as Record<string, unknown>
-      g.__leaderboardSystemAuthMock = {
-        calls: 0,
-        lastConvexUrl: null as string | null,
-        lastRedirectTo: null as string | null
-      }
-
-      ipcMain.removeHandler('auth:github-system-sign-in')
-      ipcMain.handle(
-        'auth:github-system-sign-in',
-        async (_event, input: { convexUrl: string; redirectTo: string }) => {
-          const state = g.__leaderboardSystemAuthMock as {
-            calls: number
-            lastConvexUrl: string | null
-            lastRedirectTo: string | null
-          }
-          state.calls += 1
-          state.lastConvexUrl = input.convexUrl
-          state.lastRedirectTo = input.redirectTo
-          // Keep test deterministic/offline while still exercising transport selection.
-          return { ok: false, cancelled: true }
-        }
+    // Post-cutover the renderer's "Sign in with GitHub" uses the tRPC
+    // `app.auth.githubSystemSignIn` mutation (NOT the legacy IPC channel), which
+    // routes renderer→sidecar→capability-bridge→host. Spy on the HOST AppDeps
+    // method through the bridge; the fakeResult keeps it deterministic/offline
+    // while still exercising the system-deep-link transport selection.
+    await mainWindow.evaluate(() =>
+      (window as unknown as { __testInvoke: (c: string, a: unknown[]) => Promise<unknown> }).__testInvoke(
+        'e2e:spy-app-dep',
+        ['authGithubSystemSignIn', { ok: false, cancelled: true }]
       )
-    })
+    )
 
     const leaderboardTabButton = mainWindow.locator('.lucide-trophy').first()
     await expect(leaderboardTabButton).toBeVisible({ timeout: 5_000 })
@@ -72,17 +58,17 @@ test.describe('Leaderboard auth transport', () => {
       .poll(
         async () => {
           return await electronApp.evaluate(() => {
-            const state = (globalThis as Record<string, unknown>).__leaderboardSystemAuthMock as
-              | {
-                  calls: number
-                  lastConvexUrl: string | null
-                  lastRedirectTo: string | null
-                }
+            const spy = (globalThis as Record<string, unknown>).__appDepSpies as
+              | Record<string, { calls: number; lastArgs: unknown[] | null }>
+              | undefined
+            const state = spy?.authGithubSystemSignIn
+            const input = state?.lastArgs?.[0] as
+              | { convexUrl?: string; redirectTo?: string }
               | undefined
             return {
               calls: state?.calls ?? 0,
-              lastConvexUrl: state?.lastConvexUrl ?? null,
-              lastRedirectTo: state?.lastRedirectTo ?? null
+              lastConvexUrl: input?.convexUrl ?? null,
+              lastRedirectTo: input?.redirectTo ?? null
             }
           })
         },

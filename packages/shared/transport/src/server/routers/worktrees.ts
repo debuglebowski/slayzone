@@ -95,6 +95,7 @@ import type {
   EditPrCommentInput
 } from '@slayzone/worktrees/shared'
 import { router, publicProcedure } from '../trpc'
+import { getAppDeps } from '../app-deps'
 
 const u = z.unknown()
 const s = z.string()
@@ -242,15 +243,11 @@ export const worktreesRouter = router({
   getStatusSummary: publicProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => getStatusSummary(input.repoPath)),
-  revealInFinder: publicProcedure.input(obj({ path: s })).mutation(async ({ input }) => {
-    // .catch keeps the transport pkg loadable in non-Electron contexts
-    // (esbuild leaves catch-guarded dynamic imports unresolved instead of erroring)
-    const electron = (await import('electron').catch(() => null)) as typeof import('electron') | null
-    if (!electron?.shell?.openPath) {
-      throw new Error('revealInFinder unavailable in this server context (Electron-only)')
-    }
-    await electron.shell.openPath(input.path)
-  }),
+  // Electron shell op (host-only) — forwarded over the capability bridge so it
+  // runs in the Electron host when the renderer talks to the side-car.
+  revealInFinder: publicProcedure
+    .input(obj({ path: s }))
+    .mutation(({ input }) => getAppDeps().shellOpenPath(input.path)),
   isDirty: publicProcedure.input(obj({ path: s })).query(async ({ input }) => {
     const summary = await getStatusSummary(input.path)
     return summary.staged + summary.unstaged + summary.untracked > 0

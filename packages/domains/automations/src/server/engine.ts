@@ -110,8 +110,9 @@ export class AutomationEngine {
     })
 
     // --- Task tag changed ---
-    // NOTE: only the legacy IPC tags handler emits this channel — the tRPC
-    // `tags.setForTask` path does NOT (pre-existing trigger gap, slice-7 item).
+    // Emitted by the legacy IPC tags handler (host) AND, since slice 9, by the
+    // tRPC `tags.setForTask` path via the task-trigger bus registry (set to this
+    // same bus by the side-car composition).
     bus.on('db:taskTags:setForTask:done', (_event, taskId: string, tagIds: string[]) => {
       void (async () => {
         const task = await this.db.get<{ project_id: string }>(

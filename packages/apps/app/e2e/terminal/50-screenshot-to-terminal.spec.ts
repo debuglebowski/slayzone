@@ -74,16 +74,22 @@ test.describe('Screenshot browser to terminal', () => {
     const btn = cameraButton(mainWindow)
     await expect(btn).toBeEnabled({ timeout: 10_000 })
 
-    // Mock the screenshot:captureView IPC handler
+    // Post-cutover the camera button uses tRPC `app.screenshot.captureView`
+    // (renderer→sidecar→capability-bridge→host), NOT the legacy IPC handler. Spy
+    // on the HOST AppDeps method through the bridge with a deterministic path.
     const fakeScreenshotPath = path.join(TEST_PROJECT_PATH, 'browser-screenshot.png')
     fs.writeFileSync(fakeScreenshotPath, 'fake-png-data')
 
-    await electronApp.evaluate(({ ipcMain }, fakePath) => {
-      ipcMain.removeHandler('screenshot:captureView')
-      ipcMain.handle('screenshot:captureView', async () => {
-        return { success: true, path: fakePath }
-      })
-    }, fakeScreenshotPath)
+    await mainWindow.evaluate(
+      (fakePath) =>
+        (
+          window as unknown as { __testInvoke: (c: string, a: unknown[]) => Promise<unknown> }
+        ).__testInvoke('e2e:spy-app-dep', [
+          'screenshotCaptureView',
+          { success: true, path: fakePath }
+        ]),
+      fakeScreenshotPath
+    )
 
     await btn.click()
 

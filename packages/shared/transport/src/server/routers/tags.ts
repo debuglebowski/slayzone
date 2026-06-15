@@ -10,6 +10,7 @@ import {
   setTagsForTask
 } from '@slayzone/tags/server'
 import { router, publicProcedure } from '../trpc'
+import { getTaskTriggerBus } from '../app-deps'
 
 const createTagInput = z.object({
   name: z.string().min(1),
@@ -57,5 +58,9 @@ export const tagsRouter = router({
     .input(z.object({ taskId: z.string(), tagIds: z.array(z.string()) }))
     .mutation(({ ctx, input }) => {
       setTagsForTask(ctx.db, input.taskId, input.tagIds)
+      // Fire the tag-change automation trigger on the engine's bus — mirrors the
+      // legacy `ipcMain.emit('db:taskTags:setForTask:done', null, taskId, tagIds)`
+      // (tags/electron/handlers.ts). No-op when no started engine listens.
+      getTaskTriggerBus()?.emit('db:taskTags:setForTask:done', null, input.taskId, input.tagIds)
     })
 })

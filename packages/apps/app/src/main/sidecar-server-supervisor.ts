@@ -87,6 +87,10 @@ export type SidecarServerHandle = {
   getStatus: () => SidecarStatus
   /** Resolves on first ready; rejects on permanent failure. */
   waitForReady: () => Promise<void>
+  /** Cycle the child (same sticky port) — e.g. e2e DB reset needs the side-car
+   *  to re-open the freshly-migrated DB + re-warm its caches. Resolves once the
+   *  old child has exited; the caller then `waitForReady()`s the new one. */
+  restart: () => Promise<void>
   stop: () => Promise<void>
 }
 
@@ -128,6 +132,12 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
 
   let child: ChildProcess | null = null
   let port: number | null = null
+  // Sticky port: probed once on first spawn, reused across respawns so the
+  // renderer's fixed WS URL survives a crash + immediate respawn. Only cleared
+  // (→ re-probe a fresh port) when a spawn exits WITHOUT ever becoming healthy
+  // (e.g. the sticky port became unbindable) — a never-ready child means the
+  // renderer never had a working connection to that port anyway.
+  let stickyPort: number | null = null
   let health: SidecarHealth = 'starting'
   let readySince: number | null = null
   let attempt = 0
@@ -197,9 +207,13 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
 
   function spawnChild(): void {
     if (stopped) return
-    void probeFreePort(opts.host)
+    // Reuse the sticky port if we have one; otherwise probe a fresh free port.
+    const portSource =
+      stickyPort !== null ? Promise.resolve(stickyPort) : probeFreePort(opts.host)
+    void portSource
       .then((freePort) => {
         if (stopped) return
+        stickyPort = freePort
         port = freePort
         bootDeadline = Date.now() + healthBootTimeoutMs
 
@@ -247,10 +261,14 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           const wasReady = health === 'ready'
           opts.logger(`[supervisor] sidecar exited code=${code} signal=${signal}`)
           if (wasReady) {
-            // Crash after a healthy run — restart immediately, no backoff.
+            // Crash after a healthy run — restart immediately, no backoff, on
+            // the SAME sticky port so the renderer's WS URL stays valid.
             health = 'restarting'
             spawnChild()
           } else {
+            // Never became healthy — the sticky port may be unbindable; drop it
+            // so the next attempt probes a fresh free port.
+            stickyPort = null
             scheduleRestart(new Error(`exit code=${code} signal=${signal}`))
           }
         })
@@ -283,6 +301,31 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         if (health === 'failed') return reject(new Error('sidecar permanent failure'))
         readyWaiters.push({ resolve, reject })
       }),
+    restart: async () => {
+      if (stopped) return
+      const proc = child
+      if (!proc) {
+        // No live child (e.g. mid-backoff) — kick a fresh spawn on the sticky port.
+        spawnChild()
+        return
+      }
+      // Kill the child; the `exit` handler respawns immediately on the sticky
+      // port (treated as a healthy crash). Resolve once the old child is gone.
+      await new Promise<void>((resolve) => {
+        const killTimer = setTimeout(() => {
+          try {
+            proc.kill('SIGKILL')
+          } catch {
+            /* already gone */
+          }
+        }, stopSigtermGraceMs)
+        proc.once('exit', () => {
+          clearTimeout(killTimer)
+          resolve()
+        })
+        proc.kill('SIGTERM')
+      })
+    },
     stop: async () => {
       if (stopped) return
       stopped = true
