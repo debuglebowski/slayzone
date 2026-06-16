@@ -83,11 +83,11 @@ test.describe('Screenshot browser to terminal', () => {
     await mainWindow.evaluate(
       (fakePath) =>
         (
-          window as unknown as { __testInvoke: (c: string, a: unknown[]) => Promise<unknown> }
-        ).__testInvoke('e2e:spy-app-dep', [
-          'screenshotCaptureView',
-          { success: true, path: fakePath }
-        ]),
+          window as unknown as { __testInvoke: (c: string, ...a: unknown[]) => Promise<unknown> }
+        ).__testInvoke('e2e:spy-app-dep', 'screenshotCaptureView', {
+          success: true,
+          path: fakePath
+        }),
       fakeScreenshotPath
     )
 

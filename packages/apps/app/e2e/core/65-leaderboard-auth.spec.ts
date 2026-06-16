@@ -22,10 +22,9 @@ test.describe('Leaderboard auth transport', () => {
     // method through the bridge; the fakeResult keeps it deterministic/offline
     // while still exercising the system-deep-link transport selection.
     await mainWindow.evaluate(() =>
-      (window as unknown as { __testInvoke: (c: string, a: unknown[]) => Promise<unknown> }).__testInvoke(
-        'e2e:spy-app-dep',
-        ['authGithubSystemSignIn', { ok: false, cancelled: true }]
-      )
+      (
+        window as unknown as { __testInvoke: (c: string, ...a: unknown[]) => Promise<unknown> }
+      ).__testInvoke('e2e:spy-app-dep', 'authGithubSystemSignIn', { ok: false, cancelled: true })
     )
 
     const leaderboardTabButton = mainWindow.locator('.lucide-trophy').first()
@@ -76,7 +75,10 @@ test.describe('Leaderboard auth transport', () => {
       )
       .toEqual({
         calls: 1,
-        lastConvexUrl: expect.stringContaining('.convex.cloud'),
+        // The deep-link transport forwards the build's VITE_CONVEX_URL verbatim.
+        // Assert it's a real URL rather than a specific host — CI builds with a
+        // placeholder (example.invalid), local builds with the real .convex.cloud.
+        lastConvexUrl: expect.stringMatching(/^https?:\/\//),
         lastRedirectTo: OAUTH_REDIRECT_URI
       })
   })
