@@ -123,6 +123,17 @@ export function createHostBridge(url: string, opts: { getTrpcPort: () => number 
   const floatingProxy = makeNested('floatingAgent', floatingEmitter)
   const webviewProxy = makeNested('webview', webviewEmitter)
   const taskWindowsProxy = makeNested('taskWindows', taskWindowsEmitter)
+  // Eventless nested capability: forward every method as `credentialCipher.<m>`.
+  // The side-car has no Electron safeStorage; the host holds the real cipher.
+  const credentialCipherProxy = new Proxy(
+    {},
+    {
+      get(_t, prop: string | symbol) {
+        if (typeof prop !== 'string') return undefined
+        return (...args: unknown[]) => invoke(`credentialCipher.${prop}`, ...args)
+      }
+    }
+  )
 
   const appDeps = new Proxy(
     {},
@@ -138,6 +149,8 @@ export function createHostBridge(url: string, opts: { getTrpcPort: () => number 
             return webviewProxy
           case 'taskWindows':
             return taskWindowsProxy
+          case 'credentialCipher':
+            return credentialCipherProxy
           // Self-referential: the renderer is connected to THIS side-car, so the
           // tRPC port it reports is the side-car's own bound port, not the host's.
           case 'appGetTrpcPort':

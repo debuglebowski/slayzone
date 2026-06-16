@@ -274,10 +274,19 @@ test.describe('Terminal clickable URLs', () => {
     })
     expect(result.found, result.error ?? 'Link not found').toBe(true)
 
-    const calls = await electronApp.evaluate(() => {
-      return (globalThis as Record<string, unknown>).__urlTestCalls as string[]
-    })
-    expect(calls).toContain(testUrl)
+    // The open routes renderer→side-car→capability-bridge→host (post-slice-9),
+    // and link.activate() fires that tRPC mutation fire-and-forget, so the host
+    // spy lands a beat after activate() resolves. Poll instead of reading once
+    // (the Playwright-mouse variant only passes because it sleeps 200ms after).
+    await expect
+      .poll(
+        () =>
+          electronApp.evaluate(
+            () => (globalThis as Record<string, unknown>).__urlTestCalls as string[]
+          ),
+        { timeout: 5_000 }
+      )
+      .toContain(testUrl)
   })
 
   test('Cmd+Shift+Click opens URL externally (Playwright mouse)', async ({

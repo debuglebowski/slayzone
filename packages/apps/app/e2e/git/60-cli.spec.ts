@@ -461,19 +461,31 @@ test.describe('CLI: slay', () => {
   test.describe('slay processes', () => {
     let processId = ''
 
-    test.beforeAll(async ({ electronApp }) => {
-      // Spawn a short-lived process via test global exposed in Playwright mode
-      processId = await electronApp.evaluate(() => {
-        const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
-          projectId: string | null,
-          taskId: string | null,
-          label: string,
-          command: string,
-          cwd: string,
-          autoRestart: boolean
-        ) => string
-        return spawn(null, null, 'CLI test process', 'echo hello-from-slay-cli', '/tmp', false)
-      })
+    // Seed processes through the production path: renderer → tRPC → side-car
+    // process manager (the same registry the CLI reads via /api/processes). The
+    // old __spawnProcess main-process global spawned into the HOST's manager,
+    // which post-slice-9 is a different, uninitialized registry than the
+    // side-car's — so the CLI never saw the seeded processes.
+    const spawnViaSidecar = (
+      page: import('@playwright/test').Page,
+      label: string,
+      command: string
+    ): Promise<string> =>
+      page.evaluate(
+        ({ label, command }) =>
+          window.getTrpcVanillaClient().processes.spawn.mutate({
+            projectId: null,
+            taskId: null,
+            label,
+            command,
+            cwd: '/tmp',
+            autoRestart: false
+          }) as Promise<string>,
+        { label, command }
+      )
+
+    test.beforeAll(async ({ mainWindow }) => {
+      processId = await spawnViaSidecar(mainWindow, 'CLI test process', 'echo hello-from-slay-cli')
       // Give it a moment to produce output
       await new Promise((r) => setTimeout(r, 300))
     })
@@ -520,16 +532,8 @@ test.describe('CLI: slay', () => {
     })
 
     test('kill stops a process', () => {
-      // Spawn a long-running process for this test
-      const killId = spawnSync('node', [SLAY_JS, 'tasks', 'list'], {
-        env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
-        encoding: 'utf8'
-      }) // warmup — ignore result
-      void killId
-
-      // Use electronApp.evaluate to spawn
-      // We'll use the processId from beforeAll and just verify kill works on a fresh one
-      // Spawn inline via API
+      // Kill the 'CLI test process' seeded in beforeAll (via the side-car), then
+      // verify it is gone from the side-car's process list.
       const freshId = runProcessesCli('processes', 'list', '--json')
       const before = JSON.parse(freshId.stdout) as { id: string; label: string }[]
       expect(before.some((p) => p.label === 'CLI test process')).toBe(true)
@@ -551,19 +555,13 @@ test.describe('CLI: slay', () => {
       expect(r.stderr).toContain('not found')
     })
 
-    test('follow prints buffer for a finished process and exits', async ({ electronApp }) => {
-      // Spawn a process that finishes quickly
-      const followId = await electronApp.evaluate(() => {
-        const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
-          projectId: string | null,
-          taskId: string | null,
-          label: string,
-          command: string,
-          cwd: string,
-          autoRestart: boolean
-        ) => string
-        return spawn(null, null, 'CLI follow test', 'echo follow-output-marker', '/tmp', false)
-      })
+    test('follow prints buffer for a finished process and exits', async ({ mainWindow }) => {
+      // Spawn a process that finishes quickly (renderer → tRPC → side-car manager)
+      const followId = await spawnViaSidecar(
+        mainWindow,
+        'CLI follow test',
+        'echo follow-output-marker'
+      )
       // Wait for it to complete
       await new Promise((r) => setTimeout(r, 400))
 
@@ -578,18 +576,8 @@ test.describe('CLI: slay', () => {
       expect(r.stderr).toContain('not found')
     })
 
-    test('spawns command via user shell and captures output', async ({ electronApp }) => {
-      const id = await electronApp.evaluate(() => {
-        const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
-          projectId: string | null,
-          taskId: string | null,
-          label: string,
-          command: string,
-          cwd: string,
-          autoRestart: boolean
-        ) => string
-        return spawn(null, null, 'shell test', 'echo "hello from $SHELL"', '/tmp', false)
-      })
+    test('spawns command via user shell and captures output', async ({ mainWindow }) => {
+      const id = await spawnViaSidecar(mainWindow, 'shell test', 'echo "hello from $SHELL"')
       await new Promise((r) => setTimeout(r, 500))
 
       const r = runProcessesCli('processes', 'logs', id.slice(0, 8))
@@ -601,12 +589,14 @@ test.describe('CLI: slay', () => {
     })
 
     test('process inherits enriched PATH even with bare shell and minimal env', async ({
-      electronApp,
       mainWindow
     }) => {
       // Simulate a system where the spawning shell does NOT enrich PATH
-      // (e.g. /bin/sh on Linux). The cached enrichedPath from init should
-      // be injected into the process env regardless.
+      // (e.g. /bin/sh on Linux). The side-car process manager injects its
+      // cached enrichedPath into the spawned process env regardless. (The
+      // process spawns in the side-car, a separate OS process, so poking the
+      // host's process.env.PATH no longer simulates anything — the bare-shell
+      // override is what proves the manager, not the shell, supplies the PATH.)
       const fakeShell = path.join(os.tmpdir(), 'slayzone-test-bare-shell.sh')
       fs.writeFileSync(
         fakeShell,
@@ -623,24 +613,9 @@ test.describe('CLI: slay', () => {
           window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: shell }),
         fakeShell
       )
-      const originalPath = await electronApp.evaluate(() => {
-        const orig = process.env.PATH
-        process.env.PATH = '/usr/bin:/bin'
-        return orig
-      })
 
       try {
-        const id = await electronApp.evaluate(() => {
-          const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
-            projectId: string | null,
-            taskId: string | null,
-            label: string,
-            command: string,
-            cwd: string,
-            autoRestart: boolean
-          ) => string
-          return spawn(null, null, 'path test', 'echo "PROC_PATH=$PATH"', '/tmp', false)
-        })
+        const id = await spawnViaSidecar(mainWindow, 'path test', 'echo "PROC_PATH=$PATH"')
         await new Promise((r) => setTimeout(r, 1500))
 
         const r = runProcessesCli('processes', 'logs', id.slice(0, 8))
@@ -654,9 +629,6 @@ test.describe('CLI: slay', () => {
         await mainWindow.evaluate(() =>
           window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null })
         )
-        await electronApp.evaluate((p: string) => {
-          process.env.PATH = p
-        }, originalPath)
         try {
           fs.unlinkSync(fakeShell)
         } catch {}

@@ -1665,7 +1665,6 @@ app
     // Expose test helpers for e2e
     if (isPlaywright) {
       ;(globalThis as Record<string, unknown>).__db = db
-      ;(globalThis as Record<string, unknown>).__spawnProcess = spawnProcess
       ;(globalThis as Record<string, unknown>).__notifyPtyState = notifyGlobalStateListeners
       ;(globalThis as Record<string, unknown>).__markSessionUserInput = markSessionUserInput
       ;(globalThis as Record<string, unknown>).__clearSessionUserInputMark =
@@ -1951,6 +1950,24 @@ app
             themeGetEffective: () => nativeGetEffectiveTheme(),
             themeGetSource: () => nativeGetThemeSource(),
             themeSet: (pref) => nativeSetTheme(db, pref),
+            // Credential cipher — Electron safeStorage. The side-car runs as
+            // ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
+            // forwards encrypt/decrypt here over the bridge. Base64 on the wire.
+            credentialCipher: {
+              isEncryptionAvailable: () => getSafeStorageCipher()?.isEncryptionAvailable() ?? false,
+              encryptStringToB64: (secret) => {
+                const c = getSafeStorageCipher()
+                if (!c)
+                  throw new Error('OS secure credential storage is unavailable on this machine')
+                return c.encryptString(secret).toString('base64')
+              },
+              decryptStringFromB64: (b64) => {
+                const c = getSafeStorageCipher()
+                if (!c)
+                  throw new Error('OS secure credential storage is unavailable on this machine')
+                return c.decryptString(Buffer.from(b64, 'base64'))
+              }
+            },
             // Browser view ops — same BrowserViewManager singleton + shared
             // browserExtensionOps the `browser:*` IPC handlers use (coexistence
             // until slice 5). browserExtensionOps is defined below in this

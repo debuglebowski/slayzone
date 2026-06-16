@@ -65,7 +65,13 @@ export {
   noteSessionConversationId,
   setSessionAwaitingInput,
   killPtysByTaskId,
-  broadcastRespawnRequest
+  broadcastRespawnRequest,
+  // The real "task reached terminal status" teardown (host-kill hook + kill
+  // PTYs + kill chat transports). Aliased to avoid colliding with the seam
+  // `onTaskReachedTerminal` (task-events) exported above; the side-car wires
+  // THIS as the seam handler so status→done actually tears down sessions in
+  // this process (where the PTYs/chats live post-cutover).
+  onTaskReachedTerminal as runtimeOnTaskReachedTerminal
 } from './runtime/pty-manager'
 export { createChatOps, type ChatOps, type ChatMode } from './runtime/chat-handlers'
 export {

@@ -51,10 +51,16 @@ import {
   setSessionAwaitingInput,
   configurePtyHost,
   onTaskReachedTerminal,
+  runtimeOnTaskReachedTerminal,
+  setOnTaskReachedTerminalHandler,
   broadcastRespawnRequest,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
-import { createIntegrationOps, ensureIntegrationSchema } from '@slayzone/integrations/server'
+import {
+  createIntegrationOps,
+  ensureIntegrationSchema,
+  setCredentialCipher
+} from '@slayzone/integrations/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { AutomationEngine } from '@slayzone/automations/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -179,6 +185,12 @@ export function composeServer(opts: {
     onReachedTerminal: onTaskReachedTerminal,
     requestPtyRespawn: broadcastRespawnRequest
   })
+  // Wire the cross-domain "task reached terminal status" seam to the REAL
+  // teardown (kill PTYs + chat transports). PTYs/chats live in THIS process now,
+  // so both the task-ops adapter (onReachedTerminal, above) and server-pure
+  // callers (integrations sync/pull) must tear them down here — the Electron
+  // host's handler only sees its own (empty) session maps post-cutover.
+  setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
   setTaskDeps({ ops: taskOps, onMutation: notifyRenderer })
 
   // --- PTY + chat runtime --------------------------------------------------
@@ -211,6 +223,20 @@ export function composeServer(opts: {
   // --- Integrations + feedback ------------------------------------------------
   if (opts.standalone) ensureIntegrationSchema(db)
   setIntegrationOps(createIntegrationOps(db))
+  // Credential encryption needs Electron safeStorage, absent in this
+  // ELECTRON_RUN_AS_NODE process. Supervised: forward encrypt/decrypt to the
+  // host's safeStorage over the capability bridge (base64 on the wire).
+  // Standalone (no host): leave the cipher unset — the plaintext fallback
+  // (gated by SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS / NODE_ENV=test) applies.
+  if (bridge) {
+    const hostCipher = bridge.appDeps.credentialCipher
+    setCredentialCipher({
+      isEncryptionAvailable: () => hostCipher.isEncryptionAvailable(),
+      encryptString: async (secret) =>
+        Buffer.from(await hostCipher.encryptStringToB64(secret), 'base64'),
+      decryptString: (encrypted) => hostCipher.decryptStringFromB64(encrypted.toString('base64'))
+    })
+  }
   const feedbackOps = buildFeedbackOps(db)
 
   // --- Processes ---------------------------------------------------------------
@@ -340,6 +366,14 @@ export function composeServer(opts: {
     themeGetEffective: () => 'dark',
     themeGetSource: () => 'dark',
     themeSet: async () => 'dark',
+    // No Electron safeStorage on a headless host — report unavailable so the
+    // credential store uses its plaintext fallback (gated by env). The encrypt/
+    // decrypt stubs are never reached because the cipher stays unset standalone.
+    credentialCipher: {
+      isEncryptionAvailable: () => false,
+      encryptStringToB64: stub('credentialCipher.encryptStringToB64'),
+      decryptStringFromB64: stub('credentialCipher.decryptStringFromB64')
+    },
     // No native menu on a headless host.
     appRebuildMenuForShortcuts: () => {},
 

@@ -486,6 +486,16 @@ export type AppDeps = {
   themeGetSource: () => 'system' | 'light' | 'dark'
   themeSet: (pref: 'light' | 'dark' | 'system') => Promise<'dark' | 'light'>
 
+  // Credential cipher — Electron `safeStorage`-backed, so host-only. The side-car
+  // runs as ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
+  // forwards encrypt/decrypt here over the bridge. Base64 strings on the wire
+  // (superjson does not round-trip Buffer).
+  credentialCipher: {
+    isEncryptionAvailable: () => boolean
+    encryptStringToB64: (secret: string) => string
+    decryptStringFromB64: (b64: string) => string
+  }
+
   // auth
   authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>
 
