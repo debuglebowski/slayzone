@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
-import { taskEvents, type TaskEventMap } from '@slayzone/task/server'
+import { taskEvents, recordPendingSpawn, type TaskEventMap } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import { router, publicProcedure } from '../trpc'
 import { getTaskOps, getTaskOnMutation } from '../app-deps'
@@ -35,6 +35,32 @@ export const taskRouter = router({
   get: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => ops().getTaskOp(ctx.db, input.id)),
+
+  // Test-only: seed the `pending-spawn` provenance row slay normally writes when
+  // it launches an agent (pty-manager.recordPendingSpawn). Specs that fire an
+  // agent-hook directly (without spawning a real PTY) need this so the hook's
+  // session id is honored (slay-spawned) rather than rejected as foreign-observed
+  // — the latter intentionally skips the legacy provider_config dual-write
+  // (RC1 clobber guard). PLAYWRIGHT-gated, mirrors menu.testEmit.
+  testRecordPendingSpawn: publicProcedure
+    .input(
+      z.object({
+        taskId: z.string(),
+        mode: z.string(),
+        expectedSessionId: z.string().nullable(),
+        usedResume: z.boolean().optional()
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+      await recordPendingSpawn(ctx.db, {
+        taskId: input.taskId,
+        mode: input.mode,
+        expectedSessionId: input.expectedSessionId,
+        usedResume: input.usedResume ?? false
+      })
+      return { ok: true }
+    }),
 
   create: publicProcedure.input(createInput).mutation(async ({ ctx, input }) => {
     const r = await ops().createTaskOp(ctx.db, input, deps())

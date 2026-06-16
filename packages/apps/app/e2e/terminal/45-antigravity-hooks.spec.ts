@@ -172,6 +172,21 @@ test.describe('Antigravity agent hooks', () => {
     })
 
     const cid = 'aa111111-1111-4111-8111-111111111111'
+
+    // Seed the spawn-intent row slay writes when it launches the agent, so the
+    // PreInvocation hook id is honored (slay-spawned) and persisted rather than
+    // skipped as foreign-observed (RC1 clobber guard).
+    await mainWindow.evaluate(
+      ({ id, sid }) =>
+        window.getTrpcVanillaClient().task.testRecordPendingSpawn.mutate({
+          taskId: id,
+          mode: 'antigravity',
+          expectedSessionId: sid,
+          usedResume: false
+        }),
+      { id: task.id, sid: cid }
+    )
+
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'antigravity',
       hookEvent: 'PreInvocation',

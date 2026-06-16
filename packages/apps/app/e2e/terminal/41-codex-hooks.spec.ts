@@ -198,6 +198,22 @@ test.describe('Codex agent hooks', () => {
     // The codex SessionStart hook carries the codex CLI session_id — the
     // PRIMARY resume-id capture path (no /status command needed).
     const codexSessionId = '88888888-8888-4888-8888-888888888888'
+
+    // Seed the spawn-intent row slay writes when it launches the agent. Without
+    // it the hook is treated as foreign-observed and the legacy provider_config
+    // dual-write is skipped (RC1 clobber guard) — here we simulate the real
+    // slay-spawned path so the SessionStart id is honored + persisted.
+    await mainWindow.evaluate(
+      ({ id, sid }) =>
+        window.getTrpcVanillaClient().task.testRecordPendingSpawn.mutate({
+          taskId: id,
+          mode: 'codex',
+          expectedSessionId: sid,
+          usedResume: false
+        }),
+      { id: task.id, sid: codexSessionId }
+    )
+
     const res = spawnSync('bash', [scriptPath], {
       input: JSON.stringify({
         hook_event_name: 'SessionStart',
