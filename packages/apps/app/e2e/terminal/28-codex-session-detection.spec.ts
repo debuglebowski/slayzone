@@ -150,6 +150,20 @@ test.describe('Session ID banners', () => {
       .last()
       .click()
 
+    // The side-car's codex adapter parses the session id out of /status output
+    // and emits `session-detected`. No real codex CLI here, so simulate that
+    // emit (the legacy host `pty:session-detected` IPC mock the old test relied
+    // on was orphaned by the tRPC cutover). Drives the renderer's real
+    // onSessionDetected → persist path.
+    await mainWindow.evaluate(
+      ({ id, cid }) =>
+        window.getTrpcVanillaClient().pty.testEmitSessionDetected.mutate({
+          sessionId: `${id}:${id}`,
+          conversationId: cid
+        }),
+      { id: codexTaskId, cid: detectedId }
+    )
+
     await expect
       .poll(async () => {
         const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), codexTaskId)
@@ -178,6 +192,18 @@ test.describe('Session ID banners', () => {
       .last()
       .click()
 
+    // Simulate the side-car gemini adapter's `session-detected` emit (parsed
+    // from /stats output) — no real gemini CLI here. Replaces the orphaned
+    // legacy host pty:session-detected IPC mock.
+    await mainWindow.evaluate(
+      ({ id, cid }) =>
+        window.getTrpcVanillaClient().pty.testEmitSessionDetected.mutate({
+          sessionId: `${id}:${id}`,
+          conversationId: cid
+        }),
+      { id: geminiTaskId, cid: detectedId }
+    )
+
     await expect
       .poll(async () => {
         const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), geminiTaskId)
@@ -196,7 +222,12 @@ test.describe('Session ID banners', () => {
     await expect(mainWindow.getByText('BT cursor task').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('BT cursor task').first().click()
 
-    await expect(mainWindow.getByText(/Session ID detection not available/)).toBeVisible()
+    // 5s (vs default 2s): the preceding codex/gemini detect tests persist a
+    // conversation id, whose notifyRenderer → board refetch churn can delay the
+    // first paint of this freshly-navigated banner past the default window.
+    await expect(mainWindow.getByText(/Session ID detection not available/)).toBeVisible({
+      timeout: 5_000
+    })
     await expect(mainWindow.getByText(/don't close the tab/)).toBeVisible()
     await expect(mainWindow.getByText(/Claude Code, Codex, Gemini, Qwen, Copilot/)).toBeVisible()
     // No detect button

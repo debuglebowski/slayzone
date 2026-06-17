@@ -159,6 +159,19 @@ export const ptyRouter = router({
       return () => ev.off('session-detected', handler)
     })
   ),
+  // Test-only: emit a `session-detected` event as the side-car's PTY adapter
+  // does when it parses a session id out of `/status` (codex) / `/stats`
+  // (gemini) output. Specs can't run a real CLI, so they fire this to drive the
+  // renderer's onSessionDetected → persist path. PLAYWRIGHT-gated (menu.testEmit
+  // pattern). Replaces the legacy host `pty:session-detected` IPC mock that the
+  // tRPC cutover orphaned.
+  testEmitSessionDetected: publicProcedure
+    .input(z.object({ sessionId: z.string(), conversationId: z.string() }))
+    .mutation(({ input }) => {
+      if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+      getPtyDeps().events.emit('session-detected', input.sessionId, input.conversationId)
+      return { ok: true }
+    }),
   onDevServerDetected: publicProcedure.subscription(() =>
     observable<{ sessionId: string; url: string }>((emit) => {
       const handler = (sessionId: string, url: string): void => emit.next({ sessionId, url })
