@@ -47,6 +47,7 @@ run_test_electron_strict_loader packages/domains/projects/src/server/task-automa
 run_test_electron_strict_loader packages/domains/projects/src/server/project-groups-txns.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/conversation-id-heal.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/task-conversations.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/startup-purge.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
 run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessions.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts

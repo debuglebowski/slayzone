@@ -57,6 +57,7 @@ export {
 } from './ops'
 export type { CreateImportedTaskInput } from './ops'
 export { configureTaskRuntimeAdapters, updateTask } from './ops/shared'
+export { purgeStaleAndOrphanedTasks } from './ops/startup-purge'
 export type {
   OpDeps,
   TaskRuntimeAdapters,
