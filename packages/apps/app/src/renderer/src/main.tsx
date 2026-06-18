@@ -10,7 +10,7 @@ import {
   getTrpcClient,
   initTrpcClient
 } from '@slayzone/transport/client'
-import { setShortcutBackend, UndoProvider } from '@slayzone/ui'
+import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
 import { FloatingGlobalAgentPanel } from './components/global-agent-panel/FloatingGlobalAgentPanel'
@@ -66,7 +66,9 @@ if (isFloatingGlobalAgentPanel) {
         <TrpcProvider url={withWindowId(server.url, windowId)}>
           <PtyProvider>
             <ThemeProvider>
-              <FloatingGlobalAgentPanel />
+              <TooltipProvider delayDuration={0}>
+                <FloatingGlobalAgentPanel />
+              </TooltipProvider>
             </ThemeProvider>
           </PtyProvider>
         </TrpcProvider>
@@ -84,7 +86,9 @@ if (isFloatingGlobalAgentPanel) {
           <PtyProvider>
             <ThemeProvider>
               <UndoProvider>
-                <SecondaryTaskWindow taskId={taskWindowId} />
+                <TooltipProvider delayDuration={0}>
+                  <SecondaryTaskWindow taskId={taskWindowId} />
+                </TooltipProvider>
               </UndoProvider>
             </ThemeProvider>
           </PtyProvider>
@@ -164,7 +168,9 @@ if (isFloatingGlobalAgentPanel) {
               <TelemetryProvider>
                 <UndoProvider>
                   <MaybeProfiler>
-                    <App />
+                    <TooltipProvider delayDuration={0}>
+                      <App />
+                    </TooltipProvider>
                   </MaybeProfiler>
                 </UndoProvider>
               </TelemetryProvider>

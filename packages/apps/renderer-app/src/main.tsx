@@ -5,7 +5,7 @@ import {
   initTrpcClient
 } from '@slayzone/transport/client'
 import { ThemeProvider } from '@slayzone/settings'
-import { UndoProvider } from '@slayzone/ui'
+import { TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
 import { OverlayDialogApp } from './OverlayDialogApp'
@@ -32,12 +32,20 @@ export async function mountApp(): Promise<void> {
   // into the transparent native overlay surface. Mount ONLY the dialog app; never
   // bind tRPC / data here (dual-shell-instance contention).
   if (hash === '#overlay=dialog') {
-    createRoot(el).render(<OverlayDialogApp />)
+    createRoot(el).render(
+      <TooltipProvider delayDuration={0}>
+        <OverlayDialogApp />
+      </TooltipProvider>
+    )
     return
   }
   // Layout/browser-panel skeleton demo, kept reachable for development.
   if (hash === '#task-demo') {
-    createRoot(el).render(<TaskDetailsView />)
+    createRoot(el).render(
+      <TooltipProvider delayDuration={0}>
+        <TaskDetailsView />
+      </TooltipProvider>
+    )
     return
   }
 
@@ -55,7 +63,9 @@ export async function mountApp(): Promise<void> {
     <TrpcProvider url={trpcUrl}>
       <ThemeProvider>
         <UndoProvider>
-          <HomeView />
+          <TooltipProvider delayDuration={0}>
+            <HomeView />
+          </TooltipProvider>
         </UndoProvider>
       </ThemeProvider>
     </TrpcProvider>

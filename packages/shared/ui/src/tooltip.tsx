@@ -16,12 +16,14 @@ function TooltipProvider({
   )
 }
 
+// NOTE: Tooltip does NOT wrap its own TooltipProvider. The shadcn/ui default does,
+// which spawns one Provider per <Tooltip> — ~2,000 of them accumulated in a long-lived
+// renderer (heap snapshots), and each provider's overlay/dismissable-layer state was a
+// retained-fiber leak source. Instead a SINGLE TooltipProvider is mounted once at each
+// window root (see the renderer main.tsx files). Radix requires a Provider ancestor, so
+// every render root must mount one.
 function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return (
-    <TooltipProvider>
-      <TooltipPrimitive.Root data-slot="tooltip" {...props} />
-    </TooltipProvider>
-  )
+  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
 }
 
 function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
