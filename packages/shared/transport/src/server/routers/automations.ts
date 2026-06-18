@@ -57,7 +57,9 @@ export const automationsRouter = router({
     .mutation(({ ctx, input }) => reorderAutomations(ctx.db, input.ids)),
 
   getRuns: publicProcedure
-    .input(z.object({ automationId: z.string(), limit: z.number().int().positive().optional() }))
+    // nonnegative (not positive): limit=0 is a valid "return none" the store
+    // supports via SQL LIMIT 0 — the legacy IPC path accepted it.
+    .input(z.object({ automationId: z.string(), limit: z.number().int().nonnegative().optional() }))
     .query(({ ctx, input }) => listAutomationRuns(ctx.db, input.automationId, input.limit)),
 
   runManual: publicProcedure

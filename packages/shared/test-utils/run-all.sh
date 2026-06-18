@@ -64,7 +64,7 @@ run_test packages/domains/sidebar/src/views/projectDrop.test.ts
 run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.items.test.ts
 run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.selections.test.ts
 run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.context.test.ts
-run_test_electron_strict_loader packages/domains/file-editor/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
 run_test_electron_strict_loader packages/domains/integrations/src/electron/handlers.db.test.ts
 run_test_electron_strict_loader packages/domains/worktrees/src/electron/handlers.test.ts
@@ -91,7 +91,7 @@ run_test_electron_strict_loader packages/domains/integrations/src/electron/handl
 run_test packages/domains/automations/src/shared/templates.test.ts
 run_test packages/domains/automations/src/shared/types.test.ts
 run_test packages/domains/automations/src/shared/ai.test.ts
-run_test_electron_strict_loader packages/domains/automations/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/automations.test.ts
 run_test_electron_strict_loader packages/domains/automations/src/server/engine.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
