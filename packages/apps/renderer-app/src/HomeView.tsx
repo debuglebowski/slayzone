@@ -23,6 +23,20 @@ function Centered({ children }: { children: React.ReactNode }): React.JSX.Elemen
   )
 }
 
+// Placeholder tab-bar chrome. The fork is single-view (Home) until the task
+// detail view lands — at which point this is replaced by the real tab system
+// (useTabStore). For now it just frames the Home tab so the chrome is in place.
+function TabBarPlaceholder(): React.JSX.Element {
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-3 py-1.5">
+      <div className="rounded-md bg-tab-active px-3 py-1 text-xs font-medium text-foreground">
+        Home
+      </div>
+      <span className="text-[11px] text-muted-foreground">Task tabs arrive with the task view</span>
+    </div>
+  )
+}
+
 // Stable defaults for the app-chrome props the Electron app supplies but the
 // fork doesn't have yet (no native window chrome, convex, feedback, onboarding,
 // or shortcut recorder in the shell). Module-level → referentially stable.
@@ -103,8 +117,11 @@ export function HomeView(): React.JSX.Element {
         onSetCollapsed={data.setTaskCollapsed}
         onPinnedReorder={data.reorderPinnedTasks}
       />
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <HomeContainer data={data} selectedProjectId={selectedProjectId} isActive />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <TabBarPlaceholder />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <HomeContainer data={data} selectedProjectId={selectedProjectId} isActive />
+        </div>
       </div>
     </SidebarProvider>
   )
