@@ -84,6 +84,8 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/cha
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/template.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/artifacts.test.ts
+# Cross-domain: task+tags+history activity-event recording + cursor pagination.
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/history.test.ts
 # Browser onEvent snapshot replay (stuck-loading race fix) — no DB, plain tsx
 run_test packages/shared/transport/src/server/routers/app.browser-events.test.ts
 run_test_electron_strict_loader packages/domains/integrations/src/electron/handlers.api.test.ts
