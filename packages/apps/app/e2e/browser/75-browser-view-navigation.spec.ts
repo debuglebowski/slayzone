@@ -54,11 +54,25 @@ test.describe('Browser view navigation (WebContentsView)', () => {
       .toContain('/title-Example')
 
     // THE REAL TEST: is the native view actually on screen?
-    const nativeBounds = (await testInvoke(
-      mainWindow,
-      'browser:get-actual-native-bounds',
-      viewId
-    )) as { x: number; y: number; width: number; height: number }
+    // The view resizes from its 1px initial bounds only after the renderer lays out
+    // the panel and pushes bounds to the main process (renderer layout → IPC → main
+    // resize) — under load that propagation lags the URL update, so a single read can
+    // still catch the 1px initial. Poll until the real on-screen bounds land.
+    type NativeBounds = { x: number; y: number; width: number; height: number }
+    const readBounds = async () =>
+      (await testInvoke(mainWindow, 'browser:get-actual-native-bounds', viewId)) as NativeBounds
+    await expect
+      .poll(
+        async () => {
+          const b = await readBounds()
+          return b.x >= 0 && b.width > 50 && b.height > 50
+        },
+        { timeout: 10_000 }
+      )
+      .toBe(true)
+
+    // Settled — assert the specifics with labelled messages.
+    const nativeBounds = await readBounds()
     expect(nativeBounds.x, 'native view x must not be offscreen (-10000)').toBeGreaterThanOrEqual(0)
     expect(nativeBounds.width, 'native view must have real width, not 1px initial').toBeGreaterThan(
       50

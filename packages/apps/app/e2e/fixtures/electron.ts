@@ -84,6 +84,7 @@ function ensureDir(dirPath: string): void {
  * would misleadingly succeed against the parent. We check `--show-toplevel` instead.
  */
 export function ensureGitRepo(dirPath: string): void {
+  let isOwnRepo = false
   try {
     const toplevel = execSync('git rev-parse --show-toplevel', {
       cwd: dirPath,
@@ -91,11 +92,28 @@ export function ensureGitRepo(dirPath: string): void {
     })
       .toString()
       .trim()
-    if (toplevel !== dirPath) throw new Error('not own repo')
+    isOwnRepo = toplevel === dirPath
   } catch {
+    isOwnRepo = false
+  }
+
+  if (!isOwnRepo) {
     execSync('git init', { cwd: dirPath, stdio: 'pipe' })
-    execSync('git config user.name "Test"', { cwd: dirPath, stdio: 'pipe' })
-    execSync('git config user.email "test@test.com"', { cwd: dirPath, stdio: 'pipe' })
+  }
+
+  // ALWAYS assert local config (new OR reused repo) so commits never invoke a
+  // GPG/1Password signer. Under load 1Password's signing agent intermittently
+  // fails with "1Password: failed to fill whole buffer" → "fatal: failed to write
+  // commit object", which fails a setup commit and cascades an entire describe.serial
+  // block (one beforeAll throw → many "did not run"). Setting the flags in the test
+  // repo's own config covers EVERY call site — including helpers (32/33) that don't
+  // pass `-c commit.gpgsign=false` per-command — and survives repo reuse across runs.
+  execSync('git config commit.gpgsign false', { cwd: dirPath, stdio: 'pipe' })
+  execSync('git config tag.gpgsign false', { cwd: dirPath, stdio: 'pipe' })
+  execSync('git config user.name "Test"', { cwd: dirPath, stdio: 'pipe' })
+  execSync('git config user.email "test@test.com"', { cwd: dirPath, stdio: 'pipe' })
+
+  if (!isOwnRepo) {
     fs.writeFileSync(path.join(dirPath, 'README.md'), '# test\n')
     execSync('git add -A', { cwd: dirPath, stdio: 'pipe' })
     execSync('git -c commit.gpgsign=false commit -m "Initial commit"', {

@@ -362,12 +362,13 @@ test.describe('Artifacts panel', () => {
     await openArtifactsPanel(mainWindow)
     await artifactsPanel(mainWindow).locator('[data-testid="artifacts-new-btn"]').click()
     await expect(createInput(mainWindow)).toBeVisible({ timeout: 3_000 })
-    // The input auto-focuses one rAF after mount (createInputRef). Wait for that
-    // focus to land before pressing Escape — otherwise the keydown can race the
-    // pending focus and miss the input's onKeyDown (setCreating(null)) handler.
-    await expect(createInput(mainWindow)).toBeFocused({ timeout: 3_000 })
+    // Escape must reach the input's onKeyDown (setCreating(null)) to cancel, which
+    // requires the input focused. The component auto-focuses one rAF after mount, but
+    // under load that focus can fail to land (input stays `inactive`) — so focus it
+    // explicitly here rather than waiting on the flaky auto-focus.
+    await createInput(mainWindow).focus()
     await createInput(mainWindow).press('Escape')
-    await expect(createInput(mainWindow)).not.toBeVisible({ timeout: 2_000 })
+    await expect(createInput(mainWindow)).not.toBeVisible({ timeout: 3_000 })
   })
 
   // --- Group 8: Seed-based tests ---
@@ -389,11 +390,20 @@ test.describe('Artifacts panel', () => {
 
     await openArtifactsPanel(mainWindow)
     await expect(folderRow(mainWindow, 'seeded-folder')).toBeVisible({ timeout: 5_000 })
-    // Folders AUTO-EXPAND on first load (useArtifactTree seeds the expanded set
-    // from all folder ids when nothing is persisted), so the nested artifact
-    // renders without a click. The previous click-to-expand raced that effect:
-    // a click landing after auto-expand TOGGLED the folder closed → flaky.
-    await expect(artifactRow(mainWindow, 'nested.md')).toBeVisible({ timeout: 3_000 })
+    // useArtifactTree AUTO-EXPANDS folders only on the panel's FIRST mount (it
+    // seeds the expanded set from all folder ids once, when nothing is persisted).
+    // The panel is shared across this file's tests (one beforeAll task), so by the
+    // time this test runs the panel is long-mounted and `seeded-folder` — created
+    // just now — is NOT in the expanded set → renders COLLAPSED. (Isolated `-g`
+    // runs of only this test hit the fresh-mount path and auto-expand, which is
+    // why removing the click passed in isolation but flaked in the full suite.)
+    // Expand iff collapsed: on a fresh mount nested.md is already visible (skip the
+    // click that would toggle it closed mid-auto-expand); otherwise click to open.
+    const nested = artifactRow(mainWindow, 'nested.md')
+    if (!(await nested.isVisible().catch(() => false))) {
+      await folderRow(mainWindow, 'seeded-folder').click()
+    }
+    await expect(nested).toBeVisible({ timeout: 3_000 })
   })
 
   // --- Group 9: External-sync banner + caret preservation ---

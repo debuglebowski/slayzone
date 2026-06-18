@@ -73,12 +73,27 @@ test.describe('Gemini agent hooks', () => {
       ;(window as Record<string, unknown>).__geminiUnsub = () => sub.unsubscribe()
     })
 
-    await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
-      agentId: 'gemini',
-      hookEvent: 'BeforeAgent',
-      sessionId: 'gemini-sess',
-      taskId: 'gemini-task'
-    })
+    // The tRPC WS subscription above registers server-side asynchronously after
+    // .subscribe() returns, so a POST firing before it's live misses the emit
+    // (lost-event race — flaked intermittently). Retry the POST until an event lands;
+    // re-POSTing the same BeforeAgent hook is idempotent for the events[0] assertion.
+    await expect(async () => {
+      await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
+        agentId: 'gemini',
+        hookEvent: 'BeforeAgent',
+        sessionId: 'gemini-sess',
+        taskId: 'gemini-task'
+      })
+      await mainWindow.waitForFunction(
+        () => {
+          const events = (window as Record<string, unknown>).__geminiEvents as
+            | unknown[]
+            | undefined
+          return !!events && events.length > 0
+        },
+        { timeout: 2000 }
+      )
+    }).toPass({ timeout: 15000 })
 
     const handle = await mainWindow.waitForFunction(
       () => {

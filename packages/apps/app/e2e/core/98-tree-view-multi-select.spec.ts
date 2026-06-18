@@ -363,6 +363,12 @@ test.describe('TreeView multi-select', () => {
     await mainWindow.mouse.move(dstBox.x + dstBox.width / 2, dstBox.y + dstBox.height / 2, {
       steps: 20
     })
+    // Wait for dnd-kit to register the todo header as the active drop target before
+    // releasing. Playwright dispatches pointermove synchronously without yielding to
+    // dnd-kit's rAF-batched collision detection, so releasing immediately can drop
+    // onto a null `over` → no status change. The header paints `ring-accent/*` while
+    // `isOver` (headers.tsx) — a deterministic signal the drop target is locked in.
+    await expect(todoGroup).toHaveClass(/ring-accent/, { timeout: 2_000 })
     await mainWindow.mouse.up()
 
     await expect

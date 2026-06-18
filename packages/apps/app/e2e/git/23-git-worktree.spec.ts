@@ -5,9 +5,8 @@ import {
   goHome,
   clickProject,
   resetApp,
-  ensureGitRepo
+  createIsolatedGitRepo
 } from '../fixtures/electron'
-import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
 import { execSync } from 'child_process'
 import { existsSync } from 'fs'
@@ -16,28 +15,49 @@ import path from 'path'
 test.describe('Git worktree operations', () => {
   let projectAbbrev: string
   let taskId: string
+  // Isolated per-worker repo (matches 32/33/34/35). Using the shared repoDir
+  // let ~180 prior specs accumulate worktrees/branches there, so the UI "Branch to
+  // worktree" flow (which creates at the repo-default location) hit stale state and
+  // failed deterministically in the full suite while passing in isolation.
+  let repoDir: string
   const branchName = 'worktree-task' // slugify('Worktree task')
 
   const getTask = async (page: import('@playwright/test').Page, id: string) =>
     page.evaluate((taskId) => window.getTrpcVanillaClient().task.get.query({ id: taskId }), id)
 
   const execGit = (command: string) =>
-    execSync(command, { cwd: TEST_PROJECT_PATH, stdio: 'pipe' }).toString()
+    execSync(command, { cwd: repoDir, stdio: 'pipe' }).toString()
 
   const openTaskViaSearch = async (page: import('@playwright/test').Page, title: string) => {
-    const taskCardTitle = page.getByText(title).first()
-    if (await taskCardTitle.isVisible({ timeout: 1_500 }).catch(() => false)) {
-      await taskCardTitle.click()
-    } else {
-      await pressShortcut(page, 'search')
-      const input = page.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
-      await expect(input).toBeVisible()
-      await input.fill(title)
-      await page.getByRole('dialog').last().getByText(title).first().click()
-    }
-    await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible(
-      { timeout: 5_000 }
-    )
+    const modeTrigger = page.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+    // Retry the whole open until the detail panel mounts. Under full-suite load the
+    // board re-renders (refetch churn) can detach the card between the visibility
+    // check and the click, or the search dialog can be slow to paint — either way a
+    // single attempt races. Bounded retry on a real condition (panel mounted), not a
+    // sleep. The placeholder copy stays the source of truth for the search input.
+    await expect(async () => {
+      if (await modeTrigger.isVisible({ timeout: 250 }).catch(() => false)) return // already open
+      const taskCardTitle = page.getByText(title).first()
+      if (await taskCardTitle.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await taskCardTitle.click().catch(() => {})
+      } else {
+        await pressShortcut(page, 'search')
+        const input = page.getByPlaceholder(
+          'Search files, folders, commands, projects, and tasks...'
+        )
+        if (await input.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          await input.fill(title)
+          await page
+            .getByRole('dialog')
+            .last()
+            .getByText(title)
+            .first()
+            .click()
+            .catch(() => {})
+        }
+      }
+      await expect(modeTrigger).toBeVisible({ timeout: 2_500 })
+    }).toPass({ timeout: 20_000 })
   }
 
   const removeWorktreeButton = (page: import('@playwright/test').Page) => {
@@ -47,7 +67,7 @@ test.describe('Git worktree operations', () => {
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
-    ensureGitRepo(TEST_PROJECT_PATH)
+    repoDir = createIsolatedGitRepo('worktree')
 
     // Clean up any leftover worktrees from previous runs.
     try {
@@ -68,8 +88,8 @@ test.describe('Git worktree operations', () => {
         }
       }
       execGit('git worktree prune')
-      const worktreeDir = path.join(TEST_PROJECT_PATH, 'worktrees')
-      execSync(`rm -rf "${worktreeDir}"`, { cwd: TEST_PROJECT_PATH, stdio: 'pipe' })
+      const worktreeDir = path.join(repoDir, 'worktrees')
+      execSync(`rm -rf "${worktreeDir}"`, { cwd: repoDir, stdio: 'pipe' })
     } catch {
       /* ignore */
     }
@@ -85,7 +105,7 @@ test.describe('Git worktree operations', () => {
     const p = await s.createProject({
       name: 'Worktree Test',
       color: '#10b981',
-      path: TEST_PROJECT_PATH
+      path: repoDir
     })
     // Ensure default worktree base path behavior is used for this suite.
     await s.setSetting('worktree_base_path', '')
@@ -97,9 +117,9 @@ test.describe('Git worktree operations', () => {
 
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
-    await expect(
-      mainWindow.locator('p.line-clamp-3:visible', { hasText: 'Worktree task' }).first()
-    ).toBeVisible()
+    // openTaskViaSearch robustly opens the task (card click OR search fallback, with
+    // retry), so the prior redundant card-visibility assert — which raced the board
+    // refetch under load and failed the whole beforeAll — is no longer needed.
     await openTaskViaSearch(mainWindow, 'Worktree task')
 
     // Toggle git panel on (general tab — shows branch/worktree info)
@@ -121,15 +141,21 @@ test.describe('Git worktree operations', () => {
   })
 
   test('create worktree', async ({ mainWindow }) => {
-    await mainWindow.getByRole('button', { name: /Branch to worktree/ }).click()
-    // Wait for creation (git worktree add + DB update)
+    // Click ONCE then poll. Do NOT retry the click: `git worktree add` is a slow
+    // async op under machine contention, and a second click mid-creation kicks off a
+    // conflicting add that can leave worktree_path null. A generous poll tolerates the
+    // slow op; the per-test timeout is widened to fit it.
+    test.setTimeout(45_000)
+    const branchBtn = mainWindow.getByRole('button', { name: /Branch to worktree/ })
+    await expect(branchBtn).toBeVisible({ timeout: 10_000 })
+    await branchBtn.click()
     await expect
       .poll(
         async () => {
           const task = await getTask(mainWindow, taskId)
           return task?.worktree_path ?? null
         },
-        { timeout: 10_000 }
+        { timeout: 30_000 }
       )
       .toContain(branchName)
 
@@ -201,7 +227,7 @@ test.describe('Git worktree operations', () => {
             .catch(() => {})
           await window.getTrpcVanillaClient().task.update.mutate({ id, worktreePath: null })
         },
-        { repoPath: TEST_PROJECT_PATH, worktreePath: existing.worktree_path, id: taskId }
+        { repoPath: repoDir, worktreePath: existing.worktree_path, id: taskId }
       )
     }
 
@@ -217,15 +243,15 @@ test.describe('Git worktree operations', () => {
       /* ignore */
     }
     try {
-      execSync(`rm -rf "${path.join(TEST_PROJECT_PATH, 'worktrees')}"`, {
-        cwd: TEST_PROJECT_PATH,
+      execSync(`rm -rf "${path.join(repoDir, 'worktrees')}"`, {
+        cwd: repoDir,
         stdio: 'pipe'
       })
     } catch {
       /* ignore */
     }
 
-    const targetPath = path.join(path.dirname(TEST_PROJECT_PATH), branchName)
+    const targetPath = path.join(path.dirname(repoDir), branchName)
     const parentBranch = execGit('git branch --show-current').trim() || 'main'
 
     await mainWindow.evaluate(
@@ -237,7 +263,7 @@ test.describe('Git worktree operations', () => {
           worktreeParentBranch: parentBranch
         })
       },
-      { repoPath: TEST_PROJECT_PATH, targetPath, branch: branchName, taskId, parentBranch }
+      { repoPath: repoDir, targetPath, branch: branchName, taskId, parentBranch }
     )
     await expect
       .poll(async () => {
@@ -253,12 +279,12 @@ test.describe('Git worktree operations', () => {
     // (test exercises direct createWorktree, not the auto-create default template).
     const task = await getTask(mainWindow, taskId)
     const worktreePathFromDb = task?.worktree_path ?? ''
-    const expectedWorktreePath = path.join(path.dirname(TEST_PROJECT_PATH), branchName)
+    const expectedWorktreePath = path.join(path.dirname(repoDir), branchName)
     expect(worktreePathFromDb).toBe(expectedWorktreePath)
 
     // Verify worktree dir exists on disk (read effective path from DB)
     const worktreePath =
-      task?.worktree_path ?? path.join(TEST_PROJECT_PATH, 'worktrees', branchName)
+      task?.worktree_path ?? path.join(repoDir, 'worktrees', branchName)
     const exists = existsSync(worktreePath)
     expect(exists).toBe(true)
   })
@@ -273,7 +299,7 @@ test.describe('Git worktree operations', () => {
     const branch = `archive-cleanup-${suffix}`
     const title = `Archive cleanup ${suffix}`
     const created = await s.createTask({ projectId: project!.id, title, status: 'todo' })
-    const worktreePath = path.join(path.dirname(TEST_PROJECT_PATH), branch)
+    const worktreePath = path.join(path.dirname(repoDir), branch)
     const parentBranch = execGit('git branch --show-current').trim()
 
     await mainWindow.evaluate(
@@ -286,7 +312,7 @@ test.describe('Git worktree operations', () => {
         })
       },
       {
-        repoPath: TEST_PROJECT_PATH,
+        repoPath: repoDir,
         targetPath: worktreePath,
         branch,
         taskId: created.id,
@@ -328,7 +354,7 @@ test.describe('Git worktree operations', () => {
     const branch = `delete-cleanup-${suffix}`
     const title = `Delete cleanup ${suffix}`
     const created = await s.createTask({ projectId: project!.id, title, status: 'todo' })
-    const worktreePath = path.join(path.dirname(TEST_PROJECT_PATH), branch)
+    const worktreePath = path.join(path.dirname(repoDir), branch)
     const parentBranch = execGit('git branch --show-current').trim()
 
     await mainWindow.evaluate(
@@ -341,7 +367,7 @@ test.describe('Git worktree operations', () => {
         })
       },
       {
-        repoPath: TEST_PROJECT_PATH,
+        repoPath: repoDir,
         targetPath: worktreePath,
         branch,
         taskId: created.id,

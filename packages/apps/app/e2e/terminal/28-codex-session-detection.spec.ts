@@ -20,6 +20,36 @@ test.describe('Session ID banners', () => {
   const sessionBanner = (page: import('@playwright/test').Page) =>
     page.getByText('Session not saved').last()
 
+  // Robustly open a banner task and wait for its banner. The detect tests persist a
+  // conversation id → notifyRenderer → board refetch; that churn, plus goHome being
+  // best-effort, can leave a prior task TAB active so the project board isn't the
+  // visible view and the target card stays hidden (toBeVisible→hidden). The banner
+  // itself renders fine once the task opens (confirmed via DOM dump) — the flake is
+  // purely navigation. Fix: explicitly activate the home tab (wait for + click its
+  // icon, as in 01-smoke) so the board surfaces, THEN select the project + open the
+  // task. Single pass with generous budgets — NOT a tight re-nav loop, which thrashes
+  // the app under contention.
+  const openBannerTask = async (
+    page: import('@playwright/test').Page,
+    title: string,
+    banner: import('@playwright/test').Locator
+  ): Promise<void> => {
+    const homeIcon = page.locator('.lucide-house, .lucide-home').first()
+    await expect(homeIcon).toBeVisible({ timeout: 10_000 })
+    await homeIcon.click({ timeout: 3_000 }).catch(() => {})
+    await clickProject(page, projectAbbrev)
+    // Let any in-flight board refetch from a preceding detect test settle BEFORE
+    // clicking: a click landing while the board is being replaced (notifyRenderer →
+    // refetch) is lost, so the task never opens and its (task-derived) banner never
+    // mounts ("element(s) not found"). The test right after the gemini detect test
+    // (cursor) is the one that hits this. Settle, then open against a stable board.
+    await page.waitForTimeout(2_000)
+    const card = page.getByText(title).first()
+    await expect(card).toBeVisible({ timeout: 10_000 })
+    await card.click()
+    await expect(banner).toBeVisible({ timeout: 15_000 })
+  }
+
   test.beforeAll(async ({ electronApp, mainWindow }) => {
     await resetApp(mainWindow)
     // Mock PTY handlers so we don't need real CLIs
@@ -136,9 +166,8 @@ test.describe('Session ID banners', () => {
   // --- Codex: detect banner with /status ---
 
   test('codex: shows detect banner with /status button', async ({ mainWindow }) => {
-    await mainWindow.getByText('BT codex task').first().click()
-
-    await expect(sessionBanner(mainWindow)).toBeVisible()
+    test.setTimeout(45_000)
+    await openBannerTask(mainWindow, 'BT codex task', sessionBanner(mainWindow))
     await expect(mainWindow.getByRole('button', { name: /Run \/status/ }).last()).toBeVisible()
   })
 
@@ -177,12 +206,8 @@ test.describe('Session ID banners', () => {
   // --- Gemini: detect banner with /stats ---
 
   test('gemini: shows detect banner with /stats button', async ({ mainWindow }) => {
-    await goHome(mainWindow)
-    await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('BT gemini task').first()).toBeVisible({ timeout: 5_000 })
-    await mainWindow.getByText('BT gemini task').first().click()
-
-    await expect(sessionBanner(mainWindow)).toBeVisible()
+    test.setTimeout(45_000)
+    await openBannerTask(mainWindow, 'BT gemini task', sessionBanner(mainWindow))
     await expect(mainWindow.getByRole('button', { name: /Run \/stats/ }).last()).toBeVisible()
   })
 
@@ -217,17 +242,9 @@ test.describe('Session ID banners', () => {
   // --- Cursor Agent: unavailable banner ---
 
   test('cursor: shows unavailable banner (not detect banner)', async ({ mainWindow }) => {
-    await goHome(mainWindow)
-    await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('BT cursor task').first()).toBeVisible({ timeout: 5_000 })
-    await mainWindow.getByText('BT cursor task').first().click()
-
-    // 5s (vs default 2s): the preceding codex/gemini detect tests persist a
-    // conversation id, whose notifyRenderer → board refetch churn can delay the
-    // first paint of this freshly-navigated banner past the default window.
-    await expect(mainWindow.getByText(/Session ID detection not available/)).toBeVisible({
-      timeout: 5_000
-    })
+    test.setTimeout(45_000)
+    const banner = mainWindow.getByText(/Session ID detection not available/)
+    await openBannerTask(mainWindow, 'BT cursor task', banner)
     await expect(mainWindow.getByText(/don't close the tab/)).toBeVisible()
     await expect(mainWindow.getByText(/Claude Code, Codex, Gemini, Qwen, Copilot/)).toBeVisible()
     // No detect button
@@ -235,30 +252,35 @@ test.describe('Session ID banners', () => {
   })
 
   test('cursor: unavailable banner is closable', async ({ mainWindow }) => {
+    // Continues from the previous test with the cursor task open. Wait for the
+    // banner explicitly rather than clicking blind — otherwise, if it isn't yet
+    // painted, the click below hangs for the full 30s test timeout instead of
+    // failing fast.
+    const bannerText = mainWindow.getByText(/Session ID detection not available/)
+    await expect(bannerText).toBeVisible({ timeout: 5_000 })
     // Find and click the X button inside the banner
-    const banner = mainWindow.getByText(/Session ID detection not available/).locator('..')
-    await banner.locator('button').click()
+    await bannerText.locator('..').locator('button').click()
 
-    await expect(mainWindow.getByText(/Session ID detection not available/)).not.toBeVisible()
+    await expect(bannerText).not.toBeVisible()
   })
 
   // --- OpenCode: unavailable banner ---
 
   test('opencode: shows unavailable banner', async ({ mainWindow }) => {
-    await goHome(mainWindow)
-    await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('BT opencode task').first()).toBeVisible({ timeout: 5_000 })
-    await mainWindow.getByText('BT opencode task').first().click()
-
-    await expect(mainWindow.getByText(/Session ID detection not available/)).toBeVisible()
+    test.setTimeout(45_000)
+    const banner = mainWindow.getByText(/Session ID detection not available/)
+    await openBannerTask(mainWindow, 'BT opencode task', banner)
     await expect(mainWindow.getByText(/don't close the tab/)).toBeVisible()
   })
 
   test('opencode: unavailable banner is closable', async ({ mainWindow }) => {
-    const banner = mainWindow.getByText(/Session ID detection not available/).locator('..')
-    await banner.locator('button').click()
+    // Continues with the opencode task open; wait for the banner before clicking so a
+    // not-yet-painted banner fails fast instead of hanging the 30s test timeout.
+    const bannerText = mainWindow.getByText(/Session ID detection not available/)
+    await expect(bannerText).toBeVisible({ timeout: 5_000 })
+    await bannerText.locator('..').locator('button').click()
 
-    await expect(mainWindow.getByText(/Session ID detection not available/)).not.toBeVisible()
+    await expect(bannerText).not.toBeVisible()
   })
 
   // --- Claude Code: no banner ---
