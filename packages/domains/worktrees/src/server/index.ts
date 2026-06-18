@@ -61,6 +61,7 @@ export {
   copyIgnoredFiles,
   getIgnoredFileTree,
   initSubmodules,
+  initSubmodulesSync,
   getResolvedCommitDag,
   getResolvedForkGraph,
   getResolvedUpstreamGraph,
