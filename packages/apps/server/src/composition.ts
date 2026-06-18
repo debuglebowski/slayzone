@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { openPath as nativeOpenPath, showItemInFolder as nativeShowItemInFolder } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
@@ -311,8 +312,10 @@ export function composeServer(opts: {
     filesSaveTempImage: stub('filesSaveTempImage'),
 
     shellOpenExternal: stub('shellOpenExternal'),
-    shellOpenPath: stub('shellOpenPath'),
-    shellShowItemInFolder: stub('shellShowItemInFolder'),
+    // Implemented natively (per-OS exec) so the Git/Editor panels' reveal + open
+    // actions work on the standalone/fork sidecar without an Electron host.
+    shellOpenPath: nativeOpenPath,
+    shellShowItemInFolder: nativeShowItemInFolder,
 
     feedbackListThreads: feedbackOps.listThreads,
     feedbackCreateThread: feedbackOps.createThread,
