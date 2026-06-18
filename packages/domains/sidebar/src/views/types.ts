@@ -19,6 +19,8 @@ export interface SidebarViewContext {
   onOpenTaskInBackground?: (taskId: string) => void
   /** Create a temporary "scratch" task in the given project. */
   onCreateTemporaryTask?: (projectId: string) => void
+  /** Task ids with an active (non-idle) agent session — always pass the tree filter. App injects via `useActiveSessionTaskIds`; fork passes empty. */
+  sessionTaskIds?: Set<string>
   onReorderProjects: (projectIds: string[]) => void
   // ── Project-group handlers (Discord folders / tree labels) ────────────────
   /** Create an empty group (appended to the top level). */

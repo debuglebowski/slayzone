@@ -11,15 +11,18 @@ import {
   useShortcutStore,
   type ShortcutDefinition
 } from '@slayzone/ui'
-import { KeyRecorder } from '@/components/KeyRecorder'
 import { ShortcutRow } from './ShortcutRow'
+import type { KeyRecorderComponent } from './types'
 
 export function ShortcutsDialog({
   open,
-  onOpenChange
+  onOpenChange,
+  keyRecorder: KeyRecorder
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** App injects its `KeyRecorder`; renderless hotkey capture while recording. */
+  keyRecorder: KeyRecorderComponent
 }) {
   const [openShortcutGroup, setOpenShortcutGroup] = useState<string | null>(
     () => shortcutDefinitions[0]?.group ?? null

@@ -24,12 +24,11 @@ import {
   PINNED_GROUP_KEY,
   type TreeGroup
 } from './treeGrouping'
-import { useActiveSessionTaskIds } from '@/components/agent-status/useIdleTasks'
 import { useStaleSkillCounts } from '@slayzone/ai-config/client'
 import { TreeDisplaySettings } from '../TreeDisplaySettings'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
 import { resolveProjectDrop, applyProjectDrop } from './projectDrop'
-import logo from '@/assets/logo.svg'
+import logo from '../assets/logo.svg'
 import type { SidebarViewContext } from './types'
 import {
   TreeGroupHeader,
@@ -62,9 +61,12 @@ type RowItem =
       inTempGroup: boolean
     }
 
+const EMPTY_SESSION_TASK_IDS = new Set<string>()
+
 export function TreeView({
   projects,
   tasks,
+  sessionTaskIds = EMPTY_SESSION_TASK_IDS,
   selectedProjectId,
   onSelectProject,
   onProjectSettings,
@@ -175,7 +177,6 @@ export function TreeView({
     for (const t of tabs) if (t.type === 'task') ids.add(t.taskId)
     return ids
   }, [tabs])
-  const sessionTaskIds = useActiveSessionTaskIds()
 
   const passesFilter = useCallback(
     (t: Task) => {

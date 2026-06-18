@@ -49,7 +49,7 @@ import { usePtyStatus, useTerminalStateStore } from '@slayzone/terminal/client'
 // Shared
 import { Tooltip, TooltipTrigger, TooltipContent, toast } from '@slayzone/ui'
 import { SidebarProvider, cn, useUndo, useShortcutDisplay } from '@slayzone/ui'
-import { AppSidebar } from '@/components/sidebar/AppSidebar'
+import { AppSidebar } from '@slayzone/sidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
 import { TabBar } from '@/components/tabs/TabBar'
@@ -63,6 +63,9 @@ import { UsagePopover } from '@/components/usage/UsagePopover'
 import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'
 import { useOnboardingChecklist } from '@/hooks/useOnboardingChecklist'
+import { isConvexConfigured } from '@/lib/convexAuth'
+import { FeedbackDialog } from '@/components/feedback/FeedbackDialog'
+import { KeyRecorder } from '@/components/KeyRecorder'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 // Extracted hooks (self-contained, clean interfaces)
 import { useHomePanel } from '@slayzone/home/client'
@@ -1266,6 +1269,13 @@ function App(): React.JSX.Element {
             }}
             zenMode={zenMode}
             onboardingChecklist={onboardingChecklist}
+            onSetWindowButtonVisibility={(v) =>
+              void trpcClient.app.window.setWindowButtonVisibility.mutate({ visible: v })
+            }
+            convexConfigured={isConvexConfigured}
+            feedbackSlot={<FeedbackDialog />}
+            keyRecorder={KeyRecorder}
+            sessionTaskIds={activeAgentTaskIds}
             idleByProject={idleByProject}
             onReorderProjects={reorderProjects}
             onCreateProjectGroup={createProjectGroup}

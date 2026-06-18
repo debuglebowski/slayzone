@@ -9,11 +9,10 @@ import {
   cn
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
-import { useTRPCClient } from '@slayzone/transport/client'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ProjectGroup, ColumnConfig, TopLevelEntryRef } from '@slayzone/projects/shared'
-import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
+import type { OnboardingChecklistState, KeyRecorderComponent } from './types'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'
 import { SidebarResizeHandle } from './SidebarResizeHandle'
@@ -35,6 +34,16 @@ interface AppSidebarProps {
   onCreateTemporaryTask?: (projectId: string) => void
   zenMode?: boolean
   onboardingChecklist: OnboardingChecklistState
+  /** App injects the tRPC call toggling native window-button visibility; fork no-ops. */
+  onSetWindowButtonVisibility?: (visible: boolean) => void
+  /** Convex backend configured — gates the leaderboard + feedback entry points. */
+  convexConfigured?: boolean
+  /** App-supplied feedback entry, rendered in the footer when convex is configured. */
+  feedbackSlot?: ReactNode
+  /** App-supplied renderless KeyRecorder, threaded to the shortcuts dialog. */
+  keyRecorder: KeyRecorderComponent
+  /** Task ids with an active agent session — always pass the tree filter. */
+  sessionTaskIds?: Set<string>
   idleByProject?: Map<string, number>
   onReorderProjects: (projectIds: string[]) => void
   onCreateProjectGroup?: (name?: string) => void
@@ -146,6 +155,11 @@ export function AppSidebar({
   onCreateTemporaryTask,
   zenMode,
   onboardingChecklist,
+  onSetWindowButtonVisibility,
+  convexConfigured,
+  feedbackSlot,
+  keyRecorder,
+  sessionTaskIds,
   idleByProject,
   onReorderProjects,
   onCreateProjectGroup,
@@ -179,7 +193,6 @@ export function AppSidebar({
   const setSidebarWidth = useTabStore((s) => s.setSidebarWidth)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const setSidebarAutoHide = useTabStore((s) => s.setSidebarAutoHide)
-  const trpcClient = useTRPCClient()
   const view = getView(sidebarView)
 
   const [hoverRevealed, setHoverRevealed] = useState(false)
@@ -219,8 +232,8 @@ export function AppSidebar({
   const autoHideActive = sidebarAutoHide && !zenMode
   const buttonsVisible = !zenMode && (!autoHideActive || hoverRevealed)
   useEffect(() => {
-    void trpcClient.app.window.setWindowButtonVisibility.mutate({ visible: buttonsVisible })
-  }, [buttonsVisible, trpcClient])
+    onSetWindowButtonVisibility?.(buttonsVisible)
+  }, [buttonsVisible, onSetWindowButtonVisibility])
   const isResizable = !zenMode && !!view.resizable
   const effectiveWidth = isResizable ? (sidebarWidth ?? view.defaultWidth ?? 288) : null
 
@@ -267,6 +280,7 @@ export function AppSidebar({
               onSetTasksPinned,
               onSetCollapsed,
               onPinnedReorder,
+              sessionTaskIds,
               idleByProject,
               taskContextMenuRender,
               taskBulkContextMenuRender,
@@ -290,6 +304,9 @@ export function AppSidebar({
               onUsageAnalytics={onUsageAnalytics}
               onLeaderboard={onLeaderboard}
               onboardingChecklist={onboardingChecklist}
+              convexConfigured={convexConfigured}
+              feedbackSlot={feedbackSlot}
+              keyRecorder={keyRecorder}
               trailing={
                 view.footerLayout === 'horizontal' ? (
                   <SidebarViewSwitcher

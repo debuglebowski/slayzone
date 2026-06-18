@@ -19,6 +19,7 @@
 @source "../../../../../../../packages/domains/worktrees/src";
 @source "../../../../../../../packages/domains/ai-config/src";
 @source "../../../../../../../packages/domains/file-editor/src";
+@source "../../../../../../../packages/domains/sidebar/src";
 
 @custom-variant dark (&:is(.dark *));
 

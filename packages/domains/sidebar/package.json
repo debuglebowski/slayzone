@@ -1,0 +1,40 @@
+{
+  "name": "@slayzone/sidebar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@slayzone/ai-config": "workspace:*",
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/projects": "workspace:*",
+    "@slayzone/settings": "workspace:*",
+    "@slayzone/tags": "workspace:*",
+    "@slayzone/task": "workspace:*",
+    "@slayzone/tasks": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*",
+    "@slayzone/ui": "workspace:*",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "lucide-react": "^0.562.0",
+    "react-icons": "^5.5.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "typescript": "^5.9.3"
+  }
+}

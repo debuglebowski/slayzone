@@ -52,6 +52,7 @@
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/shortcuts": "workspace:*",
+    "@slayzone/sidebar": "workspace:*",
     "@slayzone/suspense": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",

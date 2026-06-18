@@ -10,7 +10,7 @@ import {
   PopoverContent,
   cn
 } from '@slayzone/ui'
-import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
+import type { OnboardingChecklistState } from './types'
 
 export function GettingStartedPopover({
   layout,

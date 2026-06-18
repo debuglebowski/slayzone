@@ -157,6 +157,9 @@ importers:
       '@slayzone/shortcuts':
         specifier: workspace:*
         version: link:../../shared/shortcuts
+      '@slayzone/sidebar':
+        specifier: workspace:*
+        version: link:../../domains/sidebar
       '@slayzone/suspense':
         specifier: workspace:*
         version: link:../../shared/suspense
@@ -1088,6 +1091,67 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/domains/sidebar:
+    dependencies:
+      '@dnd-kit/core':
+        specifier: ^6.3.1
+        version: 6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@dnd-kit/sortable':
+        specifier: ^10.0.0
+        version: 10.0.0(@dnd-kit/core@6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)
+      '@dnd-kit/utilities':
+        specifier: ^3.2.2
+        version: 3.2.2(react@19.2.3)
+      '@radix-ui/react-collapsible':
+        specifier: ^1.1.12
+        version: 1.1.12(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../ai-config
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
+      '@slayzone/tags':
+        specifier: workspace:*
+        version: link:../tags
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/tasks':
+        specifier: workspace:*
+        version: link:../tasks
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+      react-icons:
+        specifier: ^5.5.0
+        version: 5.5.0(react@19.2.3)
+    devDependencies:
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.8

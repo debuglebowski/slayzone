@@ -1,7 +1,5 @@
 import { useState } from 'react'
 import { Settings, Keyboard, Megaphone, Trophy, BarChart3 } from 'lucide-react'
-import { isConvexConfigured } from '@/lib/convexAuth'
-import { FeedbackDialog } from '../feedback/FeedbackDialog'
 import { TerminalStatusPopover } from '@slayzone/terminal'
 import {
   IconButton,
@@ -11,8 +9,9 @@ import {
   cn
 } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/settings'
+import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'
-import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
+import type { OnboardingChecklistState, KeyRecorderComponent } from './types'
 import { GettingStartedPopover } from './GettingStartedPopover'
 import { ShortcutsDialog } from './ShortcutsDialog'
 
@@ -24,6 +23,12 @@ interface SidebarFooterIconsProps {
   onUsageAnalytics: () => void
   onLeaderboard: () => void
   onboardingChecklist: OnboardingChecklistState
+  /** Convex backend configured — gates the leaderboard + feedback entry points. */
+  convexConfigured?: boolean
+  /** App-supplied feedback entry (rendered when convex is configured). */
+  feedbackSlot?: ReactNode
+  /** App-supplied renderless KeyRecorder (threaded to the shortcuts dialog). */
+  keyRecorder: KeyRecorderComponent
   trailing?: React.ReactNode
   actions?: React.ReactNode
 }
@@ -36,6 +41,9 @@ export function SidebarFooterIcons({
   onUsageAnalytics,
   onLeaderboard,
   onboardingChecklist,
+  convexConfigured = false,
+  feedbackSlot = null,
+  keyRecorder,
   trailing,
   actions
 }: SidebarFooterIconsProps) {
@@ -59,7 +67,7 @@ export function SidebarFooterIcons({
         tooltipSide={tooltipSide}
         onboardingChecklist={onboardingChecklist}
       />
-      {isConvexConfigured && (
+      {convexConfigured && (
         <Tooltip>
           <TooltipTrigger asChild>
             <IconButton
@@ -117,8 +125,12 @@ export function SidebarFooterIcons({
         </TooltipTrigger>
         <TooltipContent side={tooltipSide}>Keyboard Shortcuts</TooltipContent>
       </Tooltip>
-      {isConvexConfigured && <FeedbackDialog />}
-      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      {convexConfigured && feedbackSlot}
+      <ShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+        keyRecorder={keyRecorder}
+      />
       {trailing}
       <Tooltip>
         <TooltipTrigger asChild>
