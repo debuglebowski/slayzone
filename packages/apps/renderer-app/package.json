@@ -11,6 +11,9 @@
   },
   "dependencies": {
     "@slayzone/layout": "workspace:*",
+    "@slayzone/settings": "workspace:*",
+    "@slayzone/tasks": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"
   },

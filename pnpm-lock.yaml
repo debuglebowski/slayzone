@@ -425,6 +425,15 @@ importers:
       '@slayzone/layout':
         specifier: workspace:*
         version: link:../../shared/layout
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../../domains/settings
+      '@slayzone/tasks':
+        specifier: workspace:*
+        version: link:../../domains/tasks
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       react:
         specifier: ^19.2.1
         version: 19.2.3

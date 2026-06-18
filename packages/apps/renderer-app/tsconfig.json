@@ -10,5 +10,5 @@
     "noEmit": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src"]
+  "include": ["src", "../../shared/types/src/txn-registry.d.ts"]
 }

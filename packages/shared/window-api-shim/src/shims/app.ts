@@ -11,6 +11,8 @@
 // the existing `__testEmit(channel, data)` hook (dispatches a CustomEvent).
 // Production menu accelerator dispatch is unchanged (still deferred).
 
+import { resolveServerUrl, CHROMIUM_WINDOW_ID } from '../server-url'
+
 const noopUnsub = (): void => undefined
 const noopSub = (_cb: unknown): (() => void) => noopUnsub
 
@@ -48,6 +50,12 @@ export const appShim = {
   isJiraIntegrationEnabled: async (): Promise<boolean> => false,
   isJiraIntegrationEnabledSync: (): boolean => false,
   isLoopModeEnabled: async (): Promise<boolean> => false,
+  // Server-mode discovery: the renderer's transport bootstrap reads these to
+  // build the tRPC-WS URL. Fork pins a fixed loopback port (see server-url.ts);
+  // windowId is constant (single window). Boot instrumentation is a no-op here.
+  getServerUrl: async (): Promise<{ mode: 'local' | 'remote'; url: string }> => resolveServerUrl(),
+  getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
+  bootMark: (_label: string): void => undefined,
   dataReady: (): Promise<void> => Promise.resolve(),
   cliStatus: async (): Promise<{ installed: boolean; path: string | null }> => ({
     installed: false,

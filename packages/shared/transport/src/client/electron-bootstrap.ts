@@ -17,8 +17,12 @@ export const electronBootstrap = {
     api().app.setBootSettings(payload),
   probeServerHealth: (url: string) => api().app.probeServerHealth(url),
   relaunch: () => api().app.relaunch(),
-  dataReady: () => api().app.dataReady(),
-  bootMark: (label: string) => api().app.bootMark(label),
+  // Boot instrumentation is pure timing telemetry — optional outside Electron
+  // (e.g. the Chromium-fork window.api shim need not implement it). Optional-
+  // chain so a missing host method is a no-op, not a TypeError that aborts the
+  // first data load. No-op under Electron too (the method exists there).
+  dataReady: () => api().app.dataReady?.() ?? Promise.resolve(),
+  bootMark: (label: string) => api().app.bootMark?.(label),
   isPlaywright: () => api().app.isPlaywright,
   getDropPaths: () => api().files.getDropPaths(),
   getPastePaths: () => api().files.getPastePaths()

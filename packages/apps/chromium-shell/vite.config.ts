@@ -15,7 +15,14 @@ export default defineConfig({
     __SLAYZONE_PROFILE__: 'false',
     __DEV__: 'false',
     __POSTHOG_API_KEY__: JSON.stringify(''),
-    __POSTHOG_HOST__: JSON.stringify('')
+    __POSTHOG_HOST__: JSON.stringify(''),
+    // Selects the renderer's baked-in default sidecar WS URL (dev :8766 vs
+    // prod :8765) when no --slayzone-server-url override is injected. The
+    // dogfood build (`pnpm build:chromium`) leaves it false → dev port; the
+    // packaging pipeline sets SLAYZONE_CHROMIUM_PROD=1 → prod port. Dev/prod
+    // differ so a dev build + packaged app can run side-by-side. See
+    // window-api-shim/src/server-url.ts.
+    __SLAYZONE_CHROMIUM_PROD__: JSON.stringify(process.env.SLAYZONE_CHROMIUM_PROD === '1')
   },
   resolve: {
     alias: {

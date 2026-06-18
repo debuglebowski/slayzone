@@ -1,0 +1,195 @@
+/*
+ * Chromium-fork theme scaffold.
+ *
+ * Mirrors the token layer of packages/apps/app/src/renderer/src/assets/main.css
+ * so the imported @slayzone/* UI (Kanban board, filter bar, cards) renders with
+ * the same Tailwind v4 theme tokens (bg-surface-1, border-border, …). The actual
+ * per-theme variable VALUES are injected at runtime by @slayzone/settings'
+ * ThemeProvider/applyTheme; the :root/.dark blocks below are the static default.
+ *
+ * Kept focused (only the @source dirs the Home view pulls). Candidate for
+ * extraction into a shared theme-css package once more of the app moves to the
+ * fork — until then this is a deliberate, commented mirror, not silent drift.
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Scan the packages whose className strings render in the Home view. */
+@source "../../../shared/ui/src";
+@source "../../../domains/tasks/src";
+@source "../../../domains/task/src";
+@source "../../../domains/projects/src";
+@source "../../../domains/tags/src";
+@source "../../../domains/settings/src";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-modal: var(--modal);
+  --color-tab-active: var(--tab-active);
+  --color-search-match: var(--search-match);
+  --color-search-match-foreground: var(--search-match-foreground);
+  --color-search-match-active: var(--search-match-active);
+  --color-search-match-active-foreground: var(--search-match-active-foreground);
+
+  --animate-collapsible-down: collapsible-down 0.15s ease-out;
+  --animate-collapsible-up: collapsible-up 0.15s ease-out;
+  @keyframes collapsible-down {
+    from { height: 0; opacity: 0; }
+    to { height: var(--radix-collapsible-content-height); opacity: 1; }
+  }
+  @keyframes collapsible-up {
+    from { height: var(--radix-collapsible-content-height); opacity: 1; }
+    to { height: 0; opacity: 0; }
+  }
+}
+
+:root {
+  --radius: 6px;
+  --background: oklch(0.94 0 0);
+  --foreground: oklch(0.13 0 0);
+  --card: var(--surface-2);
+  --card-foreground: oklch(0.13 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.13 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.93 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.93 0 0);
+  --muted-foreground: oklch(0.45 0 0);
+  --accent: oklch(0.91 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0 0 0 / 22%);
+  --input: oklch(0 0 0 / 25%);
+  --ring: oklch(0.55 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.13 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.95 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0 0 0 / 15%);
+  --sidebar-ring: oklch(0.55 0 0);
+  --surface-0: oklch(0.92 0 0);
+  --surface-1: oklch(0.95 0 0);
+  --surface-2: oklch(0.97 0 0);
+  --surface-3: oklch(1 0 0);
+  --tab-active: oklch(0.88 0 0);
+  --modal: oklch(1 0 0);
+  --modal-border: oklch(0 0 0 / 35%);
+  --search-match: oklch(0.9 0.14 85);
+  --search-match-foreground: oklch(0.18 0.05 85);
+  --search-match-active: oklch(0.78 0.19 55);
+  --search-match-active-foreground: oklch(0.15 0 0);
+}
+
+.dark {
+  --background: #141418;
+  --foreground: #fafafa;
+  --card: var(--surface-2);
+  --card-foreground: #fafafa;
+  --popover: var(--surface-3);
+  --popover-foreground: #fafafa;
+  --primary: #e4e4e7;
+  --primary-foreground: #18181b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #f87171;
+  --border: rgba(255, 255, 255, 0.15);
+  --input: rgba(255, 255, 255, 0.20);
+  --ring: #52525b;
+  --chart-1: #93c5fd;
+  --chart-2: #6ee7b7;
+  --chart-3: #fcd34d;
+  --chart-4: #c4b5fd;
+  --chart-5: #f87171;
+  --sidebar: #18181b;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #93c5fd;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #27272a;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.10);
+  --sidebar-ring: #52525b;
+  --surface-0: #09090b;
+  --surface-1: #141418;
+  --surface-2: #18181b;
+  --surface-3: #1e1e22;
+  --tab-active: #3f3f46;
+  --modal: #09090b;
+  --modal-border: rgba(255, 255, 255, 0.25);
+  --search-match: oklch(0.48 0.13 85);
+  --search-match-foreground: oklch(0.96 0 0);
+  --search-match-active: oklch(0.68 0.2 55);
+  --search-match-active-foreground: oklch(0.15 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html, body {
+    @apply h-full overflow-hidden;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--color-primary) 40%, transparent);
+    color: inherit;
+  }
+}
