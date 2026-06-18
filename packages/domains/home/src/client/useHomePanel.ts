@@ -4,7 +4,7 @@ import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { track } from '@slayzone/telemetry/client'
 import { resolvePanels, planPanelStrip } from '@slayzone/task/client/usePanelSizes'
 import type { PanelSizes, PanelConfig } from '@slayzone/task/shared'
-import { useHomePanelState } from '@/hooks/useHomePanelVisibility'
+import { useHomePanelState } from './useHomePanelVisibility'
 
 export type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
 const DEFAULT_HOME_PANEL_ORDER: HomePanel[] = [

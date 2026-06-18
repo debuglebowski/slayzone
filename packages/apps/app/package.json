@@ -41,6 +41,7 @@
     "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",
+    "@slayzone/home": "workspace:*",
     "@slayzone/hooks": "workspace:*",
     "@slayzone/icons": "workspace:*",
     "@slayzone/integrations": "workspace:*",

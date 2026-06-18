@@ -124,6 +124,9 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../../domains/history
+      '@slayzone/home':
+        specifier: workspace:*
+        version: link:../../domains/home
       '@slayzone/hooks':
         specifier: workspace:*
         version: link:../../shared/hooks
@@ -836,6 +839,58 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/domains/home:
+    dependencies:
+      '@slayzone/automations':
+        specifier: workspace:*
+        version: link:../automations
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
+      '@slayzone/tags':
+        specifier: workspace:*
+        version: link:../tags
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/tasks':
+        specifier: workspace:*
+        version: link:../tasks
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../telemetry
+      '@slayzone/test-panel':
+        specifier: workspace:*
+        version: link:../test-panel
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../worktrees
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

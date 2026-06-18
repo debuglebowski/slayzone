@@ -27,7 +27,7 @@ import {
 } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { getViewConfig } from '@slayzone/tasks/hooks'
-import { useHomePanel, HOME_PANEL_SIZE_KEY } from '@/hooks/useHomePanel'
+import { useHomePanel, HOME_PANEL_SIZE_KEY } from '@slayzone/home/client'
 import { type AgentStatusState } from '@/components/agent-status'
 import { type GlobalAgentPanelState } from '@/components/global-agent-panel'
 import {
