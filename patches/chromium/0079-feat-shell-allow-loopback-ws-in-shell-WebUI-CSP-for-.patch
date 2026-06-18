@@ -1,0 +1,42 @@
+From f00ae5248a19adf4980df9f67e5d9d77ec514814 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Thu, 18 Jun 2026 12:54:02 +0200
+Subject: [PATCH] feat(shell): allow loopback ws in shell WebUI CSP for local
+ sidecar
+
+The Home tab connects to the local @slayzone/server sidecar over a
+plaintext tRPC WebSocket. The prod connect-src allowed 'self' https:
+wss: (cloud) but not ws:, so the loopback sidecar WS was CSP-blocked.
+Allow ws ONLY on loopback hosts (ws://127.0.0.1:* ws://localhost:*);
+non-loopback plaintext ws stays blocked.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+index 33350565a6952..cbb01bd58645b 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_shell_ui.cc
+@@ -299,10 +299,15 @@ SlayzoneShellUI::SlayzoneShellUI(content::WebUI* web_ui)
+       network::mojom::CSPDirectiveName::WorkerSrc,
+       "worker-src 'self' blob:;");
+   // Convex (cap-shell-2) + PostHog will need connect-src; keep 'self' + https:
+-  // so the bundle stops at a cap-shell-2 problem, not a CSP one.
++  // so the bundle stops at a cap-shell-2 problem, not a CSP one. The Home view
++  // (server-mode) connects to the local @slayzone/server sidecar over a
++  // PLAINTEXT tRPC WebSocket — cloud is wss but a loopback sidecar has no TLS.
++  // Allow ws ONLY on loopback hosts (not a blanket ws:) so the renderer can
++  // reach ws://127.0.0.1:<port>/trpc; non-loopback plaintext ws stays blocked.
+   source->OverrideContentSecurityPolicy(
+       network::mojom::CSPDirectiveName::ConnectSrc,
+-      "connect-src 'self' https: wss:" + dev_connect_extra + ";");
++      "connect-src 'self' https: wss: ws://127.0.0.1:* ws://localhost:*" +
++          dev_connect_extra + ";");
+   source->DisableTrustedTypesCSP();
+ }
+ 
+-- 
+2.52.0
+
