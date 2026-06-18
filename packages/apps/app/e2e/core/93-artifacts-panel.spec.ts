@@ -362,6 +362,10 @@ test.describe('Artifacts panel', () => {
     await openArtifactsPanel(mainWindow)
     await artifactsPanel(mainWindow).locator('[data-testid="artifacts-new-btn"]').click()
     await expect(createInput(mainWindow)).toBeVisible({ timeout: 3_000 })
+    // The input auto-focuses one rAF after mount (createInputRef). Wait for that
+    // focus to land before pressing Escape — otherwise the keydown can race the
+    // pending focus and miss the input's onKeyDown (setCreating(null)) handler.
+    await expect(createInput(mainWindow)).toBeFocused({ timeout: 3_000 })
     await createInput(mainWindow).press('Escape')
     await expect(createInput(mainWindow)).not.toBeVisible({ timeout: 2_000 })
   })
@@ -385,8 +389,10 @@ test.describe('Artifacts panel', () => {
 
     await openArtifactsPanel(mainWindow)
     await expect(folderRow(mainWindow, 'seeded-folder')).toBeVisible({ timeout: 5_000 })
-    // Folders render collapsed by default — click to expand so nested artifact appears.
-    await folderRow(mainWindow, 'seeded-folder').click()
+    // Folders AUTO-EXPAND on first load (useArtifactTree seeds the expanded set
+    // from all folder ids when nothing is persisted), so the nested artifact
+    // renders without a click. The previous click-to-expand raced that effect:
+    // a click landing after auto-expand TOGGLED the folder closed → flaky.
     await expect(artifactRow(mainWindow, 'nested.md')).toBeVisible({ timeout: 3_000 })
   })
 
