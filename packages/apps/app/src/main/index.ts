@@ -208,6 +208,7 @@ import logoSolid from '../../resources/logo-solid.svg?asset'
 import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { buildBackupOps, startAutoBackup, stopAutoBackup } from './backup'
+import { startProactiveGc } from './proactive-gc'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
   filesPathExists,
@@ -1763,6 +1764,9 @@ app
     }
     const backupOps = buildBackupOps(db)
     startAutoBackup(db)
+    // Reclaim Blink/Oilpan garbage on busy renderers that never go idle (see
+    // proactive-gc.ts). No-op under Playwright.
+    startProactiveGc()
     logBoot('domain tRPC ops registered')
 
     // Host REST server (slice 9 local cutover). The SIDE-CAR now owns the
