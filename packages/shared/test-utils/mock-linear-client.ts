@@ -30,6 +30,9 @@ export const _mock = {
     nextCursor: null as string | null
   }),
   getIssue: async (_apiKey: string, _issueId: string) => null as LinearIssueSummary | null,
+  getIssuesBatch: async (_apiKey: string, _issueIds: string[]) =>
+    new Map<string, LinearIssueSummary>(),
+  createIssue: async (_apiKey: string, _input: unknown) => null as LinearIssueSummary | null,
   updateIssue: async (_apiKey: string, _issueId: string, _input: unknown) =>
     null as LinearIssueSummary | null
 }
@@ -56,6 +59,14 @@ export async function listIssues(apiKey: string, input: unknown) {
 
 export async function getIssue(apiKey: string, issueId: string) {
   return _mock.getIssue(apiKey, issueId)
+}
+
+export async function getIssuesBatch(apiKey: string, issueIds: string[]) {
+  return _mock.getIssuesBatch(apiKey, issueIds)
+}
+
+export async function createIssue(apiKey: string, input: unknown) {
+  return _mock.createIssue(apiKey, input)
 }
 
 export async function updateIssue(apiKey: string, issueId: string, input: unknown) {

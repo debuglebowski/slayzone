@@ -10,12 +10,16 @@ const mockDagreUrl = new URL('./mock-dagre.ts', import.meta.url).href
 
 // Redirect map: specifier patterns → mock URL
 // tsx may append .ts/.js extensions, so match with or without
+// Match a relative specifier (any `./` or `../` depth) for a given module
+// basename, with or without a tsx-appended .ts/.js extension. The integration
+// linear-client is imported as `./linear-client` from handlers-store.ts AND as
+// `../linear-client` from the adapter, so a bare `=== './linear-client'` check
+// missed the adapter path — both must redirect to the same mock.
+const matchesRelative = (basename: string) => (s: string): boolean =>
+  /^\.\.?\//.test(s) && new RegExp(`(^|/)${basename}(\\.ts|\\.js)?$`).test(s)
+
 const redirects: Array<{ match: (s: string) => boolean; url: string }> = [
-  {
-    match: (s) =>
-      s === './linear-client' || s === './linear-client.ts' || s === './linear-client.js',
-    url: mockLinearClientUrl
-  },
+  { match: matchesRelative('linear-client'), url: mockLinearClientUrl },
   {
     match: (s) => s === './merge-ai' || s === './merge-ai.ts' || s === './merge-ai.js',
     url: mockMergeAiUrl

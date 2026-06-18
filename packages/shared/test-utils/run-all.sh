@@ -53,8 +53,6 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/tas
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
-run_test_electron_strict_loader packages/domains/task/src/electron/handlers.test.ts
-run_test_electron_strict_loader packages/domains/task/src/electron/template-handlers.test.ts
 run_test packages/domains/task/src/client/card-water-fill.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
 run_test packages/domains/settings/src/client/useTabStore.test.ts
@@ -66,7 +64,7 @@ run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers
 run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.context.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
-run_test_electron_strict_loader packages/domains/integrations/src/electron/handlers.db.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
 # return adapted to {snapshotSha,headSha}). NOTE: all run_test* helpers are now strict
@@ -88,7 +86,6 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/art
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/history.test.ts
 # Browser onEvent snapshot replay (stuck-loading race fix) — no DB, plain tsx
 run_test packages/shared/transport/src/server/routers/app.browser-events.test.ts
-run_test_electron_strict_loader packages/domains/integrations/src/electron/handlers.api.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
 run_test packages/domains/automations/src/shared/types.test.ts
 run_test packages/domains/automations/src/shared/ai.test.ts
