@@ -10,5 +10,9 @@
     "noEmit": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "../../shared/types/src/txn-registry.d.ts"]
+  "include": [
+    "src",
+    "../../shared/types/src/txn-registry.d.ts",
+    "../../domains/file-editor/src/lezer-toml.d.ts"
+  ]
 }

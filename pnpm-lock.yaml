@@ -425,6 +425,9 @@ importers:
 
   packages/apps/renderer-app:
     dependencies:
+      '@slayzone/home':
+        specifier: workspace:*
+        version: link:../../domains/home
       '@slayzone/layout':
         specifier: workspace:*
         version: link:../../shared/layout
@@ -437,6 +440,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
       react:
         specifier: ^19.2.1
         version: 19.2.3

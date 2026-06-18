@@ -5,6 +5,7 @@ import {
   initTrpcClient
 } from '@slayzone/transport/client'
 import { ThemeProvider } from '@slayzone/settings'
+import { UndoProvider } from '@slayzone/ui'
 import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
 import { OverlayDialogApp } from './OverlayDialogApp'
@@ -53,7 +54,9 @@ export async function mountApp(): Promise<void> {
   createRoot(el).render(
     <TrpcProvider url={trpcUrl}>
       <ThemeProvider>
-        <HomeView />
+        <UndoProvider>
+          <HomeView />
+        </UndoProvider>
       </ThemeProvider>
     </TrpcProvider>
   )

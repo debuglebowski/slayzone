@@ -1,23 +1,12 @@
-// Chromium-fork Home view — incremental slice 1: ticket renderer + filtering +
-// display. No tab system, no side panels (git/editor/processes/tests/automations)
-// yet — those land in later slices. Composes the shared, Electron-free
-// @slayzone/tasks UI; data flows over tRPC to the standalone sidecar (the same
-// transport the Electron app uses post server-mode cutover).
+// Chromium-fork Home — full experience via the shared @slayzone/home shell.
 //
-// Reimplements the discardable inner shell of the app's HomeDetail (the panel
-// orchestration HomeDetail adds is exactly what this slice omits), so HomeDetail
-// itself is intentionally NOT lifted into a shared package — the reusable parts
-// already live in @slayzone/tasks.
+// Wraps HomeContainer (which owns all the data/filter/panel/repo wiring) with a
+// thin interim project picker. The picker is temporary: it's replaced by the
+// AppSidebar's project tree in a later slice. Project selection feeds
+// HomeContainer's selectedProjectId.
 import { useEffect, useState } from 'react'
-import {
-  useTasksData,
-  useFilterState,
-  applyFilters,
-  getViewConfig,
-  FilterBar,
-  KanbanBoard,
-  KanbanListView
-} from '@slayzone/tasks/client'
+import { useQuery, useTRPC } from '@slayzone/transport/client'
+import { HomeContainer } from '@slayzone/home/client'
 
 function Centered({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
@@ -28,45 +17,31 @@ function Centered({ children }: { children: React.ReactNode }): React.JSX.Elemen
 }
 
 export function HomeView(): React.JSX.Element {
-  const data = useTasksData()
-  const { tasks, projects, tags, taskTags, blockedTaskIds, boardStatus, boardError } = data
+  const trpc = useTRPC()
+  // Deduped board query (same key as HomeContainer's useTasksData) — populates
+  // the interim picker AND drives the connection state without a second fetch.
+  const boardQ = useQuery(trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000 }))
+  const projects = (boardQ.data?.projects ?? []) as Array<{ id: string; name: string }>
 
-  // A dead tRPC WebSocket leaves the board query PENDING forever (wsLink keeps
-  // retrying, it never errors), so a long pending state means "can't reach the
-  // server" — not a brief connect. Escalate after a grace period so the user
-  // never sees an empty board masking a dead connection (the original bug).
+  const [picked, setPicked] = useState('')
+  const projectId = picked || projects[0]?.id || ''
+
+  // A dead tRPC WebSocket leaves the query PENDING forever (wsLink retries, it
+  // never errors). Escalate a long pending state to a connection warning.
   const [stalled, setStalled] = useState(false)
   useEffect(() => {
-    if (boardStatus !== 'pending') {
+    if (boardQ.status !== 'pending') {
       setStalled(false)
       return
     }
     const t = setTimeout(() => setStalled(true), 5000)
     return () => clearTimeout(t)
-  }, [boardStatus])
+  }, [boardQ.status])
 
-  const [pickedProjectId, setPickedProjectId] = useState('')
-  // Default to the first project until the user picks one (the fork has no tab
-  // store / persisted selection yet).
-  const projectId = pickedProjectId || projects[0]?.id || ''
-  const project = projects.find((p) => p.id === projectId)
-
-  const [filter, setFilter] = useFilterState(projectId)
-  const viewConfig = getViewConfig(filter)
-
-  const projectTasks = projectId ? tasks.filter((t) => t.project_id === projectId) : []
-  const projectTags = projectId ? tags.filter((t) => t.project_id === projectId) : tags
-  const displayTasks = applyFilters(projectTasks, filter, taskTags, project?.columns_config)
-
-  const onTaskMove = (taskId: string, newColumnId: string, targetIndex: number): void =>
-    data.moveTask(taskId, newColumnId, targetIndex, viewConfig.groupBy)
-  const onTaskBulkMove = (taskIds: string[], newColumnId: string, targetIndex: number): void =>
-    data.bulkMove(taskIds, newColumnId, targetIndex, viewConfig.groupBy)
-
-  if (boardStatus === 'error') {
-    return <Centered>Couldn’t load the board: {boardError?.message ?? 'unknown error'}. Retrying…</Centered>
+  if (boardQ.status === 'error') {
+    return <Centered>Couldn’t load the board: {boardQ.error?.message ?? 'unknown error'}. Retrying…</Centered>
   }
-  if (boardStatus === 'pending') {
+  if (boardQ.status === 'pending') {
     return <Centered>{stalled ? 'Can’t reach the sidecar — is the server running?' : 'Connecting…'}</Centered>
   }
   if (projects.length === 0) {
@@ -75,10 +50,11 @@ export function HomeView(): React.JSX.Element {
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+        <span className="text-xs text-muted-foreground">Project</span>
         <select
           value={projectId}
-          onChange={(e) => setPickedProjectId(e.target.value)}
+          onChange={(e) => setPicked(e.target.value)}
           className="rounded-md border border-border bg-surface-2 px-2 py-1 text-sm text-foreground"
         >
           {projects.map((p) => (
@@ -87,57 +63,10 @@ export function HomeView(): React.JSX.Element {
             </option>
           ))}
         </select>
-        <div className="min-w-0 flex-1">
-          <FilterBar
-            filter={filter}
-            onChange={setFilter}
-            tags={projectTags}
-            columns={project?.columns_config}
-          />
-        </div>
-      </header>
-
-      <main className="min-h-0 flex-1 overflow-hidden p-3">
-        {filter.viewMode === 'list' ? (
-          <KanbanListView
-            tasks={displayTasks}
-            columns={project?.columns_config}
-            viewConfig={viewConfig}
-            onTaskMove={onTaskMove}
-            onTaskReorder={data.reorderTasks}
-            cardProperties={filter.cardProperties}
-            blockedTaskIds={blockedTaskIds}
-            allProjects={projects}
-            onUpdateTask={data.contextMenuUpdate}
-            onArchiveTask={data.archiveTask}
-            onDeleteTask={data.deleteTask}
-            tags={projectTags}
-            taskTags={taskTags}
-          />
-        ) : (
-          <KanbanBoard
-            tasks={displayTasks}
-            columns={project?.columns_config}
-            viewConfig={viewConfig}
-            onTaskMove={onTaskMove}
-            onTaskBulkMove={onTaskBulkMove}
-            onTaskReorder={data.reorderTasks}
-            cardProperties={filter.cardProperties}
-            taskTags={taskTags}
-            tags={projectTags}
-            blockedTaskIds={blockedTaskIds}
-            allProjects={projects}
-            onUpdateTask={data.contextMenuUpdate}
-            onBulkUpdateTasks={data.bulkContextMenuUpdate}
-            onClearBlockers={data.clearBlockers}
-            onArchiveTask={data.archiveTask}
-            onDeleteTask={data.deleteTask}
-            onBulkDeleteTasks={data.bulkDelete}
-            onArchiveAllTasks={data.archiveTasks}
-            selectionResetKey={projectId}
-          />
-        )}
-      </main>
+      </div>
+      <div className="min-h-0 flex-1">
+        <HomeContainer selectedProjectId={projectId} isActive />
+      </div>
     </div>
   )
 }

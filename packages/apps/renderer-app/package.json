@@ -10,10 +10,12 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@slayzone/home": "workspace:*",
     "@slayzone/layout": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/tasks": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/ui": "workspace:*",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"
   },
