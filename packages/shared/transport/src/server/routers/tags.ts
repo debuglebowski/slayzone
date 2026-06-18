@@ -44,9 +44,7 @@ export const tagsRouter = router({
 
   reorder: publicProcedure
     .input(z.object({ tagIds: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => {
-      reorderTags(ctx.db, input.tagIds)
-    }),
+    .mutation(({ ctx, input }) => reorderTags(ctx.db, input.tagIds)),
 
   getForTask: publicProcedure
     .input(z.object({ taskId: z.string() }))
@@ -56,8 +54,11 @@ export const tagsRouter = router({
 
   setForTask: publicProcedure
     .input(z.object({ taskId: z.string(), tagIds: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => {
-      setTagsForTask(ctx.db, input.taskId, input.tagIds)
+    .mutation(async ({ ctx, input }) => {
+      // Must await before the trigger fires (and before the mutation resolves) —
+      // setTagsForTask writes async; an un-awaited call lets the client refetch
+      // before the write lands.
+      await setTagsForTask(ctx.db, input.taskId, input.tagIds)
       // Fire the tag-change automation trigger on the engine's bus — mirrors the
       // legacy `ipcMain.emit('db:taskTags:setForTask:done', null, taskId, tagIds)`
       // (tags/electron/handlers.ts). No-op when no started engine listens.

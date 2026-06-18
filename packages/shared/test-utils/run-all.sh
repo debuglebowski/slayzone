@@ -39,7 +39,7 @@ run_test_electron_strict_loader() {
 # the Electron node ABI (strict+loader) — plain `npx tsx` ERR_DLOPENs. Paths moved
 # from src/main/ → src/electron/ in the Wave C2 split; repointed here.
 run_test_electron_strict_loader packages/domains/settings/src/electron/handlers.test.ts
-run_test_electron_strict_loader packages/domains/tags/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/tags.test.ts
 run_test_electron_strict_loader packages/domains/projects/src/electron/handlers.test.ts
 run_test_electron_strict_loader packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
