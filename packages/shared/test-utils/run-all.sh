@@ -59,9 +59,7 @@ run_test packages/domains/settings/src/client/useTabStore.test.ts
 run_test packages/domains/terminal/src/client/focus-loss-diag.test.ts
 run_test packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_test packages/domains/sidebar/src/views/projectDrop.test.ts
-run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.items.test.ts
-run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.selections.test.ts
-run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.context.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/ai-config.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
