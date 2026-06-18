@@ -59,6 +59,24 @@ into a shared package.
    project/task tree, the `setWindowButtonVisibility` shim; SidebarProvider from `@slayzone/ui`.
 4. **Tab bar** — only the home-tab chrome; task tabs gated on TaskDetails (see tension above).
 
+## Progress (this session)
+DONE + pushed (origin/main): `04d5619f` hooks→@slayzone/home · `76c0fc0f` HomeDetail+lazy→home · `992e13ff` HomeContainer · `12668e77` fork renders full 6-panel home · `49a1ff3e` sidecar native reveal/open · `f37d1833` canonical uses shared HomeDetail. **Home tab fully functional in the fork + shared no-drift.**
+
+## Step 5 — sidebar extraction (audited, ready; NOT yet done)
+Scope: 28 files, ~6760 LOC under `packages/apps/app/src/renderer/src/components/sidebar/` → new `@slayzone/sidebar` pkg. Zero electron coupling. Do as a **focused pass** — it touches the live app's whole left-nav; ~20 edits + live-app typecheck iterations (too risky to cram). Move attempted + cleanly reverted (tree green).
+
+Deps for pkg: ai-config, platform, projects, settings, tags, task, tasks, terminal, transport, ui + @dnd-kit/{core,sortable,utilities} + @radix-ui/react-collapsible + lucide-react + react-icons.
+
+5 app-local couplings → resolutions (preserve ALL canonical behavior via prop-threading through AppSidebar):
+- `AppSidebar.tsx:16,37` `OnboardingChecklistState` (`@/hooks/useOnboardingChecklist`) → define structural type in pkg; stays a prop.
+- `AppSidebar.tsx:222` `trpcClient.app.window.setWindowButtonVisibility` → `onSetWindowButtonVisibility?(visible)` callback prop (app injects tRPC call).
+- `SidebarFooterIcons.tsx:3,62,120` `isConvexConfigured` (`@/lib/convexAuth`) → `convexConfigured?: boolean` prop; `:4,120` `FeedbackDialog` → `feedbackSlot?: ReactNode` prop.
+- `ShortcutsDialog.tsx:14,128` `KeyRecorder` (`@/components/KeyRecorder`) → `keyRecorder` component prop.
+- `TreeView.tsx:27,178` `useActiveSessionTaskIds` (`@/components/agent-status/useIdleTasks`) → `sessionTaskIds?: Set<string>` via `SidebarViewContext` (types.ts); `:32,1433` `logo` (`@/assets/logo.svg`) → move asset into pkg + add `vite-env.d.ts` (svg ambient).
+- `App.tsx:52` import `@/components/sidebar/AppSidebar` → `@slayzone/sidebar`; `:1247` render passes the new props (wraps tRPC call, convex bool, `<FeedbackDialog/>`, `<KeyRecorder/>`, `useActiveSessionTaskIds()`).
+- KeyRecorder/FeedbackDialog/useOnboardingChecklist/useActiveSessionTaskIds/logo STAY app-side (injected via props).
+Then **Step 5b — fork layout**: sidebar-left + home-right; sidebar drives `selectedProjectId` (replaces the interim picker in renderer-app HomeView).
+
 ## Locked decisions
 1. **(A) Extract `@slayzone/home`** — `HomeContainer` (wires shared hooks + renders panels) consumed by BOTH apps; canonical App.tsx migrates to it. Single source of truth, no drift. Migrate carefully, keep e2e green.
 2. **Extract `components/sidebar/*` to a shared pkg** (both apps consume).
