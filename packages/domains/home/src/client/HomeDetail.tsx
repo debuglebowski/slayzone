@@ -104,7 +104,10 @@ export interface HomeDetailProps {
   shutdownAgentForTask: KanbanProps['onShutdownAgent']
   globalAgentPanelState: GlobalAgentPanelState
   agentStatusState: AgentStatusState
-  openProjectSettings: (project: Project, options?: { initialTab?: ProjectSettingsTab }) => void
+  // Method syntax (bivariant params) so the Electron app's richer
+  // openProjectSettings (union initialTab + extra options) stays assignable to
+  // this shared, decoupled signature.
+  openProjectSettings(project: Project, options?: { initialTab?: ProjectSettingsTab }): void
   panelGitShortcut: string | null
   panelEditorShortcut: string | null
   panelProcessesShortcut: string | null
