@@ -44,6 +44,12 @@ interface UseTasksDataReturn {
   taskTags: Map<string, string[]>
   blockedTaskIds: Set<string>
 
+  // Board-load lifecycle (the loadBoardData query) so consumers can tell
+  // "connecting" / "failed to reach the server" apart from a genuinely empty
+  // workspace — they read identical (all-empty) arrays otherwise.
+  boardStatus: 'pending' | 'error' | 'success'
+  boardError: { message: string } | null
+
   // Setters (for dialog callbacks)
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>
@@ -772,6 +778,8 @@ export function useTasksData(): UseTasksDataReturn {
     tags,
     taskTags,
     blockedTaskIds,
+    boardStatus: boardQ.status,
+    boardError: boardQ.error,
     setTasks,
     setProjects,
     setProjectGroups,

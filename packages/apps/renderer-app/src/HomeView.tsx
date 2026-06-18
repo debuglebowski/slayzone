@@ -8,7 +8,7 @@
 // orchestration HomeDetail adds is exactly what this slice omits), so HomeDetail
 // itself is intentionally NOT lifted into a shared package — the reusable parts
 // already live in @slayzone/tasks.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   useTasksData,
   useFilterState,
@@ -19,9 +19,31 @@ import {
   KanbanListView
 } from '@slayzone/tasks/client'
 
+function Centered({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex h-full items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">
+      {children}
+    </div>
+  )
+}
+
 export function HomeView(): React.JSX.Element {
   const data = useTasksData()
-  const { tasks, projects, tags, taskTags, blockedTaskIds } = data
+  const { tasks, projects, tags, taskTags, blockedTaskIds, boardStatus, boardError } = data
+
+  // A dead tRPC WebSocket leaves the board query PENDING forever (wsLink keeps
+  // retrying, it never errors), so a long pending state means "can't reach the
+  // server" — not a brief connect. Escalate after a grace period so the user
+  // never sees an empty board masking a dead connection (the original bug).
+  const [stalled, setStalled] = useState(false)
+  useEffect(() => {
+    if (boardStatus !== 'pending') {
+      setStalled(false)
+      return
+    }
+    const t = setTimeout(() => setStalled(true), 5000)
+    return () => clearTimeout(t)
+  }, [boardStatus])
 
   const [pickedProjectId, setPickedProjectId] = useState('')
   // Default to the first project until the user picks one (the fork has no tab
@@ -41,12 +63,14 @@ export function HomeView(): React.JSX.Element {
   const onTaskBulkMove = (taskIds: string[], newColumnId: string, targetIndex: number): void =>
     data.bulkMove(taskIds, newColumnId, targetIndex, viewConfig.groupBy)
 
+  if (boardStatus === 'error') {
+    return <Centered>Couldn’t load the board: {boardError?.message ?? 'unknown error'}. Retrying…</Centered>
+  }
+  if (boardStatus === 'pending') {
+    return <Centered>{stalled ? 'Can’t reach the sidecar — is the server running?' : 'Connecting…'}</Centered>
+  }
   if (projects.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background text-muted-foreground">
-        No projects yet.
-      </div>
-    )
+    return <Centered>No projects in this workspace yet.</Centered>
   }
 
   return (
