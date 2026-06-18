@@ -6,3 +6,4 @@ export {
 } from './useHomePanel'
 export { useHomePanelState, type HomePanelState } from './useHomePanelVisibility'
 export { HomeDetail, type HomeDetailProps } from './HomeDetail'
+export { HomeContainer, type HomeContainerProps } from './HomeContainer'
