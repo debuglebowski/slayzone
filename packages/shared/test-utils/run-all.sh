@@ -38,16 +38,18 @@ run_test_electron_strict_loader() {
 # Domain handler contract tests touch the harness better-sqlite3 DB, so they need
 # the Electron node ABI (strict+loader) — plain `npx tsx` ERR_DLOPENs. Paths moved
 # from src/main/ → src/electron/ in the Wave C2 split; repointed here.
-run_test_electron_strict_loader packages/domains/settings/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/settings.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/tags.test.ts
-run_test_electron_strict_loader packages/domains/projects/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/projects.test.ts
 run_test_electron_strict_loader packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
 # Strict+electron: better-sqlite3 native ABI matches Electron's node only.
 run_test_electron_strict_loader packages/domains/projects/src/server/project-groups-txns.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/conversation-id-heal.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/task-conversations.test.ts
-run_test_electron_strict_loader packages/domains/task-terminals/src/electron/handlers.test.ts
+# v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
+run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessions.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
