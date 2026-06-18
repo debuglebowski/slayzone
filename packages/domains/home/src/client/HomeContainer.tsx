@@ -40,7 +40,16 @@ export interface HomeContainerProps {
   /** Project path validation (Electron supplies via useProjectPathGuard). */
   projectPathMissing?: boolean
   onFixProjectPath?: () => void
+  /**
+   * Lifted board data. When provided (the Chromium fork passes ONE shared
+   * `useTasksData()` to both the sidebar and Home), this container skips its
+   * own `useTasksData()` call so the two consumers share a single instance.
+   * Omitted in the Electron app → self-wiring path.
+   */
+  data?: ReturnType<typeof useTasksData>
 }
+
+type HomeContainerImplProps = HomeContainerProps & { data: ReturnType<typeof useTasksData> }
 
 /**
  * Self-wiring Home shell shared by the Electron app and the Chromium fork.
@@ -48,7 +57,22 @@ export interface HomeContainerProps {
  * HomeDetail's 60. Renders the presentational HomeDetail. Single source of truth
  * for the Home experience across both renderers.
  */
-export function HomeContainer({
+export function HomeContainer({ data, ...rest }: HomeContainerProps): React.JSX.Element {
+  return data ? (
+    <HomeContainerImpl data={data} {...rest} />
+  ) : (
+    <HomeContainerSelfWiring {...rest} />
+  )
+}
+
+/** Electron-app path: owns its own board data. */
+function HomeContainerSelfWiring(props: HomeContainerProps): React.JSX.Element {
+  const data = useTasksData()
+  return <HomeContainerImpl data={data} {...props} />
+}
+
+function HomeContainerImpl({
+  data,
   selectedProjectId,
   isActive,
   durationLocked = false,
@@ -65,7 +89,7 @@ export function HomeContainer({
   panelAutomationsShortcut = null,
   projectPathMissing = false,
   onFixProjectPath
-}: HomeContainerProps): React.JSX.Element {
+}: HomeContainerImplProps): React.JSX.Element {
   const trpcClient = useTRPCClient()
   const {
     tasks,
@@ -87,7 +111,7 @@ export function HomeContainer({
     bulkDelete: rawBulkDelete,
     contextMenuUpdate: rawContextMenuUpdate,
     bulkContextMenuUpdate: rawBulkContextMenuUpdate
-  } = useTasksData()
+  } = data
 
   const { push: pushUndo, undo } = useUndo()
   const { contextMenuUpdate, archiveTask, archiveTasks, deleteTask, bulkContextMenuUpdate, bulkDelete } =

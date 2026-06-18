@@ -437,6 +437,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
+      '@slayzone/sidebar':
+        specifier: workspace:*
+        version: link:../../domains/sidebar
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../../domains/tasks

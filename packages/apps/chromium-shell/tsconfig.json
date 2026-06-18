@@ -4,6 +4,7 @@
     "src/**/*",
     "src/**/*.tsx",
     "../../renderer-app/src/env.d.ts",
+    "../../shared/types/src/txn-registry.d.ts",
     "../../shared/mojo-bindings/src/runtime/bindings-shim.ts",
     "../../shared/mojo-bindings/src/ambient.d.ts"
   ],

@@ -1,12 +1,19 @@
-// Chromium-fork Home — full experience via the shared @slayzone/home shell.
+// Chromium-fork Home — the real AppSidebar (left) + the shared @slayzone/home
+// shell (right), both fed by ONE lifted useTasksData() instance.
 //
-// Wraps HomeContainer (which owns all the data/filter/panel/repo wiring) with a
-// thin interim project picker. The picker is temporary: it's replaced by the
-// AppSidebar's project tree in a later slice. Project selection feeds
-// HomeContainer's selectedProjectId.
+// useTasksData() is called once here and passed to both the sidebar (projects/
+// tasks + CRUD/reorder mutations) and HomeContainer (via its `data` prop), so
+// the two consumers share a single board-data instance instead of each minting
+// their own. Sidebar selection drives HomeContainer's selectedProjectId.
 import { useEffect, useState } from 'react'
-import { useQuery, useTRPC } from '@slayzone/transport/client'
+import { SidebarProvider } from '@slayzone/ui'
+import { useTasksData } from '@slayzone/tasks/client'
 import { HomeContainer } from '@slayzone/home/client'
+import {
+  AppSidebar,
+  type OnboardingChecklistState,
+  type KeyRecorderComponent
+} from '@slayzone/sidebar'
 
 function Centered({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
@@ -16,32 +23,43 @@ function Centered({ children }: { children: React.ReactNode }): React.JSX.Elemen
   )
 }
 
+// Stable defaults for the app-chrome props the Electron app supplies but the
+// fork doesn't have yet (no native window chrome, convex, feedback, onboarding,
+// or shortcut recorder in the shell). Module-level → referentially stable.
+const EMPTY_SESSION_IDS = new Set<string>()
+const NOOP = (): void => {}
+const NOOP_KEY_RECORDER: KeyRecorderComponent = () => null
+const FORK_CHECKLIST: OnboardingChecklistState = {
+  steps: [],
+  dismissed: true,
+  remainingCount: 0,
+  hasRemaining: false,
+  onDismiss: NOOP
+}
+
 export function HomeView(): React.JSX.Element {
-  const trpc = useTRPC()
-  // Deduped board query (same key as HomeContainer's useTasksData) — populates
-  // the interim picker AND drives the connection state without a second fetch.
-  const boardQ = useQuery(trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000 }))
-  const projects = (boardQ.data?.projects ?? []) as Array<{ id: string; name: string }>
+  const data = useTasksData()
+  const { projects, boardStatus, boardError } = data
 
   const [picked, setPicked] = useState('')
-  const projectId = picked || projects[0]?.id || ''
+  const selectedProjectId = picked || projects[0]?.id || ''
 
-  // A dead tRPC WebSocket leaves the query PENDING forever (wsLink retries, it
-  // never errors). Escalate a long pending state to a connection warning.
+  // A dead tRPC WebSocket leaves the board query PENDING forever (wsLink retries,
+  // it never errors). Escalate a long pending state to a connection warning.
   const [stalled, setStalled] = useState(false)
   useEffect(() => {
-    if (boardQ.status !== 'pending') {
+    if (boardStatus !== 'pending') {
       setStalled(false)
       return
     }
     const t = setTimeout(() => setStalled(true), 5000)
     return () => clearTimeout(t)
-  }, [boardQ.status])
+  }, [boardStatus])
 
-  if (boardQ.status === 'error') {
-    return <Centered>Couldn’t load the board: {boardQ.error?.message ?? 'unknown error'}. Retrying…</Centered>
+  if (boardStatus === 'error') {
+    return <Centered>Couldn’t load the board: {boardError?.message ?? 'unknown error'}. Retrying…</Centered>
   }
-  if (boardQ.status === 'pending') {
+  if (boardStatus === 'pending') {
     return <Centered>{stalled ? 'Can’t reach the sidecar — is the server running?' : 'Connecting…'}</Centered>
   }
   if (projects.length === 0) {
@@ -49,24 +67,45 @@ export function HomeView(): React.JSX.Element {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-        <span className="text-xs text-muted-foreground">Project</span>
-        <select
-          value={projectId}
-          onChange={(e) => setPicked(e.target.value)}
-          className="rounded-md border border-border bg-surface-2 px-2 py-1 text-sm text-foreground"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+    <SidebarProvider defaultOpen className="h-svh min-h-0 bg-background text-foreground">
+      <AppSidebar
+        projects={projects}
+        projectGroups={data.projectGroups}
+        tasks={data.tasks}
+        selectedProjectId={selectedProjectId}
+        onSelectProject={(id) => setPicked(id)}
+        onProjectSettings={NOOP}
+        onSettings={NOOP}
+        onUsageAnalytics={NOOP}
+        onLeaderboard={NOOP}
+        onboardingChecklist={FORK_CHECKLIST}
+        onSetWindowButtonVisibility={NOOP}
+        convexConfigured={false}
+        feedbackSlot={null}
+        keyRecorder={NOOP_KEY_RECORDER}
+        sessionTaskIds={EMPTY_SESSION_IDS}
+        onReorderProjects={data.reorderProjects}
+        onCreateProjectGroup={data.createProjectGroup}
+        onCreateFolderWithProjects={data.createFolderWithProjects}
+        onRenameProjectGroup={data.renameProjectGroup}
+        onDeleteProjectGroup={data.deleteProjectGroup}
+        onSetGroupCollapsed={data.setGroupCollapsed}
+        onReorderTopLevel={data.reorderTopLevel}
+        onMoveProjectToGroup={data.moveProjectToGroup}
+        onReorderProjectsInGroup={data.reorderProjectsInGroup}
+        onTaskReorder={data.reorderTasks}
+        onTaskMove={data.moveTask}
+        onTaskReparent={data.reparentTask}
+        onTaskBulkReparent={data.bulkReparent}
+        onTaskFieldUpdate={data.contextMenuUpdate}
+        onTaskBulkFieldUpdate={data.bulkContextMenuUpdate}
+        onSetTasksPinned={data.setTasksPinned}
+        onSetCollapsed={data.setTaskCollapsed}
+        onPinnedReorder={data.reorderPinnedTasks}
+      />
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <HomeContainer data={data} selectedProjectId={selectedProjectId} isActive />
       </div>
-      <div className="min-h-0 flex-1">
-        <HomeContainer selectedProjectId={projectId} isActive />
-      </div>
-    </div>
+    </SidebarProvider>
   )
 }

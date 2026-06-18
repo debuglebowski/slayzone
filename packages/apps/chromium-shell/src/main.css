@@ -21,6 +21,7 @@
 @source "../../../domains/projects/src";
 @source "../../../domains/tags/src";
 @source "../../../domains/settings/src";
+@source "../../../domains/sidebar/src";
 
 @custom-variant dark (&:is(.dark *));
 

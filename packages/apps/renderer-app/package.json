@@ -13,6 +13,7 @@
     "@slayzone/home": "workspace:*",
     "@slayzone/layout": "workspace:*",
     "@slayzone/settings": "workspace:*",
+    "@slayzone/sidebar": "workspace:*",
     "@slayzone/tasks": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
