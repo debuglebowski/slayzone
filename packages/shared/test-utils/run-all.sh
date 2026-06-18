@@ -35,34 +35,37 @@ run_test_electron_strict_loader() {
   fi
 }
 
-run_test packages/domains/settings/src/main/handlers.test.ts
-run_test packages/domains/tags/src/main/handlers.test.ts
-run_test packages/domains/projects/src/main/handlers.test.ts
-run_test packages/domains/projects/src/main/task-automation.test.ts
+# Domain handler contract tests touch the harness better-sqlite3 DB, so they need
+# the Electron node ABI (strict+loader) — plain `npx tsx` ERR_DLOPENs. Paths moved
+# from src/main/ → src/electron/ in the Wave C2 split; repointed here.
+run_test_electron_strict_loader packages/domains/settings/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/domains/tags/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/domains/projects/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
 # Strict+electron: better-sqlite3 native ABI matches Electron's node only.
-run_test_electron_strict_loader packages/domains/projects/src/main/project-groups-txns.test.ts
-run_test_electron_strict_loader packages/domains/task/src/main/ops/conversation-id-heal.test.ts
-run_test_electron_strict_loader packages/domains/task/src/main/ops/task-conversations.test.ts
-run_test packages/domains/task-terminals/src/main/handlers.test.ts
+run_test_electron_strict_loader packages/domains/projects/src/server/project-groups-txns.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/conversation-id-heal.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/task-conversations.test.ts
+run_test_electron_strict_loader packages/domains/task-terminals/src/electron/handlers.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
-run_test packages/domains/task/src/main/handlers.test.ts
-run_test packages/domains/task/src/main/template-handlers.test.ts
+run_test_electron_strict_loader packages/domains/task/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/domains/task/src/electron/template-handlers.test.ts
 run_test packages/domains/task/src/client/card-water-fill.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
 run_test packages/domains/settings/src/client/useTabStore.test.ts
 run_test packages/domains/terminal/src/client/focus-loss-diag.test.ts
-run_test packages/apps/app/src/renderer/src/components/sidebar/views/projectGrouping.test.ts
-run_test packages/apps/app/src/renderer/src/components/sidebar/views/projectDrop.test.ts
-run_test packages/domains/ai-config/src/main/handlers.items.test.ts
-run_test packages/domains/ai-config/src/main/handlers.selections.test.ts
-run_test packages/domains/ai-config/src/main/handlers.context.test.ts
-run_test packages/domains/file-editor/src/main/handlers.test.ts
-run_test packages/domains/diagnostics/src/main/service.test.ts
-run_test packages/domains/integrations/src/main/handlers.db.test.ts
-run_test packages/domains/worktrees/src/main/handlers.test.ts
+run_test packages/domains/sidebar/src/views/projectGrouping.test.ts
+run_test packages/domains/sidebar/src/views/projectDrop.test.ts
+run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.items.test.ts
+run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.selections.test.ts
+run_test_electron_strict_loader packages/domains/ai-config/src/electron/handlers.context.test.ts
+run_test_electron_strict_loader packages/domains/file-editor/src/electron/handlers.test.ts
+run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
+run_test_electron_strict_loader packages/domains/integrations/src/electron/handlers.db.test.ts
+run_test_electron_strict_loader packages/domains/worktrees/src/electron/handlers.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
 # return adapted to {snapshotSha,headSha}). NOTE: all run_test* helpers are now strict
 # (pipefail), so the ~30 still-broken domain suites no longer mask as PASS — they now
@@ -70,9 +73,9 @@ run_test packages/domains/worktrees/src/main/handlers.test.ts
 #   1. better-sqlite3 ERR_DLOPEN — DB-handler tests on plain-node `run_test` need the
 #      Electron runner (some also need async-DB await fixes once they load).
 #   2. rest-api/tasks/* + mcp-tools/* — real assertion failures (async-DB move fallout).
-run_test_electron_strict_loader packages/domains/agent-turns/src/main/db.test.ts
-run_test_electron_strict_loader packages/domains/agent-turns/src/main/git-snapshot.test.ts
-run_test_electron_strict_loader packages/domains/agent-turns/src/main/turn-tracker.test.ts
+run_test_electron_strict_loader packages/domains/agent-turns/src/server/db.test.ts
+run_test_electron_strict_loader packages/domains/agent-turns/src/server/git-snapshot.test.ts
+run_test_electron_strict_loader packages/domains/agent-turns/src/server/turn-tracker.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/agent-turns.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/chat.test.ts
 # Transport routers P13 — task + template + artifacts (createCaller contract tests)
@@ -81,8 +84,8 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/tem
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/artifacts.test.ts
 # Browser onEvent snapshot replay (stuck-loading race fix) — no DB, plain tsx
 run_test packages/shared/transport/src/server/routers/app.browser-events.test.ts
-run_test packages/domains/integrations/src/main/handlers.api.test.ts
-run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
+run_test_electron_strict_loader packages/domains/integrations/src/electron/handlers.api.test.ts
+run_test_electron_strict_loader packages/domains/integrations/src/electron/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
 run_test packages/domains/automations/src/shared/types.test.ts
 run_test packages/domains/automations/src/shared/ai.test.ts
@@ -158,7 +161,7 @@ run_test_electron_strict() {
 run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.test.ts
 
 # Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
-run_test_electron_loader packages/domains/task/src/main/events.test.ts
+run_test_electron_loader packages/domains/task/src/server/events.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/archive.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/archive-many.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/create.test.ts
@@ -185,10 +188,10 @@ run_test_electron_loader packages/apps/cli/test/tasks-ext.test.ts
 run_test_electron_loader packages/apps/cli/test/projects-update.test.ts
 
 if [ -n "$LINEAR_API_KEY" ]; then
-  run_test_no_loader packages/domains/integrations/src/main/handlers.integration.linear.test.ts
+  run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.linear.test.ts
 fi
 if [ -n "$GITHUB_TOKEN" ]; then
-  run_test_no_loader packages/domains/integrations/src/main/handlers.integration.github.test.ts
+  run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.github.test.ts
 fi
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) can't run
