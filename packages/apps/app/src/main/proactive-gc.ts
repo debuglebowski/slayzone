@@ -11,8 +11,17 @@ import { app, webContents, type WebContents } from 'electron'
  *
  * Mechanism: CDP `HeapProfiler.collectGarbage` over `webContents.debugger` — the exact
  * call that reclaimed the memory in testing. It triggers a unified V8 + Blink/Oilpan GC
- * and needs no `--expose-gc` flag. The debugger is attached only for the call and
- * detached immediately, so it never holds the channel away from DevTools.
+ * and needs no `--expose-gc` flag (measured: `collectGarbage` ALONE, without
+ * `forciblyPurgeJavaScriptMemory`, freed ~550MB of blink_gc/blink_objects on a live
+ * grown renderer — so we deliberately do NOT purge, which would only add V8-recompile
+ * cost for negligible gain). Two passes per fire: a unified GC finalizes more Oilpan on
+ * a second cycle. The debugger is attached only for the call and detached immediately,
+ * so it never holds the channel away from DevTools.
+ *
+ * Threshold (default 1100MB) is data-grounded: sampled renderers are bimodal — healthy
+ * ones cap ~400-450MB, runaways climb to ≥1.8GB (one grew ~1.8GB in 90min, peaking
+ * ~3.7GB near the 4GB renderer cap), with nothing in between — so 1100MB sits safely in
+ * the empty band: above any healthy renderer, well below a runaway / the crash cap.
  */
 
 const THRESHOLD_MB = Number(process.env.SLAYZONE_GC_THRESHOLD_MB ?? 1100)
@@ -29,6 +38,10 @@ async function collectGarbageIn(wc: WebContents): Promise<void> {
   try {
     wc.debugger.attach('1.3')
     attached = true
+    // Two passes — the unified V8+Oilpan GC reclaims more on a second cycle (Oilpan
+    // finalization); the reclaim test used multiple passes.
+    await wc.debugger.sendCommand('HeapProfiler.collectGarbage')
+    await new Promise((resolve) => setTimeout(resolve, 250))
     await wc.debugger.sendCommand('HeapProfiler.collectGarbage')
   } catch {
     /* DevTools opened mid-cycle / frame gone — skip, retry next tick */
