@@ -1,6 +1,1 @@
-export {
-  registerTerminalTabsHandlers,
-  createPtyEnricher,
-  markTabSpawned,
-  markTabHibernated
-} from './handlers'
+export { createPtyEnricher, markTabSpawned, markTabHibernated } from './handlers'

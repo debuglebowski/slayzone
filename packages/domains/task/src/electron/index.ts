@@ -1,5 +1,3 @@
-export { registerTaskHandlers } from './handlers'
-export { registerTaskTemplateHandlers } from './template-handlers'
 export { registerFilesHandlers, filesPathExists, filesSaveTempImage } from './files'
 export {
   buildPdfHtml,

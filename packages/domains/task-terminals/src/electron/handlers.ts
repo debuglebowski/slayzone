@@ -1,17 +1,9 @@
-import type { IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { PtyInfo } from '@slayzone/terminal/shared'
-import type { CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
-import {
-  listTabsForTask,
-  ensureMainTab,
-  createTabRow,
-  updateTabRow,
-  splitTabRow,
-  moveTabToGroup,
-  deleteTab,
-  listHibernatedSessionIds
-} from '../server'
+
+// The IPC tabs:* handlers (registerTerminalTabsHandlers) were removed at the
+// IPC→tRPC cutover — the renderer uses the tRPC `taskTerminals` router over the
+// same electron-free tab store. The host-side helpers below remain.
 
 // Moved to the electron-free server entry (the REST API + standalone server
 // need them); re-exported here so existing electron-entry importers keep working.
@@ -49,40 +41,4 @@ export function createPtyEnricher(db: SlayzoneDb): (raw: PtyInfo[]) => Promise<P
       return { ...r, tabId: tab?.id ?? '', label: tab?.label ?? null }
     })
   }
-}
-
-/**
- * Thin IPC wrappers over the electron-free tab store (`../server`). Both these
- * `tabs:*` handlers and the tRPC `taskTerminals` router call the same store, so
- * they share one implementation while IPC + tRPC coexist (renderer cutover +
- * handler deletion land in a later slice).
- */
-export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
-  // List tabs for a task
-  ipcMain.handle('tabs:list', (_, taskId: string) => listTabsForTask(db, taskId))
-
-  // Main-tab session ids flagged hibernated — seeds PtyContext's 💤 dots at boot.
-  ipcMain.handle('tabs:listHibernatedSessions', () => listHibernatedSessionIds(db))
-
-  // Create a new tab (new group)
-  ipcMain.handle('tabs:create', (_, input: CreateTerminalTabInput) => createTabRow(db, input))
-
-  // Split: create a new pane in the same group as the target tab
-  ipcMain.handle('tabs:split', (_, tabId: string) => splitTabRow(db, tabId))
-
-  // Move a tab to a different group (or create a new group if targetGroupId is null)
-  ipcMain.handle('tabs:moveToGroup', (_, tabId: string, targetGroupId: string | null) =>
-    moveTabToGroup(db, tabId, targetGroupId)
-  )
-
-  // Update a tab
-  ipcMain.handle('tabs:update', (_, input: UpdateTerminalTabInput) => updateTabRow(db, input))
-
-  // Delete a tab (reject if main)
-  ipcMain.handle('tabs:delete', (_, tabId: string) => deleteTab(db, tabId))
-
-  // Ensure main tab exists for a task (creates if missing)
-  ipcMain.handle('tabs:ensureMain', (_, taskId: string, mode: string) =>
-    ensureMainTab(db, taskId, mode)
-  )
 }

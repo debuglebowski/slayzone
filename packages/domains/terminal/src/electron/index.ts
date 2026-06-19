@@ -13,7 +13,7 @@ configurePtyHost({
   bus: ipcMain
 })
 
-export { registerPtyHandlers, getPtyHandlerChannels, wireWarmWindowCleanup } from './handlers'
+export { wireWarmWindowCleanup } from './handlers'
 export { createPtyOps, type PtyCreateOpts } from '../server/runtime/pty-store'
 export { registerUsageHandlers, buildUsageOps } from './usage'
 export {

@@ -1,1 +1,1 @@
-export { registerFileEditorHandlers, closeAllWatchers } from './handlers'
+export { closeAllWatchers } from './handlers'
