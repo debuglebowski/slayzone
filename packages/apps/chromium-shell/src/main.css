@@ -14,10 +14,17 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Scan the packages whose className strings render in the Home view. */
+/* Scan the packages whose className strings render in the Home + Task Detail views. */
 @source "../../../shared/ui/src";
+@source "../../../shared/editor/src";
 @source "../../../domains/tasks/src";
 @source "../../../domains/task/src";
+@source "../../../domains/task-terminals/src";
+@source "../../../domains/task-browser/src";
+@source "../../../domains/task-artifacts/src";
+@source "../../../domains/worktrees/src";
+@source "../../../domains/file-editor/src";
+@source "../../../domains/terminal/src";
 @source "../../../domains/projects/src";
 @source "../../../domains/tags/src";
 @source "../../../domains/settings/src";
@@ -77,6 +84,7 @@
 
   --animate-collapsible-down: collapsible-down 0.15s ease-out;
   --animate-collapsible-up: collapsible-up 0.15s ease-out;
+  --animate-blink: blink 0.9s step-end infinite;
   @keyframes collapsible-down {
     from { height: 0; opacity: 0; }
     to { height: var(--radix-collapsible-content-height); opacity: 1; }
@@ -84,6 +92,10 @@
   @keyframes collapsible-up {
     from { height: var(--radix-collapsible-content-height); opacity: 1; }
     to { height: 0; opacity: 0; }
+  }
+  @keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
   }
 }
 
@@ -194,3 +206,649 @@
     color: inherit;
   }
 }
+
+/* ==========================================================================
+   Renderer-agnostic rule layer — DELIBERATE MIRROR of the canonical
+   packages/apps/app/src/renderer/src/assets/main.css (not silent drift). The
+   fork pulls the same @slayzone/* components (Task Detail's Milkdown description
+   editor, file-editor diff, search, scrollbars) which depend on these global
+   class rules — without them the markdown editor renders as unstyled
+   ProseMirror. Intentionally omits `.prose`/@tailwindcss/typography (GhMarkdown
+   PR view) — separate follow-up. Extraction into a shared theme-css package
+   (so this stops being a mirror) remains the eventual step.
+   ========================================================================== */
+
+[data-sonner-toaster][dir='ltr'] {
+  --toast-close-button-start: unset !important;
+  --toast-close-button-end: 0 !important;
+  --toast-close-button-transform: translate(35%, -35%) !important;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-accent) 0%,
+    var(--color-accent) 40%,
+    var(--color-muted) 50%,
+    var(--color-accent) 60%,
+    var(--color-accent) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+@keyframes loop-glow-active {
+  0%, 100% { box-shadow: 0 4px 20px 0 rgba(249,115,22,0.08), 0 0 15px 2px rgba(249,115,22,0.08); }
+  50% { box-shadow: 0 0 35px 5px rgba(249,115,22,0.6), 0 0 80px 10px rgba(249,115,22,0.25); }
+}
+
+/* ==========================================================================
+   Markdown document (.mk-doc)
+   Single source of truth for markdown typography across all renderers.
+   Used by Milkdown (editable) and react-markdown (read-only previews).
+
+   Architecture:
+     .mk-doc              — root: tokens, theme, layout frame, font cascade
+       .mk-doc-scroll     — scroll layer (overflow-y: auto, no padding)
+         .milkdown >      — Milkdown's wrapper (editable path)
+           .ProseMirror   — editable content (owns padding + max-width)
+         .mk-doc-body     — read-only content wrapper (read-only path)
+
+   Typography rules target .mk-doc <tag> (cascade — matches headings/paras in
+   both renderers). Only layout rules alias the content element via
+   .mk-doc .mk-doc-body, .mk-doc .ProseMirror — this is the one coupling to
+   Milkdown's class name.
+
+   Variants via [data-variant]. Theme colors via --mk-* inline CSS vars.
+   ========================================================================== */
+
+/* ---- Page variant (default) — Notion-like page feel ---- */
+.mk-doc {
+  /* Layout */
+  --mk-pad-x: 2rem;
+  --mk-pad-top: 3rem;
+  --mk-pad-bottom: 3rem;
+  /* Includes horizontal padding (2 × --mk-pad-x = 4rem), so the inner text
+     column stays ~720px wide. */
+  --mk-content-max: calc(720px + 4rem);
+
+  /* Body */
+  --mk-body-size: 16px;
+  --mk-body-line: 1.6;
+
+  /* Headings */
+  --mk-h1-size: 2.25em;
+  --mk-h1-weight: 700;
+  --mk-h1-line: 1.2;
+  --mk-h1-track: -0.02em;
+  --mk-h1-mt: 1.4em;
+  --mk-h1-mb: 0.25em;
+
+  --mk-h2-size: 1.625em;
+  --mk-h2-weight: 600;
+  --mk-h2-line: 1.3;
+  --mk-h2-track: -0.01em;
+  --mk-h2-mt: 1.6em;
+  --mk-h2-mb: 0.2em;
+
+  --mk-h3-size: 1.25em;
+  --mk-h3-weight: 600;
+  --mk-h3-line: 1.35;
+  --mk-h3-mt: 1.4em;
+  --mk-h3-mb: 0.15em;
+
+  --mk-h-stacked-mt: 0.4em;
+
+  /* Paragraph */
+  --mk-p-mt: 1.25em;
+  --mk-p-mb: 1.25em;
+
+  /* Lists */
+  --mk-list-indent: 1.75em;
+  --mk-li-mt: 0.1em;
+  --mk-li-mb: 0.1em;
+  --mk-list-mt: 0.3em;
+  --mk-list-mb: 0.3em;
+
+  /* Blocks */
+  --mk-pre-mt: 0.75em;
+  --mk-pre-mb: 0.75em;
+  --mk-quote-mt: 0.8em;
+  --mk-quote-mb: 0.8em;
+  --mk-hr-mt: 1.6em;
+  --mk-hr-mb: 1.6em;
+
+  /* Colors (theme-overridable via inline style) */
+  --mk-bg: transparent;
+  --mk-fg: inherit;
+  --mk-heading: inherit;
+  --mk-link: var(--color-primary);
+  --mk-code-fg: var(--color-primary);
+  --mk-code-bg: var(--color-muted);
+  --mk-quote-border: var(--color-border);
+  --mk-hr-color: var(--color-border);
+
+  /* Frame */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--mk-bg);
+  color: var(--mk-fg);
+  font-size: var(--mk-body-size);
+  line-height: var(--mk-body-line);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---- Readability — Y axis only (text density, vertical padding, vertical margins) ---- */
+.mk-doc[data-readability="compact"] {
+  --mk-pad-top: 0.5rem;
+  --mk-pad-bottom: 0.5rem;
+
+  --mk-body-size: 14px;
+  --mk-body-line: 1.5;
+
+  --mk-h1-size: 1.5em;  --mk-h1-mt: 0.5em;  --mk-h1-mb: 0.125em;
+  --mk-h2-size: 1.25em; --mk-h2-mt: 0.4em;  --mk-h2-mb: 0.125em;
+  --mk-h3-size: 1.1em;  --mk-h3-mt: 0.35em; --mk-h3-mb: 0.125em;
+
+  --mk-h-stacked-mt: 0.2em;
+
+  --mk-p-mt: 0.7em;
+  --mk-p-mb: 0.7em;
+  --mk-list-mt: 0.125em;
+  --mk-list-mb: 0.125em;
+  --mk-li-mt: 0;
+  --mk-li-mb: 0;
+}
+
+/* ---- Width — X axis only (column max-width, horizontal padding) ---- */
+/* narrow is the .mk-doc default — 720px column with 2rem pad-x */
+.mk-doc[data-width="wide"] {
+  --mk-pad-x: var(--mk-pad-top);
+  --mk-content-max: none;
+}
+
+/* ---- Variant: inline (constrained sidebar panels — tight chrome, page type) ---- */
+.mk-doc[data-variant="inline"] {
+  --mk-pad-x: 1rem;
+  --mk-pad-top: 1rem;
+  --mk-pad-bottom: 0.75rem;
+  --mk-content-max: none;
+}
+
+/* ---- Modifiers ---- */
+.mk-doc[data-font="mono"] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.mk-doc[data-themed="true"] {
+  border-radius: 0.375rem;
+}
+
+/* ---- Scroll layer ---- */
+.mk-doc-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Milkdown internal wrapper: fill the scroll layer ---- */
+.mk-doc .milkdown {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---- Content element (renderer alias): centered column, owns padding ---- */
+.mk-doc .mk-doc-body,
+.mk-doc .ProseMirror {
+  flex: 1;
+  outline: none;
+  max-width: var(--mk-content-max);
+  width: 100%;
+  margin-inline: auto;
+  padding: var(--mk-pad-top) var(--mk-pad-x) var(--mk-pad-bottom);
+  box-sizing: border-box;
+}
+
+/* First block hugs top padding — no heading/paragraph double-gap. */
+.mk-doc .mk-doc-body > *:first-child,
+.mk-doc .ProseMirror > *:first-child {
+  margin-top: 0;
+}
+
+/* ---- Paragraph ---- */
+.mk-doc p {
+  margin-top: var(--mk-p-mt);
+  margin-bottom: var(--mk-p-mb);
+}
+
+/* ---- Headings ---- */
+.mk-doc h1 {
+  font-size: var(--mk-h1-size);
+  font-weight: var(--mk-h1-weight);
+  line-height: var(--mk-h1-line);
+  letter-spacing: var(--mk-h1-track);
+  margin-top: var(--mk-h1-mt);
+  margin-bottom: var(--mk-h1-mb);
+  color: var(--mk-heading);
+}
+.mk-doc h2 {
+  font-size: var(--mk-h2-size);
+  font-weight: var(--mk-h2-weight);
+  line-height: var(--mk-h2-line);
+  letter-spacing: var(--mk-h2-track);
+  margin-top: var(--mk-h2-mt);
+  margin-bottom: var(--mk-h2-mb);
+  color: var(--mk-heading);
+}
+.mk-doc h3 {
+  font-size: var(--mk-h3-size);
+  font-weight: var(--mk-h3-weight);
+  line-height: var(--mk-h3-line);
+  margin-top: var(--mk-h3-mt);
+  margin-bottom: var(--mk-h3-mb);
+  color: var(--mk-heading);
+}
+.mk-doc h4,
+.mk-doc h5,
+.mk-doc h6 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 1.2em;
+  margin-bottom: 0.1em;
+  color: var(--mk-heading);
+}
+
+/* Adjacent headings collapse to --mk-h-stacked-mt (Notion title/subtitle). */
+.mk-doc h1 + h2,
+.mk-doc h1 + h3,
+.mk-doc h2 + h3,
+.mk-doc h2 + h4,
+.mk-doc h3 + h4 {
+  margin-top: var(--mk-h-stacked-mt);
+}
+
+/* ---- Lists ---- */
+.mk-doc ul,
+.mk-doc ol {
+  margin-top: var(--mk-list-mt);
+  margin-bottom: var(--mk-list-mb);
+  padding-inline-start: var(--mk-list-indent);
+}
+.mk-doc ul {
+  list-style: disc;
+}
+.mk-doc ol {
+  list-style: none;
+  counter-reset: ol-counter;
+}
+.mk-doc ol > li {
+  counter-increment: ol-counter;
+  position: relative;
+}
+.mk-doc ol > li::before {
+  content: counter(ol-counter) ".";
+  position: absolute;
+  left: -1.6em;
+  width: 1.4em;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.mk-doc li {
+  margin-top: var(--mk-li-mt);
+  margin-bottom: var(--mk-li-mb);
+}
+.mk-doc li > p {
+  margin: 0;
+}
+
+/* ---- Inline marks ---- */
+.mk-doc strong {
+  font-weight: 700;
+  color: var(--mk-heading);
+}
+.mk-doc em {
+  font-style: italic;
+}
+.mk-doc a {
+  color: var(--mk-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mk-doc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  color: var(--mk-code-fg);
+  background: var(--mk-code-bg);
+  border-radius: 3px;
+  padding: 2px 5px;
+}
+
+/* ---- Code blocks ---- */
+.mk-doc pre {
+  background: var(--mk-code-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.875em 1em;
+  margin-top: var(--mk-pre-mt);
+  margin-bottom: var(--mk-pre-mb);
+  overflow-x: auto;
+  font-size: 0.875em;
+}
+.mk-doc pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  color: var(--mk-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.6;
+}
+
+/* ---- Mermaid code blocks (rich-text editor only) ---- */
+.mk-doc .mk-mermaid {
+  position: relative;
+  margin-top: var(--mk-pre-mt);
+  margin-bottom: var(--mk-pre-mb);
+}
+.mk-doc .mk-mermaid-toolbar {
+  display: inline-flex;
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+  overflow: hidden;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.mk-doc .mk-mermaid:hover .mk-mermaid-toolbar,
+.mk-doc .mk-mermaid[data-mode="raw"] .mk-mermaid-toolbar {
+  opacity: 1;
+}
+.mk-doc .mk-mermaid-seg {
+  padding: 2px 8px;
+  background: transparent;
+  border: 0;
+  color: var(--color-foreground);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.mk-doc .mk-mermaid-seg + .mk-mermaid-seg {
+  border-left: 1px solid var(--color-border);
+}
+.mk-doc .mk-mermaid-seg[data-active="true"] {
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
+}
+.mk-doc .mk-mermaid-seg:hover:not([data-active="true"]) {
+  background: var(--color-muted);
+}
+.mk-doc .mk-mermaid-preview {
+  margin: 0;
+}
+.mk-doc .mk-mermaid-preview > div {
+  margin: 0;
+}
+.mk-doc .mk-mermaid[data-mode="preview"] .mk-mermaid-source {
+  position: absolute;
+  left: -99999px;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.mk-doc .mk-mermaid[data-mode="raw"] .mk-mermaid-preview {
+  display: none;
+}
+.mk-doc .mk-mermaid-source {
+  margin: 0;
+}
+
+/* ---- Blockquote, hr ---- */
+.mk-doc blockquote {
+  margin-top: var(--mk-quote-mt);
+  margin-bottom: var(--mk-quote-mb);
+  padding-left: 1em;
+  border-left: 3px solid var(--mk-quote-border);
+  color: var(--mk-fg);
+  opacity: 0.85;
+}
+.mk-doc hr {
+  border: none;
+  border-top: 1px solid var(--mk-hr-color);
+  margin-top: var(--mk-hr-mt);
+  margin-bottom: var(--mk-hr-mb);
+}
+
+/* ---- Tables ---- */
+.mk-doc table {
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+.mk-doc[data-readability="compact"] table {
+  width: auto;
+}
+.mk-doc th,
+.mk-doc td {
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  padding: 0.45rem 0.5rem;
+}
+.mk-doc th p,
+.mk-doc td p {
+  margin: 0;
+}
+.mk-doc th:last-child,
+.mk-doc td:last-child {
+  border-right: none;
+}
+.mk-doc tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---- Milkdown: GFM task list ([data-item-type="task"]) ---- */
+.mk-doc .ProseMirror ul:has(> li[data-item-type="task"]) {
+  list-style: none;
+  padding-inline-start: var(--mk-list-indent);
+}
+.mk-doc .ProseMirror li[data-item-type="task"] {
+  position: relative;
+  list-style: none;
+}
+.mk-doc .ProseMirror li[data-item-type="task"] > input[type="checkbox"] {
+  position: absolute;
+  left: -1.6em;
+  top: 0.3em;
+  cursor: pointer;
+  accent-color: var(--mk-link);
+}
+.mk-doc .ProseMirror li[data-item-type="task"] > span > p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* ---- Milkdown: empty-editor placeholder pseudo ---- */
+.mk-doc .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-muted-foreground);
+  pointer-events: none;
+  height: 0;
+}
+
+/* ---- react-markdown: remarkGfm task list (.task-list-item) ---- */
+.mk-doc .mk-doc-body ul.contains-task-list {
+  list-style: none;
+  padding-inline-start: var(--mk-list-indent);
+}
+.mk-doc .mk-doc-body li.task-list-item {
+  position: relative;
+  list-style: none;
+}
+.mk-doc .mk-doc-body li.task-list-item input[type="checkbox"] {
+  margin-right: 0.5em;
+  cursor: default;
+  accent-color: var(--mk-link);
+}
+
+/* ---- Asset link chips — inline pills for [text](asset:id) links ---- */
+.mk-doc .asset-link-chip {
+  display: inline;
+  background: color-mix(in srgb, var(--mk-link) 15%, transparent);
+  color: var(--mk-link);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.875em;
+  cursor: pointer;
+  text-decoration: none;
+}
+.mk-doc .asset-link-chip:hover {
+  background: color-mix(in srgb, var(--mk-link) 25%, transparent);
+}
+.mk-doc .asset-link-chip a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ---- Checked task highlight modifier (Milkdown only) ---- */
+.mk-doc[data-checked-highlight="true"] .ProseMirror li[data-item-type="task"][data-checked="true"] > span,
+.mk-doc[data-checked-highlight="true"] .ProseMirror li[data-item-type="task"][data-checked="true"] > div,
+.mk-doc[data-checked-highlight="true"] .ProseMirror li[data-item-type="task"][data-checked="true"] > p {
+  color: #4ade80;
+  text-decoration: line-through;
+  text-decoration-color: #4ade8080;
+}
+
+/* Prevent Tailwind .visible/.invisible from colliding with xterm's
+   identically-named scrollbar classes. */
+.xterm .xterm-scrollable-element > .visible,
+.xterm .xterm-scrollable-element > .invisible {
+  visibility: inherit;
+}
+
+/* Hide scrollbar but keep scrolling */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Thin styled scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Asset in-file search highlighting (CodeMirror + markdown previews) */
+.cm-artifact-search-match,
+.artifact-search-match {
+  background: var(--color-search-match);
+  color: var(--color-search-match-foreground);
+  border-radius: 2px;
+}
+.cm-artifact-search-match-active,
+.artifact-search-match-active {
+  background: var(--color-search-match-active) !important;
+  color: var(--color-search-match-active-foreground) !important;
+  outline: 1px solid var(--color-search-match-active);
+}
+
+/* Diff/code syntax highlighting (lezer classHighlighter) — light defaults, .dark overrides */
+.tok-keyword,
+.tok-controlKeyword,
+.tok-moduleKeyword,
+.tok-operatorKeyword { color: #a626a4; }
+.tok-string, .tok-string2,
+.tok-character,
+.tok-attributeValue { color: #50a14f; }
+.tok-comment, .tok-lineComment, .tok-blockComment, .tok-docComment { color: #a0a1a7; font-style: italic; }
+.tok-number, .tok-integer, .tok-float,
+.tok-bool, .tok-null, .tok-atom,
+.tok-attributeName,
+.tok-regexp { color: #986801; }
+.tok-typeName, .tok-className { color: #c18401; }
+.tok-propertyName,
+.tok-tagName,
+.tok-heading { color: #e45649; }
+.tok-variableName, .tok-local { color: #383a42; }
+.tok-function.tok-variableName,
+.tok-function.tok-propertyName,
+.tok-definition.tok-variableName,
+.tok-definition.tok-propertyName,
+.tok-link, .tok-url { color: #4078f2; }
+.tok-operator, .tok-derefOperator, .tok-arithmeticOperator, .tok-logicOperator, .tok-bitwiseOperator, .tok-compareOperator, .tok-updateOperator, .tok-definitionOperator,
+.tok-meta, .tok-processingInstruction, .tok-annotation,
+.tok-escape, .tok-special.tok-string { color: #0184bc; }
+.tok-punctuation, .tok-bracket, .tok-paren, .tok-brace, .tok-squareBracket, .tok-angleBracket, .tok-separator { color: #383a42; }
+.tok-link, .tok-url { text-decoration: underline; }
+.tok-emphasis { font-style: italic; }
+.tok-strong, .tok-heading { font-weight: 600; }
+.tok-invalid { color: #e45649; text-decoration: underline wavy; }
+
+.dark .tok-keyword,
+.dark .tok-controlKeyword,
+.dark .tok-moduleKeyword,
+.dark .tok-operatorKeyword { color: #c678dd; }
+.dark .tok-string, .dark .tok-string2,
+.dark .tok-character,
+.dark .tok-attributeValue { color: #98c379; }
+.dark .tok-comment, .dark .tok-lineComment, .dark .tok-blockComment, .dark .tok-docComment { color: #7f848e; }
+.dark .tok-number, .dark .tok-integer, .dark .tok-float,
+.dark .tok-bool, .dark .tok-null, .dark .tok-atom,
+.dark .tok-attributeName,
+.dark .tok-regexp { color: #d19a66; }
+.dark .tok-typeName, .dark .tok-className { color: #e5c07b; }
+.dark .tok-propertyName,
+.dark .tok-tagName,
+.dark .tok-heading { color: #e06c75; }
+.dark .tok-variableName, .dark .tok-local { color: #abb2bf; }
+.dark .tok-function.tok-variableName,
+.dark .tok-function.tok-propertyName,
+.dark .tok-definition.tok-variableName,
+.dark .tok-definition.tok-propertyName,
+.dark .tok-link, .dark .tok-url { color: #61afef; }
+.dark .tok-operator, .dark .tok-derefOperator, .dark .tok-arithmeticOperator, .dark .tok-logicOperator, .dark .tok-bitwiseOperator, .dark .tok-compareOperator, .dark .tok-updateOperator, .dark .tok-definitionOperator,
+.dark .tok-meta, .dark .tok-processingInstruction, .dark .tok-annotation,
+.dark .tok-escape, .dark .tok-special.tok-string { color: #56b6c2; }
+.dark .tok-punctuation, .dark .tok-bracket, .dark .tok-paren, .dark .tok-brace, .dark .tok-squareBracket, .dark .tok-angleBracket, .dark .tok-separator { color: #abb2bf; }
+.dark .tok-invalid { color: #e06c75; }

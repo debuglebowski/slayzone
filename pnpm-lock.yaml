@@ -440,15 +440,30 @@ importers:
       '@slayzone/sidebar':
         specifier: workspace:*
         version: link:../../domains/sidebar
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../../domains/task
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../../domains/tasks
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../../domains/telemetry
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../../domains/terminal
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@trpc/client':
+        specifier: ^11.17.0
+        version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
+      '@trpc/server':
+        specifier: ^11.17.0
+        version: 11.17.0(typescript@5.9.3)
       react:
         specifier: ^19.2.1
         version: 19.2.3

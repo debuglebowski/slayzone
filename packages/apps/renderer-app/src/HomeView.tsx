@@ -5,15 +5,17 @@
 // tasks + CRUD/reorder mutations) and HomeContainer (via its `data` prop), so
 // the two consumers share a single board-data instance instead of each minting
 // their own. Sidebar selection drives HomeContainer's selectedProjectId.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { SidebarProvider } from '@slayzone/ui'
 import { useTasksData } from '@slayzone/tasks/client'
 import { HomeContainer } from '@slayzone/home/client'
+import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import {
   AppSidebar,
   type OnboardingChecklistState,
   type KeyRecorderComponent
 } from '@slayzone/sidebar'
+import { TaskDetailView } from './TaskDetailView'
 
 function Centered({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
@@ -57,6 +59,19 @@ export function HomeView(): React.JSX.Element {
 
   const [picked, setPicked] = useState('')
   const selectedProjectId = picked || projects[0]?.id || ''
+
+  // Fork selected-task router. The real tab system isn't ported yet (the tab bar
+  // is still a placeholder), so a task open simply swaps the content area to the
+  // canonical Task Detail page and back. Prefetch warms the Suspense cache so the
+  // page paints without the cold use() scheduling delay (mirrors the Electron
+  // main.tsx prefetch of open tabs).
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  const openTask = useCallback((id: string) => {
+    if (!id) return
+    taskDetailCache.prefetch('taskDetail', id)
+    setOpenTaskId(id)
+  }, [])
+  const closeTask = useCallback(() => setOpenTaskId(null), [])
 
   // A dead tRPC WebSocket leaves the board query PENDING forever (wsLink retries,
   // it never errors). Escalate a long pending state to a connection warning.
@@ -120,7 +135,21 @@ export function HomeView(): React.JSX.Element {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <TabBarPlaceholder />
         <div className="min-h-0 flex-1 overflow-hidden">
-          <HomeContainer data={data} selectedProjectId={selectedProjectId} isActive />
+          {openTaskId ? (
+            <TaskDetailView
+              data={data}
+              taskId={openTaskId}
+              onClose={closeTask}
+              onNavigateToTask={openTask}
+            />
+          ) : (
+            <HomeContainer
+              data={data}
+              selectedProjectId={selectedProjectId}
+              isActive
+              onTaskClick={(task) => openTask(task.id)}
+            />
+          )}
         </div>
       </div>
     </SidebarProvider>

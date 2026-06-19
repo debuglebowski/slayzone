@@ -4,8 +4,11 @@ import {
   electronBootstrap,
   initTrpcClient
 } from '@slayzone/transport/client'
-import { ThemeProvider } from '@slayzone/settings'
+import { ThemeProvider, AppearanceProvider } from '@slayzone/settings'
+import { PtyProvider } from '@slayzone/terminal'
+import { TelemetryProvider } from '@slayzone/telemetry/client'
 import { TooltipProvider, UndoProvider } from '@slayzone/ui'
+import { browserMojoLink } from './browser-mojo-link'
 import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
 import { OverlayDialogApp } from './OverlayDialogApp'
@@ -57,17 +60,32 @@ export async function mountApp(): Promise<void> {
     electronBootstrap.getWindowId()
   ])
   const trpcUrl = withWindowId(server.url, windowId)
-  initTrpcClient(trpcUrl)
+  // Resolve the browser panel's `app.browser.*` ops against the native mojo host
+  // (window.api.browser) instead of the standalone sidecar, which stubs them.
+  // FIRST initTrpcClient call wins the link stack; TrpcProvider reuses the singleton.
+  initTrpcClient(trpcUrl, { links: [browserMojoLink()] })
 
+  // Provider stack mirrors the Electron renderer (packages/apps/app/src/renderer/
+  // src/main.tsx): TrpcProvider OUTERMOST (Pty/Appearance/Telemetry providers call
+  // tRPC hooks), then PtyProvider (TaskDetailPage's usePty/useLoopMode/useSlayNudge
+  // throw without it), ThemeProvider, AppearanceProvider (useAppearance), and
+  // TelemetryProvider (track() — no-ops with no analytics backend configured).
+  // settingsRevision is a constant in the fork (no live settings-dialog revision).
   createRoot(el).render(
     <TrpcProvider url={trpcUrl}>
-      <ThemeProvider>
-        <UndoProvider>
-          <TooltipProvider delayDuration={0}>
-            <HomeView />
-          </TooltipProvider>
-        </UndoProvider>
-      </ThemeProvider>
+      <PtyProvider>
+        <ThemeProvider>
+          <AppearanceProvider settingsRevision={0}>
+            <TelemetryProvider>
+              <UndoProvider>
+                <TooltipProvider delayDuration={0}>
+                  <HomeView />
+                </TooltipProvider>
+              </UndoProvider>
+            </TelemetryProvider>
+          </AppearanceProvider>
+        </ThemeProvider>
+      </PtyProvider>
     </TrpcProvider>
   )
 }

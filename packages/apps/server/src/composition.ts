@@ -1,5 +1,9 @@
 import { EventEmitter } from 'node:events'
-import { openPath as nativeOpenPath, showItemInFolder as nativeShowItemInFolder } from './shell-native'
+import {
+  openPath as nativeOpenPath,
+  pathExists as nativePathExists,
+  showItemInFolder as nativeShowItemInFolder
+} from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
@@ -308,7 +312,9 @@ export function composeServer(opts: {
     usageFetch: stub('usageFetch'),
     usageTest: stub('usageTest'),
 
-    filesPathExists: stub('filesPathExists'),
+    // Implemented natively (node fs) — the Task Detail loader calls this uncaught
+    // to validate a project path, so a throwing stub would fail the whole load.
+    filesPathExists: nativePathExists,
     filesSaveTempImage: stub('filesSaveTempImage'),
 
     shellOpenExternal: stub('shellOpenExternal'),

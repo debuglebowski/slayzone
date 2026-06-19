@@ -5,7 +5,8 @@ export {
   getTrpcClient,
   initTrpcClient,
   type CreateTrpcClientOpts,
-  type TrpcVanillaClient
+  type TrpcVanillaClient,
+  type AppRouter
 } from './trpc'
 export { TrpcProvider, type TrpcProviderProps } from './provider'
 export { electronBootstrap } from './electron-bootstrap'

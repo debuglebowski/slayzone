@@ -5,6 +5,7 @@
 // we do them directly with per-OS commands (plain Node, no native deps). Covers
 // the Git + Editor panels' "Reveal in Finder" / "Open" actions.
 import { execFile } from 'node:child_process'
+import { access } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 function openCommand(p: string): [string, string[]] {
@@ -37,6 +38,19 @@ export function openPath(absPath: string): Promise<string> {
     const [cmd, args] = openCommand(absPath)
     execFile(cmd, args, (err) => resolve(err ? String(err.message ?? err) : ''))
   })
+}
+
+/**
+ * Does a path exist on disk? Pure Node `fs` — node can answer this without an
+ * Electron host. The Task Detail loader (taskDetailCache.fetchTaskDetail) calls
+ * this UNCAUGHT to validate a project's path, so a throwing stub would reject the
+ * whole Suspense load on the fork; implement it natively instead.
+ */
+export function pathExists(absPath: string): Promise<boolean> {
+  return access(absPath).then(
+    () => true,
+    () => false
+  )
 }
 
 /** Reveal + select a path in the OS file manager. Fire-and-forget. */
