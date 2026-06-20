@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { join } from 'node:path'
 import {
   openPath as nativeOpenPath,
   pathExists as nativePathExists,
@@ -29,7 +30,12 @@ import {
   type FloatingAgentState
 } from '@slayzone/transport/server'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
-import { taskOps, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import {
+  taskOps,
+  configureTaskRuntimeAdapters,
+  startArtifactWatcher,
+  purgeStaleAndOrphanedTasks
+} from '@slayzone/task/server'
 import {
   createPtyOps,
   ptyEvents,
@@ -197,6 +203,14 @@ export function composeServer(opts: {
   // host's handler only sees its own (empty) session maps post-cutover.
   setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
   setTaskDeps({ ops: taskOps, onMutation: notifyRenderer })
+
+  // Startup purge (stale soft-deleted + orphaned temp tasks) + artifact file
+  // watcher. Both ran from the now-deleted registerTaskHandlers IPC bootstrap and
+  // so regressed dead at the Slice 9 cutover; restored here in the data-authority
+  // boot. The watcher feeds `artifactWatcherEvents` → the tRPC
+  // `artifacts.onContentChanged` subscription. Purge is fire-and-forget.
+  void purgeStaleAndOrphanedTasks(db)
+  startArtifactWatcher(join(dataRoot, 'artifacts'))
 
   // --- PTY + chat runtime --------------------------------------------------
   // Configure the pty-host bridge with a STUB window. node-pty spawns in THIS
