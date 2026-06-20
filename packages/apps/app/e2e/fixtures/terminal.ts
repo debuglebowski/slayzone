@@ -1,7 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect } from './electron'
-import { clickProject, goHome } from './electron'
-import { pressShortcut } from './shortcuts'
+import { openTaskByTitle } from './electron'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
@@ -47,23 +46,14 @@ export async function openTaskTerminal(
   page: Page,
   opts: { projectAbbrev: string; taskTitle: string }
 ): Promise<void> {
-  await goHome(page)
-  await clickProject(page, opts.projectAbbrev)
-
-  const taskCardTitle = page.locator('p.line-clamp-3:visible', { hasText: opts.taskTitle }).first()
-  if (await taskCardTitle.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await taskCardTitle.click()
-  } else {
-    await pressShortcut(page, 'search')
-    const searchInput = page.getByPlaceholder(
-      'Search files, folders, commands, projects, and tasks...'
-    )
-    await expect(searchInput).toBeVisible()
-    await searchInput.fill(opts.taskTitle)
-    const dialog = page.locator('[role="dialog"]:visible').last()
-    await dialog.getByText(opts.taskTitle).first().click()
-  }
-
+  // Deterministic open by id (resolved from title). The old goHome→clickProject→
+  // card-click/search-dialog open flaked under full-suite load: a wrong or stray
+  // active task (incl. temporary "Terminal N" scratch tasks) meant the INTENDED task's
+  // terminal never mounted and its PTY never spawned — surfacing downstream as
+  // `waitForPtySession` timeouts that look like "PTY spawn latency" but are really a
+  // wrong-task open. See openTaskByTitle. `projectAbbrev` is no longer needed but is
+  // kept in the signature for call-site compatibility.
+  await openTaskByTitle(page, opts.taskTitle)
   await expect(activeModeTrigger(page)).toBeVisible()
   await expect(page.locator('[data-testid="terminal-tabbar"]:visible').first()).toBeVisible()
 }

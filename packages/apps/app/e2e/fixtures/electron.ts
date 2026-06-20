@@ -764,13 +764,38 @@ export async function openTaskById(page: Page, taskId: string): Promise<void> {
 }
 
 /**
+ * Surface a project's kanban board (home tab + project selected) and wait until a
+ * known card is visible. For specs that test the BOARD itself (kanban cards), not a
+ * task's detail — there `openTaskById` doesn't apply. A single `goHome → clickProject`
+ * is unreliable under full-suite load: `goHome` no-ops if the home icon isn't queryable
+ * within its short window, and a leftover active task tab then keeps the board (and its
+ * cards) `hidden`. Retrying the whole nav against a real signal — the caller's own
+ * target card — recovers from that without a brittle global board selector.
+ */
+export async function showProjectBoard(
+  page: Page,
+  projectAbbrev: string,
+  cardText: string,
+  timeout = 30_000
+): Promise<void> {
+  await expect(async () => {
+    await goHome(page)
+    await clickProject(page, projectAbbrev)
+    await expect(page.getByText(cardText).first()).toBeVisible({ timeout: 4_000 })
+  }).toPass({ timeout })
+}
+
+/**
  * Resolve a (non-temporary) task's id by its title, then open it via openTaskById.
  * Drop-in deterministic replacement for the old "type the title into the search
- * dialog + press Enter" open used across the git specs — that path was flaky under
- * full-suite load (Enter could select the wrong result, or the search flow could spawn
- * + activate a temporary "Terminal N" scratch task that captured the active tab). The
- * `is_temporary` filter ignores any such scratch task; the most-recently-created match
- * wins so re-used titles across describes still resolve to the freshly-seeded task.
+ * dialog + press Enter" open used across the git/terminal specs — that path was flaky
+ * under full-suite load (Enter could select the wrong result, or the search flow could
+ * spawn + activate a temporary "Terminal N" scratch task that captured the active tab).
+ * Match is by EXACT title, which already excludes the auto-named "Terminal N" scratch
+ * task; the most-recently-created match wins so re-used titles across describes resolve
+ * to the freshly-seeded one. NOTE: do NOT filter out `is_temporary` — specs that
+ * deliberately seed temporary tasks (e.g. 22-terminal-mode-switching) open them by
+ * title too, and the exact-title match is what keeps the stray scratch task out.
  */
 export async function openTaskByTitle(page: Page, title: string): Promise<void> {
   let id: string | null = null
@@ -781,15 +806,14 @@ export async function openTaskByTitle(page: Page, title: string): Promise<void> 
       const all = (await window.getTrpcVanillaClient().task.getAll.query()) as Array<{
         id: string
         title: string
-        is_temporary?: boolean | number | null
         created_at?: string
       }>
       const matches = all
-        .filter((x) => x.title === t && !x.is_temporary)
+        .filter((x) => x.title === t)
         .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
       return matches.length ? matches[matches.length - 1].id : null
     }, title)
-    if (!id) throw new Error(`openTaskByTitle: no non-temporary task titled "${title}" yet`)
+    if (!id) throw new Error(`openTaskByTitle: no task titled "${title}" yet`)
   }).toPass({ timeout: 15_000 })
   await openTaskById(page, id!)
 }

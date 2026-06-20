@@ -4,7 +4,7 @@ import {
   seed,
   resetApp,
   goHome,
-  clickProject,
+  showProjectBoard,
   TEST_PROJECT_PATH
 } from '../fixtures/electron'
 import fs from 'fs'
@@ -78,8 +78,7 @@ test.describe('Performance Profiling', () => {
       await s.createTask({ projectId, title: `Perf task ${i}`, status: statuses[i % 5] })
     }
     await s.refreshData()
-    await goHome(mainWindow)
-    await clickProject(mainWindow, PROJ_ABBREV)
+    await showProjectBoard(mainWindow, PROJ_ABBREV, 'Perf task 0')
   })
 
   test('01 — memory baseline', async ({ mainWindow }) => {
@@ -199,14 +198,13 @@ test.describe('Performance Profiling', () => {
 
   test('06 — interaction: tab switch latency', async ({ mainWindow }) => {
     // Ensure the PerfTest board is shown before locating the card — earlier tests or
-    // board refetch churn under load can leave it not-yet-painted (the card lookup
-    // raced its 5s window). This precedes the measured goHome below, so it doesn't
-    // affect the latency number.
-    await goHome(mainWindow)
-    await clickProject(mainWindow, PROJ_ABBREV)
+    // board refetch churn under load can leave it not-yet-painted, and a single
+    // goHome+clickProject can fail to surface the board (card stays hidden). Retry the
+    // nav until the card is visible. This precedes the measured goHome below, so it
+    // doesn't affect the latency number.
+    await showProjectBoard(mainWindow, PROJ_ABBREV, 'Perf task 0')
     // Open a task tab by double-clicking the kanban card
     const taskCard = mainWindow.getByText('Perf task 0').first()
-    await expect(taskCard).toBeVisible({ timeout: 10_000 })
     await taskCard.dblclick()
     // Wait for navigation to occur (URL or DOM change)
     await mainWindow.waitForTimeout(1_000)

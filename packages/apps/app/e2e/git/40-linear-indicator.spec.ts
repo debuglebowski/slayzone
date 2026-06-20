@@ -1,4 +1,4 @@
-import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
+import { test, expect, seed, resetApp, showProjectBoard } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
 test.describe('Linear link indicator', () => {
@@ -39,8 +39,9 @@ test.describe('Linear link indicator', () => {
     )
 
     await s.refreshData()
-    await goHome(mainWindow)
-    await clickProject(mainWindow, projectAbbrev)
+    // Surface the board reliably (retry the nav until the card paints) — a single
+    // goHome+clickProject can leave the board hidden under full-suite load.
+    await showProjectBoard(mainWindow, projectAbbrev, 'Linked task')
   })
 
   test('kanban card has indigo left border for linked task', async ({ mainWindow }) => {
