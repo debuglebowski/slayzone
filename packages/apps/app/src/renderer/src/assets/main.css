@@ -6,6 +6,7 @@
 /* Scan monorepo packages for Tailwind classes */
 @source "../../../../../../../packages/shared/ui/src";
 @source "../../../../../../../packages/shared/editor/src";
+@source "../../../../../../../packages/domains/app-shell/src";
 @source "../../../../../../../packages/domains/terminal/src";
 @source "../../../../../../../packages/domains/task/src";
 @source "../../../../../../../packages/domains/task-artifacts/src";

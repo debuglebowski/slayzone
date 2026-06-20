@@ -2,7 +2,7 @@
 export * from './lazy'
 export * from './constants'
 export { useLazyMounted } from './useLazyMounted'
-export { AppHeaderActions } from './AppHeaderActions'
+export { AppHeaderActions } from '@slayzone/app-shell/client'
 export { CompactFooter } from './CompactFooter'
 // HomeDetail now lives in the shared @slayzone/home package (one Home shell for
 // the Electron app + the Chromium fork — no drift). App.tsx feeds it the same
@@ -10,7 +10,7 @@ export { CompactFooter } from './CompactFooter'
 export { HomeDetail } from '@slayzone/home/client'
 export { AppSidePanels } from './AppSidePanels'
 export { AppDialogs } from './AppDialogs'
-export { useExplodeMode } from './useExplodeMode'
+export { useExplodeMode } from '@slayzone/app-shell/client'
 export { useProjectPathGuard } from './useProjectPathGuard'
 export { useAppUpdates } from './useAppUpdates'
 export { useAuthFailureBanner } from './useAuthFailureBanner'
