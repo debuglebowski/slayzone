@@ -268,6 +268,11 @@ test.describe('Context manager sync flow', () => {
     // section-level pinned card to assert on. The help content is now exercised
     // incidentally by the skill-editing tests.
 
+    // MIGRATE PENDING 2026-06-20: nav (Project → MCPs) is migrated and the MCP
+    // testids still exist (McpFlatSection), but the "Add MCP server" affordance
+    // isn't reached — McpSection renders McpFlatSection only when projectPath +
+    // MCP-capable providers resolve through the new view; needs a focused pass on
+    // the redesigned MCP flow (add-server dialog + provider columns).
     test.skip('project MCP section shows provider columns when MCP entries exist', async ({
       mainWindow
     }) => {
