@@ -20,8 +20,7 @@ import type { Project } from '@slayzone/projects/shared'
 import { useHomePanel } from '@slayzone/home/client'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
-import { type GlobalAgentPanelState } from '@/components/global-agent-panel'
-import { type AgentStatusState } from '@/components/agent-status'
+import { type GlobalAgentPanelState, type AgentStatusState } from '@slayzone/agent-panels'
 
 type Tabs = ReturnType<typeof useTabStore.getState>['tabs']
 type VisibleTabsApi = ReturnType<typeof useVisibleTabs>

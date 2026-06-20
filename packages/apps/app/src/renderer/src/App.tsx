@@ -53,12 +53,13 @@ import { AppSidebar } from '@slayzone/sidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
 import { TabBar } from '@/components/tabs/TabBar'
-import { useGlobalAgentPanelState, type FloatingStateKind } from '@/components/global-agent-panel'
 import {
+  useGlobalAgentPanelState,
+  type FloatingStateKind,
   useIdleTasks,
   useActiveSessionTaskIds,
   useAgentStatusState
-} from '@/components/agent-status'
+} from '@slayzone/agent-panels'
 import { UsagePopover } from '@/components/usage/UsagePopover'
 import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'

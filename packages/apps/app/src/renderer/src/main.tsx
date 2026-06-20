@@ -13,7 +13,7 @@ import {
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
-import { FloatingGlobalAgentPanel } from './components/global-agent-panel/FloatingGlobalAgentPanel'
+import { FloatingGlobalAgentPanel } from '@slayzone/agent-panels'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
 import { getDiagnosticsContext, recordClientError } from './lib/diagnosticsClient'

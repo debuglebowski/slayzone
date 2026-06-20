@@ -26,8 +26,11 @@ import {
 } from '@slayzone/ui'
 import { useTabStore, useDialogStore } from '@slayzone/settings'
 import { UsagePopover } from '@/components/usage/UsagePopover'
-import { type AgentStatusState, type IdleTask } from '@/components/agent-status'
-import { type GlobalAgentPanelState } from '@/components/global-agent-panel'
+import {
+  type AgentStatusState,
+  type IdleTask,
+  type GlobalAgentPanelState
+} from '@slayzone/agent-panels'
 
 interface CompactFooterProps {
   usageData: ComponentProps<typeof UsagePopover>['data']

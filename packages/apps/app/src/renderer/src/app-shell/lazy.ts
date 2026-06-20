@@ -94,12 +94,12 @@ export const FilterBar = lazy(() =>
   import('@slayzone/tasks').then((m) => ({ default: m.FilterBar }))
 )
 export const GlobalAgentSidePanel = lazy(() =>
-  import('@/components/global-agent-panel/GlobalAgentSidePanel').then((m) => ({
+  import('@slayzone/agent-panels').then((m) => ({
     default: m.GlobalAgentSidePanel
   }))
 )
 export const AgentStatusSidePanel = lazy(() =>
-  import('@/components/agent-status/AgentStatusSidePanel').then((m) => ({
+  import('@slayzone/agent-panels').then((m) => ({
     default: m.AgentStatusSidePanel
   }))
 )

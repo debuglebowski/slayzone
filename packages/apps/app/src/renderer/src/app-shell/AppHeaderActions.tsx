@@ -11,8 +11,12 @@ import {
   UpdateButton
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
-import { AgentStatusButton, type AgentStatusState } from '@/components/agent-status'
-import { GlobalAgentPanelButton, type GlobalAgentPanelState } from '@/components/global-agent-panel'
+import {
+  AgentStatusButton,
+  type AgentStatusState,
+  GlobalAgentPanelButton,
+  type GlobalAgentPanelState
+} from '@slayzone/agent-panels'
 
 interface AppHeaderActionsProps {
   compact: boolean

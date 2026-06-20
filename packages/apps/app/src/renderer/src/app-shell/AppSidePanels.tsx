@@ -8,14 +8,12 @@ import {
   GLOBAL_AGENT_PANEL_MIN_WIDTH,
   GLOBAL_AGENT_PANEL_MAX_WIDTH,
   DEFAULT_GLOBAL_AGENT_PANEL_WIDTH,
-  type GlobalAgentPanelState
-} from '@/components/global-agent-panel'
-import {
+  type GlobalAgentPanelState,
   AGENT_STATUS_PANEL_MIN_WIDTH,
   AGENT_STATUS_PANEL_MAX_WIDTH,
   DEFAULT_AGENT_STATUS_PANEL_WIDTH,
   type AgentStatusState
-} from '@/components/agent-status'
+} from '@slayzone/agent-panels'
 import { GlobalAgentSidePanel, AgentStatusSidePanel } from './lazy'
 
 type GlobalAgentSidePanelProps = ComponentProps<typeof GlobalAgentSidePanel>

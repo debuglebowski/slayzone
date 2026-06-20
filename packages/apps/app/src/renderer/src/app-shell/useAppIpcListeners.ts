@@ -12,8 +12,7 @@ import { useTabStore, useDialogStore } from '@slayzone/settings'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
-import { type GlobalAgentPanelState } from '@/components/global-agent-panel'
-import { type AgentStatusState } from '@/components/agent-status'
+import { type GlobalAgentPanelState, type AgentStatusState } from '@slayzone/agent-panels'
 import type {
   ProjectSettingsTab,
   ProjectIntegrationOnboardingProvider,

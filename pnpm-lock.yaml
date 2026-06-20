@@ -103,6 +103,9 @@ importers:
       '@radix-ui/react-collapsible':
         specifier: ^1.1.12
         version: 1.1.12(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@slayzone/agent-panels':
+        specifier: workspace:*
+        version: link:../../domains/agent-panels
       '@slayzone/agent-turns':
         specifier: workspace:*
         version: link:../../domains/agent-turns
@@ -428,12 +431,18 @@ importers:
 
   packages/apps/renderer-app:
     dependencies:
+      '@slayzone/agent-panels':
+        specifier: workspace:*
+        version: link:../../domains/agent-panels
       '@slayzone/home':
         specifier: workspace:*
         version: link:../../domains/home
       '@slayzone/layout':
         specifier: workspace:*
         version: link:../../shared/layout
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../../domains/projects
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
@@ -550,6 +559,43 @@ importers:
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/domains/agent-panels:
+    dependencies:
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../telemetry
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

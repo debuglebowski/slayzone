@@ -20,6 +20,7 @@
 @source "../../../../../../../packages/domains/ai-config/src";
 @source "../../../../../../../packages/domains/file-editor/src";
 @source "../../../../../../../packages/domains/sidebar/src";
+@source "../../../../../../../packages/domains/agent-panels/src";
 
 @custom-variant dark (&:is(.dark *));
 
