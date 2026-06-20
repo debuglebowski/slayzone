@@ -16,6 +16,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/feedback": "workspace:*",

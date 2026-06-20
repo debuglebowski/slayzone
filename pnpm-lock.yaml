@@ -492,6 +492,9 @@ importers:
 
   packages/apps/server:
     dependencies:
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../../domains/ai-config
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations

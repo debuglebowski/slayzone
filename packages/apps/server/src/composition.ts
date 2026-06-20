@@ -73,6 +73,7 @@ import {
   setCredentialCipher
 } from '@slayzone/integrations/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
+import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { AutomationEngine } from '@slayzone/automations/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import {
@@ -238,6 +239,15 @@ export function composeServer(opts: {
     events: chatEvents,
     queueEvents: chatQueueEvents
   })
+
+  // --- AI config / context manager --------------------------------------------
+  // Build the ai-config + marketplace ops singletons that back the tRPC
+  // aiConfigRouter (getAiConfigOps/getMarketplaceOps). Their initializer used to
+  // live in the ai-config IPC handler registrar, deleted at the Slice 9 cutover
+  // (commit 9c809e8d) WITHOUT moving init here — so every aiConfig.* proc threw
+  // "aiConfigOps not initialized" (context manager fully broken). Restore it in
+  // the data-authority boot, alongside the other ops.
+  initAiConfigOps(db)
 
   // --- Integrations + feedback ------------------------------------------------
   if (opts.standalone) ensureIntegrationSchema(db)
