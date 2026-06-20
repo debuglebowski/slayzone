@@ -3,9 +3,9 @@ import {
   expect,
   seed,
   resetApp,
-  createIsolatedGitRepo
+  createIsolatedGitRepo,
+  openTaskByTitle
 } from '../fixtures/electron'
-import { pressShortcut } from '../fixtures/shortcuts'
 import { execSync } from 'child_process'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import path from 'path'
@@ -28,15 +28,10 @@ function getMainBranch(): string {
   }
 }
 
+// Deterministic open by title (resolves id, then opens by id). Replaces the old
+// search-dialog + Enter open, which flaked under full-suite load. See openTaskByTitle.
 async function openTaskViaSearch(page: import('@playwright/test').Page, title: string) {
-  await pressShortcut(page, 'search')
-  const input = page.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
-  await expect(input).toBeVisible()
-  await input.fill(title)
-  await page.keyboard.press('Enter')
-  await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible({
-    timeout: 5_000
-  })
+  await openTaskByTitle(page, title)
 }
 
 async function ensureDiffPanelVisible(page: import('@playwright/test').Page) {

@@ -194,7 +194,13 @@ function closeSessionLogCapture(): void {
  * test.beforeAll to ensure parallel worker isolation.
  */
 export async function resetApp(page: Page): Promise<void> {
-  await page.evaluate(() => (window as any).__testInvoke('app:reset-for-test'))
+  // `app:reset-for-test` does bulk DB writes; under full-suite load the better-sqlite3
+  // worker can briefly hold a write lock and the invoke rejects with "database is
+  // locked". The reset is idempotent (it clears state), so retry until it lands — this
+  // beforeAll-shared helper otherwise sheds an entire describe to one transient lock.
+  await expect(async () => {
+    await page.evaluate(() => (window as any).__testInvoke('app:reset-for-test'))
+  }).toPass({ timeout: 15_000 })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root', { timeout: 10_000 })
 }
@@ -726,6 +732,66 @@ export async function goHome(page: Page) {
       await icon.click({ force: true, timeout: 2_000 }).catch(() => {})
     })
   }
+}
+
+/**
+ * Open + ACTIVATE a task tab DETERMINISTICALLY by id, via the app's programmatic
+ * opener (App exposes `window.__slayzone_openTask`), then wait for its detail panel to
+ * mount. Use this in setup/beforeAll instead of goHome→clickProject→getByText(card).
+ * .click(): under full-suite load that open is flaky in two ways —
+ *   1. the project board may not be the visible view, so the task card resolves
+ *      `hidden` (toBeVisible→hidden) and the whole describe's beforeAll throws; and
+ *   2. a temporary "Terminal N" scratch task can be created + steal the active tab, so
+ *      a later UNSCOPED panel/button interaction (only the active tab's panel is
+ *      visible) lands on the WRONG task.
+ * Opening by id can't target the wrong task and surfaces no dialog, so it is immune to
+ * both. Bounded retry: the opener is exposed on App mount (throw→retry until it is),
+ * and a generous budget tolerates slow mid-suite detail-panel paints.
+ */
+export async function openTaskById(page: Page, taskId: string): Promise<void> {
+  await expect(async () => {
+    await page.evaluate((id) => {
+      const fn = (window as Window & { __slayzone_openTask?: (i: string) => void })
+        .__slayzone_openTask
+      if (!fn) throw new Error('__slayzone_openTask not exposed yet')
+      fn(id)
+    }, taskId)
+    // Opening by id is deterministic, so a visible mode-trigger here is THIS task's.
+    await expect(
+      page.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+    ).toBeVisible({ timeout: 7_000 })
+  }).toPass({ timeout: 40_000 })
+}
+
+/**
+ * Resolve a (non-temporary) task's id by its title, then open it via openTaskById.
+ * Drop-in deterministic replacement for the old "type the title into the search
+ * dialog + press Enter" open used across the git specs — that path was flaky under
+ * full-suite load (Enter could select the wrong result, or the search flow could spawn
+ * + activate a temporary "Terminal N" scratch task that captured the active tab). The
+ * `is_temporary` filter ignores any such scratch task; the most-recently-created match
+ * wins so re-used titles across describes still resolve to the freshly-seeded task.
+ */
+export async function openTaskByTitle(page: Page, title: string): Promise<void> {
+  let id: string | null = null
+  // Resolve under a retry: the task was just seeded, but getAll may briefly not reflect
+  // it, and a single query can be slow under mid-suite load.
+  await expect(async () => {
+    id = await page.evaluate(async (t) => {
+      const all = (await window.getTrpcVanillaClient().task.getAll.query()) as Array<{
+        id: string
+        title: string
+        is_temporary?: boolean | number | null
+        created_at?: string
+      }>
+      const matches = all
+        .filter((x) => x.title === t && !x.is_temporary)
+        .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
+      return matches.length ? matches[matches.length - 1].id : null
+    }, title)
+    if (!id) throw new Error(`openTaskByTitle: no non-temporary task titled "${title}" yet`)
+  }).toPass({ timeout: 15_000 })
+  await openTaskById(page, id!)
 }
 
 /** Check if a project blob exists in the sidebar */

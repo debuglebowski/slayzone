@@ -20,34 +20,37 @@ test.describe('Session ID banners', () => {
   const sessionBanner = (page: import('@playwright/test').Page) =>
     page.getByText('Session not saved').last()
 
-  // Robustly open a banner task and wait for its banner. The detect tests persist a
-  // conversation id → notifyRenderer → board refetch; that churn, plus goHome being
-  // best-effort, can leave a prior task TAB active so the project board isn't the
-  // visible view and the target card stays hidden (toBeVisible→hidden). The banner
-  // itself renders fine once the task opens (confirmed via DOM dump) — the flake is
-  // purely navigation. Fix: explicitly activate the home tab (wait for + click its
-  // icon, as in 01-smoke) so the board surfaces, THEN select the project + open the
-  // task. Single pass with generous budgets — NOT a tight re-nav loop, which thrashes
-  // the app under contention.
+  // Robustly open a banner task and wait for its banner. A preceding detect test
+  // persists a conversation id → notifyRenderer → board refetch; that churn can (a)
+  // detach the target card between the visibility check and the click so the click is
+  // lost, or (b) leave a prior task TAB active so the board isn't the visible view and
+  // the card stays hidden. A fixed settle (waitForTimeout) can't cover an arbitrarily
+  // timed refetch, so this races deterministically right after the gemini detect test
+  // (cursor is the victim). Fix: bounded retry whose TERMINAL CONDITION is the banner
+  // itself (the real goal) — a lost click or wrong-tab state self-corrects on the next
+  // attempt. Each attempt re-surfaces the board only when the card isn't visible and
+  // waits up to 4s for the banner before retrying, so it recovers without thrashing
+  // the app under contention. Mirrors openTaskViaSearch in 23-git-worktree.
   const openBannerTask = async (
     page: import('@playwright/test').Page,
     title: string,
     banner: import('@playwright/test').Locator
   ): Promise<void> => {
-    const homeIcon = page.locator('.lucide-house, .lucide-home').first()
-    await expect(homeIcon).toBeVisible({ timeout: 10_000 })
-    await homeIcon.click({ timeout: 3_000 }).catch(() => {})
-    await clickProject(page, projectAbbrev)
-    // Let any in-flight board refetch from a preceding detect test settle BEFORE
-    // clicking: a click landing while the board is being replaced (notifyRenderer →
-    // refetch) is lost, so the task never opens and its (task-derived) banner never
-    // mounts ("element(s) not found"). The test right after the gemini detect test
-    // (cursor) is the one that hits this. Settle, then open against a stable board.
-    await page.waitForTimeout(2_000)
-    const card = page.getByText(title).first()
-    await expect(card).toBeVisible({ timeout: 10_000 })
-    await card.click()
-    await expect(banner).toBeVisible({ timeout: 15_000 })
+    await expect(async () => {
+      const card = page.getByText(title).first()
+      if (!(await card.isVisible({ timeout: 800 }).catch(() => false))) {
+        // Card not on the visible board — a prior task tab is active. Surface the
+        // board: activate the home tab (as in 01-smoke), then select the project.
+        const homeIcon = page.locator('.lucide-house, .lucide-home').first()
+        if (await homeIcon.isVisible({ timeout: 800 }).catch(() => false)) {
+          await homeIcon.click({ timeout: 2_000 }).catch(() => {})
+        }
+        await clickProject(page, projectAbbrev)
+        await expect(card).toBeVisible({ timeout: 3_000 })
+      }
+      await card.click().catch(() => {})
+      await expect(banner).toBeVisible({ timeout: 4_000 })
+    }).toPass({ timeout: 30_000 })
   }
 
   test.beforeAll(async ({ electronApp, mainWindow }) => {

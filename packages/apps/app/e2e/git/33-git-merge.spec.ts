@@ -5,7 +5,8 @@ import {
   goHome,
   clickProject,
   resetApp,
-  createIsolatedGitRepo
+  createIsolatedGitRepo,
+  openTaskById
 } from '../fixtures/electron'
 import { execSync } from 'child_process'
 import { writeFileSync, mkdirSync } from 'fs'
@@ -145,7 +146,6 @@ function setupConflict() {
 
 test.describe('Clean merge', () => {
   let taskId: string
-  let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -155,7 +155,6 @@ test.describe('Clean merge', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Clean Merge', color: '#10b981', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'Clean merge task', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
@@ -165,13 +164,9 @@ test.describe('Clean merge', () => {
     })
     await s.refreshData()
 
-    await goHome(mainWindow)
-    await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('Clean merge task').first()).toBeVisible({ timeout: 5_000 })
-    await mainWindow.getByText('Clean merge task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    // Open the task deterministically by id (see openTaskById) — the prior
+    // goHome→clickProject→click-card open flaked under full-suite load.
+    await openTaskById(mainWindow, taskId)
   })
 
   test('clean merge via API returns success', async ({ mainWindow }) => {
@@ -201,7 +196,6 @@ test.describe('Clean merge', () => {
 
 test.describe('Clean merge UI', () => {
   let taskId: string
-  let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     resetRepo()
@@ -209,7 +203,6 @@ test.describe('Clean merge UI', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'UI Merge', color: '#f59e0b', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'Merge UI task', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
@@ -219,13 +212,9 @@ test.describe('Clean merge UI', () => {
     })
     await s.refreshData()
 
-    await goHome(mainWindow)
-    await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('Merge UI task').first()).toBeVisible({ timeout: 5_000 })
-    await mainWindow.getByText('Merge UI task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    // Open the task deterministically by id (see openTaskById) — the prior
+    // goHome→clickProject→click-card open flaked under full-suite load.
+    await openTaskById(mainWindow, taskId)
 
     // Toggle git panel on (general tab — shows merge controls)
     await ensureGitPanelVisible(mainWindow)

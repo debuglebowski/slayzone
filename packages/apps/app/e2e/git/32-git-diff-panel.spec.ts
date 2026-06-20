@@ -2,10 +2,9 @@ import {
   test,
   expect,
   seed,
-  goHome,
-  clickProject,
   resetApp,
-  createIsolatedGitRepo
+  createIsolatedGitRepo,
+  openTaskById
 } from '../fixtures/electron'
 import { execSync } from 'child_process'
 import { writeFileSync } from 'fs'
@@ -18,8 +17,6 @@ function git(cmd: string) {
 }
 
 test.describe('Git diff panel', () => {
-  let projectAbbrev: string
-
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     gitDir = createIsolatedGitRepo('diff-panel')
@@ -47,18 +44,13 @@ test.describe('Git diff panel', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Diff Panel Test', color: '#8b5cf6', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
-    await s.createTask({ projectId: p.id, title: 'Diff panel task', status: 'todo' })
+    const t = await s.createTask({ projectId: p.id, title: 'Diff panel task', status: 'todo' })
     await s.refreshData()
 
-    await goHome(mainWindow)
-    await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('Diff panel task').first()).toBeVisible({ timeout: 5_000 })
-
-    await mainWindow.getByText('Diff panel task').first().click()
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
+    // Open the task deterministically by id — the prior goHome→clickProject→click-card
+    // open intermittently failed under full-suite load (board not the visible view →
+    // card `hidden` → beforeAll throws → whole describe lost). See openTaskById.
+    await openTaskById(mainWindow, t.id)
 
     // Open git panel (general tab) then switch to changes tab
     await mainWindow.keyboard.press('Meta+g')

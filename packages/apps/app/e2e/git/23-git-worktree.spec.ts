@@ -5,9 +5,9 @@ import {
   goHome,
   clickProject,
   resetApp,
-  createIsolatedGitRepo
+  createIsolatedGitRepo,
+  openTaskById
 } from '../fixtures/electron'
-import { pressShortcut } from '../fixtures/shortcuts'
 import { execSync } from 'child_process'
 import { existsSync } from 'fs'
 import path from 'path'
@@ -28,37 +28,14 @@ test.describe('Git worktree operations', () => {
   const execGit = (command: string) =>
     execSync(command, { cwd: repoDir, stdio: 'pipe' }).toString()
 
-  const openTaskViaSearch = async (page: import('@playwright/test').Page, title: string) => {
-    const modeTrigger = page.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    // Retry the whole open until the detail panel mounts. Under full-suite load the
-    // board re-renders (refetch churn) can detach the card between the visibility
-    // check and the click, or the search dialog can be slow to paint — either way a
-    // single attempt races. Bounded retry on a real condition (panel mounted), not a
-    // sleep. The placeholder copy stays the source of truth for the search input.
-    await expect(async () => {
-      if (await modeTrigger.isVisible({ timeout: 250 }).catch(() => false)) return // already open
-      const taskCardTitle = page.getByText(title).first()
-      if (await taskCardTitle.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await taskCardTitle.click().catch(() => {})
-      } else {
-        await pressShortcut(page, 'search')
-        const input = page.getByPlaceholder(
-          'Search files, folders, commands, projects, and tasks...'
-        )
-        if (await input.isVisible({ timeout: 2_000 }).catch(() => false)) {
-          await input.fill(title)
-          await page
-            .getByRole('dialog')
-            .last()
-            .getByText(title)
-            .first()
-            .click()
-            .catch(() => {})
-        }
-      }
-      await expect(modeTrigger).toBeVisible({ timeout: 2_500 })
-    }).toPass({ timeout: 20_000 })
-  }
+  // Open + activate the worktree task deterministically by id (shared fixture). The
+  // prior card-click / search-dialog heuristic was the root of this describe's
+  // flakiness: its open could leave a DIFFERENT task active (incl. a stray temporary
+  // "Terminal N" scratch task), and the globally-matched "Branch to worktree" button
+  // (only the active tab's panel is visible) then created the worktree on the WRONG
+  // task — leaving this task's worktree_path null and losing the whole describe.
+  const activateWorktreeTask = (page: import('@playwright/test').Page) =>
+    openTaskById(page, taskId)
 
   const removeWorktreeButton = (page: import('@playwright/test').Page) => {
     const gitPanel = page.getByTestId('task-git-panel').last()
@@ -66,6 +43,11 @@ test.describe('Git worktree operations', () => {
   }
 
   test.beforeAll(async ({ mainWindow }) => {
+    // This whole describe rides on a single task-open below; default 30s hook budget
+    // is too tight once activateWorktreeTask (40s) is allowed its full retry window
+    // under mid-suite load. Raise it so a slow-but-successful open can't strand all
+    // ~12 tests.
+    test.setTimeout(90_000)
     await resetApp(mainWindow)
     repoDir = createIsolatedGitRepo('worktree')
 
@@ -117,10 +99,8 @@ test.describe('Git worktree operations', () => {
 
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
-    // openTaskViaSearch robustly opens the task (card click OR search fallback, with
-    // retry), so the prior redundant card-visibility assert — which raced the board
-    // refetch under load and failed the whole beforeAll — is no longer needed.
-    await openTaskViaSearch(mainWindow, 'Worktree task')
+    // Open the worktree task deterministically by id (see activateWorktreeTask).
+    await activateWorktreeTask(mainWindow)
 
     // Toggle git panel on (general tab — shows branch/worktree info)
     await mainWindow.keyboard.press('Meta+g')
@@ -146,6 +126,12 @@ test.describe('Git worktree operations', () => {
     // conflicting add that can leave worktree_path null. A generous poll tolerates the
     // slow op; the per-test timeout is widened to fit it.
     test.setTimeout(45_000)
+    // Re-activate the worktree task right before clicking. The "Branch to worktree"
+    // button is matched globally (only the ACTIVE task's git panel is visible), so if
+    // anything captured the active tab during setup the click would create the worktree
+    // on the wrong task and leave THIS task's worktree_path null. Opening by id is
+    // deterministic and idempotent (no-op if already active).
+    await activateWorktreeTask(mainWindow)
     const branchBtn = mainWindow.getByRole('button', { name: /Branch to worktree/ })
     await expect(branchBtn).toBeVisible({ timeout: 10_000 })
     await branchBtn.click()
