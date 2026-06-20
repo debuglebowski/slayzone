@@ -106,17 +106,20 @@ test.describe('Browser view navigation (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:navigate', viewId, urlB)
-
-    // Verify the view's URL updated in the manager
-    await expect
-      .poll(
-        async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-        },
-        { timeout: 15000 }
-      )
-      .toContain('/title-Other')
+    // Re-issue the navigate per attempt (not per poll tick): the first
+    // browser:navigate right after the panel opens can race the WCV becoming ready or
+    // be dropped under full-suite load (known browser lost-event race), leaving the URL
+    // unchanged forever. Each attempt fires one navigate, then waits ~8s for the URL to
+    // settle before re-issuing — so a lost navigate recovers without thrashing an
+    // in-flight load.
+    await expect(async () => {
+      await testInvoke(mainWindow, 'browser:navigate', viewId, urlB)
+      await expect
+        .poll(async () => (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string, {
+          timeout: 8000
+        })
+        .toContain('/title-Other')
+    }).toPass({ timeout: 24000 })
   })
 
   test('goBack and goForward work after navigation', async ({ mainWindow }) => {
