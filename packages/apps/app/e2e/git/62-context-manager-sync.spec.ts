@@ -257,40 +257,10 @@ test.describe('Context manager sync flow', () => {
       await closeTopDialog(mainWindow)
     })
 
-    test.skip('skills section shows a brief help card', async ({ mainWindow, electronApp }) => {
-      const dialog = await openUserContextManager(mainWindow, electronApp)
-      await dialog.getByTestId('context-overview-skills').click()
-
-      const helpCard = mainWindow.getByTestId('library-skill-help-card')
-      const toggle = helpCard.getByTestId('library-skill-help-card-toggle')
-      await expect(helpCard).toBeVisible({ timeout: 5_000 })
-      await expect(helpCard).toContainText('Skill file')
-      await expect(helpCard).toContainText('Required structure and field meanings')
-      await expect(helpCard).not.toContainText(
-        'Frontmatter comes first, followed by the instruction body'
-      )
-
-      await toggle.click()
-      await expect(helpCard).toContainText(
-        'Frontmatter comes first, followed by the instruction body'
-      )
-      await expect(helpCard).toContainText('name')
-      await expect(helpCard).toContainText('description')
-      await expect(helpCard).toContainText('trigger')
-      await expect(helpCard).toContainText('Options: any value')
-      await expect(helpCard).toContainText('Default: auto')
-
-      await toggle.click()
-      await expect(helpCard).not.toContainText('Options: any value')
-      await expect(helpCard).not.toContainText(
-        'Frontmatter comes first, followed by the instruction body'
-      )
-
-      await toggle.click()
-      await expect(helpCard).toContainText('body')
-
-      await closeTopDialog(mainWindow)
-    })
+    // REMOVED 2026-06-20: the redesigned Context Manager dropped the library-skill
+    // help card entirely (no `library-skill-help-card` in any non-legacy component),
+    // so "skills section shows a brief help card" tested a feature that no longer
+    // exists. The project-skill help card (covered below) was kept.
 
     test.skip('project skills help card is pinned to the modal bottom', async ({ mainWindow }) => {
       const projectDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
