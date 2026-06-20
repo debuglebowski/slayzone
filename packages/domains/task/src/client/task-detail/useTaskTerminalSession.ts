@@ -135,28 +135,44 @@ export function useTaskTerminalSession({
     })
   )
 
-  // Persist detected conversation IDs immediately for modes that need session discovery.
+  // Persist detected conversation IDs immediately for modes that need session
+  // discovery. Deduped by a ref so the write fires EXACTLY ONCE per detected id.
+  // This effect re-runs on every render (`updateTask` is a useMutation object in the
+  // deps, and `task` is a fresh object on each board refetch). Persisting issues a
+  // task.update → server broadcasts task-updated → board refetch → re-render. The old
+  // version started a NEW write on every such re-render and let the cleanup's
+  // `cancelled` flag strand the terminal setDetectedSessionId(null), so the write
+  // never cleared its own trigger → an infinite task.update loop that saturated the
+  // tRPC WS app-wide (panels/terminals in OTHER tabs starved). The ref makes re-runs
+  // no-ops while a write for the same id is outstanding, and the clear runs without a
+  // cancel gate so the loop always terminates.
+  const persistedSessionIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!task || !detectedSessionId || !sessionIdCommand) return
     if (getConversationIdForMode(task) === detectedSessionId) {
+      persistedSessionIdRef.current = null
       setDetectedSessionId(null)
       return
     }
+    if (persistedSessionIdRef.current === detectedSessionId) return // write already issued for this id
+    persistedSessionIdRef.current = detectedSessionId
 
-    let cancelled = false
     void (async () => {
-      const updated = await updateTask.mutateAsync({
-        id: task.id,
-        providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
-      })
-      if (cancelled) return
-      onTaskUpdated(updated)
-      setDetectedSessionId(null)
+      try {
+        const updated = await updateTask.mutateAsync({
+          id: task.id,
+          providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
+        })
+        onTaskUpdated(updated)
+      } catch {
+        // Allow a retry on a transient failure.
+        if (persistedSessionIdRef.current === detectedSessionId) persistedSessionIdRef.current = null
+        return
+      }
+      // Clear regardless of render churn (no cancel gate — that's what stranded the
+      // clear and spun the loop). Functional updater avoids clobbering a newer detect.
+      setDetectedSessionId((cur) => (cur === detectedSessionId ? null : cur))
     })()
-
-    return () => {
-      cancelled = true
-    }
   }, [task, detectedSessionId, sessionIdCommand, onTaskUpdated, getConversationIdForMode, updateTask])
 
   // Restart terminal (kill PTY, remount, keep session for --resume)
