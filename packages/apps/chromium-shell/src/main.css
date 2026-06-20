@@ -29,6 +29,7 @@
 @source "../../../domains/tags/src";
 @source "../../../domains/settings/src";
 @source "../../../domains/sidebar/src";
+@source "../../../domains/agent-panels/src";
 
 @custom-variant dark (&:is(.dark *));
 

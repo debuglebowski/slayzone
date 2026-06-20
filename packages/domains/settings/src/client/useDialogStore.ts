@@ -40,6 +40,20 @@ interface DialogState {
   openGroupSettings: (group: ProjectGroup) => void
   closeGroupSettings: () => void
 
+  // Per-project settings dialog target.
+  projectSettingsTarget: Project | null
+  openProjectSettings: (project: Project) => void
+  closeProjectSettings: () => void
+
+  // App-level (user) settings dialog. Canonical App.tsx still drives this via
+  // local useState; the store field is the convergence target so the
+  // chromium-fork shell + its AppDialogs share one store-driven source. Additive
+  // — the Electron app ignores these fields today.
+  settingsOpen: boolean
+  settingsInitialTab: string | null
+  openSettings: (opts?: { initialTab?: string }) => void
+  closeSettings: () => void
+
   // Simple booleans
   onboardingOpen: boolean
   openOnboarding: () => void
@@ -92,6 +106,16 @@ export const useDialogStore = create<DialogState>()((set) => ({
   groupSettingsTarget: null,
   openGroupSettings: (group) => set({ groupSettingsTarget: group }),
   closeGroupSettings: () => set({ groupSettingsTarget: null }),
+
+  projectSettingsTarget: null,
+  openProjectSettings: (project) => set({ projectSettingsTarget: project }),
+  closeProjectSettings: () => set({ projectSettingsTarget: null }),
+
+  settingsOpen: false,
+  settingsInitialTab: null,
+  openSettings: (opts) =>
+    set({ settingsOpen: true, settingsInitialTab: opts?.initialTab ?? null }),
+  closeSettings: () => set({ settingsOpen: false, settingsInitialTab: null }),
 
   onboardingOpen: false,
   openOnboarding: () => set({ onboardingOpen: true }),
