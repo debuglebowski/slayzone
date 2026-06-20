@@ -482,9 +482,9 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             onPaneMove={movePane}
             onGroupRename={renameTab}
             rightContent={
-              canShowPrompts ? (
+              canShowPrompts && !promptsOpen ? (
                 <div className="flex items-center gap-2">
-                  <AgentPromptsToggleButton open={promptsOpen} onToggle={togglePrompts} />
+                  <AgentPromptsToggleButton onToggle={togglePrompts} />
                   {rightContent}
                 </div>
               ) : (
@@ -509,7 +509,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           </div>
         </div>
         {canShowPrompts && promptsOpen && mainMode && (
-          <AgentPromptsSidebar taskId={taskId} agentId={mainMode} />
+          <AgentPromptsSidebar taskId={taskId} agentId={mainMode} onToggle={togglePrompts} />
         )}
       </div>
     )

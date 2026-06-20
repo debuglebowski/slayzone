@@ -46,6 +46,11 @@ test.describe('Agent prompts sidebar', () => {
     await expect(sidebar).toBeVisible()
     await expect(sidebar.getByText('No messages yet')).toBeVisible()
 
+    // While open, the toggle relocates INTO the sidebar header — exactly one
+    // toggle exists app-wide, and it lives inside the sidebar (not the tab bar).
+    await expect(mainWindow.locator('[data-testid="agent-prompts-toggle"]:visible')).toHaveCount(1)
+    await expect(sidebar.locator('[data-testid="agent-prompts-toggle"]')).toHaveCount(1)
+
     // Fire two UserPromptSubmit hooks (sequential — small gap keeps inserts
     // distinct so the transcript order is stable).
     const hookUrl = `http://127.0.0.1:${port}/api/agent-hook`
@@ -82,9 +87,11 @@ test.describe('Agent prompts sidebar', () => {
     await mainWindow.waitForTimeout(200)
     await expect(items).toHaveCount(2)
 
-    // Toggle closes the sidebar.
-    await toggle.click()
+    // The header toggle closes the sidebar.
+    await sidebar.locator('[data-testid="agent-prompts-toggle"]').click()
     await expect(mainWindow.locator('[data-testid="agent-prompts-sidebar"]:visible')).toHaveCount(0)
+    // ...and the toggle returns to the tab bar.
+    await expect(mainWindow.locator('[data-testid="agent-prompts-toggle"]:visible')).toHaveCount(1)
   })
 })
 

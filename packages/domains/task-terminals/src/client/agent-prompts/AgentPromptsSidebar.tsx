@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { MessageSquareText } from 'lucide-react'
+import { MessageSquareText, X } from 'lucide-react'
 import { IconButton } from '@slayzone/ui'
 import { useAgentPrompts } from './useAgentPrompts'
 
@@ -35,24 +35,21 @@ export function usePromptsSidebarOpen(taskId: string): [boolean, () => void] {
 }
 
 /**
- * Tab-bar toggle for the prompts sidebar. Uses the same IconButton (size-7,
- * size-3.5 glyph, ghost/default variants) as the sibling terminal-header icons
- * so size + spacing match exactly. Caller places it in the same gap-2 row.
+ * Tab-bar button that OPENS the prompts sidebar (the close affordance is the X
+ * in the sidebar header). Same IconButton (size-7, size-3.5 glyph, ghost) as
+ * the sibling terminal-header icons so size + spacing match exactly.
  */
 export function AgentPromptsToggleButton({
-  open,
   onToggle
 }: {
-  open: boolean
   onToggle: () => void
 }): React.ReactElement {
   return (
     <IconButton
       data-testid="agent-prompts-toggle"
-      variant={open ? 'default' : 'ghost'}
+      variant="ghost"
       className="size-7"
-      aria-pressed={open}
-      aria-label="Toggle messages sidebar"
+      aria-label="Show messages sidebar"
       onClick={onToggle}
     >
       <MessageSquareText className="size-3.5" />
@@ -75,10 +72,13 @@ function formatTime(ts: number): string {
  */
 export function AgentPromptsSidebar({
   taskId,
-  agentId
+  agentId,
+  onToggle
 }: {
   taskId: string
   agentId: string
+  /** Closes the sidebar — the toggle lives in this header while open. */
+  onToggle: () => void
 }): React.ReactElement {
   const prompts = useAgentPrompts(taskId, agentId, true)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -94,11 +94,19 @@ export function AgentPromptsSidebar({
       data-testid="agent-prompts-sidebar"
       className="flex h-full w-72 shrink-0 flex-col border-l border-border bg-surface-1"
     >
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border pl-3 pr-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Messages
         </span>
-        <span className="text-xs tabular-nums text-muted-foreground">{prompts.length}</span>
+        <IconButton
+          data-testid="agent-prompts-toggle"
+          variant="ghost"
+          className="size-7"
+          aria-label="Close messages sidebar"
+          onClick={onToggle}
+        >
+          <X className="size-3.5" />
+        </IconButton>
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
         {prompts.length === 0 ? (
