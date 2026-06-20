@@ -59,7 +59,9 @@ test.describe('Web panels', () => {
       }
       await panelsTab.click()
     }
-    await expect(findCard(settingsDialog(page), 'Agent')).toBeVisible({ timeout: 3_000 })
+    await expect(findCard(settingsDialog(page), 'Agent')).toBeVisible({
+      timeout: 3_000
+    })
   }
 
   const closePanelsTab = async (page: import('@playwright/test').Page) => {
@@ -80,7 +82,11 @@ test.describe('Web panels', () => {
 
   const runCli = (...args: string[]) =>
     spawnSync('node', [SLAY_JS, ...args], {
-      env: { ...process.env, SLAYZONE_DB_PATH: dbPath, SLAYZONE_MCP_PORT: String(mcpPort) },
+      env: {
+        ...process.env,
+        SLAYZONE_DB_PATH: dbPath,
+        SLAYZONE_MCP_PORT: String(mcpPort)
+      },
       encoding: 'utf8'
     })
 
@@ -110,12 +116,18 @@ test.describe('Web panels', () => {
       path: TEST_PROJECT_PATH
     })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
-    await s.createTask({ projectId: p.id, title: 'WP test task', status: 'todo' })
+    await s.createTask({
+      projectId: p.id,
+      title: 'WP test task',
+      status: 'todo'
+    })
     await s.refreshData()
 
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('WP test task').first()).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.getByText('WP test task').first()).toBeVisible({
+      timeout: 5_000
+    })
   })
 
   // ── Settings: panels tab ──
@@ -199,7 +211,9 @@ test.describe('Web panels', () => {
       figmaPanelName = nextFigmaName
     }
     await dialog.getByTestId('settings-tab-panels').click()
-    await expect(findCard(dialog, figmaPanelName)).toBeVisible({ timeout: 3_000 })
+    await expect(findCard(dialog, figmaPanelName)).toBeVisible({
+      timeout: 3_000
+    })
   })
 
   // ── Close settings, test keyboard shortcuts ──
@@ -209,6 +223,7 @@ test.describe('Web panels', () => {
     await openTaskViaSearch(mainWindow, 'WP test task')
   })
 
+  // STILL SKIPPED 2026-06-20: depends on 'add custom web panel' (TestPanel not created in settings UI).
   test.skip('Cmd+L toggles custom web panel on', async ({ mainWindow }) => {
     // Focus a safe element first (avoid webview stealing keystrokes)
     const titleEl = mainWindow.locator('h1, [data-testid="task-title"]').first()
@@ -256,7 +271,9 @@ test.describe('Web panels', () => {
     await card.click()
     await dialog.getByRole('button', { name: 'Delete' }).click()
 
-    await expect(findCard(dialog, figmaPanelName)).not.toBeVisible({ timeout: 3_000 })
+    await expect(findCard(dialog, figmaPanelName)).not.toBeVisible({
+      timeout: 3_000
+    })
 
     // Reopen — mergePredefined should NOT re-add it
     await closePanelsTab(mainWindow)
@@ -266,6 +283,7 @@ test.describe('Web panels', () => {
     })
   })
 
+  // STILL SKIPPED 2026-06-20: depends on 'add custom web panel' (TestPanel not created in settings UI).
   test.skip('delete custom TestPanel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
@@ -281,7 +299,9 @@ test.describe('Web panels', () => {
     await card.click()
     await dialog.getByRole('button', { name: 'Delete' }).click()
 
-    await expect(findCard(dialog, 'TestPanel')).not.toBeVisible({ timeout: 3_000 })
+    await expect(findCard(dialog, 'TestPanel')).not.toBeVisible({
+      timeout: 3_000
+    })
   })
 
   // ── Shortcut validation ──
@@ -296,7 +316,9 @@ test.describe('Web panels', () => {
     await dialog.getByPlaceholder('Key').last().fill('k')
     await dialog.getByRole('button', { name: 'Add Panel' }).click()
 
-    await expect(dialog.getByText(/reserved|⌘K/i).first()).toBeVisible({ timeout: 3_000 })
+    await expect(dialog.getByText(/reserved|⌘K/i).first()).toBeVisible({
+      timeout: 3_000
+    })
     await expect(findCard(dialog, 'BadShortcut')).toHaveCount(0)
 
     await nameInput.clear()
@@ -317,7 +339,9 @@ test.describe('Web panels', () => {
 
     await card.click()
     // Label renamed from "Default mode" → "Default agent provider".
-    await expect(dialog.getByText('Default agent provider')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByText('Default agent provider')).toBeVisible({
+      timeout: 5_000
+    })
     await dialog.getByTestId('settings-tab-panels').click()
     await expect(findCard(dialog, 'Agent')).toBeVisible({ timeout: 5_000 })
   })
@@ -329,7 +353,9 @@ test.describe('Web panels', () => {
     await expect(card).toBeVisible({ timeout: 5_000 })
 
     await card.click()
-    await expect(dialog.getByText('Show toast when detected')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByText('Show toast when detected')).toBeVisible({
+      timeout: 5_000
+    })
     await dialog.getByTestId('settings-tab-panels').click()
     await expect(findCard(dialog, 'Browser')).toBeVisible({ timeout: 5_000 })
   })
@@ -390,7 +416,9 @@ test.describe('Web panels', () => {
     expect(r.status).toBe(0)
 
     // settings:changed IPC → PanelsSettingsTab reloads panel_config
-    await expect(findCard(dialog, 'CLISettingsPanel')).toBeVisible({ timeout: 10_000 })
+    await expect(findCard(dialog, 'CLISettingsPanel')).toBeVisible({
+      timeout: 10_000
+    })
     await closePanelsTab(mainWindow)
   })
 
@@ -497,8 +525,9 @@ test.describe('Web panels', () => {
     expect(r.stderr).toContain('Panel not found')
   })
 
-  test.skip('CLI create rejects reserved shortcut', async () => {
-    const r = runCli('--dev', 'panels', 'create', 'BadKey', 'https://badkey.example.com', '-s', 't')
+  test('CLI create rejects reserved shortcut', async () => {
+    // 't' was rebound off panel-switch (Cmd+T→Cmd+K, commit 7c6c0a1c); 'k' is the reserved one now.
+    const r = runCli('--dev', 'panels', 'create', 'BadKey', 'https://badkey.example.com', '-s', 'k')
     expect(r.status).not.toBe(0)
     expect(r.stderr).toContain('reserved')
   })
@@ -542,7 +571,9 @@ test.describe('Web panels', () => {
     expect(del.status).toBe(0)
 
     // Gone from settings
-    await expect(findCard(dialog, 'BothTest')).not.toBeVisible({ timeout: 10_000 })
+    await expect(findCard(dialog, 'BothTest')).not.toBeVisible({
+      timeout: 10_000
+    })
 
     // Gone from CLI list
     const list = runCli('--dev', 'panels', 'list', '--json')
