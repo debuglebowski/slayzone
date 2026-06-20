@@ -11,7 +11,8 @@ import {
   closeTopDialog,
   openUserContextManager,
   openProjectContextSection,
-  openSkillSyncPanel
+  openSkillSyncPanel,
+  gotoContextSection
 } from '../fixtures/context-manager'
 import path from 'path'
 import fs from 'fs'
@@ -180,7 +181,7 @@ test.describe('Context manager sync flow', () => {
       await closeTopDialog(mainWindow)
     })
 
-    test.skip('library body-only skill can be repaired from the UI by adding frontmatter', async ({
+    test('library body-only skill can be repaired from the UI by adding frontmatter', async ({
       mainWindow,
       electronApp
     }) => {
@@ -198,7 +199,7 @@ test.describe('Context manager sync flow', () => {
       )
 
       const dialog = await openUserContextManager(mainWindow, electronApp)
-      await dialog.getByTestId('context-overview-skills').click()
+      await gotoContextSection(mainWindow, 'Library', 'Skills')
       await expect
         .poll(
           async () => {
@@ -216,21 +217,14 @@ test.describe('Context manager sync flow', () => {
         )
         .toBe('invalid')
 
-      const skillRow = dialog.getByTestId(`context-library-item-${slug}`)
-      await expect(skillRow).toContainText('Invalid frontmatter')
-
-      await skillRow.click()
+      // Select the skill in the list; its detail editor surfaces the invalid state
+      // and the repair affordance (redesigned CM — no overview cards / row badge).
+      await dialog.getByText(slug, { exact: false }).first().click()
       await expect(dialog.getByText('Frontmatter is invalid')).toBeVisible({ timeout: 5_000 })
-      await expect(dialog.getByText(/Skill content must start with YAML frontmatter/i)).toBeVisible(
-        { timeout: 5_000 }
-      )
-      const addFrontmatterButton = mainWindow.getByRole('button', {
-        name: 'Add frontmatter',
-        exact: true
-      })
-      await expect(addFrontmatterButton).toBeVisible({ timeout: 5_000 })
 
-      await addFrontmatterButton.click()
+      const fixFrontmatterButton = dialog.getByTestId('context-item-editor-fix-frontmatter')
+      await expect(fixFrontmatterButton).toBeVisible({ timeout: 5_000 })
+      await fixFrontmatterButton.click()
 
       await expect(dialog.getByTestId('context-item-editor-content')).toHaveValue(
         new RegExp(`^---\\nname: ${slug}\\n`),

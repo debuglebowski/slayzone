@@ -155,6 +155,28 @@ export async function openUserContextManager(
   return mainWindow.locator('body')
 }
 
+/**
+ * Navigate the redesigned Context Manager sidebar to a given level + section.
+ * Levels: 'Computer' | 'Project' | 'Library'. Sections: 'Files' | 'Instructions'
+ * | 'Skills' | 'MCPs'. Scopes to the level group (which contains both the level
+ * label and its section buttons) to disambiguate the duplicated section names.
+ */
+export async function gotoContextSection(
+  mainWindow: Page,
+  level: 'Computer' | 'Project' | 'Library',
+  section: 'Files' | 'Instructions' | 'Skills' | 'MCPs'
+): Promise<void> {
+  const group = mainWindow
+    .locator('div')
+    .filter({ hasText: level })
+    .filter({ has: mainWindow.getByRole('button', { name: section, exact: true }) })
+    .last()
+  await expect(group.getByRole('button', { name: section, exact: true })).toBeVisible({
+    timeout: 10_000
+  })
+  await group.getByRole('button', { name: section, exact: true }).click()
+}
+
 export async function openProjectContextManager(
   mainWindow: Page,
   projectAbbrev: string
