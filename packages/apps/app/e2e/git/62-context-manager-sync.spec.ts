@@ -408,7 +408,7 @@ test.describe('Context manager sync flow', () => {
       await closeTopDialog(mainWindow)
     })
 
-    test.skip('project-local skill can be synced to filesystem', async ({ mainWindow }) => {
+    test('project-local skill can be synced to filesystem', async ({ mainWindow }) => {
       await mainWindow.evaluate(
         ({ id }) => {
           return window
