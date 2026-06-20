@@ -1,1 +1,1 @@
-export { createPtyEnricher, markTabSpawned, markTabHibernated } from './handlers'
+export { createPtyEnricher, markTabSpawned, markTabHibernated } from './pty-enricher'

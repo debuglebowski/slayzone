@@ -1,1 +1,1 @@
-export { closeAllWatchers } from './handlers'
+export { closeAllWatchers } from './watchers'
