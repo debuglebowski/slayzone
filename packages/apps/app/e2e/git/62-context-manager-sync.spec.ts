@@ -262,25 +262,11 @@ test.describe('Context manager sync flow', () => {
     // so "skills section shows a brief help card" tested a feature that no longer
     // exists. The project-skill help card (covered below) was kept.
 
-    test.skip('project skills help card is pinned to the modal bottom', async ({ mainWindow }) => {
-      const projectDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-
-      const helpCard = projectDialog.getByTestId('project-skill-help-card')
-      await expect(helpCard).toBeVisible({ timeout: 5_000 })
-
-      const dialogBox = await projectDialog.boundingBox()
-      const helpCardBox = await helpCard.boundingBox()
-
-      expect(dialogBox).not.toBeNull()
-      expect(helpCardBox).not.toBeNull()
-
-      const modalBottomGap = Math.round(
-        dialogBox!.y + dialogBox!.height - (helpCardBox!.y + helpCardBox!.height)
-      )
-      expect(modalBottomGap).toBeLessThanOrEqual(40)
-
-      await closeTopDialog(mainWindow)
-    })
+    // REMOVED 2026-06-20: tested a section-level "help card pinned to the modal
+    // bottom". The redesigned CM is not a modal, and the skill help card moved
+    // into the per-skill editor (ItemSection's SkillHelpCard) — there is no
+    // section-level pinned card to assert on. The help content is now exercised
+    // incidentally by the skill-editing tests.
 
     test.skip('project MCP section shows provider columns when MCP entries exist', async ({
       mainWindow
