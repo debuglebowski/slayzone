@@ -133,6 +133,29 @@ export async function recordConversation(
     }
   }
 
+  // Transition triple-write (migration v147): mirror this ledger row into the
+  // first-class agent-session tables so the new resolver stays current during
+  // the bake before reads cut over (slice 2). A reset is a `session_resets`
+  // timeline event, not a session; every other origin becomes a shadow
+  // `agent_sessions` row (status='dead', cwd=NULL — live status/cwd are owned
+  // by the pool/PTY layer in later slices). Reuses the same `id` + `createdAt`
+  // so the shadow is 1:1 with the ledger. Deleted in the "drop legacy" slice.
+  if (origin === 'manual-reset') {
+    ops.push({
+      type: 'run',
+      sql: `INSERT INTO session_resets (id, task_id, mode, created_at) VALUES (?, ?, ?, ?)`,
+      params: [id, taskId, mode, createdAt]
+    })
+  } else {
+    ops.push({
+      type: 'run',
+      sql: `INSERT INTO agent_sessions
+              (id, mode, cwd, task_id, conversation_id, origin, status, pending_meta, created_at, bound_at)
+            VALUES (?, ?, NULL, ?, ?, ?, 'dead', ?, ?, ?)`,
+      params: [id, mode, taskId, conversationId, origin, meta, createdAt, createdAt]
+    })
+  }
+
   await db.batchTxn(ops)
 }
 
@@ -301,11 +324,23 @@ export async function prunePendingSpawns(
          WHERE task_id = ? AND mode = ? AND origin = 'pending-spawn'`,
       [scope.taskId, scope.mode]
     )
+    // Triple-write mirror (v147): keep the shadow agent_sessions pending rows
+    // in lockstep so the slice-2 reader never sees a stale pending row.
+    await db.run(
+      `DELETE FROM agent_sessions
+         WHERE task_id = ? AND mode = ? AND origin = 'pending-spawn'`,
+      [scope.taskId, scope.mode]
+    )
     return res.changes
   }
   const cutoff = Date.now() - TTL_PENDING_MS
   const res = await db.run(
     `DELETE FROM task_conversations
+       WHERE origin = 'pending-spawn' AND created_at < ?`,
+    [cutoff]
+  )
+  await db.run(
+    `DELETE FROM agent_sessions
        WHERE origin = 'pending-spawn' AND created_at < ?`,
     [cutoff]
   )

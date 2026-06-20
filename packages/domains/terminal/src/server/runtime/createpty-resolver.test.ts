@@ -206,6 +206,13 @@ function makeAsyncDb(): SlayzoneDb {
     CREATE TABLE task_conversations (
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, conversation_id TEXT,
       origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL);
+    -- v147 triple-write target: recordPendingSpawn → recordConversation mirrors
+    -- into agent_sessions, so the table must exist for batchTxn (not tolerant).
+    CREATE TABLE agent_sessions (
+      id TEXT PRIMARY KEY, mode TEXT NOT NULL, cwd TEXT, task_id TEXT, conversation_id TEXT,
+      origin TEXT NOT NULL, status TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL, bound_at INTEGER);
+    CREATE TABLE session_resets (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, created_at INTEGER NOT NULL);
   `)
   raw
     .prepare('INSERT INTO tasks (id, provider_config, project_id) VALUES (?, ?, ?)')

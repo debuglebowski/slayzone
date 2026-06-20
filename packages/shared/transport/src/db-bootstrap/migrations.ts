@@ -3057,6 +3057,128 @@ export const migrations: Migration[] = [
       `)
     }
   },
+  {
+    version: 147,
+    up: (db) => {
+      // First-class agent-session entity. See plans/agent-sessions.md.
+      //
+      // An agent session is a spawned provider process with its OWN durable
+      // identity (`id`, a UUID we mint), independent of any task. It supersedes
+      // the `taskId:tabId`-encoded session identity and folds in the
+      // `task_conversations` provenance ledger (v145) as the single source of
+      // truth. `task_conversations` is retired in a later migration once reads
+      // have cut over and prod has proven parity (slices 2-4 of the plan).
+      //
+      //   - id              : our minted uuid = the PTY session key.
+      //   - mode            : provider mode (claude-code / codex / ...).
+      //   - cwd             : spawn working dir = pool key. NULL for historical
+      //                       / audit rows that were never live-managed.
+      //   - task_id         : NULL while pooled; set ONCE on assignment; never
+      //                       moves (no reattach).
+      //   - conversation_id : provider thread id; fills in on `turn-init`.
+      //   - origin          : provenance; the HONORED set decides resume. Same
+      //                       semantics as the v145 ledger MINUS `manual-reset`
+      //                       (a reset is now a `session_resets` timeline event,
+      //                       not a session).
+      //   - status          : pooled | bound | dead.
+      //   - pending_meta    : {usedResume, spawnedAt} for the in-flight
+      //                       provenance match (hook-driven providers).
+      //
+      // Reset modeled as an explicit (task, mode) timeline event in
+      // `session_resets` — NOT a flag on old sessions. Normal process exit
+      // (every closed tab) leaves a session resumable; only a user reset means
+      // "forget everything before now". The resolver applies the cutoff
+      // structurally in SQL, identical to the v145 ledger semantics.
+      db.exec(`
+        CREATE TABLE agent_sessions (
+          id              TEXT PRIMARY KEY,
+          mode            TEXT NOT NULL,
+          cwd             TEXT,
+          task_id         TEXT,
+          conversation_id TEXT,
+          origin          TEXT NOT NULL,
+          status          TEXT NOT NULL,
+          pending_meta    TEXT,
+          created_at      INTEGER NOT NULL,
+          bound_at        INTEGER,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          CHECK (origin IN (
+            'slay-spawned-fresh',
+            'slay-spawned-resume',
+            'cas-repoint-heal',
+            'legacy-migration',
+            'foreign-observed',
+            'pending-spawn'
+          )),
+          CHECK (status IN ('pooled','bound','dead'))
+        );
+        CREATE INDEX agent_sessions_task
+          ON agent_sessions (task_id, mode, created_at DESC);
+        CREATE INDEX agent_sessions_pool
+          ON agent_sessions (cwd, mode)
+          WHERE status = 'pooled';
+        CREATE INDEX agent_sessions_pending
+          ON agent_sessions (task_id, mode, conversation_id)
+          WHERE origin = 'pending-spawn';
+
+        CREATE TABLE session_resets (
+          id         TEXT PRIMARY KEY,
+          task_id    TEXT NOT NULL,
+          mode       TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        CREATE INDEX session_resets_lookup
+          ON session_resets (task_id, mode, created_at DESC);
+      `)
+
+      // One-time backfill: shadow every existing `task_conversations` row into
+      // the new tables, preserving id + created_at so the new resolver picks the
+      // exact same "current" conversation the v145 resolver does (parity is
+      // asserted by the slice-2 cutover). Historical rows are audit-only — their
+      // OS processes are long gone — so `status='dead'` and `cwd=NULL`.
+      //   - `manual-reset` rows  → `session_resets` (a reset is not a session).
+      //   - every other origin   → `agent_sessions`.
+      const rows = db
+        .prepare(
+          `SELECT id, task_id, mode, conversation_id, origin, pending_meta, created_at
+             FROM task_conversations`
+        )
+        .all() as Array<{
+        id: string
+        task_id: string
+        mode: string
+        conversation_id: string | null
+        origin: string
+        pending_meta: string | null
+        created_at: number
+      }>
+      const insSession = db.prepare(
+        `INSERT INTO agent_sessions
+           (id, mode, cwd, task_id, conversation_id, origin, status, pending_meta, created_at, bound_at)
+         VALUES (?, ?, NULL, ?, ?, ?, 'dead', ?, ?, ?)`
+      )
+      const insReset = db.prepare(
+        `INSERT INTO session_resets (id, task_id, mode, created_at) VALUES (?, ?, ?, ?)`
+      )
+      for (const r of rows) {
+        if (r.origin === 'manual-reset') {
+          insReset.run(r.id, r.task_id, r.mode, r.created_at)
+        } else {
+          insSession.run(
+            r.id,
+            r.mode,
+            r.task_id,
+            r.conversation_id,
+            r.origin,
+            r.pending_meta,
+            r.created_at,
+            r.created_at
+          )
+        }
+      }
+    }
+  }
 ]
 
 export const LATEST_MIGRATION_VERSION = migrations[migrations.length - 1].version

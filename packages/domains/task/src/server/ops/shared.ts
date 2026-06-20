@@ -165,11 +165,12 @@ export async function attachWorktreeColors(db: SlayzoneDb, tasks: Task[]): Promi
 }
 
 /**
- * Populate `currentConversationByMode` from the append-only
- * `task_conversations` ledger. The renderer reads this field instead of
- * `provider_config.{mode}.conversationId` so manual-reset and provenance
- * gating are honored on every read. Single query per task per call (cheap;
- * indexed). Modes with no rows at all are simply absent from the record.
+ * Populate `currentConversationByMode` from the first-class agent-session
+ * tables (`agent_sessions` + `session_resets`, migration v147). The renderer
+ * reads this field instead of `provider_config.{mode}.conversationId` so reset
+ * cutoff and provenance gating are honored on every read. Single query per
+ * call (cheap; indexed). Modes with no honored session are simply absent from
+ * the record.
  */
 async function attachCurrentConversationByMode(
   db: SlayzoneDb,
@@ -189,24 +190,25 @@ async function attachCurrentConversationByMode(
   }>(
     `WITH reset AS (
        SELECT task_id, mode, max(created_at) AS at
-       FROM task_conversations
-       WHERE task_id IN (${placeholders}) AND origin = 'manual-reset'
+       FROM session_resets
+       WHERE task_id IN (${placeholders})
        GROUP BY task_id, mode
      ),
      ranked AS (
        SELECT
-         tc.task_id,
-         tc.mode,
-         tc.conversation_id,
+         s.task_id,
+         s.mode,
+         s.conversation_id,
          ROW_NUMBER() OVER (
-           PARTITION BY tc.task_id, tc.mode
-           ORDER BY tc.created_at DESC
+           PARTITION BY s.task_id, s.mode
+           ORDER BY s.created_at DESC
          ) AS rn
-       FROM task_conversations tc
-       LEFT JOIN reset r ON r.task_id = tc.task_id AND r.mode = tc.mode
-       WHERE tc.task_id IN (${placeholders})
-         AND tc.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
-         AND tc.created_at > coalesce(r.at, 0)
+       FROM agent_sessions s
+       LEFT JOIN reset r ON r.task_id = s.task_id AND r.mode = s.mode
+       WHERE s.task_id IN (${placeholders})
+         AND s.conversation_id IS NOT NULL
+         AND s.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+         AND s.created_at > coalesce(r.at, 0)
      )
      SELECT task_id, mode, conversation_id FROM ranked WHERE rn = 1`,
     [...ids, ...ids]

@@ -51,11 +51,19 @@ export {
   collectReferencedConversationIds,
   casRepointConversationId
 } from './conversation-id-heal.js'
+// Writes still go through the v145 ledger writer (which triple-writes into the
+// v147 agent-session tables during the transition slice).
 export {
   recordConversation,
-  getCurrentConversationId,
-  listConversationHistory,
   recordPendingSpawn,
-  findPendingSpawn,
   prunePendingSpawns
 } from './task-conversations.js'
+// Reads cut over to the first-class agent-session tables (slice 2 — see
+// plans/agent-sessions.md). Same fn names + semantics, new source of truth
+// (`agent_sessions` + `session_resets`). task_conversations is still written
+// for rollback safety until the "drop legacy" slice.
+export {
+  getCurrentConversationId,
+  listConversationHistory,
+  findPendingSpawn
+} from './agent-sessions.js'

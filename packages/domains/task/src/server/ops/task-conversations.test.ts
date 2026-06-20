@@ -47,6 +47,31 @@ raw.exec(`
       'pending-spawn'
     ))
   );
+  -- v147 first-class agent-session tables: recordConversation triple-writes
+  -- into these during the transition slice (see plans/agent-sessions.md).
+  CREATE TABLE agent_sessions (
+    id              TEXT PRIMARY KEY,
+    mode            TEXT NOT NULL,
+    cwd             TEXT,
+    task_id         TEXT,
+    conversation_id TEXT,
+    origin          TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    pending_meta    TEXT,
+    created_at      INTEGER NOT NULL,
+    bound_at        INTEGER,
+    CHECK (origin IN (
+      'slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal',
+      'legacy-migration','foreign-observed','pending-spawn'
+    )),
+    CHECK (status IN ('pooled','bound','dead'))
+  );
+  CREATE TABLE session_resets (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL,
+    mode       TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `)
 raw
   .prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)')

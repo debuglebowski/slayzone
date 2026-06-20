@@ -64,11 +64,25 @@ export async function resetConversationAction(
 
   const createdAt = Date.now()
   for (const mode of modes) {
+    const resetId = randomUUID()
     db.run(
       `INSERT INTO task_conversations (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
        VALUES (:id, :task, :mode, NULL, 'manual-reset', NULL, :ts)`,
       {
-        ':id': randomUUID(),
+        ':id': resetId,
+        ':task': task.id,
+        ':mode': mode,
+        ':ts': createdAt
+      }
+    )
+    // Transition triple-write (migration v147): a reset is a `session_resets`
+    // timeline event in the first-class agent-session model. Mirror it so the
+    // new resolver's cutoff matches once reads cut over (slice 2).
+    db.run(
+      `INSERT INTO session_resets (id, task_id, mode, created_at)
+       VALUES (:id, :task, :mode, :ts)`,
+      {
+        ':id': resetId,
         ':task': task.id,
         ':mode': mode,
         ':ts': createdAt
