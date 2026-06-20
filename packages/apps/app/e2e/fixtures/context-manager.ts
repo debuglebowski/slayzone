@@ -3,10 +3,6 @@ import { clickSettings, goHome, openProjectSettings } from './electron'
 
 type ProjectSection = 'providers' | 'instructions' | 'skills' | 'mcp'
 
-function userSettingsDialog(mainWindow: Page): Locator {
-  return mainWindow.locator('[role="dialog"][aria-label="Settings"]').last()
-}
-
 function projectSettingsDialog(mainWindow: Page): Locator {
   return mainWindow
     .getByRole('dialog')
@@ -130,90 +126,33 @@ async function isProjectSectionVisible(dialog: Locator, section: ProjectSection)
     .catch(() => false)
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function openUserContextManager(
   mainWindow: Page,
-  electronApp?: any
-): Promise<Locator> {
+  // electronApp kept for call-site compatibility; no longer needed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sendOpenSettingsShortcut = async (electronApp: any): Promise<void> => {
-    await electronApp.evaluate(
-      (
-        { BrowserWindow }: { BrowserWindow: typeof Electron.CrossProcessExports.BrowserWindow },
-        ch: string
-      ) => {
-        BrowserWindow.getAllWindows()
-          .find((w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:'))
-          ?.webContents.send(ch)
-      },
-      'app:open-settings'
-    )
-  }
-
-  const dialog = userSettingsDialog(mainWindow)
-
-  for (let reopenAttempt = 0; reopenAttempt < 3; reopenAttempt += 1) {
-    await closeTopDialog(mainWindow)
-    await goHome(mainWindow)
-
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      await mainWindow.bringToFront().catch(() => {})
-      if (await dialog.isVisible({ timeout: 500 }).catch(() => false)) break
-
-      // In long serial runs, stale Radix overlays can survive and block pointer events.
-      const blockingOverlay = mainWindow
-        .locator(
-          '[data-slot="alert-dialog-overlay"][data-state="open"], [data-slot="dialog-overlay"][data-state="open"]'
-        )
-        .first()
-      if (await blockingOverlay.isVisible({ timeout: 120 }).catch(() => false)) {
-        await mainWindow.keyboard.press('Escape').catch(() => {})
+  _electronApp?: any
+): Promise<Locator> {
+  // The Context Manager moved out of User Settings into a top-level tab-bar view
+  // (tabStore activeView === 'context'). Drive the exposed store directly
+  // instead of the obsolete Settings-dialog path.
+  await closeTopDialog(mainWindow)
+  await goHome(mainWindow)
+  await mainWindow.evaluate(() => {
+    const store = (
+      window as unknown as {
+        __slayzone_tabStore?: { getState: () => { setActiveView: (v: string) => void } }
       }
-
-      await clickSettings(mainWindow)
-      if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-
-      if (electronApp) {
-        await sendOpenSettingsShortcut(electronApp).catch(() => {})
-        if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-      }
-
-      await mainWindow.keyboard.press('Meta+,').catch(() => {})
-      if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-
-      const sidebarSettingsButton = mainWindow
-        .getByRole('button', { name: 'Settings', exact: true })
-        .first()
-      if (await sidebarSettingsButton.isVisible({ timeout: 600 }).catch(() => false)) {
-        await sidebarSettingsButton.click({ force: true }).catch(() => {})
-        if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-      }
-
-      const settingsByAria = mainWindow.locator('button[aria-label="Settings"]').first()
-      if (await settingsByAria.isVisible({ timeout: 600 }).catch(() => false)) {
-        await settingsByAria.click({ force: true }).catch(() => {})
-        if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-      }
-
-      await mainWindow.waitForTimeout(150)
-    }
-
-    if (await dialog.isVisible({ timeout: 800 }).catch(() => false)) break
-  }
-
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await openSettingsTabWithRetry(
-    mainWindow,
-    dialog,
-    'settings-tab-ai-config',
-    dialog.getByRole('heading', { name: 'Context Manager' })
-  )
-  const backToOverview = dialog.getByRole('button', { name: 'Overview' })
-  if (await backToOverview.count()) {
-    await backToOverview.click()
-  }
-  await expect(dialog.getByTestId('context-overview-providers')).toBeVisible({ timeout: 5_000 })
-  return dialog
+    ).__slayzone_tabStore
+    if (!store) throw new Error('__slayzone_tabStore not exposed')
+    store.getState().setActiveView('context')
+  })
+  await expect(mainWindow.getByRole('heading', { name: 'Context Manager' })).toBeVisible({
+    timeout: 10_000
+  })
+  // CM is a full-screen view, not a dialog; testids are unique, so scope to body.
+  // The redesigned CM opens straight to its sidebar (COMPUTER/PROJECT/...); each
+  // caller navigates to the section it needs.
+  return mainWindow.locator('body')
 }
 
 export async function openProjectContextManager(
