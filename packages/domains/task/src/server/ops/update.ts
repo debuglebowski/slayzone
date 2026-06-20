@@ -1,6 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'
 
@@ -10,23 +9,15 @@ export async function updateTaskOp(
   deps: OpDeps
 ): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
-  // `updateTask` is a conditional read-modify-write that runs side effects via
-  // runtime adapters, so it can't live inside a worker named-txn. Read the prior
-  // row, apply the update, then record the diff-derived activity events atomically
-  // through the `task:record-events` named transaction (keeps `recordActivityEvents`
-  // running synchronously inside the worker).
+  // `updateTask` commits its field UPDATE + the diff-derived activity events
+  // atomically (worker `task:update` txn) — a failed event insert rolls back the
+  // field write. We still read the prior row here for the post-mutation
+  // `task:updated` event's `oldStatus`.
   const previousRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
     data.id
   ])
   const previousTask = parseTask(previousRow)
   const nextTask = await updateTask(db, data)
-
-  if (previousTask && nextTask) {
-    const events = buildTaskUpdatedEvents(previousTask, nextTask)
-    if (events.length > 0) {
-      await db.namedTxn('task:record-events', { events })
-    }
-  }
 
   const result = { previousTask, nextTask }
 

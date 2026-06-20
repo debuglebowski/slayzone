@@ -5,16 +5,6 @@
  * (domains/task/src/electron/history.test.ts): task/tag ops record activity
  * events, rollback-on-history-insert-failure, and cursor pagination.
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
- *
- * KNOWN REGRESSION — one assertion from the legacy test is intentionally NOT
- * ported: "task UPDATE rolls back when the history insert fails". updateTask is
- * no longer atomic with its activity-event write (the field UPDATE commits
- * before the event insert runs, and updateTask interleaves non-DB side effects
- * like git worktree creation that cannot live inside a DB txn). The async-DB
- * (worker-thread) migration broke this; the legacy handler test that asserted it
- * has been failing-but-unrun (stale runner path). CREATE and TAG mutations are
- * still atomic with history (covered below). Atomic task-update+history is
- * tracked as a separate fix — do NOT assume update is transactional.
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -128,9 +118,23 @@ test('history: task create rolls back when history insert fails', async () => {
   expect(h.db.prepare('SELECT id FROM tasks WHERE title = ?').get('Rollback create')).toBeUndefined()
 })
 
-// NOTE: legacy "task update rolls back when history insert fails" intentionally
-// NOT ported — see the KNOWN REGRESSION note in the file header. updateTask is no
-// longer atomic with its activity-event write.
+test('history: task update rolls back when history insert fails', async () => {
+  const t = await createTask('Rollback update')
+  expect(
+    await didThrow(() =>
+      withFailingActivityEventInsert(() =>
+        task.update({ id: t.id, title: 'Changed title', status: 'in_progress' } as never)
+      )
+    )
+  ).toBe(true)
+  const row = h.db.prepare('SELECT title, status FROM tasks WHERE id = ?').get(t.id) as {
+    title: string
+    status: string
+  }
+  expect(row.title).toBe('Rollback update')
+  expect(row.status).toBe(t.status)
+  expect(listTaskEvents(t.id).map((e) => e.kind)).toEqual(['task.created'])
+})
 
 test('history: tag change rolls back when history insert fails', async () => {
   const t = await createTask('Rollback tags')

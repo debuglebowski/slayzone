@@ -2,6 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
 import { recordConversation } from './task-conversations.js'
+import { buildTaskUpdatedEvents } from '../history.js'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import {
   getDefaultStatus,
@@ -971,7 +972,37 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   fields.push("updated_at = datetime('now')")
   values.push(data.id)
 
-  await db.run(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, values)
+  // Field UPDATE + diff-derived activity events commit ATOMICALLY via the worker
+  // `task:update` txn (same primitive restore/unarchive use). The "after" Task is
+  // projected from the prior row + the exact values this UPDATE writes — no
+  // read-after-write diff needed — so a failed activity-event insert rolls back
+  // the field write too, keeping task mutations consistent with their audit log.
+  // Mirrors the conditions/values of the field pushes above for the columns
+  // buildTaskUpdatedEvents diffs (title/description/status/assignee/priority/due).
+  const beforeRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
+    data.id
+  ])
+  const beforeTask = parseTask(beforeRow)
+  const eventOverrides: Record<string, unknown> = {}
+  if (data.title !== undefined) eventOverrides.title = data.title
+  if (data.description !== undefined) {
+    eventOverrides.description = data.description
+    eventOverrides.description_format = 'markdown'
+  }
+  if (data.status !== undefined || normalizedStatusForWrite !== undefined)
+    eventOverrides.status = normalizedStatusForWrite ?? data.status
+  if (data.assignee !== undefined) eventOverrides.assignee = data.assignee
+  if (data.priority !== undefined) eventOverrides.priority = data.priority
+  if (data.dueDate !== undefined) eventOverrides.due_date = data.dueDate
+  const afterTask = beforeRow ? parseTask({ ...beforeRow, ...eventOverrides }) : null
+  const updateEvents =
+    beforeTask && afterTask ? buildTaskUpdatedEvents(beforeTask, afterTask) : []
+
+  await db.namedTxn('task:update', {
+    sql: `UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`,
+    params: values,
+    events: updateEvents
+  })
 
   // Funnel: every conversation-id mutation from updateTask flows into the
   // append-only ledger so the renderer's currentConversationByMode reflects
