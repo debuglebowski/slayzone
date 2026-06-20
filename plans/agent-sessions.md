@@ -186,6 +186,52 @@ in-memory `sessionId→taskId` map + boot rehydration; replace all
 `split(':')[0]` sites (main + renderer). Riskiest slice; isolate it. Heavy e2e
 on resume / reset / multi-tab / multi-mode.
 
+### Slice 3 — detailed design (post-investigation)
+
+**Identity.** Runtime PTY key = `agent_sessions.id` (opaque uuid). Never encodes
+taskId/tabId. STABLE for the session's whole life → pool assignment is just
+`UPDATE agent_sessions SET task_id=…` + an in-mem map update; the live process
+is never re-keyed. (Re-keying — what keeping `taskId:tabId` would force on every
+assignment — is the hack we avoid.)
+
+**Schema (v148).** `agent_sessions` gains nullable `tab_id` (which pane). With
+`task_id` already present: pooled = both null. "Current sessionId for tab T" =
+latest live `agent_sessions WHERE tab_id=T` after any reset. `terminal_tabs`
+structure unchanged; the `taskTerminals.list` query returns each tab's current
+sessionId (subquery/JOIN) so the renderer stops *constructing* the id and starts
+*reading* it.
+
+**`sessionId` is two different uses — only the encoder breaks:**
+- *Opaque key* (sessions map, dataListeners, event routing, store `byId`,
+  PtyContext subs, `claimSession`): already format-agnostic. No change.
+- *taskId/tabId encoder* (~40 `split(':')`): rewire to a lookup.
+
+**Main side.** `sessionTaskMap`/`sessionTabMap` (Map<sessionId,…>) populated at
+`createPty` (taskId/tabId are explicit there) + rehydrated on boot from
+`agent_sessions`. `taskIdFromSessionId`/`resolveTabRowId`/`isMainTabSession`
+read the map, FALLBACK to `split(':')` for legacy ids (dual-accept during
+transition; in-memory runtime state dies on restart anyway, so legacy
+`taskId:tabId` keys age out). `attention.ts:26`, `pty-store.ts:311` (warm-pool
+project lookup), task-terminals enricher: take taskId explicitly / via map.
+
+**Renderer.** `getSessionId(tabId)` returns the tab's current sessionId (from the
+tabs query) instead of `${taskId}:${tabId}`. The two fragile selectors —
+`useActiveTaskIds` + `useTaskTerminalState(taskId)` — use a `sessionId→taskId`
+reverse map derived from the tabs list (each tab carries taskId + sessionId).
+Parse sites: `TerminalStatusPopover` uses the `pty.taskId` field already on the
+list payload; `TerminalContainer:363` uses a `data-task-id` attr / tab lookup,
+not `substring`.
+
+**RESOLVED sub-decisions (objectable):**
+1. *Who mints `agent_sessions.id`* → **renderer mints a client uuid** per tab/pane
+   and passes it to `pty.create` (it already mints tabId uuids). Keeps create
+   fire-and-forget; no "await the id" protocol change. (Alt: main mints +
+   `pty.create` returns it — more authoritative, more invasive.)
+2. *Main-tab `terminal_tabs.id === taskId` convention* → **keep it** (harmless now
+   that sessionId isn't derived from it; less churn).
+3. *Transition* → **dual-accept** (map + split fallback), legacy keys age out on
+   restart. No destructive runtime migration.
+
 **Slice 4 — pool.** `AgentPoolManager`, assign-on-create for temp tasks, boot
 reaper, refill/cap/TTL. New feature on the now-decoupled model.
 > ⚠️ A warm-process pool ALREADY EXISTS: `warm-process-manager.ts` (+ tests
