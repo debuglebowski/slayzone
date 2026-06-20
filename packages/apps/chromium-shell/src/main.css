@@ -17,6 +17,7 @@
 /* Scan the packages whose className strings render in the Home + Task Detail views. */
 @source "../../../shared/ui/src";
 @source "../../../shared/editor/src";
+@source "../../../domains/app-shell/src";
 @source "../../../domains/tasks/src";
 @source "../../../domains/task/src";
 @source "../../../domains/task-terminals/src";
@@ -29,7 +30,13 @@
 @source "../../../domains/tags/src";
 @source "../../../domains/settings/src";
 @source "../../../domains/sidebar/src";
+@source "../../../domains/tabs/src";
 @source "../../../domains/agent-panels/src";
+@source "../../../domains/ai-config/src";
+@source "../../../domains/usage-analytics/src";
+@source "../../../domains/leaderboard/src";
+@source "../../../domains/search/src";
+@source "../../../domains/onboarding/src";
 
 @custom-variant dark (&:is(.dark *));
 

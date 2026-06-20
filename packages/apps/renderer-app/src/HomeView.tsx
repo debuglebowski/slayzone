@@ -18,36 +18,53 @@
 // the Electron app's SecondaryTaskWindow, which omits the header actions). So
 // keeping the toggles + panels confined to HomeView IS the gate; never wire
 // them into any task-detail / secondary surface.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { SidebarProvider } from '@slayzone/ui'
-import { useTasksData } from '@slayzone/tasks/client'
-import { useDialogStore, useTabStore } from '@slayzone/settings'
-import { HomeContainer } from '@slayzone/home/client'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  SidebarProvider,
+  useGuardedHotkeys,
+  useShortcutStore,
+  useShortcutDisplay,
+  shortcutDefinitions,
+  KeyRecorder,
+  useUndo,
+  cn
+} from '@slayzone/ui'
+import { useExplodeMode, AppHeaderActions } from '@slayzone/app-shell/client'
+import { useTasksData, useUndoableTaskActions } from '@slayzone/tasks/client'
+import {
+  useDialogStore,
+  useTabStore,
+  loadTabStoreState,
+  type SearchFileContext
+} from '@slayzone/settings'
+import { TabBar } from '@slayzone/tabs'
+import { HomeContainer, type HomeContainerHandle } from '@slayzone/home/client'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import { useTRPCClient } from '@slayzone/transport/client'
+import { TerminalStatusButton } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
+import { getDefaultStatus } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import {
   useGlobalAgentPanelState,
-  GlobalAgentPanelButton,
   GlobalAgentSidePanel,
   GLOBAL_AGENT_PANEL_MIN_WIDTH,
   GLOBAL_AGENT_PANEL_MAX_WIDTH,
   DEFAULT_GLOBAL_AGENT_PANEL_WIDTH,
   useAgentStatusState,
-  AgentStatusButton,
   AgentStatusSidePanel,
   AGENT_STATUS_PANEL_MIN_WIDTH,
   AGENT_STATUS_PANEL_MAX_WIDTH,
   DEFAULT_AGENT_STATUS_PANEL_WIDTH,
   useIdleTasks
 } from '@slayzone/agent-panels'
+import { AppSidebar } from '@slayzone/sidebar'
 import {
-  AppSidebar,
-  type OnboardingChecklistState,
-  type KeyRecorderComponent
-} from '@slayzone/sidebar'
+  useOnboardingChecklist,
+  COMMUNITY_DISCORD_URL,
+  COMMUNITY_X_URL
+} from '@slayzone/onboarding'
 import { TaskDetailView } from './TaskDetailView'
 import { OverlayViewRouter } from './OverlayViewRouter'
 import { AppDialogs } from './AppDialogs'
@@ -60,56 +77,284 @@ function Centered({ children }: { children: React.ReactNode }): React.JSX.Elemen
   )
 }
 
-// Placeholder tab-bar chrome. The fork is single-view (Home) until the task
-// detail view lands — at which point this is replaced by the real tab system
-// (useTabStore). For now it just frames the Home tab so the chrome is in place.
-// The agent-panel toggles live on the right edge of this bar.
-function TabBarPlaceholder({ actions }: { actions?: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-3 py-1.5">
-      <div className="rounded-md bg-tab-active px-3 py-1 text-xs font-medium text-foreground">
-        Home
-      </div>
-      <span className="text-[11px] text-muted-foreground">Task tabs arrive with the task view</span>
-      {actions && <div className="ml-auto flex items-center gap-1">{actions}</div>}
-    </div>
-  )
-}
-
 // Stable defaults for the app-chrome props the Electron app supplies but the
-// fork doesn't have yet (no native window chrome, convex, feedback, onboarding,
-// or shortcut recorder in the shell). Module-level → referentially stable.
+// fork doesn't have yet (no native window chrome / convex / feedback in the
+// shell). Module-level → referentially stable.
 const EMPTY_SESSION_IDS = new Set<string>()
 const NOOP = (): void => {}
-const NOOP_KEY_RECORDER: KeyRecorderComponent = () => null
-const FORK_CHECKLIST: OnboardingChecklistState = {
-  steps: [],
-  dismissed: true,
-  remainingCount: 0,
-  hasRemaining: false,
-  onDismiss: NOOP
-}
 
 export function HomeView(): React.JSX.Element {
-  const data = useTasksData()
-  const { projects, boardStatus, boardError } = data
+  const rawData = useTasksData()
   const trpcClient = useTRPCClient()
 
-  const [picked, setPicked] = useState('')
-  const selectedProjectId = picked || projects[0]?.id || ''
+  // Wrap task mutations with undo (toast + undo/redo) and merge them over the
+  // raw board data, so EVERY consumer — sidebar context-menu edits, the board,
+  // task-detail archive/delete, the delete-task dialog — gets the same undo
+  // affordance the Electron app provides (App.tsx useUndoableTaskActions). The
+  // underlying useTasksData instance stays single; only the wrapped action fns
+  // are swapped in. (Temp-task auto-cleanup in closeTab calls rawData.deleteTask
+  // directly to avoid a spurious "undo" toast for scratch terminals.)
+  const { push: pushUndo, undo } = useUndo()
+  const {
+    contextMenuUpdate,
+    archiveTask,
+    archiveTasks,
+    deleteTask,
+    bulkContextMenuUpdate,
+    bulkDelete
+  } = useUndoableTaskActions(
+    {
+      tasks: rawData.tasks,
+      updateTask: rawData.updateTask,
+      setTasks: rawData.setTasks,
+      archiveTask: rawData.archiveTask,
+      archiveTasks: rawData.archiveTasks,
+      deleteTask: rawData.deleteTask,
+      bulkDelete: rawData.bulkDelete,
+      contextMenuUpdate: rawData.contextMenuUpdate,
+      bulkContextMenuUpdate: rawData.bulkContextMenuUpdate
+    },
+    { push: pushUndo, undo }
+  )
+  const data = useMemo(
+    () => ({
+      ...rawData,
+      contextMenuUpdate,
+      archiveTask,
+      archiveTasks,
+      deleteTask,
+      bulkContextMenuUpdate,
+      bulkDelete
+    }),
+    [rawData, contextMenuUpdate, archiveTask, archiveTasks, deleteTask, bulkContextMenuUpdate, bulkDelete]
+  )
+  const { projects, boardStatus, boardError } = data
 
-  // Fork selected-task router. The real tab system isn't ported yet (the tab bar
-  // is still a placeholder), so a task open simply swaps the content area to the
-  // canonical Task Detail page and back. Prefetch warms the Suspense cache so the
-  // page paints without the cold use() scheduling delay (mirrors the Electron
-  // main.tsx prefetch of open tabs).
-  const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  // Canonical tab store (the exact store the Electron app uses). Primitive
+  // selectors keep re-renders scoped; actions are read off getState() (stable
+  // zustand refs). The home tab is always tabs[0]; task tabs follow.
+  const tabs = useTabStore((s) => s.tabs)
+  const activeTabIndex = useTabStore((s) => s.activeTabIndex)
+  const deferredActiveTabIndex = useDeferredValue(activeTabIndex)
+  const activeView = useTabStore((s) => s.activeView)
+  const projectScopedTabs = useTabStore((s) => s.projectScopedTabs)
+  const storeProjectId = useTabStore((s) => s.selectedProjectId)
+  const selectedProjectId = storeProjectId || projects[0]?.id || ''
+
+  // ── Special view modes (zen + explode) — mirrors the Electron App.tsx shell ──
+  // Zen is a plain boolean that collapses the sidebar (AppSidebar `zenMode` prop)
+  // and hides the header chrome. Explode tiles the open task tabs into a grid;
+  // useExplodeMode (shared @slayzone/app-shell) owns the toggle, focused cell,
+  // grid ref + responsive width.
+  const [zenMode, setZenMode] = useState(false)
+  const openTaskIds = useMemo(
+    () => tabs.filter((t) => t.type === 'task').map((t) => (t as { taskId: string }).taskId),
+    [tabs]
+  )
+  const { explodeMode, setExplodeMode, focusedExplodeTaskId, explodeGridRef, explodeGridWidth } =
+    useExplodeMode(openTaskIds, tabs, activeTabIndex)
+  const visibleTaskCount = openTaskIds.length
+
+  // Expose the tab + dialog stores for e2e / CDP introspection (mirrors the
+  // Electron App.tsx exposure). Idempotent guards → safe to run each render.
+  if (typeof window !== 'undefined') {
+    const w = window as unknown as Record<string, unknown>
+    if (!w.__slayzone_tabStore) w.__slayzone_tabStore = useTabStore
+    if (!w.__slayzone_dialogStore) w.__slayzone_dialogStore = useDialogStore
+  }
+
+  // Keep the store's task/project lookup fresh — openTask reads it to build a
+  // tab's title and worktree-grouped insert position.
+  useEffect(() => {
+    useTabStore.setState({ _taskLookup: { tasks: data.tasks, projects: data.projects } })
+  }, [data.tasks, data.projects])
+
+  // Hydrate persisted tabs/view state once on boot (mirrors the Electron
+  // renderer main.tsx loadTabStoreState() call). Flips the store's isLoaded gate
+  // so subsequent tab changes persist back to settings.
+  useEffect(() => {
+    void loadTabStoreState()
+  }, [])
+
+  // Warm the Suspense cache for every open task tab so switching to / restoring a
+  // tab paints without the cold use() scheduling delay (mirrors the Electron tab
+  // lifecycle's prefetch of open tabs).
+  useEffect(() => {
+    for (const tab of tabs) {
+      if (tab.type === 'task') taskDetailCache.prefetch('taskDetail', tab.taskId)
+    }
+  }, [tabs])
+
+  // Open or focus a task tab (sidebar / board / sibling-link / agent-panel
+  // clicks). Prefetch first so the page is warm by the time the tab activates.
   const openTask = useCallback((id: string) => {
     if (!id) return
     taskDetailCache.prefetch('taskDetail', id)
-    setOpenTaskId(id)
+    useTabStore.getState().openTask(id)
   }, [])
-  const closeTask = useCallback(() => setOpenTaskId(null), [])
+
+  // Expose openTask for e2e / CDP + domain UI that calls it (mirrors the Electron
+  // App.tsx window.__slayzone_openTask hook).
+  useEffect(() => {
+    ;(window as unknown as Record<string, unknown>).__slayzone_openTask = openTask
+  }, [openTask])
+
+  // Close a tab by index. Temporary tasks have no persistent home, so closing
+  // one kills its PTY + deletes the task (mirrors the Electron App.tsx wrapper);
+  // the live board subscription + optimistic deleteTask drop it from the board.
+  const closeTab = useCallback(
+    async (index: number): Promise<void> => {
+      const store = useTabStore.getState()
+      const tab = store.tabs[index]
+      if (tab?.type === 'task') {
+        const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
+        if (task?.is_temporary) {
+          void trpcClient.pty.kill.mutate({ sessionId: `${tab.taskId}:${tab.taskId}` })
+          // Raw delete (not the undoable wrapper) — a scratch terminal closing
+          // shouldn't surface an "undo delete" toast.
+          void rawData.deleteTask(tab.taskId)
+        }
+      }
+      store.closeTab(index)
+    },
+    [rawData, trpcClient]
+  )
+
+  const closeTabByTaskId = useCallback(
+    (taskId: string): void => {
+      const index = useTabStore
+        .getState()
+        .tabs.findIndex((t) => t.type === 'task' && t.taskId === taskId)
+      if (index >= 0) void closeTab(index)
+    },
+    [closeTab]
+  )
+
+  // Scratch terminal — create a temporary `Terminal N` task and open it (mirrors
+  // the Electron App.tsx handleCreateScratchTerminal). Temp tasks auto-delete on
+  // close via closeTab above. No project-duration lock in the fork.
+  const handleCreateScratchTerminal = useCallback(async (): Promise<void> => {
+    if (!selectedProjectId) return
+    const project = projects.find((p) => p.id === selectedProjectId)
+    const existing = data.tasks
+      .filter((t) => t.project_id === selectedProjectId)
+      .map((t) => t.title.match(/^Terminal (\d+)$/))
+      .filter(Boolean)
+      .map((m) => parseInt(m![1], 10))
+    const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
+    const task = await trpcClient.task.create.mutate({
+      projectId: selectedProjectId,
+      title: `Terminal ${next}`,
+      status: getDefaultStatus(project?.columns_config),
+      isTemporary: true
+    })
+    data.setTasks((prev) => [task, ...prev])
+    const lookup = useTabStore.getState()._taskLookup
+    useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
+    openTask(task.id)
+  }, [selectedProjectId, projects, data, trpcClient, openTask])
+
+  // ── Command palette (Cmd+K) ───────────────────────────────────────────────
+  // Imperative handle into the Home file-editor panel so palette file results
+  // open in the Home editor (mirrors the canonical buildHomeFileContext path).
+  const homeEditorHandle = useRef<HomeContainerHandle>(null)
+
+  // Resolve the search hotkey from user overrides (defaults to mod+k). load()
+  // hydrates overrides from settings; useGuardedHotkeys auto-skips when a modal
+  // is already open and maps `mod` → meta/ctrl per platform.
+  const shortcutOverrides = useShortcutStore((s) => s.overrides)
+  useEffect(() => {
+    void useShortcutStore.getState().load()
+  }, [])
+  const searchKeys =
+    shortcutOverrides['search'] ||
+    shortcutDefinitions.find((d) => d.id === 'search')?.defaultKeys ||
+    'mod+k'
+
+  // The palette's file results open in the Home editor: switch to the Home tab so
+  // the file is visible, then drive the editor through HomeContainer's handle.
+  const buildHomeFileContext = useCallback((): SearchFileContext | undefined => {
+    const project = projects.find((p) => p.id === selectedProjectId)
+    if (!project?.path) return undefined
+    return {
+      projectPath: project.path,
+      openFile: (filePath) => {
+        const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home')
+        if (hi >= 0) useTabStore.getState().setActiveTabIndex(hi)
+        homeEditorHandle.current?.openFile(filePath)
+      }
+    }
+  }, [projects, selectedProjectId])
+
+  useGuardedHotkeys(
+    searchKeys,
+    (e) => {
+      e.preventDefault()
+      useDialogStore.getState().openSearch({ fileContext: buildHomeFileContext() })
+    },
+    { enableOnFormTags: true }
+  )
+
+  // Resolve a shortcut id → key string (user override else default). Used for the
+  // zen / explode / exit bindings below (mirrors the Electron useAppShortcuts getKeys).
+  const getKeys = useCallback(
+    (id: string): string =>
+      shortcutOverrides[id] || shortcutDefinitions.find((d) => d.id === id)?.defaultKeys || '',
+    [shortcutOverrides]
+  )
+
+  // Zen / explode / exit — mirrors useAppShortcuts. Explode gated on ≥2 task tabs.
+  useGuardedHotkeys(
+    getKeys('zen-mode'),
+    (e) => {
+      e.preventDefault()
+      setZenMode((prev) => !prev)
+    },
+    { enableOnFormTags: true }
+  )
+  useGuardedHotkeys(
+    getKeys('explode-mode'),
+    (e) => {
+      e.preventDefault()
+      if (openTaskIds.length >= 2) setExplodeMode((prev) => !prev)
+    },
+    { enableOnFormTags: true }
+  )
+  useGuardedHotkeys(
+    getKeys('exit-zen-explode'),
+    () => {
+      if (explodeMode) setExplodeMode(false)
+      else if (zenMode) setZenMode(false)
+    },
+    { enableOnFormTags: true }
+  )
+
+  // Shortcut display strings for the header action tooltips.
+  const projectTabsShortcut = useShortcutDisplay('toggle-project-tabs')
+  const zenModeShortcut = useShortcutDisplay('zen-mode')
+  const explodeModeShortcut = useShortcutDisplay('explode-mode')
+  const newTempTaskShortcut = useShortcutDisplay('new-temp-task')
+  const agentStatusPanelShortcut = useShortcutDisplay('agent-status-panel')
+  const globalAgentPanelShortcut = useShortcutDisplay('global-agent-panel')
+
+  // ── Onboarding checklist (sidebar footer popover) ─────────────────────────
+  // Real checklist hook, extracted to @slayzone/onboarding and shared with the
+  // Electron renderer (no reimplementation). Setup-guide / take-tour flip store
+  // dialogs; community + X open through the sidecar's app.shell.openExternal;
+  // leaderboard flips the overlay view. startTour / markSetupGuideCompleted feed
+  // AppDialogs' onboarding close-flow.
+  const {
+    checklist: onboardingChecklist,
+    startTour,
+    markSetupGuideCompleted
+  } = useOnboardingChecklist({
+    projectCount: projects.length,
+    hasCreatedTask: data.tasks.some((t) => !t.is_temporary),
+    onCheckLeaderboard: () => useTabStore.getState().setActiveView('leaderboard'),
+    onJoinCommunity: () =>
+      void trpcClient.app.shell.openExternal.mutate({ url: COMMUNITY_DISCORD_URL }),
+    onFollowOnX: () => void trpcClient.app.shell.openExternal.mutate({ url: COMMUNITY_X_URL })
+  })
 
   // ── Agent panels (primary-window only — see file header) ──────────────────
   const [globalAgentPanelState, setGlobalAgentPanelState] = useGlobalAgentPanelState()
@@ -184,8 +429,8 @@ export function HomeView(): React.JSX.Element {
         : allIdleTasks,
     [allIdleTasks, agentStatusState.filterCurrentProject, selectedProjectId]
   )
-  const attentionCount = useMemo(
-    () => data.tasks.filter((t) => t.needs_attention).length,
+  const attentionTaskIds = useMemo(
+    () => new Set(data.tasks.filter((t) => t.needs_attention).map((t) => t.id)),
     [data.tasks]
   )
 
@@ -216,19 +461,40 @@ export function HomeView(): React.JSX.Element {
   const globalAgentVisible =
     agentSessionId !== null && globalAgentMountedRef.current && globalAgentPanelState.isOpen
 
+  // Header action bar — fork-only TerminalStatusButton + the shared
+  // AppHeaderActions (project-tabs / zen / explode / scratch terminal / agent
+  // status / global agent / update). All confined to HomeView (the primary
+  // surface) → the agent-panel toggles never leak into a secondary window. The
+  // fork has no auto-updater backend, so UpdateButton gets null version → hidden.
   const headerActions = (
     <>
-      <AgentStatusButton
-        active={agentStatusState.isLocked}
-        count={attentionCount}
-        onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })}
-        size="sm"
-      />
-      <GlobalAgentPanelButton
-        active={globalAgentPanelState.isOpen}
-        disabled={!selectedProjectId}
-        onClick={() => setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })}
-        size="sm"
+      {/* Active-terminals trigger — auto-hides at 0 running PTYs; opens the
+          store-driven TerminalStatusDialog rendered in AppDialogs. */}
+      <TerminalStatusButton side="bottom" />
+      <AppHeaderActions
+        compact
+        projectScopedTabs={projectScopedTabs}
+        projectTabsShortcut={projectTabsShortcut}
+        zenMode={zenMode}
+        setZenMode={setZenMode}
+        zenModeShortcut={zenModeShortcut}
+        explodeMode={explodeMode}
+        setExplodeMode={setExplodeMode}
+        explodeModeShortcut={explodeModeShortcut}
+        openTaskIds={openTaskIds}
+        selectedProjectId={selectedProjectId}
+        durationLocked={false}
+        handleCreateScratchTerminal={handleCreateScratchTerminal}
+        newTempTaskShortcut={newTempTaskShortcut}
+        agentStatusState={agentStatusState}
+        setAgentStatusState={setAgentStatusState}
+        attentionTaskIds={attentionTaskIds}
+        agentStatusPanelShortcut={agentStatusPanelShortcut}
+        globalAgentPanelState={globalAgentPanelState}
+        setGlobalAgentPanelState={setGlobalAgentPanelState}
+        globalAgentPanelShortcut={globalAgentPanelShortcut}
+        updateVersion={null}
+        updateDownloadPercent={null}
       />
     </>
   )
@@ -240,21 +506,23 @@ export function HomeView(): React.JSX.Element {
         projectGroups={data.projectGroups}
         tasks={data.tasks}
         selectedProjectId={selectedProjectId}
-        onSelectProject={(id) => setPicked(id)}
+        onSelectProject={(id) => useTabStore.getState().selectProject(id)}
         // Store-driven orchestration: sidebar buttons flip useDialogStore /
         // useTabStore state; AppDialogs + OverlayViewRouter (below) render the
-        // target. Settings/project-settings dialogs aren't ported into the fork
-        // yet, so openSettings/openProjectSettings flip state + no-op gracefully
-        // until their leaf dialog registers in AppDialogs.
+        // target. Settings + project (create/settings/delete) + group dialogs are
+        // registered in AppDialogs; the sidebar's create/delete/group-settings
+        // buttons flip the store directly (ProjectsRailView/TreeView), so only
+        // onProjectSettings is routed through here.
         onProjectSettings={(project) => useDialogStore.getState().openProjectSettings(project)}
         onSettings={() => useDialogStore.getState().openSettings()}
         onUsageAnalytics={() => useTabStore.getState().setActiveView('usage-analytics')}
         onLeaderboard={() => useTabStore.getState().setActiveView('leaderboard')}
-        onboardingChecklist={FORK_CHECKLIST}
+        onboardingChecklist={onboardingChecklist}
+        zenMode={zenMode}
         onSetWindowButtonVisibility={NOOP}
         convexConfigured={false}
         feedbackSlot={null}
-        keyRecorder={NOOP_KEY_RECORDER}
+        keyRecorder={KeyRecorder}
         sessionTaskIds={EMPTY_SESSION_IDS}
         onReorderProjects={data.reorderProjects}
         onCreateProjectGroup={data.createProjectGroup}
@@ -276,26 +544,106 @@ export function HomeView(): React.JSX.Element {
         onPinnedReorder={data.reorderPinnedTasks}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <TabBarPlaceholder actions={headerActions} />
+        <TabBar
+          tabs={tabs}
+          activeIndex={activeTabIndex}
+          activeView={activeView}
+          onTabClick={(i) => useTabStore.getState().setActiveTabIndex(i)}
+          onTabClose={(i) => void closeTab(i)}
+          onTabReorder={(from, to) => useTabStore.getState().reorderTabs(from, to)}
+          onTabRename={async (taskId, title) => {
+            const updated = await trpcClient.task.update.mutate({ id: taskId, title })
+            data.updateTask(updated)
+          }}
+          hideTabs={explodeMode}
+          rightContent={headerActions}
+        />
         {/* `relative` so OverlayViewRouter's `absolute inset-0` plane covers the
-            content (which stays mounted underneath, preserving its state). */}
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          {openTaskId ? (
-            <TaskDetailView
-              data={data}
-              taskId={openTaskId}
-              onClose={closeTask}
-              onNavigateToTask={openTask}
-            />
-          ) : (
-            <HomeContainer
-              data={data}
-              selectedProjectId={selectedProjectId}
-              isActive
-              onTaskClick={(task) => openTask(task.id)}
-            />
+            content. Every tab stays mounted; inactive tabs hide via `invisible` +
+            `inert` so terminal/chat sessions survive tab switches (matches
+            canonical App.tsx). In explode mode this same container becomes a CSS
+            grid that tiles the open task tabs (mirrors canonical App.tsx). */}
+        <div
+          ref={explodeGridRef}
+          className={cn(
+            'relative min-h-0 flex-1 overflow-hidden',
+            explodeMode && 'grid gap-1 p-1'
           )}
-          <OverlayViewRouter />
+          style={
+            explodeMode
+              ? (() => {
+                  const MIN_CELL_W = 480
+                  const widthCols =
+                    explodeGridWidth > 0
+                      ? Math.max(1, Math.floor(explodeGridWidth / MIN_CELL_W))
+                      : Math.ceil(Math.sqrt(visibleTaskCount))
+                  const cols = Math.max(1, Math.min(widthCols, visibleTaskCount))
+                  const rows = Math.ceil(visibleTaskCount / cols)
+                  return {
+                    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                    gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`
+                  }
+                })()
+              : undefined
+          }
+        >
+          {tabs.map((tab, i) => {
+            const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
+            // Explode mode tiles only task tabs; the home tab is hidden.
+            if (explodeMode && tab.type !== 'task') return null
+            const isExplodeFocused =
+              explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
+            return (
+              <div
+                key={tab.type === 'home' ? 'home' : tab.taskId}
+                data-explode-task-id={
+                  explodeMode && tab.type === 'task' ? tab.taskId : undefined
+                }
+                className={
+                  explodeMode
+                    ? cn(
+                        'relative min-h-0 overflow-hidden rounded border',
+                        isExplodeFocused
+                          ? 'border-primary/60 ring-2 ring-primary/40'
+                          : 'border-border'
+                      )
+                    : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
+                }
+                inert={!explodeMode && !isViewActive ? true : undefined}
+              >
+                {tab.type === 'home' ? (
+                  <HomeContainer
+                    data={data}
+                    selectedProjectId={selectedProjectId}
+                    isActive={isViewActive}
+                    onTaskClick={(task) => openTask(task.id)}
+                    editorHandleRef={homeEditorHandle}
+                  />
+                ) : (
+                  <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
+                    <TaskDetailView
+                      data={data}
+                      taskId={tab.taskId}
+                      isActive={explodeMode || isViewActive}
+                      hasShortcutFocus={
+                        explodeMode ? focusedExplodeTaskId === tab.taskId : isViewActive
+                      }
+                      compact={explodeMode}
+                      zenMode={zenMode}
+                      onClose={() => closeTabByTaskId(tab.taskId)}
+                      onNavigateToTask={openTask}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          <OverlayViewRouter
+            selectedProjectId={selectedProjectId}
+            projectName={currentProjectName}
+            projectPath={currentProjectPath}
+            onTaskClick={openTask}
+          />
         </div>
       </div>
 
@@ -380,8 +728,17 @@ export function HomeView(): React.JSX.Element {
         </>
       )}
 
-      {/* Store-driven dialog registry + toast surface (mounted once at root). */}
-      <AppDialogs />
+      {/* Store-driven dialog registry + toast surface (mounted once at root).
+          Project CRUD + group dialogs patch the lifted board (`data`) + selection
+          so the sidebar updates without forking a second useTasksData instance. */}
+      <AppDialogs
+        data={data}
+        selectedProjectId={selectedProjectId}
+        onSelectProject={(id) => useTabStore.getState().selectProject(id)}
+        onOpenTask={openTask}
+        startTour={startTour}
+        markSetupGuideCompleted={markSetupGuideCompleted}
+      />
     </SidebarProvider>
   )
 }
