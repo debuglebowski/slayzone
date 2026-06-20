@@ -100,8 +100,7 @@ async function upsertLibrarySkill(
   await closeTopDialog(mainWindow)
 }
 
-test.describe
-  .skip('Context manager sync flow', () => {
+test.describe('Context manager sync flow', () => {
     let projectId: string
 
     test.beforeAll(async ({ mainWindow }) => {
