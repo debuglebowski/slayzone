@@ -3033,6 +3033,30 @@ export const migrations: Migration[] = [
       }
     }
   }
+  ,
+  {
+    version: 146,
+    up: (db) => {
+      // User prompts sent to a task's agent, captured from the agent's
+      // UserPromptSubmit hook (clean exact text — unlike raw PTY stdin, which
+      // is deliberately dropped because edit keys / pastes / ↑-history can't be
+      // reconstructed). Powers the agent-terminal "messages" sidebar. Grouped
+      // by task + agent mode; the sidebar shows the main agent by filtering on
+      // its current mode. CASCADE so deleting a task clears its prompt history.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_prompts (
+          id             TEXT PRIMARY KEY,
+          task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          agent_id       TEXT NOT NULL,
+          cli_session_id TEXT,
+          text           TEXT NOT NULL,
+          created_at     INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_prompts_task
+          ON agent_prompts(task_id, agent_id, created_at ASC);
+      `)
+    }
+  },
 ]
 
 export const LATEST_MIGRATION_VERSION = migrations[migrations.length - 1].version

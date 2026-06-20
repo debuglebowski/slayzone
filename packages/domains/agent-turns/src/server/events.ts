@@ -14,3 +14,15 @@ export type AgentTurnsEventMap = {
  * parallel until the renderer drops IPC (slice 5).
  */
 export const agentTurnsEvents = new TypedEmitter<AgentTurnsEventMap>()
+
+export type AgentPromptsEventMap = {
+  /** Emitted whenever a user prompt is captured; payload is the task id. */
+  'agent-prompts:changed': [taskId: string]
+}
+
+/**
+ * Domain event bus for captured user prompts. `capturePrompt` emits
+ * `agent-prompts:changed` here; the tRPC `agentPrompts.onChanged` subscription
+ * wraps it so each renderer refetches the affected task's prompt list.
+ */
+export const agentPromptsEvents = new TypedEmitter<AgentPromptsEventMap>()

@@ -28,3 +28,20 @@ export interface AgentTurnRange extends AgentTurn {
   prev_snapshot_sha: string | null
   task_title: string | null
 }
+
+/**
+ * One user prompt submitted to a task's agent, captured from the agent's
+ * `UserPromptSubmit` hook (clean exact text — unlike raw PTY stdin). Powers the
+ * agent-terminal "messages" sidebar. Grouped by `task_id` + `agent_id` (mode);
+ * the sidebar shows the task's MAIN agent by filtering on its current mode.
+ */
+export interface AgentPrompt {
+  id: string
+  task_id: string
+  /** Terminal mode the prompt was sent to (claude-code, codex, ...). */
+  agent_id: string
+  /** Upstream CLI session id from the hook payload, if present. */
+  cli_session_id: string | null
+  text: string
+  created_at: number
+}

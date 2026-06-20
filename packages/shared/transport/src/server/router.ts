@@ -2,6 +2,7 @@ import { router } from './trpc'
 import { appLevelRouter } from './routers/app'
 import { agentLifecycleRouter } from './routers/agent-lifecycle'
 import { aiConfigRouter } from './routers/ai-config'
+import { agentPromptsRouter } from './routers/agent-prompts'
 import { agentTurnsRouter } from './routers/agent-turns'
 import { automationsRouter } from './routers/automations'
 import { chatRouter } from './routers/chat'
@@ -31,6 +32,7 @@ export const appRouter = router({
   app: appLevelRouter,
   agentLifecycle: agentLifecycleRouter,
   aiConfig: aiConfigRouter,
+  agentPrompts: agentPromptsRouter,
   agentTurns: agentTurnsRouter,
   automations: automationsRouter,
   artifacts: artifactsRouter,

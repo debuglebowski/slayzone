@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { usePty } from '@slayzone/terminal'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import { isPromptCaptureMode, type TerminalMode } from '@slayzone/terminal/shared'
 import {
   matchesShortcut,
   useShortcutStore,
@@ -22,6 +22,11 @@ import { useTaskTerminals } from './useTaskTerminals'
 import { TerminalTabBar, type TerminalTabBarHandle } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'
 import { createFocusHandoff, type FocusHandoff } from './focus-handoff'
+import {
+  AgentPromptsSidebar,
+  AgentPromptsToggleButton,
+  usePromptsSidebarOpen
+} from './agent-prompts/AgentPromptsSidebar'
 
 export interface TerminalContainerHandle {
   closeActiveGroup: () => Promise<boolean>
@@ -157,6 +162,14 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     // Get active group
     const activeGroup = groups.find((g) => g.id === activeGroupId)
     const mainGroupId = groups.find((group) => group.tabs.some((tab) => tab.isMain))?.id ?? null
+
+    // Agent-prompts sidebar: lists user messages sent to the MAIN agent. Only
+    // for terminal (non-chat) agents whose prompts we can capture cleanly, and
+    // only while the main group is active (it's main-agent contextual).
+    const mainMode = tabs.find((t) => t.isMain)?.mode
+    const canShowPrompts =
+      (activeGroup?.isMain ?? false) && !!mainMode && isPromptCaptureMode(mainMode)
+    const [promptsOpen, togglePrompts] = usePromptsSidebarOpen(taskId)
 
     // Notify parent when main tab active state changes
     useEffect(() => {
@@ -468,7 +481,16 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             onPaneClose={closeTab}
             onPaneMove={movePane}
             onGroupRename={renameTab}
-            rightContent={rightContent}
+            rightContent={
+              canShowPrompts ? (
+                <div className="flex items-center gap-2">
+                  <AgentPromptsToggleButton open={promptsOpen} onToggle={togglePrompts} />
+                  {rightContent}
+                </div>
+              ) : (
+                rightContent
+              )
+            }
             mainTabAccessories={mainTabAccessories}
             mainTabContextMenu={mainTabContextMenu}
           />
@@ -486,6 +508,9 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             {overlay}
           </div>
         </div>
+        {canShowPrompts && promptsOpen && mainMode && (
+          <AgentPromptsSidebar taskId={taskId} agentId={mainMode} />
+        )}
       </div>
     )
   }

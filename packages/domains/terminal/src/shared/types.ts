@@ -39,6 +39,22 @@ export function isChatSupported(mode: string): mode is ChatSupportedMode {
   return (CHAT_SUPPORTED_MODES as readonly string[]).includes(mode)
 }
 
+/**
+ * Terminal (PTY) agent modes whose user prompts CAN be captured cleanly — they
+ * emit a `UserPromptSubmit` hook carrying the prompt text (see
+ * `@slayzone/agent-turns/server` `capturePrompt`). Claude Code + Codex are
+ * authoritative; Gemini + OpenCode are best-effort (captured only if their hook
+ * payload carries the text). Antigravity (no per-turn UserPromptSubmit) and the
+ * hook-less agents (cursor-agent, qwen-code, copilot) are intentionally absent —
+ * the agent-terminal prompts sidebar hides its toggle for them. Chat modes are
+ * excluded (they record user messages through a separate path).
+ */
+export const PROMPT_CAPTURE_MODES = ['claude-code', 'codex', 'gemini', 'opencode'] as const
+export type PromptCaptureMode = (typeof PROMPT_CAPTURE_MODES)[number]
+export function isPromptCaptureMode(mode: string): mode is PromptCaptureMode {
+  return (PROMPT_CAPTURE_MODES as readonly string[]).includes(mode)
+}
+
 export interface TerminalModeInfo {
   id: string
   label: string

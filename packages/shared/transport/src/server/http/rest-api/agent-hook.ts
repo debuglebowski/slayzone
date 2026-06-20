@@ -5,6 +5,7 @@ import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone
 import { mapEventType } from '@slayzone/terminal/shared'
 import { isHookDrivenMode } from '@slayzone/terminal/server'
 import { recordConversation, findPendingSpawn } from '@slayzone/task/server'
+import { capturePrompt } from '@slayzone/agent-turns/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { RestApiDeps, TerminalStateBridge } from './types'
@@ -372,6 +373,23 @@ export function registerAgentHookRoute(
       timestamp: Date.now()
     }
     deps.agentLifecycle?.emit('event', event)
+
+    // Capture the user's prompt text (UserPromptSubmit) into agent_prompts for
+    // the agent-terminal "messages" sidebar. capturePrompt self-gates to
+    // capture-capable modes + the UserPromptSubmit event (once per turn → off
+    // the per-tool hot path) and is best-effort: fire-and-forget so a DB hiccup
+    // never blocks the hook ack.
+    if (parsed.data.taskId) {
+      void capturePrompt(deps.db, {
+        agentId: parsed.data.agentId,
+        hookEvent: parsed.data.hookEvent,
+        taskId: parsed.data.taskId,
+        sessionId: parsed.data.sessionId,
+        raw: parsed.data.raw
+      }).catch(() => {
+        /* best-effort — never block the hook */
+      })
+    }
 
     // PRIMARY resume-id capture — persist the CLI session id into
     // provider_config[agentId].conversationId for the capture agents. Gated to
