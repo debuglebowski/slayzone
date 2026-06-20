@@ -14,6 +14,7 @@ export async function searchAction(query: string, opts: SearchOpts): Promise<voi
 
   const conditions: string[] = [
     't.is_temporary = 0',
+    't.deleted_at IS NULL',
     "(LOWER(t.title) LIKE :q OR LOWER(COALESCE(t.description, '')) LIKE :q)"
   ]
   const params: Record<string, string | number | null> = { ':q': q, ':limit': limit }

@@ -398,11 +398,7 @@ test.describe('CLI: slay', () => {
   // --- slay tasks delete ---
 
   test.describe('slay tasks delete', () => {
-    // QUARANTINED 2026-05-16: post-delete, task still appears in `tasks list
-    // --json`. Either delete went through but list returned stale data, or
-    // delete silently no-ops. CLI returns status 0 either way. Investigate
-    // separately.
-    test.skip('deletes task permanently', () => {
+    test('deletes task permanently', () => {
       const title = `CLI delete test ${Date.now()}`
       runCli('tasks', 'create', title, '--project', 'cli test')
       const r0 = runCli('tasks', 'list', '--json')

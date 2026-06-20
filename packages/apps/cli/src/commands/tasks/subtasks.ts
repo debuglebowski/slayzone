@@ -31,7 +31,7 @@ export async function subtasksAction(
   const tasks = db.query<TaskRow>(
     `SELECT t.id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
      FROM tasks t JOIN projects p ON t.project_id = p.id
-     WHERE t.parent_id = :id AND t.archived_at IS NULL
+     WHERE t.parent_id = :id AND t.archived_at IS NULL AND t.deleted_at IS NULL
      ORDER BY t."order" ASC`,
     { ':id': parents[0].id }
   )

@@ -83,11 +83,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     await waitForNoPtySession(mainWindow, sessionId)
   })
 
-  // QUARANTINED 2026-05-16: status flips correctly at DB level (sanity asserted
-  // above), but pty:respawn-suggested IPC never reaches the renderer
-  // subscriber. Either runtime adapter not actually wired in PLAYWRIGHT boot
-  // path, or webContents.send drops without erroring. Needs main-process trace.
-  test.skip('status → in_progress broadcasts pty:respawn-suggested (Part B)', async ({
+  test('status → in_progress broadcasts pty:respawn-suggested (Part B)', async ({
     mainWindow
   }) => {
     const s = seed(mainWindow)

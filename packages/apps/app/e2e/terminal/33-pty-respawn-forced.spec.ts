@@ -59,11 +59,7 @@ test.describe('Forced PTY respawn via REST', () => {
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
   })
 
-  // QUARANTINED 2026-05-16: REST endpoint waits for the renderer to ack via
-  // onEnsureAlive; the test installs its own listener that acks immediately,
-  // but res.ok still false. The retry mechanism may also be racing the test
-  // subscriber.
-  test.skip('REST broadcasts pty:ensure-alive (force=true) to renderer', async ({
+  test('REST broadcasts pty:ensure-alive (force=true) to renderer', async ({
     electronApp,
     mainWindow
   }) => {
@@ -120,7 +116,7 @@ test.describe('Forced PTY respawn via REST', () => {
     expect(res.status).toBe(400)
   })
 
-  test.skip('Force respawn restarts existing PTY (terminal mode)', async ({
+  test('Force respawn restarts existing PTY (terminal mode)', async ({
     electronApp,
     mainWindow
   }) => {
