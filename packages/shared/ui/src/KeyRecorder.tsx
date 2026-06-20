@@ -21,7 +21,7 @@ function normalizeKeyEvent(e: KeyboardEvent): string | null {
   return normalizeHotkeyString(parts.join('+'))
 }
 
-interface KeyRecorderProps {
+export interface KeyRecorderProps {
   active: boolean
   onCapture: (keys: string) => void
   onCancel: () => void

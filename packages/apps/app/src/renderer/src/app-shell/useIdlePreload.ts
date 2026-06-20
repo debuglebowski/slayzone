@@ -6,7 +6,7 @@ import { useEffect } from 'react'
 // the one in lazy.ts so both share one chunk in the module cache.
 const PRELOADS: Array<() => Promise<unknown>> = [
   // Cmd+K command palette (+ its cmdk/fzf deps). See lazy.ts `SearchDialog`.
-  () => import('@/components/dialogs/SearchDialog')
+  () => import('@slayzone/search')
 ]
 
 export function useIdlePreload(): void {

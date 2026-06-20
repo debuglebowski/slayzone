@@ -20,5 +20,6 @@ export type ContextManagerSection =
   | 'skills'
   | 'mcps'
 
-export const COMMUNITY_DISCORD_URL = 'https://discord.gg/g7xPHXaU98'
-export const COMMUNITY_X_URL = 'https://x.com/debuglebowski'
+// Single source of truth lives in @slayzone/onboarding (the checklist owns these);
+// re-exported here so existing app-shell import sites keep resolving.
+export { COMMUNITY_DISCORD_URL, COMMUNITY_X_URL } from '@slayzone/onboarding'

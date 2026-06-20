@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { useLeaderboardAuth } from '@/lib/convexAuth'
 import { api } from 'convex/_generated/api'
+import type { LeaderboardAuthState } from './auth'
 import type { Period } from './LeaderboardPage.constants'
 import {
   getAvatarSrc,
@@ -12,7 +12,7 @@ import {
   initials
 } from './LeaderboardPage.utils'
 
-export function useLeaderboardController(auth: ReturnType<typeof useLeaderboardAuth>) {
+export function useLeaderboardController(auth: LeaderboardAuthState) {
   const trpcClient = useTRPCClient()
   const [period, setPeriod] = useState<Period>('all-time')
   const [authBusy, setAuthBusy] = useState(false)

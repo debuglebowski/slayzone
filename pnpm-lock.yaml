@@ -112,6 +112,9 @@ importers:
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../../domains/ai-config
+      '@slayzone/app-shell':
+        specifier: workspace:*
+        version: link:../../domains/app-shell
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
@@ -139,6 +142,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
+      '@slayzone/leaderboard':
+        specifier: workspace:*
+        version: link:../../domains/leaderboard
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown
@@ -154,6 +160,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/search':
+        specifier: workspace:*
+        version: link:../../domains/search
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
@@ -166,6 +175,9 @@ importers:
       '@slayzone/suspense':
         specifier: workspace:*
         version: link:../../shared/suspense
+      '@slayzone/tabs':
+        specifier: workspace:*
+        version: link:../../domains/tabs
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
@@ -434,21 +446,39 @@ importers:
       '@slayzone/agent-panels':
         specifier: workspace:*
         version: link:../../domains/agent-panels
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../../domains/ai-config
+      '@slayzone/app-shell':
+        specifier: workspace:*
+        version: link:../../domains/app-shell
       '@slayzone/home':
         specifier: workspace:*
         version: link:../../domains/home
       '@slayzone/layout':
         specifier: workspace:*
         version: link:../../shared/layout
+      '@slayzone/leaderboard':
+        specifier: workspace:*
+        version: link:../../domains/leaderboard
+      '@slayzone/onboarding':
+        specifier: workspace:*
+        version: link:../../domains/onboarding
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/search':
+        specifier: workspace:*
+        version: link:../../domains/search
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
       '@slayzone/sidebar':
         specifier: workspace:*
         version: link:../../domains/sidebar
+      '@slayzone/tabs':
+        specifier: workspace:*
+        version: link:../../domains/tabs
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
@@ -467,6 +497,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@slayzone/usage-analytics':
+        specifier: workspace:*
+        version: link:../../domains/usage-analytics
       '@trpc/client':
         specifier: ^11.17.0
         version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
@@ -595,6 +628,9 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.3
+      zustand:
+        specifier: ^5.0.0
+        version: 5.0.11(@types/react@19.2.8)(immer@11.1.8)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
       '@types/react':
         specifier: ^19.2.7
@@ -691,6 +727,37 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.8)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/domains/app-shell:
+    dependencies:
+      '@slayzone/agent-panels':
+        specifier: workspace:*
+        version: link:../agent-panels
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -996,8 +1063,42 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
 
+  packages/domains/leaderboard:
+    dependencies:
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      convex:
+        specifier: ^1.32.0
+        version: 1.32.0(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/domains/onboarding:
     dependencies:
+      '@radix-ui/react-collapsible':
+        specifier: ^1.1.12
+        version: 1.1.12(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1095,6 +1196,46 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/domains/search:
+    dependencies:
+      '@slayzone/icons':
+        specifier: workspace:*
+        version: link:../../shared/icons
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      fzf:
+        specifier: ^0.5.2
+        version: 0.5.2
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/domains/settings:
     dependencies:
       '@dnd-kit/core':
@@ -1145,6 +1286,9 @@ importers:
       electron:
         specifier: ^41.0.0
         version: 41.0.3
+      framer-motion:
+        specifier: ^12.29.0
+        version: 12.38.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
@@ -1218,6 +1362,37 @@ importers:
       react-icons:
         specifier: ^5.5.0
         version: 5.5.0(react@19.2.3)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/domains/tabs:
+    dependencies:
+      '@dnd-kit/core':
+        specifier: ^6.3.1
+        version: 6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@dnd-kit/sortable':
+        specifier: ^10.0.0
+        version: 10.0.0(@dnd-kit/core@6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)
+      '@dnd-kit/utilities':
+        specifier: ^3.2.2
+        version: 3.2.2(react@19.2.3)
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
     devDependencies:
       '@types/react':
         specifier: ^19.2.7

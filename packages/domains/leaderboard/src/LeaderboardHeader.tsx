@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger
 } from '@slayzone/ui'
 import { useTRPCClient } from '@slayzone/transport/client'
-import type { useLeaderboardAuth } from '@/lib/convexAuth'
+import type { LeaderboardAuthState } from './auth'
 import { PERIODS } from './LeaderboardPage.constants'
 import type { useLeaderboardController } from './useLeaderboardController'
 
@@ -18,7 +18,7 @@ export function LeaderboardHeader({
   auth,
   ctl
 }: {
-  auth: ReturnType<typeof useLeaderboardAuth>
+  auth: LeaderboardAuthState
   ctl: ReturnType<typeof useLeaderboardController>
 }): React.JSX.Element {
   const trpcClient = useTRPCClient()

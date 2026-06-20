@@ -20,7 +20,8 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.100.9",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^0.562.0",
+    "zustand": "^5.0.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

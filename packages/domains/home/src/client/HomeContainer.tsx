@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref
+} from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { useUndo } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
@@ -17,6 +25,17 @@ import { useHomePanel } from './useHomePanel'
 import { HomeDetail, type HomeDetailProps } from './HomeDetail'
 
 type ProjectSettingsTab = string
+
+/**
+ * Imperative handle exposed by HomeContainer so a parent (the fork's HomeView)
+ * can open a file in the Home file-editor panel — used to wire the command
+ * palette's file-open into the Home editor, mirroring the canonical app's
+ * `homePanel.homeEditorRef` access. HomeContainer owns `homePanel` internally,
+ * so this is the seam that surfaces its `openFile` upward.
+ */
+export interface HomeContainerHandle {
+  openFile: (filePath: string) => void
+}
 
 export interface HomeContainerProps {
   /** Project whose board + panels are shown. Empty string = no project. */
@@ -47,6 +66,12 @@ export interface HomeContainerProps {
    * Omitted in the Electron app → self-wiring path.
    */
   data?: ReturnType<typeof useTasksData>
+  /**
+   * When provided, HomeContainer surfaces an imperative `openFile` handle for
+   * the Home file-editor panel (see HomeContainerHandle). The fork's HomeView
+   * uses it to build the command palette's file-open context.
+   */
+  editorHandleRef?: Ref<HomeContainerHandle>
 }
 
 type HomeContainerImplProps = HomeContainerProps & { data: ReturnType<typeof useTasksData> }
@@ -88,7 +113,8 @@ function HomeContainerImpl({
   panelTestsShortcut = null,
   panelAutomationsShortcut = null,
   projectPathMissing = false,
-  onFixProjectPath
+  onFixProjectPath,
+  editorHandleRef
 }: HomeContainerImplProps): React.JSX.Element {
   const trpcClient = useTRPCClient()
   const {
@@ -135,6 +161,26 @@ function HomeContainerImpl({
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const [panelSizes, updatePanelSizes, resetPanelSize] = useGlobalPanelSizes()
   const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)
+
+  // Surface an `openFile` handle to the parent (fork command palette). Mirrors
+  // the canonical app's `buildHomeFileContext`: reveal the editor panel, then
+  // open via the editor ref (queuing through pendingHomeEditorFileRef if the
+  // editor hasn't mounted yet).
+  const openHomeFile = useCallback(
+    (filePath: string) => {
+      if (homePanel.homeEditorRef.current) {
+        if (!homePanel.homePanelVisibility.editor) {
+          homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
+        }
+        homePanel.homeEditorRef.current.openFile(filePath)
+      } else {
+        homePanel.pendingHomeEditorFileRef.current = filePath
+        homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
+      }
+    },
+    [homePanel]
+  )
+  useImperativeHandle(editorHandleRef, () => ({ openFile: openHomeFile }), [openHomeFile])
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) ?? null,

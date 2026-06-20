@@ -1,5 +1,6 @@
 export { useDialogStore, type SearchFileContext } from './useDialogStore'
 export { UserSettingsDialog } from './UserSettingsDialog'
+export { CliInstallDialog } from './CliInstallDialog'
 export { ThemeProvider, useTheme } from './ThemeContext'
 export { applyTheme } from './apply-theme'
 export {

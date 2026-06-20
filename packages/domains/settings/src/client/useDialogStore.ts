@@ -40,9 +40,18 @@ interface DialogState {
   openGroupSettings: (group: ProjectGroup) => void
   closeGroupSettings: () => void
 
-  // Per-project settings dialog target.
+  // Per-project settings dialog target + open context. initialTab /
+  // onboardingProvider let an opener deep-link straight to a tab (e.g. the
+  // create-with-GitHub flow lands on Integrations). Typed loosely (string) so
+  // the store doesn't couple to the projects/integrations client types — the
+  // consumer casts to the dialog's prop union at the boundary.
   projectSettingsTarget: Project | null
-  openProjectSettings: (project: Project) => void
+  projectSettingsInitialTab: string | null
+  projectSettingsOnboardingProvider: string | null
+  openProjectSettings: (
+    project: Project,
+    opts?: { initialTab?: string; integrationOnboardingProvider?: string | null }
+  ) => void
   closeProjectSettings: () => void
 
   // App-level (user) settings dialog. Canonical App.tsx still drives this via
@@ -108,8 +117,20 @@ export const useDialogStore = create<DialogState>()((set) => ({
   closeGroupSettings: () => set({ groupSettingsTarget: null }),
 
   projectSettingsTarget: null,
-  openProjectSettings: (project) => set({ projectSettingsTarget: project }),
-  closeProjectSettings: () => set({ projectSettingsTarget: null }),
+  projectSettingsInitialTab: null,
+  projectSettingsOnboardingProvider: null,
+  openProjectSettings: (project, opts) =>
+    set({
+      projectSettingsTarget: project,
+      projectSettingsInitialTab: opts?.initialTab ?? null,
+      projectSettingsOnboardingProvider: opts?.integrationOnboardingProvider ?? null
+    }),
+  closeProjectSettings: () =>
+    set({
+      projectSettingsTarget: null,
+      projectSettingsInitialTab: null,
+      projectSettingsOnboardingProvider: null
+    }),
 
   settingsOpen: false,
   settingsInitialTab: null,

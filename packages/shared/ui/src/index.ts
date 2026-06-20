@@ -23,6 +23,7 @@ export {
 } from './useShortcutStore'
 export { useShortcutDisplay } from './useShortcutDisplay'
 export { useShortcutAction } from './useShortcutAction'
+export { KeyRecorder, type KeyRecorderProps } from './KeyRecorder'
 export { projectColorBg, type ProjectColorVariant } from './project-color'
 export {
   useAppearance,

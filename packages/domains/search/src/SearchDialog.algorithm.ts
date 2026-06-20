@@ -86,7 +86,7 @@ export function createFzf(items: SearchItem[]): {
   fzfPath: Fzf<SearchItem[]>
 } {
   const fzfLabel = new Fzf(items, {
-    selector: (i) => i.label,
+    selector: (i: SearchItem) => i.label,
     limit: MAX_RESULTS * 2,
     casing: 'case-insensitive'
   })

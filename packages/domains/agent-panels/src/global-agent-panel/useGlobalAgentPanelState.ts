@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useEffect } from 'react'
+import { create } from 'zustand'
+import { getTrpcClient } from '@slayzone/transport/client'
 
 export interface GlobalAgentPanelState {
   isOpen: boolean
@@ -23,37 +23,57 @@ const DEFAULT_STATE: GlobalAgentPanelState = {
 
 const SETTINGS_KEY = 'globalAgentPanelState'
 
+// SHARED singleton store (was per-instance React useState). The panel's open/
+// width/session/mode state is owned by ONE source of truth so any consumer can
+// read AND drive it consistently — the command palette toggles it from the
+// store-driven AppDialogs while HomeView renders the panel from the same state.
+// Persists to the settings table via the vanilla tRPC client (mirrors
+// useTabStore); hydrates once on first mount.
+interface GlobalAgentPanelStore {
+  state: GlobalAgentPanelState
+  update: (updates: Partial<GlobalAgentPanelState>) => void
+  hydrate: () => Promise<void>
+}
+
+// Module-scope guards: hydrate runs at most once; an early user toggle must not
+// be clobbered by the async hydrate result.
+let hydrateStarted = false
+let touched = false
+
+const useStore = create<GlobalAgentPanelStore>((set, get) => ({
+  state: DEFAULT_STATE,
+  update: (updates) => {
+    touched = true
+    const next = { ...get().state, ...updates }
+    set({ state: next })
+    void getTrpcClient().settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
+  },
+  hydrate: async () => {
+    if (hydrateStarted) return
+    hydrateStarted = true
+    try {
+      const stored = await getTrpcClient().settings.get.query({ key: SETTINGS_KEY })
+      if (stored && !touched) {
+        try {
+          set({ state: { ...DEFAULT_STATE, ...JSON.parse(stored) } })
+        } catch {
+          // ignore parse errors
+        }
+      }
+    } catch {
+      // tRPC not ready / no stored value — keep defaults
+    }
+  }
+}))
+
 export function useGlobalAgentPanelState(): [
   GlobalAgentPanelState,
   (updates: Partial<GlobalAgentPanelState>) => void
 ] {
-  const trpc = useTRPC()
-  const [state, setState] = useState<GlobalAgentPanelState>(DEFAULT_STATE)
-
-  const storedQuery = useQuery(trpc.settings.get.queryOptions({ key: SETTINGS_KEY }))
-  const setSettings = useMutation(trpc.settings.set.mutationOptions())
-
+  const state = useStore((s) => s.state)
+  const update = useStore((s) => s.update)
   useEffect(() => {
-    const stored = storedQuery.data
-    if (stored) {
-      try {
-        setState({ ...DEFAULT_STATE, ...JSON.parse(stored) })
-      } catch {
-        // ignore parse errors
-      }
-    }
-  }, [storedQuery.data])
-
-  const updateState = useCallback(
-    (updates: Partial<GlobalAgentPanelState>) => {
-      setState((prev) => {
-        const next = { ...prev, ...updates }
-        setSettings.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
-        return next
-      })
-    },
-    [setSettings]
-  )
-
-  return [state, updateState]
+    void useStore.getState().hydrate()
+  }, [])
+  return [state, update]
 }

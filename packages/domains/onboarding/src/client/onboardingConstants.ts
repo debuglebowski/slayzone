@@ -1,6 +1,11 @@
 export const STEP_NAMES = ['welcome', 'disclaimer', 'provider', 'analytics', 'cli', 'success'] as const
 export const STEP_COUNT = STEP_NAMES.length
 
+// Community links surfaced by the onboarding checklist (Join community / Follow on X).
+// Single source of truth — the Electron app re-exports these from app-shell/constants.
+export const COMMUNITY_DISCORD_URL = 'https://discord.gg/g7xPHXaU98'
+export const COMMUNITY_X_URL = 'https://x.com/debuglebowski'
+
 export const PROVIDERS = [
   { mode: 'claude-code', label: 'Claude Code' },
   { mode: 'codex', label: 'Codex' },

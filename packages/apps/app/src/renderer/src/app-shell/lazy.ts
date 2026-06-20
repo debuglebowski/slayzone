@@ -20,7 +20,7 @@ export const UserSettingsDialog = lazy(() =>
   }))
 )
 export const TutorialAnimationModal = lazy(() =>
-  import('@/components/tutorial/TutorialAnimationModal').then((m) => ({
+  import('@slayzone/onboarding').then((m) => ({
     default: m.TutorialAnimationModal
   }))
 )
@@ -39,7 +39,7 @@ export const AutomationsPanel = lazy(() =>
 )
 // Overlay pages
 export const LeaderboardPage = lazy(() =>
-  import('@/components/leaderboard/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage }))
+  import('@slayzone/leaderboard').then((m) => ({ default: m.LeaderboardPage }))
 )
 export const UsageAnalyticsPage = lazy(() =>
   import('@slayzone/usage-analytics/client').then((m) => ({ default: m.UsageAnalyticsPage }))
@@ -76,13 +76,13 @@ export const OnboardingDialog = lazy(() =>
   import('@slayzone/onboarding').then((m) => ({ default: m.OnboardingDialog }))
 )
 export const SearchDialog = lazy(() =>
-  import('@/components/dialogs/SearchDialog').then((m) => ({ default: m.SearchDialog }))
+  import('@slayzone/search').then((m) => ({ default: m.SearchDialog }))
 )
 export const CliInstallDialog = lazy(() =>
-  import('@/components/dialogs/CliInstallDialog').then((m) => ({ default: m.CliInstallDialog }))
+  import('@slayzone/settings/client').then((m) => ({ default: m.CliInstallDialog }))
 )
 export const ChangelogDialog = lazy(() =>
-  import('@/components/changelog/ChangelogDialog').then((m) => ({ default: m.ChangelogDialog }))
+  import('@slayzone/onboarding').then((m) => ({ default: m.ChangelogDialog }))
 )
 export const KanbanBoard = lazy(() =>
   import('@slayzone/tasks').then((m) => ({ default: m.KanbanBoard }))

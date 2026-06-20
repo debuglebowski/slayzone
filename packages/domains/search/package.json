@@ -1,5 +1,5 @@
 {
-  "name": "@slayzone/onboarding",
+  "name": "@slayzone/search",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,20 +7,20 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./shared": "./src/shared/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@radix-ui/react-collapsible": "^1.1.12",
+    "@slayzone/icons": "workspace:*",
+    "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",
+    "@slayzone/task": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
-    "framer-motion": "^12.29.0",
+    "fzf": "^0.5.2",
     "lucide-react": "^0.562.0"
   },
   "peerDependencies": {
