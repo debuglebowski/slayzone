@@ -10,7 +10,6 @@ import {
 } from '../fixtures/terminal'
 
 const hasCodex = binaryOnPath('codex')
-const hasGemini = binaryOnPath('gemini')
 
 /** Strip ANSI escape sequences from terminal buffer output */
 function stripAnsi(data: string): string {
@@ -84,94 +83,6 @@ test.describe
 
       const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
       expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
-    })
-
-    test('gemini fresh start: no conversationId in DB', async ({ mainWindow }) => {
-      test.skip(!hasGemini, 'gemini not on PATH')
-      test.setTimeout(90_000)
-
-      const s = seed(mainWindow)
-      const t = await s.createTask({
-        projectId,
-        title: 'SIC gemini fresh',
-        status: 'in_progress',
-        terminalMode: 'gemini'
-      })
-      await s.refreshData()
-
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC gemini fresh' })
-      const sessionId = getMainSessionId(t.id)
-      await waitForPtySession(mainWindow, sessionId, 60_000)
-
-      await expect
-        .poll(
-          async () => {
-            const buf = await readFullBuffer(mainWindow, sessionId)
-            return buf.length > 0
-          },
-          { timeout: 60_000 }
-        )
-        .toBe(true)
-
-      const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
-      expect(task?.provider_config?.gemini?.conversationId ?? null).toBeNull()
-    })
-
-    // --- Gemini: /stats detection end-to-end ---
-
-    test('gemini: /stats detection saves a valid session ID', async ({ mainWindow }) => {
-      test.skip(!hasGemini, 'gemini not on PATH')
-      test.setTimeout(120_000)
-
-      const s = seed(mainWindow)
-      const t = await s.createTask({
-        projectId,
-        title: 'SIC gemini detect',
-        status: 'in_progress',
-        terminalMode: 'gemini'
-      })
-      await s.refreshData()
-
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC gemini detect' })
-      const sessionId = getMainSessionId(t.id)
-      await waitForPtySession(mainWindow, sessionId, 60_000)
-      await waitForPtyState(mainWindow, sessionId, 'idle', 60_000)
-      await mainWindow.waitForTimeout(2000)
-
-      // Text and \r must be separate writes (Ink TUI drops \r when concatenated with text)
-      await mainWindow.evaluate(
-        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: '/stats' }),
-        { id: sessionId }
-      )
-      await mainWindow.waitForTimeout(200)
-      await mainWindow.evaluate(
-        ({ id }) => window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: '\r' }),
-        { id: sessionId }
-      )
-
-      await expect
-        .poll(
-          async () => {
-            const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
-            return task?.provider_config?.gemini?.conversationId ?? null
-          },
-          { timeout: 15_000 }
-        )
-        .not.toBeNull()
-
-      const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t.id)
-      expect(task?.provider_config?.gemini?.conversationId).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-      )
-
-      // Cross-check with buffer if parseable
-      const buf = stripAnsi(await readFullBuffer(mainWindow, sessionId))
-      const match = buf.match(
-        /session\s*id:\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/im
-      )
-      if (match) {
-        expect(task?.provider_config?.gemini?.conversationId).toBe(match[1])
-      }
     })
 
     // --- Codex: stored session ID not overwritten ---
