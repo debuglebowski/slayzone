@@ -7,6 +7,12 @@ const root = resolve(__dirname, '../../..')
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Load env from the monorepo root (mirrors the Electron renderer's
+  // electron.vite.config `envDir: root`) so the fork bundle picks up
+  // VITE_CONVEX_URL from the root .env — the lever that flips the leaderboard's
+  // ConvexAuthBootstrap from disabled to wired. Only VITE_*-prefixed vars are
+  // exposed to the client (Vite default envPrefix), so root-only secrets stay out.
+  envDir: root,
   // cap-shell-1 — the renderer-app tree references compile-time globals that
   // Electron's vite config defines. The shell mirrors the subset needed at
   // module eval so the bundle loads cleanly; runtime window.api calls still

@@ -13,6 +13,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@convex-dev/auth": "^0.0.90",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",

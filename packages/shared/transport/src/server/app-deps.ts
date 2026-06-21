@@ -266,6 +266,32 @@ export function getAgentLifecycleEvents(): TypedEmitter<AgentLifecycleEventMap> 
   return agentLifecycleEvents
 }
 
+// Auth-callback bus — backs the `app.auth.onCallback` subscription. The
+// chromium-fork sidecar's Unix-socket server (sidecar-socket.ts) receives the
+// `slayzone://auth/callback` deep-link from the C++ shell (auth:deep-link RPC)
+// and emits the OAuth code/error here; the subscription fans it out to the
+// renderer's ConvexAuthBridge, which completes the Convex sign-in. Unlike the
+// other buses this one is process-LOCAL (emitter and subscriber both live in
+// THIS sidecar process — no Electron-host injection); composeServer constructs
+// and sets it before connections are accepted. Electron's renderer uses the
+// inline-mutation path and never subscribes, so nothing emits here in Electron.
+export type AuthEventMap = {
+  /** OAuth deep-link callback relayed from the chromium shell → sidecar. */
+  callback: [payload: { code?: string; error?: string }]
+}
+
+let authEvents: TypedEmitter<AuthEventMap> | null = null
+
+export function setAuthEvents(ev: TypedEmitter<AuthEventMap>): void {
+  authEvents = ev
+}
+
+export function getAuthEvents(): TypedEmitter<AuthEventMap> {
+  if (!authEvents)
+    throw new Error('authEvents not initialized — call setAuthEvents() in composeServer first')
+  return authEvents
+}
+
 // Task-trigger bus — the AutomationEngine's `start(bus)` listens here for
 // `db:taskTags:setForTask:done` (the tag-change trigger). Legacy host emitted it
 // on `ipcMain`; the tRPC `tags.setForTask` path never did (the pre-existing

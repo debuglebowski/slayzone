@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import {
   openPath as nativeOpenPath,
+  openExternal as nativeOpenExternal,
   pathExists as nativePathExists,
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
@@ -20,12 +21,15 @@ import {
   setAppDeps,
   setPtyDeps,
   setChatDeps,
+  setAuthEvents,
+  requestGithubSignInStart,
   type AppDeps,
   type NotifyEventMap,
   type AutomationsEventMap,
   type TelemetryEventMap,
   type MenuEventMap,
   type AgentLifecycleEventMap,
+  type AuthEventMap,
   type RestApiDeps,
   type FloatingAgentState
 } from '@slayzone/transport/server'
@@ -175,11 +179,17 @@ export function composeServer(opts: {
     notifyEvents.emit('settings-changed')
   }
 
+  // Auth-callback bus — process-local (the sidecar socket server emits, the
+  // `app.auth.onCallback` sub consumes; both in THIS process). Set before any
+  // WS connection is accepted so the subscription's getAuthEvents() never throws.
+  const authEvents = new TypedEmitter<AuthEventMap>()
+
   setNotifyEvents(notifyEvents)
   setAutomationsEvents(automationsEvents)
   setTelemetryEvents(telemetryEvents)
   setMenuEvents(menuEvents)
   setAgentLifecycleEvents(agentLifecycleEvents)
+  setAuthEvents(authEvents)
 
   // --- Task ops --------------------------------------------------------------
   // Completion-event bus the task ops emit on (Electron host: ipcMain). Nothing
@@ -341,7 +351,11 @@ export function composeServer(opts: {
     filesPathExists: nativePathExists,
     filesSaveTempImage: stub('filesSaveTempImage'),
 
-    shellOpenExternal: stub('shellOpenExternal'),
+    // Open URLs in the OS default browser (per-OS exec). The chromium-fork sidecar
+    // has no Electron `shell.openExternal`; the renderer's GitHub-OAuth flow opens
+    // the authorize URL through this. The desktop-handoff options are Electron-only
+    // (WCV nav policy) and irrelevant headless — ignore them.
+    shellOpenExternal: (url: string) => nativeOpenExternal(url),
     // Implemented natively (per-OS exec) so the Git/Editor panels' reveal + open
     // actions work on the standalone/fork sidecar without an Electron host.
     shellOpenPath: nativeOpenPath,
@@ -410,7 +424,41 @@ export function composeServer(opts: {
     // No native menu on a headless host.
     appRebuildMenuForShortcuts: () => {},
 
-    authGithubSystemSignIn: stub('authGithubSystemSignIn'),
+    // Chromium-fork GitHub OAuth start. Unlike the Electron host (which blocks
+    // waiting for the deep-link and returns the code inline), the fork CANNOT
+    // receive the callback here — slayzone:// routes to the C++ shell → the
+    // sidecar socket (sidecar-socket.ts) → the `app.auth.onCallback` sub. So we
+    // only START the flow: fetch the GitHub authorize URL + PKCE verifier, open
+    // the browser, and return `pending`. The renderer stashes the verifier and
+    // completes the code when the sub delivers it. Reuses the shared
+    // requestGithubSignInStart — same PKCE handshake as the Electron host.
+    authGithubSystemSignIn: async (input: { convexUrl: string; redirectTo: string }) => {
+      try {
+        if (!input?.convexUrl) return { ok: false as const, error: 'Convex URL is required' }
+        if (input.redirectTo !== 'slayzone://auth/callback') {
+          return { ok: false as const, error: `Unsupported redirect URI: ${input.redirectTo}` }
+        }
+        const start = await requestGithubSignInStart(
+          input.convexUrl,
+          input.redirectTo,
+          'chromium-sidecar'
+        )
+        const openErr = await nativeOpenExternal(start.redirect)
+        if (openErr) {
+          return {
+            ok: false as const,
+            verifier: start.verifier,
+            error: `Failed to open browser for GitHub sign-in: ${openErr}`
+          }
+        }
+        return { ok: true as const, verifier: start.verifier, pending: true as const }
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error.message : 'GitHub sign-in failed'
+        }
+      }
+    },
     dialogShowOpenDialog: stub('dialogShowOpenDialog'),
     windowClose: () => {},
 

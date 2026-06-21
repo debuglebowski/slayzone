@@ -1,10 +1,16 @@
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
-import { appRouter, createMcpRestApp } from '@slayzone/transport/server'
+import {
+  appRouter,
+  createMcpRestApp,
+  parseAuthCallbackUrl,
+  getAuthEvents
+} from '@slayzone/transport/server'
 import { ensureDataRoot, getServerHost, getTrpcPort } from '@slayzone/platform'
 import { getDatabasePathFromEnv, openServerDatabase } from './db.js'
 import { composeServer } from './composition.js'
+import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
 import { createLogger } from './log.js'
 import type { ServerHandle, StartServerConfig } from './index.js'
@@ -64,6 +70,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const composition = composeServer({ db, dataRoot, standalone: !supervised })
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
+
+  // Chromium-fork OAuth deep-link bridge. The C++ shell forwards
+  // `slayzone://auth/callback` to this Unix socket (auth:deep-link); we parse the
+  // code and emit it on `authEvents`, which the `app.auth.onCallback` tRPC
+  // subscription fans out to the renderer. Standalone (fork) only — the Electron
+  // host owns the deep-link itself, so there is no chromium shell to talk to.
+  let sidecarSocket: SidecarSocketServer | null = null
+  if (!supervised) {
+    sidecarSocket = startSidecarSocketServer({
+      log,
+      onAuthDeepLink: (url) => {
+        const callback = parseAuthCallbackUrl(url)
+        if (callback) getAuthEvents().emit('callback', callback)
+      }
+    })
+  }
 
   const state: HealthState = { ready: false, port: 0, startedAt: Date.now(), dbPath }
 
@@ -138,6 +160,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       if (stopped) return
       stopped = true
       state.ready = false
+      if (sidecarSocket) {
+        try {
+          await sidecarSocket.close()
+        } catch {
+          /* ignore */
+        }
+      }
       mcpRest.dispose()
       try {
         wssHandler.broadcastReconnectNotification()

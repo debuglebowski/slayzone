@@ -60,6 +60,7 @@ import {
   useIdleTasks
 } from '@slayzone/agent-panels'
 import { AppSidebar } from '@slayzone/sidebar'
+import { isConvexConfigured } from '@slayzone/leaderboard'
 import {
   useOnboardingChecklist,
   COMMUNITY_DISCORD_URL,
@@ -520,7 +521,7 @@ export function HomeView(): React.JSX.Element {
         onboardingChecklist={onboardingChecklist}
         zenMode={zenMode}
         onSetWindowButtonVisibility={NOOP}
-        convexConfigured={false}
+        convexConfigured={isConvexConfigured}
         feedbackSlot={null}
         keyRecorder={KeyRecorder}
         sessionTaskIds={EMPTY_SESSION_IDS}

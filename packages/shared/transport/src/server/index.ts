@@ -23,6 +23,12 @@ export {
   getAgentLifecycleEvents,
   type AgentLifecycleEventMap
 } from './app-deps'
+export { setAuthEvents, getAuthEvents, type AuthEventMap } from './app-deps'
+export {
+  requestGithubSignInStart,
+  parseAuthCallbackUrl,
+  type GithubSignInStart
+} from './auth-github'
 export { setAppDeps, getAppDeps, type AppDeps, type FloatingAgentState } from './app-deps'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
 export {

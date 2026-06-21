@@ -735,73 +735,6 @@ function waitForOAuthCallback(timeoutMs: number): Promise<OAuthCallbackPayload> 
   })
 }
 
-async function requestGithubSignInStart(
-  convexUrl: string,
-  redirectTo: string
-): Promise<{ redirect: string; verifier: string }> {
-  let convexSite: URL
-  try {
-    convexSite = new URL(convexUrl)
-  } catch {
-    throw new Error('Convex URL is invalid')
-  }
-  if (convexSite.protocol !== 'https:' && convexSite.protocol !== 'http:') {
-    throw new Error('Convex URL must use http or https')
-  }
-
-  const response = await fetch(`${convexSite.origin}/api/action`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Convex-Client': 'electron-main'
-    },
-    body: JSON.stringify({
-      path: 'auth:signIn',
-      format: 'convex_encoded_json',
-      args: [
-        {
-          provider: 'github',
-          params: { redirectTo }
-        }
-      ]
-    })
-  })
-
-  if (!response.ok) {
-    throw new Error(`Auth bootstrap failed (${response.status})`)
-  }
-
-  const body = (await response.json()) as {
-    status?: string
-    value?: { redirect?: string; verifier?: string }
-    errorMessage?: string
-  }
-  if (body.status === 'error') {
-    throw new Error(body.errorMessage ?? 'Auth bootstrap failed')
-  }
-  if (body.status !== 'success') {
-    throw new Error('Auth bootstrap returned an unexpected response')
-  }
-
-  const redirect = body.value?.redirect
-  const verifier = body.value?.verifier
-  if (!redirect || !verifier) {
-    throw new Error('Auth bootstrap response missing redirect or verifier')
-  }
-
-  let redirectUrl: URL
-  try {
-    redirectUrl = new URL(redirect)
-  } catch {
-    throw new Error('Auth bootstrap returned an invalid redirect URL')
-  }
-  if (redirectUrl.protocol !== 'https:') {
-    throw new Error('GitHub sign-in URL must use https')
-  }
-
-  return { redirect: redirectUrl.toString(), verifier }
-}
-
 // System GitHub OAuth sign-in flow. Shared by the `auth:github-system-sign-in`
 // IPC handler and the tRPC `app.auth.githubSystemSignIn` mutation (coexistence
 // until slice 5) — single implementation, both transports delegate here.
@@ -823,7 +756,11 @@ async function githubSystemSignIn(input: { convexUrl: string; redirectTo: string
     // Ignore stale callbacks from prior sign-in attempts.
     oauthCallbackQueue.length = 0
 
-    const start = await requestGithubSignInStart(input.convexUrl, input.redirectTo)
+    // Shared with the chromium-fork sidecar — single PKCE-handshake impl. The
+    // transport/server barrel is already loaded by boot, so this resolves the
+    // cached module instantly.
+    const { requestGithubSignInStart } = await import('@slayzone/transport/server')
+    const start = await requestGithubSignInStart(input.convexUrl, input.redirectTo, 'electron-main')
     await shell.openExternal(start.redirect)
 
     const callback = await waitForOAuthCallback(OAUTH_CALLBACK_TIMEOUT_MS)

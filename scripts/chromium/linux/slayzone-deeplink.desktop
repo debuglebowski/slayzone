@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SlayZone Deep Link Handler
+Comment=Routes slayzone:// OAuth callbacks to the running SlayZone sidecar
+# %u is the slayzone:// URL the OS passes. Replace the path with the installed
+# location of slayzone-deeplink.sh (see README.md). NoDisplay keeps it out of
+# app menus — it is a protocol handler, not a launchable app.
+Exec=/opt/slayzone/slayzone-deeplink.sh %u
+NoDisplay=true
+Terminal=false
+MimeType=x-scheme-handler/slayzone;

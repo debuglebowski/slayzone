@@ -15,14 +15,15 @@
 // Pages are lazy + <Suspense> so the overlay code-splits out of first paint,
 // matching the canonical app-shell/lazy.ts treatment.
 //
-// LEADERBOARD IS AUTH-GATED HERE: the fork has no Convex client wired
-// (convexConfigured=false in HomeView), so we pass LEADERBOARD_AUTH_DISABLED and
-// LeaderboardPage renders its sign-in gate instead of live rankings. Full
-// leaderboard functionality is BLOCKED until fork Convex/GitHub auth lands — a
-// separate task. usage-analytics + context render fully (sidecar-backed).
+// LEADERBOARD AUTH: the fork now wires Convex + GitHub OAuth via
+// ConvexAuthBootstrap (main.tsx), so we feed LeaderboardPage the live
+// useLeaderboardAuth() state. When VITE_CONVEX_URL is unset that state degrades
+// to LEADERBOARD_AUTH_DISABLED (configured:false → LeaderboardPage's sign-in
+// gate), exactly the prior behavior. usage-analytics + context render fully
+// (sidecar-backed).
 import { lazy, Suspense } from 'react'
 import { useTabStore } from '@slayzone/settings'
-import { LEADERBOARD_AUTH_DISABLED } from '@slayzone/leaderboard'
+import { useLeaderboardAuth } from '@slayzone/leaderboard'
 
 const LeaderboardPage = lazy(() =>
   import('@slayzone/leaderboard').then((m) => ({ default: m.LeaderboardPage }))
@@ -48,6 +49,7 @@ export function OverlayViewRouter({
   onTaskClick
 }: OverlayViewRouterProps): React.JSX.Element | null {
   const activeView = useTabStore((s) => s.activeView)
+  const leaderboardAuth = useLeaderboardAuth()
   if (activeView === 'tabs') return null
 
   return (
@@ -62,7 +64,7 @@ export function OverlayViewRouter({
             onBack={() => useTabStore.getState().setActiveView('tabs')}
           />
         )}
-        {activeView === 'leaderboard' && <LeaderboardPage auth={LEADERBOARD_AUTH_DISABLED} />}
+        {activeView === 'leaderboard' && <LeaderboardPage auth={leaderboardAuth} />}
       </Suspense>
     </div>
   )

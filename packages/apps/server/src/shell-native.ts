@@ -41,6 +41,20 @@ export function openPath(absPath: string): Promise<string> {
 }
 
 /**
+ * Open a URL in the OS default browser — the no-Electron `shell.openExternal`.
+ * Used by the chromium-fork sidecar to launch the GitHub OAuth flow (the
+ * authorize URL must open in a browser that can follow the slayzone:// redirect
+ * back to the app). Same per-OS launcher as openPath; `open`/`xdg-open`/`start`
+ * all accept URLs. Resolves '' on success, else an error string.
+ */
+export function openExternal(url: string): Promise<string> {
+  return new Promise((resolve) => {
+    const [cmd, args] = openCommand(url)
+    execFile(cmd, args, (err) => resolve(err ? String(err.message ?? err) : ''))
+  })
+}
+
+/**
  * Does a path exist on disk? Pure Node `fs` — node can answer this without an
  * Electron host. The Task Detail loader (taskDetailCache.fetchTaskDetail) calls
  * this UNCAUGHT to validate a project's path, so a throwing stub would reject the

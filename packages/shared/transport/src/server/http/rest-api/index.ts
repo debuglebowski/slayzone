@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import type { RestApiDeps } from './types'
 import { registerNotifyRoute } from './notify'
 import { registerAgentHookRoute } from './agent-hook'
+import { registerAuthDeepLinkRoute } from './auth-deep-link'
 import { registerProcessesListRoute } from './processes/list'
 import { registerProcessesLogsRoute } from './processes/logs'
 import { registerProcessesDeleteRoute } from './processes/delete'
@@ -40,6 +41,7 @@ import { registerBrowserNewTabRoute } from './browser/new-tab'
 import { registerTabsCreateRoute } from './tabs/create'
 import { registerTabsSplitRoute } from './tabs/split'
 import { registerTabsRenameRoute } from './tabs/rename'
+import { registerResolveSessionTaskRoute } from './sessions/resolve-task'
 
 export type { RestApiDeps } from './types'
 
@@ -49,6 +51,9 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
 
   // Agent lifecycle hooks
   registerAgentHookRoute(app, deps)
+
+  // OAuth deep-link (HTTP entry — Linux `.desktop` handler; mac uses the socket)
+  registerAuthDeepLinkRoute(app, deps)
 
   // Processes
   registerProcessesListRoute(app, deps)
@@ -90,6 +95,9 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerTabsCreateRoute(app, deps)
   registerTabsSplitRoute(app, deps)
   registerTabsRenameRoute(app, deps)
+
+  // Agent sessions (pool: session → bound task resolution for the slay CLI)
+  registerResolveSessionTaskRoute(app, deps)
 
   // Browser
   registerBrowserUrlRoute(app, deps)

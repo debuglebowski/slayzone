@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import { router, publicProcedure } from '../trpc'
-import { getAppDeps, type FloatingAgentState } from '../app-deps'
+import { getAppDeps, getAuthEvents, type FloatingAgentState } from '../app-deps'
 
 const anyInput = z.unknown()
 
@@ -213,7 +213,21 @@ export const appLevelRouter = router({
   auth: router({
     githubSystemSignIn: publicProcedure
       .input(anyInput)
-      .mutation(({ input }) => getAppDeps().authGithubSystemSignIn(input as never))
+      .mutation(({ input }) => getAppDeps().authGithubSystemSignIn(input as never)),
+    // Chromium-fork OAuth callback relay. The C++ shell forwards the
+    // `slayzone://auth/callback` deep-link to the sidecar (auth:deep-link), the
+    // sidecar's socket server emits it on `authEvents`, and this subscription
+    // pushes the {code,error} to the renderer's ConvexAuthBridge — which then
+    // completes the Convex sign-in (the renderer owns the Convex session). The
+    // Electron renderer uses the inline-mutation path and never subscribes here.
+    onCallback: publicProcedure.subscription(() =>
+      observable<{ code?: string; error?: string }>((emit) => {
+        const handler = (payload: { code?: string; error?: string }): void => emit.next(payload)
+        const ev = getAuthEvents()
+        ev.on('callback', handler)
+        return () => ev.off('callback', handler)
+      })
+    )
   }),
 
   // Dialog (native file picker — same impl backs the dialog:showOpenDialog IPC)

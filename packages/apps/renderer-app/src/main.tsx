@@ -8,6 +8,7 @@ import { ThemeProvider, AppearanceProvider } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import { TooltipProvider, UndoProvider } from '@slayzone/ui'
+import { ConvexAuthBootstrap } from '@slayzone/leaderboard'
 import { browserMojoLink } from './browser-mojo-link'
 import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
@@ -67,25 +68,33 @@ export async function mountApp(): Promise<void> {
 
   // Provider stack mirrors the Electron renderer (packages/apps/app/src/renderer/
   // src/main.tsx): TrpcProvider OUTERMOST (Pty/Appearance/Telemetry providers call
-  // tRPC hooks), then PtyProvider (TaskDetailPage's usePty/useLoopMode/useSlayNudge
+  // tRPC hooks), then ConvexAuthBootstrap (Convex + GitHub OAuth — needs the tRPC
+  // context), then PtyProvider (TaskDetailPage's usePty/useLoopMode/useSlayNudge
   // throw without it), ThemeProvider, AppearanceProvider (useAppearance), and
   // TelemetryProvider (track() — no-ops with no analytics backend configured).
   // settingsRevision is a constant in the fork (no live settings-dialog revision).
+  //
+  // oauthDelivery="subscription": the fork can't catch the slayzone:// callback in
+  // the renderer (it routes to the C++ shell → sidecar). ConvexAuthBootstrap opens
+  // the browser via the sidecar and completes the code over app.auth.onCallback.
+  // When VITE_CONVEX_URL is unset the bootstrap degrades to LEADERBOARD_AUTH_DISABLED.
   createRoot(el).render(
     <TrpcProvider url={trpcUrl}>
-      <PtyProvider>
-        <ThemeProvider>
-          <AppearanceProvider settingsRevision={0}>
-            <TelemetryProvider>
-              <UndoProvider>
-                <TooltipProvider delayDuration={0}>
-                  <HomeView />
-                </TooltipProvider>
-              </UndoProvider>
-            </TelemetryProvider>
-          </AppearanceProvider>
-        </ThemeProvider>
-      </PtyProvider>
+      <ConvexAuthBootstrap oauthDelivery="subscription">
+        <PtyProvider>
+          <ThemeProvider>
+            <AppearanceProvider settingsRevision={0}>
+              <TelemetryProvider>
+                <UndoProvider>
+                  <TooltipProvider delayDuration={0}>
+                    <HomeView />
+                  </TooltipProvider>
+                </UndoProvider>
+              </TelemetryProvider>
+            </AppearanceProvider>
+          </ThemeProvider>
+        </PtyProvider>
+      </ConvexAuthBootstrap>
     </TrpcProvider>
   )
 }
