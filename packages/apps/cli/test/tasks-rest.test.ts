@@ -20,18 +20,19 @@ import * as os from 'node:os'
 import { spawn, execSync } from 'node:child_process'
 import express from 'express'
 import Database from 'better-sqlite3'
-import { test, expect, describe } from '../../../shared/test-utils/ipc-harness.js'
+import { test, expect, describe, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
+import { configureTaskRuntimeAdapters } from '../../../domains/task/src/server/ops/shared.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../shared/test-utils/event-spy.js'
 import { __ipcEmitCalls, __resetIpcEmitCalls } from '../../../shared/test-utils/mock-electron.js'
 import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
-import { taskEvents } from '../../../domains/task/src/main/events.js'
-import { registerCreateTaskRoute } from '../../app/src/main/rest-api/tasks/create.js'
-import { registerUpdateTaskRoute } from '../../app/src/main/rest-api/tasks/update.js'
-import { registerArchiveTaskRoute } from '../../app/src/main/rest-api/tasks/archive.js'
-import { registerDeleteTaskRoute } from '../../app/src/main/rest-api/tasks/delete.js'
-import { registerUnarchiveTaskRoute } from '../../app/src/main/rest-api/tasks/unarchive.js'
-import { registerOpenTaskRoute } from '../../app/src/main/rest-api/tasks/open.js'
+import { taskEvents } from '../../../domains/task/src/server/events.js'
+import { registerCreateTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/create.js'
+import { registerUpdateTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/update.js'
+import { registerArchiveTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/archive.js'
+import { registerDeleteTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/delete.js'
+import { registerUnarchiveTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/unarchive.js'
+import { registerOpenTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/open.js'
 import { BrowserWindow } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
@@ -47,10 +48,16 @@ const db = new Database(dbPath)
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,
-  '../../../apps/app/src/main/db/migrations.ts'
+  // Canonical schema moved out of apps/app/src/main/db in the Wave C2 split.
+  '../../../shared/transport/src/db-bootstrap/migrations.ts'
 )
 const mod = await import(migrationsPath)
 mod.runMigrations(db)
+// The REST task ops are async (worker SlayzoneDb) + resolve their data root via
+// the task runtime adapter — wrap the raw connection + configure the adapter so
+// the mounted routes don't 500 (which would make the CLI subprocess exit 1).
+const slayDb = createSlayzoneDbAdapter(db)
+configureTaskRuntimeAdapters({ getDataRoot: () => tmpDir })
 
 const projectId = crypto.randomUUID()
 db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(
@@ -64,37 +71,37 @@ let notifyCount = 0
 const app = express()
 app.use(express.json())
 registerCreateTaskRoute(app, {
-  db,
+  db: slayDb,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerUpdateTaskRoute(app, {
-  db,
+  db: slayDb,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerArchiveTaskRoute(app, {
-  db,
+  db: slayDb,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerDeleteTaskRoute(app, {
-  db,
+  db: slayDb,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerUnarchiveTaskRoute(app, {
-  db,
+  db: slayDb,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerOpenTaskRoute(app, {
-  db,
+  db: slayDb,
   notifyRenderer: () => {
     notifyCount++
   }
