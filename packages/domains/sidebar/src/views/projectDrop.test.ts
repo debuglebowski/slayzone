@@ -3,7 +3,7 @@
  * Pure, no electron/react. Run: npx tsx .../views/projectDrop.test.ts
  */
 import type { TopLevelEntryRef } from '@slayzone/projects/shared'
-import { test, expect, describe } from '../../../../../../../../shared/test-utils/ipc-harness.js'
+import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import {
   resolveProjectDrop,
   dropModeFromPointer,

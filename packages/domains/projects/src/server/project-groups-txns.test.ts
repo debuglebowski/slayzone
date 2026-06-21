@@ -22,7 +22,8 @@ async function freshDb(): Promise<Database.Database> {
   db.pragma('foreign_keys = ON')
   const migrationsPath = path.resolve(
     import.meta.dirname,
-    '../../../../apps/app/src/main/db/migrations.ts'
+    // Canonical schema moved out of apps/app/src/main/db in the Wave C2 split.
+    '../../../../shared/transport/src/db-bootstrap/migrations.ts'
   )
   const mod = await import(migrationsPath)
   mod.runMigrations(db)

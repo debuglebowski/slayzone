@@ -3,7 +3,7 @@
  * Run with: npx tsx .../sidebar/views/projectGrouping.test.ts
  */
 import type { Project, ProjectGroup } from '@slayzone/projects/shared'
-import { test, expect, describe } from '../../../../../../../../shared/test-utils/ipc-harness.js'
+import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping.js'
 
 function proj(id: string, sortOrder: number, groupId: string | null = null): Project {
