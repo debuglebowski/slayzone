@@ -223,7 +223,7 @@ await test('persist callback fires on turn-init', async () => {
     cwd: '/tmp',
     conversationId: null,
     providerFlags: [],
-    onPersistSessionId: (id) => persisted.push(id)
+    onPersistSessionId: ({ conversationId }) => persisted.push(conversationId)
   })
   fake._stdout.write(readFileSync(resolve(fixtureDir(), 'bash.ndjson'), 'utf8'))
   await new Promise((r) => setTimeout(r, 50))
@@ -463,7 +463,7 @@ await test('invalid --resume: onInvalidResume fires + auto-retry with fresh sess
     cwd: '/tmp',
     conversationId: 'stale-session-id',
     providerFlags: [],
-    onPersistSessionId: (id) => persisted.push(id),
+    onPersistSessionId: ({ conversationId }) => persisted.push(conversationId),
     onInvalidResume: () => invalidResumeCalled++
   })
   expect(spawnCount).toBe(1)

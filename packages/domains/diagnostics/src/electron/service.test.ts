@@ -15,6 +15,27 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 
 const h = await createTestHarness()
+// The diagnostics events table lives in a SEPARATE diagnostics DB in prod, so
+// the harness migrations don't create it — set it up here (matches the sibling
+// diagnostics suites' DIAG_SCHEMA). h.db doubles as both settings + events DB.
+h.db.exec(`
+  CREATE TABLE IF NOT EXISTS diagnostics_events (
+    id TEXT PRIMARY KEY,
+    ts_ms INTEGER NOT NULL,
+    level TEXT NOT NULL,
+    source TEXT NOT NULL,
+    event TEXT NOT NULL,
+    trace_id TEXT,
+    task_id TEXT,
+    project_id TEXT,
+    session_id TEXT,
+    channel TEXT,
+    message TEXT,
+    payload_json TEXT,
+    redaction_version INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE INDEX IF NOT EXISTS idx_diag_ts ON diagnostics_events(ts_ms);
+`)
 registerDiagnosticsHandlers(h.ipcMain as never, h.db, h.db)
 
 // instrumentIpcMain wraps handlers as async, so all invoke() calls return Promises.
