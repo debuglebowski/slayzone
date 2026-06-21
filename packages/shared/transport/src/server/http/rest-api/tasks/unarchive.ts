@@ -6,10 +6,10 @@ import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 
 export function registerUnarchiveTaskRoute(app: Express, deps: RestApiDeps): void {
-  app.post('/api/tasks/:id/unarchive', (req, res) => {
+  app.post('/api/tasks/:id/unarchive', async (req, res) => {
     try {
       const input = unarchiveInputSchema.parse({ id: req.params.id })
-      const task = unarchiveTaskOp(deps.db, input.id, {
+      const task = await unarchiveTaskOp(deps.db, input.id, {
         ipcMain: deps.taskBus ?? NOOP_TASK_BUS,
         onMutation: deps.notifyRenderer
       })

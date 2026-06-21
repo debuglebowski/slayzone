@@ -19,10 +19,13 @@ import {
   __ipcEmitCalls,
   __resetIpcEmitCalls
 } from '../../../../../test-utils/mock-electron.js'
-import { taskEvents } from '@slayzone/task/server'
+import { taskEvents, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import { tmpdir } from 'node:os'
 import { registerUpdateTaskTool } from './update-task.js'
 
 const h = await createTestHarness()
+// archive/cleanup ops resolve the data root via the task runtime adapter.
+configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir() })
 const projectId = crypto.randomUUID()
 h.db
   .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
@@ -31,7 +34,7 @@ h.db
 let notifyCount = 0
 const stub = captureMcpServer()
 registerUpdateTaskTool(stub.server as never, {
-  db: h.db,
+  db: h.slayDb,
   taskBus: ipcMain,
   notifyRenderer: () => {
     notifyCount++

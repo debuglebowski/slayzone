@@ -25,11 +25,14 @@ import {
   describe
 } from '../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../test-utils/rest-harness.js'
-import { handleAttentionTransition } from '@slayzone/task/server'
+import { handleAttentionTransition, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import { tmpdir } from 'node:os'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import { registerAgentHookRoute, type TerminalStateBridge } from './agent-hook.js'
 
 const h = await createTestHarness()
+// archive/cleanup ops resolve the data root via the task runtime adapter.
+configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir() })
 const projectId = crypto.randomUUID()
 h.db
   .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
@@ -68,7 +71,7 @@ const bridge: TerminalStateBridge = {
     currentState = newState
     lastActivityAt = Date.now()
     activityLog.push({ kind: 'transition', sessionId, at: lastActivityAt })
-    handleAttentionTransition(h.db, sessionId, newState, prev, hasUserInput)
+    handleAttentionTransition(h.slayDb, sessionId, newState, prev, hasUserInput)
     return true
   },
   markActive: (sessionId) => {
@@ -79,7 +82,7 @@ const bridge: TerminalStateBridge = {
 }
 
 const app = express()
-registerAgentHookRoute(app, { db: h.db, notifyRenderer: () => {} }, bridge)
+registerAgentHookRoute(app, { db: h.slayDb, notifyRenderer: () => {} }, bridge)
 const rest = await mountRestApp(app)
 
 interface HookRes {
