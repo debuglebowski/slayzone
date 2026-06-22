@@ -108,7 +108,12 @@ Fork renderer (`renderer-app` / `chromium-shell`):
   route → the same `parseAuthCallbackUrl → authEvents → app.auth.onCallback` chain
   (no chromium patch/rebuild; receiving end tested on mac, `.desktop` round-trip
   needs a real Linux desktop — see `scripts/chromium/linux/README.md`). **Windows:
-  pending** (subtask `c4147868`; the same `/api/auth/deep-link` route applies).
+  done** the same way — a registry `slayzone://` handler → `register-deeplink.ps1`
+  / `slayzone-deeplink.ps1` → the same `/api/auth/deep-link` route → same chain
+  (no chromium patch/rebuild; route now has a dedicated test, `auth-deep-link.test.ts`;
+  registry + PowerShell round-trip needs a real Windows machine — see
+  `scripts/chromium/windows/README.md` and `plans/fork-windows-deeplink.md`). The
+  C++ named-pipe transport remains the deferred mac-parity alternative.
 - **Minor:** the fork has no sign-in timeout (Electron's 2-min `waitForOAuthCallback`
   has no fork analog — the renderer just stays "pending" if the user abandons GitHub).
   Acceptable; a renderer-side timeout could be added later.
