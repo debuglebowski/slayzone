@@ -35,6 +35,18 @@ export const ptyRouter = router({
 
   // PTY ops
   create: publicProcedure.input(anyInput).mutation(({ input }) => ops().ptyCreate(input as never)),
+  // Test-only (PLAYWRIGHT): capture createPty opts at the spawn chokepoint (no spawn).
+  testSetPtyCreateCapture: publicProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(({ input }) => {
+      if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+      ops().setCreateCapture(input.enabled)
+      return { ok: true }
+    }),
+  testTakePtyCreateOpts: publicProcedure.query(() => {
+    if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+    return ops().takeCreateOpts()
+  }),
   testExecutionContext: publicProcedure
     .input(anyInput)
     .query(({ input }) => ops().ptyTestExecutionContext(input as never)),

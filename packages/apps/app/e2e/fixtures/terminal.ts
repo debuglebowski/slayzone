@@ -58,6 +58,37 @@ export async function openTaskTerminal(
   await expect(page.locator('[data-testid="terminal-tabbar"]:visible').first()).toBeVisible()
 }
 
+export async function startAgentTerminal(page: Page): Promise<void> {
+  // AI-mode terminals are idle-gated (TerminalStarter): an autofocused "Open <agent>"
+  // button must be clicked to spawn the PTY (saves CPU/API credits). Plain `terminal`
+  // auto-spawns (no gate) — no-op there. Call after openTaskTerminal (+ switchTerminalMode).
+  const starter = page
+    .locator('button')
+    .filter({ hasText: /(Open|Reopen) (Claude|Codex|Cursor|OpenCode|Copilot|Qwen|Gemini)/ })
+    .last()
+  // Retry-click until the gate disappears (= started). A single click can miss if
+  // the button is still settling, so poll up to ~8s.
+  let started = false
+  for (let i = 0; i < 16; i++) {
+    if (!(await starter.isVisible({ timeout: 500 }).catch(() => false))) {
+      started = true
+      break
+    }
+    await starter.click({ timeout: 1_000 }).catch(() => {})
+    await page.waitForTimeout(250)
+  }
+  // Sync point: once the gate is gone the <Terminal> mounts + runs its spawn
+  // effect. Wait for the xterm to appear so callers can rely on pty.create having
+  // fired (the gate vanishing alone races the effect).
+  if (started) {
+    await page
+      .locator('.xterm')
+      .first()
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .catch(() => {})
+  }
+}
+
 export async function switchTerminalMode(page: Page, mode: TerminalMode): Promise<void> {
   const labels: Record<TerminalMode, string[]> = {
     'claude-code': ['Claude', 'Claude Code'],
