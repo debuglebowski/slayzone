@@ -9,9 +9,6 @@ import {
   describe
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerDiagnosticsHandlers, stopDiagnostics } from './service.js'
-// Import via the SAME specifier service.ts uses ('../server') so we share its
-// module instance — hence the same write-queue the handler fills.
-import { flushWriteQueue } from '../server'
 import { dialog } from 'electron'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -121,12 +118,14 @@ async function run() {
   }
 
   // The per-invoke IPC instrumentation records its diagnostic events
-  // fire-and-forget AFTER the handler returns, so let them settle, THEN drain
-  // the batched write queue to the DB deterministically (a bare flush raced the
-  // not-yet-queued instrumentation; a bare sleep raced the batch flush under
-  // full-suite load → export read 0 events).
-  await new Promise((r) => setTimeout(r, 50))
-  await flushWriteQueue()
+  // fire-and-forget AFTER the handler returns, and the batched write queue
+  // drains to the DB on a timer — a fixed sleep raced both under full-suite
+  // load. Poll the DB (load-independent) until the events land, then assert.
+  for (let i = 0; i < 200; i++) {
+    const { c } = h.db.prepare('SELECT COUNT(*) AS c FROM diagnostics_events').get() as { c: number }
+    if (c > 0) break
+    await new Promise((r) => setTimeout(r, 20))
+  }
 
   console.log('\ndiagnostics:export')
   {
