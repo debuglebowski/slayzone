@@ -452,6 +452,9 @@ importers:
       '@slayzone/app-shell':
         specifier: workspace:*
         version: link:../../domains/app-shell
+      '@slayzone/feedback':
+        specifier: workspace:*
+        version: link:../../domains/feedback
       '@slayzone/home':
         specifier: workspace:*
         version: link:../../domains/home
@@ -841,13 +844,31 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      convex:
+        specifier: ^1.32.0
+        version: 1.32.0(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
       electron:
         specifier: ^41.0.0
         version: 41.0.3
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

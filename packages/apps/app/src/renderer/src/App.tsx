@@ -64,7 +64,7 @@ import { UsagePopover } from '@/components/usage/UsagePopover'
 import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'
 import { isConvexConfigured, useLeaderboardAuth } from '@/lib/convexAuth'
-import { FeedbackDialog } from '@/components/feedback/FeedbackDialog'
+import { FeedbackDialog } from '@slayzone/feedback/client'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 // Extracted hooks (self-contained, clean interfaces)
 import { useHomePanel } from '@slayzone/home/client'

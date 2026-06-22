@@ -27,6 +27,7 @@ import {
   shortcutDefinitions,
   KeyRecorder,
   useUndo,
+  toast,
   cn
 } from '@slayzone/ui'
 import { useExplodeMode, AppHeaderActions } from '@slayzone/app-shell/client'
@@ -60,6 +61,7 @@ import {
   useIdleTasks
 } from '@slayzone/agent-panels'
 import { AppSidebar } from '@slayzone/sidebar'
+import { FeedbackDialog } from '@slayzone/feedback/client'
 import { isConvexConfigured } from '@slayzone/leaderboard'
 import {
   useOnboardingChecklist,
@@ -95,7 +97,7 @@ export function HomeView(): React.JSX.Element {
   // underlying useTasksData instance stays single; only the wrapped action fns
   // are swapped in. (Temp-task auto-cleanup in closeTab calls rawData.deleteTask
   // directly to avoid a spurious "undo" toast for scratch terminals.)
-  const { push: pushUndo, undo } = useUndo()
+  const { push: pushUndo, undo, redo } = useUndo()
   const {
     contextMenuUpdate,
     archiveTask,
@@ -330,6 +332,146 @@ export function HomeView(): React.JSX.Element {
     { enableOnFormTags: true }
   )
 
+  // ── Remaining global shortcuts — ported from the Electron useAppShortcuts.
+  // Gated on !isRecording so capturing a new binding in Settings doesn't fire
+  // them. (Home-panel toggles — Cmd+E/G/P/U/Y, editor-search — live in
+  // HomeContainer and aren't ported here yet.)
+  const isRecording = useShortcutStore((s) => s.isRecording)
+
+  // Complete active task → close tab. Store-driven; dialog rendered in AppDialogs.
+  useGuardedHotkeys(
+    getKeys('complete-close-tab'),
+    (e) => {
+      e.preventDefault()
+      if (tabs[activeTabIndex]?.type === 'task') useDialogStore.getState().openCompleteTaskDialog()
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // New task (only when a project exists).
+  useGuardedHotkeys(
+    getKeys('new-task'),
+    (e) => {
+      if (projects.length === 0) return
+      e.preventDefault()
+      useDialogStore.getState().openCreateTask()
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Undo / redo — skip text inputs, CodeMirror + xterm (they own these keys).
+  useGuardedHotkeys(
+    'mod+z',
+    async (e) => {
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      e.preventDefault()
+      const label = await undo()
+      if (label) toast(`Undid: ${label}`)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+  useGuardedHotkeys(
+    'mod+shift+z',
+    async (e) => {
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      e.preventDefault()
+      const label = await redo()
+      if (label) toast(`Redid: ${label}`)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Switch to tab N (mod+1..9) — index into the full tab list.
+  useGuardedHotkeys(
+    'mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8,mod+9',
+    (e) => {
+      e.preventDefault()
+      const num = parseInt(e.key, 10)
+      const store = useTabStore.getState()
+      if (num < store.tabs.length) {
+        store.setActiveView('tabs')
+        store.setActiveTabIndex(num)
+      }
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Switch project (mod+shift+1..9) → select + jump to its home tab.
+  useGuardedHotkeys(
+    'mod+shift+1,mod+shift+2,mod+shift+3,mod+shift+4,mod+shift+5,mod+shift+6,mod+shift+7,mod+shift+8,mod+shift+9',
+    (e) => {
+      e.preventDefault()
+      const num = parseInt(e.code.replace('Digit', ''), 10)
+      if (num > 0 && num <= projects.length) {
+        const store = useTabStore.getState()
+        store.selectProject(projects[num - 1].id)
+        store.setActiveTabIndex(0)
+      }
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Cycle tabs (next / prev).
+  const navigateTabCycle = (dir: 1 | -1): void => {
+    const store = useTabStore.getState()
+    const len = store.tabs.length
+    if (len === 0) return
+    const target = (store.activeTabIndex + dir + len) % len
+    store.setActiveView('tabs')
+    store.setActiveTabIndex(target)
+  }
+  useGuardedHotkeys(
+    getKeys('next-tab'),
+    (e) => {
+      e.preventDefault()
+      navigateTabCycle(1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+  useGuardedHotkeys(
+    getKeys('prev-tab'),
+    (e) => {
+      e.preventDefault()
+      navigateTabCycle(-1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Reopen the last-closed tab.
+  useGuardedHotkeys(
+    getKeys('reopen-closed-tab'),
+    (e) => {
+      e.preventDefault()
+      useTabStore.getState().reopenClosedTab()
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Toggle project-scoped tab filtering.
+  useGuardedHotkeys(
+    getKeys('toggle-project-tabs'),
+    (e) => {
+      e.preventDefault()
+      useTabStore.getState().toggleProjectScopedTabs()
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Toggle sidebar auto-hide.
+  useGuardedHotkeys(
+    getKeys('sidebar-auto-hide'),
+    (e) => {
+      e.preventDefault()
+      const store = useTabStore.getState()
+      store.setSidebarAutoHide(!store.sidebarAutoHide)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
   // Shortcut display strings for the header action tooltips.
   const projectTabsShortcut = useShortcutDisplay('toggle-project-tabs')
   const zenModeShortcut = useShortcutDisplay('zen-mode')
@@ -361,6 +503,25 @@ export function HomeView(): React.JSX.Element {
   const [globalAgentPanelState, setGlobalAgentPanelState] = useGlobalAgentPanelState()
   const [agentStatusState, setAgentStatusState] = useAgentStatusState()
   const [isSidePanelResizing, setIsSidePanelResizing] = useState(false)
+
+  // Agent-panel toggles (primary-window only — see file header). Defined here,
+  // after the panel state, so the handlers close over the live values.
+  useGuardedHotkeys(
+    getKeys('global-agent-panel'),
+    (e) => {
+      e.preventDefault()
+      if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+  useGuardedHotkeys(
+    getKeys('agent-status-panel'),
+    (e) => {
+      e.preventDefault()
+      setAgentStatusState({ isLocked: !agentStatusState.isLocked })
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
 
   // Default the agent mode from the user's `default_terminal_mode` setting until
   // they pick one explicitly (mirrors the Electron App.tsx bootstrap).
@@ -522,7 +683,7 @@ export function HomeView(): React.JSX.Element {
         zenMode={zenMode}
         onSetWindowButtonVisibility={NOOP}
         convexConfigured={isConvexConfigured}
-        feedbackSlot={null}
+        feedbackSlot={<FeedbackDialog />}
         keyRecorder={KeyRecorder}
         sessionTaskIds={EMPTY_SESSION_IDS}
         onReorderProjects={data.reorderProjects}

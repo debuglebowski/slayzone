@@ -25,6 +25,7 @@
 @source "../../../../../../../packages/domains/agent-panels/src";
 @source "../../../../../../../packages/domains/leaderboard/src";
 @source "../../../../../../../packages/domains/search/src";
+@source "../../../../../../../packages/domains/feedback/src";
 
 @custom-variant dark (&:is(.dark *));
 

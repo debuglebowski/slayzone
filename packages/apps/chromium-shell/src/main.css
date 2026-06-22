@@ -37,6 +37,7 @@
 @source "../../../domains/leaderboard/src";
 @source "../../../domains/search/src";
 @source "../../../domains/onboarding/src";
+@source "../../../domains/feedback/src";
 
 @custom-variant dark (&:is(.dark *));
 

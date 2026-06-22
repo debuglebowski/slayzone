@@ -1,7 +1,11 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "lib": ["ESNext", "DOM"],
+    "paths": {
+      "convex/_generated/*": ["../../../convex/_generated/*"]
+    }
   },
   "include": ["src/**/*", "../../shared/types/src/global.d.ts"],
   "exclude": ["src/**/*.test.ts"]

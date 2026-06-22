@@ -13,6 +13,7 @@
     "@slayzone/agent-panels": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/app-shell": "workspace:*",
+    "@slayzone/feedback": "workspace:*",
     "@slayzone/home": "workspace:*",
     "@slayzone/layout": "workspace:*",
     "@slayzone/leaderboard": "workspace:*",
