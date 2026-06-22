@@ -16,7 +16,13 @@ import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../sh
 export async function buildMcpEnv(
   db: SlayzoneDb | null | undefined,
   taskId: string | undefined,
-  mode?: TerminalMode
+  mode?: TerminalMode,
+  /** Runtime session id for a pre-warmed POOLED agent (plans/agent-sessions.md
+   *  slice 4/B). Such an agent has NO task at launch, so `SLAYZONE_TASK_ID` is
+   *  absent; the `slay` CLI + the conversation hook fall back to this id to
+   *  resolve the task once the pool binds the session. Harmless to set for a
+   *  normal agent too (the task env wins), but only pooled spawns pass it. */
+  sessionId?: string
 ): Promise<Record<string, string>> {
   const env: Record<string, string> = {}
   if (taskId) {
@@ -27,6 +33,7 @@ export async function buildMcpEnv(
     )
     if (row?.project_id) env.SLAYZONE_PROJECT_ID = row.project_id
   }
+  if (sessionId) env.SLAYZONE_SESSION_ID = sessionId
   const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
   if (mcpPort) env.SLAYZONE_MCP_PORT = String(mcpPort)
 

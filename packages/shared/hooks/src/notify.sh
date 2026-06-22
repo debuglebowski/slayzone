@@ -72,7 +72,12 @@ SESSION_ID=$(printf '%s' "$PAYLOAD" | grep -oE '"session_id"[[:space:]]*:[[:spac
 [ -z "$SESSION_ID" ] && SESSION_ID=$(printf '%s' "$PAYLOAD" | grep -oE '"conversationId"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE '"[^"]*"$' | tr -d '"' || true)
 [ -n "$SESSION_ID" ] && SESSION_FIELD=",\"sessionId\":\"$SESSION_ID\""
 
-ENVELOPE="{\"agentId\":\"$SLAYZONE_AGENT_ID\",\"hookEvent\":\"$HOOK_EVENT\"$TASK_FIELD$CWD_FIELD$SESSION_FIELD,\"raw\":$PAYLOAD}"
+# SlayZone runtime session id — set for a pre-warmed POOLED agent (no task yet);
+# lets the server capture the conversation keyed by session (agent-sessions B).
+SLAY_SESSION_FIELD=""
+[ -n "$SLAYZONE_SESSION_ID" ] && SLAY_SESSION_FIELD=",\"slaySessionId\":\"$SLAYZONE_SESSION_ID\""
+
+ENVELOPE="{\"agentId\":\"$SLAYZONE_AGENT_ID\",\"hookEvent\":\"$HOOK_EVENT\"$TASK_FIELD$CWD_FIELD$SESSION_FIELD$SLAY_SESSION_FIELD,\"raw\":$PAYLOAD}"
 
 # Fire-and-forget. Errors swallowed; never block the agent.
 # curl is the primary path — present on macOS, most Linux, and bundled with

@@ -19,7 +19,9 @@ import {
   getState,
   setDatabase,
   setTerminalTheme,
-  testExecutionContext
+  testExecutionContext,
+  setPtyCreateCapture,
+  takePtyCreateOpts
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
 import { listChatSessions } from './chat-transport-manager'
@@ -319,7 +321,10 @@ export function createPtyOps(db: SlayzoneDb) {
           projectId,
           mode: modeId,
           cwd: opts.cwd,
-          resuming: !!opts.existingConversationId
+          resuming: !!opts.existingConversationId,
+          // The warm agent baked the mode's default flags; only adopt it when
+          // this spawn's flags match (else cold-spawn with the right flags).
+          flags: opts.providerFlags ?? null
         })
       }
     }
@@ -404,6 +409,8 @@ export function createPtyOps(db: SlayzoneDb) {
     terminalModesRestoreDefaults,
     terminalModesResetToDefaultState,
     ptyCreate,
+    setCreateCapture: setPtyCreateCapture,
+    takeCreateOpts: takePtyCreateOpts,
     ptyTestExecutionContext,
     ptyWrite,
     ptySubmit,

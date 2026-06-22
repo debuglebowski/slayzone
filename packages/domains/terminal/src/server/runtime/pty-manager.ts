@@ -18,7 +18,7 @@ import {
 } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { recordPendingSpawn, prunePendingSpawns } from '@slayzone/task/server'
+import { recordPendingSpawn, prunePendingSpawns, bindSessionToTask } from '@slayzone/task/server'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
@@ -165,12 +165,18 @@ export function setShuttingDown(v: boolean): void {
   isShuttingDown = v
 }
 
-/** Resolve the terminal_tabs row id this PTY session corresponds to.
- *  Main pty session id is `${taskId}` (row id = taskId per tabs:ensureMain);
- *  pane session id is `${taskId}:${tabId}` (row id = the tabId after colon). */
-function resolveTabRowId(sessionId: string): string {
+/** Raw decode of the tab row id from a legacy `taskId:tabId` session string. */
+function splitTabRowId(sessionId: string): string {
   const colon = sessionId.indexOf(':')
   return colon >= 0 ? sessionId.slice(colon + 1) : sessionId
+}
+
+/** Resolve the terminal_tabs row id this PTY session corresponds to. Prefers the
+ *  identity map (populated at createPty); falls back to splitting a legacy
+ *  `taskId:tabId` sessionId (main session id is `${taskId}`, pane is
+ *  `${taskId}:${tabId}`). */
+function resolveTabRowId(sessionId: string): string {
+  return sessionTabMap.get(sessionId) ?? splitTabRowId(sessionId)
 }
 
 export type { BufferChunk }
@@ -247,6 +253,15 @@ interface PtySession {
 export type { PtyInfo }
 
 const sessions = new Map<string, PtySession>()
+// Session-identity seam (plans/agent-sessions.md slice 3): the runtime key is
+// becoming an opaque uuid that no longer encodes task/tab. These maps resolve a
+// sessionId → its task/tab, populated at createPty. `taskIdFromSessionId` /
+// `resolveTabRowId` read them, falling back to a `taskId:tabId` split for legacy
+// ids and any session not registered through createPty. A null taskId (pooled
+// session) is stored as the sentinel '' so a present-but-taskless entry is
+// distinguishable from a missing one on lookup.
+const sessionTaskMap = new Map<string, string>()
+const sessionTabMap = new Map<string, string>()
 const sessionChangeListeners = new Set<() => void>()
 const dataListeners = new Map<string, Set<(data: string) => void>>()
 const stateChangeListeners = new Map<
@@ -565,8 +580,17 @@ export function setConversationResolver(handler: ConversationResolver | null): v
   conversationResolver = handler
 }
 
-function taskIdFromSessionId(sessionId: string): string {
+/** Raw decode of the task id from a legacy `taskId:tabId` session string. */
+function splitTaskId(sessionId: string): string {
   return sessionId.split(':')[0] || sessionId
+}
+
+/** Resolve the task id owning this PTY session. Prefers the identity map
+ *  (populated at createPty); falls back to splitting a legacy `taskId:tabId`
+ *  sessionId. A pooled session is registered with the '' sentinel → returns ''
+ *  (no owning task), never a bogus uuid-as-taskId. */
+function taskIdFromSessionId(sessionId: string): string {
+  return sessionTaskMap.get(sessionId) ?? splitTaskId(sessionId)
 }
 
 // Theme colors used to respond to OSC 10/11/12 color queries synchronously.
@@ -1102,6 +1126,15 @@ export function spawnLoginShell(opts: {
 export interface CreatePtyOptions {
   win: PtySessionWindow
   sessionId: string
+  /**
+   * The session's task + tab, passed explicitly so the runtime no longer has to
+   * decode them from the `sessionId` string (plans/agent-sessions.md slice 3 —
+   * the key becomes an opaque uuid). When omitted, falls back to splitting a
+   * legacy `taskId:tabId` sessionId. `taskId` is null for a pooled session with
+   * no task yet.
+   */
+  taskId?: string | null
+  tabId?: string | null
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
@@ -1123,13 +1156,51 @@ export interface CreatePtyOptions {
    * this pty is registered under `sessionId` from the start — the session is never
    * renamed, so the core I/O path is untouched. The post-spawn command (e.g.
    * `export SLAYZONE_TASK_ID=…; exec claude …`) is written into the live shell.
+   *
+   * `preWarmedAgent` (plans/agent-sessions.md slice 4/B): the adopted pty is
+   * ALREADY running the agent (claude booted, MCP up, idle) — NOT a bare shell.
+   * Adoption then skips the exec (the agent is live), binds the pre-recorded
+   * pooled session (`sessionId` = `agent_sessions.id`) to this task, adopts its
+   * `conversationId`, and sends the task's initial prompt to the running agent.
    */
-  adoptPty?: { pty: pty.IPty; seedBuffer?: string }
+  adoptPty?: {
+    pty: pty.IPty
+    seedBuffer?: string
+    preWarmedAgent?: boolean
+    /** Pooled `agent_sessions.id` to bind to this task (preWarmedAgent only). */
+    sessionId?: string
+    /** The warm agent's already-established conversation id (preWarmedAgent only). */
+    conversationId?: string | null
+  }
+}
+
+// Test-only (PLAYWRIGHT) pty-create capture at the TRUE spawn chokepoint (every
+// spawn path — renderer pty.create, server auto-start, warm adopt — funnels here).
+// When on, record a serializable opts subset and return a success stub (no spawn).
+let ptyCreateCaptureOn = false
+const ptyCreateCapturedOpts: Array<Record<string, unknown>> = []
+export function setPtyCreateCapture(enabled: boolean): void {
+  ptyCreateCaptureOn = enabled
+  if (enabled) ptyCreateCapturedOpts.length = 0
+}
+export function takePtyCreateOpts(): Array<Record<string, unknown>> {
+  return ptyCreateCapturedOpts
 }
 
 export async function createPty(
   opts: CreatePtyOptions
 ): Promise<{ success: boolean; error?: string }> {
+  if (process.env.PLAYWRIGHT === '1' && ptyCreateCaptureOn) {
+    ptyCreateCapturedOpts.push({
+      sessionId: opts.sessionId,
+      cwd: opts.cwd,
+      mode: opts.mode,
+      conversationId: opts.conversationId ?? null,
+      existingConversationId: opts.existingConversationId ?? null,
+      providerArgs: opts.providerArgs ?? null
+    })
+    return { success: true }
+  }
   const {
     win: originalWin,
     sessionId,
@@ -1152,6 +1223,11 @@ export async function createPty(
   }
   // Dynamic window lookup: allows redirectSessionWindow() to reroute events at runtime.
   const getWin = (): PtySessionWindow => sessions.get(sessionId)?.win ?? originalWin
+  // Register the session-identity seam: prefer explicit task/tab (opaque-id path);
+  // fall back to splitting a legacy `taskId:tabId` sessionId. A null taskId
+  // (pooled) is stored as '' so it never decodes to a bogus uuid-as-taskId.
+  sessionTaskMap.set(sessionId, opts.taskId !== undefined ? (opts.taskId ?? '') : splitTaskId(sessionId))
+  sessionTabMap.set(sessionId, opts.tabId !== undefined ? (opts.tabId ?? '') : splitTabRowId(sessionId))
   const taskId = taskIdFromSessionId(sessionId)
   const createStartedAt = Date.now()
   let spawnAttempt: { shell: string; shellArgs: string[]; hasPostSpawnCommand: boolean } | null =
@@ -1275,7 +1351,11 @@ export async function createPty(
     // opencode), the agent mints internally and slay falls back to the
     // temporal-proximity gate via `pending-spawn` rows (`expectedSessionId=null`).
     const mintedFreshId = decision.shouldMintFresh ? randomUUID() : null
-    const effectiveConversationId = resolvedExistingId || conversationId || mintedFreshId
+    // A pre-warmed pooled agent already established its conversation id at warm
+    // time — adopt it directly (no resolve / heal / mint).
+    const effectiveConversationId = opts.adoptPty?.preWarmedAgent
+      ? opts.adoptPty.conversationId ?? null
+      : resolvedExistingId || conversationId || mintedFreshId
 
     // Pick template: resume if resuming and resume_command exists, otherwise initial
     const template = resuming && resumeCommand ? resumeCommand : initialCommand || undefined
@@ -1284,7 +1364,9 @@ export async function createPty(
     const shell = resolveUserShell()
     const shellConfig = { shell, args: getShellStartupArgs(shell) }
     let postSpawnCommand: string | undefined
-    if (template) {
+    // A pre-warmed agent is already running its command — never build/exec it
+    // again (that would type the command into the live agent's TUI as input).
+    if (template && !opts.adoptPty?.preWarmedAgent) {
       const binary = interpolateTemplate({
         template,
         conversationId: effectiveConversationId || undefined,
@@ -1419,7 +1501,7 @@ export async function createPty(
     // so the row is durable before the child process can race ahead. Drops
     // on PTY exit via `prunePendingSpawns` below, and a periodic 10-min TTL
     // sweep belt-and-suspenders.
-    if (db) {
+    if (db && !opts.adoptPty?.preWarmedAgent) {
       try {
         await recordPendingSpawn(db, {
           taskId,
@@ -1503,6 +1585,21 @@ export async function createPty(
     // emitted (its rc prompt), so getBufferSince / hibernation history stay consistent.
     if (opts.adoptPty?.seedBuffer) {
       sessions.get(sessionId)?.buffer.append(opts.adoptPty.seedBuffer)
+    }
+    // Pre-warmed pool adoption: bind the pre-recorded pooled session entity to
+    // this task+tab (set-once). Its write-once conversation id then becomes the
+    // task's resume target via the resolver (which reads agent_sessions by task).
+    if (opts.adoptPty?.preWarmedAgent && opts.adoptPty.sessionId && db) {
+      try {
+        await bindSessionToTask(db, {
+          sessionId: opts.adoptPty.sessionId,
+          taskId,
+          tabId: resolveTabRowId(sessionId)
+        })
+      } catch {
+        // Best-effort — a failed bind leaves the session pooled; the resolver
+        // simply won't surface it for this task (no phantom binding).
+      }
     }
     // Record this tab as warm — survives across app shutdown so next boot
     // auto-restarts. Cleared in finalizeSessionExit on natural/user exit.
@@ -1621,6 +1718,8 @@ export async function createPty(
       setTimeout(() => {
         dataListeners.delete(sessionId)
         sessions.delete(sessionId)
+        sessionTaskMap.delete(sessionId)
+        sessionTabMap.delete(sessionId)
         stateMachine.unregister(sessionId)
         clearSessionUserInputMark(sessionId)
         notifySessionChange()
@@ -1692,6 +1791,13 @@ export async function createPty(
     }
 
     const schedulePostSpawnCommand = (target: pty.IPty): void => {
+      // Pre-warmed agent: nothing to exec (it's already running). Send the
+      // task's initial prompt to the live agent instead, if any.
+      if (opts.adoptPty?.preWarmedAgent) {
+        commandDispatchedTs = Date.now()
+        if (initialPrompt) target.write(`${initialPrompt}\r`)
+        return
+      }
       if (!spawnConfig.postSpawnCommand) return
       // When using -c (directExec), the command is already in the shell args —
       // no need to write to stdin.
@@ -2507,7 +2613,9 @@ export async function listPtys(): Promise<PtyInfo[]> {
     raw.push({
       sessionId,
       taskId: session.taskId,
-      tabId: '',
+      // Resolve via the identity seam (correct for opaque ids); the enricher
+      // then only needs to attach the label. Was '' + enricher sessionId-split.
+      tabId: resolveTabRowId(sessionId),
       label: null,
       lastOutputTime: session.lastOutputTime,
       createdAt: session.createdAt,

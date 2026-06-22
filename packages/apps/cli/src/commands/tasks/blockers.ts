@@ -13,7 +13,7 @@ export async function blockersAction(
   taskId: string | undefined,
   opts: BlockersOpts
 ): Promise<void> {
-  taskId = resolveId(taskId)
+  taskId = await resolveId(taskId)
   const db = openDb()
 
   const tasks = db.query<{ id: string }>(

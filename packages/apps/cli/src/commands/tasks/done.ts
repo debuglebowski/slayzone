@@ -8,7 +8,7 @@ export interface DoneOpts {
 }
 
 export async function doneAction(idPrefix: string | undefined, opts: DoneOpts): Promise<void> {
-  idPrefix = resolveId(idPrefix)
+  idPrefix = await resolveId(idPrefix)
   const db = openDb()
 
   const tasks = db.query<{ id: string; title: string; project_id: string }>(

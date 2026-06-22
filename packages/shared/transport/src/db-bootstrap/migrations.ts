@@ -3178,6 +3178,26 @@ export const migrations: Migration[] = [
         }
       }
     }
+  },
+  {
+    version: 148,
+    up: (db) => {
+      // Slice 3 + entity-model B (plans/agent-sessions.md): `agent_sessions`
+      // becomes the SESSION entity — one row per spawn, whose `id` is the
+      // runtime PTY key (a main-minted uuid) instead of the `taskId:tabId`
+      // string. Two additive columns:
+      //   - `tab_id`   : which pane this session belongs to. NULL while pooled
+      //                  (no tab yet) and for v147 backfilled audit rows.
+      //   - `ended_at` : when the session's process exited (status→dead). NULL
+      //                  while live; backfilled audit rows are already dead so
+      //                  this stays NULL for them (exit time unknown).
+      // "Current session for tab T" = the latest live row with that `tab_id`.
+      db.exec(`
+        ALTER TABLE agent_sessions ADD COLUMN tab_id TEXT;
+        ALTER TABLE agent_sessions ADD COLUMN ended_at INTEGER;
+        CREATE INDEX agent_sessions_tab ON agent_sessions (tab_id, created_at DESC);
+      `)
+    }
   }
 ]
 

@@ -147,12 +147,17 @@ export async function recordConversation(
       params: [id, taskId, mode, createdAt]
     })
   } else {
+    // A pending-spawn mirror represents an IN-FLIGHT spawn → status 'bound' so
+    // the B-aware findPendingSpawn (status != 'dead') still locates it. Every
+    // other mirror is a confirmed/historical audit row → 'dead'. (Transitional:
+    // replaced when the spawn path writes B rows directly.)
+    const shadowStatus = origin === 'pending-spawn' ? 'bound' : 'dead'
     ops.push({
       type: 'run',
       sql: `INSERT INTO agent_sessions
               (id, mode, cwd, task_id, conversation_id, origin, status, pending_meta, created_at, bound_at)
-            VALUES (?, ?, NULL, ?, ?, ?, 'dead', ?, ?, ?)`,
-      params: [id, mode, taskId, conversationId, origin, meta, createdAt, createdAt]
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [id, mode, taskId, conversationId, origin, shadowStatus, meta, createdAt, createdAt]
     })
   }
 

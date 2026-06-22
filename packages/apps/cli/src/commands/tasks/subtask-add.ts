@@ -13,7 +13,7 @@ export interface SubtaskAddOpts {
 }
 
 export async function subtaskAddAction(title: string, opts: SubtaskAddOpts): Promise<void> {
-  const parentId = resolveId(opts.parent)
+  const parentId = await resolveId(opts.parent)
   const db = openDb()
 
   const parents = db.query<{ id: string; project_id: string; terminal_mode: string | null }>(

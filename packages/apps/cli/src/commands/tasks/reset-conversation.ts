@@ -21,7 +21,7 @@ export async function resetConversationAction(
   idPrefix: string | undefined,
   opts: ResetConversationOpts
 ): Promise<void> {
-  idPrefix = resolveId(idPrefix)
+  idPrefix = await resolveId(idPrefix)
   const db = openDb()
 
   const tasks = db.query<{ id: string; title: string }>(

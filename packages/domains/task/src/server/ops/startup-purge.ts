@@ -75,4 +75,16 @@ export async function purgeStaleAndOrphanedTasks(db: SlayzoneDb): Promise<void> 
       .run(...staleTemp.map((r) => r.id))
     console.log(`Purged ${staleTemp.length} stale temporary task(s)`)
   }
+
+  // Pass 3 — reap orphaned pooled agent sessions (plans/agent-sessions.md slice
+  // 4/B5). A warm-pool member is a live OS process that dies on app restart, so
+  // any `pooled` row from a previous run is stale. Status-only update — never
+  // touches conversation_id / origin, so resume bindings stay intact (the
+  // resolver gates on origin, not status).
+  const reaped = await db
+    .prepare(`UPDATE agent_sessions SET status = 'dead', ended_at = ? WHERE status = 'pooled'`)
+    .run(Date.now())
+  if (reaped.changes > 0) {
+    console.log(`Reaped ${reaped.changes} orphaned pooled agent session(s)`)
+  }
 }

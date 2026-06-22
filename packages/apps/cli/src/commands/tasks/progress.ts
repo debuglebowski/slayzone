@@ -10,7 +10,7 @@ export async function progressAction(idOrValue: string, value: string | undefine
   } else {
     idPrefix = idOrValue
   }
-  idPrefix = resolveId(idPrefix)
+  idPrefix = await resolveId(idPrefix)
   const n = Number.parseInt(value, 10)
   if (!Number.isFinite(n) || String(n) !== String(value).trim() || n < 0 || n > 100) {
     console.error('progress must be integer 0-100')

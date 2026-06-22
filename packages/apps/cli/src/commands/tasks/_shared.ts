@@ -1,4 +1,5 @@
 import { openDb, type SlayDb } from '../../db'
+import { apiGet } from '../../api'
 import { parseColumnsConfig } from '@slayzone/projects/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import type { AuthorContext } from '@slayzone/task-artifacts/shared'
@@ -113,13 +114,26 @@ export function mergeTemplateProviderConfig(
   }
 }
 
-export function resolveId(explicit?: string): string {
+/**
+ * Resolve the target task id. Order: explicit arg → `$SLAYZONE_TASK_ID` (the
+ * fast path for a normally-spawned agent) → live session→task lookup for a
+ * pre-warmed pooled agent (plans/agent-sessions.md slice 4/B): such an agent has
+ * no `SLAYZONE_TASK_ID` but an immutable `SLAYZONE_SESSION_ID`, and its bound
+ * task is resolved from `agent_sessions.task_id` via the local API. Async
+ * because the pooled fallback hits the app.
+ */
+export async function resolveId(explicit?: string): Promise<string> {
   const id = explicit ?? process.env.SLAYZONE_TASK_ID
-  if (!id) {
-    console.error('No task ID provided and $SLAYZONE_TASK_ID is not set.')
-    process.exit(1)
+  if (id) return id
+  const sessionId = process.env.SLAYZONE_SESSION_ID
+  if (sessionId) {
+    const { taskId } = await apiGet<{ taskId: string | null }>(
+      `/api/session/${encodeURIComponent(sessionId)}/task`
+    )
+    if (taskId) return taskId
   }
-  return id
+  console.error('No task ID provided and $SLAYZONE_TASK_ID is not set.')
+  process.exit(1)
 }
 
 export function printTasks(tasks: TaskRow[], blockedIds?: Set<string>) {

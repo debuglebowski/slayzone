@@ -67,3 +67,12 @@ export {
   listConversationHistory,
   findPendingSpawn
 } from './agent-sessions.js'
+// Entity-model B write lifecycle (one row per spawn). Wired into the spawn path
+// in the runtime-key-decouple slice; exported now for that wiring + tests.
+export {
+  recordSessionSpawn,
+  confirmSessionConversation,
+  confirmSessionConversationByTaskMode,
+  markSessionDead,
+  bindSessionToTask
+} from './agent-sessions.js'

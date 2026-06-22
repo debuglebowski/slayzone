@@ -10,7 +10,7 @@ export interface BlockedOpts {
 }
 
 export async function blockedAction(taskId: string | undefined, opts: BlockedOpts): Promise<void> {
-  taskId = resolveId(taskId)
+  taskId = await resolveId(taskId)
   const db = openDb()
 
   const tasks = db.query<{ id: string; is_blocked: number; blocked_comment: string | null }>(

@@ -4,7 +4,11 @@ import { z } from 'zod'
 import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone/terminal/shared'
 import { mapEventType } from '@slayzone/terminal/shared'
 import { isHookDrivenMode } from '@slayzone/terminal/server'
-import { recordConversation, findPendingSpawn } from '@slayzone/task/server'
+import {
+  recordConversation,
+  findPendingSpawn,
+  confirmSessionConversation
+} from '@slayzone/task/server'
 import { capturePrompt } from '@slayzone/agent-turns/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -248,6 +252,11 @@ const PayloadSchema = z.object({
    *  hook payload's `session_id`) — NOT the SlayZone PTY session id. */
   sessionId: z.string().optional(),
   taskId: z.string().optional(),
+  /** The SlayZone runtime session id (`$SLAYZONE_SESSION_ID`), set for a
+   *  pre-warmed POOLED agent that has no `taskId` yet. Lets the conversation be
+   *  captured keyed by session (plans/agent-sessions.md slice 4/B); the
+   *  session→task binding happens later at pool adoption. */
+  slaySessionId: z.string().optional(),
   cwd: z.string().optional(),
   raw: z.unknown().optional()
 })
@@ -420,6 +429,20 @@ export function registerAgentHookRoute(
           parsed.data.agentId as TerminalMode
         )
         if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)
+      } else if (!parsed.data.taskId && parsed.data.slaySessionId && cliSessionId) {
+        // Pre-warmed POOLED agent: no task yet, so capture the conversation
+        // keyed by the SlayZone runtime session id (write-once confirm on the
+        // pooled `agent_sessions` row). The session→task binding happens later
+        // at pool adoption (`bindSessionToTask`); the resolver then honors this
+        // conversation for the bound task. Best-effort — swallow on failure.
+        try {
+          await confirmSessionConversation(deps.db, {
+            sessionId: parsed.data.slaySessionId,
+            observedConversationId: cliSessionId
+          })
+        } catch {
+          /* best-effort — pool conversation capture never blocks the hook */
+        }
       }
     }
 

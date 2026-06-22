@@ -18,7 +18,7 @@
     "build:linux": "npm run build && electron-builder --linux",
     "typecheck": "tsgo --noEmit -p tsconfig.node.json && tsgo --noEmit -p tsconfig.web.json",
     "test:agent-hooks": "vitest run src/main/agent-hooks src/main/rest-api/agent-hook.test.ts",
-    "test:db:migrations": "ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/ai-config-slug-migration.test.ts && ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/agent-panel-rename-migration.test.ts && ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/v147-agent-sessions-migration.test.ts",
+    "test:db:migrations": "ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/ai-config-slug-migration.test.ts && ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/agent-panel-rename-migration.test.ts && ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/v147-agent-sessions-migration.test.ts && ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm src/main/db/v148-agent-sessions-runtime-migration.test.ts",
     "test:e2e": "npx playwright test --config playwright.config.ts",
     "test:e2e:headed": "npx playwright test --config playwright.config.ts --headed",
     "test:e2e:loop": "bash e2e-loop.sh",

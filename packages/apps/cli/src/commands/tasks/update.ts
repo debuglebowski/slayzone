@@ -24,7 +24,7 @@ export interface UpdateOpts {
 }
 
 export async function updateAction(idPrefix: string | undefined, opts: UpdateOpts): Promise<void> {
-  idPrefix = resolveId(idPrefix)
+  idPrefix = await resolveId(idPrefix)
   if (opts.description !== undefined && opts.appendDescription !== undefined) {
     console.error('Cannot use both --description and --append-description.')
     process.exit(1)

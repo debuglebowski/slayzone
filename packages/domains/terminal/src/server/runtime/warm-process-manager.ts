@@ -1,9 +1,14 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'fs'
 import type { IPty, IDisposable } from 'node-pty'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+import { recordSessionSpawn, markSessionDead } from '@slayzone/task/server'
 import { spawnLoginShell } from './pty-manager'
 import { buildMcpEnv } from '../mcp-env'
+import { buildExecCommand } from '../shell-env'
+import { interpolateTemplate } from '../adapters/template-interpolation'
+import { parseShellArgs } from '../adapters/flag-parser'
 
 /**
  * Keeps ONE warm (idle, rc-initialized) login shell ready per project, so the first
@@ -28,6 +33,18 @@ interface WarmHandle {
   cwd: string
   seedBuffer: string
   state: 'ready' | 'adopting'
+  /** Runtime session id of the pre-warmed agent (= `agent_sessions.id`,
+   *  `status='pooled'`). Exported into the agent as `SLAYZONE_SESSION_ID` so its
+   *  `slay` CLI + conversation hook resolve the task via session→task once the
+   *  pool binds it (plans/agent-sessions.md slice 4/B). */
+  sessionId: string
+  /** Pre-minted conversation id for `{id}`-template agents (claude-code), so the
+   *  warm agent's transcript + resume id are known before adoption. Null when the
+   *  provider mints its own. */
+  conversationId: string | null
+  /** The mode default flags baked into the running agent. Adoption requires the
+   *  task's flags to match (a live agent can't be re-flagged). */
+  flags: string | null
   dataDisposable?: IDisposable
   exitDisposable?: IDisposable
 }
@@ -65,23 +82,36 @@ export function clearWindowTabCounts(windowId: number): void {
 }
 
 /**
- * Called from the `pty:create` handler before `createPty`. Returns the warm shell to adopt
+ * Called from the `pty:create` handler before `createPty`. Returns the warm agent to adopt
  * (and re-arms a fresh one) if one is ready for this project and the spawn matches, else null.
- * Shell-only warming: only mode + cwd + fresh-start need to match — flags/conversation are
- * applied by createPty at adopt.
+ * The agent is pre-booted with the mode's DEFAULT flags + a pre-minted conversation id, so a
+ * spawn matches only when mode + cwd + fresh-start + flags all line up (a task overriding flags
+ * cold-spawns). Returns the pooled `sessionId`/`conversationId` so createPty can bind + resume.
  */
 export function claimWarmShell(criteria: {
   projectId: string
   mode: string
   cwd: string
   resuming: boolean
-}): { pty: IPty; seedBuffer: string } | null {
+  /** The task's effective provider flags. Must equal the warm agent's baked
+   *  default flags (it can't be re-flagged after boot) or there's no match.
+   *  Optional: omitted ⇒ treated as no-flags (only matches a no-flags warm). */
+  flags?: string | null
+}): {
+  pty: IPty
+  seedBuffer: string
+  preWarmedAgent: true
+  sessionId: string
+  conversationId: string | null
+} | null {
   if (!deps || shuttingDown || !deps.isEnabled()) return null
   if (criteria.mode !== WARM_MODE) return null
   if (criteria.resuming) return null
   const handle = warm.get(criteria.projectId)
   if (!handle || handle.state !== 'ready') return null
   if (handle.cwd !== criteria.cwd) return null
+  // Flags are baked into the running agent — adopt only on an exact match.
+  if ((handle.flags ?? '') !== (criteria.flags ?? '')) return null
 
   // Hand it off: stop draining its output, remove from the pool, re-arm.
   handle.state = 'adopting'
@@ -92,11 +122,18 @@ export function claimWarmShell(criteria: {
     level: 'info',
     source: 'pty',
     event: 'warm.adopted',
+    sessionId: handle.sessionId,
     payload: { projectId: criteria.projectId, cwd: criteria.cwd }
   })
   // The task being opened still counts as ≥1 open tab, so re-arm immediately.
   void spawnWarm(criteria.projectId)
-  return { pty: handle.pty, seedBuffer: handle.seedBuffer }
+  return {
+    pty: handle.pty,
+    seedBuffer: handle.seedBuffer,
+    preWarmedAgent: true,
+    sessionId: handle.sessionId,
+    conversationId: handle.conversationId
+  }
 }
 
 /** Kill every held warm shell. Call on app quit (also suppresses further spawns). */
@@ -167,27 +204,79 @@ async function spawnWarm(projectId: string): Promise<void> {
   try {
     const cwd = await deps.getProjectRoot(projectId)
     if (!cwd || !existsSync(cwd)) return
-    // Bare shell env: task-scoped vars (SLAYZONE_TASK_ID/PROJECT_ID) are omitted here and
-    // exported at adopt. Same buildMcpEnv source as a cold spawn → no drift.
-    const extraEnv = await buildMcpEnv(deps.db, undefined, WARM_MODE)
+    // The warmed agent's command template (claude-code initial_command + flags).
+    const modeRow = await deps.db.get<{
+      initial_command: string | null
+      default_flags: string | null
+    }>(`SELECT initial_command, default_flags FROM terminal_modes WHERE id = ?`, [WARM_MODE])
+
+    const sessionId = randomUUID()
+    // claude-code pre-mints the conversation id (its initial_command has the
+    // `{id}` placeholder), so the warm agent's transcript + resume id are known
+    // before adoption. Providers without `{id}` mint their own → null here.
+    const conversationId = modeRow?.initial_command?.includes('{id}') ? randomUUID() : null
+
+    // Pooled env: SLAYZONE_SESSION_ID (no SLAYZONE_TASK_ID — there's no task yet).
+    // The agent's slay CLI + conversation hook resolve the task via session→task
+    // once the pool binds it. Same buildMcpEnv source as a cold spawn → no drift.
+    const extraEnv = await buildMcpEnv(deps.db, undefined, WARM_MODE, sessionId)
     // Re-check after awaits (gate may have closed / shutdown / raced).
     if (shuttingDown || warm.has(projectId)) return
     const result = (deps.spawnShell ?? spawnLoginShell)({ cwd, extraEnv })
-    const handle: WarmHandle = { pty: result.pty, cwd, seedBuffer: '', state: 'ready' }
-    // Drain the rc prompt into seedBuffer so it doesn't flash on adopt, and so RingBuffer
-    // history stays consistent once the shell is registered.
+    const handle: WarmHandle = {
+      pty: result.pty,
+      cwd,
+      seedBuffer: '',
+      state: 'ready',
+      sessionId,
+      conversationId,
+      flags: modeRow?.default_flags ?? null
+    }
+    // Drain the agent's boot output into seedBuffer so it replays on adopt and
+    // RingBuffer history stays consistent once the session is registered.
     handle.dataDisposable = result.pty.onData((d) => {
       handle.seedBuffer = (handle.seedBuffer + d).slice(-MAX_SEED_BYTES)
     })
     handle.exitDisposable = result.pty.onExit(() => {
       if (warm.get(projectId) === handle) warm.delete(projectId)
+      // The pooled session's process died (reap / crash) → mark it dead so a
+      // stale `pooled` row never lingers as resumable.
+      void markSessionDead(deps!.db, sessionId).catch(() => {})
     })
     warm.set(projectId, handle)
+
+    // Record the pooled session entity (status='pooled', no task/tab yet). The
+    // conversation id is confirmed write-once by the agent's SessionStart hook
+    // (keyed by SLAYZONE_SESSION_ID — see agent-hook).
+    await recordSessionSpawn(deps.db, {
+      id: sessionId,
+      taskId: null,
+      tabId: null,
+      mode: WARM_MODE,
+      cwd,
+      expectedConversationId: conversationId,
+      usedResume: false,
+      status: 'pooled'
+    })
+
+    // Pre-boot the AGENT: exec the provider command in the warm shell. The pooled
+    // env is already baked into the process (passed via extraEnv), so no export
+    // prefix is needed — claude inherits SLAYZONE_SESSION_ID. This is the same
+    // command a cold spawn builds; only the timing differs (now, not at adopt).
+    if (modeRow?.initial_command) {
+      const binary = interpolateTemplate({
+        template: modeRow.initial_command,
+        conversationId: conversationId || undefined,
+        flags: parseShellArgs(modeRow.default_flags ?? undefined)
+      })
+      result.pty.write(`exec ${buildExecCommand(binary.name, binary.args)}\r`)
+    }
     recordDiagnosticEvent({
       level: 'info',
       source: 'pty',
-      event: 'warm.spawned',
-      payload: { projectId, cwd }
+      event: 'warm.agent_spawned',
+      sessionId,
+      payload: { projectId, cwd, hasConversationId: !!conversationId }
     })
   } catch (err) {
     recordDiagnosticEvent({

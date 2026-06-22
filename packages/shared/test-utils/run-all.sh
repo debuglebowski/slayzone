@@ -51,6 +51,8 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/startup-pur
 run_test_electron_strict_loader packages/domains/task/src/server/artifact-watcher.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
 run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessions.test.ts
+# Entity-model B — one-row-per-spawn session lifecycle (spawn→confirm→dead→bind).
+run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessions-lifecycle.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
@@ -169,6 +171,8 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/task
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/unarchive.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/update.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
+# Pool: session → bound task resolution (slay CLI fallback for pre-warmed agents).
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/sessions/resolve-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-many-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts

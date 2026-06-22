@@ -10,7 +10,7 @@ export interface TagOpts {
 }
 
 export async function tagAction(taskId: string | undefined, opts: TagOpts): Promise<void> {
-  taskId = resolveId(taskId)
+  taskId = await resolveId(taskId)
   const db = openDb()
 
   const tasks = db.query<{ id: string; project_id: string }>(

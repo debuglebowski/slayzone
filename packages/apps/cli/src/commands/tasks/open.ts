@@ -11,7 +11,7 @@ export interface OpenOpts {
 }
 
 export async function openAction(idPrefix: string | undefined, opts: OpenOpts = {}): Promise<void> {
-  idPrefix = resolveId(idPrefix)
+  idPrefix = await resolveId(idPrefix)
   const db = openDb()
 
   const tasks = db.query<{ id: string; title: string }>(

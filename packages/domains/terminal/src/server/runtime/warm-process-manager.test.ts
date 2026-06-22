@@ -97,11 +97,25 @@ const fakeSpawn = (() => {
 let enabled = true
 // cwd must exist on disk — spawnWarm guards on existsSync(projectRoot).
 const PROJECT_ROOT = tmpdir()
-const db = { get: async () => undefined } as unknown as SlayzoneDb
+// Stub db: the mode lookup returns the claude-code template; `run` captures
+// writes (recordSessionSpawn / markSessionDead) so the agent-warm test can
+// assert a pooled session row was recorded.
+let dbRunCalls: Array<{ sql: string; params: unknown[] }> = []
+const db = {
+  get: async (sql: string) =>
+    /terminal_modes/.test(sql)
+      ? { initial_command: 'claude --session-id {id} {flags}', default_flags: '--dangerously' }
+      : undefined,
+  run: async (sql: string, params: unknown[] = []) => {
+    dbRunCalls.push({ sql, params })
+    return { changes: 1, lastInsertRowid: 0 }
+  }
+} as unknown as SlayzoneDb
 
 function init(): void {
   spawnCount = 0
   lastSpawned = null
+  dbRunCalls = []
   enabled = true
   initWarmProcessManager({
     db,
@@ -117,6 +131,19 @@ await test('gate 0→1 spawns one warm shell', async () => {
   await settle()
   expect(getWarmStatus().p1).toBe('ready')
   expect(spawnCount).toBe(1)
+})
+
+await test('warm spawn pre-boots the agent + records a pooled session (B3b)', async () => {
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  // The provider command was exec'd into the warm shell (agent pre-boot).
+  const wrote = lastSpawned?.written.join('') ?? ''
+  expect(wrote.includes('exec ') && wrote.includes('claude')).toBeTruthy()
+  // A pooled agent_sessions row was recorded.
+  const pooledInsert = dbRunCalls.find((c) => /INSERT INTO agent_sessions/.test(c.sql))
+  expect(!!pooledInsert).toBeTruthy()
+  expect((pooledInsert!.params as unknown[]).includes('pooled')).toBeTruthy()
 })
 
 await test('count 1→2→1 does not respawn', async () => {
@@ -171,7 +198,7 @@ await test('captures shell prompt into seedBuffer', async () => {
   setProjectTabCounts(1, { p1: 1 })
   await settle()
   lastSpawned!.dataCbs.forEach((cb) => cb('user@host % '))
-  const claim = claimWarmShell({ projectId: 'p1', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: false })
+  const claim = claimWarmShell({ projectId: 'p1', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: false, flags: '--dangerously' })
   expect(claim?.seedBuffer).toBe('user@host % ')
 })
 
@@ -180,7 +207,7 @@ await test('adopt matches: claude-code + project-root cwd + fresh', async () => 
   setProjectTabCounts(1, { p1: 1 })
   await settle()
   const adopted = lastSpawned!
-  const claim = claimWarmShell({ projectId: 'p1', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: false })
+  const claim = claimWarmShell({ projectId: 'p1', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: false, flags: '--dangerously' })
   expect((claim?.pty as unknown as FakePty) === adopted).toBe(true)
   // Consumed: removed from the pool, then re-armed immediately (still has an open tab).
   await settle()

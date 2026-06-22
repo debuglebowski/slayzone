@@ -6,9 +6,10 @@
  * real shell spawns.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
  */
+import Database from 'better-sqlite3'
 import type { PtySessionWindow } from '../pty-host'
 import type { IPty } from 'node-pty'
-import type { SlayzoneDb } from '@slayzone/platform'
+import type { SlayzoneDb, BatchOp } from '@slayzone/platform'
 import { createPty, hasPty, getBuffer, killPty, setDatabase } from './pty-manager'
 
 let passed = 0
@@ -139,6 +140,80 @@ await test('adopt: seeds the RingBuffer with the warm scrollback', async () => {
   const buf = getBuffer(sessionId) ?? ''
   expect(buf.includes('WARM-PROMPT$ '), `seed not in buffer: ${JSON.stringify(buf)}`)
   killPty(sessionId)
+})
+
+await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled session (B4)', async () => {
+  // Real in-memory db so we can assert the bind actually happened.
+  const raw = new Database(':memory:')
+  raw.exec(`
+    CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT);
+    CREATE TABLE agent_sessions (
+      id TEXT PRIMARY KEY, mode TEXT NOT NULL, cwd TEXT, task_id TEXT, conversation_id TEXT,
+      origin TEXT NOT NULL, status TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL,
+      bound_at INTEGER, tab_id TEXT, ended_at INTEGER);
+  `)
+  raw.prepare("INSERT INTO tasks (id, project_id) VALUES ('taskD','proj-1')").run()
+  // A pre-warmed pooled agent already confirmed its conversation id.
+  raw
+    .prepare(
+      `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at)
+       VALUES ('poolS','claude-code','/tmp',NULL,'convPool','slay-spawned-fresh','pooled',0)`
+    )
+    .run()
+  const realDb = {
+    get: async (sql: string, p: unknown[] = []) => raw.prepare(sql).get(...p),
+    all: async (sql: string, p: unknown[] = []) => raw.prepare(sql).all(...p),
+    run: async (sql: string, p: unknown[] = []) => {
+      const r = raw.prepare(sql).run(...p)
+      return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }
+    },
+    batchTxn: async (ops: BatchOp[]) =>
+      raw.transaction(() => ops.map((o) => raw.prepare(o.sql)[o.type](...o.params)))()
+  } as unknown as SlayzoneDb
+  setDatabase(realDb)
+  try {
+    const fake = makeFakePty()
+    const sessionId = 'taskD:taskD'
+    await createPty({
+      win: fakeWin,
+      sessionId,
+      taskId: 'taskD',
+      tabId: 'taskD',
+      cwd: '/tmp',
+      mode: 'claude-code',
+      type: 'claude-code',
+      initialCommand: 'claude --session-id {id} {flags}',
+      defaultFlags: '--x',
+      initialPrompt: 'HELLO-PROMPT',
+      adoptPty: {
+        pty: fake as unknown as IPty,
+        preWarmedAgent: true,
+        sessionId: 'poolS',
+        conversationId: 'convPool'
+      }
+    })
+    const cmd = fake.written.join('')
+    // The agent is already running — it must NOT receive an exec/export (that
+    // would be typed into its live TUI as input).
+    expect(
+      !cmd.includes('exec ') && !cmd.includes('export SLAYZONE_TASK_ID'),
+      `pre-warmed agent must not be re-exec'd: ${JSON.stringify(cmd)}`
+    )
+    // The task's initial prompt is sent to the live agent.
+    expect(cmd.includes('HELLO-PROMPT'), `initial prompt not sent: ${JSON.stringify(cmd)}`)
+    // The pooled session entity was bound to the task (set-once).
+    const row = raw
+      .prepare("SELECT task_id, status FROM agent_sessions WHERE id = 'poolS'")
+      .get() as { task_id: string | null; status: string }
+    expect(
+      row.task_id === 'taskD' && row.status === 'bound',
+      `pooled session not bound: ${JSON.stringify(row)}`
+    )
+    killPty(sessionId)
+  } finally {
+    setDatabase(stubDb)
+    raw.close()
+  }
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

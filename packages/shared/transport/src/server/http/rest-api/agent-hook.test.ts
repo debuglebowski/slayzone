@@ -34,12 +34,14 @@ vi.mock('@slayzone/diagnostics/server', () => ({
 // (spawn-intent lookup) + `recordConversation` (append-only ledger). Mock both
 // so the test never pulls the task domain (+ DB) into vitest.
 const recordConversationSpy = vi.fn()
+const confirmSessionConversationSpy = vi.fn()
 const findPendingSpawnSpy =
   vi.fn<(db: unknown, taskId: string, mode: string) => Promise<unknown>>()
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: (...args: unknown[]) => recordConversationSpy(...args),
   findPendingSpawn: (db: unknown, taskId: string, mode: string) =>
-    findPendingSpawnSpy(db, taskId, mode)
+    findPendingSpawnSpy(db, taskId, mode),
+  confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args)
 }))
 
 interface ServerHandle {
@@ -114,6 +116,7 @@ describe('POST /api/agent-hook', () => {
     noteConversationIdSpy.mockReset()
     noteAwaitingInputSpy.mockReset()
     recordConversationSpy.mockReset()
+    confirmSessionConversationSpy.mockReset()
     findPendingSpawnSpy.mockReset()
     findSessionSpy.mockReturnValue(null)
     transitionSpy.mockReturnValue(true)
@@ -650,6 +653,30 @@ describe('POST /api/agent-hook', () => {
         origin: 'slay-spawned-fresh'
       })
       expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('POOLED agent SessionStart (slaySessionId, no taskId) → confirms conversation by session', async () => {
+    // Pre-warmed pooled agent has no task yet but carries SLAYZONE_SESSION_ID.
+    // Capture keys off the runtime session id, not the task (agent-sessions B).
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        slaySessionId: 'pool-sess-1',
+        sessionId: '33333333-3333-4333-8333-333333333333'
+      })
+      expect(confirmSessionConversationSpy).toHaveBeenCalledTimes(1)
+      expect(confirmSessionConversationSpy.mock.calls[0][1]).toEqual({
+        sessionId: 'pool-sess-1',
+        observedConversationId: '33333333-3333-4333-8333-333333333333'
+      })
+      // Task-keyed path is NOT taken for a pooled (taskless) agent.
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }

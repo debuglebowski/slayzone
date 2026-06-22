@@ -53,7 +53,12 @@ export {
   listConversationHistory,
   recordPendingSpawn,
   findPendingSpawn,
-  prunePendingSpawns
+  prunePendingSpawns,
+  recordSessionSpawn,
+  confirmSessionConversation,
+  confirmSessionConversationByTaskMode,
+  markSessionDead,
+  bindSessionToTask
 } from './ops'
 export type { CreateImportedTaskInput } from './ops'
 export { configureTaskRuntimeAdapters, updateTask } from './ops/shared'

@@ -64,6 +64,34 @@ Decisions locked with the user:
   better-sqlite3. **Current max version = 146.** New = 147; drop-legacy = a
   later version (148+).
 
+## Entity model: B (session entity, not event ledger) — DECIDED
+
+`agent_sessions` = **one row per spawn** (one live process), NOT one row per
+conversation-provenance event. This is the correction to slices 1–2 (which built
+an append-only mirror of `task_conversations`). Rationale + robustness proof in
+the conversation history; summary:
+
+- `id` = the runtime PTY key (main-minted uuid), 1:1 with a live process.
+- The row's lifecycle: `pending` (at spawn) → conversation_id + origin filled
+  **write-once** on turn-init → `dead` on exit. The ONLY mutations are this
+  write-once conversation fill + the `status` lifecycle. A new spawn = a NEW row
+  (still append *across* spawns), so the cross-session clobber bug stays
+  structurally impossible; provenance gate + reset cutoff are unchanged.
+- `task_conversations` retires INTO this (its append-of-events granularity was a
+  mechanism detail, not a robustness feature worth keeping).
+
+**Write lifecycle (replaces the slice-1 event triple-write):**
+- spawn → `recordSessionSpawn` INSERT (origin=`pending-spawn`, status=`bound`|`pooled`,
+  pending_meta={expectedId, usedResume}, conversation_id=expectedId|null).
+- turn-init → `confirmSessionConversation` UPDATE write-once (conversation_id=observed,
+  origin = match?`slay-spawned-fresh`/`-resume`:`foreign-observed`).
+- exit → `markSessionDead` (status=`dead`, ended_at).
+- pool assign (slice 4) → `bindSessionToTask` (task_id, tab_id, bound_at, status=`bound`).
+
+Readers (resolver / history / pending) from slice 2 already target
+`agent_sessions` + `session_resets` and stay correct for B rows. `findPendingSpawn`
+gains a not-dead filter (in-flight only).
+
 ## Target schema
 
 ```sql
@@ -186,7 +214,27 @@ in-memory `sessionId→taskId` map + boot rehydration; replace all
 `split(':')[0]` sites (main + renderer). Riskiest slice; isolate it. Heavy e2e
 on resume / reset / multi-tab / multi-mode.
 
-### Slice 3 — detailed design (post-investigation)
+### Slice 3 — DECISION: runtime-key surgery DROPPED (path A)
+
+The session **entity** (`agent_sessions`) already has an opaque, backend-minted,
+task-independent id (slices 1–2 + B foundation) — the architectural goal is met
+at the data layer. Flipping the **in-memory PTY registry key** from `taskId:tabId`
+to that opaque id was found to be atomic, 1947-LOC surgery on the live-dogfooded
+`Terminal.tsx` (93 `sessionId` uses) for a plumbing-purity gain only. The pool
+does NOT need it — pooled sessions are keyed by their opaque uuid in the runtime
+and **adopted** into the task's `taskId:tabId` session on assignment (the proven
+`warm-process-manager` pattern). So:
+
+- **KEPT** as pool foundation (behavior-neutral): the seam
+  (`sessionTaskMap`/`sessionTabMap`, map-first derivation), `pty.create` minting
+  an opaque id when none is supplied + returning it + accepting explicit
+  `taskId`/`tabId`, `listPtys`/enricher using the seam.
+- **DROPPED**: the renderer flip (Terminal.tsx / container / selectors / parse
+  sites). Bound sessions keep the `taskId:tabId` runtime key. The entity id
+  (`agent_sessions.id`) ≠ runtime key for bound sessions — accepted; the entity
+  is the source of truth, the runtime key is plumbing.
+
+### Slice 3 — original full-flip design (NOT pursued; kept for reference)
 
 **Identity.** Runtime PTY key = `agent_sessions.id` (opaque uuid). Never encodes
 taskId/tabId. STABLE for the session's whole life → pool assignment is just
@@ -222,24 +270,79 @@ Parse sites: `TerminalStatusPopover` uses the `pty.taskId` field already on the
 list payload; `TerminalContainer:363` uses a `data-task-id` attr / tab lookup,
 not `substring`.
 
-**RESOLVED sub-decisions (objectable):**
-1. *Who mints `agent_sessions.id`* → **renderer mints a client uuid** per tab/pane
-   and passes it to `pty.create` (it already mints tabId uuids). Keeps create
-   fire-and-forget; no "await the id" protocol change. (Alt: main mints +
-   `pty.create` returns it — more authoritative, more invasive.)
+**RESOLVED sub-decisions:**
+1. *Who mints `agent_sessions.id`* → **MAIN mints.** Session identity is a
+   backend entity; the frontend must not own it. Decisive: a POOLED session is
+   created with no renderer/tab in existence, so a frontend mint is structurally
+   impossible. Consequence: `pty.create` becomes request/response — main mints
+   the uuid, writes `agent_sessions`, returns the sessionId; the renderer awaits
+   it before subscribing. Pool path mints server-side via the same code, no tab
+   involved. (The conversation/thread id `agent_sessions.conversation_id` was
+   already main-minted — now the runtime key joins it: one backend authority.)
 2. *Main-tab `terminal_tabs.id === taskId` convention* → **keep it** (harmless now
    that sessionId isn't derived from it; less churn).
 3. *Transition* → **dual-accept** (map + split fallback), legacy keys age out on
    restart. No destructive runtime migration.
 
-**Slice 4 — pool.** `AgentPoolManager`, assign-on-create for temp tasks, boot
-reaper, refill/cap/TTL. New feature on the now-decoupled model.
-> ⚠️ A warm-process pool ALREADY EXISTS: `warm-process-manager.ts` (+ tests
-> `warm-process-manager.test.ts`, `adopt-pty.test.ts`, `createpty-resolver.test.ts`),
-> "per-project gate + adopt-match" — it pre-warms *shells* per project and
-> `createPty` adopts a matching warm shell. Slice 4 must EXTEND this (warm the
-> agent, not just the shell + bind via agent_sessions) — NOT build a parallel
-> pool. Read it first.
+**Slice 4 — agent pool (adoption-based).** Extend the EXISTING warm-process
+mechanism, do NOT build a parallel pool.
+
+Today `warm-process-manager.ts` pre-warms a bare login *shell* per project; the
+agent (claude) only `exec`s at adoption — so MCP init + model handshake still
+cost at adoption. The pool warms one step further: the **agent itself** is
+already running (claude booted, MCP up, idle) so assignment is instant.
+
+- A pooled agent = a spawned session with `agent_sessions` row (opaque id,
+  `task_id=null`, `status='pooled'`), process keyed by its opaque uuid in the
+  runtime `sessions` map (no task → no `taskId:tabId`).
+- Warm scope: one pool per `(project-already-running-an-agent, mode)` + a
+  scratch cwd for projectless temp tasks. Cold projects warm nothing.
+- **Assign = adopt** (the warm-shell pattern, extended): on task/main-tab spawn,
+  if a matching pooled agent exists, re-key its process from the opaque uuid to
+  the task's `taskId:tabId` session in the `sessions` map, `bindSessionToTask`
+  (set task_id/tab_id, status=bound), skip cold spawn. Renderer untouched.
+- Boot reaper: pooled rows are live OS processes → all dead on restart; mark
+  `status='dead'` for orphaned `pooled` rows on boot.
+- Refill/cap/TTL per `(cwd, mode)`.
+
+Scoping (DECIDED): K=1 per active project; claude-code only; project cwd;
+**no idle TTL** — warm agent lives while the project has ≥1 open task tab, reaped
+when it drops to zero (this is already the warm-shell `reconcile` lifecycle).
+Project-scoped only (no scratch/projectless warming in v1).
+
+### Slice 4 — path B: TRUE agent pre-warm (DECIDED)
+
+The existing pool warms a bare **shell** and `exec claude` only at adopt (so
+`SLAYZONE_TASK_ID` is set at launch). Path B pre-warms the **agent** (claude
+booted, MCP up, idle) so assignment is instant. The blocker: agent task identity
+(`SLAYZONE_TASK_ID`) is launch-time + un-mutable on a running process, and is
+read by the `slay` CLI + the conversation hook.
+
+**Solution — dynamic session→task resolution (no file):**
+- Launch a pooled agent with `SLAYZONE_SESSION_ID=<runtime uuid>` (immutable,
+  known at launch) and NO `SLAYZONE_TASK_ID`.
+- `slay` CLI resolves task = `$SLAYZONE_TASK_ID ?? resolveTaskForSession($SLAYZONE_SESSION_ID)`
+  via the local API. Source of truth = `agent_sessions.task_id`. Normal
+  (non-pool) agents keep the fast env path untouched.
+- Conversation capture keys off the runtime session id (turn-init →
+  `confirmSessionConversation({sessionId})`), NOT the task env — works for a
+  taskless pooled agent.
+- Adopt = `bindSessionToTask` (sets `task_id`/`tab_id`) + re-key the process
+  (opaque uuid → `taskId:tabId`, the warm-shell adoption pattern). The CLI's
+  session→task query then returns the bound task instantly.
+
+**Decomposition (safe sub-steps):**
+- **B1** — `slay` CLI session→task fallback + a local API endpoint resolving
+  `agent_sessions.id → task_id`. Independent, unit-testable. Foundation.
+- **B2** — spawn path writes the `agent_sessions` row (`recordSessionSpawn`) +
+  exports `SLAYZONE_SESSION_ID`; wire turn-init → `confirmSessionConversation`,
+  exit → `markSessionDead` (model-B conversation cutover, spawn path).
+- **B3** — warm-process-manager warms the agent (claude) instead of the shell:
+  pre-mint conversation id, launch claude pooled (no task env), `status='pooled'`.
+- **B4** — adopt: `claimWarmAgent` → `bindSessionToTask` + re-key + the running
+  agent's `slay` calls resolve the now-bound task.
+- **B5** — pool lifecycle (reuse `reconcile`) + boot reaper for orphaned
+  `pooled` rows.
 
 **Slice 5 — drop legacy (v148+).** After prod proves slices 2–4: drop
 `task_conversations`, the `*_conversation_id` columns, and the

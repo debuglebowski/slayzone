@@ -9,7 +9,7 @@ export async function subtasksAction(
   idPrefix: string | undefined,
   opts: SubtasksOpts
 ): Promise<void> {
-  idPrefix = resolveId(idPrefix)
+  idPrefix = await resolveId(idPrefix)
   const db = openDb()
 
   const parents = db.query<{ id: string }>(

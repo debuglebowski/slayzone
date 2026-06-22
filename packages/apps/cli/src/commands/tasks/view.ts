@@ -2,7 +2,7 @@ import { openDb } from '../../db'
 import { resolveId, type TaskRow } from './_shared'
 
 export async function viewAction(idPrefix: string | undefined): Promise<void> {
-  idPrefix = resolveId(idPrefix)
+  idPrefix = await resolveId(idPrefix)
   const db = openDb()
 
   const tasks = db.query<TaskRow & { description: string; due_date: string }>(
