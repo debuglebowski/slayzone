@@ -69,6 +69,7 @@ import {
   runtimeOnTaskReachedTerminal,
   setOnTaskReachedTerminalHandler,
   broadcastRespawnRequest,
+  initWarmProcessManager,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import {
@@ -243,6 +244,37 @@ export function composeServer(opts: {
     bus: { on: () => undefined }
   })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
+  // Warm-process pool (plans/agent-sessions.md): pre-warm one agent per active
+  // project so opening a task adopts instantly. PTY runs in THIS process
+  // (slice 9), so the manager MUST be initialized here — the renderer's warm
+  // tab-count reports (`pty.warmSetProjectTabCounts`) land in this process, not
+  // the Electron host. It was only ever wired in the host, so it went dead when
+  // pty moved to the sidecar; this restores it. `isEnabled` reads a cached
+  // `terminal_prewarm_enabled` (sync; refreshed on settings change). Raw
+  // `=== '1'` keeps it strictly opt-in.
+  let prewarmEnabled = false
+  const refreshPrewarm = async (): Promise<void> => {
+    try {
+      const row = await db.get<{ value?: string }>(
+        "SELECT value FROM settings WHERE key = 'terminal_prewarm_enabled'"
+      )
+      prewarmEnabled = row?.value === '1'
+    } catch {
+      /* keep last-known value */
+    }
+  }
+  void refreshPrewarm()
+  notifyEvents.on('settings-changed', () => void refreshPrewarm())
+  initWarmProcessManager({
+    db,
+    isEnabled: () => prewarmEnabled,
+    getProjectRoot: async (projectId) => {
+      const row = await db.get<{ path?: string }>('SELECT path FROM projects WHERE id = ?', [
+        projectId
+      ])
+      return row?.path ?? null
+    }
+  })
   setChatDeps({
     ops: createChatOps(db),
     queueOps: createChatQueueOps(db),

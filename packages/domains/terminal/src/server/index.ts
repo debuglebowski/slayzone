@@ -44,6 +44,10 @@ export {
   type IpcMainLike
 } from './pty-host'
 export { createPtyOps, type PtyCreateOpts } from './runtime/pty-store'
+// Warm-process pool lifecycle. Lives in this (server) package — the slice-9
+// sidecar owns pty + must initialize it (the renderer's warm tab-count reports
+// land here, not in the Electron host). See plans/agent-sessions.md.
+export { initWarmProcessManager, teardownAllWarm } from './runtime/warm-process-manager'
 export {
   ptyEvents,
   type PtyEventMap,
