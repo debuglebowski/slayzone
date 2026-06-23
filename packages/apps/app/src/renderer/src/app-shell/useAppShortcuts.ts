@@ -188,7 +188,48 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     (e) => {
       e.preventDefault()
       const num = parseInt(e.key, 10)
-      if (num < visibleTabs.length) setActiveTabIndex(toFullIndex(num))
+      // visibleTabs[0] is the home tab; task tabs occupy visibleIndex 1..length-1.
+      // Chrome-style: mod+9 jumps to the LAST task tab regardless of count.
+      if (num === 9) {
+        if (visibleTabs.length > 1) setActiveTabIndex(toFullIndex(visibleTabs.length - 1))
+      } else if (num < visibleTabs.length) {
+        setActiveTabIndex(toFullIndex(num))
+      }
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Cycle through open task tabs (skip the home tab), wrapping at the edges.
+  const navigateTaskTabs = useCallback(
+    (direction: 1 | -1) => {
+      // Task tabs live at visibleIndex 1..length-1 (visibleTabs[0] is home).
+      if (visibleTabs.length <= 1) return
+      const taskCount = visibleTabs.length - 1
+      const visibleIdx = toVisibleIndex(useTabStore.getState().activeTabIndex)
+      // Treat home / unknown position as "before the first task tab" so
+      // next jumps to first and prev jumps to last — same as Chrome.
+      const currentTaskPos = visibleIdx >= 1 ? visibleIdx - 1 : direction === 1 ? -1 : 0
+      const nextTaskPos = (currentTaskPos + direction + taskCount) % taskCount
+      useTabStore.getState().setActiveView('tabs')
+      setActiveTabIndex(toFullIndex(nextTaskPos + 1))
+    },
+    [visibleTabs.length, toFullIndex, toVisibleIndex, setActiveTabIndex]
+  )
+
+  useGuardedHotkeys(
+    getKeys('next-task-tab'),
+    (e) => {
+      e.preventDefault()
+      navigateTaskTabs(1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  useGuardedHotkeys(
+    getKeys('prev-task-tab'),
+    (e) => {
+      e.preventDefault()
+      navigateTaskTabs(-1)
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )
