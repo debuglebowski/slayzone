@@ -219,6 +219,10 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   useGuardedHotkeys(
     getKeys('next-task-tab'),
     (e) => {
+      // macOS Cmd+Option+Right is "next word" in text fields; don't hijack.
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
       e.preventDefault()
       navigateTaskTabs(1)
     },
@@ -228,6 +232,10 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   useGuardedHotkeys(
     getKeys('prev-task-tab'),
     (e) => {
+      // macOS Cmd+Option+Left is "previous word" in text fields; don't hijack.
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
       e.preventDefault()
       navigateTaskTabs(-1)
     },
