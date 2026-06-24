@@ -158,7 +158,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     group: 'Tabs',
     defaultKeys: 'mod+alt+arrowright',
     scope: 'global',
-    customizable: false
+    customizable: true
   },
   {
     id: 'prev-task-tab',
@@ -166,7 +166,15 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     group: 'Tabs',
     defaultKeys: 'mod+alt+arrowleft',
     scope: 'global',
-    customizable: false
+    customizable: true
+  },
+  {
+    id: 'last-task-tab',
+    label: 'Last Task Tab',
+    group: 'Tabs',
+    defaultKeys: 'mod+9',
+    scope: 'global',
+    customizable: true
   },
   {
     id: 'reopen-closed-tab',
