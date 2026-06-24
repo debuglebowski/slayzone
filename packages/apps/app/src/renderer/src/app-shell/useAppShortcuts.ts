@@ -184,15 +184,11 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   )
 
   useGuardedHotkeys(
-    'mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8,mod+9',
+    'mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8',
     (e) => {
       e.preventDefault()
       const num = parseInt(e.key, 10)
-      // visibleTabs[0] is the home tab; task tabs occupy visibleIndex 1..length-1.
-      // Chrome-style: mod+9 jumps to the LAST task tab regardless of count.
-      if (num === 9) {
-        if (visibleTabs.length > 1) setActiveTabIndex(toFullIndex(visibleTabs.length - 1))
-      } else if (num < visibleTabs.length) {
+      if (num < visibleTabs.length) {
         setActiveTabIndex(toFullIndex(num))
       }
     },
@@ -221,8 +217,10 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     (e) => {
       // macOS Cmd+Option+Right is "next word" in text fields; don't hijack.
       const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return
+      if (el.isContentEditable || el.getAttribute('role') === 'textbox') return
       if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
       e.preventDefault()
       navigateTaskTabs(1)
     },
@@ -232,12 +230,25 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   useGuardedHotkeys(
     getKeys('prev-task-tab'),
     (e) => {
-      // macOS Cmd+Option+Left is "previous word" in text fields; don't hijack.
       const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return
+      if (el.isContentEditable || el.getAttribute('role') === 'textbox') return
       if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
       e.preventDefault()
       navigateTaskTabs(-1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  useGuardedHotkeys(
+    getKeys('last-task-tab'),
+    (e) => {
+      e.preventDefault()
+      if (visibleTabs.length > 1) {
+        useTabStore.getState().setActiveView('tabs')
+        setActiveTabIndex(toFullIndex(visibleTabs.length - 1))
+      }
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )
