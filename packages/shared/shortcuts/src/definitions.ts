@@ -169,14 +169,6 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     customizable: true
   },
   {
-    id: 'last-task-tab',
-    label: 'Last Task Tab',
-    group: 'Tabs',
-    defaultKeys: 'mod+9',
-    scope: 'global',
-    customizable: true
-  },
-  {
     id: 'reopen-closed-tab',
     label: 'Reopen Closed Tab',
     group: 'Tabs',

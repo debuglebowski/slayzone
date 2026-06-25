@@ -184,7 +184,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   )
 
   useGuardedHotkeys(
-    'mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8',
+    'mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8,mod+9',
     (e) => {
       e.preventDefault()
       const num = parseInt(e.key, 10)
@@ -237,23 +237,6 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
       if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
       e.preventDefault()
       navigateTaskTabs(-1)
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('last-task-tab'),
-    (e) => {
-      const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return
-      if (el.isContentEditable || el.getAttribute('role') === 'textbox') return
-      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
-      if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
-      e.preventDefault()
-      if (visibleTabs.length > 1) {
-        useTabStore.getState().setActiveView('tabs')
-        setActiveTabIndex(toFullIndex(visibleTabs.length - 1))
-      }
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )
