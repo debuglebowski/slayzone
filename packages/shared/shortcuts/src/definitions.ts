@@ -153,6 +153,22 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     scope: 'global'
   },
   {
+    id: 'next-task-tab',
+    label: 'Next Task Tab',
+    group: 'Tabs',
+    defaultKeys: 'mod+alt+arrowright',
+    scope: 'global',
+    customizable: true
+  },
+  {
+    id: 'prev-task-tab',
+    label: 'Previous Task Tab',
+    group: 'Tabs',
+    defaultKeys: 'mod+alt+arrowleft',
+    scope: 'global',
+    customizable: true
+  },
+  {
     id: 'reopen-closed-tab',
     label: 'Reopen Closed Tab',
     group: 'Tabs',

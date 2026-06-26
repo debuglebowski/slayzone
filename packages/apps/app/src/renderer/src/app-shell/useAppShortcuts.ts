@@ -193,6 +193,52 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     { enableOnFormTags: true, enabled: !isRecording }
   )
 
+  // Cycle through open task tabs (skip the home tab), wrapping at the edges.
+  const navigateTaskTabs = useCallback(
+    (direction: 1 | -1) => {
+      // Task tabs live at visibleIndex 1..length-1 (visibleTabs[0] is home).
+      if (visibleTabs.length <= 1) return
+      const taskCount = visibleTabs.length - 1
+      const visibleIdx = toVisibleIndex(useTabStore.getState().activeTabIndex)
+      // Treat home / unknown position as "before the first task tab" so
+      // next jumps to first and prev jumps to last — same as Chrome.
+      const currentTaskPos = visibleIdx >= 1 ? visibleIdx - 1 : direction === 1 ? -1 : 0
+      const nextTaskPos = (currentTaskPos + direction + taskCount) % taskCount
+      useTabStore.getState().setActiveView('tabs')
+      setActiveTabIndex(toFullIndex(nextTaskPos + 1))
+    },
+    [visibleTabs.length, toFullIndex, toVisibleIndex, setActiveTabIndex]
+  )
+
+  useGuardedHotkeys(
+    getKeys('next-task-tab'),
+    (e) => {
+      // macOS Cmd+Option+Right is "next word" in text fields; don't hijack.
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return
+      if (el.isContentEditable || el.getAttribute('role') === 'textbox') return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
+      e.preventDefault()
+      navigateTaskTabs(1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  useGuardedHotkeys(
+    getKeys('prev-task-tab'),
+    (e) => {
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return
+      if (el.isContentEditable || el.getAttribute('role') === 'textbox') return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
+      e.preventDefault()
+      navigateTaskTabs(-1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
   useGuardedHotkeys(
     'mod+shift+1,mod+shift+2,mod+shift+3,mod+shift+4,mod+shift+5,mod+shift+6,mod+shift+7,mod+shift+8,mod+shift+9',
     (e) => {
