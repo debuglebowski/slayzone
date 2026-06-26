@@ -188,9 +188,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     (e) => {
       e.preventDefault()
       const num = parseInt(e.key, 10)
-      if (num < visibleTabs.length) {
-        setActiveTabIndex(toFullIndex(num))
-      }
+      if (num < visibleTabs.length) setActiveTabIndex(toFullIndex(num))
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )

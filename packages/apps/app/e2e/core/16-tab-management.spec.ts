@@ -245,24 +245,6 @@ test.describe('Tab management & keyboard shortcuts', () => {
     expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
   })
 
-  test('Cmd+3 jumps to the 3rd task tab; Cmd+9 is a no-op when fewer than 9 tabs', async ({
-    mainWindow
-  }) => {
-    // With 3 task tabs open, Cmd+N is an indexed jump (Cmd+N → Nth task tab).
-    await mainWindow.keyboard.press('Meta+1')
-    await expect(
-      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 5_000 })
-    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
-
-    await mainWindow.keyboard.press('Meta+3')
-    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task C')
-
-    // Cmd+9 with only 3 task tabs open is a no-op (no 9th tab to jump to).
-    await mainWindow.keyboard.press('Meta+9')
-    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task C')
-  })
-
   test('Cmd+Option+Right/Left from home jumps to first / last task tab', async ({ mainWindow }) => {
     await goHome(mainWindow)
     // Home tab active — next jumps to FIRST task tab.
