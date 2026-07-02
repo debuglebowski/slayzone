@@ -31,11 +31,12 @@ current testids. One helper fix likely revives most. → migrate.
 - `93:190`(opencode) `93:219`(qwen): `getLastOpts` null even isolated. Suspect serial
   contamination from newly-unskipped `93:161` cursor (shared capture). → fix ordering/teardown.
 
-**real-CLI idle-gate — 5: `97`(2 codex) + `47`(3 cursor)**
-- `97:48`,`97:89`: codex on PATH but `openTaskTerminal` no longer auto-spawns (idle-gated)
-  → add `startAgentTerminal`. → migrate.
-- `47` cursor ×3: real cursor CLI no output (timeout). Add `startAgentTerminal`; if still
-  flaky = inherent CLI-in-e2e slowness → guard (hasCursor) or remove. → migrate/remove.
+**real-CLI idle-gate**
+- `97` (2 codex): DONE 2026-06-24 — added `startAgentTerminal` → both green (23s). Unskipped.
+- `47` (3 cursor): REMOVED 2026-06-24 — cursor-agent produces ZERO output in-harness
+  (codex/opencode work, cursor doesn't — TTY/interactive requirement it can't satisfy
+  in e2e). Spawn/idle-gate mechanism covered generically; real cursor-CLI output can't
+  be exercised here. File deleted.
 
 **WCV / web-panel migration — 5: `61:219`,`71:562`,`71:719`,`76:198`,`79:92`**
 - `61:219`: `getWebPanelUrl` returns `'no-webview'` (webview→WCV). Rewrite helper to WCV. → migrate.

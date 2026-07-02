@@ -2,9 +2,9 @@ import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   openTaskTerminal,
+  startAgentTerminal,
   getMainSessionId,
   waitForPtySession,
-  waitForPtyState,
   readFullBuffer,
   binaryOnPath
 } from '../fixtures/terminal'
@@ -26,10 +26,7 @@ function stripAnsi(data: string): string {
  * Requires specs 93/94 to restore PTY handlers in their afterAll
  * so that real CLI spawning works here.
  */
-// DEFER 2026-06-23: codex IS on PATH but openTaskTerminal no longer auto-spawns
-// (AI modes are idle-gated). Add startAgentTerminal after openTaskTerminal so the
-// real codex CLI spawns, then verify (90s timeouts). See plans/unskip-all-e2e.md.
-test.describe.skip('Session ID consistency (real CLIs)', () => {
+test.describe('Session ID consistency (real CLIs)', () => {
     let projectAbbrev: string
     let projectId: string
 
@@ -70,6 +67,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
       await s.refreshData()
 
       await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC codex fresh' })
+      await startAgentTerminal(mainWindow)
       const sessionId = getMainSessionId(t.id)
       await waitForPtySession(mainWindow, sessionId, 60_000)
 
@@ -114,6 +112,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
       await s.refreshData()
 
       await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC codex persist' })
+      await startAgentTerminal(mainWindow)
       const sessionId = getMainSessionId(t.id)
       await waitForPtySession(mainWindow, sessionId, 60_000)
 
