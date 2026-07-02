@@ -86,10 +86,7 @@ test.describe('Browser view events (WebContentsView)', () => {
     expect(title).toBe('test-title-xyz')
   })
 
-  // Skip: Navigation to example.com and dom-ready event fire slower when multiple
-  // Electron instances contend for network + GPU during parallel e2e runs.
-  // The 15s navigation poll times out. Passes reliably at workers:1.
-  test.skip('dom-ready allows JS execution', async ({ mainWindow }) => {
+  test('dom-ready allows JS execution', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
@@ -103,9 +100,20 @@ test.describe('Browser view events (WebContentsView)', () => {
       )
       .toContain('/title-Example')
 
-    // Wait for dom-ready (implicitly proven by successful JS execution)
-    const result = await testInvoke(mainWindow, 'browser:execute-js', viewId, 'document.readyState')
-    expect(['complete', 'interactive']).toContain(result)
+    // dom-ready fires asynchronously after navigation; poll readyState until the
+    // document is parsed rather than reading once (a single read can catch 'loading').
+    await expect
+      .poll(
+        async () =>
+          (await testInvoke(
+            mainWindow,
+            'browser:execute-js',
+            viewId,
+            'document.readyState'
+          )) as string,
+        { timeout: 10_000 }
+      )
+      .toMatch(/^(complete|interactive)$/)
   })
 
   test('did-fail-load fires for invalid domain', async ({ mainWindow }) => {

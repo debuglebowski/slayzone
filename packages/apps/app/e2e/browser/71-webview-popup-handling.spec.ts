@@ -477,8 +477,11 @@ test.describe
 // QUARANTINED 2026-05-16: web panels migrated from <webview> to WebContentsView.
 // openWebPanel helper queries DOM webview which no longer exists. Same root
 // cause as 61-web-panel-handoff-routing. Feature works in app.
-test.describe
-  .skip('Webview popup handling — Web panel with handoff policy', () => {
+// DEFER 2026-06-23 (Phase-4 WCV + batch-flaky): window.open behavior in web-panel
+// views changed with webview→WebContentsView; the with/without-features popup tests
+// flake under batch load (real BrowserWindow timing). Migrate the whole describe to the
+// WCV popup path (or remove dead <webview> window.open cases). See plan.
+test.describe.skip('Webview popup handling — Web panel with handoff policy', () => {
     const PANEL_ID = 'web:popup-handoff'
     const PANEL_NAME = 'Popup Handoff'
     const PANEL_SHORTCUT = 'y'
@@ -640,8 +643,9 @@ test.describe
 // ===========================================================================
 
 // QUARANTINED 2026-05-16: see above — web panel migration to WebContentsView.
-test.describe
-  .skip('Webview popup handling — Web panel without handoff policy', () => {
+// DEFER 2026-06-23 (Phase-4 WCV + batch-flaky): see note on the with-handoff describe
+// above — same webview→WebContentsView window.open migration. See plan.
+test.describe.skip('Webview popup handling — Web panel without handoff policy', () => {
     const PANEL_ID = 'web:popup-nohandoff'
     const PANEL_NAME = 'NoHandoff Panel'
     const PANEL_SHORTCUT = 'y'

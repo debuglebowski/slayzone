@@ -44,8 +44,11 @@ function find1PasswordPath(): string | null {
 // Skip: MV3 service worker startup is unreliable under parallel Electron instances.
 // Electron's extension host contends for GPU/compositor resources, causing the
 // service worker to fail to start. This is an Electron limitation, not an app bug.
-test.describe
-  .skip('Chrome extension real usage (WebContentsView)', () => {
+// DEFER 2026-06-23: extension content-script injection / MV2+MV3 messaging fail in
+// the e2e Electron env (extension host contends for GPU/compositor; the MV3 SW case
+// is tagged @known-limitation). Investigate whether any are fixable; otherwise remove
+// (feature works in-app; not an app bug). See plans/unskip-all-e2e.md.
+test.describe.skip('Chrome extension real usage (WebContentsView)', () => {
     let taskId: string
 
     test.beforeAll(async ({ mainWindow }) => {

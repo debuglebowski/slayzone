@@ -191,16 +191,17 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await testInvoke(mainWindow, 'browser:show-all')
   })
 
-  // Skip: Native WebContentsView repositioning (moving inactive views offscreen)
-  // completes asynchronously via Chromium's compositor. Under parallel e2e runs with
-  // multiple Electron GPU processes, the position update lags behind the assertion.
-  // Passes reliably at workers:1.
+  // DEFER 2026-06-23 (real, not contention): after a search-driven switch to task B,
+  // task A's view stays entry.visible=true → isViewNativelyVisible never flips false.
+  // Native hide is rAF/DOM-placeholder driven (see feedback_webcontentsview_zorder);
+  // this open-path doesn't trigger the inactive-view hide. Needs WCV hide-mechanism
+  // review (hide-on-inactive vs offscreen-bounds) before this assertion is valid.
   test.skip('inactive task views are offscreen (Bug 2)', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewIdA = await getActiveViewId(mainWindow, taskId)
 
     // Create a second task
-    const s = (await import('./fixtures/electron')).seed(mainWindow)
+    const s = seed(mainWindow)
     const t2 = await s.createTask({
       projectId: (
         await mainWindow.evaluate(() => window.getTrpcVanillaClient().projects.list.query())
@@ -213,15 +214,17 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     // Open second task
     await openTaskViaSearch(mainWindow, 'ZOrder task B')
     await ensureBrowserPanelVisible(mainWindow)
-    await mainWindow.waitForTimeout(500)
 
-    // Task A's view should be hidden (task A is inactive)
-    const visibleA = (await testInvoke(
-      mainWindow,
-      'browser:is-view-natively-visible',
-      viewIdA
-    )) as boolean
-    expect(visibleA).toBe(false)
+    // Task A's view should become hidden (task A is inactive). The native hide is
+    // applied asynchronously via Chromium's compositor, so poll rather than reading
+    // once after a fixed wait.
+    await expect
+      .poll(
+        async () =>
+          (await testInvoke(mainWindow, 'browser:is-view-natively-visible', viewIdA)) as boolean,
+        { timeout: 10_000 }
+      )
+      .toBe(false)
 
     // Task B's views should be on screen
     const viewsB = await getViewsForTask(mainWindow, t2.id)

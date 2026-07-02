@@ -24,7 +24,7 @@ test.describe('Temporary task cursor stability', () => {
   // QUARANTINED 2026-05-16: PTY for temp task doesn't register — Claude
   // Code likely requires auth or is missing in test env. Cursor stability
   // assertion can't run without real CLI output.
-  test.skip('no blank lines between Claude Code header and prompt', async ({ mainWindow }) => {
+  test('no blank lines between Claude Code header and prompt', async ({ mainWindow }) => {
     // Select the project first (required for temp task creation)
     await clickProject(mainWindow, projectAbbrev)
 

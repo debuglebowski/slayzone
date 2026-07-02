@@ -156,6 +156,9 @@ test.describe('Terminal mode switch teardown', () => {
   // useEffect to re-spawn for the new mode (codex). handleModeChange uses
   // markSkipCache+remountTerminal which aren't exposed. Needs source-level
   // test hook.
+  // DEFER 2026-06-23: mode switch (terminal→codex) doesn't re-spawn in-test —
+  // handleModeChange uses markSkipCache+remountTerminal which aren't reachable from
+  // the test; needs a source-level remount hook (or idle-gate-aware migration). See plan.
   test.skip('kills previous session and issues create for the new mode', async ({ mainWindow }) => {
     const sessionId = getMainSessionId(taskId)
     const marker = `BEFORE_SWITCH_${Date.now()}`

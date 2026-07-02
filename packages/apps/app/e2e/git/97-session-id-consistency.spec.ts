@@ -26,8 +26,10 @@ function stripAnsi(data: string): string {
  * Requires specs 93/94 to restore PTY handlers in their afterAll
  * so that real CLI spawning works here.
  */
-test.describe
-  .skip('Session ID consistency (real CLIs)', () => {
+// DEFER 2026-06-23: codex IS on PATH but openTaskTerminal no longer auto-spawns
+// (AI modes are idle-gated). Add startAgentTerminal after openTaskTerminal so the
+// real codex CLI spawns, then verify (90s timeouts). See plans/unskip-all-e2e.md.
+test.describe.skip('Session ID consistency (real CLIs)', () => {
     let projectAbbrev: string
     let projectId: string
 

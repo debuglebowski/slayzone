@@ -273,6 +273,8 @@ test.describe('Context manager sync flow', () => {
     // isn't reached — McpSection renders McpFlatSection only when projectPath +
     // MCP-capable providers resolve through the new view; needs a focused pass on
     // the redesigned MCP flow (add-server dialog + provider columns).
+    // DEFER 2026-06-23: CM Phase-3 redesign (same root as 63) — page closes / 30s
+    // timeout against the old MCP-section UI. Rewrite to the new CM view. See plan.
     test.skip('project MCP section shows provider columns when MCP entries exist', async ({
       mainWindow
     }) => {
@@ -312,6 +314,8 @@ test.describe('Context manager sync flow', () => {
       await closeTopDialog(mainWindow)
     })
 
+    // DEFER 2026-06-23: CM Phase-3 redesign (same root as 63) — page closes / 30s
+    // timeout against the old library-link UI. Rewrite to the new CM view. See plan.
     test.skip('library skill can be linked to project and re-synced after library edits', async ({
       mainWindow,
       electronApp

@@ -220,9 +220,12 @@ test.describe('Clean merge UI', () => {
     await ensureGitPanelVisible(mainWindow)
   })
 
-  // QUARANTINED 2026-05-16 (revisit): passes in isolation, fails in full-suite
-  // — ensureGitPanelVisible in beforeAll never sees a visible task-git-panel
-  // after prior Clean merge describe runs. Same root cause as Git init below.
+  // DEFER 2026-06-23 (infra-flake, not product bug): even at workers:1, this
+  // describe's beforeAll `ensureGitPanelVisible` fails at file:102 — the Meta+g
+  // keyboard toggle races the openTaskById active-tab switch, so the git panel
+  // never opens for THIS task. Needs a deterministic panel-open (store/button) in
+  // the helper instead of a focus-dependent keyboard toggle. Merge-via-UI behavior
+  // itself is fine. ('Git init' describe below now passes.)
   test.skip('merge via UI completes and merges feature commit onto parent branch', async ({
     mainWindow
   }) => {
@@ -415,8 +418,7 @@ test.describe('Merge with conflicts and uncommitted changes', () => {
 // describes in full-suite — `task-git-panel:visible` never appears for the
 // fresh NO_GIT project, even with ensureGitPanelVisible retry. Active-tab
 // switch may race the Meta+g press.
-test.describe
-  .skip('Git init', () => {
+test.describe('Git init', () => {
     // Must be outside any git repo for isGitRepo to return false
     const NO_GIT_DIR = path.join('/tmp', 'slayzone-e2e-no-git')
     let projectAbbrev: string

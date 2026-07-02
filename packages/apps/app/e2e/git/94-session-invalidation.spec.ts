@@ -13,8 +13,11 @@ import { openTaskTerminal, getMainSessionId } from '../fixtures/terminal'
  */
 // QUARANTINED 2026-05-16: same root cause as 93 — pty:create mock no longer
 // captures opts on task open. Needs rewriting against new pty lifecycle.
-test.describe
-  .skip('Session invalidation', () => {
+// DEFER 2026-06-23: all 4 fail `toBeGreaterThan(0)` — the createPty capture isn't
+// wired for this flow. Migrate to the 93-style stubbed capture
+// (`testSetPtyCreateCapture`/`testTakePtyCreateOpts`) + idle-gate (startAgentTerminal),
+// then verify. See plans/unskip-all-e2e.md.
+test.describe.skip('Session invalidation', () => {
     let projectAbbrev: string
     let projectId: string
 

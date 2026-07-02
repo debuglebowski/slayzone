@@ -57,11 +57,10 @@ test.describe('Terminal shell fallback on CLI crash', () => {
     }
   })
 
-  // QUARANTINED 2026-05-16: '[SlayZone]' recovery banner never lands in the
-  // buffer after CLI exits, even waiting 15s. Either shell-fallback gating
-  // (`hasPostSpawnCommand`) doesn't classify custom-mode `initialCommand: false`
-  // as having a post-spawn command, or the PTY pipeline never registers the
-  // session at all. Verify against pty-manager.ts:1278 (shouldShellFallback).
+  // DEFER 2026-06-23 (still fails, real): shell-fallback recovery banner never lands
+  // after CLI exits. Add startAgentTerminal (idle-gate) to spawn first, then verify
+  // the custom-mode `initialCommand:false` shell-fallback contract (shouldShellFallback
+  // in pty-manager). See plan.
   test.skip('spawns interactive shell after CLI exits non-zero', async ({ mainWindow }) => {
     const sessionId = getMainSessionId(taskId)
 

@@ -24,8 +24,11 @@ const crashModeId = 'crash-overlay-e2e'
 // auto-spawns PTY; beforeAll's waitForPtySession times out. All 4 tests in
 // this describe depend on the spawned PTY. Skip until the mode contract is
 // updated.
-test.describe
-  .skip('Terminal crash overlay', () => {
+// DEFER 2026-06-23 (serial describe — can't cherry-pick): the crash-trigger test
+// ('overlay appears after terminal crash') is flaky (custom-mode/idle-gate spawn), and
+// the later tests (Retry/Doctor buttons, etc.) depend on the crash it produces. Fix the
+// crash trigger (startAgentTerminal + initialCommand contract) for the whole describe. See plan.
+test.describe.skip('Terminal crash overlay', () => {
     let projectAbbrev: string
     let taskId: string
     let sessionId: string
@@ -97,10 +100,7 @@ test.describe
       await runCommand(mainWindow, sessionId, 'exit 7')
     }
 
-    // QUARANTINED 2026-05-16: custom mode with initialCommand=null no longer
-    // auto-spawns PTY; beforeAll's waitForPtySession times out. Either provide
-    // an initialCommand (e.g. /bin/sh) or update fixture/source contract.
-    test.skip('overlay appears after terminal crash', async ({ mainWindow }) => {
+    test('overlay appears after terminal crash', async ({ mainWindow }) => {
       await crashTerminal(mainWindow)
       await expect(mainWindow.getByText(/Process exited with code/i).last()).toBeVisible({
         timeout: 10_000

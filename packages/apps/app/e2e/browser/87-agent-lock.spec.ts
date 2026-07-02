@@ -173,10 +173,9 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
       .toBe(true)
   })
 
-  // QUARANTINED 2026-05-16: locked state set, navigate succeeds, but CLI
-  // click reports "Element not found: #b" — possibly the navigation route
-  // is short-circuited under lock, or page hasn't finished loading. Needs
-  // separate trace of the locked-tab CLI route.
+  // DEFER 2026-06-23 (still fails, real): CLI click reports "Element not found: #b"
+  // on the locked tab — fixture page-b lacks `#b`, or the locked-tab nav route is
+  // short-circuited before the page finishes loading. Trace the locked-tab CLI route. See plan.
   test.skip('agent CLI ops still work while the tab is locked', async ({ mainWindow }) => {
     const views = await getViewsForTask(mainWindow, taskId)
     // Explicitly ensure locked state (prior tests may have left it unlocked).

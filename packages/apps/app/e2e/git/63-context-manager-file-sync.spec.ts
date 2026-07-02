@@ -128,8 +128,16 @@ function cleanupDiskFiles(): void {
 // Test suite
 // ---------------------------------------------------------------------------
 
-test.describe
-  .skip('Context manager file sync', () => {
+// DEFER 2026-06-23 (Phase-3 CM redesign — biggest remaining chunk, 22 tests):
+// the Instructions/Skills UI was replaced. `instructions-textarea` /
+// `instructions-push-all` / `instructions-provider-card-*` testids are GONE; editing
+// now goes through ContextItemEditor (`context-item-editor-content`,
+// `context-item-editor-sync-all-to-disk`, `context-item-editor-stale-banner`) and
+// SkillItemDetail (`skill-detail-*`). The in-spec `openInstructionsDialog` still hunts
+// the old 'Project Settings' dialog (CM is now a full-screen 'Context Manager' view).
+// Rewrite the open/nav + sync helpers to the new components, then verify. See
+// plans/unskip-all-e2e.md.
+test.describe.skip('Context manager file sync', () => {
     let projectId: string
 
     test.beforeAll(async ({ mainWindow }) => {

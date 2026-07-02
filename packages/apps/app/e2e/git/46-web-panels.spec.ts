@@ -162,9 +162,11 @@ test.describe('Web panels', () => {
   //    are Electron menu accelerators; k/b/e/g/s are reserved per
   //    RESERVED_PANEL_SHORTCUTS; y/n/h/x/u are predefined panel shortcuts) ──
 
-  // QUARANTINED 2026-05-16: TestPanel doesn't appear after Add Panel click.
-  // Either the shortcut 'l' is silently rejected, or the click misses (scroll
-  // offset after form expansion).
+  // DEFER 2026-06-24: the add+render half is FIXED (savePanelConfig now keeps `order`
+  // complete via mergePanelOrder, so the card appears — see delete-custom test, now
+  // green). Remaining: a freshly-added custom panel's switch defaults unchecked and the
+  // row now exposes two switches (home/task) — decide the correct default-enabled scope,
+  // then assert the right switch. See plan.
   test.skip('add custom web panel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
@@ -223,7 +225,9 @@ test.describe('Web panels', () => {
     await openTaskViaSearch(mainWindow, 'WP test task')
   })
 
-  // STILL SKIPPED 2026-06-20: depends on 'add custom web panel' (TestPanel not created in settings UI).
+  // DEFER 2026-06-24: TestPanel now creates fine, but Cmd+L doesn't surface the
+  // web panel in the task view — needs the custom-shortcut → web-panel-toggle routing
+  // verified (panel must be enabled for the task scope first). See plan.
   test.skip('Cmd+L toggles custom web panel on', async ({ mainWindow }) => {
     // Focus a safe element first (avoid webview stealing keystrokes)
     const titleEl = mainWindow.locator('h1, [data-testid="task-title"]').first()
@@ -284,7 +288,7 @@ test.describe('Web panels', () => {
   })
 
   // STILL SKIPPED 2026-06-20: depends on 'add custom web panel' (TestPanel not created in settings UI).
-  test.skip('delete custom TestPanel', async ({ mainWindow }) => {
+  test('delete custom TestPanel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     const card = findCard(dialog, 'TestPanel')

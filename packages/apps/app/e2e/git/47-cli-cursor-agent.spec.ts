@@ -13,8 +13,11 @@ import {
 // Skip: Cursor Agent CLI boot time exceeds test timeouts under parallel load.
 // The real binary takes too long to produce output when competing with multiple
 // Electron instances for CPU. Not an app bug — CLI startup is inherently slow.
-test.describe
-  .skip('Cursor Agent CLI integration', () => {
+// DEFER 2026-06-23: real cursor-agent CLI produces no output in the e2e harness
+// (all 3 time out, even isolated). Needs idle-gate start (startAgentTerminal) + a
+// hasCursor PATH guard; if still non-deterministic (inherent CLI-in-Electron
+// slowness) → remove. See plans/unskip-all-e2e.md.
+test.describe.skip('Cursor Agent CLI integration', () => {
     let taskId: string
 
     test.beforeAll(async ({ mainWindow }) => {

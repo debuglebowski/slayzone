@@ -158,6 +158,9 @@ test.describe('Resume command opts', () => {
 
     // SKIP 2026-06-22: cursor-agent terminal does not reliably spawn in the e2e
     // harness (slow CLI boot / idle-gate); same flakiness as 47-cli-cursor-agent.
+    // (2026-06-24: passes standalone, but unskipping adds a 6th sequential AI-mode
+    // open that destabilizes the shared createPty capture for sibling resume tests —
+    // kept skipped until the capture-teardown enabler lands; see 94 + plan.)
     test.skip('cursor-agent resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
       const storedId = 'cursor-resume-44444444'
       const s = seed(mainWindow)
