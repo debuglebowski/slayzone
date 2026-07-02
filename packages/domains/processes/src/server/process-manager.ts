@@ -410,7 +410,7 @@ export function listForTask(taskId: string | null, projectId: string | null): Pr
   return Array.from(processes.values())
     .filter(
       (p) =>
-        p.taskId === taskId ||
+        (taskId != null && p.taskId === taskId) ||
         (p.taskId === null && p.projectId != null && p.projectId === projectId)
     )
     .map(({ child: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
