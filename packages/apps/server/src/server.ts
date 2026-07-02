@@ -8,7 +8,11 @@ import {
   getAuthEvents
 } from '@slayzone/transport/server'
 import { ensureDataRoot, getServerHost, getTrpcPort } from '@slayzone/platform'
-import { getDatabasePathFromEnv, openServerDatabase } from './db.js'
+import {
+  getDatabasePathFromEnv,
+  openServerDatabase,
+  openServerDiagnosticsDatabase
+} from './db.js'
 import { composeServer } from './composition.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
@@ -65,9 +69,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const ownsDb = cfg.db === undefined
   log(`db opened: ${dbPath}${supervised ? '' : ' (schema bootstrapped)'}`)
 
+  // Separate diagnostics events DB so THIS process's recordDiagnosticEvent calls
+  // (pty + agent pool run here) persist + are queryable, instead of buffering +
+  // dropping. Always owned here (independent of cfg.db).
+  const diagnosticsDb = openServerDiagnosticsDatabase()
+
   // Populate every transport registry BEFORE accepting connections, so the
   // first procedure call can't hit an uninitialized dep.
-  const composition = composeServer({ db, dataRoot, standalone: !supervised })
+  const composition = composeServer({ db, dataRoot, standalone: !supervised, diagnosticsDb })
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
 
@@ -105,7 +114,36 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     mcpRest.app(req, res)
   })
 
-  const wss = new WebSocketServer({ server: httpServer, path: '/trpc' })
+  // Reject cross-origin WS upgrades. The /trpc socket exposes the ENTIRE app
+  // router (browser control, shell.openExternal, file ops, the auth callback
+  // relay) — a drive-by web page (or a DNS-rebind to 127.0.0.1) must not reach
+  // it. Native clients (Electron main, node tooling/e2e, the sidecar) send no
+  // Origin; the app's own renderers run at chrome:// (fork), file:// ("null",
+  // packaged Electron) or http://localhost (vite dev). Anything else is a
+  // foreign website → 403. (Pairs with the per-flow / PKCE auth guards.)
+  const isAllowedWsOrigin = (origin: string | undefined): boolean => {
+    if (!origin) return true // no Origin header → non-browser client
+    if (origin === 'null') return true // file:// renderers serialize to "null"
+    let u: URL
+    try {
+      u = new URL(origin)
+    } catch {
+      return false
+    }
+    if (u.protocol === 'chrome:' || u.protocol === 'chrome-extension:' || u.protocol === 'devtools:') {
+      return true
+    }
+    if (u.protocol === 'file:') return true
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
+  }
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: '/trpc',
+    verifyClient: ({ origin }, cb) => {
+      if (isAllowedWsOrigin(origin)) cb(true)
+      else cb(false, 403, 'forbidden origin')
+    }
+  })
   const wssHandler = applyWSSHandler({
     wss,
     router: appRouter,
@@ -185,6 +223,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         } catch {
           /* ignore */
         }
+      }
+      try {
+        await diagnosticsDb.close()
+      } catch {
+        /* ignore */
       }
       log('stopped')
     }

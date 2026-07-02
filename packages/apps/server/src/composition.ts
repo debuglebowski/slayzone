@@ -80,7 +80,7 @@ import {
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { AutomationEngine } from '@slayzone/automations/server'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+import { recordDiagnosticEvent, bindDiagnosticsDbs } from '@slayzone/diagnostics/server'
 import {
   processEvents,
   initProcessManager,
@@ -142,9 +142,20 @@ export function composeServer(opts: {
   /** Standalone (non-supervised) boot: hydrate the process registry and ensure
    *  aux schemas. Supervised (dark, Electron-owned DB): skip — the host did. */
   standalone: boolean
+  /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
+   *  THIS process persists (and pre-bind buffered events flush) — without it the
+   *  sidecar's diagnostics silently buffer + drop. */
+  diagnosticsDb?: SlayzoneDb
 }): ServerComposition {
   const { db, dataRoot } = opts
   const supervised = !opts.standalone
+
+  // Make this process's diagnostics queryable (pty + agent-pool run here). Bind
+  // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
+  // pre-bind events flush. No-op if the host didn't pass a diagnostics DB.
+  if (opts.diagnosticsDb) {
+    bindDiagnosticsDbs({ settingsDb: db, diagnosticsDb: opts.diagnosticsDb })
+  }
 
   // Late-bound bound port (set once listen() resolves). Declared up front so the
   // host bridge can report it as the renderer-facing tRPC port (the renderer is

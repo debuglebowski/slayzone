@@ -73,6 +73,15 @@ export function initWarmProcessManager(d: WarmDeps): void {
 /** Receive a window's full open-task-tab snapshot (keyed by projectId) and reconcile. */
 export function setProjectTabCounts(windowId: number, counts: Record<string, number>): void {
   tabCountsByWindow.set(windowId, counts)
+  // Diagnostic (d6efb204): confirms the renderer's report reaches THIS process,
+  // and captures isEnabled + whether counts are non-empty — the three prime
+  // suspects for "warm pass never fires".
+  recordDiagnosticEvent({
+    level: 'info',
+    source: 'pty',
+    event: 'warm.tab_counts',
+    payload: { windowId, counts, enabled: deps ? deps.isEnabled() : null, hasDeps: !!deps }
+  })
   scheduleReconcile()
 }
 
@@ -178,6 +187,9 @@ function scheduleReconcile(): void {
 async function reconcile(): Promise<void> {
   if (!deps || shuttingDown) return
   if (!deps.isEnabled()) {
+    // Diagnostic (d6efb204): disabled → skip. Distinguishes "off" from "on but
+    // never triggered".
+    recordDiagnosticEvent({ level: 'info', source: 'pty', event: 'warm.reconcile_skip_disabled' })
     for (const projectId of [...warm.keys()]) killWarm(projectId)
     return
   }
@@ -187,6 +199,16 @@ async function reconcile(): Promise<void> {
       if (count > 0) desired.add(projectId)
     }
   }
+  const willSpawn = [...desired].filter((p) => !warm.has(p) && !spawning.has(p))
+  // Diagnostic (d6efb204): the reconcile decision — desired projects, already-warm
+  // keys, and which will actually spawn. Empty willSpawn with empty desired ⇒ no
+  // counts reached us; empty desired with counts ⇒ projectId mapping issue.
+  recordDiagnosticEvent({
+    level: 'info',
+    source: 'pty',
+    event: 'warm.reconcile',
+    payload: { desired: [...desired], warmKeys: [...warm.keys()], willSpawn }
+  })
   // Tear down warm shells for projects with no open tabs.
   for (const projectId of [...warm.keys()]) {
     if (!desired.has(projectId)) killWarm(projectId)
@@ -203,7 +225,16 @@ async function spawnWarm(projectId: string): Promise<void> {
   spawning.add(projectId)
   try {
     const cwd = await deps.getProjectRoot(projectId)
-    if (!cwd || !existsSync(cwd)) return
+    if (!cwd || !existsSync(cwd)) {
+      // Diagnostic (d6efb204): project root missing/nonexistent → silent bail.
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'warm.spawn_skip_no_cwd',
+        payload: { projectId, cwd: cwd ?? null }
+      })
+      return
+    }
     // The warmed agent's command template (claude-code initial_command + flags).
     const modeRow = await deps.db.get<{
       initial_command: string | null

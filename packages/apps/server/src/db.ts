@@ -119,3 +119,39 @@ export function openServerDatabase(opts?: { bootstrapSchema?: boolean }): Slayzo
   if (opts?.bootstrapSchema) bootstrapSchema(db)
   return new SyncSlayzoneDb(db)
 }
+
+/**
+ * Open the separate diagnostics events DB (`slayzone[.dev].diagnostics.sqlite`,
+ * sibling of the main DB). The sidecar owns pty + the agent pool, so its
+ * `recordDiagnosticEvent` calls must persist HERE — otherwise they buffer and
+ * drop (the events DB was only ever bound in the Electron host, so sidecar
+ * diagnostics were invisible). Schema mirrors the host's diag worker and is
+ * created idempotently: a no-op in supervised mode (the host already made it),
+ * a bootstrap standalone. WAL + busy_timeout (DB_PRAGMAS) make the two-process
+ * (host + sidecar) writers safe.
+ */
+export function openServerDiagnosticsDatabase(): SlayzoneDb {
+  const diagPath = getDatabasePathFromEnv().replace(/\.sqlite$/, '.diagnostics.sqlite')
+  const db = new Database(diagPath)
+  for (const pragma of DB_PRAGMAS) db.pragma(pragma)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS diagnostics_events (
+      id TEXT PRIMARY KEY,
+      ts_ms INTEGER NOT NULL,
+      level TEXT NOT NULL,
+      source TEXT NOT NULL,
+      event TEXT NOT NULL,
+      trace_id TEXT,
+      task_id TEXT,
+      project_id TEXT,
+      session_id TEXT,
+      channel TEXT,
+      message TEXT,
+      payload_json TEXT,
+      redaction_version INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_diag_ts ON diagnostics_events(ts_ms);
+    CREATE INDEX IF NOT EXISTS idx_diag_source_event_ts ON diagnostics_events(source, event, ts_ms);
+  `)
+  return new SyncSlayzoneDb(db)
+}
