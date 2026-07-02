@@ -254,8 +254,15 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
   }
 
   const savePanelConfig = async (next: PanelConfig) => {
-    setPanelConfig(next)
-    await setSettingMutation.mutateAsync({ key: 'panel_config', value: JSON.stringify(next) })
+    // Keep `order` complete on every write (add/delete/toggle/reorder). Without
+    // this a newly-added web panel lives in `webPanels` but is absent from
+    // `order`, so the list — which renders only `order`-listed ids — won't show
+    // it until an out-of-band settings-change broadcast round-trips. mergePanelOrder
+    // is idempotent (preserves the given order, only appends missing / prunes
+    // removed), so re-applying here is safe for all callers.
+    const merged = mergePanelOrder(next)
+    setPanelConfig(merged)
+    await setSettingMutation.mutateAsync({ key: 'panel_config', value: JSON.stringify(merged) })
     window.dispatchEvent(new CustomEvent('panel-config-changed'))
   }
 
