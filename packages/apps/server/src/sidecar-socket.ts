@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from 'node:net'
-import { mkdirSync, unlinkSync, existsSync } from 'node:fs'
+import { mkdirSync, unlinkSync, existsSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -60,7 +60,8 @@ export function startSidecarSocketServer(opts: {
   const socketPath = resolveSidecarSocketPath(opts.runtimeDir)
 
   try {
-    mkdirSync(dirname(socketPath), { recursive: true })
+    mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 })
+    chmodSync(dirname(socketPath), 0o700)
   } catch {
     /* parent dir best-effort */
   }
@@ -173,6 +174,13 @@ export function startSidecarSocketServer(opts: {
     log(`sidecar socket server error: ${String(err)}`)
   })
   server.listen(socketPath, () => {
+    // Owner-only — any local process that can connect can inject `auth:deep-link`
+    // callbacks, so don't leave the socket world-accessible.
+    try {
+      chmodSync(socketPath, 0o600)
+    } catch {
+      /* best-effort */
+    }
     log(`sidecar socket listening at ${socketPath}`)
   })
 
