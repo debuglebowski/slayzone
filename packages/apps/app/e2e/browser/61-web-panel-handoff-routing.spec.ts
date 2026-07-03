@@ -1,15 +1,7 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
-// QUARANTINED 2026-05-16: WebPanelView post-Meta+o doesn't register a view
-// (listViews empty). Helpers query the browser router directly; the
-// panel-toggle → useBrowserView createView path likely blocked by ownership
-// claim or another render guard. Needs source-side trace.
-// DEFER 2026-06-23 (Phase-4 WCV migration): the describe's beforeAll/beforeEach use
-// getWebPanelUrl / resetWebPanelToAboutBlank, which return 'no-webview' — web panels
-// migrated from <webview> to WebContentsView, so these helpers query a dead DOM node.
-// Rewrite them to query WCV views (listViews), then verify. See plans/unskip-all-e2e.md.
-test.describe.skip('Web panel handoff routing', () => {
+test.describe('Web panel handoff routing', () => {
     const PANEL_ID = 'web:handoff-e2e'
     const PANEL_NAME = 'Handoff Panel'
     const PANEL_SHORTCUT = 'o'
@@ -46,12 +38,18 @@ test.describe.skip('Web panel handoff routing', () => {
       })
     }
 
+    // NOTE: a WCV that never loaded a page reports getURL() === '' —
+    // BrowserViewManager.createView deliberately skips loading 'about:blank'.
+    // getWebPanelUrl normalizes '' to 'about:blank' ("blank panel" either way),
+    // but resetWebPanelToAboutBlank must force a REAL about:blank load for '':
+    // executeJavaScript on a never-loaded frame queues forever (popup helpers hang).
     const getWebPanelUrl = async (mainWindow: import('@playwright/test').Page) => {
       return await mainWindow.evaluate(async () => {
         type V = { viewId: string; partition: string; kind: string; url: string }
         const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
-        return wp?.url ?? 'no-webview'
+        if (!wp) return 'no-webview'
+        return wp.url === '' ? 'about:blank' : wp.url
       })
     }
 
@@ -61,12 +59,16 @@ test.describe.skip('Web panel handoff routing', () => {
         const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
         const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
         if (!wp) return 'no-webview'
+        // '' = never loaded — must still navigate so the frame gets a real document.
+        if (wp.url === 'about:blank') return 'about:blank'
         await window
           .getTrpcVanillaClient()
           .app.browser.navigate.mutate({ viewId: wp.viewId, url: 'about:blank' })
         await new Promise((resolve) => setTimeout(resolve, 700))
         const after = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
-        return after.find((v) => v.viewId === wp.viewId)?.url ?? 'no-webview'
+        const url = after.find((v) => v.viewId === wp.viewId)?.url
+        if (url === undefined) return 'no-webview'
+        return url
       })
     }
 
@@ -80,16 +82,18 @@ test.describe.skip('Web panel handoff routing', () => {
         const wp = views.find((v) => v.partition === 'persist:web-panels' && v.kind === 'web-panel')
         if (!wp) return 'no-webview'
         // Inject a synthetic window.open via executeJs to provoke the popup handler.
+        // `void` so executeJavaScript never tries to serialize a WindowProxy result.
         await window.getTrpcVanillaClient().app.browser.executeJs.mutate({
           viewId: wp.viewId,
-          code: `window.open(${JSON.stringify(targetUrl)}, '_blank')`
+          code: `void window.open(${JSON.stringify(targetUrl)}, '_blank')`
         })
         await new Promise((resolve) => setTimeout(resolve, 900))
         const after = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
-        return after.find((v) => v.viewId === wp.viewId)?.url ?? 'no-webview'
+        const url = after.find((v) => v.viewId === wp.viewId)?.url
+        if (url === undefined) return 'no-webview'
+        return url === '' ? 'about:blank' : url
       }, popupUrl)
     }
-    void getWebPanelViewId
 
     test.beforeAll(async ({ electronApp, mainWindow }) => {
       await resetApp(mainWindow)
@@ -184,15 +188,19 @@ test.describe.skip('Web panel handoff routing', () => {
         timeout: 5_000
       })
 
-      const titleEl = mainWindow.locator('h1, [data-testid="task-title"]').first()
-      if (await titleEl.isVisible().catch(() => false)) await titleEl.click()
-      await mainWindow.keyboard.press('Meta+o')
-      await expect(mainWindow.locator('button').filter({ hasText: PANEL_NAME }).last()).toBeVisible(
-        {
-          timeout: 5_000
-        }
-      )
-      await expect.poll(() => getWebPanelUrl(mainWindow), { timeout: 5_000 }).toBe('about:blank')
+      // Open the web panel via its header toggle button. Don't use the seeded
+      // keyboard shortcut: built-in panel bindings (e.g. panel-terminal = Cmd+O)
+      // are matched first in TaskDetailPage's keydown chain, so a colliding
+      // letter silently toggles the wrong panel.
+      const panelToggle = mainWindow.locator('button').filter({ hasText: PANEL_NAME }).last()
+      await expect(panelToggle).toBeVisible({ timeout: 5_000 })
+      await panelToggle.click()
+      // Wait for the WCV to register, then force a REAL about:blank load
+      // (createView skips loading 'about:blank', leaving the frame document-less).
+      await expect.poll(() => getWebPanelViewId(mainWindow), { timeout: 10_000 }).not.toBeNull()
+      await expect
+        .poll(() => resetWebPanelToAboutBlank(mainWindow), { timeout: 10_000 })
+        .toBe('about:blank')
     })
 
     test.afterAll(async ({ electronApp }) => {
@@ -244,19 +252,20 @@ test.describe.skip('Web panel handoff routing', () => {
       expect(calls).toHaveLength(0)
     })
 
-    // Skip: Navigating a WebContentsView to an external OAuth URL (figma.com) is too
-    // slow when multiple Electron instances share the GPU during parallel e2e runs.
-    // The webview stays on about:blank past the poll deadline. Passes reliably at workers:1.
     test('same-host popups stay in-panel and do not call shell.openExternal', async ({
       electronApp,
       mainWindow
     }) => {
-      const currentUrl = await triggerPopupFromWebPanel(
+      await triggerPopupFromWebPanel(
         mainWindow,
         'https://www.figma.com/oauth/authorize?client_id=slayzone-e2e'
       )
 
-      expect(currentUrl).not.toBe('about:blank')
+      // Poll: navigating the WCV to an external URL (figma.com) can outlast the
+      // helper's fixed post-trigger wait when the machine is loaded.
+      await expect
+        .poll(() => getWebPanelUrl(mainWindow), { timeout: 15_000 })
+        .not.toBe('about:blank')
       const calls = await getOpenExternalCalls(electronApp)
       expect(calls).toHaveLength(0)
     })

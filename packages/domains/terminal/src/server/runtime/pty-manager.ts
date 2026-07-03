@@ -1179,12 +1179,22 @@ export interface CreatePtyOptions {
 // When on, record a serializable opts subset and return a success stub (no spawn).
 let ptyCreateCaptureOn = false
 const ptyCreateCapturedOpts: Array<Record<string, unknown>> = []
+// Kill calls recorded while the capture is on. Lifecycle specs (94-session-
+// invalidation) assert reset/restart actually kill the old session — with the
+// capture stub there is no real process, so record the killPty() CALL itself.
+const ptyKillCapturedSessionIds: string[] = []
 export function setPtyCreateCapture(enabled: boolean): void {
   ptyCreateCaptureOn = enabled
-  if (enabled) ptyCreateCapturedOpts.length = 0
+  if (enabled) {
+    ptyCreateCapturedOpts.length = 0
+    ptyKillCapturedSessionIds.length = 0
+  }
 }
 export function takePtyCreateOpts(): Array<Record<string, unknown>> {
   return ptyCreateCapturedOpts
+}
+export function takePtyKillCalls(): string[] {
+  return ptyKillCapturedSessionIds
 }
 
 export async function createPty(
@@ -2481,6 +2491,11 @@ export function resizePty(sessionId: string, cols: number, rows: number): boolea
 }
 
 export function killPty(sessionId: string): boolean {
+  // Test-only (PLAYWRIGHT): record the kill CALL while the create capture is on
+  // (the stubbed create never registers a session, so record before the lookup).
+  if (process.env.PLAYWRIGHT === '1' && ptyCreateCaptureOn) {
+    ptyKillCapturedSessionIds.push(sessionId)
+  }
   const session = sessions.get(sessionId)
   if (!session) {
     recordDiagnosticEvent({

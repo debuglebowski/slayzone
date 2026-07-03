@@ -47,6 +47,12 @@ export const ptyRouter = router({
     if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
     return ops().takeCreateOpts()
   }),
+  // Test-only (PLAYWRIGHT): kill calls recorded while the create capture is on —
+  // lifecycle specs assert reset/restart killed the (stubbed) session.
+  testTakePtyKillCalls: publicProcedure.query(() => {
+    if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+    return ops().takeKillCalls()
+  }),
   testExecutionContext: publicProcedure
     .input(anyInput)
     .query(({ input }) => ops().ptyTestExecutionContext(input as never)),
@@ -182,6 +188,23 @@ export const ptyRouter = router({
     .mutation(({ input }) => {
       if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
       getPtyDeps().events.emit('session-detected', input.sessionId, input.conversationId)
+      return { ok: true }
+    }),
+  // Test-only: emit a `pty:exit` on the shared emitter (e.g. errorCode
+  // SESSION_NOT_FOUND to drive the stale-session "Start fresh" overlay). Specs
+  // run against the stubbed createPty capture, so there is no real process to
+  // exit. PLAYWRIGHT-gated (menu.testEmit pattern).
+  testEmitExit: publicProcedure
+    .input(
+      z.object({
+        sessionId: z.string(),
+        exitCode: z.number().nullable(),
+        errorCode: z.string().nullable()
+      })
+    )
+    .mutation(({ input }) => {
+      if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+      getPtyDeps().events.emit('exit', input.sessionId, input.exitCode, input.errorCode)
       return { ok: true }
     }),
   onDevServerDetected: publicProcedure.subscription(() =>

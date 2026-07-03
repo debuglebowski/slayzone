@@ -34,6 +34,20 @@ export async function openUserContextManager(
   // instead of the obsolete Settings-dialog path.
   await closeTopDialog(mainWindow)
   await goHome(mainWindow)
+  // Leave the CM view first so the next open remounts it — sections load their
+  // data on mount, and tests routinely mutate state via tRPC between opens.
+  await mainWindow.evaluate(() => {
+    const store = (
+      window as unknown as {
+        __slayzone_tabStore?: { getState: () => { setActiveView: (v: string) => void } }
+      }
+    ).__slayzone_tabStore
+    if (!store) throw new Error('__slayzone_tabStore not exposed')
+    store.getState().setActiveView('tabs')
+  })
+  await expect(mainWindow.getByRole('heading', { name: 'Context Manager' })).toBeHidden({
+    timeout: 5_000
+  })
   await mainWindow.evaluate(() => {
     const store = (
       window as unknown as {
@@ -55,23 +69,33 @@ export async function openUserContextManager(
 /**
  * Navigate the redesigned Context Manager sidebar to a given level + section.
  * Levels: 'Computer' | 'Project' | 'Library'. Sections: 'Files' | 'Instructions'
- * | 'Skills' | 'MCPs'. Scopes to the level group (which contains both the level
- * label and its section buttons) to disambiguate the duplicated section names.
+ * | 'Skills' | 'MCPs'.
+ *
+ * Section names repeat across levels (Project and Library both list
+ * Instructions/Skills/MCPs), and the Project → Skills button grows a stale-count
+ * dot (`title="N stale"`) that CHANGES its accessible name — so never match
+ * buttons by exact name. Instead index the sidebar's section buttons by level
+ * order (Project first, Library second) with substring name matching, and verify
+ * arrival via the content header ('<Level> — <Section>').
  */
 export async function gotoContextSection(
   mainWindow: Page,
   level: 'Computer' | 'Project' | 'Library',
   section: 'Files' | 'Instructions' | 'Skills' | 'MCPs'
 ): Promise<void> {
-  const group = mainWindow
-    .locator('div')
-    .filter({ hasText: level })
-    .filter({ has: mainWindow.getByRole('button', { name: section, exact: true }) })
-    .last()
-  await expect(group.getByRole('button', { name: section, exact: true })).toBeVisible({
+  const nav = mainWindow
+    .locator('nav')
+    .filter({ has: mainWindow.getByRole('heading', { name: 'Context Manager' }) })
+  // Non-exact name = case-insensitive substring — immune to the stale-dot title
+  // being appended to the Project button's accessible name.
+  const buttons = nav.getByRole('button', { name: section })
+  const index = level === 'Library' ? 1 : 0
+  const button = buttons.nth(index)
+  await expect(button).toBeVisible({ timeout: 10_000 })
+  await button.click()
+  await expect(mainWindow.getByRole('heading', { name: `${level} — ${section}` })).toBeVisible({
     timeout: 10_000
   })
-  await group.getByRole('button', { name: section, exact: true }).click()
 }
 
 export async function openProjectContextManager(
@@ -79,6 +103,20 @@ export async function openProjectContextManager(
   projectAbbrev: string
 ): Promise<Locator> {
   await closeTopDialog(mainWindow)
+  // Leave the CM view first so the next open remounts it — sections load their
+  // data on mount, and tests routinely mutate state via tRPC between opens.
+  await mainWindow.evaluate(() => {
+    const store = (
+      window as unknown as {
+        __slayzone_tabStore?: { getState: () => { setActiveView: (v: string) => void } }
+      }
+    ).__slayzone_tabStore
+    if (!store) throw new Error('__slayzone_tabStore not exposed')
+    store.getState().setActiveView('tabs')
+  })
+  await expect(mainWindow.getByRole('heading', { name: 'Context Manager' })).toBeHidden({
+    timeout: 5_000
+  })
   // Select the project (enables the CM's Project level) then open the CM view.
   await mainWindow.evaluate(async (abbrev) => {
     const projects = await window.getTrpcVanillaClient().projects.list.query()
@@ -124,22 +162,22 @@ export async function openProjectContextSection(
   return dialog
 }
 
-export async function openSkillSyncPanel(dialog: Locator, slug: string): Promise<void> {
-  const skillRow = dialog.getByTestId(`project-context-item-skill-${slug}`)
-  await expect(skillRow).toBeVisible({ timeout: 5_000 })
-  const syncSection = dialog.getByTestId(`skill-sync-section-${slug}`)
-  if (!(await syncSection.isVisible().catch(() => false))) {
-    await skillRow.click()
+/**
+ * Redesigned CM skill rows (SkillListView) open a single ContextItemEditor panel
+ * that hosts both editing and sync (stale banner + per-provider actions).
+ * `skill-row-<slug>` is on the list row; `context-item-editor-slug` is always
+ * rendered in the editor (the content textarea is swapped for a DiffView when a
+ * stale provider is auto-selected, so don't wait on it here).
+ */
+export async function openSkillEditor(body: Locator, slug: string): Promise<void> {
+  const row = body.getByTestId(`skill-row-${slug}`)
+  await expect(row).toBeVisible({ timeout: 5_000 })
+  const editorSlug = body.getByTestId('context-item-editor-slug')
+  const openForThisSkill =
+    (await editorSlug.isVisible().catch(() => false)) &&
+    (await editorSlug.inputValue().catch(() => '')) === slug
+  if (!openForThisSkill) {
+    await row.click()
   }
-  await expect(syncSection).toBeVisible({ timeout: 5_000 })
-}
-
-export async function openSkillEditPanel(dialog: Locator, slug: string): Promise<void> {
-  const skillRow = dialog.getByTestId(`project-context-item-skill-${slug}`)
-  await expect(skillRow).toBeVisible({ timeout: 5_000 })
-  const editSection = dialog.getByTestId(`skill-edit-section-${slug}`)
-  if (!(await editSection.isVisible().catch(() => false))) {
-    await skillRow.click()
-  }
-  await expect(editSection).toBeVisible({ timeout: 5_000 })
+  await expect(editorSlug).toBeVisible({ timeout: 5_000 })
 }

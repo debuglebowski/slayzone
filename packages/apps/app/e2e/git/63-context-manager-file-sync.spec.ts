@@ -9,9 +9,10 @@ import {
 } from '../fixtures/electron'
 import {
   closeTopDialog,
+  gotoContextSection,
   openProjectContextSection,
-  openSkillEditPanel,
-  openSkillSyncPanel
+  openSkillEditor,
+  openUserContextManager
 } from '../fixtures/context-manager'
 import type { Page, Locator } from '@playwright/test'
 import path from 'path'
@@ -25,7 +26,6 @@ const projectName = 'FS Sync'
 const projectAbbrev = 'FS'
 const skillSlug = 'e2e-file-sync-skill'
 const unmanagedSkillSlug = 'commit-changes'
-const manageableUnmanagedSkillSlug = 'e2e-manage-unmanaged-skill'
 const codexOnlySkillSlug = 'e2e-codex-only-linked-skill'
 const codexOnlyWithUnmanagedClaudeSlug = 'e2e-codex-only-with-unmanaged-claude'
 const frontmatterMismatchSkillSlug = 'e2e-frontmatter-mismatch-skill'
@@ -33,9 +33,11 @@ const skillContentV1 = '# File sync skill v1\n\nContent for testing.\n'
 const skillContentV2 = '# File sync skill v2\n\nUpdated content.\n'
 const instructionsV1 = '# Project instructions v1\n\nThese are test instructions.\n'
 const instructionsV2 = '# Project instructions v2\n\nUpdated instructions.\n'
+const variantSlug = 'e2e-fs-instructions-variant'
+const variantContent = '# Variant instructions\n\nSynced from a library variant.\n'
 const codexOnlySkillContent = '# Codex-only linked skill\n'
 const codexOnlyWithUnmanagedClaudeContent = '# Codex-only with unmanaged claude file\n'
-const manageableUnmanagedSkillContent = '# unmanaged skill to manage\n'
+const unmanagedSkillContent = '# unmanaged skill on disk\n'
 const frontmatterMismatchSkillInitialContent = '# Frontmatter mismatch body\n\nSame body.\n'
 const frontmatterMismatchSkillDbContent =
   '---\nname: e2e-frontmatter-mismatch-skill\ndescription: DB frontmatter mismatch\n---\n# Frontmatter mismatch body\n\nSame body.\n'
@@ -57,8 +59,6 @@ const codexSkillPath = () =>
   path.join(TEST_PROJECT_PATH, '.agents', 'skills', skillSlug, 'SKILL.md')
 const unmanagedCodexSkillPath = () =>
   path.join(TEST_PROJECT_PATH, '.agents', 'skills', unmanagedSkillSlug, 'SKILL.md')
-const manageableUnmanagedCodexSkillPath = () =>
-  path.join(TEST_PROJECT_PATH, '.agents', 'skills', manageableUnmanagedSkillSlug, 'SKILL.md')
 const codexOnlySkillPath = () =>
   path.join(TEST_PROJECT_PATH, '.agents', 'skills', codexOnlySkillSlug, 'SKILL.md')
 const codexOnlyWithUnmanagedClaudeCodexPath = () =>
@@ -102,6 +102,69 @@ async function setInstructionsContent(
   )
 }
 
+/** Update a library skill's content directly in the DB (marks linked providers stale). */
+async function updateLibrarySkillContent(
+  mainWindow: Page,
+  slug: string,
+  content: string
+): Promise<void> {
+  await mainWindow.evaluate(
+    async ({ slug: targetSlug, content: next }) => {
+      const items = await window
+        .getTrpcVanillaClient()
+        .aiConfig.listItems.query({ scope: 'library', type: 'skill' })
+      const match = items.find((i) => i.slug === targetSlug)
+      if (!match) throw new Error(`Library skill not found: ${targetSlug}`)
+      await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content: next })
+    },
+    { slug, content }
+  )
+}
+
+async function skillDbContentMatches(
+  mainWindow: Page,
+  slug: string,
+  fragments: string[]
+): Promise<boolean> {
+  return await mainWindow.evaluate(
+    async ({ slug: targetSlug, fragments: parts }) => {
+      const items = await window
+        .getTrpcVanillaClient()
+        .aiConfig.listItems.query({ scope: 'library', type: 'skill' })
+      const match = items.find((i) => i.slug === targetSlug)
+      if (!match) return false
+      return parts.every((part) => match.content.includes(part))
+    },
+    { slug, fragments }
+  )
+}
+
+/** Open the Project → Skills section of the full-screen Context Manager. */
+async function openProjectSkills(mainWindow: Page): Promise<Locator> {
+  return openProjectContextSection(mainWindow, projectAbbrev, 'skills')
+}
+
+/** Open the Library → Skills section (editable — project-linked library skills are read-only). */
+async function openLibrarySkills(mainWindow: Page): Promise<Locator> {
+  const body = await openUserContextManager(mainWindow)
+  await gotoContextSection(mainWindow, 'Library', 'Skills')
+  return body
+}
+
+/** Open Project → Instructions and select a provider file in the redesigned file list. */
+async function openInstructionsFile(
+  mainWindow: Page,
+  fileName: 'CLAUDE.md' | 'AGENTS.md'
+): Promise<{ body: Locator; textarea: Locator }> {
+  const body = await openProjectContextSection(mainWindow, projectAbbrev, 'instructions')
+  const fileRow = body.getByRole('button').filter({ hasText: fileName }).first()
+  await expect(fileRow).toBeVisible({ timeout: 5_000 })
+  await fileRow.click()
+  const textarea = body.getByPlaceholder('Write instructions...')
+  await expect(textarea).toBeVisible({ timeout: 5_000 })
+  return { body, textarea }
+}
+
 function cleanupDiskFiles(): void {
   for (const f of [
     claudeInstructionsPath(),
@@ -109,7 +172,6 @@ function cleanupDiskFiles(): void {
     claudeSkillPath(),
     codexSkillPath(),
     unmanagedCodexSkillPath(),
-    manageableUnmanagedCodexSkillPath(),
     codexOnlySkillPath(),
     codexOnlyWithUnmanagedClaudeCodexPath(),
     codexOnlyWithUnmanagedClaudeClaudePath(),
@@ -127,1095 +189,803 @@ function cleanupDiskFiles(): void {
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
+// MIGRATED 2026-07-02 (Phase-3 CM redesign): the old Project Settings dialog UI
+// (`instructions-textarea` / `instructions-push-*` / `instructions-provider-card-*`
+// / `skill-detail-*` / `project-context-item-skill-*`) is dead code. The reachable
+// UI is the full-screen Context Manager: Project → Instructions edits provider
+// files directly on disk (library variants replace the DB-push model) and
+// Project/Library → Skills uses SkillListView rows (`skill-row-<slug>`) plus a
+// single ContextItemEditor (`context-item-editor-*`) hosting edit + sync.
 
-// DEFER 2026-06-23 (Phase-3 CM redesign — biggest remaining chunk, 22 tests):
-// the Instructions/Skills UI was replaced. `instructions-textarea` /
-// `instructions-push-all` / `instructions-provider-card-*` testids are GONE; editing
-// now goes through ContextItemEditor (`context-item-editor-content`,
-// `context-item-editor-sync-all-to-disk`, `context-item-editor-stale-banner`) and
-// SkillItemDetail (`skill-detail-*`). The in-spec `openInstructionsDialog` still hunts
-// the old 'Project Settings' dialog (CM is now a full-screen 'Context Manager' view).
-// Rewrite the open/nav + sync helpers to the new components, then verify. See
-// plans/unskip-all-e2e.md.
-test.describe.skip('Context manager file sync', () => {
-    let projectId: string
+test.describe('Context manager file sync', () => {
+  let projectId: string
 
-    test.beforeAll(async ({ mainWindow }) => {
-      await resetApp(mainWindow)
-      cleanupDiskFiles()
+  test.beforeAll(async ({ mainWindow }) => {
+    await resetApp(mainWindow)
+    cleanupDiskFiles()
 
-      const s = seed(mainWindow)
-      const project = await s.createProject({
-        name: projectName,
-        color: '#6366f1',
-        path: TEST_PROJECT_PATH
-      })
-      projectId = project.id
+    const s = seed(mainWindow)
+    const project = await s.createProject({
+      name: projectName,
+      color: '#6366f1',
+      path: TEST_PROJECT_PATH
+    })
+    projectId = project.id
 
-      // Enable claude + codex providers
-      await mainWindow.evaluate(
-        ({ id }) => {
-          return window
-            .getTrpcVanillaClient()
-            .aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
-        },
-        { id: project.id }
-      )
+    // Enable claude + codex providers
+    await mainWindow.evaluate(
+      ({ id }) => {
+        return window
+          .getTrpcVanillaClient()
+          .aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
+      },
+      { id: project.id }
+    )
 
-      // Seed instructions content in DB
-      await mainWindow.evaluate(
-        ({ id, projectPath, content }) => {
-          return window
-            .getTrpcVanillaClient()
-            .aiConfig.saveInstructionsContent.mutate({ projectId: id, projectPath, content })
-        },
-        { id: project.id, projectPath: TEST_PROJECT_PATH, content: instructionsV1 }
-      )
+    // Seed instructions content in DB
+    await mainWindow.evaluate(
+      ({ id, projectPath, content }) => {
+        return window
+          .getTrpcVanillaClient()
+          .aiConfig.saveInstructionsContent.mutate({ projectId: id, projectPath, content })
+      },
+      { id: project.id, projectPath: TEST_PROJECT_PATH, content: instructionsV1 }
+    )
 
-      // Create and link a library skill
-      await mainWindow.evaluate(
+    // Create and link a library skill
+    await mainWindow.evaluate(
+      async ({ slug, content }) => {
+        const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
+        const match = existing.find((item) => item.slug === slug)
+        if (match) {
+          await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+        } else {
+          await window.getTrpcVanillaClient().aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content })
+        }
+      },
+      { slug: skillSlug, content: skillDocument(skillSlug, skillContentV1) }
+    )
+
+    // Link library skill to project
+    await mainWindow.evaluate(
+      async ({ projectId: pid, projectPath, slug }) => {
+        const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
+        const item = items.find((i) => i.slug === slug)
+        if (!item) throw new Error('Skill not found')
+        await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
+          projectId: pid,
+          projectPath,
+          itemId: item.id,
+          providers: ['claude', 'codex']
+        })
+      },
+      { projectId: project.id, projectPath: TEST_PROJECT_PATH, slug: skillSlug }
+    )
+
+    await s.refreshData()
+    await goHome(mainWindow)
+    await expect(projectBlob(mainWindow, projectAbbrev)).toBeVisible({ timeout: 5_000 })
+  })
+
+  // =========================================================================
+  // Instructions tests
+  // =========================================================================
+  // The redesign dropped the DB-centric instructions model (textarea + per-
+  // provider push/pull/stale cards). Instructions are now the provider files
+  // themselves: a file list (CLAUDE.md / AGENTS.md) with a direct disk editor
+  // (auto-save on blur, watcher-driven reload), plus library variants that
+  // sync one shared content to all provider files.
+  //
+  // REMOVED 2026-07-02: 'Database → File pushes to specific provider' — the
+  // push affordance no longer exists; editing a file IS the per-provider write
+  // (covered below, including the "other file untouched" half of the old test).
+  // REMOVED 2026-07-02: 'stale card shows pull action' + 'File → Database pulls
+  // from File' — stale/pull cards no longer exist. A clean editor auto-reloads
+  // on external change (covered below); the dirty-editor Reload banner is only
+  // reachable through a <500ms debounce race, so it is not e2e-testable
+  // deterministically (unit-covered in useWatchedFile.test.ts).
+
+  test.describe('Instructions', () => {
+    test('editing a provider file auto-saves to that file only', async ({ mainWindow }) => {
+      // Seed a sentinel so we can await the editor's initial load before typing
+      // (the file read is async — filling before it resolves loses the edit).
+      fs.writeFileSync(claudeInstructionsPath(), '# sentinel claude v0\n')
+
+      const { textarea } = await openInstructionsFile(mainWindow, 'CLAUDE.md')
+      await expect(textarea).toHaveValue('# sentinel claude v0\n', { timeout: 5_000 })
+      await textarea.fill(instructionsV2)
+      await textarea.blur()
+
+      await expect
+        .poll(() => readFileSafe(claudeInstructionsPath()), { timeout: 5_000 })
+        .toBe(instructionsV2)
+      // Per-provider write: the codex file is untouched
+      expect(readFileSafe(codexInstructionsPath())).toBe('')
+    })
+
+    test('linking a library variant syncs all provider files', async ({ mainWindow }) => {
+      // Seed a library instruction variant via API
+      const variantId = await mainWindow.evaluate(
         async ({ slug, content }) => {
-          const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
-          const match = existing.find((item) => item.slug === slug)
+          const existing = await window.getTrpcVanillaClient().aiConfig.listInstructionVariants.query()
+          const match = existing.find((v) => v.slug === slug)
           if (match) {
             await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
-          } else {
-            await window.getTrpcVanillaClient().aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content })
+            return match.id
           }
+          const created = await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
+            type: 'root_instructions',
+            scope: 'library',
+            slug,
+            content
+          })
+          return created.id
         },
-        { slug: skillSlug, content: skillDocument(skillSlug, skillContentV1) }
+        { slug: variantSlug, content: variantContent }
       )
 
-      // Link library skill to project
+      const body = await openProjectContextSection(mainWindow, projectAbbrev, 'instructions')
+      await body.getByRole('button', { name: 'Use library variant' }).click()
+      const pickerDialog = mainWindow
+        .getByRole('dialog')
+        .filter({ hasText: 'Use Library Variant' })
+        .last()
+      await expect(pickerDialog).toBeVisible({ timeout: 5_000 })
+      await pickerDialog.getByText(variantSlug, { exact: true }).click()
+
+      // Linking writes the variant content to every provider file
+      await expect.poll(() => readFileSafe(claudeInstructionsPath())).toBe(variantContent)
+      await expect.poll(() => readFileSafe(codexInstructionsPath())).toBe(variantContent)
+
+      // Linked mode is shown (variant chip button replaces the link button)
+      await expect(body.getByRole('button', { name: variantSlug })).toBeVisible({ timeout: 5_000 })
+
+      // Unlink to restore custom (per-file) mode for the remaining tests
+      await body.getByTitle('Unlink variant').click()
+      await expect(body.getByRole('button', { name: 'Use library variant' })).toBeVisible({
+        timeout: 5_000
+      })
+
+      // Cleanup: drop the variant selection rows + the variant item so the
+      // needsSync check later is not polluted by variant selections.
       await mainWindow.evaluate(
-        async ({ projectId: pid, projectPath, slug }) => {
-          const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
-          const item = items.find((i) => i.slug === slug)
-          if (!item) throw new Error('Skill not found')
+        async ({ id, pid }) => {
+          try {
+            await window
+              .getTrpcVanillaClient()
+              .aiConfig.removeProjectSelection.mutate({ projectId: pid, itemId: id })
+          } catch {
+            /* ignore */
+          }
+          await window.getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id })
+        },
+        { id: variantId, pid: projectId }
+      )
+    })
+
+    test('external disk change auto-reloads the open file editor', async ({ mainWindow }) => {
+      fs.writeFileSync(claudeInstructionsPath(), instructionsV1)
+
+      const { textarea } = await openInstructionsFile(mainWindow, 'CLAUDE.md')
+      await expect(textarea).toHaveValue(instructionsV1, { timeout: 5_000 })
+
+      const external = '# Externally modified\n'
+      fs.writeFileSync(claudeInstructionsPath(), external)
+
+      // Clean editor auto-reloads from disk via the file watcher
+      await expect(textarea).toHaveValue(external, { timeout: 15_000 })
+    })
+  })
+
+  // =========================================================================
+  // Skills tests
+  // =========================================================================
+
+  test.describe('Skills', () => {
+    test('skill editor auto-saves content to DB', async ({ mainWindow }) => {
+      // Project-linked library skills are read-only in the project view; the
+      // editable editor lives in Library → Skills.
+      const body = await openLibrarySkills(mainWindow)
+      await openSkillEditor(body, skillSlug)
+
+      const content = body.getByTestId('context-item-editor-content')
+      await expect(content).toBeVisible({ timeout: 5_000 })
+      await expect(content).toHaveValue(
+        new RegExp(
+          `---\\nname: ${skillSlug}[\\s\\S]*${skillContentV1.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`
+        ),
+        { timeout: 5_000 }
+      )
+
+      // Edit and verify auto-save (save fires on blur)
+      await content.fill(skillDocument(skillSlug, skillContentV2))
+      await content.blur()
+
+      await expect
+        .poll(
+          () =>
+            skillDbContentMatches(mainWindow, skillSlug, [
+              `name: ${skillSlug}`,
+              skillContentV2.trim()
+            ]),
+          { timeout: 5_000 }
+        )
+        .toBe(true)
+    })
+
+    test('Database → File pushes skill to specific provider', async ({ mainWindow }) => {
+      const pendingBody = `# File sync skill provider push\n\n${Date.now()}\n`
+      await updateLibrarySkillContent(mainWindow, skillSlug, skillDocument(skillSlug, pendingBody))
+
+      const body = await openProjectSkills(mainWindow)
+      await expect(body.getByTestId(`skill-row-${skillSlug}`)).toContainText('Stale', {
+        timeout: 5_000
+      })
+      await openSkillEditor(body, skillSlug)
+
+      await expect(body.getByTestId('context-item-editor-stale-banner')).toBeVisible({
+        timeout: 5_000
+      })
+      await body.getByTestId('context-item-editor-sync-provider-claude').click()
+
+      // Verify .claude/skills/{slug}/SKILL.md written with frontmatter
+      await expect
+        .poll(() => {
+          const content = readFileSafe(claudeSkillPath())
+          return content.includes(`name: ${skillSlug}`) && content.includes(pendingBody.trim())
+        })
+        .toBe(true)
+
+      // Claude row now synced, codex still stale
+      await expect(body.getByTestId('context-item-editor-provider-row-claude')).toContainText(
+        'synced',
+        { timeout: 5_000 }
+      )
+      await expect(body.getByTestId('context-item-editor-provider-row-codex')).toContainText(
+        'stale',
+        { timeout: 5_000 }
+      )
+    })
+
+    test('Database → All Files pushes to all providers', async ({ mainWindow }) => {
+      const pendingBody = `# File sync skill push all\n\n${Date.now()}\n`
+      await updateLibrarySkillContent(mainWindow, skillSlug, skillDocument(skillSlug, pendingBody))
+
+      const body = await openProjectSkills(mainWindow)
+      await openSkillEditor(body, skillSlug)
+
+      const banner = body.getByTestId('context-item-editor-stale-banner')
+      await expect(banner).toBeVisible({ timeout: 5_000 })
+      await body.getByTestId('context-item-editor-sync-all-to-disk').click()
+
+      // Verify both provider files on disk
+      await expect
+        .poll(() => {
+          const content = readFileSafe(claudeSkillPath())
+          return content.includes(`name: ${skillSlug}`) && content.includes(pendingBody.trim())
+        })
+        .toBe(true)
+      await expect
+        .poll(() => {
+          const content = readFileSafe(codexSkillPath())
+          return content.includes(`name: ${skillSlug}`) && content.includes(pendingBody.trim())
+        })
+        .toBe(true)
+
+      // Fully synced → stale banner disappears
+      await expect(banner).toHaveCount(0, { timeout: 5_000 })
+    })
+
+    test('stale detection after external disk modification', async ({ mainWindow }) => {
+      // Externally modify the claude skill file
+      const modified = '---\nname: modified\n---\n# Modified externally\n'
+      fs.writeFileSync(claudeSkillPath(), modified)
+
+      const body = await openProjectSkills(mainWindow)
+
+      // Row shows stale aggregate
+      await expect(body.getByTestId(`skill-row-${skillSlug}`)).toContainText('Stale', {
+        timeout: 5_000
+      })
+
+      // Editor shows per-provider status: claude stale, codex still synced
+      await openSkillEditor(body, skillSlug)
+      await expect(body.getByTestId('context-item-editor-provider-row-claude')).toContainText(
+        'stale',
+        { timeout: 5_000 }
+      )
+      await expect(body.getByTestId('context-item-editor-provider-row-codex')).toContainText(
+        'synced',
+        { timeout: 5_000 }
+      )
+    })
+
+    test('stale skill shows pull action', async ({ mainWindow }) => {
+      const modified = '---\nname: modified\n---\n# Modified externally\n'
+      fs.writeFileSync(claudeSkillPath(), modified)
+
+      const body = await openProjectSkills(mainWindow)
+      await openSkillEditor(body, skillSlug)
+
+      await expect(body.getByTestId('context-item-editor-provider-row-claude')).toContainText(
+        'stale',
+        { timeout: 5_000 }
+      )
+      await expect(body.getByTestId('context-item-editor-pull-provider-claude')).toBeVisible({
+        timeout: 5_000
+      })
+    })
+
+    test('File → Database pulls from File and keeps raw frontmatter', async ({ mainWindow }) => {
+      const modified = '---\nname: modified\n---\n# Modified externally\n'
+      fs.writeFileSync(claudeSkillPath(), modified)
+
+      const body = await openProjectSkills(mainWindow)
+      await openSkillEditor(body, skillSlug)
+      await expect(body.getByTestId('context-item-editor-provider-row-claude')).toContainText(
+        'stale',
+        { timeout: 5_000 }
+      )
+
+      const pullClaude = body.getByTestId('context-item-editor-pull-provider-claude')
+      await expect(pullClaude).toBeVisible({ timeout: 5_000 })
+      await pullClaude.click()
+
+      // Verify DB content updated with the raw skill document
+      await expect
+        .poll(
+          () =>
+            skillDbContentMatches(mainWindow, skillSlug, [
+              'name: modified',
+              '# Modified externally'
+            ]),
+          { timeout: 5_000 }
+        )
+        .toBe(true)
+    })
+
+    test('filename rename updates slug', async ({ mainWindow }) => {
+      const newSlug = 'e2e-file-sync-renamed'
+
+      // Rename is done in the editable library editor (project view is read-only
+      // for linked library skills). Rename saves on blur of the filename input.
+      const body = await openLibrarySkills(mainWindow)
+      await openSkillEditor(body, skillSlug)
+
+      const slugInput = body.getByTestId('context-item-editor-slug')
+      await slugInput.fill(newSlug)
+      await slugInput.blur()
+
+      // Verify slug updated in DB
+      await expect
+        .poll(
+          async () => {
+            return await mainWindow.evaluate(async (slug) => {
+              const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
+                scope: 'library',
+                type: 'skill'
+              })
+              return items.some((i) => i.slug === slug)
+            }, newSlug)
+          },
+          { timeout: 5_000 }
+        )
+        .toBe(true)
+
+      // Verify new row visible
+      await expect(body.getByTestId(`skill-row-${newSlug}`)).toBeVisible({ timeout: 5_000 })
+
+      // Rename back for subsequent tests
+      await slugInput.fill(skillSlug)
+      await slugInput.blur()
+      await expect(body.getByTestId(`skill-row-${skillSlug}`)).toBeVisible({ timeout: 5_000 })
+    })
+
+    test('managed skill shows frontmatter in the editor and becomes invalid if it is removed', async ({
+      mainWindow
+    }) => {
+      const body = await openLibrarySkills(mainWindow)
+      await openSkillEditor(body, skillSlug)
+
+      const contentInput = body.getByTestId('context-item-editor-content')
+      await expect(contentInput).toBeVisible({ timeout: 5_000 })
+      await expect(contentInput).toHaveValue(/---\nname: /, { timeout: 5_000 })
+      await contentInput.fill(releasePromptBody)
+      await contentInput.blur()
+
+      await expect
+        .poll(
+          async () => {
+            return await mainWindow.evaluate(async (slug) => {
+              const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
+                scope: 'library',
+                type: 'skill'
+              })
+              const match = items.find((item) => item.slug === slug)
+              if (!match) return null
+              const metadata = JSON.parse(match.metadata_json) as {
+                skillValidation?: { status?: string }
+              }
+              return metadata.skillValidation?.status ?? null
+            }, skillSlug)
+          },
+          { timeout: 5_000 }
+        )
+        .toBe('invalid')
+
+      await expect(body.getByText('Frontmatter is invalid')).toBeVisible({ timeout: 5_000 })
+      await expect(body.getByText(/Skill content must start with YAML frontmatter/i)).toBeVisible({
+        timeout: 5_000
+      })
+      // The repair affordance is offered
+      await expect(body.getByTestId('context-item-editor-fix-frontmatter')).toBeVisible({
+        timeout: 5_000
+      })
+
+      // Restore valid content for the remaining tests
+      await contentInput.fill(skillDocument(skillSlug, skillContentV1))
+      await contentInput.blur()
+      await expect
+        .poll(
+          () =>
+            skillDbContentMatches(mainWindow, skillSlug, [
+              `name: ${skillSlug}`,
+              skillContentV1.trim()
+            ]),
+          { timeout: 5_000 }
+        )
+        .toBe(true)
+    })
+
+    test('Database → File after pull re-syncs File', async ({ mainWindow }) => {
+      const resyncedBody = '# Re-synced after pull\n'
+      await updateLibrarySkillContent(mainWindow, skillSlug, skillDocument(skillSlug, resyncedBody))
+
+      const body = await openProjectSkills(mainWindow)
+      await expect(body.getByTestId(`skill-row-${skillSlug}`)).toContainText('Stale', {
+        timeout: 5_000
+      })
+      await openSkillEditor(body, skillSlug)
+
+      const banner = body.getByTestId('context-item-editor-stale-banner')
+      await expect(banner).toBeVisible({ timeout: 5_000 })
+      await body.getByTestId('context-item-editor-sync-all-to-disk').click()
+
+      // Verify files on disk
+      await expect
+        .poll(() => readFileSafe(claudeSkillPath()).includes(resyncedBody.trim()))
+        .toBe(true)
+      await expect
+        .poll(() => {
+          const content = readFileSafe(codexSkillPath())
+          return content.includes(`name: ${skillSlug}`) && content.includes(resyncedBody.trim())
+        })
+        .toBe(true)
+
+      // Fully synced → banner gone
+      await expect(banner).toHaveCount(0, { timeout: 5_000 })
+    })
+  })
+
+  // =========================================================================
+  // Cross-feature tests
+  // =========================================================================
+  // REMOVED 2026-07-02: 'full instructions roundtrip: push → external edit →
+  // stale → pull' — it exercised the dropped instructions push/pull/stale-card
+  // affordances end-to-end. Each constituent behavior that survived the
+  // redesign (file edit → disk, variant → all files, external change → reload)
+  // is covered by the migrated Instructions tests above.
+  // REMOVED 2026-07-02: 'unmanaged skill can be managed from row button' — the
+  // manage button no longer exists; opening Project → Skills auto-reconciles
+  // disk-only skills into managed project skills (covered below).
+
+  test.describe('Integration', () => {
+    test('needsSync returns false after instructions and skills are synced', async ({
+      mainWindow
+    }) => {
+      const aligned = '# needsSync aligned instructions\n'
+      await setInstructionsContent(mainWindow, projectId, aligned)
+
+      // Seed sentinels so the editor-load race is deterministic when switching files
+      fs.writeFileSync(claudeInstructionsPath(), '# sentinel claude\n')
+      fs.writeFileSync(codexInstructionsPath(), '# sentinel codex\n')
+
+      // Align both provider files with the DB content via the file editor
+      const { body, textarea } = await openInstructionsFile(mainWindow, 'CLAUDE.md')
+      await expect(textarea).toHaveValue('# sentinel claude\n', { timeout: 5_000 })
+      await textarea.fill(aligned)
+      await textarea.blur()
+      await expect.poll(() => readFileSafe(claudeInstructionsPath())).toBe(aligned)
+
+      await body.getByRole('button').filter({ hasText: 'AGENTS.md' }).first().click()
+      await expect(textarea).toHaveValue('# sentinel codex\n', { timeout: 5_000 })
+      await textarea.fill(aligned)
+      await textarea.blur()
+      await expect.poll(() => readFileSafe(codexInstructionsPath())).toBe(aligned)
+
+      // Sync the linked skill if any provider is still stale
+      const skillsBody = await openProjectSkills(mainWindow)
+      const row = skillsBody.getByTestId(`skill-row-${skillSlug}`)
+      await expect(row).toBeVisible({ timeout: 5_000 })
+      if (
+        await row
+          .getByText('Stale')
+          .isVisible({ timeout: 1_000 })
+          .catch(() => false)
+      ) {
+        await openSkillEditor(skillsBody, skillSlug)
+        await skillsBody.getByTestId('context-item-editor-sync-all-to-disk').click()
+        await expect(skillsBody.getByTestId('context-item-editor-stale-banner')).toHaveCount(0, {
+          timeout: 5_000
+        })
+      }
+
+      // Verify needsSync is false
+      await expect
+        .poll(async () => {
+          return await mainWindow.evaluate(
+            ({ id, projectPath }) => {
+              return window
+                .getTrpcVanillaClient()
+                .aiConfig.needsSync.query({ projectId: id, projectPath })
+            },
+            { id: projectId, projectPath: TEST_PROJECT_PATH }
+          )
+        })
+        .toBe(false)
+    })
+
+    test('disk-only skills are auto-managed into the project', async ({ mainWindow }) => {
+      fs.mkdirSync(path.dirname(unmanagedCodexSkillPath()), { recursive: true })
+      fs.writeFileSync(unmanagedCodexSkillPath(), unmanagedSkillContent)
+
+      // Opening Project → Skills reconciles disk-only skill files into managed
+      // project skills (replaces the old 'Unmanaged' row + manage button).
+      const body = await openProjectSkills(mainWindow)
+      await expect(body.getByTestId(`skill-row-${unmanagedSkillSlug}`)).toBeVisible({
+        timeout: 10_000
+      })
+
+      // DB item created (project scope) and the codex provider reports synced
+      await expect
+        .poll(async () => {
+          return await mainWindow.evaluate(
+            async ({ id, projectPath, slug }) => {
+              const statuses = await window
+                .getTrpcVanillaClient()
+                .aiConfig.getProjectSkillsStatus.query({ projectId: id, projectPath })
+              const status = statuses.find((entry) => entry.item.slug === slug)
+              return status?.providers.codex?.syncHealth ?? null
+            },
+            { id: projectId, projectPath: TEST_PROJECT_PATH, slug: unmanagedSkillSlug }
+          )
+        })
+        .toBe('synced')
+    })
+
+    test('frontmatter-only DB metadata changes mark both linked providers stale', async ({
+      mainWindow
+    }) => {
+      await mainWindow.evaluate(
+        async ({ id, projectPath, slug, initialContent, updatedContent }) => {
+          const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({
+            scope: 'library',
+            type: 'skill'
+          })
+          const match = existing.find((item) => item.slug === slug)
+          const item = match
+            ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content: initialContent })
+            : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
+                type: 'skill',
+                scope: 'library',
+                slug,
+                content: initialContent
+              })
+          if (!item) throw new Error('Could not create frontmatter mismatch skill')
+
+          await window
+            .getTrpcVanillaClient()
+            .aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
           await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
-            projectId: pid,
+            projectId: id,
             projectPath,
             itemId: item.id,
             providers: ['claude', 'codex']
           })
+          await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: updatedContent })
         },
-        { projectId: project.id, projectPath: TEST_PROJECT_PATH, slug: skillSlug }
+        {
+          id: projectId,
+          projectPath: TEST_PROJECT_PATH,
+          slug: frontmatterMismatchSkillSlug,
+          initialContent: skillDocument(
+            frontmatterMismatchSkillSlug,
+            frontmatterMismatchSkillInitialContent
+          ),
+          updatedContent: frontmatterMismatchSkillDbContent
+        }
       )
 
-      await s.refreshData()
-      await goHome(mainWindow)
-      await expect(projectBlob(mainWindow, projectAbbrev)).toBeVisible({ timeout: 5_000 })
+      await expect
+        .poll(() => {
+          const content = readFileSafe(frontmatterMismatchCodexPath())
+          return (
+            content.includes(`name: ${frontmatterMismatchSkillSlug}`) &&
+            content.includes(frontmatterMismatchSkillInitialContent.trim())
+          )
+        })
+        .toBe(true)
+      await expect
+        .poll(async () => {
+          return await mainWindow.evaluate(
+            async ({ id, projectPath, slug }) => {
+              const statuses = await window
+                .getTrpcVanillaClient()
+                .aiConfig.getProjectSkillsStatus.query({ projectId: id, projectPath })
+              const skill = statuses.find((entry) => entry.item.slug === slug)
+              return {
+                claude: skill?.providers.claude?.syncHealth ?? null,
+                codex: skill?.providers.codex?.syncHealth ?? null
+              }
+            },
+            { id: projectId, projectPath: TEST_PROJECT_PATH, slug: frontmatterMismatchSkillSlug }
+          )
+        })
+        .toEqual({ claude: 'stale', codex: 'stale' })
+
+      const body = await openProjectSkills(mainWindow)
+      await expect(body.getByTestId(`skill-row-${frontmatterMismatchSkillSlug}`)).toContainText(
+        'Stale',
+        { timeout: 5_000 }
+      )
+
+      await openSkillEditor(body, frontmatterMismatchSkillSlug)
+      await expect(body.getByTestId('context-item-editor-provider-row-claude')).toContainText(
+        'stale',
+        { timeout: 5_000 }
+      )
+      await expect(body.getByTestId('context-item-editor-provider-row-codex')).toContainText(
+        'stale',
+        { timeout: 5_000 }
+      )
     })
 
-    // =========================================================================
-    // Instructions tests
-    // =========================================================================
-
-    test.describe('Instructions', () => {
-      test.afterAll(async ({ mainWindow }) => {
-        await closeTopDialog(mainWindow).catch(() => {})
-      })
-
-      async function openInstructionsDialog(mainWindow: Page): Promise<Locator> {
-        const dialog = mainWindow
-          .getByRole('dialog')
-          .filter({ has: mainWindow.getByRole('heading', { name: 'Project Settings' }) })
-          .last()
-        const textarea = dialog.getByTestId('instructions-textarea')
-
-        if (await textarea.isVisible({ timeout: 500 }).catch(() => false)) return dialog
-
-        if (await dialog.isVisible({ timeout: 500 }).catch(() => false)) {
-          const sectionCard = dialog.getByTestId('project-context-overview-instructions').first()
-          if (await sectionCard.isVisible({ timeout: 500 }).catch(() => false)) {
-            await sectionCard.click().catch(() => {})
-            if (await textarea.isVisible({ timeout: 1_500 }).catch(() => false)) return dialog
-          }
-        }
-
-        return openProjectContextSection(mainWindow, projectAbbrev, 'instructions')
-      }
-
-      async function reopenInstructionsSection(dialog: Locator): Promise<void> {
-        const backToOverview = dialog
-          .getByRole('button', { name: 'Instructions', exact: true })
-          .first()
-        if (await backToOverview.isVisible({ timeout: 500 }).catch(() => false)) {
-          await backToOverview.click().catch(() => {})
-        }
-        const instructionsCard = dialog.getByTestId('project-context-overview-instructions').first()
-        await expect(instructionsCard).toBeVisible({ timeout: 5_000 })
-        await instructionsCard.click()
-        await expect(dialog.getByTestId('instructions-textarea')).toBeVisible({ timeout: 5_000 })
-      }
-
-      async function ensureInstructionsV2AndSyncAll(mainWindow: Page): Promise<Locator> {
-        await setInstructionsContent(mainWindow, projectId, instructionsV2)
-        const dialog = await openInstructionsDialog(mainWindow)
-        const textarea = dialog.getByTestId('instructions-textarea')
-        await expect(textarea).toBeVisible({ timeout: 5_000 })
-        await textarea.fill(instructionsV2)
-        await expect
-          .poll(
-            async () => {
-              const result = await mainWindow.evaluate(
-                ({ id, projectPath }) => {
-                  return window.getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
-                },
-                { id: projectId, projectPath: TEST_PROJECT_PATH }
-              )
-              return result.content
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(instructionsV2)
-        const pushAll = dialog.getByTestId('instructions-push-all')
-        if (await pushAll.isVisible({ timeout: 600 }).catch(() => false)) {
-          await pushAll.click()
-        }
-        await expect(dialog.getByTestId('instructions-provider-card-claude')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await expect(dialog.getByTestId('instructions-provider-card-codex')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        return dialog
-      }
-
-      test('edit auto-saves to DB', async ({ mainWindow }) => {
-        const dialog = await openInstructionsDialog(mainWindow)
-        const textarea = dialog.getByTestId('instructions-textarea')
-        await expect(textarea).toBeVisible({ timeout: 5_000 })
-
-        await textarea.fill(instructionsV2)
-
-        // Wait for debounced save (800ms) + processing
-        await expect
-          .poll(
-            async () => {
-              const result = await mainWindow.evaluate(
-                ({ id, projectPath }) => {
-                  return window.getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
-                },
-                { id: projectId, projectPath: TEST_PROJECT_PATH }
-              )
-              return result.content
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(instructionsV2)
-      })
-
-      test('Database → File pushes to specific provider', async ({ mainWindow }) => {
-        await setInstructionsContent(mainWindow, projectId, instructionsV2)
-        const dialog = await openInstructionsDialog(mainWindow)
-        const textarea = dialog.getByTestId('instructions-textarea')
-        await expect(textarea).toBeVisible({ timeout: 5_000 })
-        await textarea.fill(instructionsV2)
-        await expect
-          .poll(
-            async () => {
-              const result = await mainWindow.evaluate(
-                ({ id, projectPath }) => {
-                  return window.getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
-                },
-                { id: projectId, projectPath: TEST_PROJECT_PATH }
-              )
-              return result.content
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(instructionsV2)
-
-        const pushClaude = dialog.getByTestId('instructions-push-claude')
-        await expect(pushClaude).toBeVisible({ timeout: 5_000 })
-        await pushClaude.click()
-
-        // Verify CLAUDE.md written on disk
-        await expect.poll(() => readFileSafe(claudeInstructionsPath())).toBe(instructionsV2)
-
-        // Verify card shows Synced
-        const card = dialog.getByTestId('instructions-provider-card-claude')
-        await expect(card).toContainText('Synced', { timeout: 5_000 })
-      })
-
-      test('Database → All Files pushes to all providers', async ({ mainWindow }) => {
-        await setInstructionsContent(mainWindow, projectId, instructionsV2)
-        const dialog = await openInstructionsDialog(mainWindow)
-        const textarea = dialog.getByTestId('instructions-textarea')
-        await expect(textarea).toBeVisible({ timeout: 5_000 })
-        await textarea.fill(instructionsV2)
-        await expect
-          .poll(
-            async () => {
-              const result = await mainWindow.evaluate(
-                ({ id, projectPath }) => {
-                  return window.getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
-                },
-                { id: projectId, projectPath: TEST_PROJECT_PATH }
-              )
-              return result.content
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(instructionsV2)
-
-        const pushAll = dialog.getByTestId('instructions-push-all')
-        await expect(pushAll).toBeVisible({ timeout: 5_000 })
-        await pushAll.click()
-
-        // Verify both files on disk
-        await expect.poll(() => readFileSafe(claudeInstructionsPath())).toBe(instructionsV2)
-        await expect.poll(() => readFileSafe(codexInstructionsPath())).toBe(instructionsV2)
-
-        // Verify both cards show Synced
-        await expect(dialog.getByTestId('instructions-provider-card-claude')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await expect(dialog.getByTestId('instructions-provider-card-codex')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-      })
-
-      test('stale detection after disk modification', async ({ mainWindow }) => {
-        const dialog = await ensureInstructionsV2AndSyncAll(mainWindow)
-        // Modify CLAUDE.md externally
-        fs.writeFileSync(claudeInstructionsPath(), '# Externally modified\n')
-
-        // Remount section to refresh status
-        await reopenInstructionsSection(dialog)
-        const card = dialog.getByTestId('instructions-provider-card-claude')
-        await expect(card).toContainText('Stale', { timeout: 5_000 })
-
-        // Codex should still be synced
-        await expect(dialog.getByTestId('instructions-provider-card-codex')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-      })
-
-      test('stale card shows pull action', async ({ mainWindow }) => {
-        const dialog = await ensureInstructionsV2AndSyncAll(mainWindow)
-        fs.writeFileSync(claudeInstructionsPath(), '# Externally modified\n')
-        await reopenInstructionsSection(dialog)
-        const card = dialog.getByTestId('instructions-provider-card-claude')
-        await expect(card).toContainText('Stale', { timeout: 5_000 })
-        await expect(dialog.getByTestId('instructions-pull-claude')).toBeVisible({ timeout: 5_000 })
-      })
-
-      test('File → Database pulls from File', async ({ mainWindow }) => {
-        const dialog = await ensureInstructionsV2AndSyncAll(mainWindow)
-        const diskContent = '# Externally modified\n'
-        fs.writeFileSync(claudeInstructionsPath(), diskContent)
-
-        await reopenInstructionsSection(dialog)
-
-        const pullClaude = dialog.getByTestId('instructions-pull-claude')
-        await expect(pullClaude).toBeVisible({ timeout: 5_000 })
-        await pullClaude.click()
-
-        // Verify textarea updated with disk content
-        const textarea = dialog.getByTestId('instructions-textarea')
-        await expect(textarea).toHaveValue(diskContent, { timeout: 5_000 })
-
-        // Verify all providers now synced
-        await expect(dialog.getByTestId('instructions-provider-card-claude')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-
-        // DB should also reflect pulled content
-        await expect
-          .poll(async () => {
-            const result = await mainWindow.evaluate(
-              ({ id, projectPath }) => {
-                return window.getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
-              },
-              { id: projectId, projectPath: TEST_PROJECT_PATH }
-            )
-            return result.content
+    test('row status uses linked providers only', async ({ mainWindow }) => {
+      await mainWindow.evaluate(
+        async ({ id, projectPath, slug, content }) => {
+          const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({
+            scope: 'library',
+            type: 'skill'
           })
-          .toBe(diskContent)
-      })
-    })
+          const match = existing.find((item) => item.slug === slug)
+          const item = match
+            ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+            : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
+                type: 'skill',
+                scope: 'library',
+                slug,
+                content
+              })
+          if (!item) throw new Error('Could not create codex-only skill')
 
-    // =========================================================================
-    // Skills tests
-    // =========================================================================
-
-    test.describe('Skills', () => {
-      test('expand shows editor with auto-save', async ({ mainWindow }) => {
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-
-        await openSkillEditPanel(dialog, skillSlug)
-
-        // Verify content editor visible
-        const content = dialog.getByTestId('skill-detail-content')
-        await expect(content).toBeVisible({ timeout: 5_000 })
-        await expect(content).toHaveValue(
-          new RegExp(
-            `---\\nname: ${skillSlug}[\\s\\S]*${skillContentV1.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`
-          ),
-          { timeout: 5_000 }
-        )
-
-        // Edit and verify auto-save
-        await content.fill(skillDocument(skillSlug, skillContentV2))
-
-        await expect
-          .poll(
-            async () => {
-              return await mainWindow.evaluate(
-                async ({ slug, expectedBody }) => {
-                  const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-                    scope: 'library',
-                    type: 'skill'
-                  })
-                  const match = items.find((i) => i.slug === slug)
-                  return (
-                    !!match?.content.includes(`name: ${slug}`) &&
-                    !!match?.content.includes(expectedBody.trim())
-                  )
-                },
-                { slug: skillSlug, expectedBody: skillContentV2 }
-              )
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(true)
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('Database → File pushes skill to specific provider', async ({ mainWindow }) => {
-        const pendingBody = `# File sync skill provider push\n\n${Date.now()}\n`
-        const pendingContent = skillDocument(skillSlug, pendingBody)
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillEditPanel(dialog, skillSlug)
-        const content = dialog.getByTestId('skill-detail-content')
-        await expect(content).toBeVisible({ timeout: 5_000 })
-        await content.fill(pendingContent)
-        await expect
-          .poll(
-            async () => {
-              return await mainWindow.evaluate(
-                async ({ slug, expectedBody }) => {
-                  const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-                    scope: 'library',
-                    type: 'skill'
-                  })
-                  const match = items.find((i) => i.slug === slug)
-                  return (
-                    !!match?.content.includes(`name: ${slug}`) &&
-                    !!match?.content.includes(expectedBody.trim())
-                  )
-                },
-                { slug: skillSlug, expectedBody: pendingBody }
-              )
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(true)
-        await openSkillSyncPanel(dialog, skillSlug)
-
-        const pushClaude = dialog.getByTestId(`skill-push-claude-${skillSlug}`)
-        await expect(pushClaude).toBeVisible({ timeout: 5_000 })
-        await pushClaude.click()
-
-        // Verify .claude/skills/{slug}/SKILL.md written with frontmatter
-        await expect
-          .poll(() => {
-            const content = readFileSafe(claudeSkillPath())
-            return content.includes(`name: ${skillSlug}`) && content.includes(pendingBody.trim())
-          })
-          .toBe(true)
-
-        // Verify claude card shows synced
-        const claudeCard = dialog.getByTestId(`skill-provider-card-claude-${skillSlug}`)
-        await expect(claudeCard).toContainText('Synced', { timeout: 5_000 })
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('Database → All Files pushes to all providers', async ({ mainWindow }) => {
-        const pendingBody = `# File sync skill push all\n\n${Date.now()}\n`
-        const pendingContent = skillDocument(skillSlug, pendingBody)
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillEditPanel(dialog, skillSlug)
-        const content = dialog.getByTestId('skill-detail-content')
-        await expect(content).toBeVisible({ timeout: 5_000 })
-        await content.fill(pendingContent)
-        await expect
-          .poll(
-            async () => {
-              return await mainWindow.evaluate(
-                async ({ slug, expectedBody }) => {
-                  const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-                    scope: 'library',
-                    type: 'skill'
-                  })
-                  const match = items.find((i) => i.slug === slug)
-                  return (
-                    !!match?.content.includes(`name: ${slug}`) &&
-                    !!match?.content.includes(expectedBody.trim())
-                  )
-                },
-                { slug: skillSlug, expectedBody: pendingBody }
-              )
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(true)
-        await openSkillSyncPanel(dialog, skillSlug)
-
-        const pushAll = dialog.getByTestId(`skill-push-all-${skillSlug}`)
-        await expect(pushAll).toBeVisible({ timeout: 5_000 })
-        await pushAll.click()
-
-        // Verify both provider files on disk
-        await expect
-          .poll(() => {
-            const content = readFileSafe(claudeSkillPath())
-            return content.includes(`name: ${skillSlug}`) && content.includes(pendingBody.trim())
-          })
-          .toBe(true)
-        await expect
-          .poll(() => {
-            const content = readFileSafe(codexSkillPath())
-            return content.includes(`name: ${skillSlug}`) && content.includes(pendingBody.trim())
-          })
-          .toBe(true)
-
-        // Verify both cards show synced
-        await expect(dialog.getByTestId(`skill-provider-card-claude-${skillSlug}`)).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await expect(dialog.getByTestId(`skill-provider-card-codex-${skillSlug}`)).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('stale detection after external disk modification', async ({ mainWindow }) => {
-        // Externally modify the claude skill file
-        const modified = '---\nname: modified\n---\n# Modified externally\n'
-        fs.writeFileSync(claudeSkillPath(), modified)
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        const skillRow = dialog.getByTestId(`project-context-item-skill-${skillSlug}`)
-
-        // Row should show stale aggregate
-        await expect(skillRow).toContainText('Stale', { timeout: 5_000 })
-
-        // Expand to see per-provider status
-        await openSkillSyncPanel(dialog, skillSlug)
-        const claudeCard = dialog.getByTestId(`skill-provider-card-claude-${skillSlug}`)
-        await expect(claudeCard).toContainText('Stale', { timeout: 5_000 })
-
-        // Codex should still be synced
-        await expect(dialog.getByTestId(`skill-provider-card-codex-${skillSlug}`)).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('stale skill card shows pull action', async ({ mainWindow }) => {
-        const modified = '---\nname: modified\n---\n# Modified externally\n'
-        fs.writeFileSync(claudeSkillPath(), modified)
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillSyncPanel(dialog, skillSlug)
-
-        const claudeCard = dialog.getByTestId(`skill-provider-card-claude-${skillSlug}`)
-        await expect(claudeCard).toContainText('Stale', { timeout: 5_000 })
-        await expect(dialog.getByTestId(`skill-pull-claude-${skillSlug}`)).toBeVisible({
-          timeout: 5_000
-        })
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('File → Database pulls from File and keeps raw frontmatter', async ({ mainWindow }) => {
-        const modified = '---\nname: modified\n---\n# Modified externally\n'
-        fs.writeFileSync(claudeSkillPath(), modified)
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillSyncPanel(dialog, skillSlug)
-        await expect(dialog.getByTestId(`skill-provider-card-claude-${skillSlug}`)).toContainText(
-          'Stale',
-          { timeout: 5_000 }
-        )
-
-        const pullClaude = dialog.getByTestId(`skill-pull-claude-${skillSlug}`)
-        await expect(pullClaude).toBeVisible({ timeout: 5_000 })
-        await pullClaude.click()
-
-        // Verify DB content updated with the raw skill document
-        await expect
-          .poll(
-            async () => {
-              return await mainWindow.evaluate(
-                async ({ slug, expectedBody }) => {
-                  const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-                    scope: 'library',
-                    type: 'skill'
-                  })
-                  const match = items.find((i) => i.slug === slug)
-                  return (
-                    !!match?.content.includes('name: modified') &&
-                    !!match?.content.includes(expectedBody.trim())
-                  )
-                },
-                { slug: skillSlug, expectedBody: '# Modified externally\n' }
-              )
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(true)
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('filename rename updates slug', async ({ mainWindow }) => {
-        const newSlug = 'e2e-file-sync-renamed'
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        const skillRow = dialog.getByTestId(`project-context-item-skill-${skillSlug}`)
-        await openSkillEditPanel(dialog, skillSlug)
-
-        const filenameInput = dialog.getByTestId('skill-detail-filename')
-        await expect(filenameInput).toBeVisible({ timeout: 5_000 })
-        await filenameInput.fill(newSlug)
-
-        const renameButton = dialog.getByTestId('skill-detail-rename')
-        await expect(renameButton).toBeVisible({ timeout: 5_000 })
-        await renameButton.click()
-
-        // Verify slug updated in DB
-        await expect
-          .poll(
-            async () => {
-              return await mainWindow.evaluate(async (slug) => {
-                const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-                  scope: 'library',
-                  type: 'skill'
-                })
-                return items.some((i) => i.slug === slug)
-              }, newSlug)
-            },
-            { timeout: 5_000 }
-          )
-          .toBe(true)
-
-        // Verify new row visible
-        await expect(dialog.getByTestId(`project-context-item-skill-${newSlug}`)).toBeVisible({
-          timeout: 5_000
-        })
-
-        // Rename back for subsequent tests — need to close/reopen dialog since onChanged reloads data
-        await closeTopDialog(mainWindow)
-        const dialog2 = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillEditPanel(dialog2, newSlug)
-        const input = dialog2.getByTestId('skill-detail-filename')
-        await expect(input).toBeVisible({ timeout: 5_000 })
-        await input.fill(skillSlug)
-        await dialog2.getByTestId('skill-detail-rename').click()
-        await expect(dialog2.getByTestId(`project-context-item-skill-${skillSlug}`)).toBeVisible({
-          timeout: 5_000
-        })
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('existing managed skill shows frontmatter in the editor and becomes invalid if it is removed', async ({
-        mainWindow
-      }) => {
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillEditPanel(dialog, skillSlug)
-
-        const contentInput = dialog.getByTestId('skill-detail-content')
-        await expect(contentInput).toBeVisible({ timeout: 5_000 })
-        await expect(contentInput).toHaveValue(/---\nname: /, { timeout: 5_000 })
-        await contentInput.fill(releasePromptBody)
-
-        await expect
-          .poll(
-            async () => {
-              return await mainWindow.evaluate(async (slug) => {
-                const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-                  scope: 'library',
-                  type: 'skill'
-                })
-                const match = items.find((item) => item.slug === slug)
-                if (!match) return null
-                const metadata = JSON.parse(match.metadata_json) as {
-                  skillValidation?: { status?: string }
-                }
-                return metadata.skillValidation?.status ?? null
-              }, skillSlug)
-            },
-            { timeout: 5_000 }
-          )
-          .toBe('invalid')
-
-        await expect(dialog.getByText('Frontmatter is invalid')).toBeVisible({ timeout: 5_000 })
-        await expect(
-          dialog.getByText(/Skill content must start with YAML frontmatter/i)
-        ).toBeVisible({ timeout: 5_000 })
-        await expect(dialog.getByTestId(`project-context-item-skill-${skillSlug}`)).toContainText(
-          'Invalid frontmatter'
-        )
-
-        await closeTopDialog(mainWindow)
-
-        const dialog2 = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await expect(dialog2.getByTestId(`project-context-item-skill-${skillSlug}`)).toContainText(
-          'Invalid frontmatter'
-        )
-        await openSkillSyncPanel(dialog2, skillSlug)
-        await expect(dialog2.getByTestId(`skill-push-all-${skillSlug}`)).toBeDisabled({
-          timeout: 5_000
-        })
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('Database → File after pull re-syncs File', async ({ mainWindow }) => {
-        const resyncedBody = '# Re-synced after pull\n'
-        const resyncedContent = skillDocument(skillSlug, resyncedBody)
-        await mainWindow.evaluate(
-          async ({ slug, content }) => {
-            const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
-            const item = items.find((entry) => entry.slug === slug)
-            if (!item) throw new Error('Skill not found for resync test')
-            await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content })
-          },
-          { slug: skillSlug, content: resyncedContent }
-        )
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillSyncPanel(dialog, skillSlug)
-        await expect(dialog.getByTestId(`project-context-item-skill-${skillSlug}`)).toContainText(
-          'Stale',
-          { timeout: 5_000 }
-        )
-
-        const pushAll = dialog.getByTestId(`skill-push-all-${skillSlug}`)
-        await expect(pushAll).toBeVisible({ timeout: 5_000 })
-        await pushAll.click()
-
-        // Verify both synced
-        await expect(dialog.getByTestId(`skill-provider-card-claude-${skillSlug}`)).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await expect(dialog.getByTestId(`skill-provider-card-codex-${skillSlug}`)).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-
-        // Verify files on disk
-        await expect
-          .poll(() => readFileSafe(claudeSkillPath()).includes(resyncedBody.trim()))
-          .toBe(true)
-        await expect
-          .poll(() => {
-            const content = readFileSafe(codexSkillPath())
-            return content.includes(`name: ${skillSlug}`) && content.includes(resyncedBody.trim())
-          })
-          .toBe(true)
-
-        await closeTopDialog(mainWindow)
-      })
-    })
-
-    // =========================================================================
-    // Cross-feature tests
-    // =========================================================================
-
-    test.describe('Integration', () => {
-      test('full instructions roundtrip: push → external edit → stale → pull', async ({
-        mainWindow
-      }) => {
-        const testContent = '# Roundtrip test\n\nFull cycle.\n'
-        const externalEdit = '# Externally edited\n\nDifferent content.\n'
-
-        // 1. Set instructions via API
-        await mainWindow.evaluate(
-          ({ id, projectPath, content }) => {
-            return window
+          await window
             .getTrpcVanillaClient()
-            .aiConfig.saveInstructionsContent.mutate({ projectId: id, projectPath, content })
-          },
-          { id: projectId, projectPath: TEST_PROJECT_PATH, content: testContent }
-        )
+            .aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
+          await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
+            projectId: id,
+            projectPath,
+            itemId: item.id,
+            providers: ['codex']
+          })
+        },
+        {
+          id: projectId,
+          projectPath: TEST_PROJECT_PATH,
+          slug: codexOnlySkillSlug,
+          content: skillDocument(codexOnlySkillSlug, codexOnlySkillContent)
+        }
+      )
 
-        // 2. Push to all
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'instructions')
-        await dialog.getByTestId('instructions-push-all').click()
-        await expect.poll(() => readFileSafe(claudeInstructionsPath())).toBe(testContent)
-
-        // 3. Externally edit
-        fs.writeFileSync(claudeInstructionsPath(), externalEdit)
-
-        // 4. Close and reopen to pick up stale status
-        await closeTopDialog(mainWindow)
-        const dialog2 = await openProjectContextSection(mainWindow, projectAbbrev, 'instructions')
-        await expect(dialog2.getByTestId('instructions-provider-card-claude')).toContainText(
-          'Stale',
-          { timeout: 5_000 }
-        )
-
-        // 5. Pull from claude
-        await dialog2.getByTestId('instructions-pull-claude').click()
-        await expect(dialog2.getByTestId('instructions-textarea')).toHaveValue(externalEdit, {
-          timeout: 5_000
+      await expect
+        .poll(() => {
+          const content = readFileSafe(codexOnlySkillPath())
+          return (
+            content.includes(`name: ${codexOnlySkillSlug}`) &&
+            content.includes(codexOnlySkillContent.trim())
+          )
         })
+        .toBe(true)
 
-        // 6. Push to all again to sync codex
-        await dialog2.getByTestId('instructions-push-all').click()
-        await expect(dialog2.getByTestId('instructions-provider-card-claude')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await expect(dialog2.getByTestId('instructions-provider-card-codex')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
+      // The missing claude file must NOT mark the row stale — claude is not linked.
+      const body = await openProjectSkills(mainWindow)
+      const row = body.getByTestId(`skill-row-${codexOnlySkillSlug}`)
+      await expect(row).toBeVisible({ timeout: 5_000 })
+      await expect(row).not.toContainText('Stale')
 
-        await closeTopDialog(mainWindow)
-      })
+      // Editor shows no stale banner either
+      await openSkillEditor(body, codexOnlySkillSlug)
+      await expect(body.getByTestId('context-item-editor-stale-banner')).toHaveCount(0)
+    })
 
-      test('needsSync returns false after all providers synced', async ({ mainWindow }) => {
-        // Push all instructions
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'instructions')
-        const pushAllInstructions = dialog.getByTestId('instructions-push-all')
-        if (await pushAllInstructions.count()) {
-          if (await pushAllInstructions.isVisible({ timeout: 800 }).catch(() => false)) {
-            await pushAllInstructions.click()
-          }
+    // MIGRATED 2026-07-02: the 'Unmanaged' row badge no longer exists — opening
+    // Project → Skills auto-reconciles an unmanaged file on an unlinked provider
+    // into a linked selection, which then reports stale (file ≠ DB content).
+    test('unmanaged file on unlinked provider is auto-linked and marked stale', async ({
+      mainWindow
+    }) => {
+      await mainWindow.evaluate(
+        async ({ id, projectPath, slug, content }) => {
+          const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({
+            scope: 'library',
+            type: 'skill'
+          })
+          const match = existing.find((item) => item.slug === slug)
+          const item = match
+            ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+            : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
+                type: 'skill',
+                scope: 'library',
+                slug,
+                content
+              })
+          if (!item) throw new Error('Could not create codex-only skill with unmanaged claude')
+
+          await window
+            .getTrpcVanillaClient()
+            .aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
+          await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
+            projectId: id,
+            projectPath,
+            itemId: item.id,
+            providers: ['codex']
+          })
+        },
+        {
+          id: projectId,
+          projectPath: TEST_PROJECT_PATH,
+          slug: codexOnlyWithUnmanagedClaudeSlug,
+          content: skillDocument(
+            codexOnlyWithUnmanagedClaudeSlug,
+            codexOnlyWithUnmanagedClaudeContent
+          )
         }
-        if (!(await pushAllInstructions.isVisible({ timeout: 400 }).catch(() => false))) {
-          const pushClaude = dialog.getByTestId('instructions-push-claude')
-          if (await pushClaude.isVisible({ timeout: 800 }).catch(() => false)) {
-            await pushClaude.click()
-          }
-          const pushCodex = dialog.getByTestId('instructions-push-codex')
-          if (await pushCodex.isVisible({ timeout: 800 }).catch(() => false)) {
-            await pushCodex.click()
-          }
-        }
-        await expect(dialog.getByTestId('instructions-provider-card-claude')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await expect(dialog.getByTestId('instructions-provider-card-codex')).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await closeTopDialog(mainWindow)
+      )
 
-        // Push all skills
-        const dialog2 = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        await openSkillSyncPanel(dialog2, skillSlug)
-        const pushAllSkills = dialog2.getByTestId(`skill-push-all-${skillSlug}`)
-        if (await pushAllSkills.count()) {
-          await pushAllSkills.click()
-        }
-        await expect(dialog2.getByTestId(`skill-provider-card-claude-${skillSlug}`)).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await expect(dialog2.getByTestId(`skill-provider-card-codex-${skillSlug}`)).toContainText(
-          'Synced',
-          { timeout: 5_000 }
-        )
-        await closeTopDialog(mainWindow)
+      await expect
+        .poll(() => {
+          const content = readFileSafe(codexOnlyWithUnmanagedClaudeCodexPath())
+          return (
+            content.includes(`name: ${codexOnlyWithUnmanagedClaudeSlug}`) &&
+            content.includes(codexOnlyWithUnmanagedClaudeContent.trim())
+          )
+        })
+        .toBe(true)
+      fs.mkdirSync(path.dirname(codexOnlyWithUnmanagedClaudeClaudePath()), { recursive: true })
+      fs.writeFileSync(codexOnlyWithUnmanagedClaudeClaudePath(), '# unmanaged claude version\n')
 
-        // Verify needsSync is false
-        await expect
-          .poll(async () => {
-            return await mainWindow.evaluate(
-              ({ id, projectPath }) => {
-                return window
-                  .getTrpcVanillaClient()
-                  .aiConfig.needsSync.query({ projectId: id, projectPath })
-              },
-              { id: projectId, projectPath: TEST_PROJECT_PATH }
-            )
-          })
-          .toBe(false)
-      })
+      const body = await openProjectSkills(mainWindow)
+      const row = body.getByTestId(`skill-row-${codexOnlyWithUnmanagedClaudeSlug}`)
+      await expect(row).toContainText('Stale', { timeout: 10_000 })
 
-      test('disk-only skills are shown in Skills section as unmanaged', async ({ mainWindow }) => {
-        fs.mkdirSync(path.dirname(unmanagedCodexSkillPath()), { recursive: true })
-        fs.writeFileSync(unmanagedCodexSkillPath(), '# unmanaged skill on disk\n')
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        const unmanagedRow = dialog.getByTestId(
-          `project-context-item-unmanaged-skill-${unmanagedSkillSlug}`
-        )
-        await expect(unmanagedRow).toBeVisible({ timeout: 5_000 })
-        await expect(unmanagedRow).toContainText('Unmanaged')
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('unmanaged skill can be managed from row button', async ({ mainWindow }) => {
-        fs.mkdirSync(path.dirname(manageableUnmanagedCodexSkillPath()), { recursive: true })
-        fs.writeFileSync(manageableUnmanagedCodexSkillPath(), manageableUnmanagedSkillContent)
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        const unmanagedRow = dialog.getByTestId(
-          `project-context-item-unmanaged-skill-${manageableUnmanagedSkillSlug}`
-        )
-        await expect(unmanagedRow).toBeVisible({ timeout: 5_000 })
-        await unmanagedRow.click()
-        await dialog.getByTestId(`unmanaged-skill-manage-${manageableUnmanagedSkillSlug}`).click()
-
-        await expect(
-          dialog.getByTestId(`project-context-item-unmanaged-skill-${manageableUnmanagedSkillSlug}`)
-        ).toHaveCount(0)
-        const managedRow = dialog.getByTestId(
-          `project-context-item-skill-${manageableUnmanagedSkillSlug}`
-        )
-        await expect(managedRow).toBeVisible({ timeout: 5_000 })
-        await expect(managedRow).toContainText('Synced', { timeout: 5_000 })
-
-        await expect
-          .poll(async () => {
-            return await mainWindow.evaluate(
-              async ({ id, projectPath, slug }) => {
-                const statuses = await window
-                  .getTrpcVanillaClient()
-                  .aiConfig.getProjectSkillsStatus.query({ projectId: id, projectPath })
-                const status = statuses.find((entry) => entry.item.slug === slug)
-                return status?.providers.codex?.syncHealth ?? null
-              },
-              { id: projectId, projectPath: TEST_PROJECT_PATH, slug: manageableUnmanagedSkillSlug }
-            )
-          })
-          .toBe('synced')
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('frontmatter-only DB metadata changes mark both linked providers stale', async ({
-        mainWindow
-      }) => {
-        await mainWindow.evaluate(
-          async ({ id, projectPath, slug, initialContent, updatedContent }) => {
-            const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-              scope: 'library',
-              type: 'skill'
-            })
-            const match = existing.find((item) => item.slug === slug)
-            const item = match
-              ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content: initialContent })
-              : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
-                  type: 'skill',
-                  scope: 'library',
-                  slug,
-                  content: initialContent
-                })
-            if (!item) throw new Error('Could not create frontmatter mismatch skill')
-
-            await window
-              .getTrpcVanillaClient()
-              .aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
-            await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
-              projectId: id,
-              projectPath,
-              itemId: item.id,
-              providers: ['claude', 'codex']
-            })
-            await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: updatedContent })
-          },
-          {
-            id: projectId,
-            projectPath: TEST_PROJECT_PATH,
-            slug: frontmatterMismatchSkillSlug,
-            initialContent: skillDocument(
-              frontmatterMismatchSkillSlug,
-              frontmatterMismatchSkillInitialContent
-            ),
-            updatedContent: frontmatterMismatchSkillDbContent
-          }
-        )
-
-        await expect
-          .poll(() => {
-            const content = readFileSafe(frontmatterMismatchCodexPath())
-            return (
-              content.includes(`name: ${frontmatterMismatchSkillSlug}`) &&
-              content.includes(frontmatterMismatchSkillInitialContent.trim())
-            )
-          })
-          .toBe(true)
-        await expect
-          .poll(async () => {
-            return await mainWindow.evaluate(
-              async ({ id, projectPath, slug }) => {
-                const statuses = await window
-                  .getTrpcVanillaClient()
-                  .aiConfig.getProjectSkillsStatus.query({ projectId: id, projectPath })
-                const skill = statuses.find((entry) => entry.item.slug === slug)
-                return {
-                  claude: skill?.providers.claude?.syncHealth ?? null,
-                  codex: skill?.providers.codex?.syncHealth ?? null
-                }
-              },
-              { id: projectId, projectPath: TEST_PROJECT_PATH, slug: frontmatterMismatchSkillSlug }
-            )
-          })
-          .toEqual({ claude: 'stale', codex: 'stale' })
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        const skillRow = dialog.getByTestId(
-          `project-context-item-skill-${frontmatterMismatchSkillSlug}`
-        )
-        await expect(skillRow).toContainText('Stale', { timeout: 5_000 })
-
-        await openSkillSyncPanel(dialog, frontmatterMismatchSkillSlug)
-        await expect(
-          dialog.getByTestId(`skill-provider-card-claude-${frontmatterMismatchSkillSlug}`)
-        ).toContainText('Stale', { timeout: 5_000 })
-        await expect(
-          dialog.getByTestId(`skill-provider-card-codex-${frontmatterMismatchSkillSlug}`)
-        ).toContainText('Stale', { timeout: 5_000 })
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('row status uses linked providers only', async ({ mainWindow }) => {
-        await mainWindow.evaluate(
-          async ({ id, projectPath, slug, content }) => {
-            const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-              scope: 'library',
-              type: 'skill'
-            })
-            const match = existing.find((item) => item.slug === slug)
-            const item = match
-              ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
-              : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
-                  type: 'skill',
-                  scope: 'library',
-                  slug,
-                  content
-                })
-            if (!item) throw new Error('Could not create codex-only skill')
-
-            await window
-              .getTrpcVanillaClient()
-              .aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
-            await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
-              projectId: id,
-              projectPath,
-              itemId: item.id,
-              providers: ['codex']
-            })
-          },
-          {
-            id: projectId,
-            projectPath: TEST_PROJECT_PATH,
-            slug: codexOnlySkillSlug,
-            content: skillDocument(codexOnlySkillSlug, codexOnlySkillContent)
-          }
-        )
-
-        await expect
-          .poll(() => {
-            const content = readFileSafe(codexOnlySkillPath())
-            return (
-              content.includes(`name: ${codexOnlySkillSlug}`) &&
-              content.includes(codexOnlySkillContent.trim())
-            )
-          })
-          .toBe(true)
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        const skillRow = dialog.getByTestId(`project-context-item-skill-${codexOnlySkillSlug}`)
-        await expect(skillRow).toContainText('Synced', { timeout: 5_000 })
-
-        await openSkillSyncPanel(dialog, codexOnlySkillSlug)
-        await expect(
-          dialog.getByTestId(`skill-provider-card-codex-${codexOnlySkillSlug}`)
-        ).toBeVisible({ timeout: 5_000 })
-        await expect(
-          dialog.getByTestId(`skill-provider-card-claude-${codexOnlySkillSlug}`)
-        ).toHaveCount(0)
-
-        await closeTopDialog(mainWindow)
-      })
-
-      test('row status reflects unmanaged file on unlinked provider', async ({ mainWindow }) => {
-        await mainWindow.evaluate(
-          async ({ id, projectPath, slug, content }) => {
-            const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({
-              scope: 'library',
-              type: 'skill'
-            })
-            const match = existing.find((item) => item.slug === slug)
-            const item = match
-              ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
-              : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
-                  type: 'skill',
-                  scope: 'library',
-                  slug,
-                  content
-                })
-            if (!item) throw new Error('Could not create codex-only skill with unmanaged claude')
-
-            await window
-              .getTrpcVanillaClient()
-              .aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
-            await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
-              projectId: id,
-              projectPath,
-              itemId: item.id,
-              providers: ['codex']
-            })
-          },
-          {
-            id: projectId,
-            projectPath: TEST_PROJECT_PATH,
-            slug: codexOnlyWithUnmanagedClaudeSlug,
-            content: skillDocument(
-              codexOnlyWithUnmanagedClaudeSlug,
-              codexOnlyWithUnmanagedClaudeContent
-            )
-          }
-        )
-
-        await expect
-          .poll(() => {
-            const content = readFileSafe(codexOnlyWithUnmanagedClaudeCodexPath())
-            return (
-              content.includes(`name: ${codexOnlyWithUnmanagedClaudeSlug}`) &&
-              content.includes(codexOnlyWithUnmanagedClaudeContent.trim())
-            )
-          })
-          .toBe(true)
-        fs.mkdirSync(path.dirname(codexOnlyWithUnmanagedClaudeClaudePath()), { recursive: true })
-        fs.writeFileSync(codexOnlyWithUnmanagedClaudeClaudePath(), '# unmanaged claude version\n')
-
-        const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-        const skillRow = dialog.getByTestId(
-          `project-context-item-skill-${codexOnlyWithUnmanagedClaudeSlug}`
-        )
-        await expect(skillRow).toContainText('Unmanaged', { timeout: 5_000 })
-        await expect(skillRow).not.toContainText('Synced')
-
-        await closeTopDialog(mainWindow)
-      })
+      // Reconcile linked the claude provider; its file content differs from DB
+      await expect
+        .poll(async () => {
+          return await mainWindow.evaluate(
+            async ({ id, projectPath, slug }) => {
+              const statuses = await window
+                .getTrpcVanillaClient()
+                .aiConfig.getProjectSkillsStatus.query({ projectId: id, projectPath })
+              const status = statuses.find((entry) => entry.item.slug === slug)
+              return status?.providers.claude?.syncHealth ?? null
+            },
+            { id: projectId, projectPath: TEST_PROJECT_PATH, slug: codexOnlyWithUnmanagedClaudeSlug }
+          )
+        })
+        .toBe('stale')
     })
   })
+
+  test.afterAll(async ({ mainWindow }) => {
+    await closeTopDialog(mainWindow).catch(() => {})
+  })
+})

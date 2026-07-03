@@ -1,6 +1,6 @@
-import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
+import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { openTaskTerminal, switchTerminalMode, getMainSessionId, startAgentTerminal } from '../fixtures/terminal'
+import { openTaskTerminal, startAgentTerminal, closeAllTaskTabs } from '../fixtures/terminal'
 
 /**
  * Verifies that the correct pty:create opts are sent when resuming vs starting fresh.
@@ -50,6 +50,13 @@ test.describe('Resume command opts', () => {
       projectAbbrev = p.name.slice(0, 2).toUpperCase()
       projectId = p.id
       await s.refreshData()
+    })
+
+    // Per-test terminal teardown: serial AI-mode opens otherwise accumulate
+    // hidden mounted terminals that destabilize the shared createPty capture
+    // for later tests (getLastOpts null for the 6th+ open).
+    test.afterEach(async ({ mainWindow }) => {
+      await closeAllTaskTabs(mainWindow)
     })
 
     test.afterAll(async ({ mainWindow }) => {
@@ -156,12 +163,7 @@ test.describe('Resume command opts', () => {
       expect(opts?.existingConversationId).toBe(storedId)
     })
 
-    // SKIP 2026-06-22: cursor-agent terminal does not reliably spawn in the e2e
-    // harness (slow CLI boot / idle-gate); same flakiness as 47-cli-cursor-agent.
-    // (2026-06-24: passes standalone, but unskipping adds a 6th sequential AI-mode
-    // open that destabilizes the shared createPty capture for sibling resume tests —
-    // kept skipped until the capture-teardown enabler lands; see 94 + plan.)
-    test.skip('cursor-agent resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
+    test('cursor-agent resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
       const storedId = 'cursor-resume-44444444'
       const s = seed(mainWindow)
       const t = await s.createTask({

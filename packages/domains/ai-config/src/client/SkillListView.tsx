@@ -177,6 +177,7 @@ function SkillRow({
 
   return (
     <div
+      data-testid={`skill-row-${item.slug}`}
       onClick={() => onSelect(isSelected ? null : item.id)}
       className={cn(
         'group flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors',

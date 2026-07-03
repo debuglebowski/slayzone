@@ -11,9 +11,10 @@ import {
   closeTopDialog,
   openUserContextManager,
   openProjectContextSection,
-  openSkillSyncPanel,
+  openSkillEditor,
   gotoContextSection
 } from '../fixtures/context-manager'
+import type { Page } from '@playwright/test'
 import path from 'path'
 import fs from 'fs'
 
@@ -52,30 +53,24 @@ function skillDocument(slug: string, body: string): string {
   return `---\nname: ${slug}\ndescription: ${slug}\n---\n\n${normalizedBody}`
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function upsertLibrarySkill(
-  mainWindow: Page,
-  content: string,
-  electronApp?: any
-): Promise<void> {
+async function upsertLibrarySkill(mainWindow: Page, content: string): Promise<void> {
   const skillExists = await mainWindow.evaluate(async (slug) => {
     const skills = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
     return skills.some((item) => item.slug === slug)
   }, skillSlug)
 
-  const dialog = await openUserContextManager(mainWindow, electronApp)
-  await dialog.getByTestId('context-overview-skills').click()
-  await expect(dialog.getByTestId('context-new-skill')).toBeVisible({ timeout: 5_000 })
+  const dialog = await openUserContextManager(mainWindow)
+  await gotoContextSection(mainWindow, 'Library', 'Skills')
 
-  const existing = dialog.getByTestId(`context-library-item-${skillSlug}`)
   if (skillExists) {
-    await expect(existing).toBeVisible({ timeout: 5_000 })
-    await existing.click()
+    await openSkillEditor(dialog, skillSlug)
   } else {
-    await dialog.getByTestId('context-new-skill').click()
-    await expect(dialog.getByTestId('context-item-editor-slug')).toBeVisible({ timeout: 5_000 })
-    await dialog.getByTestId('context-item-editor-slug').fill(skillSlug)
-    await dialog.getByTestId('context-item-editor-slug').blur()
+    // 'Add Skill' creates a new library skill and opens its editor immediately
+    await dialog.getByRole('button', { name: 'Add Skill' }).click()
+    const slugInput = dialog.getByTestId('context-item-editor-slug')
+    await expect(slugInput).toBeVisible({ timeout: 5_000 })
+    await slugInput.fill(skillSlug)
+    await slugInput.blur()
   }
 
   await dialog.getByTestId('context-item-editor-content').fill(skillDocument(skillSlug, content))
@@ -268,14 +263,12 @@ test.describe('Context manager sync flow', () => {
     // section-level pinned card to assert on. The help content is now exercised
     // incidentally by the skill-editing tests.
 
-    // MIGRATE PENDING 2026-06-20: nav (Project → MCPs) is migrated and the MCP
-    // testids still exist (McpFlatSection), but the "Add MCP server" affordance
-    // isn't reached — McpSection renders McpFlatSection only when projectPath +
-    // MCP-capable providers resolve through the new view; needs a focused pass on
-    // the redesigned MCP flow (add-server dialog + provider columns).
-    // DEFER 2026-06-23: CM Phase-3 redesign (same root as 63) — page closes / 30s
-    // timeout against the old MCP-section UI. Rewrite to the new CM view. See plan.
-    test.skip('project MCP section shows provider columns when MCP entries exist', async ({
+    // MIGRATED 2026-07-02 (CM Phase-3 redesign): the old McpFlatSection UI
+    // (`project-context-mcp-provider-*` columns + 'Add MCP server' catalog
+    // dialog) is dead code. Project → MCPs is now ProjectMcpPanel: curated
+    // server cards with Enable/Disable that write/remove the server in every
+    // writable enabled provider's project config (.mcp.json for claude).
+    test('project MCP server can be enabled from the catalog and written to provider configs', async ({
       mainWindow
     }) => {
       await mainWindow.evaluate(
@@ -287,47 +280,92 @@ test.describe('Context manager sync flow', () => {
         { id: projectId }
       )
 
-      const projectDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'mcp')
-
-      await expect(projectDialog.getByTestId('project-context-mcp-provider-claude')).toHaveCount(0)
-      await expect(projectDialog.getByTestId('project-context-mcp-provider-codex')).toHaveCount(0)
-
-      await projectDialog.getByText('Add MCP server').click()
-      const addMcpDialog = mainWindow
-        .getByRole('dialog')
-        .filter({ hasText: 'Add MCP Server' })
-        .last()
-      await expect(addMcpDialog).toBeVisible({ timeout: 5_000 })
-      await addMcpDialog.getByRole('button', { name: 'Filesystem' }).click()
-
-      const serverRow = projectDialog.locator('[data-testid^="project-context-item-mcp-"]').first()
-      await expect(serverRow).toBeVisible({ timeout: 5_000 })
-      await serverRow.click()
-      await expect(projectDialog.getByTestId('project-context-mcp-provider-claude')).toBeVisible({
-        timeout: 5_000
-      })
-      const codexColumn = projectDialog.getByTestId('project-context-mcp-provider-codex')
-      if (await codexColumn.count()) {
-        await expect(codexColumn).toBeVisible({ timeout: 5_000 })
+      const mcpConfigPath = path.join(TEST_PROJECT_PATH, '.mcp.json')
+      try {
+        fs.unlinkSync(mcpConfigPath)
+      } catch {
+        /* ignore */
       }
+
+      const body = await openProjectContextSection(mainWindow, projectAbbrev, 'mcp')
+      await expect(body.getByRole('heading', { name: /^Available/ })).toBeVisible({
+        timeout: 10_000
+      })
+
+      // Enable the curated Filesystem server
+      const availableCard = body
+        .locator('div')
+        .filter({ has: mainWindow.getByText('Filesystem', { exact: true }) })
+        .filter({ has: mainWindow.getByRole('button', { name: 'Enable', exact: true }) })
+        .last()
+      await availableCard.getByRole('button', { name: 'Enable', exact: true }).click()
+
+      // Enabling writes the server into the claude project MCP config
+      await expect
+        .poll(
+          () => {
+            try {
+              const doc = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf-8'))
+              return doc?.mcpServers?.filesystem != null
+            } catch {
+              return false
+            }
+          },
+          { timeout: 10_000 }
+        )
+        .toBe(true)
+
+      // The card moves to the Enabled section
+      await expect(body.getByRole('heading', { name: /^Enabled/ })).toBeVisible({ timeout: 5_000 })
+      const enabledCard = body
+        .locator('div')
+        .filter({ has: mainWindow.getByText('Filesystem', { exact: true }) })
+        .filter({ has: mainWindow.getByRole('button', { name: 'Disable', exact: true }) })
+        .last()
+      await expect(enabledCard).toBeVisible({ timeout: 5_000 })
+
+      // Disable removes it from the provider config again
+      await enabledCard.getByRole('button', { name: 'Disable', exact: true }).click()
+      await expect
+        .poll(
+          () => {
+            try {
+              const doc = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf-8'))
+              return doc?.mcpServers?.filesystem == null
+            } catch {
+              return true
+            }
+          },
+          { timeout: 10_000 }
+        )
+        .toBe(true)
 
       await closeTopDialog(mainWindow)
     })
 
-    // DEFER 2026-06-23: CM Phase-3 redesign (same root as 63) — page closes / 30s
-    // timeout against the old library-link UI. Rewrite to the new CM view. See plan.
-    test.skip('library skill can be linked to project and re-synced after library edits', async ({
-      mainWindow,
-      electronApp
+    // MIGRATED 2026-07-02 (CM Phase-3 redesign): linking now goes through the
+    // Project → Skills 'Add Skill' picker ('From library' step) and re-sync
+    // through the skill editor's stale banner (Sync all).
+    test('library skill can be linked to project and re-synced after library edits', async ({
+      mainWindow
     }) => {
-      await upsertLibrarySkill(mainWindow, skillContentV1, electronApp)
+      await upsertLibrarySkill(mainWindow, skillContentV1)
 
       const projectDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
 
-      await projectDialog.getByTestId('project-context-add-skill').click()
+      await projectDialog.getByRole('button', { name: 'Add Skill' }).click()
       const addDialog = mainWindow.getByRole('dialog').filter({ hasText: 'Add Skill' }).last()
       await expect(addDialog).toBeVisible({ timeout: 5_000 })
-      await addDialog.getByTestId(`add-item-option-${skillSlug}`).click()
+      await addDialog.getByText('From library').click()
+      // The dialog title switches to 'Add from Library' on the library step
+      const libraryDialog = mainWindow
+        .getByRole('dialog')
+        .filter({ hasText: 'Add from Library' })
+        .last()
+      await expect(libraryDialog.getByTestId(`add-item-option-${skillSlug}`)).toBeVisible({
+        timeout: 5_000
+      })
+      await libraryDialog.getByTestId(`add-item-option-${skillSlug}`).click()
 
       await expect.poll(() => fs.existsSync(claudeSkillPath())).toBe(true)
       await expect
@@ -356,25 +394,15 @@ test.describe('Context manager sync flow', () => {
       }
 
       await closeTopDialog(mainWindow)
-      await upsertLibrarySkill(mainWindow, skillContentV2, electronApp)
+      await upsertLibrarySkill(mainWindow, skillContentV2)
 
       const resyncDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
-      const skillRow = resyncDialog.getByTestId(`project-context-item-skill-${skillSlug}`)
+      const skillRow = resyncDialog.getByTestId(`skill-row-${skillSlug}`)
       await expect(skillRow).toContainText('Stale', { timeout: 5_000 })
-      await openSkillSyncPanel(resyncDialog, skillSlug)
-      const pushAll = resyncDialog.getByTestId(`skill-push-all-${skillSlug}`)
-      if (await pushAll.isVisible({ timeout: 800 }).catch(() => false)) {
-        await pushAll.click()
-      } else {
-        const pushClaude = resyncDialog.getByTestId(`skill-push-claude-${skillSlug}`)
-        if (await pushClaude.isVisible({ timeout: 800 }).catch(() => false)) {
-          await pushClaude.click()
-        }
-        const pushCodex = resyncDialog.getByTestId(`skill-push-codex-${skillSlug}`)
-        if (await pushCodex.isVisible({ timeout: 800 }).catch(() => false)) {
-          await pushCodex.click()
-        }
-      }
+      await openSkillEditor(resyncDialog, skillSlug)
+      const staleBanner = resyncDialog.getByTestId('context-item-editor-stale-banner')
+      await expect(staleBanner).toBeVisible({ timeout: 5_000 })
+      await resyncDialog.getByTestId('context-item-editor-sync-all-to-disk').click()
 
       await expect
         .poll(() => {

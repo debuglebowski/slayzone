@@ -21,7 +21,8 @@ import {
   setTerminalTheme,
   testExecutionContext,
   setPtyCreateCapture,
-  takePtyCreateOpts
+  takePtyCreateOpts,
+  takePtyKillCalls
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
 import { listChatSessions } from './chat-transport-manager'
@@ -411,6 +412,7 @@ export function createPtyOps(db: SlayzoneDb) {
     ptyCreate,
     setCreateCapture: setPtyCreateCapture,
     takeCreateOpts: takePtyCreateOpts,
+    takeKillCalls: takePtyKillCalls,
     ptyTestExecutionContext,
     ptyWrite,
     ptySubmit,

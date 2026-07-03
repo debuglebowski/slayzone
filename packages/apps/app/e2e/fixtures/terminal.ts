@@ -62,10 +62,23 @@ export async function startAgentTerminal(page: Page): Promise<void> {
   // AI-mode terminals are idle-gated (TerminalStarter): an autofocused "Open <agent>"
   // button must be clicked to spawn the PTY (saves CPU/API credits). Plain `terminal`
   // auto-spawns (no gate) — no-op there. Call after openTaskTerminal (+ switchTerminalMode).
+  // Scope to VISIBLE buttons: inactive task tabs stay mounted (display:none) and can
+  // hold hidden starters, so a bare `.last()` could resolve to another tab's button —
+  // its isVisible() check then reads false and the loop bails without ever clicking
+  // the ACTIVE tab's starter (the 93/94 serial-contamination failure mode).
   const starter = page
-    .locator('button')
+    .locator('button:visible')
     .filter({ hasText: /(Open|Reopen) (Claude|Codex|Cursor|OpenCode|Copilot|Qwen|Gemini)/ })
     .last()
+  // Grace window: right after openTaskTerminal, TerminalStarter renders a blank
+  // div until its async pty.exists + settings round trip resolves — the gate (or
+  // the auto-spawned xterm) only appears after that. `isVisible()` returns
+  // immediately, so without this wait the loop below reads "no starter" on its
+  // first pass and bails without ever clicking (the late-in-file 93 flake).
+  await Promise.race([
+    starter.waitFor({ state: 'visible', timeout: 5_000 }),
+    page.locator('.xterm:visible').first().waitFor({ state: 'visible', timeout: 5_000 })
+  ]).catch(() => {})
   // Retry-click until the gate disappears (= started). A single click can miss if
   // the button is still settling, so poll up to ~8s.
   let started = false
@@ -82,11 +95,36 @@ export async function startAgentTerminal(page: Page): Promise<void> {
   // fired (the gate vanishing alone races the effect).
   if (started) {
     await page
-      .locator('.xterm')
+      .locator('.xterm:visible')
       .first()
       .waitFor({ state: 'visible', timeout: 8_000 })
       .catch(() => {})
   }
+}
+
+/**
+ * Per-test terminal teardown: close every open task tab (unmounts their
+ * terminals). Serial AI-mode opens otherwise accumulate hidden, still-mounted
+ * terminals whose DOM (starter buttons, xterms) and lifecycle effects bleed
+ * into later tests sharing the createPty capture — the 93/94 flake class.
+ * Call from afterEach in specs that open one task terminal per test.
+ */
+export async function closeAllTaskTabs(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    type Store = {
+      getState: () => {
+        tabs: { type: string; taskId?: string }[]
+        closeTabByTaskId: (taskId: string) => void
+      }
+    }
+    const store = (window as unknown as { __slayzone_tabStore?: Store }).__slayzone_tabStore
+    if (!store) return
+    for (let guard = 0; guard < 100; guard++) {
+      const tab = store.getState().tabs.find((t) => t.type === 'task' && t.taskId)
+      if (!tab?.taskId) break
+      store.getState().closeTabByTaskId(tab.taskId)
+    }
+  })
 }
 
 export async function switchTerminalMode(page: Page, mode: TerminalMode): Promise<void> {

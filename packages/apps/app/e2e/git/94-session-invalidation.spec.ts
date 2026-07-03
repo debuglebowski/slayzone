@@ -1,131 +1,92 @@
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { openTaskTerminal, getMainSessionId } from '../fixtures/terminal'
+import {
+  openTaskTerminal,
+  startAgentTerminal,
+  getMainSessionId,
+  closeAllTaskTabs
+} from '../fixtures/terminal'
 
 /**
  * Tests stale-session handling (issue #90: provider auto-cleaned the session),
- * reset terminal, and restart terminal. Mocks pty:create, pty:kill, pty:exists
- * to verify lifecycle without real CLIs.
+ * reset terminal, and restart terminal — without real CLIs.
  *
- * Stale detection now rides the `pty:exit` reason (code SESSION_NOT_FOUND); there
- * is no `pty:session-not-found` IPC and no auto-clear — the dead overlay shows a
+ * Migrated 2026-07-03 off the legacy ipcMain pty:create/kill/exists mocks (orphaned
+ * by the slice-9 sidecar cutover) onto the sidecar-side createPty capture:
+ * `pty.testSetPtyCreateCapture` stubs the spawn chokepoint and records create opts
+ * (`testTakePtyCreateOpts`) + kill calls (`testTakePtyKillCalls`). AI terminals are
+ * idle-gated, so each open clicks the "Open <agent>" starter (startAgentTerminal).
+ *
+ * Stale detection rides the `pty:exit` reason (code SESSION_NOT_FOUND); the spec
+ * drives it via the PLAYWRIGHT-gated `pty.testEmitExit` (no real process exists
+ * under the capture stub). There is no auto-clear — the dead overlay shows a
  * friendly message and recovery is the user-initiated "Start fresh" button.
  */
-// QUARANTINED 2026-05-16: same root cause as 93 — pty:create mock no longer
-// captures opts on task open. Needs rewriting against new pty lifecycle.
-// DEFER 2026-06-23: all 4 fail `toBeGreaterThan(0)` — the createPty capture isn't
-// wired for this flow. Migrate to the 93-style stubbed capture
-// (`testSetPtyCreateCapture`/`testTakePtyCreateOpts`) + idle-gate (startAgentTerminal),
-// then verify. See plans/unskip-all-e2e.md.
-test.describe.skip('Session invalidation', () => {
+test.describe('Session invalidation', () => {
     let projectAbbrev: string
     let projectId: string
 
-    /** Install pty mocks that track create/kill calls */
-    const installMock = async (electronApp: import('electron').ElectronApplication) => {
-      await electronApp.evaluate(({ ipcMain }) => {
-        const g = globalThis as unknown as {
-          __ptyCreateCount: number
-          __lastPtyCreateOpts: unknown
-          __ptyKillCalls: string[]
-          __ptyExistsOverride: boolean
-        }
-        g.__ptyCreateCount = 0
-        g.__lastPtyCreateOpts = null
-        g.__ptyKillCalls = []
-        // Start with false so Terminal.tsx takes the create path (not the "already exists" path)
-        g.__ptyExistsOverride = false
-
-        ipcMain.removeHandler('pty:create')
-        ipcMain.handle('pty:create', async (_event, opts) => {
-          g.__ptyCreateCount += 1
-          g.__lastPtyCreateOpts = opts
-          // After create, make exists return true so component thinks PTY is alive
-          ;(globalThis as unknown as { __ptyExistsOverride: boolean }).__ptyExistsOverride = true
-          // Emit state change so terminal UI renders (avoids 3s watchdog → dead)
-          setTimeout(() => {
-            _event.sender.send('pty:state-change', opts.sessionId, 'running', 'starting')
-          }, 100)
-          return { success: true }
-        })
-
-        ipcMain.removeHandler('pty:kill')
-        ipcMain.handle('pty:kill', async (_event, sessionId: string) => {
-          g.__ptyKillCalls.push(sessionId)
-          // After kill, PTY no longer exists — so remount triggers a fresh pty:create
-          ;(globalThis as unknown as { __ptyExistsOverride: boolean }).__ptyExistsOverride = false
-          return true
-        })
-
-        ipcMain.removeHandler('pty:exists')
-        ipcMain.handle('pty:exists', async () => {
-          return (globalThis as unknown as { __ptyExistsOverride: boolean }).__ptyExistsOverride
-        })
-
-        // Mock buffer/state queries so terminal init doesn't error
-        ipcMain.removeHandler('pty:getState')
-        ipcMain.handle('pty:getState', async () => null)
-        ipcMain.removeHandler('pty:getBufferSince')
-        ipcMain.handle('pty:getBufferSince', async () => ({ chunks: [], currentSeq: 0 }))
-      })
-    }
-
-    const getCreateCount = (electronApp: import('electron').ElectronApplication) =>
-      electronApp.evaluate(
-        () => (globalThis as unknown as { __ptyCreateCount: number }).__ptyCreateCount
+    /** Enable (and clear) the sidecar createPty capture — stubs the spawn. */
+    const resetCapture = (mainWindow: import('@playwright/test').Page) =>
+      mainWindow.evaluate(() =>
+        window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: true })
       )
 
-    const getKillCalls = (electronApp: import('electron').ElectronApplication) =>
-      electronApp.evaluate(
-        () => (globalThis as unknown as { __ptyKillCalls: string[] }).__ptyKillCalls
+    /** Captured pty.create calls for one session (capture records every spawn path). */
+    const getCreateCount = (mainWindow: import('@playwright/test').Page, sessionId: string) =>
+      mainWindow.evaluate(async (sid) => {
+        const all = (await window
+          .getTrpcVanillaClient()
+          .pty.testTakePtyCreateOpts.query()) as Array<{ sessionId: string }>
+        return all.filter((o) => o.sessionId === sid).length
+      }, sessionId)
+
+    const getKillCalls = (mainWindow: import('@playwright/test').Page) =>
+      mainWindow.evaluate(
+        () => window.getTrpcVanillaClient().pty.testTakePtyKillCalls.query() as Promise<string[]>
       )
 
-    const getLastOpts = (electronApp: import('electron').ElectronApplication) =>
-      electronApp.evaluate(
-        () => (globalThis as unknown as { __lastPtyCreateOpts: unknown }).__lastPtyCreateOpts
-      ) as Promise<{
+    const getLastOpts = (mainWindow: import('@playwright/test').Page, sessionId: string) =>
+      mainWindow.evaluate(async (sid) => {
+        const all = (await window
+          .getTrpcVanillaClient()
+          .pty.testTakePtyCreateOpts.query()) as Array<{ sessionId: string }>
+        const mine = all.filter((o) => o.sessionId === sid)
+        return mine[mine.length - 1] ?? null
+      }, sessionId) as Promise<{
         existingConversationId?: string | null
         mode?: string
       } | null>
 
-    const resetCapture = (electronApp: import('electron').ElectronApplication) =>
-      electronApp.evaluate(() => {
-        const g = globalThis as unknown as {
-          __ptyCreateCount: number
-          __lastPtyCreateOpts: unknown
-          __ptyKillCalls: string[]
-          __ptyExistsOverride: boolean
-        }
-        g.__ptyCreateCount = 0
-        g.__lastPtyCreateOpts = null
-        g.__ptyKillCalls = []
-        g.__ptyExistsOverride = false
-      })
-
     /** Emit pty:exit carrying the stale-session reason (issue #90 path) */
-    const emitStaleExit = (
-      electronApp: import('electron').ElectronApplication,
-      sessionId: string
-    ) =>
-      electronApp.evaluate(({ BrowserWindow }, sid: string) => {
-        const win = BrowserWindow.getAllWindows().find(
-          (w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:')
-        )
-        win?.webContents.send('pty:exit', sid, 0, 'SESSION_NOT_FOUND')
-      }, sessionId)
+    const emitStaleExit = (mainWindow: import('@playwright/test').Page, sessionId: string) =>
+      mainWindow.evaluate(
+        (sid) =>
+          window.getTrpcVanillaClient().pty.testEmitExit.mutate({
+            sessionId: sid,
+            exitCode: 0,
+            errorCode: 'SESSION_NOT_FOUND'
+          }),
+        sessionId
+      )
 
     /** Open the terminal header dropdown menu */
     const openTerminalMenu = async (page: import('@playwright/test').Page) => {
-      await page
-        .locator('.lucide-ellipsis:visible, .lucide-more-horizontal:visible')
-        .first()
-        .click()
+      await page.locator('[data-testid="terminal-menu-trigger"]:visible').last().click()
       await expect(page.locator('[role="menu"]')).toBeVisible()
     }
 
-    test.beforeAll(async ({ electronApp, mainWindow }) => {
+    test.beforeAll(async ({ mainWindow }) => {
       await resetApp(mainWindow)
-      await installMock(electronApp)
+      // Auto-start agents: the reset/restart/"Start fresh" remounts under test
+      // re-check the idle-gate, and the capture stub never flips
+      // `terminal_tabs.was_spawned` (that write lives after the real spawn), so
+      // without auto-start the gate would re-appear mid-test and swallow the
+      // remount's pty.create. The gate itself is 93/97's subject, not this spec's.
+      await mainWindow.evaluate(() =>
+        window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+      )
+      await resetCapture(mainWindow)
 
       const s = seed(mainWindow)
       const p = await s.createProject({
@@ -138,20 +99,22 @@ test.describe.skip('Session invalidation', () => {
       await s.refreshData()
     })
 
-    test.afterAll(async ({ electronApp }) => {
-      await electronApp.evaluate(() => {
-        const restore = (globalThis as unknown as { __restorePtyHandlers?: () => void })
-          .__restorePtyHandlers
-        restore?.()
-      })
+    // Per-test terminal teardown: serial AI-mode opens otherwise accumulate
+    // hidden mounted terminals that destabilize the shared createPty capture
+    // for later tests.
+    test.afterEach(async ({ mainWindow }) => {
+      await closeAllTaskTabs(mainWindow)
+    })
+
+    test.afterAll(async ({ mainWindow }) => {
+      await mainWindow.evaluate(() =>
+        window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: false })
+      )
     })
 
     // --- stale session (issue #90): friendly overlay + manual "Start fresh" ---
 
-    test('stale-session exit shows the "Start fresh" overlay', async ({
-      electronApp,
-      mainWindow
-    }) => {
+    test('stale-session exit shows the "Start fresh" overlay', async ({ mainWindow }) => {
       const s = seed(mainWindow)
       const t = await s.createTask({ projectId, title: 'SI overlay', status: 'in_progress' })
       await mainWindow.evaluate(
@@ -164,19 +127,21 @@ test.describe.skip('Session invalidation', () => {
       )
       await s.refreshData()
 
-      await resetCapture(electronApp)
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI overlay' })
-      await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
-
       const sessionId = getMainSessionId(t.id)
-      await emitStaleExit(electronApp, sessionId)
+      await resetCapture(mainWindow)
+      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI overlay' })
+      await startAgentTerminal(mainWindow)
+      await expect
+        .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
+        .toBeGreaterThan(0)
+
+      await emitStaleExit(mainWindow, sessionId)
 
       await expect(mainWindow.getByText(/session expired/i)).toBeVisible()
       await expect(mainWindow.getByRole('button', { name: 'Start fresh' })).toBeVisible()
     })
 
     test('"Start fresh" clears conversationId and remounts; id survives until then', async ({
-      electronApp,
       mainWindow
     }) => {
       const s = seed(mainWindow)
@@ -191,13 +156,16 @@ test.describe.skip('Session invalidation', () => {
       )
       await s.refreshData()
 
-      await resetCapture(electronApp)
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI fresh' })
-      await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
-      const countBefore = await getCreateCount(electronApp)
-
       const sessionId = getMainSessionId(t.id)
-      await emitStaleExit(electronApp, sessionId)
+      await resetCapture(mainWindow)
+      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI fresh' })
+      await startAgentTerminal(mainWindow)
+      await expect
+        .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
+        .toBeGreaterThan(0)
+      const countBefore = await getCreateCount(mainWindow, sessionId)
+
+      await emitStaleExit(mainWindow, sessionId)
       await expect(mainWindow.getByRole('button', { name: 'Start fresh' })).toBeVisible()
 
       // Manual-only (issue #90 decision Q1): the id survives until the user acts.
@@ -217,16 +185,13 @@ test.describe.skip('Session invalidation', () => {
         )
         .toBeNull()
       await expect
-        .poll(() => getCreateCount(electronApp), { timeout: 10_000 })
+        .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
         .toBeGreaterThan(countBefore)
     })
 
     // --- Reset terminal (menu) ---
 
-    test('reset terminal clears conversationId and remounts', async ({
-      electronApp,
-      mainWindow
-    }) => {
+    test('reset terminal clears conversationId and remounts', async ({ mainWindow }) => {
       const s = seed(mainWindow)
       const t = await s.createTask({ projectId, title: 'SI reset', status: 'in_progress' })
       await mainWindow.evaluate(
@@ -239,11 +204,15 @@ test.describe.skip('Session invalidation', () => {
       )
       await s.refreshData()
 
-      await resetCapture(electronApp)
+      const sessionId = getMainSessionId(t.id)
+      await resetCapture(mainWindow)
       await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI reset' })
-      await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
+      await startAgentTerminal(mainWindow)
+      await expect
+        .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
+        .toBeGreaterThan(0)
 
-      const countBefore = await getCreateCount(electronApp)
+      const countBefore = await getCreateCount(mainWindow, sessionId)
 
       // Click "Reset terminal" in dropdown menu
       await openTerminalMenu(mainWindow)
@@ -261,11 +230,10 @@ test.describe.skip('Session invalidation', () => {
         .toBeNull()
 
       // PTY should have been killed
-      const sessionId = getMainSessionId(t.id)
       await expect
         .poll(
           async () => {
-            const kills = await getKillCalls(electronApp)
+            const kills = await getKillCalls(mainWindow)
             return kills.includes(sessionId)
           },
           { timeout: 10_000 }
@@ -274,14 +242,13 @@ test.describe.skip('Session invalidation', () => {
 
       // Terminal should remount (new pty:create call)
       await expect
-        .poll(() => getCreateCount(electronApp), { timeout: 10_000 })
+        .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
         .toBeGreaterThan(countBefore)
     })
 
     // --- Restart terminal (menu) ---
 
     test('restart terminal preserves conversationId and remounts with same ID', async ({
-      electronApp,
       mainWindow
     }) => {
       const storedId = 'keep-on-restart'
@@ -297,11 +264,15 @@ test.describe.skip('Session invalidation', () => {
       )
       await s.refreshData()
 
-      await resetCapture(electronApp)
+      const sessionId = getMainSessionId(t.id)
+      await resetCapture(mainWindow)
       await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI restart' })
-      await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
+      await startAgentTerminal(mainWindow)
+      await expect
+        .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
+        .toBeGreaterThan(0)
 
-      const countBefore = await getCreateCount(electronApp)
+      const countBefore = await getCreateCount(mainWindow, sessionId)
 
       // Click "Restart terminal" in dropdown menu
       await openTerminalMenu(mainWindow)
@@ -312,11 +283,10 @@ test.describe.skip('Session invalidation', () => {
       expect(task?.provider_config?.['claude-code']?.conversationId).toBe(storedId)
 
       // PTY should have been killed
-      const sessionId = getMainSessionId(t.id)
       await expect
         .poll(
           async () => {
-            const kills = await getKillCalls(electronApp)
+            const kills = await getKillCalls(mainWindow)
             return kills.includes(sessionId)
           },
           { timeout: 10_000 }
@@ -325,10 +295,10 @@ test.describe.skip('Session invalidation', () => {
 
       // Terminal should remount with same existingConversationId
       await expect
-        .poll(() => getCreateCount(electronApp), { timeout: 10_000 })
+        .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
         .toBeGreaterThan(countBefore)
 
-      const opts = await getLastOpts(electronApp)
+      const opts = await getLastOpts(mainWindow, sessionId)
       expect(opts?.existingConversationId).toBe(storedId)
     })
   })
