@@ -52,6 +52,23 @@ function migrateThemeId(id: string): string {
   return LEGACY_ID_MAP[id] ?? id
 }
 
+// Resolve the OS dark/light setting in the renderer. The chromium-fork sidecar
+// has no Electron `nativeTheme`, so its server-side effective-theme is a constant
+// — "system" MUST be resolved here via `prefers-color-scheme`. matchMedia works
+// identically in the Electron renderer (reflects nativeTheme), so this is shared.
+function systemTheme(): Theme {
+  if (typeof window === 'undefined' || !window.matchMedia) return 'dark'
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+// Effective dark/light from the user's preference: explicit wins, "system" maps
+// to the OS, and a non-preference value falls back to the server's answer.
+function resolveEffective(source: ThemePreference, serverEffective: Theme): Theme {
+  if (source === 'light' || source === 'dark') return source
+  if (source === 'system') return systemTheme()
+  return serverEffective
+}
+
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -126,7 +143,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const darkId = migrateThemeId(savedDark ?? resolvedId)
       const lightId = migrateThemeId(savedLight ?? resolvedId)
 
-      setTheme(effective)
+      const resolved = resolveEffective(source, effective)
+      setTheme(resolved)
       setPreferenceState(source)
       setSingleThemeId(resolvedId)
       setSplitThemesState(isSplit)
@@ -135,8 +153,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setTerminalOverrideThemeIdState(savedTermOvrId ? migrateThemeId(savedTermOvrId) : '')
       setEditorOverrideThemeIdState(savedEditorOvrId ? migrateThemeId(savedEditorOvrId) : '')
 
-      const chromeId = isSplit ? (effective === 'dark' ? darkId : lightId) : resolvedId
-      applyTheme(effective, chromeId)
+      const chromeId = isSplit ? (resolved === 'dark' ? darkId : lightId) : resolvedId
+      applyTheme(resolved, chromeId)
       performance.mark('sz:theme:end')
     }
 
@@ -163,15 +181,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     })
   )
 
+  // Follow OS dark/light while the preference is "system". The fork sidecar can't
+  // push OS changes (no nativeTheme), so this renderer-side listener is what makes
+  // system mode track the OS there; on Electron it harmlessly mirrors the
+  // onThemeChanged push.
+  useEffect(() => {
+    if (preference !== 'system') return
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (): void => setTheme(mq.matches ? 'dark' : 'light')
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [preference])
+
   // Re-apply chrome whenever resolved themeId or theme changes
   useEffect(() => {
     applyTheme(theme, themeId)
   }, [theme, themeId])
 
   const setPreference = async (nextPreference: ThemePreference) => {
-    const effective = await setThemeMutation.mutateAsync(nextPreference)
+    const serverEffective = await setThemeMutation.mutateAsync(nextPreference)
     setPreferenceState(nextPreference)
-    setTheme(effective)
+    setTheme(resolveEffective(nextPreference, serverEffective))
     track('theme_changed', { mode: nextPreference as 'light' | 'dark' | 'system' })
   }
 
