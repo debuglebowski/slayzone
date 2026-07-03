@@ -16,6 +16,8 @@ export function getModeLabel(mode: TerminalMode): string {
       return 'Antigravity'
     case 'opencode':
       return 'OpenCode'
+    case 'qwen-code':
+      return 'Qwen'
     case 'copilot':
       return 'Copilot'
     default:
