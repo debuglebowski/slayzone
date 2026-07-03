@@ -141,6 +141,9 @@ export function HomeView(): React.JSX.Element {
   const deferredActiveTabIndex = useDeferredValue(activeTabIndex)
   const activeView = useTabStore((s) => s.activeView)
   const projectScopedTabs = useTabStore((s) => s.projectScopedTabs)
+  // Tree sidebar mode hides the top tab-bar header (mirrors the Electron App.tsx
+  // `headerHidden = sidebarView === 'tree'`); the tree sidebar owns navigation.
+  const sidebarView = useTabStore((s) => s.sidebarView)
   const storeProjectId = useTabStore((s) => s.selectedProjectId)
   const selectedProjectId = storeProjectId || projects[0]?.id || ''
 
@@ -706,20 +709,22 @@ export function HomeView(): React.JSX.Element {
         onPinnedReorder={data.reorderPinnedTasks}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <TabBar
-          tabs={tabs}
-          activeIndex={activeTabIndex}
-          activeView={activeView}
-          onTabClick={(i) => useTabStore.getState().setActiveTabIndex(i)}
-          onTabClose={(i) => void closeTab(i)}
-          onTabReorder={(from, to) => useTabStore.getState().reorderTabs(from, to)}
-          onTabRename={async (taskId, title) => {
-            const updated = await trpcClient.task.update.mutate({ id: taskId, title })
-            data.updateTask(updated)
-          }}
-          hideTabs={explodeMode}
-          rightContent={headerActions}
-        />
+        {sidebarView !== 'tree' && (
+          <TabBar
+            tabs={tabs}
+            activeIndex={activeTabIndex}
+            activeView={activeView}
+            onTabClick={(i) => useTabStore.getState().setActiveTabIndex(i)}
+            onTabClose={(i) => void closeTab(i)}
+            onTabReorder={(from, to) => useTabStore.getState().reorderTabs(from, to)}
+            onTabRename={async (taskId, title) => {
+              const updated = await trpcClient.task.update.mutate({ id: taskId, title })
+              data.updateTask(updated)
+            }}
+            hideTabs={explodeMode}
+            rightContent={headerActions}
+          />
+        )}
         {/* `relative` so OverlayViewRouter's `absolute inset-0` plane covers the
             content. Every tab stays mounted; inactive tabs hide via `invisible` +
             `inert` so terminal/chat sessions survive tab switches (matches
