@@ -84,14 +84,55 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   SIDECAR_PID=$!
   trap 'kill '"$SIDECAR_PID"' 2>/dev/null || true' EXIT
 
-  # Wait up to 8s for the HTTP health endpoint to answer.
+  # Identity check: is the process listening on $SLAYZONE_PORT one WE spawned?
+  # The renderer's WS URL is hard-pinned to this port (window-api-shim
+  # server-url.ts) and server.ts has NO port fallback — a collision kills our
+  # sidecar with EADDRINUSE while a SQUATTER (an orphaned sidecar from a prior
+  # run that the EXIT trap missed, or another instance) keeps answering /health.
+  # A plain health probe can't tell the two apart, so the fork would silently
+  # adopt the wrong DB. Match the port's listener to our spawn instead.
+  #
+  # node_modules/.bin/electron is a JS shim that spawns the real Electron binary
+  # as a CHILD, so the listener is a descendant of $SIDECAR_PID, not == it —
+  # walk the parent chain. lsof is on macOS/Linux; where it's absent (Windows
+  # MSYS) fall back to a liveness check (our sidecar dead + port answering =
+  # squatter).
+  port_owner_is_ours() {
+    command -v lsof >/dev/null 2>&1 || { kill -0 "$SIDECAR_PID" 2>/dev/null; return; }
+    local owner cur
+    owner="$(lsof -nP -iTCP:"$SLAYZONE_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    [[ -z "$owner" ]] && return 1
+    cur="$owner"
+    for _ in 1 2 3 4 5; do
+      [[ "$cur" == "$SIDECAR_PID" ]] && return 0
+      cur="$(ps -o ppid= -p "$cur" 2>/dev/null | tr -d ' ')"
+      [[ -z "$cur" || "$cur" == "1" || "$cur" == "0" ]] && break
+    done
+    return 1
+  }
+
+  # Wait up to 8s for OUR sidecar to answer health on the port. Stop early if it
+  # already exited (EADDRINUSE) — no point waiting on a dead process.
+  ready=0
   for _ in $(seq 1 80); do
-    if curl -sf "http://$SLAYZONE_HOST:$SLAYZONE_PORT/health" >/dev/null 2>&1; then break; fi
+    if curl -sf "http://$SLAYZONE_HOST:$SLAYZONE_PORT/health" >/dev/null 2>&1 && port_owner_is_ours; then
+      ready=1
+      break
+    fi
+    kill -0 "$SIDECAR_PID" 2>/dev/null || break
     sleep 0.1
   done
-  if ! curl -sf "http://$SLAYZONE_HOST:$SLAYZONE_PORT/health" >/dev/null 2>&1; then
-    echo "[run] sidecar failed health check within 8s — see $SIDECAR_LOG" >&2
-    cat "$SIDECAR_LOG" >&2 || true
+  if [[ "$ready" != "1" ]]; then
+    foreign="$(lsof -nP -iTCP:"$SLAYZONE_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    if [[ -n "$foreign" ]] && ! port_owner_is_ours; then
+      echo "[run] FATAL: port $SLAYZONE_PORT is held by a FOREIGN process (pid=$foreign), not the sidecar we spawned (pid=$SIDECAR_PID)." >&2
+      ps -o pid,ppid,command -p "$foreign" >&2 2>/dev/null || true
+      echo "[run] The renderer hard-pins ws://localhost:$SLAYZONE_PORT, so it would connect to that process's DB — likely an orphaned sidecar from a prior run or another SlayZone instance." >&2
+      echo "[run] Free the port (kill $foreign) or stop the other instance, then retry." >&2
+    else
+      echo "[run] sidecar failed health check within 8s — see $SIDECAR_LOG" >&2
+      cat "$SIDECAR_LOG" >&2 || true
+    fi
     exit 1
   fi
   echo "[run] sidecar ready (pid=$SIDECAR_PID)" >&2
@@ -130,6 +171,23 @@ EXTRA_ARGS=(
 # once the build is properly codesigned with keychain-access entitlements.
 if [[ "${SLAYZONE_REAL_KEYCHAIN:-0}" != "1" ]]; then
   EXTRA_ARGS+=("--use-mock-keychain")
+fi
+
+# Opt-in CDP endpoint for local inspection/automation — the dev build binds no
+# remote-debugging port by default. Set SLAYZONE_REMOTE_DEBUG=<port>. Env-based
+# (not arg passthrough) so it survives `pnpm dev:chromium`/`run:chromium`.
+if [[ -n "${SLAYZONE_REMOTE_DEBUG:-}" ]]; then
+  EXTRA_ARGS+=("--remote-debugging-port=${SLAYZONE_REMOTE_DEBUG}")
+fi
+
+# Opt-in HMR: proxy chrome://slayzone-shell/ to the chromium-shell Vite dev
+# server instead of the on-disk bundle. Set SLAYZONE_SHELL_DEV_SERVER to its URL
+# — the project-private strict port from chromium-shell/vite.config.ts, i.e.
+# http://localhost:51734 (NOT Vite's shared default 5173, which another local
+# project can squat and get rendered inside the shell). Env-based so it survives
+# `pnpm dev:chromium`/`run:chromium`. When unset, the on-disk shell bundle wins.
+if [[ -n "${SLAYZONE_SHELL_DEV_SERVER:-}" ]]; then
+  EXTRA_ARGS+=("--slayzone-shell-dev-server=${SLAYZONE_SHELL_DEV_SERVER}")
 fi
 
 exec "$APP" "${EXTRA_ARGS[@]}" "$@"

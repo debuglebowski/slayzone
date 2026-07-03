@@ -52,16 +52,25 @@ export default defineConfig({
   },
   base: './',
   server: {
-    // cap-shell-dx-hmr — when the Chromium fork proxies chrome://slayzone-shell/
-    // to this dev server, the page is served on chrome:// origin. Vite's HMR
-    // client otherwise auto-derives ws://<location.host>/ which yields
-    // ws://slayzone-shell/ (invalid). Pin the HMR endpoint explicitly so the
-    // client always opens ws://localhost:5173.
+    // cap-shell-dx-hmr — bind a project-PRIVATE port, never Vite's shared
+    // default 5173. The fork proxies chrome://slayzone-shell/ to this exact
+    // host:port (run.sh SLAYZONE_SHELL_DEV_SERVER). On 5173 any other local
+    // Vite project (e.g. ../kingsmaker apps/web pins 5173) — or our own
+    // electron renderer — can win the port first and get rendered INSIDE the
+    // SlayZone shell. strictPort makes a busy port fail loud instead of
+    // silently bumping to 5174 (which the fixed proxy URL would never reach,
+    // leaving whatever squats 5173 to be proxied in).
+    port: 51734,
+    strictPort: true,
+    // When the Chromium fork proxies chrome://slayzone-shell/ to this dev
+    // server, the page is served on chrome:// origin. Vite's HMR client
+    // otherwise auto-derives ws://<location.host>/ which yields
+    // ws://slayzone-shell/ (invalid). Pin the HMR endpoint to the same port.
     hmr: {
       protocol: 'ws',
       host: 'localhost',
-      port: 5173,
-      clientPort: 5173,
+      port: 51734,
+      clientPort: 51734,
     },
     // Vite needs CORS for the chrome:// origin to fetch modules.
     cors: true,
