@@ -51,6 +51,22 @@ function clearConvexAuthStorage(): void {
   }
 }
 
+// The OAuth `error` arrives in the deep-link callback URL — i.e. it is
+// attacker-influenceable — and gets rendered in the trusted app chrome. Map the
+// known OAuth error codes to fixed copy and never surface a raw string, so a
+// forged callback can't plant phishing text in the UI.
+const KNOWN_OAUTH_ERRORS: Record<string, string> = {
+  access_denied: 'GitHub sign-in was denied.',
+  server_error: 'GitHub reported a server error during sign-in.',
+  temporarily_unavailable: 'GitHub sign-in is temporarily unavailable. Try again.'
+}
+function sanitizeAuthError(raw: string | undefined): string {
+  if (raw && Object.prototype.hasOwnProperty.call(KNOWN_OAUTH_ERRORS, raw)) {
+    return KNOWN_OAUTH_ERRORS[raw]
+  }
+  return 'GitHub sign-in failed.'
+}
+
 interface GithubSystemSignInResult {
   ok?: boolean
   code?: string
@@ -76,6 +92,11 @@ function ConvexAuthBridge({
   const trpcClient = useTRPCClient()
   const [lastError, setLastError] = useState<string | null>(null)
   const handledOAuthCodesRef = useRef<Set<string>>(new Set())
+  // True between starting a GitHub sign-in and consuming its callback. The
+  // always-on onCallback subscription ignores callbacks when this is false, so a
+  // deep-link we didn't initiate can't drive a sign-in (defense-in-depth atop
+  // PKCE, which already rejects a code mispaired with this renderer's verifier).
+  const flowPendingRef = useRef(false)
 
   const completeOAuthCode = useCallback(
     async (code: string) => {
@@ -90,6 +111,14 @@ function ConvexAuthBridge({
         }
       } catch (e) {
         setLastError(e instanceof Error ? e.message : 'Sign-in completion failed')
+      } finally {
+        // PKCE verifier is single-use — drop it once the exchange has been
+        // attempted so a stale verifier can't widen a replay window.
+        try {
+          window.localStorage.removeItem(namespacedVerifierKey(AUTH_STORAGE_NAMESPACE))
+        } catch {
+          /* ignore */
+        }
       }
     },
     [actions]
@@ -102,8 +131,12 @@ function ConvexAuthBridge({
     if (oauthDelivery !== 'subscription') return
     const sub = trpcClient.app.auth.onCallback.subscribe(undefined, {
       onData: (payload: { code?: string; error?: string }) => {
+        // Only act on a callback for a sign-in WE started — ignore unsolicited /
+        // injected deep-link callbacks.
+        if (!flowPendingRef.current) return
+        flowPendingRef.current = false
         if (payload.error) {
-          setLastError(payload.error)
+          setLastError(sanitizeAuthError(payload.error))
           return
         }
         if (payload.code) void completeOAuthCode(payload.code)
@@ -122,6 +155,9 @@ function ConvexAuthBridge({
         try {
           setLastError(null)
           if (convexUrl) {
+            // Arm the callback subscription before opening the browser so a fast
+            // (fork) callback isn't dropped; the onCallback handler disarms it.
+            flowPendingRef.current = true
             const signInResult = (await trpcClient.app.auth.githubSystemSignIn.mutate({
               convexUrl,
               redirectTo: OAUTH_REDIRECT_URI
