@@ -147,12 +147,32 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const wssHandler = applyWSSHandler({
     wss,
     router: appRouter,
-    createContext: ({ req }) => ({
-      db,
-      dataRoot,
-      req,
-      automationEngine: composition.automationEngine
-    })
+    createContext: ({ req }) => {
+      // Parse windowId from the WS query (?windowId=N) → ctx.windowId. Required by
+      // claimSession + panel-ownership + warm-pool (warmSetProjectTabCounts) procs;
+      // without it they throw "windowId required". This sidecar's applyWSSHandler
+      // had omitted it (the transport ws-server parses it, but the sidecar uses THIS
+      // handler) — so the whole warm-agent pool silently never fired. The renderer
+      // already sends it (see main.tsx withWindowId).
+      let windowId: number | null = null
+      try {
+        const u = new URL(req.url ?? '/', 'http://localhost')
+        const wid = u.searchParams.get('windowId')
+        if (wid != null) {
+          const n = Number(wid)
+          if (Number.isFinite(n)) windowId = n
+        }
+      } catch {
+        /* malformed URL — leave null */
+      }
+      return {
+        db,
+        dataRoot,
+        req,
+        automationEngine: composition.automationEngine,
+        windowId
+      }
+    }
   })
 
   const port = cfg.port ?? getTrpcPort() ?? 0
