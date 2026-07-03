@@ -521,7 +521,10 @@ function getSidecarStatusSnapshot(): import('./sidecar-server-supervisor').Sidec
       restarts: 0,
       totalRespawns: 0,
       dbPath: null,
-      uptimeMs: null
+      uptimeMs: null,
+      runningBuildId: null,
+      diskBuildId: null,
+      stale: false
     }
   )
 }
@@ -2092,7 +2095,13 @@ app
                   info.lastError instanceof Error ? info.lastError.message : info.lastError
                 )
               })
-            }
+            },
+            // Dev-only, opt-in: relaunch the side-car when its on-disk build
+            // changes (server-src watcher rebuilds bin.cjs). Off by default so a
+            // rebuild never surprises a live debug session; staleness still shows
+            // in the Diagnostics tab regardless. Never enabled in a packaged app.
+            hotRestartOnBuildChange:
+              is.dev && process.env.SLAYZONE_SIDECAR_HOT_RESTART === '1'
           })
           sidecarServerHandle = supervisor
           resolveSidecarHandle(supervisor)
@@ -2747,6 +2756,23 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
       app.relaunch()
       app.exit(0)
+    })
+    // Cycle the embedded side-car in place (same sticky port — the renderer's
+    // WS reconnects). Local mode only: in remote mode the backend runs
+    // elsewhere and the supervisor was never started (its handle promise never
+    // resolves, so awaiting it would hang forever).
+    ipcMain.handle('app:restart-sidecar', async () => {
+      if (isRemoteMode) {
+        return { ok: false as const, error: 'Remote mode — no embedded server to restart' }
+      }
+      try {
+        const handle = await sidecarHandlePromise
+        await handle.restart()
+        await handle.waitForReady()
+        return { ok: true as const }
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
     })
     // Writes the pre-boot config file. Throws on an unnormalizable URL.
     ipcMain.handle(

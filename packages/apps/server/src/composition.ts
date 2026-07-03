@@ -7,6 +7,7 @@ import {
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { checkCliInstalled } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   setTaskDeps,
@@ -34,6 +35,7 @@ import {
   type FloatingAgentState
 } from '@slayzone/transport/server'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
+import { getServerBuildInfo } from './build-info.js'
 import {
   taskOps,
   configureTaskRuntimeAdapters,
@@ -426,13 +428,18 @@ export function composeServer(opts: {
       reason: 'dev-skipped' as const
     }),
     appGetRendererZoomFactor: () => null,
-    appCheckCliInstalled: () => ({ installed: false }),
+    // Real fs probe (pure Node, no Electron) — the stub hardcoded
+    // `installed: false`, so the "Install the slay CLI" dialog auto-opened for
+    // every fork user even when the CLI was already installed.
+    appCheckCliInstalled: () => checkCliInstalled(),
     appInstallCli: stub('appInstallCli'),
     appAdjustZoom: stub('appAdjustZoom'),
     appRestartForUpdate: stub('appRestartForUpdate'),
     appCheckForUpdates: stub('appCheckForUpdates'),
     // Read-path: a renderer served BY this server is asking about the server
-    // itself — report self status instead of a supervisor snapshot.
+    // itself — report self status instead of a supervisor snapshot. It IS the
+    // running build, so runningBuildId is its own; there's no supervisor here to
+    // compare against disk → never stale.
     appGetSidecarStatus: () => ({
       health: 'ready' as const,
       port: boundPort || null,
@@ -440,7 +447,10 @@ export function composeServer(opts: {
       restarts: 0,
       totalRespawns: 0,
       dbPath: null,
-      uptimeMs: Math.round(process.uptime() * 1000)
+      uptimeMs: Math.round(process.uptime() * 1000),
+      runningBuildId: getServerBuildInfo().buildId,
+      diskBuildId: null,
+      stale: false
     }),
     appRevealSidecarLog: stub('appRevealSidecarLog'),
 
@@ -452,10 +462,13 @@ export function composeServer(opts: {
     appFocusRenderer: () => {},
     // No window to raise on a headless host.
     appRaiseMainWindow: () => {},
-    // No nativeTheme off-Electron — remote/standalone UI hides theme controls.
+    // No OS nativeTheme off-Electron. Default the preference to "system" so the
+    // renderer resolves dark/light from `prefers-color-scheme` (ThemeContext);
+    // an explicit light/dark still applies for the session. (Cross-restart
+    // persistence of an explicit choice in the fork is a follow-up.)
     themeGetEffective: () => 'dark',
-    themeGetSource: () => 'dark',
-    themeSet: async () => 'dark',
+    themeGetSource: () => 'system',
+    themeSet: async (pref) => (pref === 'light' ? 'light' : 'dark'),
     // No Electron safeStorage on a headless host — report unavailable so the
     // credential store uses its plaintext fallback (gated by env). The encrypt/
     // decrypt stubs are never reached because the cipher stays unset standalone.

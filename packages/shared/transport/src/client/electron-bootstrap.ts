@@ -17,6 +17,7 @@ export const electronBootstrap = {
     api().app.setBootSettings(payload),
   probeServerHealth: (url: string) => api().app.probeServerHealth(url),
   relaunch: () => api().app.relaunch(),
+  restartSidecar: () => api().app.restartSidecar(),
   // Boot instrumentation is pure timing telemetry — optional outside Electron
   // (e.g. the Chromium-fork window.api shim need not implement it). Optional-
   // chain so a missing host method is a no-op, not a TypeError that aborts the

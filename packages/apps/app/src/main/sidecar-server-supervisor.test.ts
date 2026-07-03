@@ -95,6 +95,15 @@ if (counterFile) {
   try { fs.writeFileSync(counterFile, String(attempt)) } catch (e) {}
 }
 
+// Capture buildId ONCE at boot: explicit env wins; else read the manifest now.
+// A fresh child (post-restart) picks up the current on-disk build; an old child
+// keeps the build it booted with — exactly how a rebuilt bin behaves.
+let bootBuildId = process.env.FAKE_BUILD_ID || ''
+const manifestFile = process.env.FAKE_MANIFEST_FILE || ''
+if (!bootBuildId && manifestFile) {
+  try { bootBuildId = JSON.parse(fs.readFileSync(manifestFile, 'utf8')).buildId || '' } catch (e) {}
+}
+
 function crash(why) {
   process.stderr.write('fake-sidecar crash attempt=' + attempt + ' why=' + why + '\\n')
   process.exit(1)
@@ -108,7 +117,7 @@ const server = http.createServer(function (req, res) {
   if (req.method === 'GET' && req.url === '/health') {
     if (ready && !nohealth) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end('{"ok":true}')
+      res.end(JSON.stringify(bootBuildId ? { ok: true, buildId: bootBuildId } : { ok: true }))
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' })
       res.end('{"ok":false}')
@@ -142,6 +151,10 @@ function writeFakeSidecar(dir: string): string {
   fs.writeFileSync(p, FAKE_SIDECAR)
   return p
 }
+/** Write the on-disk build manifest the supervisor compares the running build to. */
+function writeManifest(dir: string, buildId: string): void {
+  fs.writeFileSync(path.join(dir, 'sidecar-build.json'), JSON.stringify({ buildId }))
+}
 function cleanup(): void {
   for (const dir of tmpDirs) {
     try {
@@ -165,7 +178,8 @@ type HarnessCtx = {
 function makeHarness(
   dir: string,
   fakeEnv: Record<string, string>,
-  timing?: SidecarServerOpts['timing']
+  timing?: SidecarServerOpts['timing'],
+  extra?: Partial<SidecarServerOpts>
 ): { handle: SidecarServerHandle; ctx: HarnessCtx } {
   const scriptPath = writeFakeSidecar(dir)
   const ctx: HarnessCtx = {
@@ -192,7 +206,8 @@ function makeHarness(
       ctx.permanentFailure = info
       ctx.permanentFailed.resolve()
     },
-    timing
+    timing,
+    ...extra
   })
   return { handle, ctx }
 }
@@ -447,6 +462,193 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
     assert(exited, `side-car did not self-exit within 6s of stdin close — output: ${out}`)
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  }
+})
+
+test('build-identity: running build matches disk manifest ⇒ not stale', async () => {
+  const dir = mkTmp()
+  writeManifest(dir, 'abc123@2026-07-03T00:00:00.000Z')
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_BUILD_ID: 'abc123@2026-07-03T00:00:00.000Z' },
+    { healthPollIntervalMs: 40 }
+  )
+  try {
+    await handle.waitForReady()
+    const s = handle.getStatus()
+    assertEq(s.runningBuildId, 'abc123@2026-07-03T00:00:00.000Z', 'runningBuildId from /health')
+    assertEq(s.diskBuildId, 'abc123@2026-07-03T00:00:00.000Z', 'diskBuildId from manifest')
+    assertEq(s.stale, false, 'not stale when running === disk')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('build-identity: disk manifest ahead of running build ⇒ stale + loud log', async () => {
+  const dir = mkTmp()
+  writeManifest(dir, 'NEW@2026-07-03T09:00:00.000Z')
+  const { handle, ctx } = makeHarness(
+    dir,
+    { FAKE_BUILD_ID: 'OLD@2026-07-01T09:00:00.000Z' },
+    { healthPollIntervalMs: 40 }
+  )
+  try {
+    await handle.waitForReady()
+    const s = handle.getStatus()
+    assertEq(s.runningBuildId, 'OLD@2026-07-01T09:00:00.000Z', 'runningBuildId is the old build')
+    assertEq(s.diskBuildId, 'NEW@2026-07-03T09:00:00.000Z', 'diskBuildId is the new on-disk build')
+    assertEq(s.stale, true, 'stale when disk build differs from running build')
+    assert(
+      ctx.logs.some((l) => l.line.includes('STALE')),
+      'a loud STALE log line was emitted on mismatch'
+    )
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('hot-restart (flag ON): disk build change relaunches the sidecar onto the new build', async () => {
+  const dir = mkTmp()
+  writeManifest(dir, 'v1@2026-07-03T00:00:00.000Z')
+  // Fake reports the manifest's buildId at boot (FAKE_BUILD_ID unset).
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_MANIFEST_FILE: path.join(dir, 'sidecar-build.json') },
+    { healthPollIntervalMs: 40, buildWatchIntervalMs: 100 },
+    { hotRestartOnBuildChange: true }
+  )
+  try {
+    await handle.waitForReady()
+    assertEq(handle.getStatus().runningBuildId, 'v1@2026-07-03T00:00:00.000Z', 'boots on v1')
+    assertEq(handle.getStatus().stale, false, 'v1 not stale')
+    const respawnsBefore = handle.getStatus().totalRespawns
+
+    // Simulate a rebuild: bump the on-disk manifest.
+    writeManifest(dir, 'v2@2026-07-03T01:00:00.000Z')
+
+    await waitFor(
+      () => handle.getStatus().runningBuildId === 'v2@2026-07-03T01:00:00.000Z',
+      8_000,
+      'sidecar hot-restarted onto the new build'
+    )
+    assert(
+      handle.getStatus().totalRespawns > respawnsBefore,
+      'a respawn occurred on the build change'
+    )
+    assertEq(handle.getStatus().stale, false, 'not stale after hot-restart (running === disk)')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('hot-restart (flag OFF): disk build change surfaces stale, does NOT relaunch', async () => {
+  const dir = mkTmp()
+  writeManifest(dir, 'v1@2026-07-03T00:00:00.000Z')
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_MANIFEST_FILE: path.join(dir, 'sidecar-build.json') },
+    { healthPollIntervalMs: 40, buildWatchIntervalMs: 100 }
+    // no hotRestartOnBuildChange → detection only
+  )
+  try {
+    await handle.waitForReady()
+    const respawnsBefore = handle.getStatus().totalRespawns
+    writeManifest(dir, 'v2@2026-07-03T01:00:00.000Z')
+    // Give any (unwanted) watcher time to act.
+    await delay(600)
+    const s = handle.getStatus()
+    assertEq(s.runningBuildId, 'v1@2026-07-03T00:00:00.000Z', 'still running v1 (no relaunch)')
+    assertEq(s.diskBuildId, 'v2@2026-07-03T01:00:00.000Z', 'disk moved to v2')
+    assertEq(s.stale, true, 'stale surfaces')
+    assertEq(s.totalRespawns, respawnsBefore, 'no respawn without the flag')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('manual restart() cycles a ready child on the same sticky port', async () => {
+  const dir = mkTmp()
+  const { handle } = makeHarness(dir, {}, { healthPollIntervalMs: 40 })
+  try {
+    await handle.waitForReady()
+    const before = handle.getStatus()
+    assert(typeof before.pid === 'number' && before.pid! > 0, 'has a running child pid')
+
+    await handle.restart()
+    await handle.waitForReady()
+
+    const after = handle.getStatus()
+    assertEq(after.health, 'ready', 'ready again after manual restart')
+    assert(after.pid !== before.pid, 'a new child pid replaced the old one')
+    assertEq(after.port, before.port, 'sticky port preserved across manual restart')
+    assertEq(after.totalRespawns, before.totalRespawns + 1, 'exactly one respawn')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('manual restart() recovers from permanent failure with a fresh backoff budget', async () => {
+  const dir = mkTmp()
+  const counterFile = path.join(dir, 'counter')
+  // Crash the first 3 spawns (initial + 2 retries with backoffMs.length = 2 →
+  // attempts exhausted → permanent failure), then stay healthy: the 4th spawn
+  // (triggered only by the manual restart) comes up clean.
+  const { handle, ctx } = makeHarness(
+    dir,
+    { FAKE_COUNTER_FILE: counterFile, FAKE_CRASH_FIRST: '3' },
+    { backoffMs: [40, 80], healthPollIntervalMs: 40 }
+  )
+  try {
+    await Promise.race([
+      ctx.permanentFailed.promise,
+      delay(10_000).then(() => {
+        throw new Error('permanent failure never reported')
+      })
+    ])
+    assertEq(handle.getHealth(), 'failed', 'failed after exhausting the backoff budget')
+
+    await handle.restart()
+    await handle.waitForReady()
+
+    assertEq(handle.getHealth(), 'ready', 'manual restart recovers from failed')
+    assertEq(handle.getStatus().restarts, 0, 'backoff attempt counter reset by manual restart')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('fixedPort: binds the given port instead of probing, and keeps it across a crash respawn', async () => {
+  const dir = mkTmp()
+  // Pick a fixed port by probing one free port up front then closing it — avoids
+  // a hardcoded literal colliding with something else already bound on CI/dev.
+  const net = await import('node:net')
+  const fixedPort: number = await new Promise((resolve, reject) => {
+    const srv = net.createServer()
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address()
+      const p = typeof addr === 'object' && addr ? addr.port : 0
+      srv.close(() => resolve(p))
+    })
+  })
+  const counterFile = path.join(dir, 'counter')
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_COUNTER_FILE: counterFile, FAKE_CRASH_AFTER_READY_MS: '150' },
+    { healthPollIntervalMs: 40 },
+    { fixedPort }
+  )
+  try {
+    await handle.waitForReady()
+    assertEq(handle.getPort(), fixedPort, 'bound exactly the fixed port, no probing')
+
+    // Crash-after-ready respawns immediately (existing healthy-crash path) — the
+    // fixed port must survive that respawn identically to how stickyPort does.
+    await waitFor(() => handle.getStatus().totalRespawns >= 1, 8_000, 'respawn after crash')
+    await handle.waitForReady()
+    assertEq(handle.getPort(), fixedPort, 'fixed port unchanged after crash respawn')
+  } finally {
+    await handle.stop()
   }
 })
 

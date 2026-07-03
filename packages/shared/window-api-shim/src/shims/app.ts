@@ -45,7 +45,11 @@ export const appShim = {
   getZoomFactor: async (): Promise<number> => 1,
   adjustZoom: async (_delta: number): Promise<number> => 1,
   onZoomFactorChanged: noopSub,
-  isPlaywright: (): boolean => false,
+  // Boolean, NOT a function — the Electron preload + the ElectronAPI type both
+  // expose this as a boolean. dialog.tsx reads `api.app.isPlaywright` as a value
+  // (`!!...`), so a function ref (always truthy) made every fork dialog think it
+  // was under Playwright and suppress outside-click dismissal.
+  isPlaywright: false,
   isTestsPanelEnabled: async (): Promise<boolean> => false,
   isJiraIntegrationEnabled: async (): Promise<boolean> => false,
   isJiraIntegrationEnabledSync: (): boolean => false,
@@ -54,6 +58,11 @@ export const appShim = {
   // build the tRPC-WS URL. Fork pins a fixed loopback port (see server-url.ts);
   // windowId is constant (single window). Boot instrumentation is a no-op here.
   getServerUrl: async (): Promise<{ mode: 'local' | 'remote'; url: string }> => resolveServerUrl(),
+  // The fork's sidecar is an external process the shell doesn't supervise.
+  restartSidecar: async (): Promise<{ ok: boolean; error?: string }> => ({
+    ok: false,
+    error: 'Not supported in the Chromium shell',
+  }),
   getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
   bootMark: (_label: string): void => undefined,
   dataReady: (): Promise<void> => Promise.resolve(),

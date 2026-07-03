@@ -241,6 +241,18 @@ export function DiagnosticsSettingsTab() {
             <span className="text-sm text-muted-foreground">{sidecarStatus?.pid ?? '—'}</span>
           </div>
           <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-4">
+            <span className="text-sm">Build</span>
+            <span className="text-xs text-muted-foreground flex flex-col gap-1 break-all">
+              <span>{sidecarStatus?.runningBuildId ?? '—'}</span>
+              {sidecarStatus?.stale && (
+                <span className="text-destructive">
+                  ⚠ STALE — a newer build is on disk ({sidecarStatus.diskBuildId}). Restart the app
+                  to load it.
+                </span>
+              )}
+            </span>
+          </div>
+          <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-4">
             <span className="text-sm">Database</span>
             <span className="text-xs text-muted-foreground break-all">
               {sidecarStatus?.dbPath ?? '—'}

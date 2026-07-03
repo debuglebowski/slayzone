@@ -57,6 +57,7 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 | `SLAYZONE_PROFILE=1`            | off     | Swap to React's profiling builds so `<Profiler>` fires `onRender`. Required by `e2e/perf/scenarios.spec.ts`. |
 | `SLAYZONE_DEBUG_BOOT=1`         | off     | Verbose main-process boot logging.                                                                           |
 | `SLAYZONE_REGISTER_DEV_PROTOCOL=1` | off  | Register the `slayzone://` custom protocol in dev. Needed when testing OAuth deep-link callbacks.            |
+| `SLAYZONE_SIDECAR_HOT_RESTART=1`   | off  | Dev-only. Supervisor hot-restarts the sidecar when its on-disk build changes (server-src watcher rebuilds `bin.cjs`). Off = staleness only shown in Diagnostics tab, no auto-restart. `pnpm dev` always runs the server watcher regardless. |
 
 **React transform**: Babel + `babel-plugin-react-compiler` in all modes (dev + prod). Auto-memoization active everywhere; compiler rule violations surface at build time.
 

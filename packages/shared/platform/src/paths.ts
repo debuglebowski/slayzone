@@ -33,6 +33,25 @@ export function getServerPort(): number | undefined {
 }
 
 /**
+ * Fixed per-environment sidecar ports (plans/sidecar-staleness.md, Phase 4).
+ *
+ * One supervised sidecar per environment ever runs at a time (packaged app:
+ * Electron single-instance-lock; dev: one interactive `pnpm dev`; e2e: single
+ * Playwright worker, `fullyParallel: false` — see playwright.config.ts). A
+ * fixed port per environment turns "which sidecar is the CLI even talking to"
+ * from a DB-write race into a known constant, and turns a stray second
+ * instance into a loud `EADDRINUSE` at bind time instead of silent ambiguity
+ * (unlike a lock FILE, a bound TCP port can't go stale — a dead process can't
+ * hold it, so bind failure always means something else is genuinely alive).
+ * IANA dynamic/private range (49152–65535) — no registered-service collision.
+ */
+export const SIDECAR_FIXED_PORT = {
+  prod: 51100,
+  dev: 51101,
+  test: 51102
+} as const
+
+/**
  * Returns the tRPC server port from SLAYZONE_PORT, or undefined if unset/invalid.
  * Callers should fall back to a stored or auto-assigned port when undefined.
  */

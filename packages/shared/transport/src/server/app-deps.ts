@@ -474,6 +474,9 @@ export type AppDeps = {
     totalRespawns: number
     dbPath: string | null
     uptimeMs: number | null
+    runningBuildId: string | null
+    diskBuildId: string | null
+    stale: boolean
   }
   appRevealSidecarLog: () => void
 

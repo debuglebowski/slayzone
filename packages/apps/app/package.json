@@ -6,7 +6,7 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "pnpm --filter @slayzone/server build && electron-vite dev",
+    "dev": "node dev.mjs",
     "dev:protocol": "SLAYZONE_REGISTER_DEV_PROTOCOL=1 electron-vite dev",
     "prebuild": "pnpm --filter @slayzone/server build",
     "build": "npm run typecheck && electron-vite build",

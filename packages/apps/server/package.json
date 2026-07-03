@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {

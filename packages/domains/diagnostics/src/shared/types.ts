@@ -4,6 +4,7 @@ export type DiagnosticSource =
   | 'ipc'
   | 'pty'
   | 'main'
+  | 'server'
   | 'renderer'
   | 'git'
   | 'gh'

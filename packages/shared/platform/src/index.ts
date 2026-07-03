@@ -7,7 +7,13 @@ export {
   getAntigravityHooksPath,
   getOpencodePluginPath
 } from './dirs'
-export { ensureDataRoot, getTrpcPort, getServerPort, getServerHost } from './paths'
+export {
+  ensureDataRoot,
+  getTrpcPort,
+  getServerPort,
+  getServerHost,
+  SIDECAR_FIXED_PORT
+} from './paths'
 export { writeFileIfChanged } from './fs-utils'
 export {
   migrateXdgIfNeeded,

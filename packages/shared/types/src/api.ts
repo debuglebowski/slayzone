@@ -411,6 +411,7 @@ export interface ElectronAPI {
       normalizedUrl?: string
       error?: string
     }>
+    restartSidecar: () => Promise<{ ok: boolean; error?: string }>
     isPlaywright: boolean
     dataReady: () => void
     bootMark: (label: string) => void
@@ -684,6 +685,9 @@ export interface _LegacyElectronAPI {
       totalRespawns: number
       dbPath: string | null
       uptimeMs: number | null
+      runningBuildId: string | null
+      diskBuildId: string | null
+      stale: boolean
     }>
     revealSidecarLog: () => Promise<void>
     isTestsPanelEnabled: () => Promise<boolean>

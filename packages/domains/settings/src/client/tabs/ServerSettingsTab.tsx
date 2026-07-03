@@ -25,6 +25,7 @@ export function ServerSettingsTab() {
   const [savedUrl, setSavedUrl] = useState('')
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' })
   const [saving, setSaving] = useState(false)
+  const [restarting, setRestarting] = useState(false)
 
   useEffect(() => {
     void electronBootstrap.getServerUrl().then((server) => {
@@ -68,6 +69,25 @@ export function ServerSettingsTab() {
       toast.error(`Failed to save: ${msg}`)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Cycle the embedded side-car without relaunching the app. The IPC resolves
+  // only once the new child answers /health (or reports why it couldn't).
+  const restartServer = async (): Promise<void> => {
+    setRestarting(true)
+    try {
+      const result = await electronBootstrap.restartSidecar()
+      if (result.ok) {
+        toast.success('Server restarted')
+      } else {
+        toast.error(`Restart failed: ${result.error ?? 'unknown error'}`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(`Restart failed: ${msg}`)
+    } finally {
+      setRestarting(false)
     }
   }
 
@@ -163,6 +183,27 @@ export function ServerSettingsTab() {
           {saving ? 'Saving…' : 'Save & relaunch'}
         </Button>
         {dirty && <span className="text-muted-foreground text-xs">Unsaved changes</span>}
+      </div>
+
+      <div className="border-border space-y-3 border-t pt-6">
+        <Label className="text-base font-semibold">Embedded server</Label>
+        <p className="text-muted-foreground max-w-lg text-xs">
+          Restart the local backend process without relaunching the app. Running agents and
+          terminal sessions are stopped; the app reconnects automatically.
+        </p>
+        <Button
+          variant="outline"
+          disabled={savedMode !== 'local' || restarting}
+          onClick={() => {
+            void restartServer()
+          }}
+          data-testid="server-restart-button"
+        >
+          {restarting ? 'Restarting…' : 'Restart server'}
+        </Button>
+        {savedMode !== 'local' && (
+          <p className="text-muted-foreground text-xs">Available in Local mode only.</p>
+        )}
       </div>
     </div>
   )

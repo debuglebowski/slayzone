@@ -16,7 +16,9 @@ import {
 import { composeServer } from './composition.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
+import { getServerBuildInfo } from './build-info.js'
 import { createLogger } from './log.js'
+import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
 
 /**
@@ -207,6 +209,33 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   }
   log(`listening on http://${host}:${actualPort} (/trpc + /health + /api + /mcp)`)
 
+  // Boot canary: records THIS process's build identity so the running sidecar's
+  // code is visible in the diagnostics DB (plans/sidecar-staleness.md). Also the
+  // proof that sidecar diagnostics persistence is wired (composeServer bound the
+  // diagnostics DB above) — a missing sidecar.boot event ⇒ a stale sidecar.
+  const build = getServerBuildInfo()
+  log(`build ${build.buildId}`)
+  recordDiagnosticEvent({
+    level: 'info',
+    source: 'server',
+    event: 'sidecar.boot',
+    message: `sidecar ${build.buildId} on :${actualPort}`,
+    payload: {
+      buildId: build.buildId,
+      commit: build.commit,
+      builtAt: build.builtAt,
+      pid: process.pid,
+      port: actualPort,
+      dbPath,
+      supervised
+    }
+  })
+  // Force the batch out now: the boot canary is `info` (not the error level that
+  // auto-flushes), and a sidecar that crashes/exits inside the flush window is
+  // exactly the stale/crash-loop case we need it for. The sidecar's diag DB is
+  // synchronous, so this drains immediately.
+  await flushWriteQueue()
+
   let stopped = false
   return {
     port: actualPort,
@@ -243,6 +272,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         } catch {
           /* ignore */
         }
+      }
+      // Drain buffered diagnostics before closing their DB — otherwise a clean
+      // shutdown silently loses the tail of the write queue (batched `info`
+      // events that never hit the flush interval).
+      try {
+        await flushWriteQueue()
+      } catch {
+        /* ignore */
       }
       try {
         await diagnosticsDb.close()

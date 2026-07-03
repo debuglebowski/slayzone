@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import http from 'node:http'
 import net from 'node:net'
+import { readFileSync, watchFile, unwatchFile } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 /**
  * Supervises the @slayzone/server side-car subprocess.
@@ -21,6 +23,7 @@ const HEALTHY_RESET_MS = 60_000
 const HEALTH_POLL_INTERVAL_MS = 250
 const HEALTH_BOOT_TIMEOUT_MS = 10_000
 const STOP_SIGTERM_GRACE_MS = 3_000
+const BUILD_WATCH_INTERVAL_MS = 500
 
 /**
  * Timing overrides. Every field is optional and falls back to the production
@@ -39,6 +42,8 @@ export type SidecarTiming = {
   healthBootTimeoutMs?: number
   /** Grace period after SIGTERM before `stop()` escalates to SIGKILL. */
   stopSigtermGraceMs?: number
+  /** Poll interval for the on-disk build manifest watcher (hot-restart). */
+  buildWatchIntervalMs?: number
 }
 
 export type SidecarServerOpts = {
@@ -56,6 +61,23 @@ export type SidecarServerOpts = {
   onPermanentFailure: (info: { attempts: number; lastError: unknown }) => void
   /** Optional timing overrides (tests only — production omits this). */
   timing?: SidecarTiming
+  /**
+   * Dev hot-restart: watch `dist/sidecar-build.json` and relaunch the side-car
+   * when the on-disk build changes (picks up a fresh `bin.cjs` without a full
+   * app restart). Opt-in — the caller gates it on `is.dev` +
+   * `SLAYZONE_SIDECAR_HOT_RESTART=1`. Off ⇒ staleness is only surfaced, never
+   * auto-corrected. Never enabled in production.
+   */
+  hotRestartOnBuildChange?: boolean
+  /**
+   * Bind exactly this port instead of probing a free one (plans/sidecar-staleness.md,
+   * Phase 4). One supervised sidecar per environment ever runs at a time
+   * (single-instance-locked app, or a single e2e worker), so a fixed port turns
+   * backend discovery from a DB-write race into a known constant, and a stray
+   * second instance into a loud EADDRINUSE at bind time instead of silent
+   * ambiguity. Overrides the sticky-port/probe logic entirely — never cleared.
+   */
+  fixedPort?: number
 }
 
 export type SidecarHealth = 'starting' | 'ready' | 'restarting' | 'failed'
@@ -78,6 +100,15 @@ export type SidecarStatus = {
   dbPath: string | null
   /** Milliseconds the side-car has been continuously healthy, or null. */
   uptimeMs: number | null
+  /** Build id the live process reports via /health (`commit@builtAt`). Null
+   *  before the first ready or if the sidecar predates build-identity. */
+  runningBuildId: string | null
+  /** Build id currently on disk (`dist/sidecar-build.json`, sibling of the
+   *  spawned bin). Null if the manifest is missing/unreadable. */
+  diskBuildId: string | null
+  /** running !== disk (both known) — the process is executing stale code
+   *  relative to the latest build on disk. */
+  stale: boolean
 }
 
 export type SidecarServerHandle = {
@@ -107,17 +138,39 @@ function probeFreePort(host: string): Promise<number> {
   })
 }
 
-/** Single GET /health probe — resolves true on HTTP 200. */
-function probeHealth(host: string, port: number): Promise<boolean> {
+/**
+ * Single GET /health probe. Resolves `{ ok }` (HTTP 200) plus the running
+ * build's `buildId` from the body when present — so the supervisor can compare
+ * the live process against the on-disk build and flag a stale sidecar.
+ */
+function probeHealth(
+  host: string,
+  port: number
+): Promise<{ ok: boolean; buildId: string | null }> {
   return new Promise((resolve) => {
     const req = http.get({ host, port, path: '/health', timeout: 1_000 }, (res) => {
-      res.resume()
-      resolve(res.statusCode === 200)
+      if (res.statusCode !== 200) {
+        res.resume()
+        resolve({ ok: false, buildId: null })
+        return
+      }
+      let body = ''
+      res.on('data', (c) => (body += c))
+      res.on('end', () => {
+        let buildId: string | null = null
+        try {
+          const parsed = JSON.parse(body) as { buildId?: unknown }
+          if (typeof parsed.buildId === 'string') buildId = parsed.buildId
+        } catch {
+          /* body may be absent/legacy — treat as unknown build */
+        }
+        resolve({ ok: true, buildId })
+      })
     })
-    req.on('error', () => resolve(false))
+    req.on('error', () => resolve({ ok: false, buildId: null }))
     req.on('timeout', () => {
       req.destroy()
-      resolve(false)
+      resolve({ ok: false, buildId: null })
     })
   })
 }
@@ -129,6 +182,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   const healthPollIntervalMs = opts.timing?.healthPollIntervalMs ?? HEALTH_POLL_INTERVAL_MS
   const healthBootTimeoutMs = opts.timing?.healthBootTimeoutMs ?? HEALTH_BOOT_TIMEOUT_MS
   const stopSigtermGraceMs = opts.timing?.stopSigtermGraceMs ?? STOP_SIGTERM_GRACE_MS
+  const buildWatchIntervalMs = opts.timing?.buildWatchIntervalMs ?? BUILD_WATCH_INTERVAL_MS
 
   let child: ChildProcess | null = null
   let port: number | null = null
@@ -140,6 +194,9 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   let stickyPort: number | null = null
   let health: SidecarHealth = 'starting'
   let readySince: number | null = null
+  // Build id the live child last reported via /health. Null until first ready,
+  // reset on every exit — an old value must never survive into a new child.
+  let runningBuildId: string | null = null
   let attempt = 0
   let spawnCount = 0
   let stopped = false
@@ -147,6 +204,18 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   let healthyTimer: NodeJS.Timeout | null = null
   let pollTimer: NodeJS.Timeout | null = null
   let bootDeadline = 0
+
+  // On-disk build manifest (sibling of the spawned bin). Read fresh on demand so
+  // a rebuild after boot is reflected immediately (drives stale-detection).
+  const manifestPath = join(dirname(opts.scriptPath), 'sidecar-build.json')
+  const readDiskBuildId = (): string | null => {
+    try {
+      const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as { buildId?: unknown }
+      return typeof parsed.buildId === 'string' ? parsed.buildId : null
+    } catch {
+      return null
+    }
+  }
 
   const readyWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }> = []
 
@@ -182,11 +251,24 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
 
   const pollHealth = (): void => {
     if (stopped || !child || port === null) return
-    void probeHealth(opts.host, port).then((ok) => {
+    void probeHealth(opts.host, port).then((result) => {
       if (stopped) return
-      if (ok) {
+      if (result.ok) {
         health = 'ready'
         readySince = Date.now()
+        runningBuildId = result.buildId
+        // Stale detection: the live process's build vs the build on disk. A
+        // mismatch means the sidecar is running old code (e.g. bin.cjs was
+        // rebuilt but this long-lived process never relaunched) — the exact
+        // dogfooding failure this guards against. Loud log; auto-restart is
+        // Phase 3 (flag-gated). Unknown build (legacy sidecar, no manifest) is
+        // not treated as stale — only a definite mismatch.
+        const diskBuildId = readDiskBuildId()
+        if (runningBuildId && diskBuildId && runningBuildId !== diskBuildId) {
+          opts.logger(
+            `[supervisor] STALE sidecar: running ${runningBuildId} vs disk ${diskBuildId} — relaunch to load the fresh build`
+          )
+        }
         opts.logger(`[supervisor] sidecar ready pid=${child?.pid} port=${port}`)
         opts.onReady({ pid: child?.pid ?? -1, port: port! })
         resolveWaiters()
@@ -207,9 +289,15 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
 
   function spawnChild(): void {
     if (stopped) return
-    // Reuse the sticky port if we have one; otherwise probe a fresh free port.
+    // Fixed port wins outright — no probing, no sticky-port bookkeeping needed
+    // (it's already permanently "stuck" to the one configured value). Otherwise
+    // reuse the sticky port if we have one; else probe a fresh free port.
     const portSource =
-      stickyPort !== null ? Promise.resolve(stickyPort) : probeFreePort(opts.host)
+      opts.fixedPort !== undefined
+        ? Promise.resolve(opts.fixedPort)
+        : stickyPort !== null
+          ? Promise.resolve(stickyPort)
+          : probeFreePort(opts.host)
     void portSource
       .then((freePort) => {
         if (stopped) return
@@ -257,6 +345,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           if (child !== proc) return
           child = null
           readySince = null
+          runningBuildId = null
           if (stopped) return
           const wasReady = health === 'ready'
           opts.logger(`[supervisor] sidecar exited code=${code} signal=${signal}`)
@@ -281,53 +370,99 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
       })
   }
 
+  // Cycle the child on the sticky port. The `exit` handler treats this like a
+  // healthy crash → immediate respawn. Resolves once the old child is gone.
+  // A deliberate restart (user button / hot-restart) grants a FRESH backoff
+  // budget: it must be able to recover from `failed` (attempts exhausted).
+  const doRestart = async (): Promise<void> => {
+    if (stopped) return
+    attempt = 0
+    const proc = child
+    if (!proc) {
+      if (backoffTimer) {
+        // Mid-backoff — cancel the pending spawn so we don't double-spawn.
+        clearTimeout(backoffTimer)
+        backoffTimer = null
+      } else if (health !== 'failed') {
+        // A spawn is already in flight (port-probe window before the child is
+        // assigned) — let it land; there is nothing to cycle yet.
+        return
+      }
+      health = 'restarting'
+      spawnChild()
+      return
+    }
+    await new Promise<void>((resolve) => {
+      const killTimer = setTimeout(() => {
+        try {
+          proc.kill('SIGKILL')
+        } catch {
+          /* already gone */
+        }
+      }, stopSigtermGraceMs)
+      proc.once('exit', () => {
+        clearTimeout(killTimer)
+        resolve()
+      })
+      proc.kill('SIGTERM')
+    })
+  }
+
   spawnChild()
+
+  // Dev hot-restart: poll the on-disk build manifest; when it names a build
+  // different from the one the live child reported, relaunch onto it. Polls
+  // (watchFile) rather than fs.watch so a manifest that doesn't exist yet (built
+  // concurrently with the app) is tolerated — the watcher just fires once it
+  // appears. `hotRestartInFlight` collapses the burst of writes a rebuild emits
+  // into a single restart.
+  let hotRestartInFlight = false
+  if (opts.hotRestartOnBuildChange) {
+    watchFile(manifestPath, { interval: buildWatchIntervalMs }, () => {
+      if (stopped || hotRestartInFlight) return
+      const diskBuildId = readDiskBuildId()
+      // Only act on a definite mismatch against a ready child — never on a
+      // missing manifest or before the child has reported its build.
+      if (health === 'ready' && runningBuildId && diskBuildId && diskBuildId !== runningBuildId) {
+        opts.logger(
+          `[supervisor] build changed on disk (${diskBuildId}) — hot-restarting sidecar`
+        )
+        hotRestartInFlight = true
+        void doRestart().finally(() => {
+          hotRestartInFlight = false
+        })
+      }
+    })
+  }
 
   return {
     getPort: () => (health === 'ready' ? port : null),
     getHealth: () => health,
-    getStatus: () => ({
-      health,
-      port,
-      pid: child?.pid ?? null,
-      restarts: attempt,
-      totalRespawns: Math.max(0, spawnCount - 1),
-      dbPath: opts.env.SLAYZONE_DB_PATH ?? null,
-      uptimeMs: readySince === null ? null : Date.now() - readySince
-    }),
+    getStatus: () => {
+      const diskBuildId = readDiskBuildId()
+      return {
+        health,
+        port,
+        pid: child?.pid ?? null,
+        restarts: attempt,
+        totalRespawns: Math.max(0, spawnCount - 1),
+        dbPath: opts.env.SLAYZONE_DB_PATH ?? null,
+        uptimeMs: readySince === null ? null : Date.now() - readySince,
+        runningBuildId,
+        diskBuildId,
+        stale: !!(runningBuildId && diskBuildId && runningBuildId !== diskBuildId)
+      }
+    },
     waitForReady: () =>
       new Promise<void>((resolve, reject) => {
         if (health === 'ready') return resolve()
         if (health === 'failed') return reject(new Error('sidecar permanent failure'))
         readyWaiters.push({ resolve, reject })
       }),
-    restart: async () => {
-      if (stopped) return
-      const proc = child
-      if (!proc) {
-        // No live child (e.g. mid-backoff) — kick a fresh spawn on the sticky port.
-        spawnChild()
-        return
-      }
-      // Kill the child; the `exit` handler respawns immediately on the sticky
-      // port (treated as a healthy crash). Resolve once the old child is gone.
-      await new Promise<void>((resolve) => {
-        const killTimer = setTimeout(() => {
-          try {
-            proc.kill('SIGKILL')
-          } catch {
-            /* already gone */
-          }
-        }, stopSigtermGraceMs)
-        proc.once('exit', () => {
-          clearTimeout(killTimer)
-          resolve()
-        })
-        proc.kill('SIGTERM')
-      })
-    },
+    restart: doRestart,
     stop: async () => {
       if (stopped) return
+      if (opts.hotRestartOnBuildChange) unwatchFile(manifestPath)
       stopped = true
       clearTimers()
       const proc = child
