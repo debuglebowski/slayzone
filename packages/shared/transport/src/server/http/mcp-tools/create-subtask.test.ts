@@ -1,6 +1,9 @@
 /**
  * MCP: create_subtask tool tests — focused on parent_task_id resolution
- * (resolveCurrentTaskId), including the warm-pool session→task fallback.
+ * (resolveCurrentTaskId), including the warm-pool session→task fallback. Both
+ * ids are passed as EXPLICIT tool arguments (parent_task_id/session_id) — this
+ * handler runs in the shared MCP sidecar process, which has no per-request env
+ * to read; the calling agent passes whichever id its own shell has.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/create-subtask.test.ts
  */
 import {
@@ -48,18 +51,12 @@ registerCreateSubtaskTool(stub.server as never, {
   }
 })
 
-function resetEnv(): void {
-  delete process.env.SLAYZONE_TASK_ID
-  delete process.env.SLAYZONE_SESSION_ID
-}
-
 await describe('mcp create_subtask', () => {
   test('register: tool registered', () => {
     expect(stub.has('create_subtask')).toBe(true)
   })
 
-  test('explicit parent_task_id (no env needed)', async () => {
-    resetEnv()
+  test('explicit parent_task_id (no session_id needed)', async () => {
     const parent = seedParent()
     notifyCount = 0
     const res = (await stub.invoke('create_subtask', {
@@ -72,11 +69,13 @@ await describe('mcp create_subtask', () => {
     expect(notifyCount).toBeGreaterThanOrEqual(1)
   })
 
-  test('warm-pool fallback: no parent_task_id arg, no $SLAYZONE_TASK_ID, resolves via bound session', async () => {
-    resetEnv()
+  test('warm-pool fallback: no parent_task_id arg, resolves via bound session_id arg', async () => {
     const parent = seedParent()
-    process.env.SLAYZONE_SESSION_ID = seedAgentSession(parent, 'bound')
-    const res = (await stub.invoke('create_subtask', { title: 'Sub via pool' })) as {
+    const sessionId = seedAgentSession(parent, 'bound')
+    const res = (await stub.invoke('create_subtask', {
+      session_id: sessionId,
+      title: 'Sub via pool'
+    })) as {
       content: { text: string }[]
       isError?: boolean
     }
@@ -86,17 +85,18 @@ await describe('mcp create_subtask', () => {
   })
 
   test('warm-pool fallback: session still pooled (unbound) → isError', async () => {
-    resetEnv()
-    process.env.SLAYZONE_SESSION_ID = seedAgentSession(null, 'pooled')
-    const res = (await stub.invoke('create_subtask', { title: 'Sub' })) as {
+    const sessionId = seedAgentSession(null, 'pooled')
+    const res = (await stub.invoke('create_subtask', {
+      session_id: sessionId,
+      title: 'Sub'
+    })) as {
       content: { text: string }[]
       isError?: boolean
     }
     expect(res.isError).toBe(true)
   })
 
-  test('no parent_task_id, no env → isError', async () => {
-    resetEnv()
+  test('no parent_task_id, no session_id → isError', async () => {
     const res = (await stub.invoke('create_subtask', { title: 'Sub' })) as {
       content: { text: string }[]
       isError?: boolean
@@ -105,5 +105,4 @@ await describe('mcp create_subtask', () => {
   })
 })
 
-resetEnv()
 h.cleanup()

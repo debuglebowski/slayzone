@@ -14,12 +14,18 @@ import type { McpToolsDeps } from './types'
 export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps): void {
   server.tool(
     'create_subtask',
-    'Create a subtask under a parent task. Prefer calling get_current_task_id first, then pass that as parent_task_id. In task terminals, you can source parent_task_id from local $SLAYZONE_TASK_ID.',
+    "Create a subtask under a parent task. Prefer calling get_current_task_id first, then pass that as parent_task_id. In task terminals, you can source parent_task_id from local $SLAYZONE_TASK_ID. If that's empty (pre-warmed agent), pass session_id from $SLAYZONE_SESSION_ID instead.",
     {
       parent_task_id: z
         .string()
         .optional()
         .describe('Parent task ID (recommended: pass $SLAYZONE_TASK_ID)'),
+      session_id: z
+        .string()
+        .optional()
+        .describe(
+          'Fallback when $SLAYZONE_TASK_ID is empty — pass $SLAYZONE_SESSION_ID instead'
+        ),
       title: z.string().describe('Subtask title'),
       description: z.string().nullable().optional().describe('Subtask description (null to clear)'),
       status: z
@@ -35,14 +41,14 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       assignee: z.string().nullable().optional().describe('Assignee name (null to clear)'),
       due_date: z.string().nullable().optional().describe('Due date ISO string (null to clear)')
     },
-    async ({ parent_task_id, due_date, title, description, status, priority, assignee }) => {
-      const resolvedParentId = await resolveCurrentTaskId(deps.db, parent_task_id)
+    async ({ parent_task_id, session_id, due_date, title, description, status, priority, assignee }) => {
+      const resolvedParentId = await resolveCurrentTaskId(deps.db, parent_task_id, session_id)
       if (!resolvedParentId) {
         return {
           content: [
             {
               type: 'text' as const,
-              text: 'No parent task ID available. Pass parent_task_id (recommended from $SLAYZONE_TASK_ID).'
+              text: 'No parent task ID available. Pass parent_task_id (from $SLAYZONE_TASK_ID) or session_id (from $SLAYZONE_SESSION_ID).'
             }
           ],
           isError: true

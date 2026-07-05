@@ -2,7 +2,10 @@
  * MCP: get_current_task_id tool tests. Covers the warm-pool session→task
  * fallback (resolveCurrentTaskId): a pre-warmed agent boots with only
  * $SLAYZONE_SESSION_ID (no $SLAYZONE_TASK_ID yet), and must resolve its task
- * via agent_sessions.task_id once the pool binds it.
+ * via agent_sessions.task_id once the pool binds it. Both ids are passed as
+ * EXPLICIT tool arguments (session_id/task_id) — this handler runs in the
+ * shared MCP sidecar process, which has no per-request env to fall back to;
+ * the calling agent must read its own env and pass whichever id it has.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/get-current-task-id.test.ts
  */
 import {
@@ -47,18 +50,14 @@ registerGetCurrentTaskIdTool(stub.server as never, {
   notifyRenderer: () => {}
 })
 
-async function invoke(): Promise<{ content: { text: string }[]; isError?: boolean }> {
-  return (await stub.invoke('get_current_task_id', {})) as {
+async function invoke(args: {
+  task_id?: string
+  session_id?: string
+}): Promise<{ content: { text: string }[]; isError?: boolean }> {
+  return (await stub.invoke('get_current_task_id', args)) as {
     content: { text: string }[]
     isError?: boolean
   }
-}
-
-const savedTaskIdEnv = process.env.SLAYZONE_TASK_ID
-const savedSessionIdEnv = process.env.SLAYZONE_SESSION_ID
-function resetEnv(): void {
-  delete process.env.SLAYZONE_TASK_ID
-  delete process.env.SLAYZONE_SESSION_ID
 }
 
 await describe('mcp get_current_task_id', () => {
@@ -66,63 +65,39 @@ await describe('mcp get_current_task_id', () => {
     expect(stub.has('get_current_task_id')).toBe(true)
   })
 
-  test('explicit arg wins over env', async () => {
-    resetEnv()
+  test('explicit task_id arg wins over session_id arg', async () => {
     const explicit = seedTask()
-    process.env.SLAYZONE_TASK_ID = crypto.randomUUID() // some other, unseeded id
-    const res = (await stub.invoke('get_current_task_id', { task_id: explicit })) as {
-      content: { text: string }[]
-      isError?: boolean
-    }
+    const pooledSession = seedAgentSession(null, 'pooled') // would resolve to null if consulted
+    const res = await invoke({ task_id: explicit, session_id: pooledSession })
     expect(res.isError === true).toBe(false)
     const parsed = JSON.parse(res.content[0].text) as { task_id: string }
     expect(parsed.task_id).toBe(explicit)
   })
 
-  test('$SLAYZONE_TASK_ID wins over session lookup (normal spawn, fast path)', async () => {
-    resetEnv()
+  test('warm-pool fallback: no task_id arg, resolves via bound agent_sessions row', async () => {
     const taskId = seedTask()
-    process.env.SLAYZONE_TASK_ID = taskId
-    process.env.SLAYZONE_SESSION_ID = seedAgentSession(null, 'pooled') // would resolve to null if consulted
-    const res = await invoke()
-    expect(res.isError === true).toBe(false)
-    const parsed = JSON.parse(res.content[0].text) as { task_id: string }
-    expect(parsed.task_id).toBe(taskId)
-  })
-
-  test('warm-pool fallback: no $SLAYZONE_TASK_ID, resolves via bound agent_sessions row', async () => {
-    resetEnv()
-    const taskId = seedTask()
-    process.env.SLAYZONE_SESSION_ID = seedAgentSession(taskId, 'bound')
-    const res = await invoke()
+    const sessionId = seedAgentSession(taskId, 'bound')
+    const res = await invoke({ session_id: sessionId })
     expect(res.isError === true).toBe(false)
     const parsed = JSON.parse(res.content[0].text) as { task_id: string }
     expect(parsed.task_id).toBe(taskId)
   })
 
   test('warm-pool fallback: session still pooled (unbound) → no task id → isError', async () => {
-    resetEnv()
-    process.env.SLAYZONE_SESSION_ID = seedAgentSession(null, 'pooled')
-    const res = await invoke()
+    const sessionId = seedAgentSession(null, 'pooled')
+    const res = await invoke({ session_id: sessionId })
     expect(res.isError).toBe(true)
   })
 
-  test('no env at all → isError', async () => {
-    resetEnv()
-    const res = await invoke()
+  test('no args at all → isError', async () => {
+    const res = await invoke({})
     expect(res.isError).toBe(true)
   })
 
-  test('unknown $SLAYZONE_SESSION_ID → no task id → isError', async () => {
-    resetEnv()
-    process.env.SLAYZONE_SESSION_ID = crypto.randomUUID()
-    const res = await invoke()
+  test('unknown session_id → no task id → isError', async () => {
+    const res = await invoke({ session_id: crypto.randomUUID() })
     expect(res.isError).toBe(true)
   })
 })
-
-resetEnv()
-if (savedTaskIdEnv !== undefined) process.env.SLAYZONE_TASK_ID = savedTaskIdEnv
-if (savedSessionIdEnv !== undefined) process.env.SLAYZONE_SESSION_ID = savedSessionIdEnv
 
 h.cleanup()
