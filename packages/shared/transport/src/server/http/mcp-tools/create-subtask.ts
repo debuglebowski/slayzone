@@ -36,7 +36,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       due_date: z.string().nullable().optional().describe('Due date ISO string (null to clear)')
     },
     async ({ parent_task_id, due_date, title, description, status, priority, assignee }) => {
-      const resolvedParentId = resolveCurrentTaskId(parent_task_id)
+      const resolvedParentId = await resolveCurrentTaskId(deps.db, parent_task_id)
       if (!resolvedParentId) {
         return {
           content: [

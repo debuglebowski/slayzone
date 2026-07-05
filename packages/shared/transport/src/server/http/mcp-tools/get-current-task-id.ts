@@ -14,7 +14,7 @@ export function registerGetCurrentTaskIdTool(server: McpServer, deps: McpToolsDe
         .describe('Optional explicit task ID (recommended: pass $SLAYZONE_TASK_ID)')
     },
     async ({ task_id }) => {
-      const resolvedTaskId = resolveCurrentTaskId(task_id)
+      const resolvedTaskId = await resolveCurrentTaskId(deps.db, task_id)
       if (!resolvedTaskId) {
         return {
           content: [

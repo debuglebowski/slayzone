@@ -183,6 +183,9 @@ run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/cre
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/delete-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/unarchive-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/update-task.test.ts
+# Warm-pool session → task fallback for MCP tools (mirrors the CLI/REST fallback above).
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/get-current-task-id.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/create-subtask.test.ts
 run_test_electron_loader packages/apps/cli/test/tasks-rest.test.ts
 
 # CLI command tests (need Electron Node for better-sqlite3 + ESM interop).
