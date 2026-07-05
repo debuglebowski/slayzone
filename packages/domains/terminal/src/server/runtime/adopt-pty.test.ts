@@ -35,6 +35,7 @@ interface FakePty {
   pid: number
   process: string
   written: string[]
+  resized: [number, number][]
   spawnedFresh: boolean
   onData: (cb: (d: string) => void) => { dispose: () => void }
   onExit: (cb: (e: { exitCode: number }) => void) => { dispose: () => void }
@@ -47,6 +48,7 @@ function makeFakePty(): FakePty {
     pid: 4242,
     process: 'zsh',
     written: [],
+    resized: [],
     spawnedFresh: false,
     onData() {
       return { dispose() {} }
@@ -58,7 +60,9 @@ function makeFakePty(): FakePty {
       this.written.push(s)
     },
     kill() {},
-    resize() {}
+    resize(c, r) {
+      this.resized.push([c, r])
+    }
   }
 }
 
@@ -142,6 +146,53 @@ await test('adopt: seeds the RingBuffer with the warm scrollback', async () => {
   killPty(sessionId)
 })
 
+await test('adopt: resizes the warm pty to the tab\'s real dimensions', async () => {
+  // The warm pool spawns the shell with no cols/rows (placeholder 80x24) — adoption
+  // must apply the tab's actual requested size, or the already-running agent's
+  // first paint is laid out for the wrong terminal size.
+  const fake = makeFakePty()
+  const sessionId = 'taskE:taskE'
+  await createPty({
+    win: fakeWin,
+    sessionId,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    conversationId: 'conv-5',
+    initialCommand: 'claude --session-id {id} {flags}',
+    defaultFlags: '--allow-dangerously-skip-permissions',
+    cols: 217,
+    rows: 53,
+    adoptPty: { pty: fake as unknown as IPty, seedBuffer: 'PROMPT$ ' }
+  })
+  expect(
+    fake.resized.some(([c, r]) => c === 217 && r === 53),
+    `pty not resized to requested dims: ${JSON.stringify(fake.resized)}`
+  )
+  killPty(sessionId)
+})
+
+await test('adopt: resizes to the 80x24 default when the tab requests no explicit size', async () => {
+  const fake = makeFakePty()
+  const sessionId = 'taskF:taskF'
+  await createPty({
+    win: fakeWin,
+    sessionId,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    conversationId: 'conv-6',
+    initialCommand: 'claude --session-id {id} {flags}',
+    defaultFlags: '--allow-dangerously-skip-permissions',
+    adoptPty: { pty: fake as unknown as IPty, seedBuffer: 'PROMPT$ ' }
+  })
+  expect(
+    fake.resized.some(([c, r]) => c === 80 && r === 24),
+    `pty not resized to default dims: ${JSON.stringify(fake.resized)}`
+  )
+  killPty(sessionId)
+})
+
 await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled session (B4)', async () => {
   // Real in-memory db so we can assert the bind actually happened.
   const raw = new Database(':memory:')
@@ -185,6 +236,8 @@ await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled
       initialCommand: 'claude --session-id {id} {flags}',
       defaultFlags: '--x',
       initialPrompt: 'HELLO-PROMPT',
+      cols: 180,
+      rows: 45,
       adoptPty: {
         pty: fake as unknown as IPty,
         preWarmedAgent: true,
@@ -192,6 +245,10 @@ await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled
         conversationId: 'convPool'
       }
     })
+    expect(
+      fake.resized.some(([c, r]) => c === 180 && r === 45),
+      `pre-warmed adoption did not resize to real dims: ${JSON.stringify(fake.resized)}`
+    )
     const cmd = fake.written.join('')
     // The agent is already running — it must NOT receive an exec/export (that
     // would be typed into its live TUI as input).

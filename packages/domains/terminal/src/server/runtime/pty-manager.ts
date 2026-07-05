@@ -1591,6 +1591,13 @@ export async function createPty(
       syncQueryPending: '',
       lastEmittedTitle: ''
     })
+    // Adoption: the warm shell was spawned before any tab existed, so it has no
+    // real cols/rows to size to — it's stuck at spawnLoginShell's placeholder
+    // default. Resize to the tab's actual dimensions now that we know them, so
+    // the already-running agent's first paint isn't laid out for the wrong size.
+    if (opts.adoptPty) {
+      resizePty(sessionId, opts.cols ?? 80, opts.rows ?? 24)
+    }
     // Adoption: seed the fresh RingBuffer with whatever the warm shell already
     // emitted (its rc prompt), so getBufferSince / hibernation history stay consistent.
     if (opts.adoptPty?.seedBuffer) {
