@@ -14,27 +14,28 @@ import {
   openTaskTerminal,
   runCommand,
   switchTerminalMode,
+  waitForBufferContains,
   waitForPtySession
 } from '../fixtures/terminal'
 const crashModeId = 'crash-overlay-e2e'
 
 // ─── Crash overlay ────────────────────────────────────────────────────────────
 
-// QUARANTINED 2026-05-16: custom mode with initialCommand=null no longer
-// auto-spawns PTY; beforeAll's waitForPtySession times out. All 4 tests in
-// this describe depend on the spawned PTY. Skip until the mode contract is
-// updated.
-// DEFER 2026-06-23 (serial describe — can't cherry-pick): the crash-trigger test
-// ('overlay appears after terminal crash') is flaky (custom-mode/idle-gate spawn), and
-// the later tests (Retry/Doctor buttons, etc.) depend on the crash it produces. Fix the
-// crash trigger (startAgentTerminal + initialCommand contract) for the whole describe. See plan.
-test.describe.skip('Terminal crash overlay', () => {
+test.describe('Terminal crash overlay', () => {
     let projectAbbrev: string
     let taskId: string
     let sessionId: string
 
     test.beforeAll(async ({ mainWindow }) => {
       await resetApp(mainWindow)
+      // AI-mode terminals are idle-gated (TerminalStarter). The custom mode's
+      // starter button ("Open Crash Overlay E2E") doesn't match
+      // startAgentTerminal's built-in-agent regex, and every Retry remount
+      // would re-hit the gate anyway (exit clears `was_spawned`) — seed
+      // auto-start so mounts spawn directly. The gate is 93/97's subject.
+      await mainWindow.evaluate(() =>
+        window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+      )
       await mainWindow.evaluate(
         (id) =>
           window.getTrpcVanillaClient().pty.modesCreate.mutate({
@@ -84,6 +85,13 @@ test.describe.skip('Terminal crash overlay', () => {
         (id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }),
         crashModeId
       )
+      await mainWindow
+        .evaluate(() =>
+          window
+            .getTrpcVanillaClient()
+            .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+        )
+        .catch(() => {})
     })
 
     const ensureLiveTerminal = async (mainWindow: import('@playwright/test').Page) => {
@@ -97,6 +105,13 @@ test.describe.skip('Terminal crash overlay', () => {
 
     const crashTerminal = async (mainWindow: import('@playwright/test').Page) => {
       await ensureLiveTerminal(mainWindow)
+      // Readiness gate: the session registers before the shell finishes its
+      // startup, so an immediate `exit 7` can land while the shell isn't
+      // processing input yet (flaky overlay). Prove the shell is live with an
+      // echo round-trip first.
+      const ready = `CRASH_READY_${Date.now()}`
+      await runCommand(mainWindow, sessionId, `echo ${ready}`)
+      await waitForBufferContains(mainWindow, sessionId, ready)
       await runCommand(mainWindow, sessionId, 'exit 7')
     }
 
@@ -111,11 +126,11 @@ test.describe.skip('Terminal crash overlay', () => {
       await crashTerminal(mainWindow)
 
       await expect(mainWindow.getByRole('button', { name: 'Retry' }).last()).toBeVisible({
-        timeout: 3_000
+        timeout: 10_000
       })
 
       await expect(mainWindow.getByRole('button', { name: 'Doctor' }).last()).toBeVisible({
-        timeout: 3_000
+        timeout: 10_000
       })
     })
 

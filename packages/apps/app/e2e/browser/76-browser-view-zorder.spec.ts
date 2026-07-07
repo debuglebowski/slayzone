@@ -191,12 +191,7 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await testInvoke(mainWindow, 'browser:show-all')
   })
 
-  // DEFER 2026-06-23 (real, not contention): after a search-driven switch to task B,
-  // task A's view stays entry.visible=true → isViewNativelyVisible never flips false.
-  // Native hide is rAF/DOM-placeholder driven (see feedback_webcontentsview_zorder);
-  // this open-path doesn't trigger the inactive-view hide. Needs WCV hide-mechanism
-  // review (hide-on-inactive vs offscreen-bounds) before this assertion is valid.
-  test.skip('inactive task views are offscreen (Bug 2)', async ({ mainWindow }) => {
+  test('inactive task views are offscreen (Bug 2)', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewIdA = await getActiveViewId(mainWindow, taskId)
 
@@ -215,16 +210,27 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await openTaskViaSearch(mainWindow, 'ZOrder task B')
     await ensureBrowserPanelVisible(mainWindow)
 
-    // Task A's view should become hidden (task A is inactive). The native hide is
-    // applied asynchronously via Chromium's compositor, so poll rather than reading
-    // once after a fixed wait.
+    // Contract (useBrowserViewBounds offScreen): when the parent task tab hides,
+    // the active browser sub-tab KEEPS PAINTING (video keeps playing) and is
+    // parked off-screen at (-20000,-20000) — it does NOT flip visible=false.
+    // Poll bounds rather than reading once: the park is applied by a renderer
+    // effect after the tab switch.
     await expect
       .poll(
-        async () =>
-          (await testInvoke(mainWindow, 'browser:is-view-natively-visible', viewIdA)) as boolean,
+        async () => {
+          const bounds = (await testInvoke(
+            mainWindow,
+            'browser:get-actual-native-bounds',
+            viewIdA
+          )) as { x: number; y: number } | null
+          return bounds ? bounds.x <= -10_000 && bounds.y <= -10_000 : false
+        },
         { timeout: 10_000 }
       )
-      .toBe(false)
+      .toBe(true)
+    expect(
+      (await testInvoke(mainWindow, 'browser:is-view-natively-visible', viewIdA)) as boolean
+    ).toBe(true)
 
     // Task B's views should be on screen
     const viewsB = await getViewsForTask(mainWindow, t2.id)
@@ -237,16 +243,20 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
       expect(boundsB.x).toBeGreaterThanOrEqual(0)
     }
 
-    // Switch back to task A — its views should restore
+    // Switch back to task A — its views should restore on-screen
     await openTaskViaSearch(mainWindow, 'ZOrder task')
-    await mainWindow.waitForTimeout(500)
-    const boundsAAfter = (await testInvoke(
-      mainWindow,
-      'browser:get-actual-native-bounds',
-      viewIdA
-    )) as { x: number } | null
-    if (boundsAAfter) {
-      expect(boundsAAfter.x).toBeGreaterThanOrEqual(0)
-    }
+    await expect
+      .poll(
+        async () => {
+          const bounds = (await testInvoke(
+            mainWindow,
+            'browser:get-actual-native-bounds',
+            viewIdA
+          )) as { x: number } | null
+          return bounds ? bounds.x >= 0 : false
+        },
+        { timeout: 10_000 }
+      )
+      .toBe(true)
   })
 })

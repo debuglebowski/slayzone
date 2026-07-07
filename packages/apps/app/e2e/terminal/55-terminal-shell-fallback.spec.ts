@@ -14,6 +14,14 @@ test.describe('Terminal shell fallback on CLI crash', () => {
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
+    // AI-mode terminals are idle-gated (TerminalStarter). startAgentTerminal's
+    // starter-button regex only knows built-in agent labels, so a custom mode
+    // ("Open Failing CLI") would never get clicked — seed auto-start instead so
+    // the terminal mounts (and the failing CLI spawns) without the gate. The
+    // gate itself is 93/97's subject, not this spec's.
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+    )
     const s = seed(mainWindow)
     const p = await s.createProject({
       name: 'Shell Fallback',
@@ -55,13 +63,14 @@ test.describe('Terminal shell fallback on CLI crash', () => {
         .evaluate((id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }), customModeId)
         .catch(() => {})
     }
+    await mainWindow
+      .evaluate(() =>
+        window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+      )
+      .catch(() => {})
   })
 
-  // DEFER 2026-06-23 (still fails, real): shell-fallback recovery banner never lands
-  // after CLI exits. Add startAgentTerminal (idle-gate) to spawn first, then verify
-  // the custom-mode `initialCommand:false` shell-fallback contract (shouldShellFallback
-  // in pty-manager). See plan.
-  test.skip('spawns interactive shell after CLI exits non-zero', async ({ mainWindow }) => {
+  test('spawns interactive shell after CLI exits non-zero', async ({ mainWindow }) => {
     const sessionId = getMainSessionId(taskId)
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Crash recovery task' })

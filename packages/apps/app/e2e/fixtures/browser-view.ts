@@ -67,6 +67,15 @@ export async function focusForAppShortcut(page: Page): Promise<void> {
       .click({ position: { x: 12, y: 12 } })
       .catch(() => {})
   }
+  // The corner click can land on a drag region / no-op area and leave a text
+  // input focused (e.g. the URL bar autofocuses when the browser panel opens);
+  // hotkeys are ignored while form fields have focus. Blur explicitly.
+  await page
+    .evaluate(() => {
+      const el = document.activeElement as HTMLElement | null
+      if (el && el !== document.body) el.blur?.()
+    })
+    .catch(() => {})
 }
 
 /**
@@ -107,9 +116,21 @@ export async function ensureBrowserPanelHidden(page: Page): Promise<void> {
 // ── Task navigation ─────────────────────────────────────────────────
 
 export async function openTaskViaSearch(page: Page, title: string): Promise<void> {
-  await focusForAppShortcut(page)
-  await pressShortcut(page, 'search')
   const input = page.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
+  // Right after a task switch the new task's TaskDetailPage isn't shortcut-active
+  // yet (same propagation race ensureBrowserPanelVisible retries for), so a single
+  // mod+k can be swallowed. Retry press→appear before failing.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await focusForAppShortcut(page)
+    await pressShortcut(page, 'search')
+    if (
+      await input
+        .waitFor({ state: 'visible', timeout: 1_000 })
+        .then(() => true)
+        .catch(() => false)
+    )
+      break
+  }
   await expect(input).toBeVisible()
   await input.fill(title)
   await page.keyboard.press('Enter')

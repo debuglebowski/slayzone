@@ -91,13 +91,29 @@ function initGitDir() {
 async function ensureGitPanelVisible(page: import('@playwright/test').Page) {
   const target = page.locator('[data-testid="task-git-panel"]:visible').last()
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (await target.isVisible({ timeout: 500 }).catch(() => false)) return
-    await page.keyboard.press('Escape').catch(() => {})
-    await page
-      .locator('#root')
-      .click({ position: { x: 16, y: 16 } })
-      .catch(() => {})
-    await page.keyboard.press('Meta+g')
+    if (await target.isVisible().catch(() => false)) return
+    // Prefer the header PanelToggle "Git" button — a deterministic, focus-
+    // independent open. The old blind Meta+g retry could land a press, miss
+    // the short visibility window while the panel mounted, and the next
+    // attempt's press would toggle it straight back off.
+    const gitToggle = page.locator('button:visible').filter({ hasText: /^Git\b/ }).first()
+    if (await gitToggle.isVisible().catch(() => false)) {
+      await gitToggle.click().catch(() => {})
+    } else {
+      await page.keyboard.press('Escape').catch(() => {})
+      await page
+        .locator('#root')
+        .click({ position: { x: 16, y: 16 } })
+        .catch(() => {})
+      await page.keyboard.press('Meta+g')
+    }
+    // Wait generously for the mount before concluding the attempt failed —
+    // re-triggering too early is what used to toggle the panel back off.
+    const appeared = await target
+      .waitFor({ state: 'visible', timeout: 3_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (appeared) return
   }
   await expect(target).toBeVisible({ timeout: 5_000 })
 }
@@ -220,13 +236,7 @@ test.describe('Clean merge UI', () => {
     await ensureGitPanelVisible(mainWindow)
   })
 
-  // DEFER 2026-06-23 (infra-flake, not product bug): even at workers:1, this
-  // describe's beforeAll `ensureGitPanelVisible` fails at file:102 — the Meta+g
-  // keyboard toggle races the openTaskById active-tab switch, so the git panel
-  // never opens for THIS task. Needs a deterministic panel-open (store/button) in
-  // the helper instead of a focus-dependent keyboard toggle. Merge-via-UI behavior
-  // itself is fine. ('Git init' describe below now passes.)
-  test.skip('merge via UI completes and merges feature commit onto parent branch', async ({
+  test('merge via UI completes and merges feature commit onto parent branch', async ({
     mainWindow
   }) => {
     const main = getMainBranch()

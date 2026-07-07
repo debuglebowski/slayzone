@@ -2,7 +2,10 @@
  * Tests that webview popup/new-window handling works correctly:
  * - OAuth popups (window.open with features) create real BrowserWindows
  * - Regular links (target="_blank") create new browser tabs, not windows
- * - Handoff-enabled webviews (Figma) deny all popups at the main process level
+ * - Web panels (WebContentsView): window.open WITH features is allowed (real
+ *   BrowserWindow on the panel session so OAuth cookies propagate), while
+ *   featureless popups are denied in main and routed through the renderer's
+ *   handoff-aware popup handler (in-panel / openExternal / suppressed)
  * - Child popup windows cannot spawn grandchildren
  * - Popup windows are cleaned up when parent webview is destroyed
  * - Popup windows share session with parent webview
@@ -64,15 +67,20 @@ const execInBrowserWebview = async (mainWindow: Page, taskId: string, code: stri
   return testInvoke(mainWindow, 'browser:execute-js', viewId, code)
 }
 
-/** Execute JavaScript inside the web panel's <webview>. */
-const execInWebPanelWebview = async (mainWindow: Page, code: string) =>
-  mainWindow.evaluate((c) => {
-    const wv = document.querySelector('webview[partition="persist:web-panels"]') as
-      | (HTMLElement & { executeJavaScript: (code: string) => Promise<unknown> })
-      | null
-    if (!wv) return 'no-webview'
-    return wv.executeJavaScript(c)
-  }, code)
+/** Execute JavaScript inside a web panel's WebContentsView (main world, user gesture). */
+const execInWebPanelView = async (mainWindow: Page, panelId: string, code: string) =>
+  mainWindow.evaluate(
+    async ({ pid, js }) => {
+      type V = { viewId: string; tabId: string; kind: string }
+      const client = window.getTrpcVanillaClient()
+      const views = (await client.app.browser.listViews.query()) as V[]
+      const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
+      const wp = matches[matches.length - 1]
+      if (!wp) return 'no-webview'
+      return client.app.browser.executeJs.mutate({ viewId: wp.viewId, code: js })
+    },
+    { pid: panelId, js: code }
+  )
 
 /** Count visible browser panel tabs (exclude the "+" button). */
 const getBrowserTabCount = async (mainWindow: Page) => tabEntries(mainWindow).count()
@@ -80,8 +88,12 @@ const getBrowserTabCount = async (mainWindow: Page) => tabEntries(mainWindow).co
 const ensureBrowserPanel = ensureBrowserPanelVisible
 
 // ---------------------------------------------------------------------------
-// Web panel helpers (pattern from 61-web-panel-handoff-routing)
+// Web panel helpers — WCV era (pattern from 61-web-panel-handoff-routing)
 // ---------------------------------------------------------------------------
+// Web panels migrated from <webview> to WebContentsView: there is no DOM
+// element to query — target the main-process BrowserViewManager via the
+// app.browser tRPC router instead. Views are matched by tabId (= panel id)
+// so a stale panel from an earlier describe can never be picked up.
 
 const clearOpenExternalCalls = async (electronApp: ElectronApp) => {
   await electronApp.evaluate(() => {
@@ -96,49 +108,76 @@ const getOpenExternalCalls = async (electronApp: ElectronApp) =>
     return g.__popupTestOpenExternalCalls ?? []
   })
 
-const getWebPanelUrl = async (mainWindow: Page) =>
-  mainWindow.evaluate(() => {
-    const wv = document.querySelector('webview[partition="persist:web-panels"]') as
-      | (HTMLElement & { getURL: () => string })
-      | null
-    return wv?.getURL() ?? 'no-webview'
-  })
+/** Resolve the WCV viewId for a web panel (by panel id). */
+const getWebPanelViewId = async (mainWindow: Page, panelId: string) =>
+  mainWindow.evaluate(async (pid) => {
+    type V = { viewId: string; tabId: string; kind: string }
+    const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+    const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
+    return matches.length > 0 ? matches[matches.length - 1].viewId : null
+  }, panelId)
 
-const resetWebPanelToAboutBlank = async (mainWindow: Page) =>
-  mainWindow.evaluate(async () => {
-    const wv = document.querySelector('webview[partition="persist:web-panels"]') as
-      | (HTMLElement & { loadURL: (url: string) => void; getURL: () => string })
-      | null
-    if (!wv) return 'no-webview'
-    wv.loadURL('about:blank')
+// NOTE: a WCV that never loaded a page reports getURL() === '' —
+// BrowserViewManager.createView deliberately skips loading 'about:blank'.
+// getWebPanelUrl normalizes '' to 'about:blank' ("blank panel" either way),
+// but resetWebPanelToAboutBlank must force a REAL about:blank load for '':
+// executeJavaScript on a never-loaded frame queues forever (popup helpers hang).
+const getWebPanelUrl = async (mainWindow: Page, panelId: string) =>
+  mainWindow.evaluate(async (pid) => {
+    type V = { viewId: string; tabId: string; kind: string; url: string }
+    const views = (await window.getTrpcVanillaClient().app.browser.listViews.query()) as V[]
+    const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
+    const wp = matches[matches.length - 1]
+    if (!wp) return 'no-webview'
+    return wp.url === '' ? 'about:blank' : wp.url
+  }, panelId)
+
+const resetWebPanelToAboutBlank = async (mainWindow: Page, panelId: string) =>
+  mainWindow.evaluate(async (pid) => {
+    type V = { viewId: string; tabId: string; kind: string; url: string }
+    const client = window.getTrpcVanillaClient()
+    const views = (await client.app.browser.listViews.query()) as V[]
+    const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
+    const wp = matches[matches.length - 1]
+    if (!wp) return 'no-webview'
+    // '' = never loaded — must still navigate so the frame gets a real document.
+    if (wp.url === 'about:blank') return 'about:blank'
+    await client.app.browser.navigate.mutate({ viewId: wp.viewId, url: 'about:blank' })
     await new Promise((resolve) => setTimeout(resolve, 700))
-    return wv.getURL()
-  })
+    const after = (await client.app.browser.listViews.query()) as V[]
+    const url = after.find((v) => v.viewId === wp.viewId)?.url
+    if (url === undefined) return 'no-webview'
+    return url
+  }, panelId)
 
-/** Dispatch a synthetic new-window event on the web panel webview (renderer-side only). */
-const dispatchWebPanelNewWindow = async (
-  mainWindow: Page,
-  popupUrl: string,
-  disposition?: string
-) =>
+/**
+ * Trigger a REAL `window.open(url)` (no features → 'foreground-tab' disposition)
+ * inside the web panel WCV, wait for routing to settle, and return the panel URL.
+ * Featureless popups are denied in main and emitted as 'web-panel:popup-request'
+ * for the renderer's handoff-aware routing — this replaces the dead synthetic
+ * <webview> 'new-window' CustomEvent path.
+ * `void` so executeJavaScript never tries to serialize a WindowProxy result.
+ */
+const triggerPopupFromWebPanel = async (mainWindow: Page, panelId: string, popupUrl: string) =>
   mainWindow.evaluate(
-    async ({ targetUrl, disp }) => {
-      const wv = document.querySelector('webview[partition="persist:web-panels"]') as
-        | (HTMLElement & { getURL: () => string })
-        | null
-      if (!wv) return 'no-webview'
-      const detail: Record<string, unknown> = { url: targetUrl }
-      if (disp) detail.disposition = disp
-      wv.dispatchEvent(new CustomEvent('new-window', { detail }))
-      const deadline = Date.now() + 10_000
-      while (Date.now() < deadline) {
-        const url = wv.getURL()
-        if (url && url !== 'about:blank') return url
-        await new Promise((resolve) => setTimeout(resolve, 100))
-      }
-      return wv.getURL()
+    async ({ pid, targetUrl }) => {
+      type V = { viewId: string; tabId: string; kind: string; url: string }
+      const client = window.getTrpcVanillaClient()
+      const views = (await client.app.browser.listViews.query()) as V[]
+      const matches = views.filter((v) => v.kind === 'web-panel' && v.tabId === pid)
+      const wp = matches[matches.length - 1]
+      if (!wp) return 'no-webview'
+      await client.app.browser.executeJs.mutate({
+        viewId: wp.viewId,
+        code: `void window.open(${JSON.stringify(targetUrl)}, '_blank')`
+      })
+      await new Promise((resolve) => setTimeout(resolve, 900))
+      const after = (await client.app.browser.listViews.query()) as V[]
+      const url = after.find((v) => v.viewId === wp.viewId)?.url
+      if (url === undefined) return 'no-webview'
+      return url === '' ? 'about:blank' : url
     },
-    { targetUrl: popupUrl, disp: disposition }
+    { pid: panelId, targetUrl: popupUrl }
   )
 
 /** Patch shell.openExternal to record calls instead of opening. */
@@ -187,12 +226,12 @@ const restoreOpenExternal = async (electronApp: ElectronApp) => {
   })
 }
 
-/** Navigate to task + open a web panel by shortcut. */
+/** Navigate to task + open a web panel via its header toggle button. */
 const openWebPanel = async (
   mainWindow: Page,
   taskTitle: string,
   panelName: string,
-  panelShortcut: string
+  panelId: string
 ) => {
   await openTaskViaSearch(mainWindow, taskTitle)
 
@@ -201,16 +240,22 @@ const openWebPanel = async (
     .first()
     .waitFor({ timeout: 5_000 })
 
-  const titleEl = mainWindow.locator('h1, [data-testid="task-title"]').first()
-  if (await titleEl.isVisible().catch(() => false)) await titleEl.click()
-  await mainWindow.keyboard.press(`Meta+${panelShortcut}`)
-  await expect(mainWindow.locator('span').filter({ hasText: panelName }).last()).toBeVisible({
-    timeout: 5_000
-  })
-  // Initial WebContentsView URL may be empty before first navigation completes.
+  // Open via the header toggle button, NOT the seeded keyboard shortcut:
+  // built-in panel bindings are matched first in TaskDetailPage's keydown
+  // chain, so a colliding letter silently toggles the wrong panel.
+  const panelToggle = mainWindow.locator('button').filter({ hasText: panelName }).last()
+  await expect(panelToggle).toBeVisible({ timeout: 5_000 })
+  await panelToggle.click()
+
+  // Wait for the WCV to register, then force a REAL about:blank load —
+  // createView skips loading 'about:blank', and executeJavaScript on a
+  // document-less frame queues forever.
   await expect
-    .poll(() => getWebPanelUrl(mainWindow), { timeout: 5_000 })
-    .toMatch(/^(about:blank|)$/)
+    .poll(() => getWebPanelViewId(mainWindow, panelId), { timeout: 10_000 })
+    .not.toBeNull()
+  await expect
+    .poll(() => resetWebPanelToAboutBlank(mainWindow, panelId), { timeout: 10_000 })
+    .toBe('about:blank')
 }
 
 // ===========================================================================
@@ -474,14 +519,17 @@ test.describe
 // Group 2: Web Panel WITH handoff policy (Figma)
 // ===========================================================================
 
-// QUARANTINED 2026-05-16: web panels migrated from <webview> to WebContentsView.
-// openWebPanel helper queries DOM webview which no longer exists. Same root
-// cause as 61-web-panel-handoff-routing. Feature works in app.
-// DEFER 2026-06-23 (Phase-4 WCV + batch-flaky): window.open behavior in web-panel
-// views changed with webview→WebContentsView; the with/without-features popup tests
-// flake under batch load (real BrowserWindow timing). Migrate the whole describe to the
-// WCV popup path (or remove dead <webview> window.open cases). See plan.
-test.describe.skip('Webview popup handling — Web panel with handoff policy', () => {
+// MIGRATED 2026-07-03 (webview → WebContentsView):
+// - Helpers target the main-process WCV via app.browser tRPC (DOM <webview> is
+//   gone) and force a real about:blank load before any executeJavaScript.
+// - window.open() WITH features is now ALLOWED for web panels regardless of
+//   handoff policy (real BrowserWindow on the panel session so OAuth cookies
+//   propagate back) — the old "with features denied in handoff webview"
+//   expectation asserted a dead <webview> behavior.
+// - The synthetic <webview> 'new-window' CustomEvent path is dead; renderer
+//   routing now hangs off main's 'web-panel:popup-request' event, exercised
+//   here via real featureless window.open() calls.
+test.describe('Webview popup handling — Web panel with handoff policy', () => {
     const PANEL_ID = 'web:popup-handoff'
     const PANEL_NAME = 'Popup Handoff'
     const PANEL_SHORTCUT = 'y'
@@ -542,7 +590,7 @@ test.describe.skip('Webview popup handling — Web panel with handoff policy', (
       )
       await s.refreshData()
 
-      await openWebPanel(mainWindow, 'Popup handoff task', PANEL_NAME, PANEL_SHORTCUT)
+      await openWebPanel(mainWindow, 'Popup handoff task', PANEL_NAME, PANEL_ID)
       baselineWindowIds = await getWindowIds(electronApp)
     })
 
@@ -557,36 +605,43 @@ test.describe.skip('Webview popup handling — Web panel with handoff policy', (
     test.beforeEach(async ({ electronApp, mainWindow }) => {
       await clearOpenExternalCalls(electronApp)
       await expect
-        .poll(() => resetWebPanelToAboutBlank(mainWindow), { timeout: 5_000 })
+        .poll(() => resetWebPanelToAboutBlank(mainWindow, PANEL_ID), { timeout: 5_000 })
         .toBe('about:blank')
     })
 
     // --- Main process tests (real window.open via executeJavaScript) ---
 
-    test('window.open() with features denied in handoff webview (main process)', async ({
+    test('window.open() with features creates real BrowserWindow (handoff panel, OAuth allowed)', async ({
       electronApp,
       mainWindow
     }) => {
-      const result = await execInWebPanelWebview(
+      const result = await execInWebPanelView(
         mainWindow,
+        PANEL_ID,
         `new Promise((resolve) => {
-        const popup = window.open('https://accounts.google.com/oauth', 'auth', 'width=500,height=600')
+        const popup = window.open('https://example.com/oauth-handoff', 'auth', 'width=500,height=600')
         resolve(JSON.stringify({ popupIsNull: popup === null }))
       })`
       )
       const parsed = JSON.parse(result as string)
-      expect(parsed.popupIsNull).toBe(true)
+      expect(parsed.popupIsNull).toBe(false)
 
-      const newWindows = await getNewWindowIds(electronApp, baselineWindowIds)
-      expect(newWindows).toHaveLength(0)
+      await expect
+        .poll(() => getNewWindowIds(electronApp, baselineWindowIds), { timeout: 10_000 })
+        .toHaveLength(1)
+
+      // new-window popups never route through the renderer popup handler
+      const calls = await getOpenExternalCalls(electronApp)
+      expect(calls).toHaveLength(0)
     })
 
-    test('window.open() without features denied in handoff webview (main process)', async ({
+    test('window.open() without features denied in handoff panel (main process)', async ({
       electronApp,
       mainWindow
     }) => {
-      const result = await execInWebPanelWebview(
+      const result = await execInWebPanelView(
         mainWindow,
+        PANEL_ID,
         `new Promise((resolve) => {
         const popup = window.open('https://example.com/nofeatures')
         resolve(JSON.stringify({ popupIsNull: popup === null }))
@@ -595,20 +650,31 @@ test.describe.skip('Webview popup handling — Web panel with handoff policy', (
       const parsed = JSON.parse(result as string)
       expect(parsed.popupIsNull).toBe(true)
 
+      // Denied in main, routed to the renderer: cross-host (outside figma.com
+      // scope) → openExternal. Polling this also drains the async routing so
+      // it can't leak into the next test's openExternal call log.
+      await expect
+        .poll(() => getOpenExternalCalls(electronApp), { timeout: 5_000 })
+        .toHaveLength(1)
+
       const newWindows = await getNewWindowIds(electronApp, baselineWindowIds)
       expect(newWindows).toHaveLength(0)
     })
 
-    // --- Renderer tests (synthetic new-window events) ---
+    // --- Renderer routing tests (web-panel:popup-request via real window.open) ---
 
     test('same-host popup loads in-panel (renderer)', async ({ electronApp, mainWindow }) => {
-      const currentUrl = await dispatchWebPanelNewWindow(
+      await triggerPopupFromWebPanel(
         mainWindow,
+        PANEL_ID,
         'https://www.figma.com/oauth/authorize?client_id=popup-test'
       )
 
-      expect(currentUrl).not.toBe('about:blank')
-      expect(currentUrl).toContain('figma.com')
+      // Poll: navigating the WCV to an external URL (figma.com) can outlast the
+      // helper's fixed post-trigger wait when the machine is loaded.
+      await expect
+        .poll(() => getWebPanelUrl(mainWindow, PANEL_ID), { timeout: 15_000 })
+        .toContain('figma.com')
 
       const calls = await getOpenExternalCalls(electronApp)
       expect(calls).toHaveLength(0)
@@ -616,7 +682,7 @@ test.describe.skip('Webview popup handling — Web panel with handoff policy', (
 
     test('cross-host popup opens externally (renderer)', async ({ electronApp, mainWindow }) => {
       const targetUrl = 'https://example.com/popup-cross-host'
-      const currentUrl = await dispatchWebPanelNewWindow(mainWindow, targetUrl)
+      const currentUrl = await triggerPopupFromWebPanel(mainWindow, PANEL_ID, targetUrl)
 
       expect(currentUrl).toBe('about:blank')
 
@@ -626,8 +692,9 @@ test.describe.skip('Webview popup handling — Web panel with handoff policy', (
     })
 
     test('loopback popup suppressed (renderer)', async ({ electronApp, mainWindow }) => {
-      const currentUrl = await dispatchWebPanelNewWindow(
+      const currentUrl = await triggerPopupFromWebPanel(
         mainWindow,
+        PANEL_ID,
         'http://127.0.0.1:38495/handoff-popup'
       )
 
@@ -642,10 +709,11 @@ test.describe.skip('Webview popup handling — Web panel with handoff policy', (
 // Group 3: Web Panel WITHOUT handoff policy
 // ===========================================================================
 
-// QUARANTINED 2026-05-16: see above — web panel migration to WebContentsView.
-// DEFER 2026-06-23 (Phase-4 WCV + batch-flaky): see note on the with-handoff describe
-// above — same webview→WebContentsView window.open migration. See plan.
-test.describe.skip('Webview popup handling — Web panel without handoff policy', () => {
+// MIGRATED 2026-07-03 (webview → WebContentsView): see note on the
+// with-handoff describe above — same WCV helper migration; dispositions are
+// now produced by real window.open() calls (with features → 'new-window',
+// featureless → 'foreground-tab') instead of synthetic <webview> events.
+test.describe('Webview popup handling — Web panel without handoff policy', () => {
     const PANEL_ID = 'web:popup-nohandoff'
     const PANEL_NAME = 'NoHandoff Panel'
     const PANEL_SHORTCUT = 'y'
@@ -704,7 +772,7 @@ test.describe.skip('Webview popup handling — Web panel without handoff policy'
       )
       await s.refreshData()
 
-      await openWebPanel(mainWindow, 'No-handoff popup task', PANEL_NAME, PANEL_SHORTCUT)
+      await openWebPanel(mainWindow, 'No-handoff popup task', PANEL_NAME, PANEL_ID)
       baselineWindowIds = await getWindowIds(electronApp)
     })
 
@@ -716,18 +784,22 @@ test.describe.skip('Webview popup handling — Web panel without handoff policy'
       await closeNewWindows(electronApp, baselineWindowIds)
     })
 
-    test.beforeEach(async ({ electronApp }) => {
+    test.beforeEach(async ({ electronApp, mainWindow }) => {
       await clearOpenExternalCalls(electronApp)
+      await expect
+        .poll(() => resetWebPanelToAboutBlank(mainWindow, PANEL_ID), { timeout: 5_000 })
+        .toBe('about:blank')
     })
 
-    // --- Main process test (real window.open via executeJavaScript) ---
+    // --- Main process tests (real window.open via executeJavaScript) ---
 
     test('window.open() with features creates real BrowserWindow (no handoff)', async ({
       electronApp,
       mainWindow
     }) => {
-      const result = await execInWebPanelWebview(
+      const result = await execInWebPanelView(
         mainWindow,
+        PANEL_ID,
         `new Promise((resolve) => {
         const popup = window.open('https://example.com/oauth-no-handoff', 'auth', 'width=500,height=600')
         resolve(JSON.stringify({ popupIsNull: popup === null }))
@@ -737,7 +809,7 @@ test.describe.skip('Webview popup handling — Web panel without handoff policy'
       expect(parsed.popupIsNull).toBe(false)
 
       await expect
-        .poll(() => getNewWindowIds(electronApp, baselineWindowIds), { timeout: 5_000 })
+        .poll(() => getNewWindowIds(electronApp, baselineWindowIds), { timeout: 10_000 })
         .toHaveLength(1)
     })
 
@@ -745,8 +817,9 @@ test.describe.skip('Webview popup handling — Web panel without handoff policy'
       electronApp,
       mainWindow
     }) => {
-      const result = await execInWebPanelWebview(
+      const result = await execInWebPanelView(
         mainWindow,
+        PANEL_ID,
         `new Promise((resolve) => {
         const popup = window.open('https://example.com/no-features-no-handoff')
         resolve(JSON.stringify({ popupIsNull: popup === null }))
@@ -756,17 +829,33 @@ test.describe.skip('Webview popup handling — Web panel without handoff policy'
       // Without features → disposition 'foreground-tab' → denied by main process
       expect(parsed.popupIsNull).toBe(true)
 
+      // Routed to the renderer: no handoff policy → openExternal. Polling this
+      // also drains the async routing before the next test clears the call log.
+      await expect
+        .poll(() => getOpenExternalCalls(electronApp), { timeout: 5_000 })
+        .toHaveLength(1)
+
       const newWindows = await getNewWindowIds(electronApp, baselineWindowIds)
       expect(newWindows).toHaveLength(0)
     })
 
-    // --- Renderer tests (synthetic new-window events) ---
+    // --- Renderer routing tests (web-panel:popup-request via real window.open) ---
 
     test('disposition new-window skips renderer handler (no openExternal)', async ({
       electronApp,
       mainWindow
     }) => {
-      await dispatchWebPanelNewWindow(mainWindow, 'https://example.com/auth-popup', 'new-window')
+      await execInWebPanelView(
+        mainWindow,
+        PANEL_ID,
+        `void window.open('https://example.com/auth-popup', 'auth-nw', 'width=500,height=600')`
+      )
+
+      // Wait for the popup BrowserWindow — proves the open was fully processed
+      // before asserting the renderer handler was skipped.
+      await expect
+        .poll(() => getNewWindowIds(electronApp, baselineWindowIds), { timeout: 10_000 })
+        .toHaveLength(1)
 
       const calls = await getOpenExternalCalls(electronApp)
       expect(calls).toHaveLength(0)
@@ -774,10 +863,17 @@ test.describe.skip('Webview popup handling — Web panel without handoff policy'
 
     test('disposition foreground-tab opens externally', async ({ electronApp, mainWindow }) => {
       const targetUrl = 'https://example.com/foreground-tab-link'
-      await dispatchWebPanelNewWindow(mainWindow, targetUrl, 'foreground-tab')
+      const currentUrl = await triggerPopupFromWebPanel(mainWindow, PANEL_ID, targetUrl)
 
+      expect(currentUrl).toBe('about:blank')
+
+      await expect
+        .poll(() => getOpenExternalCalls(electronApp), { timeout: 5_000 })
+        .toHaveLength(1)
       const calls = await getOpenExternalCalls(electronApp)
-      expect(calls).toHaveLength(1)
       expect(calls[0]?.url).toBe(targetUrl)
+
+      const newWindows = await getNewWindowIds(electronApp, baselineWindowIds)
+      expect(newWindows).toHaveLength(0)
     })
   })

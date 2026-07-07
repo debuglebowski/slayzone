@@ -162,12 +162,7 @@ test.describe('Web panels', () => {
   //    are Electron menu accelerators; k/b/e/g/s are reserved per
   //    RESERVED_PANEL_SHORTCUTS; y/n/h/x/u are predefined panel shortcuts) ──
 
-  // DEFER 2026-06-24: the add+render half is FIXED (savePanelConfig now keeps `order`
-  // complete via mergePanelOrder, so the card appears — see delete-custom test, now
-  // green). Remaining: a freshly-added custom panel's switch defaults unchecked and the
-  // row now exposes two switches (home/task) — decide the correct default-enabled scope,
-  // then assert the right switch. See plan.
-  test.skip('add custom web panel', async ({ mainWindow }) => {
+  test('add custom web panel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
 
@@ -181,7 +176,15 @@ test.describe('Web panels', () => {
 
     const card = findCard(dialog, 'TestPanel')
     await expect(card).toBeVisible({ timeout: 3_000 })
-    await expect(card.getByRole('switch')).toHaveAttribute('data-state', 'checked')
+    // Each row exposes two switches: home-scope (first) and task-scope (last).
+    // Web panels are task-only — the home switch is a disabled placeholder,
+    // always unchecked. The task switch is CHECKED by default for a fresh
+    // custom panel: isPanelEnabled() treats a missing viewEnabled entry as
+    // enabled, and only PREDEFINED externals ship an explicit `false` in
+    // DEFAULT_PANEL_CONFIG. handleAddCustomPanel writes no viewEnabled entry.
+    await expect(card.getByRole('switch').first()).toHaveAttribute('data-state', 'unchecked')
+    await expect(card.getByRole('switch').first()).toBeDisabled()
+    await expect(card.getByRole('switch').last()).toHaveAttribute('data-state', 'checked')
   })
 
   test('enable Figma panel', async ({ mainWindow }) => {
@@ -225,10 +228,7 @@ test.describe('Web panels', () => {
     await openTaskViaSearch(mainWindow, 'WP test task')
   })
 
-  // DEFER 2026-06-24: TestPanel now creates fine, but Cmd+L doesn't surface the
-  // web panel in the task view — needs the custom-shortcut → web-panel-toggle routing
-  // verified (panel must be enabled for the task scope first). See plan.
-  test.skip('Cmd+L toggles custom web panel on', async ({ mainWindow }) => {
+  test('Cmd+L toggles custom web panel on', async ({ mainWindow }) => {
     // Focus a safe element first (avoid webview stealing keystrokes)
     const titleEl = mainWindow.locator('h1, [data-testid="task-title"]').first()
     if (await titleEl.isVisible().catch(() => false)) await titleEl.click()
@@ -287,7 +287,8 @@ test.describe('Web panels', () => {
     })
   })
 
-  // STILL SKIPPED 2026-06-20: depends on 'add custom web panel' (TestPanel not created in settings UI).
+  // TestPanel is normally created by 'add custom web panel' above; the in-test
+  // fallback re-creates it so this test stands alone if that one ever fails.
   test('delete custom TestPanel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)

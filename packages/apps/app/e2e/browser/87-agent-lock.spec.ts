@@ -20,8 +20,14 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SLAY_JS = path.resolve(__dirname, '..', '..', '..', 'cli', 'dist', 'slay.js')
 
+// Fixture pages MUST live under the home directory: the slz-file:// protocol
+// guard rejects file:// paths outside $HOME ("Access denied — Path outside
+// home directory"), silently serving a stub page with no #b button.
+const FIXTURE_BASE = path.join(os.homedir(), '.slayzone-e2e-tmp')
+
 function writeFixture(name: string, body: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-agent-lock-'))
+  fs.mkdirSync(FIXTURE_BASE, { recursive: true })
+  const dir = fs.mkdtempSync(path.join(FIXTURE_BASE, 'agent-lock-'))
   const file = path.join(dir, `${name}.html`)
   fs.writeFileSync(
     file,
@@ -72,6 +78,10 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
     await expect
       .poll(async () => (await getViewsForTask(mainWindow, taskId)).length, { timeout: 10_000 })
       .toBe(1)
+  })
+
+  test.afterAll(() => {
+    fs.rmSync(FIXTURE_BASE, { recursive: true, force: true })
   })
 
   function runCli(...args: string[]): CliResult {
@@ -173,10 +183,7 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
       .toBe(true)
   })
 
-  // DEFER 2026-06-23 (still fails, real): CLI click reports "Element not found: #b"
-  // on the locked tab — fixture page-b lacks `#b`, or the locked-tab nav route is
-  // short-circuited before the page finishes loading. Trace the locked-tab CLI route. See plan.
-  test.skip('agent CLI ops still work while the tab is locked', async ({ mainWindow }) => {
+  test('agent CLI ops still work while the tab is locked', async ({ mainWindow }) => {
     const views = await getViewsForTask(mainWindow, taskId)
     // Explicitly ensure locked state (prior tests may have left it unlocked).
     await testInvoke(mainWindow, 'browser:set-locked', views[0], true)

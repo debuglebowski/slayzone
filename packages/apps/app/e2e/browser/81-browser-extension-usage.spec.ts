@@ -9,9 +9,9 @@ import {
   getActiveViewId
 } from '../fixtures/browser-view'
 
-// Resolve test extension fixture paths (relative to project root)
-const TEST_EXT_DIR = join(import.meta.dirname, 'fixtures', 'test-extension')
-const TEST_EXT_MV3_DIR = join(import.meta.dirname, 'fixtures', 'test-extension-mv3')
+// Resolve test extension fixture paths (fixtures live in e2e/fixtures/)
+const TEST_EXT_DIR = join(import.meta.dirname, '..', 'fixtures', 'test-extension')
+const TEST_EXT_MV3_DIR = join(import.meta.dirname, '..', 'fixtures', 'test-extension-mv3')
 
 // 1Password extension path (Chrome default profile)
 const ONEPASSWORD_ID = 'aeblfdkhhhdcdjpifhhbdiojplfjncoa'
@@ -41,14 +41,13 @@ function find1PasswordPath(): string | null {
   }
 }
 
-// Skip: MV3 service worker startup is unreliable under parallel Electron instances.
-// Electron's extension host contends for GPU/compositor resources, causing the
-// service worker to fail to start. This is an Electron limitation, not an app bug.
-// DEFER 2026-06-23: extension content-script injection / MV2+MV3 messaging fail in
-// the e2e Electron env (extension host contends for GPU/compositor; the MV3 SW case
-// is tagged @known-limitation). Investigate whether any are fixable; otherwise remove
-// (feature works in-app; not an app bug). See plans/unskip-all-e2e.md.
-test.describe.skip('Chrome extension real usage (WebContentsView)', () => {
+// UNSKIPPED 2026-07-05: the historical failures here (content-script injection,
+// MV2/MV3 messaging — previously blamed on Electron extension-host GPU/compositor
+// contention) were actually caused by fixture path drift: when specs moved from
+// e2e/ to e2e/browser/, TEST_EXT_DIR still resolved import.meta.dirname/fixtures
+// (nonexistent), so the extension never loaded. With the paths fixed all tests
+// pass. Do not re-skip without re-checking the fixture paths first.
+test.describe('Chrome extension real usage (WebContentsView)', () => {
     let taskId: string
 
     test.beforeAll(async ({ mainWindow }) => {
@@ -182,7 +181,7 @@ test.describe.skip('Chrome extension real usage (WebContentsView)', () => {
         .not.toBe('not-found')
     })
 
-    test('MV3: service worker messaging works @known-limitation', async ({
+    test('MV3: service worker messaging works', async ({
       mainWindow,
       electronApp
     }) => {
@@ -272,7 +271,8 @@ test.describe.skip('Chrome extension real usage (WebContentsView)', () => {
 
     test('real extension: 1Password imports and page stays usable', async ({ mainWindow }) => {
       const extPath = find1PasswordPath()
-      expect(extPath, '1Password extension not found in the default Chrome profile').toBeTruthy()
+      // Env-guard: needs 1Password installed in the local Chrome default profile.
+      test.skip(!extPath, '1Password extension not found in the default Chrome profile')
 
       test.setTimeout(60000)
       await ensureBrowserPanelVisible(mainWindow)

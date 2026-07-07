@@ -1,84 +1,57 @@
-# Plan: Un-skip all e2e tests → zero skips
+# Plan: Un-skip all e2e tests → zero skips — ✅ DONE 2026-07-07
 
-Goal: zero skipped e2e tests. **Verdict per test: fix (real bug) · migrate (spec
-drift) · remove (dead/impossible) · keep (correct conditional).**
+Goal reached: **zero statically skipped e2e tests.** Verified: batch run of all 15
+touched files = **131 passed (2.2m)**; each file also green ≥2× isolated.
 
-## 2026-06-23 GROUND-TRUTH re-baseline (verified by running, not guessing)
-All skip markers flipped → ran the affected 21 files. Result: **62 passed / 53 failed**.
-Many stale 2026-05-16 `describe.skip` quarantines now PASS for free. Tree currently
-has ALL skips flipped (WIP, uncommitted). Inner `test.skip(!hasCodex)` env-guards KEPT.
+Remaining `test.skip(...)` markers are all correct runtime env-guards (kept by design):
+- `97-session-id-consistency` ×2: `test.skip(!hasCodex, 'codex not on PATH')`
+- `81-browser-extension-usage`: `test.skip(!extPath, '1Password extension not found…')`
 
-### STALE-GREEN (now pass — keep unskipped, FREE WINS)
-- `83` cursor-stability (1/1) ✓ full file green
-- `33` 'Git init' describe ✓ (only `33:226` merge-UI fails)
-- `93:161` cursor resume ✓ (skip reason "slow CLI" was wrong — capture is stubbed)
-- `71` 15/17 ✓ (only `562`,`719` fail)
-- `61` 3/4 ✓ (only `219` fails)
-- `55-crash` 6/7 ✓ (only `102` fails)
-- `81` 1/5 ✓ (4 fail)
-- `30:300` clear-buffer ✓ (batch fail was contention flake — passes isolated)
+## Outcome by cluster (2026-07-02 → 2026-07-07)
 
-### REAL WORK (53 fails, by cluster, ROI order)
-**CM redesign — 24 (BIG): `63`(22) + `62`(2)** — Phase-3 variant model. `instructions-textarea`
-testid GONE from components; test helper `openInstructionsDialog` still hunts the old
-`'Project Settings'` dialog (CM is now a full-screen 'Context Manager' view). All 22 fail
-at first element. ENABLER: rewrite the in-spec open/nav helpers to the new CM view +
-current testids. One helper fix likely revives most. → migrate.
+- **CM redesign — 63 (17 green, 5 removed w/ in-file justification) + 62 (5 green).**
+  Fixture root cause: Project→Skills sidebar button grows a stale-count dot that
+  changes its accessible name; exact-name match silently landed on Library→Skills.
+  Fixed in `e2e/fixtures/context-manager.ts` (nav scoped by level order + arrival
+  heading check).
+- **pty-capture — 94 (4) + 93 (10) green.** Migrated 94 to sidecar-side capture
+  (`testSetPtyCreateCapture`); added PLAYWRIGHT-gated `testTakePtyKillCalls` +
+  `testEmitExit` hooks; `closeAllTaskTabs` afterEach teardown ends serial
+  contamination. REAL BUG fixed: `getModeLabel()` missing `'qwen-code'` case.
+- **61 handoff (4 green).** WCV panels never load a document until forced —
+  `executeJavaScript` on document-less frame hangs forever. Helpers now force a
+  real `about:blank` load; `void window.open(...)` avoids WindowProxy serialization.
+- **71 popups (17 green ×3).** Both web-panel describes migrated to WCV; one
+  expectation inverted to current design (panels ALLOW featured popups for OAuth).
+- **81 extensions (5 green).** "Electron env limit" diagnosis was WRONG: fixture
+  path drift from the e2e/→e2e/browser/ move — extensions never loaded. Path fix
+  revived all 4 "impossible" tests.
+- **46 panels (29 green).** Fresh custom panel = task-scope enabled by default
+  (missing `viewEnabled` entry = enabled); home-scope is a disabled placeholder
+  for web panels. Cmd+L passed as-is.
+- **terminal — 30 (7), 55-crash (7), 55-shell (1) green.** No source hook needed:
+  `terminal_auto_start='1'` seeding beats the post-remount idle gate;
+  `shouldShellFallback` works (banner only missed because spawn was gated).
+- **76 zorder (8 green).** Assertion migrated to the real contract: inactive task's
+  view KEEPS PAINTING, parked at (-20000,-20000) (`useBrowserViewBounds` offScreen)
+  — it does not flip visible=false. Fixture `openTaskViaSearch` gained press→appear
+  retry (mod+k swallowed right after task switch until shortcut-active propagates).
+- **87 agent-lock (5 green).** REAL cause: `slz-file://` guard rejects file:// paths
+  outside $HOME — fixtures in os.tmpdir() served "Access denied" stub with no #b.
+  Fixtures now under `~/.slayzone-e2e-tmp` (cleaned in afterAll).
+- **33 merge-UI (10 green).** `ensureGitPanelVisible` toggle-race: a landed Meta+g
+  + slow mount + blind re-press toggled the panel back off. Now one-way opens via
+  the header "Git" PanelToggle button with a 3s mount wait per attempt.
 
-**pty-capture lifecycle — 6: `94`(4) + `93:190`,`93:219`**
-- `94` all 4: `toBeGreaterThan(0)` → capture count 0; needs the 93-style createPty
-  capture wiring (`testSetPtyCreateCapture`/`testTakePtyCreateOpts` + idle-gate). → migrate.
-- `93:190`(opencode) `93:219`(qwen): `getLastOpts` null even isolated. Suspect serial
-  contamination from newly-unskipped `93:161` cursor (shared capture). → fix ordering/teardown.
+## Removed tests (all with in-file `// REMOVED <date>` justification)
+- 63: 5 tests asserting redesign-dropped affordances (per-provider push button,
+  stale-card pull ×2, roundtrip, manage-from-row).
+- 47-cursor-cli file (2026-06-24): cursor-agent produces zero output in-harness.
+- 62 (2026-06-20, prior): library-skill help card, section-level pinned help card.
 
-**real-CLI idle-gate**
-- `97` (2 codex): DONE 2026-06-24 — added `startAgentTerminal` → both green (23s). Unskipped.
-- `47` (3 cursor): REMOVED 2026-06-24 — cursor-agent produces ZERO output in-harness
-  (codex/opencode work, cursor doesn't — TTY/interactive requirement it can't satisfy
-  in e2e). Spawn/idle-gate mechanism covered generically; real cursor-CLI output can't
-  be exercised here. File deleted.
-
-**WCV / web-panel migration — 5: `61:219`,`71:562`,`71:719`,`76:198`,`79:92`**
-- `61:219`: `getWebPanelUrl` returns `'no-webview'` (webview→WCV). Rewrite helper to WCV. → migrate.
-- `71:562`,`719`: window.open BrowserWindow assertions (`toMatch`). → migrate (or remove dead window.open path).
-- `76:198`: inactive views offscreen — WCV reposition timing. → fix wait.
-- `79:92`: dom-ready JS exec `toContain`. → fix wait/executeJs.
-
-**terminal singles — 6**
-- `37:180`: remove gemini branch (Phase-6 resolved), keep codex/cursor/terminal/claude. → migrate.
-- `30:159`: mode-switch teardown needs source hook (markSkipCache/remountTerminal). → fix/migrate.
-- `55-crash:102`: crash overlay appears. → fix/migrate.
-- `55-shell:65`: interactive shell after CLI non-zero (custom-mode initialCommand). → migrate.
-- `98:135`: codex resize gray-area — documented CDP harness limit, cosmetic. → remove.
-- `87:180`: agent CLI ops while locked — `#b` click element. → fix fixture/route.
-
-**panels — `46`: FIX LANDED (`287` green), 2 deferred**
-- ROOT (fixed): `savePanelConfig` didn't keep `order` complete → added panel unrendered
-  until broadcast. FIX: `usePanelSettings.savePanelConfig` wraps `mergePanelOrder` (app-code).
-  Verified: delete-custom (`287`) now passes; card renders.
-- DEFER `46:168` (new panel's switch defaults unchecked + row now has 2 switches home/task —
-  pick correct default-enabled scope) and `46:227` (Cmd+L → web-panel-toggle routing).
-
-**Round-2 reverts (serial-coupling / batch-flake — defer WHOLE describe, can't cherry-pick):**
-- `55-crash` 'Terminal crash overlay': later tests depend on the crash trigger (102, flaky).
-- `71` both window.open describes: real-BrowserWindow timing flakes under batch load.
-- `93` 'Resume command opts': reverted to main (161 stays skipped — unskipping adds a 6th
-  sequential AI-mode open that destabilizes the shared createPty capture; fix needs
-  per-test terminal teardown, same enabler as `94`).
-
-**extensions env-limit — 4: `81:64/117/149/181`** (`181` tagged `@known-limitation`)
-MV3 service-worker / extension host unreliable in e2e Electron (GPU contention, documented).
-→ investigate; if truly impossible, remove (feature works in-app; not an app bug).
-
-**opencode idle — 1: `49:120`** — Bubble Tea TUI idle pattern doesn't match in time;
-commit 6a6d1838 deliberately kept-skip; spawn+I/O covered by 3 passing tests. → remove (for zero).
-
-## Execution discipline
-- Spec-only edits → NO rebuild. App-code fixes → batch → one `pnpm build` → verify.
-- `--reporter=line` (survives kill). Run targeted, isolated per file (avoid contention flakes).
-- Suite stays green per commit; never commit red. Commit per cluster (await approval).
-- Run: `env -u ELECTRON_RUN_AS_NODE npx playwright test --config playwright.config.ts <files>`
-
-## Decisions (resolved)
-- Remove all gemini tests/branches. Remove redesign-dropped affordances. Lower removal bar.
-- Keep inner `test.skip(!hasCodex)` env-guards (idiomatic).
+## App-code changes made along the way (all uncommitted with the spec work)
+- `get-tab-label.ts`: `case 'qwen-code': return 'Qwen'` (user-facing label fix).
+- PLAYWRIGHT-gated test hooks: pty-manager kill-capture (+pty-store op),
+  transport pty router `testTakePtyKillCalls` / `testEmitExit`.
+- (Pre-existing in tree: `skill-row-*` testid in SkillListView.tsx,
+  `savePanelConfig` mergePanelOrder fix.)

@@ -149,17 +149,25 @@ test.describe('Terminal mode switch teardown', () => {
       (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }),
       taskId
     )
+    // AI-mode terminals are idle-gated (TerminalStarter): after the switch to
+    // codex, the remounted terminal would show the "Open Codex" gate instead of
+    // spawning — seed auto-start so the remount spawns directly. The gate
+    // itself is 93/97's subject, not this spec's.
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+    )
     await s.refreshData()
   })
 
-  // QUARANTINED 2026-05-16: tab-toggle remount doesn't trigger Terminal's
-  // useEffect to re-spawn for the new mode (codex). handleModeChange uses
-  // markSkipCache+remountTerminal which aren't exposed. Needs source-level
-  // test hook.
-  // DEFER 2026-06-23: mode switch (terminal→codex) doesn't re-spawn in-test —
-  // handleModeChange uses markSkipCache+remountTerminal which aren't reachable from
-  // the test; needs a source-level remount hook (or idle-gate-aware migration). See plan.
-  test.skip('kills previous session and issues create for the new mode', async ({ mainWindow }) => {
+  test.afterAll(async ({ mainWindow }) => {
+    await mainWindow
+      .evaluate(() =>
+        window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+      )
+      .catch(() => {})
+  })
+
+  test('kills previous session and issues create for the new mode', async ({ mainWindow }) => {
     const sessionId = getMainSessionId(taskId)
     const marker = `BEFORE_SWITCH_${Date.now()}`
 
