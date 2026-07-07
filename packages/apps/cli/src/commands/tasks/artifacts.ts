@@ -38,7 +38,7 @@ import {
   type RenderMode
 } from '@slayzone/task/shared/types'
 import { apiPost } from '../../api'
-import { cliAuthor } from './_shared'
+import { cliAuthor, resolveId } from './_shared'
 
 interface ArtifactRow extends Record<string, unknown> {
   id: string
@@ -79,12 +79,11 @@ function resolveArtifact(db: SlayDb, prefix: string): ArtifactRow {
   return rows[0]
 }
 
-function resolveTaskForArtifact(db: SlayDb, taskOpt?: string): { id: string; title: string } {
-  const ref = taskOpt ?? process.env.SLAYZONE_TASK_ID
-  if (!ref) {
-    console.error('No task ID provided and $SLAYZONE_TASK_ID is not set.')
-    process.exit(1)
-  }
+async function resolveTaskForArtifact(
+  db: SlayDb,
+  taskOpt?: string
+): Promise<{ id: string; title: string }> {
+  const ref = await resolveId(taskOpt)
   const rows = db.query<{ id: string; title: string }>(
     `SELECT id, title FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
     { ':prefix': ref }
@@ -366,7 +365,7 @@ export function artifactsSubcommand(): Command {
     .option('--tree', 'Show as indented tree')
     .action(async (taskId: string, opts) => {
       const db = openDb()
-      const task = resolveTaskForArtifact(db, taskId)
+      const task = await resolveTaskForArtifact(db, taskId)
       const rows = db.query<ArtifactRow>(
         `SELECT * FROM task_artifacts WHERE task_id = :taskId ORDER BY "order" ASC, created_at ASC`,
         { ':taskId': task.id }
@@ -437,12 +436,7 @@ export function artifactsSubcommand(): Command {
       const db = openDb()
       let scopeTaskId: string | null = null
       if (!opts.allTasks) {
-        const ref = opts.task ?? process.env.SLAYZONE_TASK_ID
-        if (!ref) {
-          console.error('Provide --task, set $SLAYZONE_TASK_ID, or pass --all-tasks.')
-          process.exit(1)
-        }
-        scopeTaskId = resolveTaskForArtifact(db, ref).id
+        scopeTaskId = (await resolveTaskForArtifact(db, opts.task)).id
       }
       const folderId = opts.folder ? resolveFolder(db, opts.folder).id : null
 
@@ -509,7 +503,7 @@ export function artifactsSubcommand(): Command {
     .option('--json', 'Output as JSON')
     .action(async (title: string, opts) => {
       const db = openDb()
-      const task = resolveTaskForArtifact(db, opts.task)
+      const task = await resolveTaskForArtifact(db, opts.task)
       const folderId = opts.folder ? resolveFolder(db, opts.folder).id : null
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
@@ -601,7 +595,7 @@ export function artifactsSubcommand(): Command {
         process.exit(1)
       }
       const db = openDb()
-      const task = resolveTaskForArtifact(db, opts.task)
+      const task = await resolveTaskForArtifact(db, opts.task)
       const id = crypto.randomUUID()
       const title = opts.title ?? path.basename(sourcePath)
       const now = new Date().toISOString()
@@ -874,7 +868,7 @@ export function artifactsSubcommand(): Command {
     .option('--json', 'Output as JSON')
     .action(async (name: string, opts) => {
       const db = openDb()
-      const task = resolveTaskForArtifact(db, opts.task)
+      const task = await resolveTaskForArtifact(db, opts.task)
       const parentId = opts.parent ? resolveFolder(db, opts.parent).id : null
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
@@ -1044,7 +1038,7 @@ pdf/png/html require the SlayZone app to be running.
       // --- ZIP: task-level ---
       if (opts.type === 'zip') {
         const db = openDb()
-        const task = resolveTaskForArtifact(db, opts.task)
+        const task = await resolveTaskForArtifact(db, opts.task)
         const artifacts = db.query<ArtifactRow>(
           `SELECT * FROM task_artifacts WHERE task_id = :taskId ORDER BY "order" ASC`,
           { ':taskId': task.id }

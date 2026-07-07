@@ -52,6 +52,17 @@ function seedTask(extra: Record<string, unknown> = {}): string {
   return id
 }
 
+function seedAgentSession(taskId: string | null, status: 'pooled' | 'bound'): string {
+  const id = crypto.randomUUID()
+  h.db
+    .prepare(
+      `INSERT INTO agent_sessions (id, mode, cwd, task_id, origin, status, created_at)
+       VALUES (?, 'claude-code', '/tmp', ?, 'slay-spawned-fresh', ?, 0)`
+    )
+    .run(id, taskId, status)
+  return id
+}
+
 await describe('mcp update_task', () => {
   test('register: tool registered with description + schema', () => {
     expect(stub.has('update_task')).toBe(true)
@@ -129,6 +140,26 @@ await describe('mcp update_task', () => {
     }
     expect(res.isError).toBe(true)
     expect(res.content[0].text.includes('not found')).toBe(true)
+  })
+
+  test('warm-pool fallback: no task_id arg, resolves via bound agent_sessions row', async () => {
+    const id = seedTask()
+    const sessionId = seedAgentSession(id, 'bound')
+    const res = (await stub.invoke('update_task', {
+      session_id: sessionId,
+      title: 'Renamed via session'
+    })) as { content: { text: string }[]; isError?: boolean }
+    expect(res.isError === true).toBe(false)
+    const row = h.db.prepare('SELECT title FROM tasks WHERE id = ?').get(id) as { title: string }
+    expect(row.title).toBe('Renamed via session')
+  })
+
+  test('no task_id and no session_id → isError', async () => {
+    const res = (await stub.invoke('update_task', { title: 'x' })) as {
+      content: { text: string }[]
+      isError?: boolean
+    }
+    expect(res.isError).toBe(true)
   })
 })
 

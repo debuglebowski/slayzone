@@ -1,14 +1,6 @@
 import { Command } from 'commander'
 import { apiGet, apiPost } from '../api'
-
-function resolveTaskId(): string {
-  const id = process.env.SLAYZONE_TASK_ID
-  if (!id) {
-    console.error('$SLAYZONE_TASK_ID is not set. Run this from a task terminal.')
-    process.exit(1)
-  }
-  return id
-}
+import { resolveId } from './tasks/_shared'
 
 interface TabRow {
   idx: number
@@ -83,7 +75,7 @@ export function browserCommand(): Command {
         url: string | undefined,
         opts: { panel?: 'visible' | 'hidden'; background?: boolean; json?: boolean }
       ) => {
-        const taskId = resolveTaskId()
+        const taskId = await resolveId()
         const result = await apiPost<{
           ok: boolean
           tabId: string
@@ -108,7 +100,7 @@ export function browserCommand(): Command {
     .description('List browser tabs for the current task')
     .option('--json', 'Output as JSON')
     .action(async (opts: { json?: boolean }) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabs = await fetchTabs(taskId)
       if (opts.json) {
         console.log(JSON.stringify(tabs, null, 2))
@@ -129,7 +121,7 @@ export function browserCommand(): Command {
   withCommonOpts(cmd.command('url'), 'hidden')
     .description('Print current URL')
     .action(async (opts: CommonOpts) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
       const qs = new URLSearchParams({ taskId, panel: panel(opts, 'hidden') })
       if (tabId) qs.set('tabId', tabId)
@@ -140,7 +132,7 @@ export function browserCommand(): Command {
   withCommonOpts(cmd.command('navigate <url>'), 'visible')
     .description('Navigate browser to URL')
     .action(async (url: string, opts: CommonOpts) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
       const result = await apiPost<{ ok: boolean; url: string }>('/api/browser/navigate', {
         taskId,
@@ -154,7 +146,7 @@ export function browserCommand(): Command {
   withCommonOpts(cmd.command('click <selector>'), 'hidden')
     .description('Click element by CSS selector')
     .action(async (selector: string, opts: CommonOpts) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
       const result = await apiPost<{ ok: boolean; tag?: string; text?: string }>(
         '/api/browser/click',
@@ -166,7 +158,7 @@ export function browserCommand(): Command {
   withCommonOpts(cmd.command('type <selector> <text>'), 'hidden')
     .description('Type text into input by CSS selector')
     .action(async (selector: string, text: string, opts: CommonOpts) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
       await apiPost('/api/browser/type', {
         taskId,
@@ -181,7 +173,7 @@ export function browserCommand(): Command {
   withCommonOpts(cmd.command('eval <code>'), 'hidden')
     .description('Execute JavaScript in browser and print result')
     .action(async (code: string, opts: CommonOpts) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
       const { result } = await apiPost<{ ok: boolean; result: unknown }>('/api/browser/eval', {
         taskId,
@@ -196,7 +188,7 @@ export function browserCommand(): Command {
     .description('Get page text content and interactive elements')
     .option('--json', 'Output as JSON')
     .action(async (opts: CommonOpts & { json?: boolean }) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
       const qs = new URLSearchParams({ taskId, panel: panel(opts, 'hidden') })
       if (tabId) qs.set('tabId', tabId)
@@ -224,7 +216,7 @@ export function browserCommand(): Command {
     .description('Capture screenshot to file')
     .option('-o, --output <path>', 'Output file path')
     .action(async (opts: CommonOpts & { output?: string }) => {
-      const taskId = resolveTaskId()
+      const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
       const { path } = await apiPost<{ ok: boolean; path: string }>('/api/browser/screenshot', {
         taskId,

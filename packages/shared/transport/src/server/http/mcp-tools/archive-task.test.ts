@@ -47,6 +47,17 @@ function seedTask(): string {
   return id
 }
 
+function seedAgentSession(taskId: string | null, status: 'pooled' | 'bound'): string {
+  const id = crypto.randomUUID()
+  h.db
+    .prepare(
+      `INSERT INTO agent_sessions (id, mode, cwd, task_id, origin, status, created_at)
+       VALUES (?, 'claude-code', '/tmp', ?, 'slay-spawned-fresh', ?, 0)`
+    )
+    .run(id, taskId, status)
+  return id
+}
+
 await describe('mcp archive_task', () => {
   test('register: tool registered as archive_task with description + schema', () => {
     expect(stub.has('archive_task')).toBe(true)
@@ -86,6 +97,27 @@ await describe('mcp archive_task', () => {
     }
     expect(res.isError).toBe(true)
     expect(res.content[0].text.includes('not found')).toBe(true)
+  })
+
+  test('warm-pool fallback: no id arg, resolves via bound agent_sessions row', async () => {
+    const id = seedTask()
+    const sessionId = seedAgentSession(id, 'bound')
+    const res = (await stub.invoke('archive_task', { session_id: sessionId })) as {
+      content: { type: string; text: string }[]
+      isError?: boolean
+    }
+    expect(res.isError === true).toBe(false)
+    const parsed = JSON.parse(res.content[0].text) as { id: string; archived_at: string | null }
+    expect(parsed.id).toBe(id)
+    expect(parsed.archived_at !== null).toBe(true)
+  })
+
+  test('no id and no session_id → isError', async () => {
+    const res = (await stub.invoke('archive_task', {})) as {
+      content: { text: string }[]
+      isError?: boolean
+    }
+    expect(res.isError).toBe(true)
   })
 })
 
