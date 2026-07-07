@@ -64,6 +64,7 @@ import { UsagePopover } from '@/components/usage/UsagePopover'
 import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'
 import { isConvexConfigured, useLeaderboardAuth } from '@/lib/convexAuth'
+import { recordDiagnosticsTimeline } from '@/lib/diagnosticsClient'
 import { FeedbackDialog } from '@slayzone/feedback/client'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 // Extracted hooks (self-contained, clean interfaces)
@@ -916,11 +917,16 @@ function App(): React.JSX.Element {
         .map((m) => parseInt(m![1], 10))
       const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
       const status = getDefaultStatus(project?.columns_config)
+      const createStart = performance.now()
       const task = await trpcClient.task.create.mutate({
         projectId,
         title: `Terminal ${next}`,
         status,
         isTemporary: true
+      })
+      recordDiagnosticsTimeline('temp_task_created', {
+        taskId: task.id,
+        taskCreateMs: Math.round(performance.now() - createStart)
       })
       track('temporary_task_created')
       setTasks((prev) => [task, ...prev])

@@ -27,6 +27,7 @@ import {
   reportRendererOk
 } from './scramble-telemetry'
 import { diag } from './terminal-webgl-diag'
+import { startMountTimeline } from './mount-timeline'
 import { trimSelectionTrailingSpaces, waitForDimensions } from './Terminal.utils'
 import {
   ensureFocusDiagnostics,
@@ -350,6 +351,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       setIsInitializing(true)
       setInitError(null)
       let didInit = false
+      const timeline = startMountTimeline(sessionId, mode)
 
       try {
         // Wait for container to have dimensions BEFORE initializing terminal
@@ -359,6 +361,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           if (e instanceof DOMException && e.name === 'AbortError') return
           throw e
         }
+        timeline.mark('dims_ready')
 
         const rect = containerRef.current.getBoundingClientRect()
 
@@ -627,6 +630,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               focus: () => cached.terminal.focus(),
               clearBuffer: clearBufferWithoutRestart
             })
+            timeline.flush('reattach')
             return
           }
         }
@@ -647,6 +651,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           getOnOpenFile: () => onOpenFileRef.current
         })
         if (!created) return
+        timeline.mark('xterm_created')
         const { terminal, fitAddon, serializeAddon, searchAddon } = created
 
         terminalRef.current = terminal
@@ -661,6 +666,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // Simple fit - container is guaranteed to have dimensions from waitForDimensions
         fitAddon.fit()
         diag(sessionId, 'fit', { site: 'init', terminal })
+        timeline.mark('xterm_opened')
 
         // WebGL renderer — 5-10x faster than the DOM renderer.
         // Safe because filterBufferData() strips SGR 4 (underline) codes server-side
@@ -678,6 +684,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // Check if PTY already exists (e.g., from idle hibernation)
         const exists = await trpcClient.pty.exists.query({ sessionId })
         if (signal.aborted) return // Don't continue if unmounted
+        timeline.mark('exists_checked')
         let createCols = terminal.cols
         let createRows = terminal.rows
         if (exists) {
@@ -696,6 +703,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             }
             lastRenderedSeqRef.current = result.currentSeq
           }
+          timeline.flush('restored')
         } else {
           // Generate conversation ID for AI modes whose initialCommand uses {id}.
           // Providers without {id} (e.g. codex, gemini) generate their own session
@@ -730,6 +738,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Capture dims before async gap so PTY starts at correct size
           createCols = terminal.cols
           createRows = terminal.rows
+          timeline.mark('create_sent')
           const result = await trpcClient.pty.create.mutate({
             sessionId,
             cwd,
@@ -741,6 +750,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             cols: createCols,
             rows: createRows
           })
+          timeline.mark('create_done')
+          timeline.flush(result.success ? 'created' : 'create_error')
           if (!result.success) {
             const message = result.error || 'Failed to create terminal process'
             terminal.writeln(`\x1b[31mError: ${message}\x1b[0m`)
