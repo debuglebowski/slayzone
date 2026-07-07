@@ -1409,7 +1409,11 @@ export async function createPty(
       }
     })
 
-    const mcpEnv = await buildMcpEnv(db, taskId, terminalMode)
+    // A pre-warmed agent already has its env baked in from spawn time (warm pool)
+    // and is never re-exported/re-exec'd (see the preWarmedAgent guard above) — its
+    // mcpEnv would only feed the export-prefix / spawnOptions.env below, both of
+    // which are unreachable for it. Skip the DB round-trip entirely on this path.
+    const mcpEnv = opts.adoptPty?.preWarmedAgent ? {} : await buildMcpEnv(db, taskId, terminalMode)
 
     // Adoption: the warm shell was spawned without the task-scoped MCP env
     // (SLAYZONE_TASK_ID etc.) — env can't be mutated on a live process, so export
