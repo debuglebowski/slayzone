@@ -191,6 +191,18 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // Electron profile instead of only redirecting the SQLite DB path.
   mkdirSync(process.env.SLAYZONE_USER_DATA_DIR, { recursive: true })
   app.setPath('userData', process.env.SLAYZONE_USER_DATA_DIR)
+} else if (is.dev) {
+  // Dev runs alongside the packaged app. Two Chromium instances sharing one
+  // profile corrupts partition storage (wedged IndexedDB/quota service,
+  // "Database IO error" on service worker DB), so isolate dev's Electron
+  // profile the same way Playwright does above. The SQLite DB and artifacts
+  // stay in the original dir via the SLAYZONE_DB_DIR fallback — only the
+  // Chromium profile (Partitions, storage, caches) moves.
+  const sharedDataDir = app.getPath('userData')
+  process.env.SLAYZONE_DB_DIR ??= sharedDataDir
+  const devProfileDir = `${sharedDataDir}-dev`
+  mkdirSync(devProfileDir, { recursive: true })
+  app.setPath('userData', devProfileDir)
 }
 
 // tRPC server data root. Mirrors the app/IPC icon+DB convention
