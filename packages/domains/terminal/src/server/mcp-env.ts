@@ -22,17 +22,25 @@ export async function buildMcpEnv(
    *  absent; the `slay` CLI + the conversation hook fall back to this id to
    *  resolve the task once the pool binds the session. Harmless to set for a
    *  normal agent too (the task env wins), but only pooled spawns pass it. */
-  sessionId?: string
+  sessionId?: string,
+  /** Explicit project id — set when the caller already knows it without a task
+   *  (the warm pool spawns per-project, before any task exists). Takes priority
+   *  over the task-derived lookup so `SLAYZONE_PROJECT_ID` is always present,
+   *  regardless of whether a task is bound yet. */
+  projectId?: string
 ): Promise<Record<string, string>> {
   const env: Record<string, string> = {}
-  if (taskId) {
-    env.SLAYZONE_TASK_ID = taskId
-    const row = await db?.get<{ project_id?: string }>(
-      'SELECT project_id FROM tasks WHERE id = ?',
-      [taskId]
-    )
-    if (row?.project_id) env.SLAYZONE_PROJECT_ID = row.project_id
-  }
+  if (taskId) env.SLAYZONE_TASK_ID = taskId
+  const resolvedProjectId =
+    projectId ??
+    (taskId
+      ? (
+          await db?.get<{ project_id?: string }>('SELECT project_id FROM tasks WHERE id = ?', [
+            taskId
+          ])
+        )?.project_id
+      : undefined)
+  if (resolvedProjectId) env.SLAYZONE_PROJECT_ID = resolvedProjectId
   if (sessionId) env.SLAYZONE_SESSION_ID = sessionId
   const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
   if (mcpPort) env.SLAYZONE_MCP_PORT = String(mcpPort)

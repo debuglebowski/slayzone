@@ -247,10 +247,12 @@ async function spawnWarm(projectId: string): Promise<void> {
     // before adoption. Providers without `{id}` mint their own → null here.
     const conversationId = modeRow?.initial_command?.includes('{id}') ? randomUUID() : null
 
-    // Pooled env: SLAYZONE_SESSION_ID (no SLAYZONE_TASK_ID — there's no task yet).
-    // The agent's slay CLI + conversation hook resolve the task via session→task
-    // once the pool binds it. Same buildMcpEnv source as a cold spawn → no drift.
-    const extraEnv = await buildMcpEnv(deps.db, undefined, WARM_MODE, sessionId)
+    // Pooled env: SLAYZONE_SESSION_ID (no SLAYZONE_TASK_ID — there's no task yet),
+    // but SLAYZONE_PROJECT_ID IS already known (the pool is per-project) — pass it
+    // explicitly so it's set regardless of task binding. The agent's slay CLI +
+    // conversation hook resolve the task via session→task once the pool binds it.
+    // Same buildMcpEnv source as a cold spawn → no drift.
+    const extraEnv = await buildMcpEnv(deps.db, undefined, WARM_MODE, sessionId, projectId)
     // Re-check after awaits (gate may have closed / shutdown / raced).
     if (shuttingDown || warm.has(projectId)) return
     const result = (deps.spawnShell ?? spawnLoginShell)({ cwd, extraEnv })

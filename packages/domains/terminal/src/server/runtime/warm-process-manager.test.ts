@@ -63,6 +63,7 @@ interface FakePty {
 
 let spawnCount = 0
 let lastSpawned: FakePty | null = null
+let lastSpawnOpts: { cwd: string; extraEnv?: Record<string, string> } | null = null
 
 function makeFakePty(): FakePty {
   const dataCbs: Array<(d: string) => void> = []
@@ -87,8 +88,9 @@ function makeFakePty(): FakePty {
   return obj
 }
 
-const fakeSpawn = (() => {
+const fakeSpawn = ((opts: { cwd: string; extraEnv?: Record<string, string> }) => {
   spawnCount++
+  lastSpawnOpts = opts
   const pty = makeFakePty()
   lastSpawned = pty
   return { pty: pty as unknown as IPty, shell: '/bin/zsh', usedArgs: ['-i', '-l'], usedFallback: false }
@@ -115,6 +117,7 @@ const db = {
 function init(): void {
   spawnCount = 0
   lastSpawned = null
+  lastSpawnOpts = null
   dbRunCalls = []
   enabled = true
   initWarmProcessManager({
@@ -144,6 +147,14 @@ await test('warm spawn pre-boots the agent + records a pooled session (B3b)', as
   const pooledInsert = dbRunCalls.find((c) => /INSERT INTO agent_sessions/.test(c.sql))
   expect(!!pooledInsert).toBeTruthy()
   expect((pooledInsert!.params as unknown[]).includes('pooled')).toBeTruthy()
+})
+
+await test('warm spawn sets SLAYZONE_PROJECT_ID even with no task bound yet', async () => {
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  expect(lastSpawnOpts?.extraEnv?.SLAYZONE_PROJECT_ID).toBe('p1')
+  expect(lastSpawnOpts?.extraEnv?.SLAYZONE_TASK_ID).toBe(undefined as unknown as string)
 })
 
 await test('count 1→2→1 does not respawn', async () => {
