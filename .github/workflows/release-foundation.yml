@@ -403,7 +403,16 @@ jobs:
             release_title="SlayZone $VERSION"
             prerelease="false"
           else
-            channel_tag="$BASE_TAG-$CHANNEL"
+            case "$BASE_TAG" in
+              *"-$CHANNEL"|*"-$CHANNEL".*)
+                # Tag already carries the channel suffix (tag-push flow, e.g. v1.4.0-beta.2)
+                channel_tag="$BASE_TAG"
+                ;;
+              *)
+                # Clean base tag + explicit channel list (manual dispatch fan-out)
+                channel_tag="$BASE_TAG-$CHANNEL"
+                ;;
+            esac
             release_title="SlayZone $VERSION ($CHANNEL)"
             prerelease="true"
           fi
@@ -510,7 +519,7 @@ jobs:
   bump-homebrew:
     runs-on: ubuntu-latest
     needs: [resolve, publish-channel]
-    if: needs.resolve.outputs.mode == 'publish'
+    if: needs.resolve.outputs.mode == 'publish' && contains(fromJSON(needs.resolve.outputs.channels_json), 'stable')
     steps:
       - uses: actions/checkout@v5
         with:
@@ -573,7 +582,7 @@ jobs:
   notify-discord:
     runs-on: ubuntu-latest
     needs: [resolve, publish-channel]
-    if: needs.resolve.outputs.mode == 'publish'
+    if: needs.resolve.outputs.mode == 'publish' && contains(fromJSON(needs.resolve.outputs.channels_json), 'stable')
     steps:
       - uses: actions/checkout@v5
         with:
@@ -601,7 +610,7 @@ jobs:
   update-nix:
     runs-on: ubuntu-latest
     needs: [resolve, publish-channel]
-    if: needs.resolve.outputs.mode == 'publish'
+    if: needs.resolve.outputs.mode == 'publish' && contains(fromJSON(needs.resolve.outputs.channels_json), 'stable')
     steps:
       - uses: actions/checkout@v5
         with:
