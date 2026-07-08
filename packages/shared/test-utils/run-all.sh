@@ -70,6 +70,8 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/fil
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
 run_test packages/apps/server/src/build-info.test.ts
+# mcp_server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
+run_test packages/apps/server/src/port-claim.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree

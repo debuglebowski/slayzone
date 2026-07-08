@@ -18,6 +18,7 @@ import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-so
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
 import { createLogger } from './log.js'
+import { claimMcpServerPort } from './port-claim.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
 
@@ -199,14 +200,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
   // Slice 9 live cutover: the side-car is now the discoverable backend — the CLI,
   // agents, and external MCP resolve `settings.mcp_server_port` to reach HERE
-  // (the host's REST runs with writePort:false). Single writer of this key.
-  try {
-    await db
-      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)")
-      .run(String(actualPort))
-  } catch {
-    /* non-fatal — CLI falls back to its default port */
-  }
+  // (the host's REST runs with writePort:false). Single writer of this key —
+  // guarded against clobbering a still-live sidecar (plans/sidecar-staleness.md
+  // Phase 4, see port-claim.ts).
+  await claimMcpServerPort(db, host, actualPort, log)
   log(`listening on http://${host}:${actualPort} (/trpc + /health + /api + /mcp)`)
 
   // Boot canary: records THIS process's build identity so the running sidecar's
