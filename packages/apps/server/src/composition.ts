@@ -40,8 +40,10 @@ import {
   taskOps,
   configureTaskRuntimeAdapters,
   startArtifactWatcher,
-  purgeStaleAndOrphanedTasks
+  purgeStaleAndOrphanedTasks,
+  handleAttentionTransition
 } from '@slayzone/task/server'
+import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
   createPtyOps,
   ptyEvents,
@@ -72,6 +74,8 @@ import {
   setOnTaskReachedTerminalHandler,
   broadcastRespawnRequest,
   initWarmProcessManager,
+  onGlobalStateChange,
+  hasSessionUserInput,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import {
@@ -228,6 +232,59 @@ export function composeServer(opts: {
   // host's handler only sees its own (empty) session maps post-cutover.
   setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
   setTaskDeps({ ops: taskOps, onMutation: notifyRenderer })
+
+  // Terminal state-change consumers: task auto-move + the needs_attention flag.
+  // Both listened in the Electron host pre-cutover and regressed dead at slice 9
+  // — the host's onGlobalStateChange registers on ITS bundled pty-manager copy,
+  // whose session map is empty post-inversion. Transitions fire in THIS process
+  // (the pty runtime lives here), so the consumers must listen here too.
+  onGlobalStateChange(async (sessionId, newState, oldState) => {
+    await handleTerminalStateChange(
+      db,
+      sessionId,
+      newState,
+      oldState,
+      () => notifyEvents.emit('tasks-changed'),
+      onTaskReachedTerminal
+    )
+
+    // Attention flag: PTY finished a turn (running → idle|error). Gated on
+    // hasSessionUserInput so a spawn/banner settle never flags the task; the
+    // renderer clears the flag when the user navigates into the task.
+    try {
+      const hasUserInput = hasSessionUserInput(sessionId)
+      const changed = await handleAttentionTransition(
+        db,
+        sessionId,
+        newState,
+        oldState,
+        hasUserInput
+      )
+      // Every attention decision is recorded: the set path failed silently for
+      // months (no observable trace between "turn ended" and "flag in DB"), so
+      // gate inputs + outcome must be visible in Diagnostics. Low frequency —
+      // fires only on state transitions, a few per turn.
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'task',
+        event: 'task.attention_transition',
+        sessionId,
+        taskId: sessionId.split(':')[0],
+        message: `${oldState} -> ${newState}`,
+        payload: { hasUserInput, changed }
+      })
+      if (changed) notifyEvents.emit('tasks-changed')
+    } catch (err) {
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'task',
+        event: 'task.attention_transition_failed',
+        sessionId,
+        taskId: sessionId.split(':')[0],
+        message: (err as Error).message
+      })
+    }
+  })
 
   // Startup purge (stale soft-deleted + orphaned temp tasks) + artifact file
   // watcher. Both ran from the now-deleted registerTaskHandlers IPC bootstrap and

@@ -549,6 +549,9 @@ importers:
       '@slayzone/processes':
         specifier: workspace:*
         version: link:../../domains/processes
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../../domains/projects
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings

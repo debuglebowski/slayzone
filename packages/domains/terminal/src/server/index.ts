@@ -70,6 +70,7 @@ export {
   setSessionAwaitingInput,
   killPtysByTaskId,
   broadcastRespawnRequest,
+  onGlobalStateChange,
   // The real "task reached terminal status" teardown (host-kill hook + kill
   // PTYs + kill chat transports). Aliased to avoid colliding with the seam
   // `onTaskReachedTerminal` (task-events) exported above; the side-car wires
