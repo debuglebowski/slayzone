@@ -74,5 +74,6 @@ export {
   confirmSessionConversation,
   confirmSessionConversationByTaskMode,
   markSessionDead,
-  bindSessionToTask
+  bindSessionToTask,
+  getBoundTaskId
 } from './agent-sessions.js'

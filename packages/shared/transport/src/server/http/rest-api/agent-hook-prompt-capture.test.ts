@@ -21,9 +21,13 @@ vi.mock('@slayzone/terminal/server', () => ({
 vi.mock('@slayzone/diagnostics/server', () => ({
   recordDiagnosticEvent: () => {}
 }))
+const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(
+  () => Promise.resolve(null)
+)
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: () => {},
-  findPendingSpawn: () => Promise.resolve(null)
+  findPendingSpawn: () => Promise.resolve(null),
+  getBoundTaskId: (db: unknown, sessionId: string) => getBoundTaskIdSpy(db, sessionId)
 }))
 
 interface ServerHandle {
@@ -75,7 +79,11 @@ function postJson(port: number, body: unknown): Promise<{ status: number }> {
 }
 
 describe('POST /api/agent-hook → capturePrompt', () => {
-  beforeEach(() => capturePromptSpy.mockReset())
+  beforeEach(() => {
+    capturePromptSpy.mockReset()
+    getBoundTaskIdSpy.mockReset()
+    getBoundTaskIdSpy.mockResolvedValue(null)
+  })
 
   test('forwards UserPromptSubmit payload to capturePrompt', async () => {
     const srv = await startServer()
@@ -110,6 +118,32 @@ describe('POST /api/agent-hook → capturePrompt', () => {
         raw: { prompt: 'no task' }
       })
       expect(capturePromptSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('warm-pool-adopted session (slaySessionId, no taskId) → captures with DB-resolved taskId', async () => {
+    // The adopted agent's env was fixed pre-task, so its payload carries only
+    // slaySessionId. The route must resolve the bound task and still capture —
+    // otherwise these sessions never populate the messages sidebar.
+    getBoundTaskIdSpy.mockResolvedValue('bound-task-7')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        slaySessionId: 'pool-sess-capture-1',
+        raw: { prompt: 'hello from adopted session' }
+      })
+      expect(getBoundTaskIdSpy).toHaveBeenCalledWith(expect.anything(), 'pool-sess-capture-1')
+      expect(capturePromptSpy).toHaveBeenCalledTimes(1)
+      const [, input] = capturePromptSpy.mock.calls[0]
+      expect(input).toMatchObject({
+        agentId: 'claude-code',
+        taskId: 'bound-task-7',
+        raw: { prompt: 'hello from adopted session' }
+      })
     } finally {
       await srv.close()
     }

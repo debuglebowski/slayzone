@@ -295,3 +295,18 @@ export async function bindSessionToTask(
   )
   return res.changes > 0
 }
+
+/**
+ * Resolve the task a (pool) session id is bound to, if any. A warm-pool agent's
+ * env vars are fixed at process spawn (no `SLAYZONE_TASK_ID` — the task didn't
+ * exist yet), so its hook payloads carry only `slaySessionId` forever; this is
+ * how the hook route recovers the task id `bindSessionToTask` recorded here.
+ * `bound_at IS NOT NULL` is the set-once bind marker (never reverts).
+ */
+export async function getBoundTaskId(db: SlayzoneDb, sessionId: string): Promise<string | null> {
+  const row = await db.get<{ task_id: string | null }>(
+    `SELECT task_id FROM agent_sessions WHERE id = ? AND bound_at IS NOT NULL`,
+    [sessionId]
+  )
+  return row?.task_id ?? null
+}

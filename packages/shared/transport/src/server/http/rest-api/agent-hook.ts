@@ -7,7 +7,8 @@ import { isHookDrivenMode } from '@slayzone/terminal/server'
 import {
   recordConversation,
   findPendingSpawn,
-  confirmSessionConversation
+  confirmSessionConversation,
+  getBoundTaskId
 } from '@slayzone/task/server'
 import { capturePrompt } from '@slayzone/agent-turns/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
@@ -168,6 +169,15 @@ const CONVERSATION_ID_CAPTURE_EVENT: Record<string, string> = {
   codex: 'SessionStart',
   antigravity: 'PreInvocation'
 }
+
+/**
+ * `slaySessionId` → bound `taskId`, cached after the first DB hit. A warm-pool
+ * agent's env vars are fixed at spawn (before its task exists), so its hook
+ * payloads never carry `taskId` — only `slaySessionId` — for the session's
+ * entire life. `getBoundTaskId` recovers it from the `bindSessionToTask`
+ * write; caching is safe because that bind is set-once and never changes.
+ */
+const poolSessionTaskIdCache = new Map<string, string>()
 
 /** Dispatch to the per-agent raw-hook-event → TerminalState mapper. */
 function hookToTerminalState(
@@ -376,8 +386,27 @@ export function registerAgentHookRoute(
       res.status(204).end()
       return
     }
+    // Resolve the effective task id up front. A warm-pool-adopted session's
+    // payload never carries `taskId` (its env vars were fixed before the task
+    // existed — see `poolSessionTaskIdCache` above) — fall back to the DB
+    // binding so its hooks aren't silently dropped by every taskId-gated
+    // consumer below (was: no spinner, no prompt capture, taskId-less
+    // lifecycle events, for the session's whole life).
+    let resolvedTaskId = parsed.data.taskId
+    if (!resolvedTaskId && parsed.data.slaySessionId) {
+      resolvedTaskId = poolSessionTaskIdCache.get(parsed.data.slaySessionId)
+      if (!resolvedTaskId) {
+        const bound = await getBoundTaskId(deps.db, parsed.data.slaySessionId)
+        if (bound) {
+          resolvedTaskId = bound
+          poolSessionTaskIdCache.set(parsed.data.slaySessionId, bound)
+        }
+      }
+    }
+
     const event: AgentLifecycleEvent = {
       ...parsed.data,
+      taskId: resolvedTaskId,
       type,
       timestamp: Date.now()
     }
@@ -388,11 +417,11 @@ export function registerAgentHookRoute(
     // capture-capable modes + the UserPromptSubmit event (once per turn → off
     // the per-tool hot path) and is best-effort: fire-and-forget so a DB hiccup
     // never blocks the hook ack.
-    if (parsed.data.taskId) {
+    if (resolvedTaskId) {
       void capturePrompt(deps.db, {
         agentId: parsed.data.agentId,
         hookEvent: parsed.data.hookEvent,
-        taskId: parsed.data.taskId,
+        taskId: resolvedTaskId,
         sessionId: parsed.data.sessionId,
         raw: parsed.data.raw
       }).catch(() => {
@@ -449,9 +478,9 @@ export function registerAgentHookRoute(
     // Drive the PTY state machine from the hook signal — the source of truth
     // for hook-driven agents (replaces adapter output detection / bullet-glyph
     // regex). gemini/opencode still rely on adapter detection.
-    if (bridge && isHookDrivenMode(parsed.data.agentId) && parsed.data.taskId) {
+    if (bridge && isHookDrivenMode(parsed.data.agentId) && resolvedTaskId) {
       const mode = parsed.data.agentId as TerminalMode
-      const sessionId = bridge.findSession(parsed.data.taskId, mode)
+      const sessionId = bridge.findSession(resolvedTaskId, mode)
       if (sessionId) {
         const newState = hookToTerminalState(
           parsed.data.agentId,
@@ -463,7 +492,7 @@ export function registerAgentHookRoute(
           source: 'pty',
           event: 'pty.hook_received',
           sessionId,
-          taskId: parsed.data.taskId,
+          taskId: resolvedTaskId,
           message: parsed.data.hookEvent,
           // Include raw payload (truncated) so we can see stop_hook_active,
           // tool_name, tool_response, transcript_path, etc. Temporary

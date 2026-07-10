@@ -58,7 +58,8 @@ export {
   confirmSessionConversation,
   confirmSessionConversationByTaskMode,
   markSessionDead,
-  bindSessionToTask
+  bindSessionToTask,
+  getBoundTaskId
 } from './ops'
 export type { CreateImportedTaskInput } from './ops'
 export { configureTaskRuntimeAdapters, updateTask } from './ops/shared'
