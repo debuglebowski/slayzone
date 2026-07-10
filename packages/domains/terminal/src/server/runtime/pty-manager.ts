@@ -11,6 +11,7 @@ import { homedir, platform, userInfo } from 'os'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
+  containsSubmitEnter,
   DEV_SERVER_URL_PATTERN,
   extractOscTitle,
   SESSION_ID_UNAVAILABLE,
@@ -2432,8 +2433,12 @@ export function writePty(sessionId: string, data: string): boolean {
   // Buffer input to detect commands
   session.inputBuffer += data
 
-  // On Enter: transition TUI to 'working' if adapter opts in
-  const hasNewline = data.includes('\r') || data.includes('\n')
+  // On Enter: transition TUI to 'working' if adapter opts in. Submit-Enter
+  // detection must include the kitty CSI-u encoding — once Claude Code enables
+  // the kitty keyboard protocol, xterm sends Enter as `ESC [ 13 u` and no \r
+  // ever reaches this write (a bare CR/LF check missed every typed submit, so
+  // markSessionUserInput never ran → needs_attention never fired).
+  const hasNewline = containsSubmitEnter(data)
   if (hasNewline) {
     // Notify turn-tracker subscribers BEFORE we reset the buffer below.
     // Snapshot of stdin so far = the just-submitted prompt.
@@ -2441,6 +2446,17 @@ export function writePty(sessionId: string, data: string): boolean {
     if (submittedLine.trim().length > 0) {
       emitInputSubmit(sessionId, session.taskId, submittedLine)
       markSessionUserInput(sessionId)
+      // Counterpart to task.attention_transition: proves the user-input mark
+      // was set (and under which key) when a later running→idle checks it.
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'pty',
+        event: 'pty.user_input_marked',
+        sessionId,
+        taskId: session.taskId,
+        message: 'submit-enter',
+        payload: { mode: session.mode, bufferedChars: submittedLine.length }
+      })
     }
     if (
       shouldFlipToRunningOnInput(session.adapter, session.state, session.inputBuffer.trim().length)

@@ -1599,19 +1599,38 @@ app
       // trigger running → idle on auto-respawn after task open) does not flag
       // the task. Renderer clears the flag when the user focuses the task tab.
       try {
-        if (
-          await handleAttentionTransition(
-            db,
-            sessionId,
-            newState,
-            oldState,
-            hasSessionUserInput(sessionId)
-          )
-        ) {
-          notifyTasksChanged()
-        }
+        const hasUserInput = hasSessionUserInput(sessionId)
+        const changed = await handleAttentionTransition(
+          db,
+          sessionId,
+          newState,
+          oldState,
+          hasUserInput
+        )
+        // Every attention decision is recorded: the set path failed silently for
+        // months (no observable trace between "turn ended" and "flag in DB"), so
+        // gate inputs + outcome must be visible in Diagnostics. Low frequency —
+        // fires only on state transitions, a few per turn.
+        recordDiagnosticEvent({
+          level: 'info',
+          source: 'task',
+          event: 'task.attention_transition',
+          sessionId,
+          taskId: sessionId.split(':')[0],
+          message: `${oldState} -> ${newState}`,
+          payload: { hasUserInput, changed }
+        })
+        if (changed) notifyTasksChanged()
       } catch (err) {
         console.error('[attention] failed to set needs_attention:', err)
+        recordDiagnosticEvent({
+          level: 'error',
+          source: 'task',
+          event: 'task.attention_transition_failed',
+          sessionId,
+          taskId: sessionId.split(':')[0],
+          message: (err as Error).message
+        })
       }
     })
 
