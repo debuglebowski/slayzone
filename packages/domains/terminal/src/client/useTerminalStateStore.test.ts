@@ -13,7 +13,7 @@ let failed = 0
 
 function test(name: string, fn: () => void) {
   // Reset state between tests for isolation (actions are preserved by merge).
-  useTerminalStateStore.setState({ byId: {}, hibernated: {} })
+  useTerminalStateStore.setState({ byId: {}, hibernated: {}, lastPushedAt: {} })
   try {
     fn()
     console.log(`✓ ${name}`)
@@ -165,6 +165,38 @@ test('reconcile keeps hibernated during DB-write lag (absent from list AND set)'
   s().applyHibernated('lag:lag')
   s().reconcile([], [])
   expect(s().getSessionState('lag:lag')).toBe('hibernated')
+})
+
+console.log('\nuseTerminalStateStore — reconcile dispatch-freshness guard (flicker fix)\n')
+
+test('reconcile skips a stomp when the push landed after the fetch was dispatched (stale snapshot)', () => {
+  // Models: hook flips a:a to 'running', a stale in-flight reconcile (dispatched
+  // before the hook fired) resolves afterwards with a pre-hook 'idle' snapshot.
+  // The stale snapshot must not flicker the dot back to 'idle'.
+  s().applyStateChange('a:a', 'running')
+  const dispatchedAt = Date.now() - 1000
+  s().reconcile([{ sessionId: 'a:a', state: 'idle' }], undefined, dispatchedAt)
+  expect(s().getSessionState('a:a')).toBe('running')
+})
+
+test('reconcile still applies a snapshot dispatched after the last push (no race)', () => {
+  s().applyStateChange('b:b', 'running')
+  const dispatchedAt = Date.now() + 1000
+  s().reconcile([{ sessionId: 'b:b', state: 'idle' }], undefined, dispatchedAt)
+  expect(s().getSessionState('b:b')).toBe('idle')
+})
+
+test('reconcile Pass 2 skips marking dead when the alive-push is fresher than the stale fetch', () => {
+  s().applyStateChange('c:c', 'running')
+  const dispatchedAt = Date.now() - 1000
+  s().reconcile([], undefined, dispatchedAt)
+  expect(s().getSessionState('c:c')).toBe('running')
+})
+
+test('reconcile without dispatchedAt keeps legacy always-stomp behavior', () => {
+  s().applyStateChange('d:d', 'running')
+  s().reconcile([{ sessionId: 'd:d', state: 'idle' }])
+  expect(s().getSessionState('d:d')).toBe('idle')
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

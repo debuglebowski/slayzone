@@ -44,6 +44,10 @@ export interface TerminalStateStore {
    *  dead but we synthesize 'hibernated' (💤) until reopen. Read by the actions
    *  to swallow the kill's 'dead' and to skip reconcile; no selector reads it. */
   hibernated: Record<string, true>
+  /** sessionId -> Date.now() of the last push event (state-change/exit/hibernated)
+   *  applied to that sid. Lets `reconcile` tell a fresher push apart from a
+   *  `sessionList` snapshot dispatched before the push landed — see `reconcile`. */
+  lastPushedAt: Record<string, number>
 
   /** pty:state-change → adopt newState (swallow the kill's 'dead' while hibernated). */
   applyStateChange: (sessionId: string, newState: TerminalState) => void
@@ -60,8 +64,17 @@ export interface TerminalStateStore {
    *  authority for the 💤 state, which the live `sessions` list can't carry
    *  (hibernating kills the PTY → it vanishes from the list). Passing it lets
    *  any window heal hibernation it never received the window-targeted IPC for.
-   *  Omit it to reconcile only liveness (legacy callers / tests). */
-  reconcile: (sessions: SessionInfoLite[], hibernatedIds?: readonly string[]) => void
+   *  Omit it to reconcile only liveness (legacy callers / tests).
+   *  `dispatchedAt` (Date.now() taken before the `sessionList` fetch started) lets
+   *  a sid with a push newer than the fetch keep its fresher local value instead
+   *  of being stomped by the (now-stale) snapshot — see the flicker this fixes
+   *  in `reconcile`'s body. Omit for callers without a fetch-start timestamp
+   *  (legacy callers / tests) — freshness check is skipped, old behavior. */
+  reconcile: (
+    sessions: SessionInfoLite[],
+    hibernatedIds?: readonly string[],
+    dispatchedAt?: number
+  ) => void
   /** Imperative read (non-reactive callers); default 'starting'. */
   getSessionState: (sessionId: string) => TerminalState
 }
@@ -70,38 +83,43 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
   subscribeWithSelector((set, get) => ({
     byId: {},
     hibernated: {},
+    lastPushedAt: {},
 
     applyStateChange: (sessionId, newState) =>
       set((s) => {
+        const lastPushedAt = { ...s.lastPushedAt, [sessionId]: Date.now() }
         if (s.hibernated[sessionId]) {
           // The kill's own 'dead' must not clear 💤; any other transition means
           // a real reopen/respawn — drop the marker and flow through.
-          if (newState === 'dead') return {}
+          if (newState === 'dead') return { lastPushedAt }
           const { [sessionId]: _omit, ...hibernated } = s.hibernated
-          return { hibernated, byId: { ...s.byId, [sessionId]: newState } }
+          return { hibernated, byId: { ...s.byId, [sessionId]: newState }, lastPushedAt }
         }
-        if (s.byId[sessionId] === newState) return {}
-        return { byId: { ...s.byId, [sessionId]: newState } }
+        if (s.byId[sessionId] === newState) return { lastPushedAt }
+        return { byId: { ...s.byId, [sessionId]: newState }, lastPushedAt }
       }),
 
     applyExit: (sessionId) =>
       set((s) => {
-        if (s.hibernated[sessionId]) return {} // keep 'hibernated', not 'dead'
-        if (s.byId[sessionId] === 'dead') return {}
-        return { byId: { ...s.byId, [sessionId]: 'dead' } }
+        const lastPushedAt = { ...s.lastPushedAt, [sessionId]: Date.now() }
+        if (s.hibernated[sessionId]) return { lastPushedAt } // keep 'hibernated', not 'dead'
+        if (s.byId[sessionId] === 'dead') return { lastPushedAt }
+        return { byId: { ...s.byId, [sessionId]: 'dead' }, lastPushedAt }
       }),
 
     applyHibernated: (sessionId) =>
       set((s) => ({
         hibernated: { ...s.hibernated, [sessionId]: true },
-        byId: { ...s.byId, [sessionId]: 'hibernated' }
+        byId: { ...s.byId, [sessionId]: 'hibernated' },
+        lastPushedAt: { ...s.lastPushedAt, [sessionId]: Date.now() }
       })),
 
     clearSession: (sessionId) =>
       set((s) => {
         const { [sessionId]: _b, ...byId } = s.byId
         const { [sessionId]: _h, ...hibernated } = s.hibernated
-        return { byId, hibernated }
+        const { [sessionId]: _p, ...lastPushedAt } = s.lastPushedAt
+        return { byId, hibernated, lastPushedAt }
       }),
 
     hydrate: (sessions) =>
@@ -117,8 +135,16 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
         return changed ? { byId } : {}
       }),
 
-    reconcile: (sessions, hibernatedIds) =>
+    reconcile: (sessions, hibernatedIds, dispatchedAt) =>
       set((s) => {
+        // A push (state-change/exit) newer than the moment this reconcile's
+        // fetch was dispatched carries information the fetch's snapshot
+        // couldn't have seen — the snapshot is stale for that sid, so skip the
+        // stomp instead of overwriting a fresher local value with a stale one
+        // (was: fresh 'running' -> flickered to a stale 'idle' every 15s/focus
+        // reconcile that happened to straddle a hook-driven transition).
+        const isStale = (sid: string): boolean =>
+          dispatchedAt !== undefined && (s.lastPushedAt[sid] ?? 0) > dispatchedAt
         const present = new Map(sessions.map((x) => [x.sessionId, x.state]))
         // `null` = caller passed no set → reconcile liveness only, preserving the
         // legacy local-marker behavior. A set (even empty) = DB is authoritative.
@@ -161,7 +187,7 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
           if (cur === undefined) {
             byId[sid] = listState
             changed = true
-          } else if (cur !== listState && cur !== 'dead') {
+          } else if (cur !== listState && cur !== 'dead' && !isStale(sid)) {
             byId[sid] = listState
             changed = true
           }
@@ -174,7 +200,7 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
         // DB-write lag right after hibernate can't flicker 💤 off.)
         for (const sid of Object.keys(byId)) {
           if (hibernated[sid]) continue
-          if (ALIVE_STATES.has(byId[sid]) && !present.has(sid)) {
+          if (ALIVE_STATES.has(byId[sid]) && !present.has(sid) && !isStale(sid)) {
             byId[sid] = 'dead'
             changed = true
           }
@@ -245,6 +271,10 @@ let _reconciling = false
 async function pullReconcile(): Promise<void> {
   if (_reconciling || typeof window === 'undefined') return
   _reconciling = true
+  // Stamped before the fetch fires so `reconcile` can tell a push that landed
+  // WHILE this fetch was in flight (fresher than what the snapshot could see)
+  // apart from one that landed before it (safe to trust the snapshot for).
+  const dispatchedAt = Date.now()
   try {
     // Pull liveness + the authoritative hibernated set together so reconcile can
     // heal 💤 in any window, not just the one that owned the session when the
@@ -262,7 +292,8 @@ async function pullReconcile(): Promise<void> {
       .getState()
       .reconcile(
         sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })),
-        hibernatedIds
+        hibernatedIds,
+        dispatchedAt
       )
   } catch {
     // Best-effort; the next trigger retries (also covers the tRPC-client-not-yet-
