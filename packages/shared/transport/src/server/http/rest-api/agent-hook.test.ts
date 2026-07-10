@@ -3,9 +3,10 @@ import http from 'http'
 import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { registerAgentHookRoute } from './agent-hook'
 
-// Broadcast spy — injected via deps.legacyBroadcast (the route no longer
-// imports the Electron-side broadcast helper).
-const broadcastSpy = vi.fn()
+// Lifecycle spy — captures every event the route emits on deps.agentLifecycle
+// (the host bridges that emitter to the renderer; legacyBroadcast is unused
+// by this route). Receives the event object only.
+const lifecycleSpy = vi.fn()
 
 // PTY state-machine bridge — injected via deps.terminalStateBridge (the route
 // no longer imports @slayzone/terminal/electron; the host wires the live impl).
@@ -19,7 +20,7 @@ const noteAwaitingInputSpy = vi.fn<(sessionId: string, awaiting: boolean) => voi
 // importing it for real would pull the adapter registry into vitest — mock it.
 // Mirror the real registry-derived set (claude-code/codex/antigravity carry
 // hookDriven=true). The route uses this to decide whether hooks drive state;
-// the gemini "broadcast only" test below exercises the false branch.
+// the gemini "lifecycle only" test below exercises the false branch.
 vi.mock('@slayzone/terminal/server', () => ({
   isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode)
 }))
@@ -56,25 +57,17 @@ interface ServerHandle {
   close(): Promise<void>
 }
 
-function startServer(deps?: {
-  notifyRenderer?: () => void
-  onLifecycleEvent?: (event: unknown) => void
-}): Promise<ServerHandle> {
+function startServer(deps?: { notifyRenderer?: () => void }): Promise<ServerHandle> {
   const app = express()
   registerAgentHookRoute(app, {
     db: {} as never,
     notifyRenderer: deps?.notifyRenderer ?? (() => {}),
-    legacyBroadcast: (...args: unknown[]) => broadcastSpy(...args),
-    ...(deps?.onLifecycleEvent
-      ? {
-          agentLifecycle: {
-            emit: (_channel: string, event: unknown) => {
-              deps.onLifecycleEvent?.(event)
-              return true
-            }
-          } as never
-        }
-      : {}),
+    agentLifecycle: {
+      emit: (_channel: string, event: unknown) => {
+        lifecycleSpy(event)
+        return true
+      }
+    } as never,
     terminalStateBridge: {
       findSession: (taskId, mode) => findSessionSpy(taskId, mode),
       transition: (sessionId, state, event) => transitionSpy(sessionId, state, event),
@@ -129,7 +122,7 @@ function postJson(port: number, body: unknown): Promise<{ status: number; body: 
 
 describe('POST /api/agent-hook', () => {
   beforeEach(() => {
-    broadcastSpy.mockClear()
+    lifecycleSpy.mockClear()
     findSessionSpy.mockReset()
     transitionSpy.mockReset()
     markActiveSpy.mockReset()
@@ -148,7 +141,7 @@ describe('POST /api/agent-hook', () => {
     findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
   })
 
-  test('valid payload → 200 + broadcasts agent:lifecycle', async () => {
+  test('valid payload → 200 + emits agent lifecycle event', async () => {
     const srv = await startServer()
     try {
       const res = await postJson(srv.port, {
@@ -158,9 +151,8 @@ describe('POST /api/agent-hook', () => {
         taskId: 'task-1'
       })
       expect(res.status).toBe(200)
-      expect(broadcastSpy).toHaveBeenCalledTimes(1)
-      const [channel, event] = broadcastSpy.mock.calls[0]
-      expect(channel).toBe('agent:lifecycle')
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      const [event] = lifecycleSpy.mock.calls[0]
       expect(event).toMatchObject({
         agentId: 'claude-code',
         hookEvent: 'UserPromptSubmit',
@@ -174,23 +166,23 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('unknown hookEvent → 204 + no broadcast', async () => {
+  test('unknown hookEvent → 204 + no lifecycle event', async () => {
     const srv = await startServer()
     try {
       const res = await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'TotallyUnknown' })
       expect(res.status).toBe(204)
-      expect(broadcastSpy).not.toHaveBeenCalled()
+      expect(lifecycleSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
   })
 
-  test('invalid payload → 400 + no broadcast', async () => {
+  test('invalid payload → 400 + no lifecycle event', async () => {
     const srv = await startServer()
     try {
       const res = await postJson(srv.port, { agentId: 'unknown-agent', hookEvent: 'Stop' })
       expect(res.status).toBe(400)
-      expect(broadcastSpy).not.toHaveBeenCalled()
+      expect(lifecycleSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -360,7 +352,7 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('claude-code SessionStart → broadcast + markActive, no state transition (PTY drives its own starting→running)', async () => {
+  test('claude-code SessionStart → lifecycle + markActive, no state transition (PTY drives its own starting→running)', async () => {
     findSessionSpy.mockReturnValue('task-4')
     const srv = await startServer()
     try {
@@ -369,7 +361,7 @@ describe('POST /api/agent-hook', () => {
         hookEvent: 'SessionStart',
         taskId: 'task-4'
       })
-      expect(broadcastSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
       expect(transitionSpy).not.toHaveBeenCalled()
       expect(markActiveSpy).toHaveBeenCalledWith('task-4')
     } finally {
@@ -455,7 +447,7 @@ describe('POST /api/agent-hook', () => {
         hookEvent: 'PostToolUse',
         taskId: 'task-post'
       })
-      expect(broadcastSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
       expect(transitionSpy).not.toHaveBeenCalled()
       expect(markActiveSpy).toHaveBeenCalledWith('task-post')
     } finally {
@@ -568,11 +560,11 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('claude-code w/o taskId → broadcast only, no session lookup', async () => {
+  test('claude-code w/o taskId → lifecycle only, no session lookup', async () => {
     const srv = await startServer()
     try {
       await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'Stop' })
-      expect(broadcastSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
       expect(findSessionSpy).not.toHaveBeenCalled()
       expect(transitionSpy).not.toHaveBeenCalled()
       expect(markActiveSpy).not.toHaveBeenCalled()
@@ -713,8 +705,7 @@ describe('POST /api/agent-hook', () => {
   test('warm-pool-adopted session (no taskId, bound in DB) → resolves taskId + drives state machine', async () => {
     getBoundTaskIdSpy.mockResolvedValue('resolved-task-1')
     findSessionSpy.mockReturnValue('resolved-task-1:resolved-task-1')
-    const lifecycleEvents: unknown[] = []
-    const srv = await startServer({ onLifecycleEvent: (e) => lifecycleEvents.push(e) })
+    const srv = await startServer()
     try {
       await postJson(srv.port, {
         agentId: 'claude-code',
@@ -730,8 +721,8 @@ describe('POST /api/agent-hook', () => {
       )
       // The lifecycle event must carry the resolved taskId too — renderer
       // consumers key agent:lifecycle by task.
-      expect(lifecycleEvents).toHaveLength(1)
-      expect(lifecycleEvents[0]).toMatchObject({ taskId: 'resolved-task-1' })
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ taskId: 'resolved-task-1' })
     } finally {
       await srv.close()
     }
@@ -1106,11 +1097,11 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('gemini → broadcast only, no state-machine drive (still adapter-detected)', async () => {
+  test('gemini → lifecycle only, no state-machine drive (still adapter-detected)', async () => {
     const srv = await startServer()
     try {
       await postJson(srv.port, { agentId: 'gemini', hookEvent: 'Stop', taskId: 'gm-1' })
-      expect(broadcastSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
       expect(findSessionSpy).not.toHaveBeenCalled()
       expect(transitionSpy).not.toHaveBeenCalled()
       expect(markActiveSpy).not.toHaveBeenCalled()
