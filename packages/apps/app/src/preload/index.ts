@@ -35,6 +35,8 @@ const api: ElectronAPI = {
   app: {
     getServerUrl: () =>
       ipcRenderer.invoke('app:get-server-url') as Promise<{ mode: 'local' | 'remote'; url: string }>,
+    getBootConfig: () =>
+      ipcRenderer.invoke('app:get-boot-config') as Promise<{ fleetMode: boolean }>,
     getWindowId: () => ipcRenderer.invoke('app:get-window-id') as Promise<number | null>,
     relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
     setBootSettings: (payload) =>

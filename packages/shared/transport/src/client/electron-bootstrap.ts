@@ -12,6 +12,8 @@ function api(): ElectronAPI {
 
 export const electronBootstrap = {
   getServerUrl: () => api().app.getServerUrl(),
+  // Pre-boot config not backed by the settings DB (fleet mode — decided at boot).
+  getBootConfig: () => api().app.getBootConfig(),
   getWindowId: () => api().app.getWindowId(),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'

@@ -400,6 +400,8 @@ export interface PtyCreateOptions {
 export interface ElectronAPI {
   app: {
     getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
+    /** Pre-boot config the renderer can't get from the settings DB (fleet mode). */
+    getBootConfig: () => Promise<{ fleetMode: boolean }>
     getWindowId: () => Promise<number | null>
     relaunch: () => Promise<void>
     setBootSettings: (payload: {
@@ -668,6 +670,8 @@ export interface _LegacyElectronAPI {
     getVersion: () => Promise<string>
     getTrpcPort: () => Promise<number>
     getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
+    /** Pre-boot config the renderer can't get from the settings DB (fleet mode). */
+    getBootConfig: () => Promise<{ fleetMode: boolean }>
     relaunch: () => Promise<void>
     setBootSettings: (payload: {
       server_mode?: 'local' | 'remote'

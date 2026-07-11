@@ -2874,6 +2874,15 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
       }
     })
+    // Reads the pre-boot config the renderer needs for settings toggles that
+    // aren't backed by the settings DB (fleet mode — see FleetSettingsTab). The
+    // in-memory `bootConfig` was read once at boot; re-read from disk so a save
+    // made since boot is reflected. `server_mode`/url are already exposed via
+    // `app:get-server-url`; this surfaces `fleet_mode` as a plain boolean.
+    ipcMain.handle('app:get-boot-config', () => {
+      const cfg = readBootConfig(getTrpcDataRoot())
+      return { fleetMode: cfg.fleet_mode === true }
+    })
     // Writes the pre-boot config file. Throws on an unnormalizable URL.
     ipcMain.handle(
       'app:set-boot-settings',
