@@ -136,7 +136,15 @@ export async function resolveId(explicit?: string): Promise<string> {
   process.exit(1)
 }
 
-export function printTasks(tasks: TaskRow[], blockedIds?: Set<string>) {
+/** Minimal shape printTasks renders — satisfied by both TaskRow and TaskJson. */
+export interface PrintableTask {
+  id: string
+  status: string
+  title: string
+  project_name?: string | null
+}
+
+export function printTasks(tasks: PrintableTask[], blockedIds?: Set<string>) {
   if (tasks.length === 0) {
     console.log('No tasks found.')
     return

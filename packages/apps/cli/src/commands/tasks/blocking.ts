@@ -1,4 +1,4 @@
-import { openDb } from '../../db'
+import { apiGet } from '../../api'
 import { printTasks, resolveId, type TaskRow } from './_shared'
 
 export interface BlockingOpts {
@@ -10,33 +10,11 @@ export async function blockingAction(
   opts: BlockingOpts
 ): Promise<void> {
   taskId = await resolveId(taskId)
-  const db = openDb()
-
-  const tasks = db.query<{ id: string }>(
-    `SELECT id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': taskId }
+  // GET /api/tasks/:id/blocking resolves the id prefix and returns the tasks
+  // this one blocks (reverse of blockers) in the CLI's column set.
+  const { data: blocking } = await apiGet<{ ok: true; data: TaskRow[] }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/blocking`
   )
-  if (tasks.length === 0) {
-    console.error(`Task not found: ${taskId}`)
-    process.exit(1)
-  }
-  if (tasks.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${taskId}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-
-  const task = tasks[0]
-
-  const blocking = db.query<TaskRow>(
-    `SELECT t.id, t.project_id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
-     FROM tasks t JOIN task_dependencies td ON t.id = td.blocks_task_id
-     JOIN projects p ON t.project_id = p.id
-     WHERE td.task_id = :tid`,
-    { ':tid': task.id }
-  )
-  db.close()
 
   if (opts.json) {
     console.log(JSON.stringify(blocking, null, 2))

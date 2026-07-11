@@ -10,7 +10,8 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
  * that has a `task_conversations` row for the task is reset. Append-only —
  * a sentinel row (NULL conversation_id, origin 'manual-reset') plus the
  * mirrored `session_resets` timeline event (migration v147 triple-write).
- * Responds with the list of reset modes (empty when nothing to reset).
+ * Responds with the resolved task id + the list of reset modes (empty when
+ * nothing to reset) — the id lets the CLI echo the task it resolved.
  */
 export function registerTaskResetConversationRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/tasks/:id/reset-conversation', async (req, res) => {
@@ -37,7 +38,7 @@ export function registerTaskResetConversationRoute(app: Express, deps: RestApiDe
           ).map((r) => r.mode)
 
       if (modes.length === 0) {
-        res.json({ ok: true, data: { reset: [] } })
+        res.json({ ok: true, data: { id: task.row.id, reset: [] } })
         return
       }
 
@@ -61,7 +62,7 @@ export function registerTaskResetConversationRoute(app: Express, deps: RestApiDe
       })
       await db.batchTxn(ops)
 
-      res.json({ ok: true, data: { reset: modes } })
+      res.json({ ok: true, data: { id: task.row.id, reset: modes } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }

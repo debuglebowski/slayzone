@@ -1,5 +1,4 @@
-import { openDb } from '../../db'
-import { apiPatch } from '../../api'
+import { apiGet, apiPatch } from '../../api'
 import { resolveId } from './_shared'
 
 export async function progressAction(idOrValue: string, value: string | undefined): Promise<void> {
@@ -17,23 +16,11 @@ export async function progressAction(idOrValue: string, value: string | undefine
     process.exit(1)
   }
 
-  const db = openDb()
-  const tasks = db.query<{ id: string; title: string }>(
-    `SELECT id, title FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': idPrefix }
+  // GET /api/tasks/:id resolves the id prefix (404/400 with the same messages)
+  // and yields the full uuid + title; PATCH then requires the resolved uuid.
+  const { data: task } = await apiGet<{ ok: true; data: { id: string; title: string } }>(
+    `/api/tasks/${encodeURIComponent(idPrefix)}`
   )
-  db.close()
-  if (tasks.length === 0) {
-    console.error(`Task not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (tasks.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-  const task = tasks[0]
 
   await apiPatch(`/api/tasks/${task.id}`, { progress: n })
   console.log(`Progress ${n}%: ${task.id.slice(0, 8)}  ${task.title}`)

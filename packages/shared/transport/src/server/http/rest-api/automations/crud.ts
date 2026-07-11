@@ -64,6 +64,36 @@ export function registerAutomationsCrudRoutes(app: Express, deps: RestApiDeps): 
     }
   })
 
+  // Execution history for an automation (CLI `slay automations runs`).
+  app.get('/api/automations/:id/runs', async (req, res) => {
+    const rawLimit = queryString(req.query.limit) ?? '10'
+    const limit = parseInt(rawLimit, 10)
+    if (!Number.isFinite(limit) || limit <= 0) {
+      res.status(400).json({ ok: false, error: `Invalid limit: ${rawLimit}` })
+      return
+    }
+    try {
+      const resolved = await resolveByIdPrefix<{ id: string }>(
+        deps.db,
+        'automations',
+        req.params.id,
+        'Automation',
+        'id'
+      )
+      if (isResolveFailure(resolved)) {
+        res.status(resolved.status).json({ ok: false, error: resolved.error })
+        return
+      }
+      const runs = await deps.db.all(
+        `SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT ?`,
+        [resolved.row.id, limit]
+      )
+      res.json({ ok: true, data: runs })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
   app.post('/api/automations', async (req, res) => {
     const body = (req.body ?? {}) as {
       project?: unknown

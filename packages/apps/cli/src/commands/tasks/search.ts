@@ -1,4 +1,4 @@
-import { openDb } from '../../db'
+import { apiGet } from '../../api'
 import { printTasks, type TaskRow } from './_shared'
 
 export interface SearchOpts {
@@ -8,34 +8,19 @@ export interface SearchOpts {
 }
 
 export async function searchAction(query: string, opts: SearchOpts): Promise<void> {
-  const db = openDb()
-  const q = `%${query.toLowerCase()}%`
-  const limit = parseInt(opts.limit ?? '50', 10)
+  // GET /api/tasks/search owns the title/description substring match, project
+  // narrowing, and limit — returning the same column set the CLI printed.
+  const params = new URLSearchParams({ q: query })
+  if (opts.project) params.set('project', opts.project)
+  if (opts.limit) params.set('limit', opts.limit)
 
-  const conditions: string[] = [
-    't.is_temporary = 0',
-    't.deleted_at IS NULL',
-    "(LOWER(t.title) LIKE :q OR LOWER(COALESCE(t.description, '')) LIKE :q)"
-  ]
-  const params: Record<string, string | number | null> = { ':q': q, ':limit': limit }
-
-  if (opts.project) {
-    conditions.push('(p.id = :proj OR LOWER(p.name) LIKE :projLike)')
-    params[':proj'] = opts.project
-    params[':projLike'] = `%${opts.project.toLowerCase()}%`
-  }
-
-  const tasks = db.query<TaskRow>(
-    `SELECT t.id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
-     FROM tasks t JOIN projects p ON t.project_id = p.id
-     WHERE ${conditions.join(' AND ')}
-     ORDER BY t.updated_at DESC LIMIT :limit`,
-    params
+  const { data } = await apiGet<{ ok: true; data: TaskRow[] }>(
+    `/api/tasks/search?${params.toString()}`
   )
 
   if (opts.json) {
-    console.log(JSON.stringify(tasks, null, 2))
+    console.log(JSON.stringify(data, null, 2))
   } else {
-    printTasks(tasks)
+    printTasks(data)
   }
 }

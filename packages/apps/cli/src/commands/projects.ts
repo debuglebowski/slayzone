@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import fs from 'node:fs'
 import path from 'node:path'
-import { openDb, notifyApp, resolveProject } from '../db'
+import { apiGet, apiPost, apiPatch } from '../api'
 import { prepareProjectCreate } from '@slayzone/projects/shared'
 
 interface ProjectRow extends Record<string, unknown> {
@@ -21,6 +21,18 @@ interface CreatedProjectRow extends Record<string, unknown> {
 }
 
 const DEFAULT_PROJECT_COLOR = '#3b82f6'
+
+/** Narrow a full Project row to the CLI's stable `--json` field set. */
+function narrowProject(p: Record<string, unknown>): CreatedProjectRow {
+  return {
+    id: p.id as string,
+    name: p.name as string,
+    color: p.color as string,
+    path: (p.path as string | null) ?? null,
+    created_at: p.created_at as string,
+    updated_at: p.updated_at as string
+  }
+}
 
 function normalizeProjectPath(input: string | undefined): string | null {
   if (!input) return null
@@ -68,16 +80,9 @@ export function projectsCommand(): Command {
     .description('List all projects')
     .option('--json', 'Output as JSON')
     .action(async (opts) => {
-      const db = openDb()
-
-      const projects = db.query<ProjectRow>(
-        `SELECT p.id, p.name, p.path,
-           COUNT(t.id) FILTER (WHERE t.archived_at IS NULL AND t.deleted_at IS NULL AND t.is_temporary = 0) AS task_count
-         FROM projects p
-         LEFT JOIN tasks t ON t.project_id = p.id
-         GROUP BY p.id
-         ORDER BY p.name ASC`
-      )
+      // GET /api/projects returns id, name, path + live (non-archived/deleted/
+      // temporary) task_count, ordered by name.
+      const { data: projects } = await apiGet<{ ok: true; data: ProjectRow[] }>('/api/projects')
 
       if (opts.json) {
         console.log(JSON.stringify(projects, null, 2))
@@ -113,13 +118,11 @@ export function projectsCommand(): Command {
     .option('--json', 'Output created project as JSON')
     .action(async (name: string, opts: { path?: string; color: string; json?: boolean }) => {
       const projectPath = normalizeProjectPath(opts.path)
+      // Validate name + color locally FIRST (same messages), so an invalid
+      // input never creates the directory (parity with the original ordering).
       let prepared: ReturnType<typeof prepareProjectCreate>
       try {
-        prepared = prepareProjectCreate({
-          name,
-          color: opts.color,
-          path: projectPath
-        })
+        prepared = prepareProjectCreate({ name, color: opts.color, path: projectPath })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error(message)
@@ -131,52 +134,14 @@ export function projectsCommand(): Command {
         console.error(`Created directory: ${prepared.path}`)
       }
 
-      const db = openDb()
-      let project: CreatedProjectRow | undefined
-      try {
-        db.run('BEGIN')
-        try {
-          const { sort_order: nextOrder } = db.query<{ sort_order: number }>(
-            'SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM projects'
-          )[0] ?? { sort_order: 0 }
-
-          db.run(
-            `INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at)
-             VALUES (:id, :name, :color, :path, :columnsConfig, :sortOrder, :createdAt, :updatedAt)`,
-            {
-              ':id': prepared.id,
-              ':name': prepared.name,
-              ':color': prepared.color,
-              ':path': prepared.path,
-              ':columnsConfig': prepared.columnsConfigJson,
-              ':sortOrder': nextOrder,
-              ':createdAt': prepared.createdAt,
-              ':updatedAt': prepared.updatedAt
-            }
-          )
-          db.run('COMMIT')
-        } catch (e) {
-          db.run('ROLLBACK')
-          throw e
-        }
-
-        project = db.query<CreatedProjectRow>(
-          `SELECT id, name, color, path, created_at, updated_at
-           FROM projects
-           WHERE id = :id
-           LIMIT 1`,
-          { ':id': prepared.id }
-        )[0]
-      } finally {
-        db.close()
-      }
-
-      if (!project) {
-        console.error('Failed to create project.')
-        process.exit(1)
-      }
-
-      await notifyApp()
+      // POST /api/projects persists the metadata (server allocates id +
+      // sort_order via the shared create op).
+      const { data } = await apiPost<{ ok: true; data: CreatedProjectRow }>('/api/projects', {
+        name: prepared.name,
+        color: prepared.color,
+        path: prepared.path
+      })
+      const project = narrowProject(data)
 
       if (opts.json) {
         console.log(JSON.stringify(project, null, 2))
@@ -205,43 +170,28 @@ export function projectsCommand(): Command {
           process.exit(1)
         }
 
-        const db = openDb()
-        const project = resolveProject(db, proj)
-        const sets: string[] = ['updated_at = :now']
-        const params: Record<string, string | number | null> = {
-          ':now': new Date().toISOString(),
-          ':id': project.id
-        }
-
-        if (opts.name !== undefined) {
-          sets.push('name = :name')
-          params[':name'] = opts.name
-        }
-        if (opts.color !== undefined) {
-          sets.push('color = :color')
-          params[':color'] = opts.color
-        }
+        const body: Record<string, unknown> = {}
+        if (opts.name !== undefined) body.name = opts.name
+        if (opts.color !== undefined) body.color = opts.color
         if (opts.path !== undefined) {
           const resolved = normalizeProjectPath(opts.path)
           if (resolved) ensureProjectPath(resolved)
-          sets.push('path = :path')
-          params[':path'] = resolved
+          body.path = resolved
         }
 
-        db.run(`UPDATE projects SET ${sets.join(', ')} WHERE id = :id`, params)
-
-        const updated = db.query<CreatedProjectRow>(
-          `SELECT id, name, color, path, created_at, updated_at FROM projects WHERE id = :id LIMIT 1`,
-          { ':id': project.id }
-        )[0]
-        db.close()
-        await notifyApp()
+        // PATCH /api/projects/:id resolves the project (id or name substring)
+        // and persists via the shared update op.
+        const { data } = await apiPatch<{ ok: true; data: CreatedProjectRow }>(
+          `/api/projects/${encodeURIComponent(proj)}`,
+          body
+        )
+        const updated = narrowProject(data)
 
         if (opts.json) {
           console.log(JSON.stringify(updated, null, 2))
           return
         }
-        console.log(`Updated project: ${project.id.slice(0, 8)}  ${opts.name ?? project.name}`)
+        console.log(`Updated project: ${updated.id.slice(0, 8)}  ${updated.name}`)
       }
     )
 

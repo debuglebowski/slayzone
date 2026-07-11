@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto'
-import { openDb } from '../../db'
+import { apiPost } from '../../api'
 import { resolveId } from './_shared'
 
 export interface ResetConversationOpts {
@@ -16,82 +15,27 @@ export interface ResetConversationOpts {
  * The bug class (eager-persist clobber) is closed structurally for new writes
  * after migration v145; this CLI exists to recover from the small set of
  * historic bad bindings the backfill carried forward.
+ *
+ * POST /api/tasks/:id/reset-conversation owns id-prefix resolution, the
+ * append-only sentinel + session_resets triple-write, and returns the resolved
+ * task id plus the list of reset modes (empty when nothing to reset).
  */
 export async function resetConversationAction(
   idPrefix: string | undefined,
   opts: ResetConversationOpts
 ): Promise<void> {
   idPrefix = await resolveId(idPrefix)
-  const db = openDb()
-
-  const tasks = db.query<{ id: string; title: string }>(
-    `SELECT id, title FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': idPrefix }
+  const { data } = await apiPost<{ ok: true; data: { id: string; reset: string[] } }>(
+    `/api/tasks/${encodeURIComponent(idPrefix)}/reset-conversation`,
+    opts.mode ? { mode: opts.mode } : {}
   )
-  if (tasks.length === 0) {
-    console.error(`Task not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (tasks.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${tasks
-        .map((t) => t.id.slice(0, 8))
-        .join(', ')}`
-    )
-    process.exit(1)
-  }
-  const task = tasks[0]
 
-  // If no --mode is given, reset every mode that currently has a row for this
-  // task. Reset = append a `manual-reset` sentinel; the row's NULL
-  // conversation_id is intentional. Append-only: we never DELETE.
-  const modes = opts.mode
-    ? [opts.mode]
-    : db
-        .query<{ mode: string }>(
-          `SELECT DISTINCT mode FROM task_conversations WHERE task_id = :id`,
-          { ':id': task.id }
-        )
-        .map((r) => r.mode)
-
-  if (modes.length === 0) {
-    console.log(
-      `No conversation rows for ${task.id.slice(0, 8)} — nothing to reset.`
-    )
-    db.close()
+  const shortId = data.id.slice(0, 8)
+  if (data.reset.length === 0) {
+    console.log(`No conversation rows for ${shortId} — nothing to reset.`)
     return
   }
-
-  const createdAt = Date.now()
-  for (const mode of modes) {
-    const resetId = randomUUID()
-    db.run(
-      `INSERT INTO task_conversations (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
-       VALUES (:id, :task, :mode, NULL, 'manual-reset', NULL, :ts)`,
-      {
-        ':id': resetId,
-        ':task': task.id,
-        ':mode': mode,
-        ':ts': createdAt
-      }
-    )
-    // Transition triple-write (migration v147): a reset is a `session_resets`
-    // timeline event in the first-class agent-session model. Mirror it so the
-    // new resolver's cutoff matches once reads cut over (slice 2).
-    db.run(
-      `INSERT INTO session_resets (id, task_id, mode, created_at)
-       VALUES (:id, :task, :mode, :ts)`,
-      {
-        ':id': resetId,
-        ':task': task.id,
-        ':mode': mode,
-        ':ts': createdAt
-      }
-    )
-    console.log(
-      `Reset: ${task.id.slice(0, 8)}  mode=${mode}  (next spawn starts fresh)`
-    )
+  for (const mode of data.reset) {
+    console.log(`Reset: ${shortId}  mode=${mode}  (next spawn starts fresh)`)
   }
-
-  db.close()
 }

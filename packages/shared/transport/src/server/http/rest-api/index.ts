@@ -21,17 +21,20 @@ import { registerGetTaskRoute } from './tasks/get'
 import { registerTaskSubtasksRoutes } from './tasks/subtasks'
 import { registerTaskBlockersRoutes } from './tasks/blockers'
 import { registerTaskBlockingRoute } from './tasks/blocking'
+import { registerTaskBlockedRoutes } from './tasks/blocked'
 import { registerTaskTagsRoutes } from './tasks/tags'
 import { registerTaskResetConversationRoute } from './tasks/reset-conversation'
 import { registerTaskProgressRoute } from './tasks/progress'
 import { registerTagsCrudRoutes } from './tags/crud'
 import { registerProjectsListRoute } from './projects/list'
 import { registerProjectsResolveByPathRoute } from './projects/resolve-by-path'
+import { registerProjectsCrudRoutes } from './projects/crud'
 import { registerTemplatesCrudRoutes } from './templates/crud'
 import { registerPanelsCrudRoutes } from './panels/crud'
 import { registerAutomationsCrudRoutes } from './automations/crud'
 import { registerArtifactsListRoute } from './artifacts/list'
 import { registerArtifactsContentRoutes } from './artifacts/content'
+import { registerArtifactsCrudRoutes } from './artifacts/crud'
 import { registerOpenArtifactRoute } from './artifacts/open'
 import { registerArtifactsExportPdfRoute } from './artifacts/export-pdf'
 import { registerArtifactsExportPngRoute } from './artifacts/export-png'
@@ -97,6 +100,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerTaskSubtasksRoutes(app, deps)
   registerTaskBlockersRoutes(app, deps)
   registerTaskBlockingRoute(app, deps)
+  registerTaskBlockedRoutes(app, deps)
   registerTaskTagsRoutes(app, deps)
   registerTaskResetConversationRoute(app, deps)
   registerTaskProgressRoute(app, deps)
@@ -107,6 +111,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // Projects
   registerProjectsListRoute(app, deps)
   registerProjectsResolveByPathRoute(app, deps)
+  registerProjectsCrudRoutes(app, deps)
 
   // Templates
   registerTemplatesCrudRoutes(app, deps)
@@ -118,6 +123,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerOpenArtifactRoute(app, deps)
   registerArtifactsListRoute(app, deps)
   registerArtifactsContentRoutes(app, deps)
+  registerArtifactsCrudRoutes(app, deps)
   registerArtifactsExportPdfRoute(app, deps)
   registerArtifactsExportPngRoute(app, deps)
   registerArtifactsExportHtmlRoute(app, deps)

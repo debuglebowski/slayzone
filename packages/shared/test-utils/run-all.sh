@@ -191,6 +191,26 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/task
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/delete.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/unarchive.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/update.test.ts
+# Wave-3 CLI cutover — dark hub REST read/CRUD surface consumed by the CLI.
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/list.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/get.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/search.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/subtasks.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/blockers.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/blocking.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/blocked.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/tags.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/progress.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/reset-conversation.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tags/crud.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/projects/list.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/projects/resolve-by-path.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/projects/crud.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/templates/crud.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/panels/crud.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/automations/crud.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/list.test.ts
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
 # Pool: session → bound task resolution (slay CLI fallback for pre-warmed agents).
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/sessions/resolve-task.test.ts
@@ -214,6 +234,8 @@ run_test_electron_loader packages/apps/cli/test/templates.test.ts
 run_test_electron_loader packages/apps/cli/test/automations.test.ts
 run_test_electron_loader packages/apps/cli/test/tasks-ext.test.ts
 run_test_electron_loader packages/apps/cli/test/projects-update.test.ts
+# Wave-3 CLI read commands routed through REST (hub-aware cutover).
+run_test_electron_loader packages/apps/cli/test/cli-read-rest.test.ts
 
 if [ -n "$LINEAR_API_KEY" ]; then
   run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.linear.test.ts

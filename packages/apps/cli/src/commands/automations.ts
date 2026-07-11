@@ -1,8 +1,8 @@
 import { Command } from 'commander'
 import fs from 'node:fs'
 import { TEMPLATE_VARIABLES } from '@slayzone/automations/shared'
-import { openDb, notifyApp, resolveProject, resolveProjectArg } from '../db'
-import { apiPost } from '../api'
+import { resolveProjectArg } from '../db'
+import { apiGet, apiPost, apiPatch, apiDelete } from '../api'
 
 function templateVarsHelp(): string {
   const w = Math.max(...TEMPLATE_VARIABLES.map((v) => v.name.length)) + 6
@@ -10,18 +10,21 @@ function templateVarsHelp(): string {
   return `\nTemplate variables (use in --action-command):\n${lines.join('\n')}\n`
 }
 
-interface AutomationRow extends Record<string, unknown> {
+// Parsed automation shape returned by the REST routes (parseAutomationRow):
+// enabled/catchup_on_start are booleans; trigger_config/conditions/actions are
+// parsed JSON.
+interface Automation extends Record<string, unknown> {
   id: string
   project_id: string
   name: string
   description: string | null
-  enabled: number
-  trigger_config: string
-  conditions: string | null
-  actions: string
+  enabled: boolean
+  trigger_config: { type?: string; params?: Record<string, string> } | null
+  conditions: unknown[]
+  actions: unknown[]
   run_count: number
   last_run_at: string | null
-  catchup_on_start: number
+  catchup_on_start: boolean
   sort_order: number
   created_at: string
   updated_at: string
@@ -57,44 +60,6 @@ const TRIGGER_TYPES = [
   'manual'
 ] as const
 
-function safeJsonParse(s: string | null): unknown {
-  if (!s) return null
-  try {
-    return JSON.parse(s)
-  } catch {
-    return null
-  }
-}
-
-function resolveAutomation(db: ReturnType<typeof openDb>, idPrefix: string) {
-  const rows = db.query<AutomationRow>(
-    `SELECT * FROM automations WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': idPrefix }
-  )
-  if (rows.length === 0) {
-    console.error(`Automation not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (rows.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-  return rows[0]
-}
-
-function parseRow(row: AutomationRow) {
-  return {
-    ...row,
-    enabled: Boolean(row.enabled),
-    catchup_on_start: Boolean(row.catchup_on_start),
-    trigger_config: safeJsonParse(row.trigger_config),
-    conditions: safeJsonParse(row.conditions) ?? [],
-    actions: safeJsonParse(row.actions) ?? []
-  }
-}
-
 export function automationsCommand(): Command {
   const cmd = new Command('automations')
     .description('Manage automations')
@@ -108,17 +73,15 @@ export function automationsCommand(): Command {
     .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--json', 'Output as JSON')
     .action(async (opts) => {
-      const db = openDb()
-      const project = resolveProject(db, resolveProjectArg(opts.project))
-
-      const rows = db.query<AutomationRow>(
-        `SELECT * FROM automations WHERE project_id = :pid ORDER BY sort_order, created_at`,
-        { ':pid': project.id }
+      const project = resolveProjectArg(opts.project)
+      // GET /api/automations resolves the project and returns parsed automation
+      // rows (booleans + parsed JSON) — the CLI's --json contract exactly.
+      const { data: rows } = await apiGet<{ ok: true; data: Automation[] }>(
+        `/api/automations?project=${encodeURIComponent(project)}`
       )
-      db.close()
 
       if (opts.json) {
-        console.log(JSON.stringify(rows.map(parseRow), null, 2))
+        console.log(JSON.stringify(rows, null, 2))
         return
       }
 
@@ -140,8 +103,7 @@ export function automationsCommand(): Command {
         const id = r.id.slice(0, 8).padEnd(idW)
         const name = r.name.slice(0, nameW).padEnd(nameW)
         const on = r.enabled ? 'yes' : 'no '
-        const tc = safeJsonParse(r.trigger_config) as { type?: string } | null
-        const trigger = (tc?.type ?? '?').slice(0, trigW).padEnd(trigW)
+        const trigger = (r.trigger_config?.type ?? '?').slice(0, trigW).padEnd(trigW)
         const runs = String(r.run_count).padStart(4)
         const lastRun = r.last_run_at ?? '-'
         console.log(`${id}  ${name}  ${on}  ${trigger}  ${runs}  ${lastRun}`)
@@ -154,28 +116,24 @@ export function automationsCommand(): Command {
     .description('View automation details (id prefix supported)')
     .option('--json', 'Output as JSON')
     .action(async (idPrefix: string, opts) => {
-      const db = openDb()
-      const row = resolveAutomation(db, idPrefix)
-      db.close()
-
-      const parsed = parseRow(row)
+      const { data: row } = await apiGet<{ ok: true; data: Automation }>(
+        `/api/automations/${encodeURIComponent(idPrefix)}`
+      )
 
       if (opts.json) {
-        console.log(JSON.stringify(parsed, null, 2))
+        console.log(JSON.stringify(row, null, 2))
         return
       }
 
       console.log(`ID:          ${row.id}`)
       console.log(`Name:        ${row.name}`)
-      console.log(`Enabled:     ${parsed.enabled ? 'yes' : 'no'}`)
+      console.log(`Enabled:     ${row.enabled ? 'yes' : 'no'}`)
       if (row.description) console.log(`Description: ${row.description}`)
-      console.log(`Trigger:     ${JSON.stringify(parsed.trigger_config)}`)
-      const triggerType = (parsed.trigger_config as { type?: string } | null)?.type
-      if (triggerType === 'cron')
-        console.log(`Catchup:     ${parsed.catchup_on_start ? 'yes' : 'no'}`)
-      if ((parsed.conditions as unknown[]).length > 0)
-        console.log(`Conditions:  ${JSON.stringify(parsed.conditions)}`)
-      console.log(`Actions:     ${JSON.stringify(parsed.actions)}`)
+      console.log(`Trigger:     ${JSON.stringify(row.trigger_config)}`)
+      const triggerType = row.trigger_config?.type
+      if (triggerType === 'cron') console.log(`Catchup:     ${row.catchup_on_start ? 'yes' : 'no'}`)
+      if (row.conditions.length > 0) console.log(`Conditions:  ${JSON.stringify(row.conditions)}`)
+      console.log(`Actions:     ${JSON.stringify(row.actions)}`)
       console.log(`Runs:        ${row.run_count}`)
       if (row.last_run_at) console.log(`Last run:    ${row.last_run_at}`)
       console.log(`Created:     ${row.created_at}`)
@@ -199,8 +157,7 @@ export function automationsCommand(): Command {
     .option('--config <file>', 'JSON config file (overrides flags)')
     .addHelpText('after', templateVarsHelp())
     .action(async (name: string, opts) => {
-      const db = openDb()
-      const project = resolveProject(db, resolveProjectArg(opts.project))
+      const project = resolveProjectArg(opts.project)
 
       let triggerConfig: unknown
       let conditions: unknown[] = []
@@ -222,9 +179,7 @@ export function automationsCommand(): Command {
         }
       } else {
         if (!TRIGGER_TYPES.includes(opts.trigger as (typeof TRIGGER_TYPES)[number])) {
-          console.error(
-            `Invalid trigger type: ${opts.trigger}. Must be: ${TRIGGER_TYPES.join(', ')}`
-          )
+          console.error(`Invalid trigger type: ${opts.trigger}. Must be: ${TRIGGER_TYPES.join(', ')}`)
           process.exit(1)
         }
 
@@ -248,37 +203,21 @@ export function automationsCommand(): Command {
         actions = [{ type: 'run_command', params: { command: opts.actionCommand } }]
       }
 
-      const id = crypto.randomUUID()
-      const now = new Date().toISOString()
-
-      const { sort_order: nextOrder } = db.query<{ sort_order: number }>(
-        `SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM automations WHERE project_id = :pid`,
-        { ':pid': project.id }
-      )[0] ?? { sort_order: 0 }
-
-      // commander's --no-catchup negates: opts.catchup === false when flag passed, true otherwise
-      const catchupOnStart = opts.catchup === false ? 0 : 1
-
-      db.run(
-        `INSERT INTO automations (id, project_id, name, description, enabled, trigger_config, conditions, actions, sort_order, catchup_on_start, created_at, updated_at)
-         VALUES (:id, :pid, :name, :desc, 1, :trigger, :conditions, :actions, :sortOrder, :catchup, :now, :now)`,
+      // commander's --no-catchup negates: opts.catchup === false when flag passed.
+      // The route defaults catchup_on_start on unless explicitly false.
+      const { data: automation } = await apiPost<{ ok: true; data: Automation }>(
+        '/api/automations',
         {
-          ':id': id,
-          ':pid': project.id,
-          ':name': name,
-          ':desc': opts.description ?? null,
-          ':trigger': JSON.stringify(triggerConfig),
-          ':conditions': JSON.stringify(conditions),
-          ':actions': JSON.stringify(actions),
-          ':sortOrder': nextOrder,
-          ':catchup': catchupOnStart,
-          ':now': now
+          project,
+          name,
+          description: opts.description,
+          trigger_config: triggerConfig,
+          conditions,
+          actions,
+          catchup_on_start: opts.catchup === false ? false : undefined
         }
       )
-
-      db.close()
-      await notifyApp()
-      console.log(`Created automation: ${id.slice(0, 8)}  ${name}`)
+      console.log(`Created automation: ${automation.id.slice(0, 8)}  ${name}`)
     })
 
   // slay automations update
@@ -310,29 +249,11 @@ export function automationsCommand(): Command {
         process.exit(1)
       }
 
-      const db = openDb()
-      const automation = resolveAutomation(db, idPrefix)
-
-      const sets: string[] = ['updated_at = :now']
-      const params: Record<string, string | number | null> = {
-        ':now': new Date().toISOString(),
-        ':id': automation.id
-      }
-
-      if (opts.name !== undefined) {
-        sets.push('name = :name')
-        params[':name'] = opts.name
-      }
-      if (opts.description !== undefined) {
-        sets.push('description = :desc')
-        params[':desc'] = opts.description || null
-      }
-      if (opts.enabled) {
-        sets.push('enabled = 1')
-      }
-      if (opts.disabled) {
-        sets.push('enabled = 0')
-      }
+      const body: Record<string, unknown> = {}
+      if (opts.name !== undefined) body.name = opts.name
+      if (opts.description !== undefined) body.description = opts.description || null
+      if (opts.enabled) body.enabled = true
+      if (opts.disabled) body.enabled = false
 
       if (opts.trigger) {
         if (!TRIGGER_TYPES.includes(opts.trigger as (typeof TRIGGER_TYPES)[number])) {
@@ -346,25 +267,21 @@ export function automationsCommand(): Command {
         } else if (opts.trigger === 'cron') {
           if (opts.cron) tparams.expression = opts.cron
         }
-        sets.push('trigger_config = :trigger')
-        params[':trigger'] = JSON.stringify({ type: opts.trigger, params: tparams })
+        body.trigger_config = { type: opts.trigger, params: tparams }
       }
 
       if (opts.actionCommand) {
-        sets.push('actions = :actions')
-        params[':actions'] = JSON.stringify([
-          { type: 'run_command', params: { command: opts.actionCommand } }
-        ])
+        body.actions = [{ type: 'run_command', params: { command: opts.actionCommand } }]
       }
 
-      if (opts.catchup !== undefined) {
-        sets.push('catchup_on_start = :catchup')
-        params[':catchup'] = opts.catchup ? 1 : 0
-      }
+      if (opts.catchup !== undefined) body.catchup_on_start = opts.catchup
 
-      db.run(`UPDATE automations SET ${sets.join(', ')} WHERE id = :id`, params)
-      db.close()
-      await notifyApp()
+      // PATCH /api/automations/:id resolves the id prefix and persists via the
+      // shared store; returns the updated automation.
+      const { data: automation } = await apiPatch<{ ok: true; data: Automation }>(
+        `/api/automations/${encodeURIComponent(idPrefix)}`,
+        body
+      )
       console.log(
         `Updated automation: ${automation.id.slice(0, 8)}  ${opts.name ?? automation.name}`
       )
@@ -375,12 +292,10 @@ export function automationsCommand(): Command {
     .command('delete <id>')
     .description('Delete an automation (id prefix supported)')
     .action(async (idPrefix: string) => {
-      const db = openDb()
-      const automation = resolveAutomation(db, idPrefix)
-
-      db.run(`DELETE FROM automations WHERE id = :id`, { ':id': automation.id })
-      db.close()
-      await notifyApp()
+      const { data: automation } = await apiDelete<{
+        ok: true
+        data: { id: string; name: string }
+      }>(`/api/automations/${encodeURIComponent(idPrefix)}`)
       console.log(`Deleted automation: ${automation.id.slice(0, 8)}  ${automation.name}`)
     })
 
@@ -389,19 +304,16 @@ export function automationsCommand(): Command {
     .command('toggle <id>')
     .description('Toggle an automation on/off (id prefix supported)')
     .action(async (idPrefix: string) => {
-      const db = openDb()
-      const automation = resolveAutomation(db, idPrefix)
-
-      const newEnabled = automation.enabled ? 0 : 1
-      db.run(`UPDATE automations SET enabled = :enabled, updated_at = :now WHERE id = :id`, {
-        ':enabled': newEnabled,
-        ':now': new Date().toISOString(),
-        ':id': automation.id
-      })
-      db.close()
-      await notifyApp()
+      // Read current state (resolves the id prefix), then flip via PATCH.
+      const { data: current } = await apiGet<{ ok: true; data: Automation }>(
+        `/api/automations/${encodeURIComponent(idPrefix)}`
+      )
+      const { data: automation } = await apiPatch<{ ok: true; data: Automation }>(
+        `/api/automations/${current.id}`,
+        { enabled: !current.enabled }
+      )
       console.log(
-        `${newEnabled ? 'Enabled' : 'Disabled'}: ${automation.id.slice(0, 8)}  ${automation.name}`
+        `${automation.enabled ? 'Enabled' : 'Disabled'}: ${automation.id.slice(0, 8)}  ${automation.name}`
       )
     })
 
@@ -410,10 +322,11 @@ export function automationsCommand(): Command {
     .command('run <id>')
     .description('Manually run an automation (requires app running)')
     .action(async (idPrefix: string) => {
-      const db = openDb()
-      const automation = resolveAutomation(db, idPrefix)
-      db.close()
-
+      // Resolve the id prefix first, then trigger the manual run (the run route
+      // takes a full id and returns the run record).
+      const { data: automation } = await apiGet<{ ok: true; data: Automation }>(
+        `/api/automations/${encodeURIComponent(idPrefix)}`
+      )
       const run = await apiPost<{
         id: string
         status: string
@@ -436,15 +349,11 @@ export function automationsCommand(): Command {
     .option('--limit <n>', 'Max results', '10')
     .option('--json', 'Output as JSON')
     .action(async (idPrefix: string, opts) => {
-      const db = openDb()
-      const automation = resolveAutomation(db, idPrefix)
-      const limit = parseInt(opts.limit, 10)
-
-      const runs = db.query<RunRow>(
-        `SELECT * FROM automation_runs WHERE automation_id = :aid ORDER BY started_at DESC LIMIT :limit`,
-        { ':aid': automation.id, ':limit': limit }
+      // GET /api/automations/:id/runs resolves the id prefix and returns the
+      // execution history (newest first, limited).
+      const { data: runs } = await apiGet<{ ok: true; data: RunRow[] }>(
+        `/api/automations/${encodeURIComponent(idPrefix)}/runs?limit=${encodeURIComponent(opts.limit)}`
       )
-      db.close()
 
       if (opts.json) {
         console.log(JSON.stringify(runs, null, 2))
@@ -461,9 +370,7 @@ export function automationsCommand(): Command {
       console.log(
         `${'ID'.padEnd(idW)}  ${'STATUS'.padEnd(statusW)}  ${'DURATION'.padEnd(10)}  STARTED`
       )
-      console.log(
-        `${'-'.repeat(idW)}  ${'-'.repeat(statusW)}  ${'-'.repeat(10)}  ${'-'.repeat(19)}`
-      )
+      console.log(`${'-'.repeat(idW)}  ${'-'.repeat(statusW)}  ${'-'.repeat(10)}  ${'-'.repeat(19)}`)
       for (const r of runs) {
         const id = r.id.slice(0, 8).padEnd(idW)
         const status = r.status.padEnd(statusW)

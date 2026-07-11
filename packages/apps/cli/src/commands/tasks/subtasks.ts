@@ -1,4 +1,4 @@
-import { openDb } from '../../db'
+import { apiGet } from '../../api'
 import { printTasks, resolveId, type TaskRow } from './_shared'
 
 export interface SubtasksOpts {
@@ -10,35 +10,15 @@ export async function subtasksAction(
   opts: SubtasksOpts
 ): Promise<void> {
   idPrefix = await resolveId(idPrefix)
-  const db = openDb()
-
-  const parents = db.query<{ id: string }>(
-    `SELECT id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': idPrefix }
-  )
-
-  if (parents.length === 0) {
-    console.error(`Task not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (parents.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${parents.map((t) => t.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-
-  const tasks = db.query<TaskRow>(
-    `SELECT t.id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
-     FROM tasks t JOIN projects p ON t.project_id = p.id
-     WHERE t.parent_id = :id AND t.archived_at IS NULL AND t.deleted_at IS NULL
-     ORDER BY t."order" ASC`,
-    { ':id': parents[0].id }
+  // GET /api/tasks/:id/subtasks resolves the parent id prefix and returns direct
+  // subtasks (non-archived/deleted, order ASC) in the CLI's column set.
+  const { data } = await apiGet<{ ok: true; data: TaskRow[] }>(
+    `/api/tasks/${encodeURIComponent(idPrefix)}/subtasks`
   )
 
   if (opts.json) {
-    console.log(JSON.stringify(tasks, null, 2))
+    console.log(JSON.stringify(data, null, 2))
   } else {
-    printTasks(tasks)
+    printTasks(data)
   }
 }

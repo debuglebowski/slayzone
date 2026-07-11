@@ -69,6 +69,43 @@ await describe('/api/panels', () => {
     expect(res.body.data.some((p) => p.id === createdId)).toBe(true)
   })
 
+  test('PATCH: enable panel persists viewEnabled.task[id] = true', async () => {
+    const res = await rest.request<{ ok: boolean; data: { id: string; enabled: boolean } }>(
+      'PATCH',
+      `/api/panels/${createdId}`,
+      { enabled: true }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.enabled).toBe(true)
+    const stored = h.db
+      .prepare(`SELECT value FROM settings WHERE key = 'panel_config'`)
+      .get() as { value: string }
+    const config = JSON.parse(stored.value) as { viewEnabled?: { task?: Record<string, boolean> } }
+    expect(config.viewEnabled?.task?.[createdId]).toBe(true)
+  })
+
+  test('PATCH: disable panel by name', async () => {
+    const res = await rest.request<{ ok: boolean; data: { enabled: boolean } }>(
+      'PATCH',
+      '/api/panels/My%20Docs',
+      { enabled: false }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.enabled).toBe(false)
+  })
+
+  test('PATCH 400: missing enabled', async () => {
+    const res = await rest.request<OneResponse>('PATCH', `/api/panels/${createdId}`, {})
+    expect(res.status).toBe(400)
+  })
+
+  test('PATCH 404: unknown panel', async () => {
+    const res = await rest.request<OneResponse>('PATCH', '/api/panels/definitely-not-a-panel', {
+      enabled: true
+    })
+    expect(res.status).toBe(404)
+  })
+
   test('POST 400: missing name', async () => {
     const res = await rest.request<OneResponse>('POST', '/api/panels', { url: 'x.com' })
     expect(res.status).toBe(400)

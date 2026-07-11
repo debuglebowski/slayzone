@@ -36,7 +36,7 @@ app.use(express.json())
 registerTaskResetConversationRoute(app, { db: h.slayDb, notifyRenderer: () => {} })
 const rest = await mountRestApp(app)
 
-type ResetResponse = { ok: boolean; data: { reset: string[] }; error?: string }
+type ResetResponse = { ok: boolean; data: { id: string; reset: string[] }; error?: string }
 
 await describe('POST /api/tasks/:id/reset-conversation', () => {
   test('happy: resets every mode with rows; sentinel + session_resets appended', async () => {
@@ -46,6 +46,7 @@ await describe('POST /api/tasks/:id/reset-conversation', () => {
       {}
     )
     expect(res.status).toBe(200)
+    expect(res.body.data.id).toBe(withConvs)
     expect([...res.body.data.reset].sort()).toEqual(['claude-code', 'codex'])
     const sentinels = h.db
       .prepare(

@@ -1,5 +1,6 @@
 import { Command } from 'commander'
-import { openDb, notifyApp, resolveProject, resolveProjectArg } from '../db'
+import { resolveProjectArg } from '../db'
+import { apiGet, apiPost, apiDelete } from '../api'
 
 interface TagRow extends Record<string, unknown> {
   id: string
@@ -23,14 +24,12 @@ export function tagsCommand(): Command {
     .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--json', 'Output as JSON')
     .action(async (opts) => {
-      const db = openDb()
-      const project = resolveProject(db, resolveProjectArg(opts.project))
-
-      const tags = db.query<TagRow>(
-        `SELECT * FROM tags WHERE project_id = :pid ORDER BY sort_order, name`,
-        { ':pid': project.id }
+      // The route resolves the project (id or name substring) and orders by
+      // sort_order, name — returning full tag rows.
+      const project = resolveProjectArg(opts.project)
+      const { data: tags } = await apiGet<{ ok: true; data: TagRow[] }>(
+        `/api/tags?project=${encodeURIComponent(project)}`
       )
-      db.close()
 
       if (opts.json) {
         console.log(JSON.stringify(tags, null, 2))
@@ -61,31 +60,15 @@ export function tagsCommand(): Command {
     .option('--color <hex>', 'Tag color (#RRGGBB)', '#6366f1')
     .option('--text-color <hex>', 'Text color (#RRGGBB)', '#ffffff')
     .action(async (name: string, opts) => {
-      const db = openDb()
-      const project = resolveProject(db, resolveProjectArg(opts.project))
-
-      const id = crypto.randomUUID()
-      const { sort_order: nextOrder } = db.query<{ sort_order: number }>(
-        `SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM tags WHERE project_id = :pid`,
-        { ':pid': project.id }
-      )[0] ?? { sort_order: 0 }
-
-      db.run(
-        `INSERT INTO tags (id, project_id, name, color, text_color, sort_order)
-         VALUES (:id, :pid, :name, :color, :textColor, :sortOrder)`,
-        {
-          ':id': id,
-          ':pid': project.id,
-          ':name': name,
-          ':color': opts.color,
-          ':textColor': opts.textColor,
-          ':sortOrder': nextOrder
-        }
-      )
-
-      db.close()
-      await notifyApp()
-      console.log(`Created tag: ${id.slice(0, 8)}  ${name}  ${opts.color}`)
+      const project = resolveProjectArg(opts.project)
+      // POST /api/tags resolves the project and allocates the next sort_order.
+      const { data: tag } = await apiPost<{ ok: true; data: TagRow }>('/api/tags', {
+        project,
+        name,
+        color: opts.color,
+        textColor: opts.textColor
+      })
+      console.log(`Created tag: ${tag.id.slice(0, 8)}  ${name}  ${tag.color}`)
     })
 
   // slay tags delete
@@ -93,28 +76,11 @@ export function tagsCommand(): Command {
     .command('delete <id>')
     .description('Delete a tag (id prefix supported)')
     .action(async (idPrefix: string) => {
-      const db = openDb()
-
-      const tags = db.query<{ id: string; name: string }>(
-        `SELECT id, name FROM tags WHERE id LIKE :prefix || '%' LIMIT 2`,
-        { ':prefix': idPrefix }
+      // DELETE /api/tags/:id resolves the id prefix (404/400 parity) and returns
+      // the deleted tag's id + name.
+      const { data: tag } = await apiDelete<{ ok: true; data: { id: string; name: string } }>(
+        `/api/tags/${encodeURIComponent(idPrefix)}`
       )
-
-      if (tags.length === 0) {
-        console.error(`Tag not found: ${idPrefix}`)
-        process.exit(1)
-      }
-      if (tags.length > 1) {
-        console.error(
-          `Ambiguous id prefix "${idPrefix}". Matches: ${tags.map((t) => t.id.slice(0, 8)).join(', ')}`
-        )
-        process.exit(1)
-      }
-
-      const tag = tags[0]
-      db.run(`DELETE FROM tags WHERE id = :id`, { ':id': tag.id })
-      db.close()
-      await notifyApp()
       console.log(`Deleted tag: ${tag.id.slice(0, 8)}  ${tag.name}`)
     })
 

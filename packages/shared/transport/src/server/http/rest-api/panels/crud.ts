@@ -6,6 +6,7 @@ import {
   DEFAULT_PANEL_CONFIG,
   inferHostScopeFromUrl,
   inferProtocolFromUrl,
+  isPanelEnabled,
   mergePredefinedWebPanels,
   normalizeDesktopProtocol,
   validatePanelShortcut
@@ -18,6 +19,7 @@ import type { RestApiDeps } from '../types'
  *
  * - GET    /api/panels                → configured web panels
  * - POST   /api/panels   { name, url, shortcut?, blockHandoff?, protocol? }
+ * - PATCH  /api/panels/:idOrName  { enabled: boolean }  (task-view visibility)
  * - DELETE /api/panels/:idOrName      (predefined panels are tombstoned)
  */
 
@@ -50,7 +52,13 @@ export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void 
   app.get('/api/panels', async (_req, res) => {
     try {
       const config = await loadPanelConfig(deps.db)
-      res.json({ ok: true, data: config.webPanels })
+      // Augment each panel with its task-view enabled state (additive) so the
+      // CLI's `slay panels list` can render the ON column without a 2nd fetch.
+      const data = config.webPanels.map((p) => ({
+        ...p,
+        enabled: isPanelEnabled(config, p.id, 'task')
+      }))
+      res.json({ ok: true, data })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
@@ -123,6 +131,34 @@ export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void 
       await savePanelConfig(deps.db, { ...config, webPanels: [...config.webPanels, newPanel] })
       deps.notifyRenderer()
       res.json({ ok: true, data: newPanel })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // Enable/disable a panel in the task view (`viewEnabled.task[id]`).
+  app.patch('/api/panels/:idOrName', async (req, res) => {
+    const body = (req.body ?? {}) as { enabled?: unknown }
+    if (typeof body.enabled !== 'boolean') {
+      res.status(400).json({ ok: false, error: 'enabled (boolean) required' })
+      return
+    }
+    try {
+      const config = await loadPanelConfig(deps.db)
+      const panel = findPanel(config, req.params.idOrName)
+      if (!panel) {
+        res.status(404).json({ ok: false, error: `Panel not found: ${req.params.idOrName}` })
+        return
+      }
+      await savePanelConfig(deps.db, {
+        ...config,
+        viewEnabled: {
+          ...config.viewEnabled,
+          task: { ...config.viewEnabled?.task, [panel.id]: body.enabled }
+        }
+      })
+      deps.notifyRenderer()
+      res.json({ ok: true, data: { id: panel.id, name: panel.name, enabled: body.enabled } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }

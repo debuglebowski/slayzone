@@ -101,6 +101,26 @@ await describe('/api/automations CRUD', () => {
     expect(res.status).toBe(404)
   })
 
+  test('GET :id/runs: newest-first execution history', async () => {
+    const runId = crypto.randomUUID()
+    h.db
+      .prepare(
+        `INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, ?, ?)`
+      )
+      .run(runId, createdId, 'success', new Date().toISOString())
+    const res = await rest.request<{ ok: boolean; data: { id: string; status: string }[] }>(
+      'GET',
+      `/api/automations/${createdId.slice(0, 8)}/runs`
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.map((r) => r.id)).toEqual([runId])
+  })
+
+  test('GET :id/runs 404: unknown automation', async () => {
+    const res = await rest.request<{ ok: boolean }>('GET', '/api/automations/ffffffff/runs')
+    expect(res.status).toBe(404)
+  })
+
   test('PATCH: updates name + enabled', async () => {
     const res = await rest.request<One>('PATCH', `/api/automations/${createdId}`, {
       name: 'Renamed',
