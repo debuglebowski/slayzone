@@ -54,6 +54,11 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessi
 # Entity-model B — one-row-per-spawn session lifecycle (spawn→confirm→dead→bind).
 run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessions-lifecycle.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts
+# Wave-1 hub/runner split — exec-domain DB access moved behind injectable ops seams.
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
@@ -222,7 +227,8 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
   packages/domains/task/src/client/taskDetailCache.test.ts \
-  packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx; then
+  packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
+  packages/domains/worktrees/src/server/composite-ops.test.ts; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
