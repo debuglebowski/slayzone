@@ -20,6 +20,7 @@ import {
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
+import { getPtyBackend, spawnLocalPty, type PtySpawnSpec } from './pty-backend'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
@@ -46,8 +47,7 @@ import {
   quoteForShell,
   buildExecCommand,
   resolveUserShell,
-  getShellStartupArgs,
-  wrapShellWithUlimit
+  getShellStartupArgs
 } from '../shell-env'
 import { shouldShellFallback, buildRecoveryMessage } from '../pty-exit-strategy'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
@@ -1080,23 +1080,6 @@ function buildBaseEnv(): Record<string, string> {
 }
 
 /**
- * Low-level shell spawn shared by createPty and the warm-process pool. Non-transport
- * spawns get wrapped in `/bin/sh -c 'ulimit -n 65535; exec <shell> <args>'` so child
- * processes inherit a soft fd limit high enough for Bun-compiled CLIs. Transport spawns
- * (docker/ssh) handle their own env on the remote side.
- */
-function spawnWrappedShell(
-  file: string,
-  args: string[],
-  spawnOptions: pty.IPtyForkOptions,
-  transport: boolean
-): pty.IPty {
-  if (transport) return pty.spawn(file, args, spawnOptions)
-  const wrapped = wrapShellWithUlimit(file, args)
-  return pty.spawn(wrapped.file, wrapped.args, spawnOptions)
-}
-
-/**
  * Spawn a bare login+interactive shell (no post-spawn command) for the warm-process
  * pool. Reuses the exact shell resolution, startup args, ulimit wrap, and interactive-only
  * fallback that createPty's initial spawn uses, so an adopted warm shell is indistinguishable
@@ -1119,7 +1102,7 @@ export function spawnLoginShell(opts: {
   }
   try {
     return {
-      pty: spawnWrappedShell(shell, args, spawnOptions, false),
+      pty: spawnLocalPty(shell, args, spawnOptions, false),
       shell,
       usedArgs: args,
       usedFallback: false
@@ -1129,7 +1112,7 @@ export function spawnLoginShell(opts: {
     if (!(args.includes('-i') && args.includes('-l'))) throw err
     const fallbackArgs = args.filter((a) => a !== '-l')
     return {
-      pty: spawnWrappedShell(shell, fallbackArgs, spawnOptions, false),
+      pty: spawnLocalPty(shell, fallbackArgs, spawnOptions, false),
       shell,
       usedArgs: fallbackArgs,
       usedFallback: true
@@ -1149,6 +1132,13 @@ export interface CreatePtyOptions {
    */
   taskId?: string | null
   tabId?: string | null
+  /**
+   * Hub/runner split (wave 2, Model A): the runner this session's OS process
+   * spawns on, or `null`/absent for a hub-local session (today's only path).
+   * Threaded into the `PtySpawnSpec` so a remote `PtyBackend` can route the
+   * spawn; resolved by pty-store's `ptyCreate` via `PtySpawnLookups`.
+   */
+  runnerId?: string | null
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
@@ -1253,6 +1243,9 @@ export async function createPty(
   sessionTaskMap.set(sessionId, opts.taskId !== undefined ? (opts.taskId ?? '') : splitTaskId(sessionId))
   sessionTabMap.set(sessionId, opts.tabId !== undefined ? (opts.tabId ?? '') : splitTabRowId(sessionId))
   const taskId = taskIdFromSessionId(sessionId)
+  // Hub/runner split (wave 2): which runner this session spawns on (null =
+  // hub-local, today's only path). Threaded into every PtySpawnSpec below.
+  const runnerId = opts.runnerId ?? null
   const createStartedAt = Date.now()
   let spawnAttempt: { shell: string; shellArgs: string[]; hasPostSpawnCommand: boolean } | null =
     null
@@ -1551,12 +1544,33 @@ export async function createPty(
     }
     const spawnStartTs = Date.now()
     let ptyProcess: pty.IPty
-    // Non-transport spawns get wrapped in `/bin/sh -c 'ulimit -n 65535; exec
-    // <shell> <args>'` so child processes inherit a soft fd limit high enough
-    // for Bun-compiled CLIs (e.g. droid). Transport spawns (docker/ssh) handle
-    // their own env on the remote side.
-    const spawn = (rawFile: string, rawArgs: string[]): pty.IPty =>
-      spawnWrappedShell(rawFile, rawArgs, spawnOptions, !!transport)
+    // Hub/runner split (wave 2, Model A): route EVERY OS spawn — the initial
+    // spawn below AND the two onExit recovery re-spawns — through the swappable
+    // `PtyBackend`. The default `localPtyBackend` still wraps non-transport
+    // spawns in `/bin/sh -c 'ulimit -n 65535; exec <shell> <args>'` (transport
+    // docker/ssh spawns run as-is) and returns the raw node-pty IPty
+    // SYNCHRONOUSLY, so the -l / shell fallback control flow (which mutates
+    // usedArgs/usedFallback and runs inside a synchronous onExit callback) stays
+    // byte-identical. An async (remote) backend is a later wave that must
+    // restructure those synchronous recovery callbacks.
+    const spawn = (rawFile: string, rawArgs: string[]): pty.IPty => {
+      const spec: PtySpawnSpec = {
+        sessionId,
+        taskId,
+        runnerId,
+        file: rawFile,
+        args: rawArgs,
+        options: spawnOptions,
+        transport: !!transport
+      }
+      const handle = getPtyBackend().spawn(spec)
+      if (handle instanceof Promise) {
+        throw new Error(
+          '[pty-manager] the default (local) PtyBackend must spawn synchronously; async backends are a later hub/runner wave'
+        )
+      }
+      return handle as unknown as pty.IPty
+    }
     if (opts.adoptPty) {
       // Warm-process adoption: reuse the already-spawned, rc-initialized idle shell.
       // Skip the initial spawn entirely; the post-spawn command (export + exec agent)

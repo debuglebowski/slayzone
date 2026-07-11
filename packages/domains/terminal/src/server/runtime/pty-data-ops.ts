@@ -64,6 +64,13 @@ export function createDbPtySessionLedger(db: SlayzoneDb): PtySessionLedger {
 export interface PtySpawnLookups {
   getTerminalMode(id: string): Promise<TerminalModeInfo | null>
   getTaskProjectId(taskId: string): Promise<string | null>
+  /**
+   * Hub/runner split (wave 2, Model A): the runner a task's PTY should spawn on,
+   * or `null` for hub-local (today's only path). The db default ALWAYS returns
+   * null; a later wave injects a runner-aware impl via `setPtySpawnLookups` so
+   * `ptyCreate` can route the spawn (and gate warm-pool adoption to local).
+   */
+  resolveRunnerId(taskId: string): Promise<string | null>
 }
 
 /** Map a raw `terminal_modes` row to the shared TerminalModeInfo shape. */
@@ -105,6 +112,9 @@ export function createDbPtySpawnLookups(db: SlayzoneDb): PtySpawnLookups {
         .prepare('SELECT project_id FROM tasks WHERE id = ?')
         .get(taskId)) as { project_id?: string } | undefined
       return row?.project_id ?? null
-    }
+    },
+    // Hub-local by default — no runner assignment exists yet. Wave 2's
+    // runner-aware lookups impl overrides this via `setPtySpawnLookups`.
+    resolveRunnerId: async () => null
   }
 }

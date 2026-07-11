@@ -43,7 +43,23 @@ export {
   type PtySessionWindow,
   type IpcMainLike
 } from './pty-host'
-export { createPtyOps, type PtyCreateOpts } from './runtime/pty-store'
+export { createPtyOps, setPtySpawnLookups, type PtyCreateOpts } from './runtime/pty-store'
+// Hub/runner split spawn-backend seam (wave 2, Model A) + spawn-time lookups /
+// session ledger (wave 1) interfaces. Default backend/lookups/ledger are the
+// in-process db-backed impls, so this lands dark; a later wave injects remote
+// impls via `setPtyBackend` / `setPtySpawnLookups` / `setPtySessionLedger`.
+export {
+  getPtyBackend,
+  setPtyBackend,
+  type PtyBackend,
+  type PtyHandle,
+  type PtySpawnSpec
+} from './runtime/pty-backend'
+export {
+  createDbPtySessionLedger,
+  type PtySessionLedger,
+  type PtySpawnLookups
+} from './runtime/pty-data-ops'
 // Warm-process pool lifecycle. Lives in this (server) package — the slice-9
 // sidecar owns pty + must initialize it (the renderer's warm tab-count reports
 // land here, not in the Electron host). See plans/agent-sessions.md.
@@ -71,6 +87,9 @@ export {
   killPtysByTaskId,
   broadcastRespawnRequest,
   onGlobalStateChange,
+  // Wave-1 session-ledger seam (was landed but left unexported): lets a later
+  // hub/runner wave inject a non-DB-backed ledger from the composition root.
+  setPtySessionLedger,
   // The real "task reached terminal status" teardown (host-kill hook + kill
   // PTYs + kill chat transports). Aliased to avoid colliding with the seam
   // `onTaskReachedTerminal` (task-events) exported above; the side-car wires

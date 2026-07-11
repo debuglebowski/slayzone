@@ -25,7 +25,7 @@ import {
   takePtyKillCalls
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
-import { createDbPtySpawnLookups, mapModeRow } from './pty-data-ops'
+import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty-data-ops'
 import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell, setProjectTabCounts } from './warm-process-manager'
 import { getAdapter, type ExecutionContext } from '../adapters'
@@ -40,6 +40,18 @@ import { parseShellArgs } from '../adapters/flag-parser'
 import { setShellOverride } from '../shell-env'
 
 const execFileAsync = promisify(execFile)
+
+/**
+ * Injectable spawn-time lookups (hub/runner split, wave 2, Model A). Default
+ * `null` → each `createPtyOps` builds the db-backed impl below, so behavior is
+ * byte-identical. A later wave calls `setPtySpawnLookups` at boot (BEFORE
+ * `createPtyOps`) to route spawn-time reads — including `resolveRunnerId` —
+ * through the hub RPC. Swap only at a boot quiesce point (no in-flight spawn).
+ */
+let injectedSpawnLookups: PtySpawnLookups | null = null
+export function setPtySpawnLookups(lookups: PtySpawnLookups | null): void {
+  injectedSpawnLookups = lookups
+}
 
 export interface PtyCreateOpts {
   sessionId: string
@@ -72,9 +84,11 @@ export function createPtyOps(db: SlayzoneDb) {
   // Wires the pty-manager's session ledger (hub/runner wave 1: the runtime's
   // DB touchpoints go through an injected ops interface, db-backed by default).
   setDatabase(db)
-  // Spawn-time reads (mode row, task→project) — same queries, behind the seam.
-  // The terminal_modes CRUD below stays on the raw db: that's hub data.
-  const lookups = createDbPtySpawnLookups(db)
+  // Spawn-time reads (mode row, task→project, runner assignment) — same queries,
+  // behind the seam. Injectable (wave 2) so a runner-aware impl can replace the
+  // db default; unset → the db-backed impl (byte-identical). The terminal_modes
+  // CRUD below stays on the raw db: that's hub data.
+  const lookups = injectedSpawnLookups ?? createDbPtySpawnLookups(db)
 
   // Terminal Modes CRUD
   const terminalModesList = async (): Promise<TerminalModeInfo[]> => {
@@ -290,24 +304,33 @@ export function createPtyOps(db: SlayzoneDb) {
     // createPty cold-spawns exactly as before.
     let warmClaim: ReturnType<typeof claimWarmShell> = null
     const taskId = opts.sessionId.split(':')[0]
+    // Hub/runner split (wave 2, Model A): resolve which runner this task spawns
+    // on. The db default is always null (hub-local, today's only path). Warm-pool
+    // adoption is a HUB-LOCAL optimization, so gate it to local sessions — a
+    // remote-runner spawn must never claim a hub warm shell.
+    let runnerId: string | null = null
     if (taskId) {
-      const projectId = await lookups.getTaskProjectId(taskId)
-      if (projectId) {
-        warmClaim = claimWarmShell({
-          projectId,
-          mode: modeId,
-          cwd: opts.cwd,
-          resuming: !!opts.existingConversationId,
-          // The warm agent baked the mode's default flags; only adopt it when
-          // this spawn's flags match (else cold-spawn with the right flags).
-          flags: opts.providerFlags ?? null
-        })
+      runnerId = await lookups.resolveRunnerId(taskId)
+      if (runnerId == null) {
+        const projectId = await lookups.getTaskProjectId(taskId)
+        if (projectId) {
+          warmClaim = claimWarmShell({
+            projectId,
+            mode: modeId,
+            cwd: opts.cwd,
+            resuming: !!opts.existingConversationId,
+            // The warm agent baked the mode's default flags; only adopt it when
+            // this spawn's flags match (else cold-spawn with the right flags).
+            flags: opts.providerFlags ?? null
+          })
+        }
       }
     }
 
     return createPty({
       win: targetWin,
       sessionId: opts.sessionId,
+      runnerId,
       cwd: opts.cwd,
       conversationId: opts.conversationId,
       existingConversationId: opts.existingConversationId,
