@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ENV_VARS, loadRunnerConfig } from './config'
+import { assertPathAllowed, ENV_VARS, loadRunnerConfig } from './config'
 
 let dir: string
 
@@ -25,7 +25,7 @@ describe('loadRunnerConfig', () => {
       joinToken: 'jt-1',
       name: hostname(),
       allowedRoots: [],
-      capabilities: ['pty']
+      capabilities: ['pty', 'git', 'fs', 'proc']
     })
   })
 
@@ -75,5 +75,46 @@ describe('loadRunnerConfig', () => {
     expect(() =>
       loadRunnerConfig({ [ENV_VARS.hubUrl]: 'wss://x/fleet', [ENV_VARS.heartbeatIntervalMs]: 'soon' })
     ).toThrow(/integer/)
+  })
+})
+
+describe('assertPathAllowed', () => {
+  it('accepts a path inside an allowed root and returns its canonical path', () => {
+    const root = realpathSync(dir)
+    const nested = join(root, 'a', 'b')
+    expect(assertPathAllowed(nested, [root])).toBe(nested)
+    // The root itself is allowed.
+    expect(assertPathAllowed(root, [root])).toBe(root)
+  })
+
+  it('rejects ../ traversal that escapes every allowed root', () => {
+    const root = realpathSync(dir)
+    expect(() => assertPathAllowed(join(root, '..', 'outside'), [root])).toThrow(/allowedRoots/)
+    expect(() => assertPathAllowed(join(root, 'sub', '..', '..', 'escape'), [root])).toThrow(
+      /allowedRoots/
+    )
+  })
+
+  it('rejects a sibling directory sharing a name prefix with the root', () => {
+    const root = realpathSync(dir)
+    // `${root}-evil` textually starts with `${root}` but is NOT contained.
+    expect(() => assertPathAllowed(`${root}-evil/x`, [root])).toThrow(/allowedRoots/)
+  })
+
+  it('resolves symlinked ancestors so they cannot smuggle a path out of a root', () => {
+    const root = realpathSync(dir)
+    const outside = mkdtempSync(join(tmpdir(), 'runner-outside-'))
+    try {
+      // A symlink INSIDE the root pointing OUT of it must not grant access.
+      const link = join(root, 'escape-link')
+      symlinkSync(realpathSync(outside), link)
+      expect(() => assertPathAllowed(join(link, 'secret'), [root])).toThrow(/allowedRoots/)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('throws when no roots are configured', () => {
+    expect(() => assertPathAllowed('/anything', [])).toThrow(/no allowedRoots/)
   })
 })

@@ -6,9 +6,10 @@
  * @module runner/config
  */
 
+import { realpathSync } from 'node:fs'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { delimiter } from 'node:path'
+import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 
 export const runnerConfigSchema = z.object({
@@ -42,7 +43,69 @@ export const ENV_VARS = {
   configFile: 'SLAYZONE_RUNNER_CONFIG'
 } as const
 
-export const DEFAULT_CAPABILITIES = ['pty'] as const
+export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
+
+/**
+ * Resolve `target` to an absolute canonical path, tolerating a
+ * not-yet-existing tail (e.g. a worktree directory about to be created).
+ *
+ * Lexically normalizes `..` first, then `realpath`s the nearest EXISTING
+ * ancestor to collapse symlinks (so an attacker cannot symlink out of an
+ * allowed root), re-appending the non-existent remainder. This closes both the
+ * lexical-`../` traversal hole and the symlinked-ancestor hole.
+ */
+function realpathBoundary(target: string): string {
+  let current = resolve(target)
+  const tail: string[] = []
+  // Walk up until we hit an existing directory we can canonicalize.
+  for (;;) {
+    try {
+      const real = realpathSync.native(current)
+      return tail.length > 0 ? join(real, ...tail.reverse()) : real
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) {
+        // Reached the filesystem root and nothing exists — fall back to the
+        // lexically-resolved path (already free of `..` segments).
+        return resolve(target)
+      }
+      tail.push(basename(current))
+      current = parent
+    }
+  }
+}
+
+/**
+ * Assert that `candidate` is contained within one of `allowedRoots` and return
+ * its canonical absolute path. Throws a clear error on traversal outside every
+ * configured root (or when no roots are configured at all).
+ *
+ * Every fs./git./proc. path argument on the runner MUST pass through this guard
+ * before touching the filesystem.
+ */
+export function assertPathAllowed(candidate: string, allowedRoots: readonly string[]): string {
+  if (allowedRoots.length === 0) {
+    throw new Error(
+      `runner has no allowedRoots configured; refusing filesystem access to '${candidate}'`
+    )
+  }
+  const resolved = realpathBoundary(candidate)
+  for (const root of allowedRoots) {
+    let realRoot: string
+    try {
+      realRoot = realpathSync.native(resolve(root))
+    } catch {
+      // A configured root that does not exist cannot contain anything — skip it.
+      continue
+    }
+    if (resolved === realRoot || resolved.startsWith(realRoot + sep)) {
+      return resolved
+    }
+  }
+  throw new Error(
+    `path '${candidate}' is outside the runner's allowedRoots [${allowedRoots.join(', ')}]`
+  )
+}
 
 type Env = Record<string, string | undefined>
 

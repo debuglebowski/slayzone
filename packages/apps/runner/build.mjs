@@ -13,8 +13,10 @@ await esbuild.build({
   format: 'cjs',
   target: 'node20',
   sourcemap: true,
-  // Optional native ws accelerators — resolved at runtime if present.
-  external: ['bufferutil', 'utf-8-validate'],
+  // node-pty is a native addon (loads a prebuilt .node binary) and cannot be
+  // bundled; keep it external and resolve it from node_modules at runtime.
+  // bufferutil/utf-8-validate are optional native ws accelerators.
+  external: ['node-pty', 'bufferutil', 'utf-8-validate'],
   banner: { js: '#!/usr/bin/env node' },
   logLevel: 'info'
 })

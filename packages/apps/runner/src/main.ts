@@ -1,9 +1,9 @@
 /**
  * Runner main — wires config + credential store + hub dialer into a running
- * exec node. Wave-1 skeleton: the transport, enrollment, heartbeats, and
- * reconnect logic are fully live, while every exec command (pty.*, fs.*,
- * git.*) answers `-32001 unimplemented`. `runner.shutdown` performs a
- * graceful stop.
+ * exec node. The transport, enrollment, heartbeats, and reconnect logic live in
+ * `@slayzone/fleet`; this module owns the hub→runner request DISPATCH TABLE that
+ * routes each method to its exec handler (pty.*, git.*, fs.*, proc.*), plus a
+ * graceful `runner.shutdown`. Unknown methods answer `-32001 unimplemented`.
  *
  * @module runner/main
  */
@@ -16,12 +16,17 @@ import {
 } from '@slayzone/fleet/client'
 import { FleetErrorCodes, HubToRunnerMethods, RpcError, runnerShutdownParamsSchema } from '@slayzone/fleet/shared'
 import type { RunnerConfig } from './config'
+import { createFsHandlers } from './handlers/fs'
+import { createGitHandlers } from './handlers/git'
+import { createProcHandlers } from './handlers/proc'
+import { createPtyHandlers } from './handlers/pty'
+import type { HandlerContext, HubMethodTable, RunnerDialer, RunnerLog } from './handlers/types'
 
 /** Version advertised at enrollment; wave-1 skeleton is pre-release. */
 export const RUNNER_VERSION = '0.0.0'
 
 export interface RunnerRuntimeDeps {
-  log?: (message: string, meta?: Record<string, unknown>) => void
+  log?: RunnerLog
   /** Invoked after a graceful `runner.shutdown` stop completes. */
   onShutdown?: (reason: string) => void
   /** Override the credential store (tests). */
@@ -33,23 +38,64 @@ export interface RunnerHandle {
   stop(): Promise<void>
 }
 
-/**
- * Hub-request dispatcher for the wave-1 skeleton: `runner.shutdown` triggers
- * `shutdown(reason)` (after acking), everything else is unimplemented.
- */
-export function createHubRequestHandler(
+export interface HubRequestHandlerDeps {
+  /** Trigger a graceful stop (after the ack flushes). */
   shutdown: (reason: string) => void
-): (method: string, params: unknown) => Promise<unknown> {
-  return async (method, params) => {
-    if (method === HubToRunnerMethods.runnerShutdown) {
-      const parsed = runnerShutdownParamsSchema.safeParse(params ?? {})
-      const reason = parsed.success ? (parsed.data.reason ?? 'hub-requested') : 'hub-requested'
-      // Ack first; the dialer flushes the response before the socket drops.
-      queueMicrotask(() => shutdown(reason))
-      return { ok: true }
-    }
-    throw new RpcError(FleetErrorCodes.unimplemented, `unimplemented: ${method}`)
+  /** Dialer used by streaming handlers (pty.data/exit, proc.data/exit, …). */
+  dialer: RunnerDialer
+  config: RunnerConfig
+  log?: RunnerLog
+}
+
+export interface HubRequestDispatch {
+  /** Route one hub→runner request to its handler. */
+  handle(method: string, params: unknown): Promise<unknown>
+  /** Tear down live sessions/processes (runner shutdown). */
+  dispose(): void
+}
+
+/**
+ * Build the hub→runner dispatch table. `runner.shutdown` acks then triggers the
+ * graceful stop; pty/git/fs/proc methods route to their handler modules;
+ * everything else throws `-32001 unimplemented`.
+ */
+export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequestDispatch {
+  const log = deps.log ?? (() => {})
+  const ctx: HandlerContext = { dialer: deps.dialer, config: deps.config, log }
+
+  const pty = createPtyHandlers(ctx)
+  const proc = createProcHandlers(ctx)
+
+  const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
+    const parsed = runnerShutdownParamsSchema.safeParse(params ?? {})
+    const reason = parsed.success ? (parsed.data.reason ?? 'hub-requested') : 'hub-requested'
+    // Ack first; the dialer flushes the response before the socket drops.
+    queueMicrotask(() => deps.shutdown(reason))
+    return { ok: true }
   }
+
+  const table: HubMethodTable = {
+    [HubToRunnerMethods.runnerShutdown]: shutdownHandler,
+    ...pty.handlers,
+    ...proc.handlers,
+    ...createGitHandlers(ctx),
+    ...createFsHandlers(ctx)
+  }
+
+  const handle = async (method: string, params: unknown): Promise<unknown> => {
+    const entry = table[method]
+    if (!entry) {
+      throw new RpcError(FleetErrorCodes.unimplemented, `unimplemented: ${method}`)
+    }
+    return entry(params)
+  }
+
+  const dispose = (): void => {
+    pty.disposeAll()
+    proc.disposeAll()
+  }
+
+  return { handle, dispose }
 }
 
 export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}): RunnerHandle {
@@ -61,6 +107,7 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     })
 
   let handle: RunnerHandle
+  let dispatch: HubRequestDispatch
   const dialer = new HubDialer({
     url: config.hubUrl,
     identity: {
@@ -73,10 +120,17 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
     ...(config.pinnedCertSha256 ? { pinnedCertSha256: config.pinnedCertSha256 } : {}),
     ...(config.heartbeatIntervalMs ? { heartbeatIntervalMs: config.heartbeatIntervalMs } : {}),
-    onHubRequest: createHubRequestHandler((reason) => {
+    onHubRequest: (method, params) => dispatch.handle(method, params),
+    log
+  })
+
+  dispatch = createHubRequestHandler({
+    shutdown: (reason) => {
       log('runner shutdown requested by hub', { reason })
       void handle.stop().then(() => deps.onShutdown?.(reason))
-    }),
+    },
+    dialer,
+    config,
     log
   })
 
@@ -90,7 +144,11 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
   dialer.start()
   handle = {
     dialer,
-    stop: () => dialer.stop()
+    stop: async () => {
+      // Kill live ptys/processes before the socket drops so nothing is orphaned.
+      dispatch.dispose()
+      await dialer.stop()
+    }
   }
   return handle
 }
