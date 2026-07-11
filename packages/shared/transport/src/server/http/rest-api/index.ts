@@ -15,6 +15,23 @@ import { registerCreateTaskRoute } from './tasks/create'
 import { registerDeleteTaskRoute } from './tasks/delete'
 import { registerUnarchiveTaskRoute } from './tasks/unarchive'
 import { registerUpdateTaskRoute } from './tasks/update'
+import { registerListTasksRoute } from './tasks/list'
+import { registerSearchTasksRoute } from './tasks/search'
+import { registerGetTaskRoute } from './tasks/get'
+import { registerTaskSubtasksRoutes } from './tasks/subtasks'
+import { registerTaskBlockersRoutes } from './tasks/blockers'
+import { registerTaskBlockingRoute } from './tasks/blocking'
+import { registerTaskTagsRoutes } from './tasks/tags'
+import { registerTaskResetConversationRoute } from './tasks/reset-conversation'
+import { registerTaskProgressRoute } from './tasks/progress'
+import { registerTagsCrudRoutes } from './tags/crud'
+import { registerProjectsListRoute } from './projects/list'
+import { registerProjectsResolveByPathRoute } from './projects/resolve-by-path'
+import { registerTemplatesCrudRoutes } from './templates/crud'
+import { registerPanelsCrudRoutes } from './panels/crud'
+import { registerAutomationsCrudRoutes } from './automations/crud'
+import { registerArtifactsListRoute } from './artifacts/list'
+import { registerArtifactsContentRoutes } from './artifacts/content'
 import { registerOpenArtifactRoute } from './artifacts/open'
 import { registerArtifactsExportPdfRoute } from './artifacts/export-pdf'
 import { registerArtifactsExportPngRoute } from './artifacts/export-png'
@@ -71,14 +88,43 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerArchiveManyTaskRoute(app, deps)
   registerUnarchiveTaskRoute(app, deps)
 
+  // Tasks — CLI-parity read/CRUD surface (hub/runner split wave 1; dark until
+  // the slay CLI cuts over from direct sqlite reads). ORDER MATTERS: the fixed
+  // /api/tasks/search path must register before the /api/tasks/:id matcher.
+  registerListTasksRoute(app, deps)
+  registerSearchTasksRoute(app, deps)
+  registerGetTaskRoute(app, deps)
+  registerTaskSubtasksRoutes(app, deps)
+  registerTaskBlockersRoutes(app, deps)
+  registerTaskBlockingRoute(app, deps)
+  registerTaskTagsRoutes(app, deps)
+  registerTaskResetConversationRoute(app, deps)
+  registerTaskProgressRoute(app, deps)
+
+  // Tags
+  registerTagsCrudRoutes(app, deps)
+
+  // Projects
+  registerProjectsListRoute(app, deps)
+  registerProjectsResolveByPathRoute(app, deps)
+
+  // Templates
+  registerTemplatesCrudRoutes(app, deps)
+
+  // Panels
+  registerPanelsCrudRoutes(app, deps)
+
   // Artifacts
   registerOpenArtifactRoute(app, deps)
+  registerArtifactsListRoute(app, deps)
+  registerArtifactsContentRoutes(app, deps)
   registerArtifactsExportPdfRoute(app, deps)
   registerArtifactsExportPngRoute(app, deps)
   registerArtifactsExportHtmlRoute(app, deps)
 
   // Automations
   registerAutomationsRunRoute(app, deps)
+  registerAutomationsCrudRoutes(app, deps)
 
   // PTY
   registerPtyListRoute(app, deps)
