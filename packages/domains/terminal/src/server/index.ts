@@ -62,6 +62,13 @@ export {
   type PtySessionLedger,
   type PtySpawnLookups
 } from './runtime/pty-data-ops'
+// Wave-3 remote-MCP-env contracts: the composition root builds a provider of
+// this shape (fleet mode only) and injects it via `setRemoteMcpEnvProvider`.
+export {
+  AGENT_HOOK_PATH,
+  type RemoteMcpEnv,
+  type RemoteMcpEnvProvider
+} from './mcp-env'
 // Warm-process pool lifecycle. Lives in this (server) package — the slice-9
 // sidecar owns pty + must initialize it (the renderer's warm tab-count reports
 // land here, not in the Electron host). See plans/agent-sessions.md.
@@ -92,6 +99,10 @@ export {
   // Wave-1 session-ledger seam (was landed but left unexported): lets a later
   // hub/runner wave inject a non-DB-backed ledger from the composition root.
   setPtySessionLedger,
+  // Wave-3 remote-MCP-env seam: fleet mode injects a provider that mints a
+  // per-task hub bearer + resolves the hub base URL so a runner-routed pty's
+  // slay CLI + agent hooks dial the hub instead of loopback. Unset => loopback.
+  setRemoteMcpEnvProvider,
   // The real "task reached terminal status" teardown (host-kill hook + kill
   // PTYs + kill chat transports). Aliased to avoid colliding with the seam
   // `onTaskReachedTerminal` (task-events) exported above; the side-car wires

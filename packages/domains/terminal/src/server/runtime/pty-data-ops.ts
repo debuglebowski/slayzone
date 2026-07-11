@@ -5,7 +5,7 @@ import {
   bindSessionToTask as bindSessionToTaskDb
 } from '@slayzone/task/server'
 import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal/shared'
-import { buildMcpEnv as buildMcpEnvDb } from '../mcp-env'
+import { buildMcpEnv as buildMcpEnvDb, type RemoteMcpEnv } from '../mcp-env'
 
 /**
  * Hub/runner split (wave 1): the PTY runtime's DB touchpoints, pulled behind
@@ -42,8 +42,19 @@ export interface PtySessionLedger {
   prunePendingSpawns(scope: { taskId: string; mode: string }): Promise<number>
   /** Bind a pooled agent session to a task+tab (set-once). True if it bound. */
   bindSessionToTask(args: { sessionId: string; taskId: string; tabId: string }): Promise<boolean>
-  /** Task-scoped MCP env for agent subprocesses (SLAYZONE_TASK_ID etc.). */
-  buildMcpEnv(taskId: string | undefined, mode?: TerminalMode): Promise<Record<string, string>>
+  /**
+   * Task-scoped MCP env for agent subprocesses (SLAYZONE_TASK_ID etc.).
+   *
+   * `remote` (hub/runner split, wave 3): a resolved hub target when this
+   * session's pty runs on a runner — replaces the loopback hook URL/MCP port
+   * with the hub's endpoint + a scoped bearer. Absent/`null` (every local
+   * spawn, today's only path) => byte-identical loopback env.
+   */
+  buildMcpEnv(
+    taskId: string | undefined,
+    mode?: TerminalMode,
+    remote?: RemoteMcpEnv | null
+  ): Promise<Record<string, string>>
 }
 
 /** Default local-DB ledger — same SQL as before the split (task/server ops + mcp-env). */
@@ -52,7 +63,7 @@ export function createDbPtySessionLedger(db: SlayzoneDb): PtySessionLedger {
     recordPendingSpawn: (args) => recordPendingSpawnDb(db, args),
     prunePendingSpawns: (scope) => prunePendingSpawnsDb(db, scope),
     bindSessionToTask: (args) => bindSessionToTaskDb(db, args),
-    buildMcpEnv: (taskId, mode) => buildMcpEnvDb(db, taskId, mode)
+    buildMcpEnv: (taskId, mode, remote) => buildMcpEnvDb(db, taskId, mode, undefined, undefined, remote)
   }
 }
 

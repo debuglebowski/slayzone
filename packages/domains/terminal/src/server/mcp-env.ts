@@ -2,6 +2,78 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { getSlayzoneHomeDir } from '@slayzone/platform'
 import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../shared'
 
+/** Path the agent lifecycle hook (notify.sh) POSTs to — see agent-hook.ts. */
+export const AGENT_HOOK_PATH = '/api/agent-hook'
+
+/**
+ * A resolved REMOTE hub target for a task whose PTY runs on a runner
+ * (hub/runner split, Model A). Built by the caller (pty-manager, via an injected
+ * provider) and passed IN so `buildMcpEnv` stays a pure function of its inputs.
+ *
+ * `null`/absent (today's only path, and every local spawn) => the loopback env
+ * below is byte-identical to before this seam existed.
+ */
+export interface RemoteMcpEnv {
+  /** Non-empty runner id this session's OS process spawns on. */
+  runnerId: string
+  /**
+   * The hub's externally-reachable HTTP base URL (e.g. `https://hub:8443`), no
+   * trailing slash. The `slay` CLI + agent hooks inside the remote pty dial THIS
+   * instead of loopback (loopback resolves on the runner machine, where no hub
+   * runs). The provider MUST return `null` rather than an empty/invalid base.
+   */
+  hubBaseUrl: string
+  /**
+   * A short-lived bearer scoped to `{ taskId, runnerId }`, or `null` when the
+   * minter is unavailable. Injected as `SLAYZONE_HUB_TOKEN`; the CLI's
+   * `resolveHubTarget` already reads it and sends `Authorization: Bearer`.
+   */
+  token: string | null
+}
+
+/**
+ * Resolves the remote hub target (base URL + a freshly-minted per-task token)
+ * for a session that spawns on a runner. Injected under fleet mode by the
+ * composition root; UNSET by default (so `resolveRemoteMcpEnv` short-circuits to
+ * `null` and every spawn keeps today's loopback env). Kept a plain function so
+ * `buildMcpEnv` itself stays a pure function of its inputs — the impurity (mint
+ * a token, read the hub URL) lives behind this seam.
+ */
+export type RemoteMcpEnvProvider = (args: {
+  taskId: string | undefined
+  runnerId: string
+  mode?: TerminalMode
+}) => Promise<RemoteMcpEnv | null> | RemoteMcpEnv | null
+
+/**
+ * Resolve the remote target for a spawn: `null` for a hub-local session
+ * (`runnerId == null` — today's only path) or when no provider is wired. Only a
+ * `runnerId != null` session with a provider mints/reads a target. Never throws
+ * — a provider error degrades to `null` (spawn continues; the remote backend's
+ * own routing surfaces a hard failure if the runner is truly unreachable).
+ */
+export async function resolveRemoteMcpEnv(
+  provider: RemoteMcpEnvProvider | null | undefined,
+  args: { taskId: string | undefined; runnerId: string | null; mode?: TerminalMode }
+): Promise<RemoteMcpEnv | null> {
+  if (args.runnerId == null || !provider) return null
+  try {
+    const resolved = await provider({
+      taskId: args.taskId,
+      runnerId: args.runnerId,
+      mode: args.mode
+    })
+    if (!resolved) return null
+    // Enforce the provider contract defensively: a blank base URL would inject
+    // SLAYZONE_HUB_URL='' + a relative hook URL (both broken on the runner), so
+    // treat it as "no valid remote target" rather than emit a poisoned env.
+    if (resolved.hubBaseUrl.trim() === '') return null
+    return resolved
+  } catch {
+    return null
+  }
+}
+
 /**
  * Build MCP env vars for AI agent subprocesses (PTY shells + chat-mode SDK spawns).
  * Both transports must inject the same set so `slay` CLI and MCP tools resolve the
@@ -9,9 +81,15 @@ import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../sh
  *
  * When `mode` is supplied AND the agent supports hook lifecycle events
  * (claude-code initially; see HOOK_SUPPORTED_AGENT_IDS), also injects:
- *   SLAYZONE_AGENT_HOOK_URL  - loopback URL for POST /api/agent-hook
+ *   SLAYZONE_AGENT_HOOK_URL  - URL for POST /api/agent-hook (loopback locally,
+ *                              the hub's endpoint for a remote runner)
  *   SLAYZONE_AGENT_ID        - the mode itself (passed back in hook payload)
  *   SLAYZONE_HOME_DIR        - resolved ~/.slayzone (script lookup base)
+ *
+ * When `remote` is supplied (a task's pty routed to a runner), the loopback
+ * `SLAYZONE_MCP_PORT` + hook URL are REPLACED by `SLAYZONE_HUB_URL` (+ an
+ * optional `SLAYZONE_HUB_TOKEN`) and a hub-hosted hook URL. With no `remote`
+ * (the default) nothing about the local env changes.
  */
 export async function buildMcpEnv(
   db: SlayzoneDb | null | undefined,
@@ -27,7 +105,10 @@ export async function buildMcpEnv(
    *  (the warm pool spawns per-project, before any task exists). Takes priority
    *  over the task-derived lookup so `SLAYZONE_PROJECT_ID` is always present,
    *  regardless of whether a task is bound yet. */
-  projectId?: string
+  projectId?: string,
+  /** Resolved remote hub target when this session runs on a runner (fleet mode).
+   *  Absent/`null` => local loopback env (byte-identical to before the seam). */
+  remote?: RemoteMcpEnv | null
 ): Promise<Record<string, string>> {
   const env: Record<string, string> = {}
   if (taskId) env.SLAYZONE_TASK_ID = taskId
@@ -42,12 +123,31 @@ export async function buildMcpEnv(
       : undefined)
   if (resolvedProjectId) env.SLAYZONE_PROJECT_ID = resolvedProjectId
   if (sessionId) env.SLAYZONE_SESSION_ID = sessionId
+
+  const hookCapable = Boolean(mode && HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId))
+
+  if (remote) {
+    // Remote runner: loopback is meaningless on the runner machine. Point the
+    // CLI + hooks at the hub. `SLAYZONE_MCP_PORT` is deliberately omitted (a
+    // loopback concept); the CLI resolves the hub via `SLAYZONE_HUB_URL` and the
+    // hook uses the absolute `SLAYZONE_AGENT_HOOK_URL` below.
+    env.SLAYZONE_HUB_URL = remote.hubBaseUrl
+    if (remote.token) env.SLAYZONE_HUB_TOKEN = remote.token
+    if (hookCapable) {
+      env.SLAYZONE_AGENT_HOOK_URL = `${remote.hubBaseUrl}${AGENT_HOOK_PATH}`
+      env.SLAYZONE_AGENT_ID = mode as string
+      env.SLAYZONE_HOME_DIR = getSlayzoneHomeDir()
+    }
+    return env
+  }
+
+  // Local (hub-local — today's only path): loopback, byte-identical to before.
   const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
   if (mcpPort) env.SLAYZONE_MCP_PORT = String(mcpPort)
 
-  if (mcpPort && mode && HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId)) {
-    env.SLAYZONE_AGENT_HOOK_URL = `http://127.0.0.1:${mcpPort}/api/agent-hook`
-    env.SLAYZONE_AGENT_ID = mode
+  if (mcpPort && hookCapable) {
+    env.SLAYZONE_AGENT_HOOK_URL = `http://127.0.0.1:${mcpPort}${AGENT_HOOK_PATH}`
+    env.SLAYZONE_AGENT_ID = mode as string
     env.SLAYZONE_HOME_DIR = getSlayzoneHomeDir()
   }
 

@@ -80,7 +80,11 @@ export interface ChatDataOps {
   clearChatEventsForTab(tabId: string): Promise<void>
   /** Drop all queued messages for a tab. Returns the number removed. */
   clearChatQueue(tabId: string): Promise<number>
-  /** MCP env vars for the chat subprocess (task/project ids, hook URL, …). */
+  /** MCP env vars for the chat subprocess (task/project ids, hook URL, …).
+   *  Intentionally local-only (no `remote` param): chat is SDK-spawned in THIS
+   *  process, never routed to a runner, so it always gets the loopback env. If
+   *  chat ever spawns on a runner, thread a `remote` arg here mirroring the pty
+   *  ledger's buildMcpEnv (hub/runner split, wave 3). */
   buildMcpEnv(taskId: string, mode: string): Promise<Record<string, string>>
   bumpAutocompleteUsage(source: string, name: string): Promise<void>
   getAutocompleteUsage(): Promise<UsageMap>

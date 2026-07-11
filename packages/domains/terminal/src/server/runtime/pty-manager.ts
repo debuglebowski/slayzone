@@ -54,7 +54,7 @@ import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-resp
 import { filterBufferData } from '../filter-buffer-data'
 import { shouldHonorDetectedError } from '../session-error-gate'
 import { resolveSpawnConversation } from '../spawn-conversation'
-import { buildMcpEnv } from '../mcp-env'
+import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
 export { filterBufferData }
@@ -109,6 +109,20 @@ export function setDatabase(database: SlayzoneDb): void {
  *  TTL sweep. Wave 2 must swap only at boot/reconnect quiesce points. */
 export function setPtySessionLedger(ops: PtySessionLedger | null): void {
   ledger = ops
+}
+
+// Remote-MCP-env provider (hub/runner split, wave 3). Null by default: with no
+// provider `resolveRemoteMcpEnv` returns null for EVERY spawn, so a session's
+// mcpEnv is byte-identical to today's loopback env. The composition root wires a
+// real provider ONLY under fleet mode; it mints a short-lived per-task bearer +
+// resolves the hub's externally-reachable base URL so a runner-routed pty's
+// `slay` CLI + agent hooks dial the hub instead of loopback. Injected here (not
+// baked into the ledger) so it's swappable independently of the DB ledger.
+let remoteMcpEnvProvider: RemoteMcpEnvProvider | null = null
+
+/** Wave-3 seam: inject the remote hub-target provider (fleet mode only). */
+export function setRemoteMcpEnvProvider(provider: RemoteMcpEnvProvider | null): void {
+  remoteMcpEnvProvider = provider
 }
 
 /**
@@ -1416,6 +1430,17 @@ export async function createPty(
       }
     })
 
+    // Hub/runner split (wave 3): when this session spawns on a runner, resolve
+    // its remote hub target (base URL + a freshly-minted per-task bearer) so the
+    // env below points the CLI + agent hooks at the hub instead of loopback.
+    // `runnerId == null` (every local spawn) OR no provider wired => null, so
+    // the mcpEnv resolution stays byte-identical to today's loopback env.
+    const remoteMcpEnv = await resolveRemoteMcpEnv(remoteMcpEnvProvider, {
+      taskId,
+      runnerId,
+      mode: terminalMode
+    })
+
     // A pre-warmed agent already has its env baked in from spawn time (warm pool)
     // and is never re-exported/re-exec'd (see the preWarmedAgent guard above) — its
     // mcpEnv would only feed the export-prefix / spawnOptions.env below, both of
@@ -1426,8 +1451,8 @@ export async function createPty(
     const mcpEnv = opts.adoptPty?.preWarmedAgent
       ? {}
       : ledger
-        ? await ledger.buildMcpEnv(taskId, terminalMode)
-        : await buildMcpEnv(null, taskId, terminalMode)
+        ? await ledger.buildMcpEnv(taskId, terminalMode, remoteMcpEnv)
+        : await buildMcpEnv(null, taskId, terminalMode, undefined, undefined, remoteMcpEnv)
 
     // Adoption: the warm shell was spawned without the task-scoped MCP env
     // (SLAYZONE_TASK_ID etc.) — env can't be mutated on a live process, so export

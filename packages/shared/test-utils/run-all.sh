@@ -115,6 +115,8 @@ run_test_electron_strict_loader packages/domains/automations/src/server/engine.t
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
 run_test packages/domains/terminal/src/server/filter-buffer-data.test.ts
+# Wave-3 remote-runner per-PTY env (loopback vs hub URL + scoped token).
+run_test packages/domains/terminal/src/server/mcp-env.test.ts
 run_test packages/domains/terminal/src/client/webgl-loader.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
@@ -237,7 +239,8 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/worktrees/src/server/composite-ops.test.ts \
   packages/domains/settings/src/client/tabs/FleetSettingsTab.test.tsx \
   packages/domains/task/src/client/RunnerCard.test.tsx \
-  packages/domains/projects/src/client/GeneralTab.test.tsx; then
+  packages/domains/projects/src/client/GeneralTab.test.tsx \
+  packages/domains/hub-auth/src/server/task-tokens.test.ts; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
