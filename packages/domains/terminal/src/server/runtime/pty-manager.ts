@@ -19,7 +19,7 @@ import {
 } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { recordPendingSpawn, prunePendingSpawns, bindSessionToTask } from '@slayzone/task/server'
+import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
@@ -91,11 +91,24 @@ export type PtyEventMap = {
 
 export const ptyEvents = new TypedEmitter<PtyEventMap>()
 
-// Database reference (held for future use; legacy from notification feature)
-let db: SlayzoneDb | null = null
+// Session-provenance ledger (hub/runner split, wave 1). Null until the
+// composition root injects a DB via `setDatabase` — every call site guards on
+// it, preserving the old null-before-init `if (db)` behavior. The default impl
+// runs the same SQL locally; wave 2 swaps in a remote-backed impl via
+// `setPtySessionLedger` without touching call sites.
+let ledger: PtySessionLedger | null = null
 
 export function setDatabase(database: SlayzoneDb): void {
-  db = database
+  ledger = createDbPtySessionLedger(database)
+}
+
+/** Wave-2 seam: inject a non-DB-backed ledger (e.g. hub RPC). NOTE: call sites
+ *  re-read the module ref at each use, so a swap between a session's spawn
+ *  (recordPendingSpawn) and its exit (prunePendingSpawns) sends the prune to
+ *  the NEW ledger — the old one's pending row then only falls to the 10-min
+ *  TTL sweep. Wave 2 must swap only at boot/reconnect quiesce points. */
+export function setPtySessionLedger(ops: PtySessionLedger | null): void {
+  ledger = ops
 }
 
 /**
@@ -1414,7 +1427,14 @@ export async function createPty(
     // and is never re-exported/re-exec'd (see the preWarmedAgent guard above) — its
     // mcpEnv would only feed the export-prefix / spawnOptions.env below, both of
     // which are unreachable for it. Skip the DB round-trip entirely on this path.
-    const mcpEnv = opts.adoptPty?.preWarmedAgent ? {} : await buildMcpEnv(db, taskId, terminalMode)
+    // Ledger-null fallback (pre-init) matches the old `buildMcpEnv(null, …)`
+    // behavior: env is still built (task id, MCP port, hook URL) minus the
+    // DB-resolved project id.
+    const mcpEnv = opts.adoptPty?.preWarmedAgent
+      ? {}
+      : ledger
+        ? await ledger.buildMcpEnv(taskId, terminalMode)
+        : await buildMcpEnv(null, taskId, terminalMode)
 
     // Adoption: the warm shell was spawned without the task-scoped MCP env
     // (SLAYZONE_TASK_ID etc.) — env can't be mutated on a live process, so export
@@ -1516,9 +1536,9 @@ export async function createPty(
     // so the row is durable before the child process can race ahead. Drops
     // on PTY exit via `prunePendingSpawns` below, and a periodic 10-min TTL
     // sweep belt-and-suspenders.
-    if (db && !opts.adoptPty?.preWarmedAgent) {
+    if (ledger && !opts.adoptPty?.preWarmedAgent) {
       try {
-        await recordPendingSpawn(db, {
+        await ledger.recordPendingSpawn({
           taskId,
           mode: terminalMode,
           expectedSessionId: effectiveConversationId || null,
@@ -1611,9 +1631,9 @@ export async function createPty(
     // Pre-warmed pool adoption: bind the pre-recorded pooled session entity to
     // this task+tab (set-once). Its write-once conversation id then becomes the
     // task's resume target via the resolver (which reads agent_sessions by task).
-    if (opts.adoptPty?.preWarmedAgent && opts.adoptPty.sessionId && db) {
+    if (opts.adoptPty?.preWarmedAgent && opts.adoptPty.sessionId && ledger) {
       try {
-        await bindSessionToTask(db, {
+        await ledger.bindSessionToTask({
           sessionId: opts.adoptPty.sessionId,
           taskId,
           tabId: resolveTabRowId(sessionId)
@@ -1682,8 +1702,8 @@ export async function createPty(
       // isn't pruned here gets swept by the periodic 10-min TTL anyway, but
       // explicit pruning here keeps the table small and avoids stale rows
       // matching a fast restart on the same task/mode.
-      if (db) {
-        void prunePendingSpawns(db, { taskId, mode: terminalMode }).catch(() => {
+      if (ledger) {
+        void ledger.prunePendingSpawns({ taskId, mode: terminalMode }).catch(() => {
           // Best-effort — failure leaks at most one pending row per spawn,
           // which the periodic sweep collects within 10 min.
         })

@@ -25,6 +25,7 @@ import {
   takePtyKillCalls
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
+import { createDbPtySpawnLookups, mapModeRow } from './pty-data-ops'
 import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell, setProjectTabCounts } from './warm-process-manager'
 import { getAdapter, type ExecutionContext } from '../adapters'
@@ -53,32 +54,6 @@ export interface PtyCreateOpts {
   rows?: number
 }
 
-function mapModeRow(row: any): TerminalModeInfo {
-  let usageConfig = null
-  if (row.usage_config) {
-    try {
-      usageConfig = JSON.parse(row.usage_config)
-    } catch {
-      /* ignore corrupt */
-    }
-  }
-  return {
-    id: row.id,
-    label: row.label,
-    type: row.type,
-    initialCommand: row.initial_command,
-    resumeCommand: row.resume_command,
-    headlessCommand: row.headless_command ?? null,
-    defaultFlags: row.default_flags,
-    enabled: Boolean(row.enabled),
-    isBuiltin: Boolean(row.is_builtin),
-    order: row.order,
-    patternWorking: row.pattern_working,
-    patternError: row.pattern_error,
-    usageConfig
-  }
-}
-
 /**
  * Transport-agnostic PTY operations (IPC → tRPC migration, slice 3 / P17).
  *
@@ -94,8 +69,12 @@ function mapModeRow(row: any): TerminalModeInfo {
  * of which transport pushed the counts.
  */
 export function createPtyOps(db: SlayzoneDb) {
-  // Set database reference for notifications.
+  // Wires the pty-manager's session ledger (hub/runner wave 1: the runtime's
+  // DB touchpoints go through an injected ops interface, db-backed by default).
   setDatabase(db)
+  // Spawn-time reads (mode row, task→project) — same queries, behind the seam.
+  // The terminal_modes CRUD below stays on the raw db: that's hub data.
+  const lookups = createDbPtySpawnLookups(db)
 
   // Terminal Modes CRUD
   const terminalModesList = async (): Promise<TerminalModeInfo[]> => {
@@ -303,8 +282,7 @@ export function createPtyOps(db: SlayzoneDb) {
     // Look up mode info to get type, templates, and default flags
     const modeId = opts.mode || 'claude-code'
 
-    const modeRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(modeId)
-    const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
+    const modeInfo = (await lookups.getTerminalMode(modeId)) ?? undefined
 
     // Warm-process pool: if this project has a ready warm shell that matches this
     // spawn (default mode, project-root cwd, fresh start), adopt it instead of
@@ -313,10 +291,7 @@ export function createPtyOps(db: SlayzoneDb) {
     let warmClaim: ReturnType<typeof claimWarmShell> = null
     const taskId = opts.sessionId.split(':')[0]
     if (taskId) {
-      const taskRow = (await db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId)) as
-        | { project_id?: string }
-        | undefined
-      const projectId = taskRow?.project_id
+      const projectId = await lookups.getTaskProjectId(taskId)
       if (projectId) {
         warmClaim = claimWarmShell({
           projectId,
@@ -380,8 +355,7 @@ export function createPtyOps(db: SlayzoneDb) {
   }) => setTerminalTheme(theme)
 
   const ptyValidate = async (mode: TerminalMode) => {
-    const modeRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(mode)
-    const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
+    const modeInfo = (await lookups.getTerminalMode(mode)) ?? undefined
     const adapter = getAdapter({
       mode,
       type: modeInfo?.type,
