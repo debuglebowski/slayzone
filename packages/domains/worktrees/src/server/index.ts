@@ -102,9 +102,12 @@ export { worktreesEvents, type WorktreesEventMap } from './events'
 export {
   detectChildRepos,
   detectWorktreesWithColors,
+  createDbWorktreePolicyOps,
   resolveCopyBehavior,
   resolveSubmoduleInitBehavior,
   createWorktreeWithSetup,
+  createWorktreeWithSetupWith,
   mergeWithAI,
-  analyzeConflict
+  analyzeConflict,
+  type WorktreePolicyOps
 } from './composite-ops'

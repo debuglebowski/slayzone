@@ -109,75 +109,108 @@ export async function detectWorktreesWithColors(repoPath: string) {
 }
 
 // ── Copy / submodule behavior resolvers ──────────────────────────────────────
+/**
+ * Policy reads the worktree-creation flow depends on. The default impl
+ * (`createDbWorktreePolicyOps`) reads the local DB; a hub/runner split can
+ * substitute an impl that resolves policy remotely — exec-side code depends
+ * only on this interface, never on the DB directly.
+ */
+export interface WorktreePolicyOps {
+  resolveCopyBehavior(
+    projectId?: string
+  ): Promise<{ behavior: WorktreeCopyBehavior; customPaths: string[] }>
+  resolveSubmoduleInit(projectId?: string): Promise<WorktreeSubmoduleInit>
+}
+
+/** DB-backed `WorktreePolicyOps` — same SQL the legacy resolvers ran. */
+export function createDbWorktreePolicyOps(db: SlayzoneDb): WorktreePolicyOps {
+  return {
+    async resolveCopyBehavior(
+      projectId?: string
+    ): Promise<{ behavior: WorktreeCopyBehavior; customPaths: string[] }> {
+      // Check project-level override first (null = inherit from global)
+      // Wrapped in try-catch: columns added in migration v70 may not exist on stale DBs
+      if (projectId) {
+        try {
+          const row = (await db
+            .prepare(
+              'SELECT worktree_copy_behavior, worktree_copy_paths FROM projects WHERE id = ?'
+            )
+            .get(projectId)) as
+            | { worktree_copy_behavior: string | null; worktree_copy_paths: string | null }
+            | undefined
+          if (row?.worktree_copy_behavior) {
+            const behavior = row.worktree_copy_behavior as WorktreeCopyBehavior
+            const customPaths =
+              behavior === 'custom' && row.worktree_copy_paths
+                ? row.worktree_copy_paths
+                    .split(',')
+                    .map((p) => p.trim())
+                    .filter(Boolean)
+                : []
+            return { behavior, customPaths }
+          }
+        } catch {
+          /* fall through to global setting */
+        }
+      }
+
+      // Fall back to global setting
+      const settingRow = (await db
+        .prepare("SELECT value FROM settings WHERE key = 'worktree_copy_behavior'")
+        .get()) as { value: string } | undefined
+      const behavior = (settingRow?.value as WorktreeCopyBehavior) || 'ask'
+      let customPaths: string[] = []
+      if (behavior === 'custom') {
+        const pathsRow = (await db
+          .prepare("SELECT value FROM settings WHERE key = 'worktree_copy_paths'")
+          .get()) as { value: string } | undefined
+        customPaths = pathsRow?.value
+          ? pathsRow.value
+              .split(',')
+              .map((p) => p.trim())
+              .filter(Boolean)
+          : []
+      }
+
+      return { behavior, customPaths }
+    },
+
+    async resolveSubmoduleInit(projectId?: string): Promise<WorktreeSubmoduleInit> {
+      if (projectId) {
+        try {
+          const row = (await db
+            .prepare('SELECT worktree_submodule_init FROM projects WHERE id = ?')
+            .get(projectId)) as { worktree_submodule_init: string | null } | undefined
+          if (row?.worktree_submodule_init)
+            return row.worktree_submodule_init as WorktreeSubmoduleInit
+        } catch {
+          /* column may not exist on stale DB — fall through */
+        }
+      }
+
+      const settingRow = (await db
+        .prepare("SELECT value FROM settings WHERE key = 'worktree_submodule_init'")
+        .get()) as { value: string } | undefined
+      return (settingRow?.value as WorktreeSubmoduleInit) || 'auto'
+    }
+  }
+}
+
+/** Legacy signature — delegates to the DB-backed `WorktreePolicyOps`. */
 export async function resolveCopyBehavior(
   db: SlayzoneDb,
   projectId?: string
 ): Promise<{ behavior: WorktreeCopyBehavior; customPaths: string[] }> {
-  // Check project-level override first (null = inherit from global)
-  // Wrapped in try-catch: columns added in migration v70 may not exist on stale DBs
-  if (projectId) {
-    try {
-      const row = (await db
-        .prepare('SELECT worktree_copy_behavior, worktree_copy_paths FROM projects WHERE id = ?')
-        .get(projectId)) as
-        | { worktree_copy_behavior: string | null; worktree_copy_paths: string | null }
-        | undefined
-      if (row?.worktree_copy_behavior) {
-        const behavior = row.worktree_copy_behavior as WorktreeCopyBehavior
-        const customPaths =
-          behavior === 'custom' && row.worktree_copy_paths
-            ? row.worktree_copy_paths
-                .split(',')
-                .map((p) => p.trim())
-                .filter(Boolean)
-            : []
-        return { behavior, customPaths }
-      }
-    } catch {
-      /* fall through to global setting */
-    }
-  }
-
-  // Fall back to global setting
-  const settingRow = (await db
-    .prepare("SELECT value FROM settings WHERE key = 'worktree_copy_behavior'")
-    .get()) as { value: string } | undefined
-  const behavior = (settingRow?.value as WorktreeCopyBehavior) || 'ask'
-  let customPaths: string[] = []
-  if (behavior === 'custom') {
-    const pathsRow = (await db
-      .prepare("SELECT value FROM settings WHERE key = 'worktree_copy_paths'")
-      .get()) as { value: string } | undefined
-    customPaths = pathsRow?.value
-      ? pathsRow.value
-          .split(',')
-          .map((p) => p.trim())
-          .filter(Boolean)
-      : []
-  }
-
-  return { behavior, customPaths }
+  return createDbWorktreePolicyOps(db).resolveCopyBehavior(projectId)
 }
 
+/** Legacy signature — delegates to the DB-backed `WorktreePolicyOps`. */
 export async function resolveSubmoduleInitBehavior(
   db: SlayzoneDb,
   projectId?: string
 ): Promise<WorktreeSubmoduleInit> {
-  if (projectId) {
-    try {
-      const row = (await db
-        .prepare('SELECT worktree_submodule_init FROM projects WHERE id = ?')
-        .get(projectId)) as { worktree_submodule_init: string | null } | undefined
-      if (row?.worktree_submodule_init) return row.worktree_submodule_init as WorktreeSubmoduleInit
-    } catch {
-      /* column may not exist on stale DB — fall through */
-    }
-  }
-
-  const settingRow = (await db
-    .prepare("SELECT value FROM settings WHERE key = 'worktree_submodule_init'")
-    .get()) as { value: string } | undefined
-  return (settingRow?.value as WorktreeSubmoduleInit) || 'auto'
+  return createDbWorktreePolicyOps(db).resolveSubmoduleInit(projectId)
 }
 
 // ── Worktree creation (create → copy ignored → submodules → setup script) ─────
@@ -187,8 +220,8 @@ export async function resolveSubmoduleInitBehavior(
  * `createWorktree` mutation to `worktreesEvents` (consumed by the
  * `onCreateWorktreePhase` subscription, correlated by requestId).
  */
-export async function createWorktreeWithSetup(
-  db: SlayzoneDb,
+export async function createWorktreeWithSetupWith(
+  policy: WorktreePolicyOps,
   opts: CreateWorktreeOpts,
   onPhase?: (phase: CreateWorktreePhase) => void
 ): Promise<{
@@ -203,13 +236,13 @@ export async function createWorktreeWithSetup(
 
   emit('copying')
   // Copy ignored files based on settings ('ask' is handled client-side)
-  const { behavior, customPaths } = await resolveCopyBehavior(db, projectId)
+  const { behavior, customPaths } = await policy.resolveCopyBehavior(projectId)
   if (behavior === 'all' || behavior === 'custom') {
     await copyIgnoredFiles(repoPath, targetPath, behavior, customPaths)
   }
 
   emit('submodules')
-  const submoduleBehavior = await resolveSubmoduleInitBehavior(db, projectId)
+  const submoduleBehavior = await policy.resolveSubmoduleInit(projectId)
   let submoduleResult: WorktreeSubmoduleResult
   if (submoduleBehavior === 'skip') {
     submoduleResult = { ran: false, reason: 'skipped' }
@@ -222,6 +255,18 @@ export async function createWorktreeWithSetup(
 
   emit('done')
   return { setupResult, submoduleResult }
+}
+
+/** Legacy signature — delegates to `createWorktreeWithSetupWith` over the DB-backed policy. */
+export async function createWorktreeWithSetup(
+  db: SlayzoneDb,
+  opts: CreateWorktreeOpts,
+  onPhase?: (phase: CreateWorktreePhase) => void
+): Promise<{
+  setupResult: Awaited<ReturnType<typeof runWorktreeSetupScript>>
+  submoduleResult: WorktreeSubmoduleResult
+}> {
+  return createWorktreeWithSetupWith(createDbWorktreePolicyOps(db), opts, onPhase)
 }
 
 // ── AI-assisted merge: start a no-commit merge, return an agent resolution plan ─
