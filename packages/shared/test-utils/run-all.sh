@@ -59,6 +59,7 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cha
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
+run_test_electron_strict_loader packages/apps/server/src/fleet-auth.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
