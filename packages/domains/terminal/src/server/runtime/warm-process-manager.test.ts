@@ -13,7 +13,8 @@ import {
   clearWindowTabCounts,
   claimWarmShell,
   getWarmStatus,
-  __resetForTests
+  __resetForTests,
+  type WarmPoolDataOps
 } from './warm-process-manager'
 
 let passed = 0
@@ -54,6 +55,7 @@ const settle = (): Promise<void> => wait(240)
 interface FakePty {
   killed: boolean
   dataCbs: Array<(d: string) => void>
+  exitCbs: Array<(e: { exitCode: number }) => void>
   written: string[]
   onData: (cb: (d: string) => void) => { dispose: () => void }
   onExit: (cb: (e: { exitCode: number }) => void) => { dispose: () => void }
@@ -67,15 +69,18 @@ let lastSpawnOpts: { cwd: string; extraEnv?: Record<string, string> } | null = n
 
 function makeFakePty(): FakePty {
   const dataCbs: Array<(d: string) => void> = []
+  const exitCbs: Array<(e: { exitCode: number }) => void> = []
   const obj: FakePty = {
     killed: false,
     dataCbs,
+    exitCbs,
     written: [],
     onData(cb) {
       dataCbs.push(cb)
       return { dispose() {} }
     },
-    onExit() {
+    onExit(cb) {
+      exitCbs.push(cb)
       return { dispose() {} }
     },
     kill() {
@@ -256,6 +261,54 @@ await test('adopt miss: no warm for project', async () => {
   init()
   const claim = claimWarmShell({ projectId: 'nope', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: false })
   expect(claim).toBeNull()
+})
+
+await test('injected ops seam handles mode lookup + session writes (db untouched)', async () => {
+  spawnCount = 0
+  lastSpawned = null
+  lastSpawnOpts = null
+  dbRunCalls = []
+  enabled = true
+  const modeLookups: string[] = []
+  let recorded: Parameters<WarmPoolDataOps['recordSessionSpawn']>[0] | null = null
+  const deadIds: string[] = []
+  const ops: WarmPoolDataOps = {
+    getModeSpawnConfig: async (modeId) => {
+      modeLookups.push(modeId)
+      return { initial_command: 'claude --session-id {id} {flags}', default_flags: '--dangerously' }
+    },
+    recordSessionSpawn: async (input) => {
+      recorded = input
+    },
+    markSessionDead: async (sessionId) => {
+      deadIds.push(sessionId)
+    }
+  }
+  initWarmProcessManager({
+    db,
+    ops,
+    isEnabled: () => enabled,
+    getProjectRoot: async () => PROJECT_ROOT,
+    spawnShell: fakeSpawn
+  })
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  expect(getWarmStatus().p1).toBe('ready')
+  // Mode template came through ops, and the agent was exec'd from it.
+  expect(modeLookups.includes('claude-code')).toBeTruthy()
+  expect((lastSpawned?.written.join('') ?? '').includes('claude')).toBeTruthy()
+  // Pooled session recorded through ops with the exact spawn payload…
+  expect(recorded?.status).toBe('pooled')
+  expect(recorded?.mode).toBe('claude-code')
+  expect(recorded?.taskId).toBeNull()
+  // …and no session write hit the injected db directly (db.run untouched;
+  // deps.db itself stays required this wave, e.g. buildMcpEnv still takes it).
+  expect(dbRunCalls.length).toBe(0)
+  // Warm pty dies → markSessionDead flows through ops with the pooled session id.
+  lastSpawned!.exitCbs.forEach((cb) => cb({ exitCode: 0 }))
+  await wait(10)
+  expect(deadIds.length).toBe(1)
+  expect(deadIds[0]).toBe(recorded!.id)
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

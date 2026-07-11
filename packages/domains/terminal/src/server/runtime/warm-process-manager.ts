@@ -49,15 +49,60 @@ interface WarmHandle {
   exitDisposable?: IDisposable
 }
 
+/**
+ * Data seam for every DB touchpoint of the warm pool (hub/runner split, wave 1).
+ * The default impl (`createDbWarmPoolDataOps`) runs the same SQL / barrel calls
+ * against the local db; an exec-side runner can inject a remote impl instead.
+ */
+export interface WarmPoolDataOps {
+  /** The warmed mode's command template (`terminal_modes` row), or null if unknown. */
+  getModeSpawnConfig(modeId: string): Promise<{
+    initial_command: string | null
+    default_flags: string | null
+  } | null>
+  /** Record the pooled session entity at warm spawn (status='pooled', no task/tab yet). */
+  recordSessionSpawn(input: {
+    id: string
+    taskId: string | null
+    tabId: string | null
+    mode: string
+    cwd: string
+    expectedConversationId: string | null
+    usedResume: boolean
+    status: 'pooled'
+  }): Promise<void>
+  /** Mark a pooled session's process dead (reap/crash) so it never lingers as resumable. */
+  markSessionDead(sessionId: string): Promise<void>
+}
+
+/** Default local-DB impl — same SQL / `@slayzone/task/server` calls as before the seam. */
+export function createDbWarmPoolDataOps(db: SlayzoneDb): WarmPoolDataOps {
+  return {
+    async getModeSpawnConfig(modeId) {
+      const row = await db.get<{
+        initial_command: string | null
+        default_flags: string | null
+      }>(`SELECT initial_command, default_flags FROM terminal_modes WHERE id = ?`, [modeId])
+      return row ?? null
+    },
+    recordSessionSpawn: (input) => recordSessionSpawn(db, input),
+    markSessionDead: (sessionId) => markSessionDead(db, sessionId)
+  }
+}
+
 interface WarmDeps {
   db: SlayzoneDb
+  /** Data seam; defaults to the local-DB impl (`createDbWarmPoolDataOps(db)`) when omitted. */
+  ops?: WarmPoolDataOps
   isEnabled: () => boolean
   getProjectRoot: (projectId: string) => Promise<string | null>
   /** Injectable for tests; defaults to the real shell spawn so cold + warm can't drift. */
   spawnShell?: typeof spawnLoginShell
 }
 
-let deps: WarmDeps | null = null
+type ResolvedWarmDeps = WarmDeps & { ops: WarmPoolDataOps }
+
+let deps: ResolvedWarmDeps | null = null
 let shuttingDown = false
 const warm = new Map<string /* projectId */, WarmHandle>()
 const spawning = new Set<string /* projectId */>()
@@ -66,7 +111,7 @@ const tabCountsByWindow = new Map<number /* windowId */, Record<string, number>>
 let reconcileTimer: NodeJS.Timeout | undefined
 
 export function initWarmProcessManager(d: WarmDeps): void {
-  deps = d
+  deps = { ...d, ops: d.ops ?? createDbWarmPoolDataOps(d.db) }
   shuttingDown = false
 }
 
@@ -236,10 +281,7 @@ async function spawnWarm(projectId: string): Promise<void> {
       return
     }
     // The warmed agent's command template (claude-code initial_command + flags).
-    const modeRow = await deps.db.get<{
-      initial_command: string | null
-      default_flags: string | null
-    }>(`SELECT initial_command, default_flags FROM terminal_modes WHERE id = ?`, [WARM_MODE])
+    const modeRow = await deps.ops.getModeSpawnConfig(WARM_MODE)
 
     const sessionId = randomUUID()
     // claude-code pre-mints the conversation id (its initial_command has the
@@ -274,14 +316,14 @@ async function spawnWarm(projectId: string): Promise<void> {
       if (warm.get(projectId) === handle) warm.delete(projectId)
       // The pooled session's process died (reap / crash) → mark it dead so a
       // stale `pooled` row never lingers as resumable.
-      void markSessionDead(deps!.db, sessionId).catch(() => {})
+      void deps!.ops.markSessionDead(sessionId).catch(() => {})
     })
     warm.set(projectId, handle)
 
     // Record the pooled session entity (status='pooled', no task/tab yet). The
     // conversation id is confirmed write-once by the agent's SessionStart hook
     // (keyed by SLAYZONE_SESSION_ID — see agent-hook).
-    await recordSessionSpawn(deps.db, {
+    await deps.ops.recordSessionSpawn({
       id: sessionId,
       taskId: null,
       tabId: null,
