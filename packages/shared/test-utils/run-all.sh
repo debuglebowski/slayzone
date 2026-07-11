@@ -65,6 +65,8 @@ run_test packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_test packages/domains/sidebar/src/views/projectDrop.test.ts
 # listForTask scoping — null taskId (Home/project view) must not leak other projects' processes.
 run_test packages/domains/processes/src/server/process-manager.test.ts
+# Persistence seam — fake ProcessPersistence records insert/update/remove; loadAll hydration.
+run_test packages/domains/processes/src/server/process-persistence.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/ai-config.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts

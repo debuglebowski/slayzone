@@ -3,6 +3,7 @@ export {
   subscribeToProcessLogs,
   setProcessManagerWindow,
   initProcessManager,
+  initProcessManagerWith,
   createProcess,
   spawnProcess,
   updateProcess,
@@ -21,4 +22,6 @@ export type {
   ProcessShutdownOptions,
   ProcessShutdownResult
 } from './process-manager'
+export { createDbProcessPersistence } from './process-persistence'
+export type { ProcessPersistence, PersistedProcess, ProcessRow } from './process-persistence'
 export { createStatsPoller } from './pid-stats'

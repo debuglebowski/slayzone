@@ -3,6 +3,8 @@ import type { ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createStatsPoller } from './pid-stats'
+import { createDbProcessPersistence } from './process-persistence'
+import type { ProcessPersistence } from './process-persistence'
 import { extractOscTitle } from '@slayzone/terminal/shared'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 import { buildShellInvocation } from '@slayzone/platform'
@@ -79,7 +81,7 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'
 }
 
 let win: ProcessBroadcastWindow | null = null
-let db: SlayzoneDb | null = null
+let persistence: ProcessPersistence | null = null
 let isShuttingDown = false
 const processes = new Map<string, ManagedProcess>()
 
@@ -99,8 +101,13 @@ export function setProcessManagerWindow(window: ProcessBroadcastWindow): void {
   win = window
 }
 
+/** DB-backed init — keeps the historical signature; delegates to the seam below. */
 export async function initProcessManager(database: SlayzoneDb): Promise<void> {
-  db = database
+  return initProcessManagerWith(createDbProcessPersistence(database))
+}
+
+export async function initProcessManagerWith(p: ProcessPersistence): Promise<void> {
+  persistence = p
   // Warm the enriched-PATH cache off the boot critical path. Spawning the
   // user's shell to read $PATH is ~100ms (login shell + rc files); deferring
   // saves it from blocking window creation. First spawn within the deferred
@@ -112,15 +119,7 @@ export async function initProcessManager(database: SlayzoneDb): Promise<void> {
       /* lazy fallback handles it */
     }
   })
-  const rows = (await db.prepare('SELECT * FROM processes ORDER BY created_at').all()) as Array<{
-    id: string
-    task_id: string | null
-    project_id: string | null
-    label: string
-    command: string
-    cwd: string
-    auto_restart: number
-  }>
+  const rows = await p.loadAll()
   for (const row of rows) {
     processes.set(row.id, {
       id: row.id,
@@ -281,11 +280,7 @@ export function createProcess(
     oscTitleSet: false
   }
   processes.set(id, proc)
-  void db
-    ?.prepare(
-      'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    )
-    .run(id, projectId, taskId, label, command, cwd, autoRestart ? 1 : 0)
+  void persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
   return id
 }
 
@@ -320,11 +315,7 @@ export function spawnProcess(
     oscTitleSet: false
   }
   processes.set(id, proc)
-  void db
-    ?.prepare(
-      'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    )
-    .run(id, projectId, taskId, label, command, cwd, autoRestart ? 1 : 0)
+  void persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
   doSpawn(proc)
   return id
 }
@@ -338,23 +329,15 @@ export function updateProcess(
   const proc = processes.get(id)
   if (!proc) return false
   Object.assign(proc, updates)
-  void db
-    ?.prepare(
-      `
-    UPDATE processes SET
-      project_id = ?, task_id = ?, label = ?, command = ?, cwd = ?, auto_restart = ?
-    WHERE id = ?
-  `
-    )
-    .run(
-      proc.projectId,
-      proc.taskId,
-      proc.label,
-      proc.command,
-      proc.cwd,
-      proc.autoRestart ? 1 : 0,
-      id
-    )
+  void persistence?.update({
+    id,
+    taskId: proc.taskId,
+    projectId: proc.projectId,
+    label: proc.label,
+    command: proc.command,
+    cwd: proc.cwd,
+    autoRestart: proc.autoRestart
+  })
   return true
 }
 
@@ -381,7 +364,7 @@ export function killProcess(id: string): boolean {
   if (proc.child) killProcessTree(proc.child)
   proc.child = null
   processes.delete(id)
-  void db?.prepare('DELETE FROM processes WHERE id = ?').run(id)
+  void persistence?.remove(id)
   return true
 }
 
