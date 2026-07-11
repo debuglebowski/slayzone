@@ -2161,8 +2161,10 @@ app
     // at the local hub's fleet URL. Gated STRICTLY on boot-config `fleet_mode`
     // (default off) AND local mode (remote mode has no local hub to dial): when
     // off, NOTHING new spawns — byte-identical boot. Skipped under Playwright so
-    // e2e never launches a runner. Off the boot critical path (setImmediate);
-    // failure is log-only.
+    // e2e never launches a runner — UNLESS a fleet-loopback spec explicitly opts
+    // in via `SLAYZONE_E2E_ALLOW_RUNNER=1` (mirrors the `SLAYZONE_E2E_INSTALL_HOOKS`
+    // opt-in below); the default e2e path still skips the runner, byte-identical.
+    // Off the boot critical path (setImmediate); failure is log-only.
     //
     // Join token: DEFERRED. Auto-minting one at boot is circular (the token must
     // be minted against the hub identity, which the sidecar owns, and delivered
@@ -2171,7 +2173,11 @@ app
     // SLAYZONE_JOIN_TOKEN env var (operator-supplied); absent ⇒ the runner still
     // spawns but its dialer fails auth and backs off (the runner's own fatal-auth
     // handling), which is the correct dark behavior — no half-wired minting.
-    if (bootConfig.fleet_mode === true && !isRemoteMode && !process.env.PLAYWRIGHT) {
+    if (
+      bootConfig.fleet_mode === true &&
+      !isRemoteMode &&
+      (!process.env.PLAYWRIGHT || process.env.SLAYZONE_E2E_ALLOW_RUNNER === '1')
+    ) {
       setImmediate(() => {
         logBoot('local-runner supervisor import dispatched')
         import('./local-runner-supervisor')

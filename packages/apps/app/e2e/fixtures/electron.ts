@@ -251,6 +251,12 @@ async function launchElectronWithRetry(args: {
   userDataDir: string
   workerArtifactsDir: string
   executablePath: string
+  /** Extra env merged LAST into the launch literal — lets an isolated spec pass
+   *  otherwise-stripped SLAYZONE_* vars (e.g. SLAYZONE_FLEET_MODE /
+   *  SLAYZONE_E2E_ALLOW_RUNNER / SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN) through
+   *  the strip below. Wins over the fixed keys, so a spec may also override an
+   *  isolation default intentionally. */
+  extraEnv?: Record<string, string>
 }): Promise<{ app: ElectronApplication; page: Page; attempts: LaunchAttemptRecord[] }> {
   const attempts: LaunchAttemptRecord[] = []
 
@@ -335,7 +341,14 @@ async function launchElectronWithRetry(args: {
             'plugin',
             'slayzone-notify.js'
           ),
-          XDG_CONFIG_HOME: path.join(args.userDataDir, '.config')
+          XDG_CONFIG_HOME: path.join(args.userDataDir, '.config'),
+          // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
+          // isolated spec needs (fleet-loopback: SLAYZONE_FLEET_MODE,
+          // SLAYZONE_E2E_ALLOW_RUNNER, SLAYZONE_STORE_DIR, SLAYZONE_HUB_URL,
+          // SLAYZONE_JOIN_TOKEN). Merged LAST so a spec can also override an
+          // isolation default on purpose. Undefined for every default launch
+          // (shared worker app + 103) → byte-identical there.
+          ...(args.extraEnv ?? {})
         }
       })
 
@@ -393,6 +406,11 @@ export async function launchIsolatedElectron(opts: {
   name: string
   /** Runs after the userdata dir exists, before Electron launches. */
   seedUserData?: (userDataDir: string) => void
+  /** Extra env for the launch (merged last, past the env strip for
+   *  `SLAYZONE_`/`ELECTRON_` prefixes). Receives the resolved `userDataDir` so a
+   *  spec can pin store/hub paths into it (e.g. the fleet-loopback spec sets
+   *  SLAYZONE_STORE_DIR + opt-in flags). */
+  extraEnv?: (userDataDir: string) => Record<string, string>
 }): Promise<{
   app: ElectronApplication
   page: Page
@@ -410,7 +428,8 @@ export async function launchIsolatedElectron(opts: {
   const launched = await launchElectronWithRetry({
     userDataDir,
     workerArtifactsDir: artifactsDir,
-    executablePath
+    executablePath,
+    ...(opts.extraEnv ? { extraEnv: opts.extraEnv(userDataDir) } : {})
   })
   return {
     app: launched.app,
