@@ -88,10 +88,14 @@ export interface WorktreeExecAdapters {
   getWorktreeColor: (projectPath: string, worktreePath: string) => string | undefined
   /** `ensureProjectWorktreeColors` from `@slayzone/worktrees/server`. */
   ensureProjectWorktreeColors: (projectPath: string) => Promise<ReadonlyMap<string, string>>
-  /** `fs.existsSync` seam (recovered-worktree check, artifact-dir guard). */
-  pathExists: (path: string) => boolean
-  /** `fs.rmSync(dir, { recursive, force })` seam for task artifact directories. */
-  removeArtifactDir: (absDir: string) => void
+  /** `fs.existsSync` seam (recovered-worktree check, artifact-dir guard). The
+   *  local default stays sync (`boolean`); a runner-backed impl needs a network
+   *  round-trip, so the return is widened to allow a Promise (call sites await). */
+  pathExists: (path: string) => boolean | Promise<boolean>
+  /** `fs.rmSync(dir, { recursive, force })` seam for task artifact directories.
+   *  Widened to `void | Promise<void>` for the same remote-async reason as
+   *  `pathExists`; the local default stays sync. */
+  removeArtifactDir: (absDir: string) => void | Promise<void>
 }
 
 export interface TaskRuntimeAdapters {
@@ -120,7 +124,7 @@ export interface TaskRuntimeAdapters {
  * implementation. Neither composition root passes `worktrees`, so this default
  * must survive every partial `configureTaskRuntimeAdapters` call.
  */
-const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
+export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   createWorktree,
   removeWorktree,
   runWorktreeSetupScript,
@@ -411,8 +415,8 @@ export async function cleanupTaskFull(
     'artifacts',
     taskId
   )
-  if (runtimeAdapters.worktrees.pathExists(artifactsBaseDir)) {
-    runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
+  if (await runtimeAdapters.worktrees.pathExists(artifactsBaseDir)) {
+    await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
   }
 
   const task = await db.get<{ worktree_path: string | null; project_id: string }>(
@@ -547,7 +551,7 @@ export async function maybeAutoCreateWorktree(
   } catch (err) {
     // Git may exit non-zero after creating the worktree (e.g. post-checkout hook failure).
     // If the dir exists, still link it — better than orphaning a worktree the user can see.
-    if (runtimeAdapters.worktrees.pathExists(worktreePath)) {
+    if (await runtimeAdapters.worktrees.pathExists(worktreePath)) {
       await db.run(
         `
         UPDATE tasks

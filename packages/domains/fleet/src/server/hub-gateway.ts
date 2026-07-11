@@ -31,6 +31,8 @@ import {
   FleetErrorCodes,
   helloParamsSchema,
   heartbeatParamsSchema,
+  type ProcDataParams,
+  type ProcExitParams,
   type PtyDataParams,
   type PtyExitParams,
   type RunnerEventParams,
@@ -65,6 +67,11 @@ export type FleetGatewayEvents = {
   'runner-lost': { runnerId: string; reason: 'heartbeat-timeout' }
   'pty.data': PtyDataParams & { runnerId: string }
   'pty.exit': PtyExitParams & { runnerId: string }
+  /** Child-process stdout/stderr chunk from a routed `proc.spawn` (arrival order,
+   *  not sequenced). Demuxed by `createRoutingProcessBackend`. */
+  'proc.data': ProcDataParams & { runnerId: string }
+  /** Routed child process exited. Demuxed by `createRoutingProcessBackend`. */
+  'proc.exit': ProcExitParams & { runnerId: string }
   event: RunnerEventParams & { runnerId: string }
   'checkout.status': CheckoutStatusParams & { runnerId: string }
   /** Malformed or unexpected frame (never fatal to the gateway). */
@@ -346,6 +353,12 @@ export function createHubFleetGateway(options: HubFleetGatewayOptions): HubFleet
         return
       case RunnerNotificationMethods.ptyExit:
         events.emit('pty.exit', { runnerId, ...(parsed.data as PtyExitParams) })
+        return
+      case RunnerNotificationMethods.procData:
+        events.emit('proc.data', { runnerId, ...(parsed.data as ProcDataParams) })
+        return
+      case RunnerNotificationMethods.procExit:
+        events.emit('proc.exit', { runnerId, ...(parsed.data as ProcExitParams) })
         return
       case RunnerNotificationMethods.event:
         events.emit('event', { runnerId, ...(parsed.data as RunnerEventParams) })

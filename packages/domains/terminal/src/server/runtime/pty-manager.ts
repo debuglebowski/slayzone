@@ -1546,37 +1546,51 @@ export async function createPty(
     let ptyProcess: pty.IPty
     // Hub/runner split (wave 2, Model A): route EVERY OS spawn — the initial
     // spawn below AND the two onExit recovery re-spawns — through the swappable
-    // `PtyBackend`. The default `localPtyBackend` still wraps non-transport
-    // spawns in `/bin/sh -c 'ulimit -n 65535; exec <shell> <args>'` (transport
-    // docker/ssh spawns run as-is) and returns the raw node-pty IPty
-    // SYNCHRONOUSLY, so the -l / shell fallback control flow (which mutates
-    // usedArgs/usedFallback and runs inside a synchronous onExit callback) stays
-    // byte-identical. An async (remote) backend is a later wave that must
-    // restructure those synchronous recovery callbacks.
+    // `PtyBackend`. The default `localPtyBackend` wraps non-transport spawns in
+    // `/bin/sh -c 'ulimit -n 65535; exec <shell> <args>'` (transport docker/ssh
+    // spawns run as-is) and returns the raw node-pty IPty SYNCHRONOUSLY, so the
+    // -l / shell fallback control flow (which mutates usedArgs/usedFallback and
+    // runs inside a synchronous onExit callback) stays byte-identical for the
+    // hub-local path (`runnerId == null`). A remote backend (`runnerId != null`)
+    // may return a Promise; only the INITIAL spawn awaits it (`spawnRemote`), and
+    // the local -l / shell fallbacks never fire for a remote session — the runner
+    // owns its own shell semantics.
+    const buildSpec = (rawFile: string, rawArgs: string[]): PtySpawnSpec => ({
+      sessionId,
+      taskId,
+      runnerId,
+      file: rawFile,
+      args: rawArgs,
+      options: spawnOptions,
+      transport: !!transport
+    })
+    // Synchronous spawn — the hub-local path (and every recovery re-spawn). Throws
+    // if the active backend returns a Promise: only a remote (runnerId != null)
+    // spawn may be async, and that path never routes through here.
     const spawn = (rawFile: string, rawArgs: string[]): pty.IPty => {
-      const spec: PtySpawnSpec = {
-        sessionId,
-        taskId,
-        runnerId,
-        file: rawFile,
-        args: rawArgs,
-        options: spawnOptions,
-        transport: !!transport
-      }
-      const handle = getPtyBackend().spawn(spec)
+      const handle = getPtyBackend().spawn(buildSpec(rawFile, rawArgs))
       if (handle instanceof Promise) {
         throw new Error(
-          '[pty-manager] the default (local) PtyBackend must spawn synchronously; async backends are a later hub/runner wave'
+          '[pty-manager] the local PtyBackend must spawn synchronously; a remote (runnerId != null) spawn takes the async spawnRemote path'
         )
       }
       return handle as unknown as pty.IPty
     }
+    // Remote spawn — awaits the backend (a network round-trip). Only reached for a
+    // runner-routed session (runnerId != null); tolerates a sync or async handle.
+    const spawnRemote = async (rawFile: string, rawArgs: string[]): Promise<pty.IPty> =>
+      (await getPtyBackend().spawn(buildSpec(rawFile, rawArgs))) as unknown as pty.IPty
     if (opts.adoptPty) {
       // Warm-process adoption: reuse the already-spawned, rc-initialized idle shell.
       // Skip the initial spawn entirely; the post-spawn command (export + exec agent)
       // is written into the live shell below. Fallback paths still re-spawn fresh
       // shells via `spawn` if the agent exits, exactly as for a cold spawn.
       ptyProcess = opts.adoptPty.pty
+    } else if (runnerId != null) {
+      // Remote session: await the runner spawn. No local -l / interactive-shell
+      // fallback — a runner owns its shell startup, and its handle can't be
+      // re-spawned synchronously inside an onExit callback.
+      ptyProcess = await spawnRemote(spawnFile, initialArgs)
     } else {
       try {
         ptyProcess = spawn(spawnFile, initialArgs)
@@ -2209,6 +2223,7 @@ export async function createPty(
           if (!session || session.pty !== target) return
 
           const canAsyncFallback =
+            runnerId == null && // remote sessions never use the local shell fallback
             canRetryInteractiveOnly &&
             !usedFallback &&
             firstOutputTs === null &&
@@ -2281,8 +2296,9 @@ export async function createPty(
           }
 
           // #5: Shell fallback — spawn interactive shell when AI provider exits
-          // non-zero. Suppressed for a stale session (handled by the overlay).
-          if (shouldShellFallback(exitCtx)) {
+          // non-zero. Suppressed for a stale session (handled by the overlay) and
+          // for remote sessions (runnerId != null — the runner owns its shell).
+          if (runnerId == null && shouldShellFallback(exitCtx)) {
             const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
             const previousArgs = [...usedArgs]
             try {

@@ -10,31 +10,27 @@
  * from the shared gateway event bus and whose write/resize/kill translate to
  * hub → runner requests.
  *
- * LANDS DARK: nothing constructs these yet; a later serial unit wires them into
- * composition (and reconciles the local-mirror seam types below to the real
- * terminal/processes/task exports).
- *
- * ── Local-mirror seams ────────────────────────────────────────────────────
- * The consumed backend contracts (`PtyBackend`, `PtyHandle`, `PtySpawnSpec`,
- * `ProcessBackend`/`ProcHandle`/`ProcSpawnSpec`, `WorktreeExecAdapters`) and the
- * gateway surface (`RoutingGateway`) are declared here as structural mirrors of
- * the real exports (terminal `runtime/pty-backend`, processes `ProcessBackend`,
- * task `WorktreeExecAdapters`, fleet `HubFleetGateway`). They are ADDED by
- * sibling/earlier units and may not all exist in this base yet; a later
- * integration reconciles these mirrors to the canonical types. Two deliberate
- * divergences from the real interfaces, forced by remoting:
- *   1. `RoutingGateway.events` includes `proc.data`/`proc.exit` which the
- *      current `HubFleetGateway` does not yet emit — the wiring unit extends the
- *      gateway to surface them.
- *   2. `WorktreeExecAdapters.pathExists`/`removeArtifactDir` are async here; the
- *      real seams are sync (`boolean` / `void`). A network call cannot be
- *      synchronous, so remoting requires promoting them (or a hub-local sync
- *      fallback) at reconciliation. `getWorktreeColor` stays SYNC and is always
- *      served locally — a documented cosmetic degradation for remote worktrees.
+ * ── Seam types (wave-2B reconciliation) ───────────────────────────────────
+ * The consumed backend contracts are imported from the REAL seams they mirror,
+ * not re-declared here: `PtyBackend`/`PtyHandle`/`PtySpawnSpec` from
+ * `@slayzone/terminal/server`, `ProcessBackend`/`ProcHandle`/`ProcSpawnSpec`
+ * from `@slayzone/processes/server`, `WorktreeExecAdapters` from
+ * `@slayzone/task/server`, and the gateway surface (`RoutingGateway`, a `Pick`
+ * of `HubFleetGateway`) from this package. The two remoting divergences the
+ * earlier dark landing flagged are now resolved at their source:
+ *   1. The gateway emits `proc.data`/`proc.exit` (added to `FleetGatewayEvents`).
+ *   2. `WorktreeExecAdapters.pathExists`/`removeArtifactDir` were widened to
+ *      `boolean | Promise<boolean>` / `void | Promise<void>` so a remote
+ *      (async) impl is valid alongside the sync local default. `getWorktreeColor`
+ *      stays SYNC and is always served locally — a documented cosmetic
+ *      degradation for remote worktrees.
  *
  * @module fleet/server/exec-proxies
  */
 
+import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
+import type { WorktreeExecAdapters } from '@slayzone/task/server'
+import type { PtyBackend, PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import {
   fsPathExistsResultSchema,
   gitGetCurrentBranchResultSchema,
@@ -46,154 +42,41 @@ import {
   ptyGetBufferSinceResultSchema,
   ptySpawnResultSchema
 } from '../shared/frames'
+import type { HubFleetGateway } from './hub-gateway'
 
 // ===========================================================================
-// Local-mirror seam types (reconciled to real exports later — see module doc)
+// Gateway surface
 // ===========================================================================
 
-/** Disposable returned by event-registration methods (mirrors node-pty IEvent). */
-export interface ExecDisposable {
-  dispose: () => void
-}
-
-/** Terminal exit payload (mirrors node-pty IPty `onExit`). */
-export interface PtyExitEvent {
-  exitCode: number | null
-  signal?: number | string
-}
-
 /**
- * Mirror of the terminal `PtySpawnSpec`. `runnerId` (when present) is the
- * default routing hint; `resolveRunnerId` has the final say.
+ * The slice of the fleet hub gateway the routing backends consume: addressed
+ * request/notify plus the demux event bus. A `Pick` of the real
+ * `HubFleetGateway` (not a re-declared mirror) so it can never drift from the
+ * gateway the composition root injects.
  */
-export interface PtySpawnSpec {
-  sessionId: string
-  taskId?: string | null
-  runnerId?: string | null
-  file: string
-  args: string[]
-  options: {
-    cwd: string
-    env?: Record<string, string>
-    cols?: number
-    rows?: number
-    name?: string
-  }
-  transport?: unknown
-}
-
-/** Mirror of the terminal `PtyHandle` (structural subset consumed here). */
-export interface PtyHandle {
-  /** 0 until the remote `pty.spawn` reply lands (remote ptys key by sessionId). */
-  pid: number
-  process: string
-  fd?: number
-  onData: (listener: (data: string) => void) => ExecDisposable
-  onExit: (listener: (event: PtyExitEvent) => void) => ExecDisposable
-  write: (data: string) => void
-  resize: (cols: number, rows: number) => void
-  kill: (signal?: string) => void
-}
-
-/** Mirror of the terminal `PtyBackend`. */
-export interface PtyBackend {
-  spawn: (spec: PtySpawnSpec) => PtyHandle
-}
-
-/** Mirror of the processes `ProcSpawnSpec` (structural subset). */
-export interface ProcSpawnSpec {
-  sessionId: string
-  taskId?: string | null
-  runnerId?: string | null
-  file: string
-  args: string[]
-  options: {
-    cwd?: string
-    env?: Record<string, string>
-  }
-  transport?: unknown
-}
-
-/** Mirror of the processes `ProcHandle`. */
-export interface ProcHandle {
-  pid: number
-  onData: (listener: (data: string) => void) => ExecDisposable
-  onExit: (listener: (event: PtyExitEvent) => void) => ExecDisposable
-  kill: (signal?: string) => void
-}
-
-/** Mirror of the processes `ProcessBackend`. */
-export interface ProcessBackend {
-  spawn: (spec: ProcSpawnSpec) => ProcHandle
-}
-
-/**
- * Mirror of the task-domain `WorktreeExecAdapters` (10-method seam). Divergence:
- * `pathExists`/`removeArtifactDir` are async here (network); see module doc.
- */
-export interface WorktreeExecAdapters {
-  createWorktree: (
-    repoPath: string,
-    worktreePath: string,
-    branch: string,
-    sourceBranch?: string
-  ) => Promise<void>
-  removeWorktree: (
-    projectPath: string,
-    worktreePath: string
-  ) => Promise<{ branchDeleted?: boolean; branchError?: string }>
-  runWorktreeSetupScript: (
-    worktreePath: string,
-    repoPath: string,
-    sourceBranch?: string | null
-  ) => Promise<{ ran: boolean; success?: boolean; output?: string }>
-  copyIgnoredFiles: (
-    repoPath: string,
-    worktreePath: string,
-    behavior: 'all' | 'custom',
-    customPaths: string[]
-  ) => Promise<void>
-  getCurrentBranch: (repoPath: string) => Promise<string | null>
-  isGitRepo: (path: string) => Promise<boolean>
-  getWorktreeColor: (projectPath: string, worktreePath: string) => string | undefined
-  ensureProjectWorktreeColors: (projectPath: string) => Promise<ReadonlyMap<string, string>>
-  pathExists: (path: string) => Promise<boolean>
-  removeArtifactDir: (absDir: string) => Promise<void>
-}
-
-/**
- * Gateway event payloads the routing backends demux on. Structural mirror of a
- * superset of `FleetGatewayEvents` — includes `proc.*` which the current
- * gateway does not yet emit (reconciled by the wiring unit).
- */
-export interface RoutingGatewayEvents {
-  'pty.data': { runnerId: string; sessionId: string; seq: number; data: string }
-  'pty.exit': { runnerId: string; sessionId: string; exitCode: number | null; signal?: string | null }
-  'proc.data': { runnerId: string; sessionId: string; data: string; stream?: 'stdout' | 'stderr' }
-  'proc.exit': { runnerId: string; sessionId: string; exitCode: number | null; signal?: string | null }
-  'runner-lost': { runnerId: string; reason: string }
-  'runner-disconnected': { runnerId: string; reason: string }
-}
-
-/**
- * Structural mirror of the fleet `HubFleetGateway` surface the routing backends
- * consume — request/notify addressed by runnerId plus the demux event bus.
- */
-export interface RoutingGateway {
-  request<T = unknown>(runnerId: string, method: string, params?: unknown, timeoutMs?: number): Promise<T>
-  notify(runnerId: string, method: string, params?: unknown): void
-  listRunners(): Array<{ runnerId: string }>
-  readonly events: {
-    on<K extends keyof RoutingGatewayEvents>(
-      event: K,
-      listener: (payload: RoutingGatewayEvents[K]) => void
-    ): () => void
-  }
-}
+export type RoutingGateway = Pick<HubFleetGateway, 'request' | 'events'>
 
 // ===========================================================================
 // Internal helpers
 // ===========================================================================
+
+/** Disposable returned by event-registration methods (mirrors node-pty IEvent). */
+interface ExecDisposable {
+  dispose: () => void
+}
+
+/**
+ * Terminal exit payload streamed by the routing pty handle. Wider than the
+ * terminal seam's `onExit` param (`{ exitCode: number; signal?: number }`):
+ * a remote runner can report a null exit code (signal death) and a string
+ * signal (`runner-lost` / `runner-disconnected`). The handle stays assignable
+ * to the terminal `PtyHandle` because `onExit` is a method (bivariant params);
+ * pty-manager only reads `exitCode`, so the extra breadth is lossless there.
+ */
+export interface PtyExitEvent {
+  exitCode: number | null
+  signal?: number | string
+}
 
 /**
  * Emitter that buffers emissions until the first listener attaches (then flushes
@@ -336,7 +219,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   gateway.events.on('runner-disconnected', (payload) => disposeRunner(payload.runnerId, 'runner-disconnected'))
 
   return {
-    spawn(spec: PtySpawnSpec): PtyHandle {
+    spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle> {
       const runnerId = resolveRunnerId(spec)
       if (runnerId == null) return local.spawn(spec)
 
@@ -356,22 +239,40 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
       sessions.set(key, entry)
 
+      // `pid` is 0 until the remote `pty.spawn` reply lands (remote ptys key by
+      // sessionId, not pid). Exposed via a getter so the returned handle stays a
+      // valid `readonly pid` under the terminal `PtyHandle` seam.
+      let pid = 0
+      // Annotated `PtyHandle` so the object is checked against the terminal seam
+      // directly. `onExit` adapts the wider remote `PtyExitEvent` (exitCode may be
+      // null on signal death / runner-loss; signal may be a string like
+      // 'runner-lost') to the seam's `{ exitCode: number; signal?: number }`:
+      // null exit code → 1 (abnormal), string signals dropped. Lossless for
+      // pty-manager, which only reads `exitCode`.
       const handle: PtyHandle = {
-        pid: 0,
+        get pid(): number {
+          return pid
+        },
         process: spec.file,
-        onData: (listener) => dataEmitter.on(listener),
-        onExit: (listener) => exitEmitter.on(listener),
-        write: (data) => {
+        onData: (listener: (data: string) => void): ExecDisposable => dataEmitter.on(listener),
+        onExit: (cb: (e: { exitCode: number; signal?: number }) => void): ExecDisposable =>
+          exitEmitter.on((event) =>
+            cb({
+              exitCode: event.exitCode ?? 1,
+              signal: typeof event.signal === 'number' ? event.signal : undefined
+            })
+          ),
+        write: (data: string): void => {
           void gateway
             .request(runnerId, HubToRunnerMethods.ptyWrite, { sessionId: spec.sessionId, data })
             .catch(noop)
         },
-        resize: (cols, rows) => {
+        resize: (cols: number, rows: number): void => {
           void gateway
             .request(runnerId, HubToRunnerMethods.ptyResize, { sessionId: spec.sessionId, cols, rows })
             .catch(noop)
         },
-        kill: (signal) => {
+        kill: (signal?: string): void => {
           void gateway
             .request(runnerId, HubToRunnerMethods.ptyKill, {
               sessionId: spec.sessionId,
@@ -394,7 +295,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         .then(
           (res) => {
             const parsed = ptySpawnResultSchema.safeParse(res)
-            if (parsed.success) handle.pid = parsed.data.pid
+            if (parsed.success) pid = parsed.data.pid
           },
           () => finalize(entry, null, 'spawn-failed')
         )
@@ -419,24 +320,26 @@ interface ProcEntry {
   runnerId: string
   sessionId: string
   disposed: boolean
-  dataEmitter: BufferingEmitter<string>
-  exitEmitter: BufferingEmitter<PtyExitEvent>
+  dataEmitter: BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>
+  exitEmitter: BufferingEmitter<{ code: number | null; signal: string | null }>
 }
 
 /**
  * A `ProcessBackend` analogous to {@link createRoutingPtyBackend}. Child-process
  * output is not sequenced (no `proc.getBufferSince`), so `proc.data` is
- * delivered in arrival order — no gap detection/backfill.
+ * delivered in arrival order — no gap detection/backfill. The process manager's
+ * `ProcSpawnSpec` keys by `id` (the session id here) and carries a single
+ * `command` string; the routing spawn forwards those to the `proc.spawn` frame.
  */
 export function createRoutingProcessBackend(options: RoutingProcessBackendOptions): ProcessBackend {
   const { gateway, local, resolveRunnerId } = options
   const sessions = new Map<string, ProcEntry>()
 
-  function finalize(entry: ProcEntry, exitCode: number | null, signal: string | null): void {
+  function finalize(entry: ProcEntry, code: number | null, signal: string | null): void {
     if (entry.disposed) return
     entry.disposed = true
     sessions.delete(entry.key)
-    entry.exitEmitter.emit({ exitCode, signal: signal ?? undefined })
+    entry.exitEmitter.emit({ code, signal })
   }
 
   function disposeRunner(runnerId: string, reason: string): void {
@@ -447,7 +350,9 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
 
   gateway.events.on('proc.data', (payload) => {
     const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
-    if (entry && !entry.disposed) entry.dataEmitter.emit(payload.data)
+    if (entry && !entry.disposed) {
+      entry.dataEmitter.emit({ chunk: payload.data, stream: payload.stream ?? 'stdout' })
+    }
   })
   gateway.events.on('proc.exit', (payload) => {
     const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
@@ -461,20 +366,27 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
       const runnerId = resolveRunnerId(spec)
       if (runnerId == null) return local.spawn(spec)
 
-      const key = sessionKey(runnerId, spec.sessionId)
-      const dataEmitter = new BufferingEmitter<string>()
-      const exitEmitter = new BufferingEmitter<PtyExitEvent>()
-      const entry: ProcEntry = { key, runnerId, sessionId: spec.sessionId, disposed: false, dataEmitter, exitEmitter }
+      const key = sessionKey(runnerId, spec.id)
+      const dataEmitter = new BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>()
+      const exitEmitter = new BufferingEmitter<{ code: number | null; signal: string | null }>()
+      const entry: ProcEntry = { key, runnerId, sessionId: spec.id, disposed: false, dataEmitter, exitEmitter }
       sessions.set(key, entry)
 
-      const handle: ProcHandle = {
-        pid: 0,
-        onData: (listener) => dataEmitter.on(listener),
-        onExit: (listener) => exitEmitter.on(listener),
-        kill: (signal) => {
+      let pid: number | undefined
+      const handle = {
+        get pid(): number | undefined {
+          return pid
+        },
+        onData: (
+          cb: (chunk: string, stream: 'stdout' | 'stderr') => void
+        ): ExecDisposable => dataEmitter.on((v) => cb(v.chunk, v.stream)),
+        onExit: (
+          cb: (e: { code: number | null; signal: string | null }) => void
+        ): ExecDisposable => exitEmitter.on(cb),
+        kill: (signal?: string): void => {
           void gateway
             .request(runnerId, HubToRunnerMethods.procKill, {
-              sessionId: spec.sessionId,
+              sessionId: spec.id,
               ...(signal ? { signal } : {})
             })
             .catch(noop)
@@ -483,16 +395,15 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
 
       void gateway
         .request(runnerId, HubToRunnerMethods.procSpawn, {
-          sessionId: spec.sessionId,
-          command: spec.file,
-          args: spec.args,
-          cwd: spec.options.cwd,
-          env: spec.options.env
+          sessionId: spec.id,
+          command: spec.command,
+          cwd: spec.cwd,
+          env: spec.env
         })
         .then(
           (res) => {
             const parsed = procSpawnResultSchema.safeParse(res)
-            if (parsed.success) handle.pid = parsed.data.pid
+            if (parsed.success) pid = parsed.data.pid
           },
           () => finalize(entry, null, 'spawn-failed')
         )

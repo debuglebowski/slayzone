@@ -39,6 +39,7 @@ import { getServerBuildInfo } from './build-info.js'
 import {
   taskOps,
   configureTaskRuntimeAdapters,
+  defaultWorktreeExecAdapters,
   startArtifactWatcher,
   purgeStaleAndOrphanedTasks,
   handleAttentionTransition
@@ -46,6 +47,10 @@ import {
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
   createPtyOps,
+  createDbPtySpawnLookups,
+  setPtyBackend,
+  setPtySpawnLookups,
+  localPtyBackend,
   ptyEvents,
   createChatOps,
   createChatQueueOps,
@@ -99,8 +104,22 @@ import {
   killTaskProcesses,
   listForTask,
   listAllProcesses,
-  subscribeToProcessLogs
+  subscribeToProcessLogs,
+  setProcessBackend,
+  localProcessBackend
 } from '@slayzone/processes/server'
+// Hub/runner split (wave 2B): fleet gateway + hub-auth + runner resolution,
+// wired only under the `fleet_mode` gate below. All dark by default.
+import {
+  createHubFleetGateway,
+  createRoutingPtyBackend,
+  createRoutingProcessBackend,
+  createRemoteWorktreeAdapters,
+  type HubFleetGateway
+} from '@slayzone/fleet/server'
+import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import { resolveTaskRunnerId } from '@slayzone/runners/server'
+import { createFleetAuthAdapters } from './fleet-auth.js'
 
 /**
  * Composition root for the standalone server: populates every transport
@@ -140,6 +159,17 @@ export type ServerComposition = {
   restDeps: RestApiDeps
   /** Late-bound by the server once listen() resolves the actual port. */
   setBoundPort: (port: number) => void
+  /** Hub fleet gateway (runner-WS multiplexer), or `null` when fleet mode is off
+   *  or its async init hasn't resolved yet. A later unit mounts it onto the
+   *  server's WS upgrade path (see `fleetReady`). */
+  readonly fleetGateway: HubFleetGateway | null
+  /** Hub-auth (better-auth) instance backing runner enroll/verify, or `null`
+   *  (same gating as `fleetGateway`). */
+  readonly hubAuth: HubAuth | null
+  /** Resolves once the async fleet init has finished (already-resolved no-op when
+   *  fleet mode is off). A later unit awaits this before reading the two fields
+   *  above / mounting the gateway. */
+  fleetReady: Promise<void>
 }
 
 export function composeServer(opts: {
@@ -155,6 +185,18 @@ export function composeServer(opts: {
 }): ServerComposition {
   const { db, dataRoot } = opts
   const supervised = !opts.standalone
+
+  // --- Fleet mode gate (hub/runner split, wave 2B) ---------------------------
+  // Single lever: when OFF (default) NOTHING below builds a gateway/auth or swaps
+  // an exec backend, so the composition is byte-identical to today (every spawn
+  // stays hub-local via the seams' local defaults). A later unit replaces this
+  // env probe with the real boot-config field. Runner routing is opt-in.
+  const isFleetEnabled = process.env.SLAYZONE_FLEET_MODE === '1'
+  // Populated by the async fleet init (createHubAuth is async — migrations); a
+  // later unit reads these after `fleetReady` to mount the gateway in server.ts.
+  let fleetGatewayRef: HubFleetGateway | null = null
+  let hubAuthRef: HubAuth | null = null
+  let fleetReady: Promise<void> = Promise.resolve()
 
   // Make this process's diagnostics queryable (pty + agent-pool run here). Bind
   // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
@@ -214,7 +256,11 @@ export function composeServer(opts: {
   // subscribes here yet — the engine's tag-trigger listener attaches in
   // standalone mode only, when the engine is started (slice 7).
   const taskBus = new EventEmitter()
-  configureTaskRuntimeAdapters({
+  // Base task runtime adapters (no worktrees override → the task server's local
+  // git/fs default stays bound). Extracted so the fleet-mode path can re-supply a
+  // COMPLETE object (configureTaskRuntimeAdapters shallow-merges over DEFAULTS,
+  // not over the prior call — a partial second call would drop these fields).
+  const baseTaskAdapters = {
     getDataRoot: () => dataRoot,
     killTaskProcesses,
     killPtysByTaskId,
@@ -224,7 +270,8 @@ export function composeServer(opts: {
     // streams to the renderer), status→in_progress suggests a respawn.
     onReachedTerminal: onTaskReachedTerminal,
     requestPtyRespawn: broadcastRespawnRequest
-  })
+  }
+  configureTaskRuntimeAdapters(baseTaskAdapters)
   // Wire the cross-domain "task reached terminal status" seam to the REAL
   // teardown (kill PTYs + chat transports). PTYs/chats live in THIS process now,
   // so both the task-ops adapter (onReachedTerminal, above) and server-pure
@@ -313,6 +360,19 @@ export function composeServer(opts: {
     isDarkTheme: () => true,
     bus: { on: () => undefined }
   })
+  // Fleet mode: inject runner-aware spawn lookups BEFORE createPtyOps (which
+  // captures the lookups at construction). Only `resolveRunnerId` is overridden —
+  // it needs the db, not the gateway, so it's safe to wire synchronously here;
+  // the mode-row / project-id reads keep their db defaults. With no runner
+  // assigned, `resolveTaskRunnerId` returns null → the spec carries a null
+  // runnerId → every routing backend below falls through to local (byte-identical).
+  if (isFleetEnabled) {
+    const dbLookups = createDbPtySpawnLookups(db)
+    setPtySpawnLookups({
+      ...dbLookups,
+      resolveRunnerId: (taskId) => resolveTaskRunnerId(db, taskId)
+    })
+  }
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
   // Warm-process pool (plans/agent-sessions.md): pre-warm one agent per active
   // project so opening a task adopts instantly. PTY runs in THIS process
@@ -730,12 +790,80 @@ export function composeServer(opts: {
   // the local emitters (set via setAppDeps above) exist before frames arrive.
   bridge?.connect()
 
+  // --- Fleet gateway + hub-auth (async; dark until a runner enrolls) ----------
+  // Built off the main path because `createHubAuth` runs better-auth migrations
+  // (async). Ordering is safe: the ledger DB stays local (Model A — never
+  // proxied); `setPtySpawnLookups` already ran synchronously above; and the
+  // routing backends are read per-spawn via getPtyBackend()/getProcessBackend(),
+  // so injecting them once the gateway resolves takes effect for later spawns
+  // without a mid-session straddle. With no runner registered every spawn's
+  // resolved runnerId is null → the routing backends fall through to local, so
+  // behavior matches fleet-OFF until a runner actually enrolls.
+  if (isFleetEnabled) {
+    fleetReady = (async () => {
+      const hubAuth = await createHubAuth({
+        dbPath: join(dataRoot, 'hub-auth.sqlite'),
+        baseURL: process.env.SLAYZONE_FLEET_BASE_URL ?? 'http://127.0.0.1:8788',
+        secret: process.env.SLAYZONE_FLEET_SECRET ?? 'slayzone-dev-fleet-secret'
+      })
+      hubAuthRef = hubAuth
+      const fleetGateway = createHubFleetGateway(createFleetAuthAdapters({ db, auth: hubAuth }))
+      fleetGatewayRef = fleetGateway
+
+      // Route OS-level exec (pty/proc) to the resolved runner; a null runnerId
+      // (baked into the spec by the runner-aware spawn lookups above) falls
+      // through to the in-process local backend.
+      setPtyBackend(
+        createRoutingPtyBackend({
+          gateway: fleetGateway,
+          local: localPtyBackend,
+          resolveRunnerId: (spec) => spec.runnerId ?? null
+        })
+      )
+      setProcessBackend(
+        createRoutingProcessBackend({
+          gateway: fleetGateway,
+          local: localProcessBackend,
+          resolveRunnerId: (spec) => spec.runnerId ?? null
+        })
+      )
+      // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
+      // every base field so nothing is dropped, plus the routing worktree adapter.
+      configureTaskRuntimeAdapters({
+        ...baseTaskAdapters,
+        worktrees: createRemoteWorktreeAdapters({
+          gateway: fleetGateway,
+          // Per-task worktree runner routing is a later unit — the WorktreeExecAdapters
+          // seam carries no task id, so there's no task context to route on here.
+          // null keeps worktree git/fs work hub-local (createRemoteWorktreeAdapters
+          // degrades every method to `local`); the seam is wired, ready to route.
+          resolveRunnerId: () => null,
+          local: defaultWorktreeExecAdapters
+        })
+      })
+    })().catch((err) => {
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'task',
+        event: 'fleet.init_failed',
+        message: err instanceof Error ? err.message : String(err)
+      })
+    })
+  }
+
   return {
     notifyRenderer,
     automationEngine,
     restDeps,
     setBoundPort: (port: number) => {
       boundPort = port
-    }
+    },
+    get fleetGateway(): HubFleetGateway | null {
+      return fleetGatewayRef
+    },
+    get hubAuth(): HubAuth | null {
+      return hubAuthRef
+    },
+    fleetReady
   }
 }

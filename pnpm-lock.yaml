@@ -571,6 +571,9 @@ importers:
       '@slayzone/hub-auth':
         specifier: workspace:*
         version: link:../../domains/hub-auth
+      '@slayzone/hub-identity':
+        specifier: workspace:*
+        version: link:../../domains/hub-identity
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
@@ -1033,6 +1036,15 @@ importers:
 
   packages/domains/fleet:
     dependencies:
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../processes
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
       ws:
         specifier: ^8.18.0
         version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)

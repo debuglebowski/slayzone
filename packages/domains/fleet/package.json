@@ -16,6 +16,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@slayzone/processes": "workspace:*",
+    "@slayzone/task": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
     "ws": "^8.18.0",
     "zod": "^4.3.5"
   },

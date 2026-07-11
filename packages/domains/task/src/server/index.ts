@@ -62,7 +62,12 @@ export {
   getBoundTaskId
 } from './ops'
 export type { CreateImportedTaskInput } from './ops'
-export { configureTaskRuntimeAdapters, updateTask } from './ops/shared'
+export {
+  configureTaskRuntimeAdapters,
+  updateTask,
+  defaultWorktreeExecAdapters
+} from './ops/shared'
+export type { WorktreeExecAdapters } from './ops/shared'
 export { purgeStaleAndOrphanedTasks } from './ops/startup-purge'
 export type {
   OpDeps,

@@ -51,12 +51,14 @@ export { createPtyOps, setPtySpawnLookups, type PtyCreateOpts } from './runtime/
 export {
   getPtyBackend,
   setPtyBackend,
+  localPtyBackend,
   type PtyBackend,
   type PtyHandle,
   type PtySpawnSpec
 } from './runtime/pty-backend'
 export {
   createDbPtySessionLedger,
+  createDbPtySpawnLookups,
   type PtySessionLedger,
   type PtySpawnLookups
 } from './runtime/pty-data-ops'

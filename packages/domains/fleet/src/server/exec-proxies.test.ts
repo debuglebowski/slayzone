@@ -1,23 +1,23 @@
 /**
  * Unit tests for the hub-side exec proxies, driven by a fake in-memory gateway
- * (implements request / notify / events / listRunners). No sockets, no runner.
+ * (request + a real typed event bus). No sockets, no runner. The routing
+ * backends consume the REAL seam types (terminal `PtyBackend`, processes
+ * `ProcessBackend`, task `WorktreeExecAdapters`); the fake gateway is the
+ * `RoutingGateway` slice of `HubFleetGateway`.
  */
+import type { ProcHandle, ProcSpawnSpec, ProcessBackend } from '@slayzone/processes/server'
+import type { WorktreeExecAdapters } from '@slayzone/task/server'
+import type { PtyBackend, PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
+import { TypedEventEmitter } from '../shared/events'
 import {
   createRemoteWorktreeAdapters,
   createRoutingProcessBackend,
   createRoutingPtyBackend,
-  type ProcHandle,
-  type ProcSpawnSpec,
-  type PtyBackend,
   type PtyExitEvent,
-  type PtyHandle,
-  type PtySpawnSpec,
-  type ProcessBackend,
-  type RoutingGateway,
-  type RoutingGatewayEvents,
-  type WorktreeExecAdapters
+  type RoutingGateway
 } from './exec-proxies'
+import type { FleetGatewayEvents } from './hub-gateway'
 
 // ---------------------------------------------------------------------------
 // Fake gateway
@@ -27,14 +27,12 @@ interface RecordedCall {
   runnerId: string
   method: string
   params: unknown
-  kind: 'request' | 'notify'
 }
 
 class FakeGateway implements RoutingGateway {
   readonly calls: RecordedCall[] = []
-  readonly runners: Array<{ runnerId: string }> = []
+  readonly events = new TypedEventEmitter<FleetGatewayEvents>()
   private readonly handlers = new Map<string, (params: unknown) => unknown>()
-  private readonly listeners = new Map<string, Set<(payload: unknown) => void>>()
 
   /** Register a canned responder for a hub → runner request method. */
   onMethod(method: string, handler: (params: unknown) => unknown): void {
@@ -42,7 +40,7 @@ class FakeGateway implements RoutingGateway {
   }
 
   request<T = unknown>(runnerId: string, method: string, params?: unknown): Promise<T> {
-    this.calls.push({ runnerId, method, params, kind: 'request' })
+    this.calls.push({ runnerId, method, params })
     const handler = this.handlers.get(method)
     if (!handler) return Promise.resolve(undefined as T)
     try {
@@ -52,33 +50,9 @@ class FakeGateway implements RoutingGateway {
     }
   }
 
-  notify(runnerId: string, method: string, params?: unknown): void {
-    this.calls.push({ runnerId, method, params, kind: 'notify' })
-  }
-
-  listRunners(): Array<{ runnerId: string }> {
-    return this.runners
-  }
-
-  readonly events = {
-    on: <K extends keyof RoutingGatewayEvents>(
-      event: K,
-      listener: (payload: RoutingGatewayEvents[K]) => void
-    ): (() => void) => {
-      const key = event as string
-      let set = this.listeners.get(key)
-      if (!set) {
-        set = new Set()
-        this.listeners.set(key, set)
-      }
-      set.add(listener as (payload: unknown) => void)
-      return () => set!.delete(listener as (payload: unknown) => void)
-    }
-  }
-
   /** Drive a gateway event to all subscribers. */
-  emit<K extends keyof RoutingGatewayEvents>(event: K, payload: RoutingGatewayEvents[K]): void {
-    for (const listener of [...(this.listeners.get(event as string) ?? [])]) listener(payload)
+  emit<K extends keyof FleetGatewayEvents>(event: K, payload: FleetGatewayEvents[K]): void {
+    this.events.emit(event, payload)
   }
 
   requestsOf(method: string): RecordedCall[] {
@@ -105,19 +79,22 @@ const throwingProc: ProcessBackend = {
 
 const ptySpec = (over: Partial<PtySpawnSpec> = {}): PtySpawnSpec => ({
   sessionId: 'sess-1',
+  taskId: 'task-1',
   runnerId: 'runner-1',
   file: 'bash',
   args: [],
-  options: { cwd: '/tmp' },
-  ...over
+  transport: false,
+  ...over,
+  options: { cwd: '/tmp', env: {}, cols: 80, rows: 24, name: 'xterm-256color', ...(over.options ?? {}) }
 })
 
 const procSpec = (over: Partial<ProcSpawnSpec> = {}): ProcSpawnSpec => ({
-  sessionId: 'proc-1',
+  id: 'proc-1',
+  taskId: 'task-1',
+  projectId: 'proj-1',
   runnerId: 'runner-1',
-  file: 'git',
-  args: ['status'],
-  options: { cwd: '/repo' },
+  command: 'git status',
+  cwd: '/repo',
   ...over
 })
 
@@ -163,7 +140,7 @@ describe('createRoutingPtyBackend', () => {
       resolveRunnerId: (spec) => spec.runnerId ?? null
     })
 
-    const handle = backend.spawn(ptySpec())
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
     const chunks: string[] = []
     let exit: PtyExitEvent | null = null
     handle.onData((d) => chunks.push(d))
@@ -193,7 +170,7 @@ describe('createRoutingPtyBackend', () => {
     expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 
-  it('maps the spawn spec to a pty.spawn frame and issues write/resize/kill frames', () => {
+  it('maps the spawn spec to a pty.spawn frame and issues write/resize/kill frames', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
     const backend = createRoutingPtyBackend({
@@ -202,9 +179,9 @@ describe('createRoutingPtyBackend', () => {
       resolveRunnerId: (spec) => spec.runnerId ?? null
     })
 
-    const handle = backend.spawn(
-      ptySpec({ file: 'zsh', args: ['-l'], options: { cwd: '/work', env: { FOO: 'bar' }, cols: 100, rows: 30 } })
-    )
+    const handle = (await backend.spawn(
+      ptySpec({ file: 'zsh', args: ['-l'], options: { cwd: '/work', env: { FOO: 'bar' }, cols: 100, rows: 30, name: 'xterm-256color' } })
+    )) as PtyHandle
 
     expect(requireCall(gateway, 'pty.spawn')).toMatchObject({
       runnerId: 'runner-1',
@@ -232,7 +209,7 @@ describe('createRoutingPtyBackend', () => {
     expect(gateway.requestsOf('pty.kill')[1]?.params).toEqual({ sessionId: 'sess-1' })
   })
 
-  it('disposes the session on runner-lost (exit emitted, later frames dropped)', () => {
+  it('disposes the session on runner-lost (exit emitted, later frames dropped)', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
     const backend = createRoutingPtyBackend({
@@ -241,7 +218,7 @@ describe('createRoutingPtyBackend', () => {
       resolveRunnerId: (spec) => spec.runnerId ?? null
     })
 
-    const handle = backend.spawn(ptySpec())
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
     const chunks: string[] = []
     let exit: PtyExitEvent | null = null
     handle.onData((d) => chunks.push(d))
@@ -252,14 +229,17 @@ describe('createRoutingPtyBackend', () => {
     gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 1, data: 'a' })
     gateway.emit('runner-lost', { runnerId: 'runner-1', reason: 'heartbeat-timeout' })
 
-    expect(exit).toEqual({ exitCode: null, signal: 'runner-lost' })
+    // The terminal PtyHandle.onExit seam can't carry a null exitCode or a string
+    // signal, so runner-loss is coerced to abnormal exit (exitCode 1) — pty-manager
+    // only reads exitCode. The raw null/'runner-lost' payload is internal.
+    expect(exit).toEqual({ exitCode: 1, signal: undefined })
 
     // Session removed from the demux Map → no further delivery.
     gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 2, data: 'b' })
     expect(chunks).toEqual(['a'])
   })
 
-  it('disposes the session on runner-disconnected', () => {
+  it('disposes the session on runner-disconnected', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
     const backend = createRoutingPtyBackend({
@@ -268,14 +248,15 @@ describe('createRoutingPtyBackend', () => {
       resolveRunnerId: (spec) => spec.runnerId ?? null
     })
 
-    const handle = backend.spawn(ptySpec())
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
     let exit: PtyExitEvent | null = null
     handle.onExit((e) => {
       exit = e
     })
 
     gateway.emit('runner-disconnected', { runnerId: 'runner-1', reason: 'socket-closed' })
-    expect(exit).toEqual({ exitCode: null, signal: 'runner-disconnected' })
+    // Coerced to the terminal seam shape (see runner-lost test above).
+    expect(exit).toEqual({ exitCode: 1, signal: undefined })
   })
 })
 
@@ -312,15 +293,15 @@ describe('createRoutingProcessBackend', () => {
 
     const handle = backend.spawn(procSpec())
     const chunks: string[] = []
-    let exit: PtyExitEvent | null = null
-    handle.onData((d) => chunks.push(d))
+    let exit: { code: number | null; signal: string | null } | null = null
+    handle.onData((chunk) => chunks.push(chunk))
     handle.onExit((e) => {
       exit = e
     })
 
     expect(requireCall(gateway, 'proc.spawn')).toMatchObject({
       runnerId: 'runner-1',
-      params: { sessionId: 'proc-1', command: 'git', args: ['status'], cwd: '/repo' }
+      params: { sessionId: 'proc-1', command: 'git status', cwd: '/repo' }
     })
     await vi.waitFor(() => expect(handle.pid).toBe(555))
 
@@ -332,7 +313,7 @@ describe('createRoutingProcessBackend', () => {
     expect(requireCall(gateway, 'proc.kill').params).toEqual({ sessionId: 'proc-1', signal: 'SIGKILL' })
 
     gateway.emit('proc.exit', { runnerId: 'runner-1', sessionId: 'proc-1', exitCode: 1, signal: null })
-    expect(exit).toEqual({ exitCode: 1, signal: undefined })
+    expect(exit).toEqual({ code: 1, signal: null })
 
     gateway.emit('proc.data', { runnerId: 'runner-1', sessionId: 'proc-1', data: 'after-exit' })
     expect(chunks).toEqual(['one', 'two'])
@@ -348,12 +329,12 @@ describe('createRoutingProcessBackend', () => {
     })
 
     const handle = backend.spawn(procSpec())
-    let exit: PtyExitEvent | null = null
+    let exit: { code: number | null; signal: string | null } | null = null
     handle.onExit((e) => {
       exit = e
     })
     gateway.emit('runner-lost', { runnerId: 'runner-1', reason: 'heartbeat-timeout' })
-    expect(exit).toEqual({ exitCode: null, signal: 'runner-lost' })
+    expect(exit).toEqual({ code: null, signal: 'runner-lost' })
   })
 })
 
@@ -465,6 +446,61 @@ describe('createRemoteWorktreeAdapters', () => {
     expect(local.isGitRepo).toHaveBeenCalledWith('/repo')
     expect(local.pathExists).toHaveBeenCalledWith('/x')
     expect(local.removeArtifactDir).toHaveBeenCalledWith('/dir')
+    expect(gateway.calls).toHaveLength(0)
+  })
+})
+
+// ===========================================================================
+// Fleet-OFF / no-runner fall-through
+//
+// The composition wires these routing backends under `SLAYZONE_FLEET_MODE=1`,
+// but with no runner registered `resolveTaskRunnerId` returns null, so the
+// spec's runnerId is null and EVERY spawn must route to the in-process local
+// backend WITHOUT any gateway contact — byte-identical to fleet-OFF. This
+// pins that guarantee across all three backends against a gateway whose
+// `request` throws (so any accidental routing is a hard failure).
+// ===========================================================================
+
+describe('fleet-off / no-runner fall-through (byte-identical to local)', () => {
+  class ExplodingGateway extends FakeGateway {
+    override request<T = unknown>(_runnerId: string, method: string, _params?: unknown): Promise<T> {
+      throw new Error(`no-runner spawn must never reach the gateway (got ${method})`)
+    }
+  }
+
+  it('pty/proc/worktree all resolve to local, zero gateway traffic', async () => {
+    const gateway = new ExplodingGateway()
+
+    const ptyHandle: PtyHandle = {
+      pid: 11,
+      process: 'bash',
+      onData: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      write: () => {},
+      resize: () => {},
+      kill: () => {}
+    }
+    const localPty: PtyBackend = { spawn: vi.fn(() => ptyHandle) }
+    const pty = createRoutingPtyBackend({ gateway, local: localPty, resolveRunnerId: () => null })
+    expect(pty.spawn(ptySpec({ runnerId: null }))).toBe(ptyHandle)
+    expect(localPty.spawn).toHaveBeenCalledTimes(1)
+
+    const procHandle: ProcHandle = {
+      pid: 22,
+      onData: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      kill: () => {}
+    }
+    const localProc: ProcessBackend = { spawn: vi.fn(() => procHandle) }
+    const proc = createRoutingProcessBackend({ gateway, local: localProc, resolveRunnerId: () => null })
+    expect(proc.spawn(procSpec({ runnerId: null }))).toBe(procHandle)
+    expect(localProc.spawn).toHaveBeenCalledTimes(1)
+
+    const localWt = makeLocalWorktrees({ isGitRepo: vi.fn(async () => true) })
+    const wt = createRemoteWorktreeAdapters({ gateway, local: localWt, resolveRunnerId: () => null })
+    expect(await wt.isGitRepo('/repo')).toBe(true)
+    expect(localWt.isGitRepo).toHaveBeenCalledWith('/repo')
+
     expect(gateway.calls).toHaveLength(0)
   })
 })
