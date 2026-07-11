@@ -1,0 +1,28 @@
+{
+  "name": "@slayzone/runners",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./shared": "./src/shared/index.ts",
+    "./server": "./src/server/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron ../../../node_modules/vitest/vitest.mjs run"
+  },
+  "dependencies": {
+    "@slayzone/platform": "workspace:*"
+  },
+  "devDependencies": {
+    "@slayzone/test-utils": "workspace:*",
+    "@slayzone/transport": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.8.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

@@ -3198,6 +3198,64 @@ export const migrations: Migration[] = [
         CREATE INDEX agent_sessions_tab ON agent_sessions (tab_id, created_at DESC);
       `)
     }
+  },
+  {
+    version: 149,
+    up: (db) => {
+      // Fleet schema for the hub/runner split (wave 1). Lands DARK: purely
+      // additive and all-nullable — nothing reads or writes these until the
+      // @slayzone/runners domain is wired up in the integration wave.
+      //
+      //   - runners                    : one row per enrolled runner (a machine
+      //                                  /process that can host task work).
+      //                                  `capabilities_json` is a JSON object;
+      //                                  `revoked_at` NULL = active.
+      //   - join_tokens                : single-use enrollment tokens. Only
+      //                                  sha256(token) at rest — the plaintext
+      //                                  token is shown once at mint and never
+      //                                  stored. `used_at` NULL = unclaimed;
+      //                                  `runner_id` links the runner that
+      //                                  eventually enrolled with it.
+      //   - runner_project_checkouts  : where each runner has each project
+      //                                  checked out, one row per pair.
+      //   - tasks.runner_id            : NULL = inherit the project default.
+      //   - projects.default_runner_id : NULL = local/first runner.
+      db.exec(`
+        CREATE TABLE runners (
+          id                TEXT PRIMARY KEY,
+          name              TEXT NOT NULL,
+          platform          TEXT NOT NULL,
+          version           TEXT NOT NULL,
+          capabilities_json TEXT NOT NULL,
+          auth_key_id       TEXT,
+          last_seen_at      INTEGER,
+          created_at        INTEGER NOT NULL,
+          revoked_at        INTEGER
+        );
+
+        CREATE TABLE join_tokens (
+          id         TEXT PRIMARY KEY,
+          token_hash TEXT NOT NULL UNIQUE,
+          label      TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          used_at    INTEGER,
+          runner_id  TEXT
+        );
+
+        CREATE TABLE runner_project_checkouts (
+          runner_id  TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          root_path  TEXT NOT NULL,
+          status     TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (runner_id, project_id)
+        );
+
+        ALTER TABLE tasks ADD COLUMN runner_id TEXT;
+        ALTER TABLE projects ADD COLUMN default_runner_id TEXT;
+      `)
+    }
   }
 ]
 
