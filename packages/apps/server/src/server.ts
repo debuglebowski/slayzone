@@ -7,6 +7,8 @@ import {
   parseAuthCallbackUrl,
   getAuthEvents
 } from '@slayzone/transport/server'
+import { createAuthExpressApp } from '@slayzone/hub-auth/server'
+import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import { ensureDataRoot, getServerHost, getTrpcPort } from '@slayzone/platform'
 import {
   getDatabasePathFromEnv,
@@ -83,6 +85,30 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
 
+  // --- Fleet mode (hub/runner split, wave 2B) --------------------------------
+  // `composition.fleetReady` resolves the async fleet init (createHubAuth runs
+  // better-auth migrations). It is an already-resolved no-op when fleet mode is
+  // off, so awaiting it is invisible on the default path — no listener, no
+  // identity load, no mount happens below when the gateway/auth are null.
+  await composition.fleetReady
+  const fleetGateway = composition.fleetGateway
+  const hubAuth = composition.hubAuth
+  // better-auth express app for `/api/auth/*`. Mounted via a direct dispatch in
+  // the HTTP request handler BELOW (not inside the mcpRest express app) so the
+  // RAW request body reaches better-auth — mcpRest applies `express.json()`,
+  // which would consume the body before better-auth sees it.
+  const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
+  // Hub TLS identity — loaded only under fleet mode (creates <dataRoot>/identity/
+  // on first run). For THIS unit its `fingerprintSha256Hex` is fed to the runners
+  // registry so `mintJoinToken` can pin it in a join token; the fleet WS listener
+  // itself stays plain `ws` on the shared HTTP server (see the demux below).
+  // TLS TERMINATION + actual cert-pinning ENFORCEMENT is DEFERRED to a follow-up:
+  // upgrading the muxed HTTP server to https risks the shared /trpc + /health +
+  // /mcp + REST-proxy stack, so we do not half-wire it here (the join token
+  // already carries the correct fingerprint for when TLS lands).
+  const hubIdentity = fleetGateway ? await loadOrCreateHubIdentity(dataRoot) : null
+  if (fleetGateway) log('fleet mode enabled (gateway + hub-auth + identity loaded)')
+
   // Chromium-fork OAuth deep-link bridge. The C++ shell forwards
   // `slayzone://auth/callback` to this Unix socket (auth:deep-link); we parse the
   // code and emit it on `authEvents`, which the `app.auth.onCallback` tRPC
@@ -107,11 +133,19 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Single muxed HTTP server: /health (pre-express, stays alive even if the
   // express stack wedges) + Electron-only REST reverse-proxied to the host (when
-  // supervised) + /api/* + /mcp via express + /trpc WS upgrade.
+  // supervised) + `/api/auth/*` → hub-auth (fleet mode only, RAW body) + /api/*
+  // + /mcp via express + /trpc WS upgrade.
   const httpServer = createServer((req, res) => {
     if (handleHealth(state, req, res)) return
     if (hostRestUrl && needsHostRest(req.url)) {
       proxyToHostRest(hostRestUrl, req, res)
+      return
+    }
+    // Fleet mode: `/api/auth/*` goes to the hub-auth express app BEFORE the
+    // mcpRest stack, which applies `express.json()` — better-auth needs the raw
+    // body. Absent when fleet mode is off, so the default path is unchanged.
+    if (authApp && (req.url ?? '').split('?')[0].startsWith('/api/auth/')) {
+      authApp(req, res)
       return
     }
     mcpRest.app(req, res)
@@ -139,14 +173,45 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     if (u.protocol === 'file:') return true
     return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
   }
-  const wss = new WebSocketServer({
-    server: httpServer,
-    path: '/trpc',
-    verifyClient: ({ origin }, cb) => {
-      if (isAllowedWsOrigin(origin)) cb(true)
-      else cb(false, 403, 'forbidden origin')
-    }
-  })
+  const verifyTrpcClient = (
+    { origin }: { origin?: string },
+    cb: (verified: boolean, code?: number, message?: string) => void
+  ): void => {
+    if (isAllowedWsOrigin(origin)) cb(true)
+    else cb(false, 403, 'forbidden origin')
+  }
+  // Fleet mode: the shared HTTP server must carry BOTH `/trpc` (browser renderer,
+  // origin-guarded) and `/fleet` (non-browser runners, authenticated via
+  // enroll/hello + join token, NOT Origin). A single `WebSocketServer({ server,
+  // path })` would `abortHandshake(400)` the other path, so we run both in
+  // `noServer` mode and demux upgrades ourselves. Default (fleet off) keeps the
+  // exact original single-WSS construction → byte-identical behavior.
+  let wss: WebSocketServer
+  let fleetWss: WebSocketServer | null = null
+  if (fleetGateway) {
+    wss = new WebSocketServer({ noServer: true, verifyClient: verifyTrpcClient })
+    fleetWss = new WebSocketServer({ noServer: true })
+    httpServer.on('upgrade', (req, socket, head) => {
+      const pathname = (req.url ?? '').split('?')[0]
+      if (pathname === '/trpc') {
+        wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+      } else if (pathname === '/fleet') {
+        // No origin allowlist here — runners are non-browser clients that
+        // authenticate via the fleet protocol (enroll/hello frames + join token),
+        // not Origin. TLS/cert-pinning is deferred (see hubIdentity note above);
+        // this is plain `ws` on the shared server for now.
+        fleetWss!.handleUpgrade(req, socket, head, (ws) => fleetGateway.handleConnection(ws))
+      } else {
+        socket.destroy()
+      }
+    })
+  } else {
+    wss = new WebSocketServer({
+      server: httpServer,
+      path: '/trpc',
+      verifyClient: verifyTrpcClient
+    })
+  }
   const wssHandler = applyWSSHandler({
     wss,
     router: appRouter,
@@ -196,6 +261,17 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   state.port = actualPort
   state.ready = true
   composition.setBoundPort(actualPort)
+  // Fleet mode: now that the port is bound + the identity is loaded, feed the
+  // fleet WS URL + cert fingerprint to the runners registry so `mintJoinToken`
+  // can embed them. Plain `ws://` for now (TLS deferred — see hubIdentity note);
+  // the fingerprint is still the real one, so a future TLS listener can pin it.
+  if (fleetGateway && hubIdentity) {
+    composition.setFleetListenerInfo({
+      hubUrl: `ws://${host}:${actualPort}/fleet`,
+      certFingerprint: hubIdentity.fingerprintSha256Hex
+    })
+    log(`fleet listener ready on ws://${host}:${actualPort}/fleet`)
+  }
   // Agents spawned BY this process discover their hook endpoint via this global.
   ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
   // Slice 9 live cutover: the side-car is now the discoverable backend — the CLI,
@@ -261,6 +337,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         wss.close()
       } catch {
         /* ignore */
+      }
+      // Fleet mode: terminate every runner connection + reject in-flight requests,
+      // then close the fleet WSS. No-op when fleet mode is off (both are null).
+      if (fleetGateway) {
+        try {
+          fleetGateway.close()
+        } catch {
+          /* ignore */
+        }
+      }
+      if (fleetWss) {
+        try {
+          fleetWss.close()
+        } catch {
+          /* ignore */
+        }
       }
       await new Promise<void>((r) => httpServer.close(() => r()))
       if (ownsDb) {

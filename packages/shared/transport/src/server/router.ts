@@ -17,6 +17,7 @@ import { processesRouter } from './routers/processes'
 import { projectsRouter } from './routers/projects'
 import { projectGroupsRouter } from './routers/project-groups'
 import { ptyRouter } from './routers/pty'
+import { runnersRouter } from './routers/runners'
 import { settingsRouter } from './routers/settings'
 import { tagsRouter } from './routers/tags'
 import { taskRouter } from './routers/task'
@@ -48,6 +49,7 @@ export const appRouter = router({
   projects: projectsRouter,
   projectGroups: projectGroupsRouter,
   pty: ptyRouter,
+  runners: runnersRouter,
   settings: settingsRouter,
   tags: tagsRouter,
   task: taskRouter,

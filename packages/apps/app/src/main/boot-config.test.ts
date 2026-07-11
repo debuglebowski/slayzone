@@ -102,6 +102,35 @@ describe('readBootConfig / writeBootSettings', () => {
     expect(raw).toContain('\n')
     expect(JSON.parse(raw).server_mode).toBe('remote')
   })
+
+  it('fleet_mode is absent by default (byte-identical off)', () => {
+    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+    writeBootSettings(dir, { server_mode: 'local' })
+    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+  })
+
+  it('round-trips fleet_mode: true and clears it back to absent', () => {
+    writeBootSettings(dir, { fleet_mode: true })
+    expect(readBootConfig(dir).fleet_mode).toBe(true)
+    writeBootSettings(dir, { fleet_mode: false })
+    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+  })
+
+  it('ignores a non-true fleet_mode value on read (stays off)', () => {
+    writeFileSync(
+      join(dir, 'boot-config.json'),
+      JSON.stringify({ server_mode: 'local', fleet_mode: 'yes' })
+    )
+    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+  })
+
+  it('fleet_mode is independent of server_mode', () => {
+    writeBootSettings(dir, { server_mode: 'remote', remote_server_url: 'ws://x:1/trpc' })
+    writeBootSettings(dir, { fleet_mode: true })
+    const cfg = readBootConfig(dir)
+    expect(cfg.server_mode).toBe('remote')
+    expect(cfg.fleet_mode).toBe(true)
+  })
 })
 
 describe('probeRemoteHealth', () => {

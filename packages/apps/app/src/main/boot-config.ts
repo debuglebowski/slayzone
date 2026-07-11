@@ -21,11 +21,20 @@ export type BootConfig = {
   server_mode: ServerMode
   /** Canonical ws(s)://host[:port]/trpc URL — normalized on write. */
   remote_server_url?: string
+  /**
+   * Hub/runner split (wave 2B): when true, the local backend also spawns a
+   * co-located @slayzone/runner subprocess (see index.ts) so this machine can
+   * host runner work. Default off — nothing new spawns. Modeled on `server_mode`
+   * (a pre-boot JSON field, not a settings-table row) so boot can read it before
+   * any DB is open. The UI to set it lands in wave 3; this is read-only wiring.
+   */
+  fleet_mode?: boolean
 }
 
 export type BootSettingsPatch = {
   server_mode?: ServerMode
   remote_server_url?: string
+  fleet_mode?: boolean
 }
 
 export type HealthProbeResult = {
@@ -89,6 +98,9 @@ export function readBootConfig(dir: string): BootConfig {
     const normalized = normalizeRemoteUrl(obj.remote_server_url)
     if (normalized) config.remote_server_url = normalized
   }
+  // Only surface fleet_mode when it's explicitly true — a missing/false/garbage
+  // value stays absent, so the byte-identical default (no runner spawn) holds.
+  if (obj.fleet_mode === true) config.fleet_mode = true
   return config
 }
 
@@ -106,6 +118,12 @@ export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootCo
     const normalized = normalizeRemoteUrl(patch.remote_server_url)
     if (!normalized) throw new Error(`Invalid remote server URL: ${patch.remote_server_url}`)
     next.remote_server_url = normalized
+  }
+  if (patch.fleet_mode !== undefined) {
+    // Persist only the enabled state; clearing it drops the key entirely so the
+    // file stays minimal (readBootConfig treats absent as off anyway).
+    if (patch.fleet_mode) next.fleet_mode = true
+    else delete next.fleet_mode
   }
   mkdirSync(dir, { recursive: true })
   const target = join(dir, FILE_NAME)

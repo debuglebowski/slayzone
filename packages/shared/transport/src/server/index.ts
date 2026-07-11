@@ -32,6 +32,13 @@ export {
 export { setAppDeps, getAppDeps, type AppDeps, type FloatingAgentState } from './app-deps'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
 export {
+  setRunnersDeps,
+  getRunnersDeps,
+  getRunnersDepsOrNull,
+  type RunnersDeps,
+  type RunnersFleetGateway
+} from './app-deps'
+export {
   setPowerResumeEvents,
   getPowerResumeEvents,
   type PowerResumeEventMap

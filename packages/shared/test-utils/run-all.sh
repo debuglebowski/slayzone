@@ -62,6 +62,7 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-ex
 run_test_electron_strict_loader packages/apps/server/src/fleet-auth.test.ts
 # Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/runners.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts

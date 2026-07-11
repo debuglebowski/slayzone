@@ -500,6 +500,9 @@ let mcpCleanup: (() => void) | null = null
 let trpcCleanup: (() => void) | null = null
 let sidecarCleanup: (() => void) | null = null
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
+// Local-runner supervisor (hub/runner split, wave 2B) — only spawned under
+// boot-config `fleet_mode`. Null (never started) on the default path.
+let localRunnerCleanup: (() => void) | null = null
 // Local cutover (slice 9): the side-car must be spawned with the host's
 // capability-bridge + REST URLs in env, but those servers start on their own
 // async paths. These promises let the sidecar-spawn block await both ports.
@@ -2143,6 +2146,63 @@ app
           console.error('[sidecar] Failed to start supervisor:', err)
         })
     })
+
+    // Local-runner supervisor (hub/runner split, wave 2B). Spawns a co-located
+    // @slayzone/runner subprocess so THIS machine can host runner work, pointed
+    // at the local hub's fleet URL. Gated STRICTLY on boot-config `fleet_mode`
+    // (default off) AND local mode (remote mode has no local hub to dial): when
+    // off, NOTHING new spawns — byte-identical boot. Skipped under Playwright so
+    // e2e never launches a runner. Off the boot critical path (setImmediate);
+    // failure is log-only.
+    //
+    // Join token: DEFERRED. Auto-minting one at boot is circular (the token must
+    // be minted against the hub identity, which the sidecar owns, and delivered
+    // before the runner dials) — validating that auto-enroll handshake is a
+    // wave-2 integration follow-up. For now the token is read from the
+    // SLAYZONE_JOIN_TOKEN env var (operator-supplied); absent ⇒ the runner still
+    // spawns but its dialer fails auth and backs off (the runner's own fatal-auth
+    // handling), which is the correct dark behavior — no half-wired minting.
+    if (bootConfig.fleet_mode === true && !isRemoteMode && !process.env.PLAYWRIGHT) {
+      setImmediate(() => {
+        logBoot('local-runner supervisor import dispatched')
+        import('./local-runner-supervisor')
+          .then(({ startLocalRunner }) => {
+            const runnerScriptPath = is.dev
+              ? join(app.getAppPath(), '../runner/dist/bin.cjs')
+              : join(process.resourcesPath, 'runner', 'bin.cjs')
+            const handle = startLocalRunner({
+              execPath: process.execPath,
+              scriptPath: runnerScriptPath,
+              env: {
+                ...process.env,
+                // Fleet WS endpoint the runner dials. DEFERRED, same as the token:
+                // the hub's /fleet listener is muxed onto the sidecar's tRPC port
+                // (OS-assigned), which THIS process cannot know at boot without a
+                // discovery hop — so there is no correct URL to hardcode here. The
+                // operator supplies SLAYZONE_HUB_URL (+ SLAYZONE_JOIN_TOKEN); the
+                // wave-2 integration follow-up wires real URL/token discovery. When
+                // both are absent the runner's config load fails fast and the
+                // supervisor backs off — correct dark behavior, no live enroll.
+                SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? 'local-runner'
+                // SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN / SLAYZONE_RUNNER_ALLOWED_ROOTS
+                // flow through from process.env when the operator sets them.
+              },
+              logger: (line) => logBoot(line),
+              onPermanentFailure: (info) => {
+                console.error(
+                  '[local-runner] permanent failure (fleet-mode, non-fatal):',
+                  info
+                )
+              }
+            })
+            localRunnerCleanup = () => void handle.stop()
+            logBoot('local-runner supervisor started')
+          })
+          .catch((err) => {
+            console.error('[local-runner] Failed to start supervisor:', err)
+          })
+      })
+    }
 
     // Install agent lifecycle hook script + Claude settings.json entries.
     // Off boot critical path; failures must NOT block app startup (logged only).
@@ -3831,6 +3891,7 @@ app.on('will-quit', () => {
   mcpCleanup?.()
   trpcCleanup?.()
   sidecarCleanup?.()
+  localRunnerCleanup?.()
   // Record completion BEFORE closing diagnostics DB; a row written here is the last
   // event of the session and proves the chain ran. stopDiagnostics() can clear timers
   // safely after.

@@ -23,6 +23,7 @@ import {
   setPtyDeps,
   setChatDeps,
   setAuthEvents,
+  setRunnersDeps,
   requestGithubSignInStart,
   type AppDeps,
   type NotifyEventMap,
@@ -170,6 +171,13 @@ export type ServerComposition = {
    *  fleet mode is off). A later unit awaits this before reading the two fields
    *  above / mounting the gateway. */
   fleetReady: Promise<void>
+  /** Feed the fleet listener's bound WS URL + the hub identity's TLS cert
+   *  fingerprint back into the runners registry (`mintJoinToken` embeds both in
+   *  a join token). The server host resolves these only after it binds the fleet
+   *  port + loads `loadOrCreateHubIdentity`, which happens AFTER composeServer
+   *  returns — so it's a late-bound setter, not a constructor arg. No-op when
+   *  fleet mode is off (the runners registry was never populated). */
+  setFleetListenerInfo: (info: { hubUrl: string; certFingerprint: string }) => void
 }
 
 export function composeServer(opts: {
@@ -197,6 +205,12 @@ export function composeServer(opts: {
   let fleetGatewayRef: HubFleetGateway | null = null
   let hubAuthRef: HubAuth | null = null
   let fleetReady: Promise<void> = Promise.resolve()
+  // Fleet listener info the runners router bakes into a join token — bound late
+  // by the server host (setFleetListenerInfo) once it knows its own fleet URL +
+  // cert fingerprint. Null until then, so `mintJoinToken` fails cleanly if
+  // called before the listener is up.
+  let fleetHubUrl: string | null = null
+  let fleetCertFingerprint: string | null = null
 
   // Make this process's diagnostics queryable (pty + agent-pool run here). Bind
   // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
@@ -800,6 +814,17 @@ export function composeServer(opts: {
   // resolved runnerId is null → the routing backends fall through to local, so
   // behavior matches fleet-OFF until a runner actually enrolls.
   if (isFleetEnabled) {
+    // Populate the runners registry synchronously (the router may be called
+    // before the async gateway init below resolves). The getters read the
+    // late-bound refs, so `list` sees the gateway once it exists and
+    // `mintJoinToken` sees the URL/fingerprint once the server host feeds them
+    // via setFleetListenerInfo. When fleet mode is OFF this is never called, so
+    // getRunnersDeps() throws and the fleet-dependent procs fail cleanly.
+    setRunnersDeps({
+      getGateway: () => fleetGatewayRef,
+      getHubUrl: () => fleetHubUrl,
+      getCertFingerprint: () => fleetCertFingerprint
+    })
     fleetReady = (async () => {
       const hubAuth = await createHubAuth({
         dbPath: join(dataRoot, 'hub-auth.sqlite'),
@@ -864,6 +889,10 @@ export function composeServer(opts: {
     get hubAuth(): HubAuth | null {
       return hubAuthRef
     },
-    fleetReady
+    fleetReady,
+    setFleetListenerInfo: (info) => {
+      fleetHubUrl = info.hubUrl
+      fleetCertFingerprint = info.certFingerprint
+    }
   }
 }

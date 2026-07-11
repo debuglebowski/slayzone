@@ -762,3 +762,61 @@ export function getProcessesDeps(): ProcessesDeps {
     throw new Error('processesDeps not initialized — call setProcessesDeps() in main host first')
   return processesDeps
 }
+
+// Runners / fleet deps — the hub/runner-split surface the `runnersRouter` needs
+// that transport cannot own itself: the live fleet gateway (runner-WS connection
+// status) plus the two values `mintJoinToken` bakes into a join token (the fleet
+// WS URL a runner dials + the hub TLS cert fingerprint it pins). All three are
+// exposed as GETTERS, not snapshots: the gateway is built asynchronously (auth
+// migrations) and the URL/fingerprint are only known after the server binds its
+// port + loads its identity, so the registry must read the live refs each call.
+//
+// Populated only under fleet mode (composeServer + the server host wire it); when
+// fleet mode is off it is never set and `getRunnersDeps()` throws — the router's
+// fleet-dependent procedures fail cleanly and nothing calls them (the UI is
+// wave 3). The pure runner-binding mutations (setTaskRunner / … / revokeRunner)
+// go straight through `ctx.db` and never touch this registry, so they work
+// regardless. `getRunnersDepsOrNull()` lets `list` degrade gracefully (store rows
+// with no live status) instead of throwing when the gateway isn't wired.
+
+/** Structural slice of the fleet gateway the runners router reads — connection
+ *  status only. Kept structural (not the full `HubFleetGateway`) so transport
+ *  stays decoupled from `@slayzone/fleet`. */
+export type RunnersFleetGateway = {
+  listRunners: () => ReadonlyArray<{
+    runnerId: string
+    connectedAt: number
+    lastSeenAt: number
+  }>
+}
+
+export type RunnersDeps = {
+  /** Live fleet gateway, or null until the async fleet init resolves. */
+  getGateway: () => RunnersFleetGateway | null
+  /** ws(s)://host:port/fleet URL a join token embeds for the runner to dial.
+   *  Null until the fleet listener's port is bound. */
+  getHubUrl: () => string | null
+  /** Hub TLS leaf-cert sha256 (lowercase hex) a join token pins. Null until the
+   *  hub identity has been loaded. */
+  getCertFingerprint: () => string | null
+}
+
+let runnersDeps: RunnersDeps | null = null
+
+export function setRunnersDeps(deps: RunnersDeps): void {
+  runnersDeps = deps
+}
+
+export function getRunnersDeps(): RunnersDeps {
+  if (!runnersDeps)
+    throw new Error(
+      'runnersDeps not initialized — fleet mode is off, or composeServer/server host have not wired it yet'
+    )
+  return runnersDeps
+}
+
+/** Non-throwing read for the `list` procedure, which must still return store
+ *  rows (with no live connection status) when the gateway isn't wired. */
+export function getRunnersDepsOrNull(): RunnersDeps | null {
+  return runnersDeps
+}
