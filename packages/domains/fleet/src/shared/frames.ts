@@ -10,10 +10,15 @@
  *
  * Direction map (v1):
  *  runner → hub requests:      enroll, hello, heartbeat
- *  runner → hub notifications: pty.data, pty.exit, event, checkout.status
+ *  runner → hub notifications: pty.data, pty.exit, proc.data, proc.exit,
+ *                              event, checkout.status
  *  hub → runner requests:      pty.spawn, pty.kill, pty.resize, pty.write,
- *                              pty.getBufferSince, fs.* (reserved),
- *                              git.* (reserved), ping, runner.shutdown
+ *                              pty.getBufferSince, git.isGitRepo,
+ *                              git.getCurrentBranch, git.createWorktree,
+ *                              git.removeWorktree, git.runWorktreeSetupScript,
+ *                              git.copyIgnoredFiles, fs.pathExists,
+ *                              fs.removeDir, proc.spawn, proc.kill, ping,
+ *                              runner.shutdown
  *
  * `pty.data.seq` is a per-session monotonic sequence number assigned by the
  * runner at emission and preserved end-to-end, so the hub can detect gaps and
@@ -100,6 +105,8 @@ export type HeartbeatResult = z.infer<typeof heartbeatResultSchema>
 export const RunnerNotificationMethods = {
   ptyData: 'pty.data',
   ptyExit: 'pty.exit',
+  procData: 'proc.data',
+  procExit: 'proc.exit',
   event: 'event',
   checkoutStatus: 'checkout.status'
 } as const
@@ -134,9 +141,32 @@ export const checkoutStatusParamsSchema = z.object({
 })
 export type CheckoutStatusParams = z.infer<typeof checkoutStatusParamsSchema>
 
+/**
+ * Child-process output chunk (proc.spawn stream). Unlike `pty.data`, process
+ * output is not sequenced/replayable — there is no `proc.getBufferSince` — so
+ * the hub delivers these in arrival order. `stream` distinguishes stdout from
+ * stderr; absent means stdout.
+ */
+export const procDataParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  data: z.string(),
+  stream: z.enum(['stdout', 'stderr']).optional()
+})
+export type ProcDataParams = z.infer<typeof procDataParamsSchema>
+
+/** Child process exited. Mirrors `pty.exit`. */
+export const procExitParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  exitCode: z.number().int().nullable(),
+  signal: z.string().nullable().optional()
+})
+export type ProcExitParams = z.infer<typeof procExitParamsSchema>
+
 export const runnerNotificationSchemas = {
   [RunnerNotificationMethods.ptyData]: ptyDataParamsSchema,
   [RunnerNotificationMethods.ptyExit]: ptyExitParamsSchema,
+  [RunnerNotificationMethods.procData]: procDataParamsSchema,
+  [RunnerNotificationMethods.procExit]: procExitParamsSchema,
   [RunnerNotificationMethods.event]: runnerEventParamsSchema,
   [RunnerNotificationMethods.checkoutStatus]: checkoutStatusParamsSchema
 } as const
@@ -152,12 +182,25 @@ export const HubToRunnerMethods = {
   ptyResize: 'pty.resize',
   ptyWrite: 'pty.write',
   ptyGetBufferSince: 'pty.getBufferSince',
+  // git ops (routed WorktreeExecAdapters — see server/exec-proxies)
+  gitIsGitRepo: 'git.isGitRepo',
+  gitGetCurrentBranch: 'git.getCurrentBranch',
+  gitCreateWorktree: 'git.createWorktree',
+  gitRemoveWorktree: 'git.removeWorktree',
+  gitRunWorktreeSetupScript: 'git.runWorktreeSetupScript',
+  gitCopyIgnoredFiles: 'git.copyIgnoredFiles',
+  // raw-fs ops (routed pathExists / removeArtifactDir seams)
+  fsPathExists: 'fs.pathExists',
+  fsRemoveDir: 'fs.removeDir',
+  // child-process ops (routed ProcessBackend)
+  procSpawn: 'proc.spawn',
+  procKill: 'proc.kill',
   ping: 'ping',
   runnerShutdown: 'runner.shutdown'
 } as const
 
 /** Reserved method namespaces for future hub → runner exec commands. */
-export const RESERVED_HUB_METHOD_PREFIXES = ['pty.', 'fs.', 'git.'] as const
+export const RESERVED_HUB_METHOD_PREFIXES = ['pty.', 'fs.', 'git.', 'proc.'] as const
 
 export const ptySpawnParamsSchema = z.object({
   sessionId: z.string().min(1),
@@ -169,6 +212,11 @@ export const ptySpawnParamsSchema = z.object({
   rows: z.number().int().positive().optional()
 })
 export type PtySpawnParams = z.infer<typeof ptySpawnParamsSchema>
+
+export const ptySpawnResultSchema = z.object({
+  pid: z.number().int()
+})
+export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
 
 export const ptyKillParamsSchema = z.object({
   sessionId: z.string().min(1),
@@ -222,3 +270,116 @@ export const runnerShutdownParamsSchema = z.object({
   deadlineMs: z.number().int().nonnegative().optional()
 })
 export type RunnerShutdownParams = z.infer<typeof runnerShutdownParamsSchema>
+
+// ---------------------------------------------------------------------------
+// hub → runner requests: git ops
+//
+// Param/result shapes mirror the task-domain `WorktreeExecAdapters` seam
+// (narrowed to the arguments task ops actually pass); the hub-side routing
+// adapters in `server/exec-proxies` forward each seam method to these frames.
+// ---------------------------------------------------------------------------
+
+export const gitIsGitRepoParamsSchema = z.object({
+  path: z.string().min(1)
+})
+export type GitIsGitRepoParams = z.infer<typeof gitIsGitRepoParamsSchema>
+
+export const gitIsGitRepoResultSchema = z.object({
+  isGitRepo: z.boolean()
+})
+export type GitIsGitRepoResult = z.infer<typeof gitIsGitRepoResultSchema>
+
+export const gitGetCurrentBranchParamsSchema = z.object({
+  repoPath: z.string().min(1)
+})
+export type GitGetCurrentBranchParams = z.infer<typeof gitGetCurrentBranchParamsSchema>
+
+export const gitGetCurrentBranchResultSchema = z.object({
+  branch: z.string().nullable()
+})
+export type GitGetCurrentBranchResult = z.infer<typeof gitGetCurrentBranchResultSchema>
+
+export const gitCreateWorktreeParamsSchema = z.object({
+  repoPath: z.string().min(1),
+  worktreePath: z.string().min(1),
+  branch: z.string().min(1),
+  sourceBranch: z.string().optional()
+})
+export type GitCreateWorktreeParams = z.infer<typeof gitCreateWorktreeParamsSchema>
+
+export const gitRemoveWorktreeParamsSchema = z.object({
+  projectPath: z.string().min(1),
+  worktreePath: z.string().min(1)
+})
+export type GitRemoveWorktreeParams = z.infer<typeof gitRemoveWorktreeParamsSchema>
+
+export const gitRemoveWorktreeResultSchema = z.object({
+  branchDeleted: z.boolean().optional(),
+  branchError: z.string().optional()
+})
+export type GitRemoveWorktreeResult = z.infer<typeof gitRemoveWorktreeResultSchema>
+
+export const gitRunWorktreeSetupScriptParamsSchema = z.object({
+  worktreePath: z.string().min(1),
+  repoPath: z.string().min(1),
+  sourceBranch: z.string().nullable().optional()
+})
+export type GitRunWorktreeSetupScriptParams = z.infer<typeof gitRunWorktreeSetupScriptParamsSchema>
+
+export const gitRunWorktreeSetupScriptResultSchema = z.object({
+  ran: z.boolean(),
+  success: z.boolean().optional(),
+  output: z.string().optional()
+})
+export type GitRunWorktreeSetupScriptResult = z.infer<typeof gitRunWorktreeSetupScriptResultSchema>
+
+export const gitCopyIgnoredFilesParamsSchema = z.object({
+  repoPath: z.string().min(1),
+  worktreePath: z.string().min(1),
+  behavior: z.enum(['all', 'custom']),
+  customPaths: z.array(z.string())
+})
+export type GitCopyIgnoredFilesParams = z.infer<typeof gitCopyIgnoredFilesParamsSchema>
+
+// ---------------------------------------------------------------------------
+// hub → runner requests: raw-fs ops
+// ---------------------------------------------------------------------------
+
+export const fsPathExistsParamsSchema = z.object({
+  path: z.string().min(1)
+})
+export type FsPathExistsParams = z.infer<typeof fsPathExistsParamsSchema>
+
+export const fsPathExistsResultSchema = z.object({
+  exists: z.boolean()
+})
+export type FsPathExistsResult = z.infer<typeof fsPathExistsResultSchema>
+
+export const fsRemoveDirParamsSchema = z.object({
+  path: z.string().min(1)
+})
+export type FsRemoveDirParams = z.infer<typeof fsRemoveDirParamsSchema>
+
+// ---------------------------------------------------------------------------
+// hub → runner requests: child-process ops
+// ---------------------------------------------------------------------------
+
+export const procSpawnParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  command: z.string().min(1),
+  args: z.array(z.string()).optional(),
+  cwd: z.string().min(1).optional(),
+  env: z.record(z.string(), z.string()).optional()
+})
+export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
+
+export const procSpawnResultSchema = z.object({
+  pid: z.number().int()
+})
+export type ProcSpawnResult = z.infer<typeof procSpawnResultSchema>
+
+export const procKillParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  signal: z.string().optional()
+})
+export type ProcKillParams = z.infer<typeof procKillParamsSchema>
