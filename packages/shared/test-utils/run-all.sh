@@ -235,7 +235,9 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/task/src/client/taskDetailCache.test.ts \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
-  packages/domains/settings/src/client/tabs/FleetSettingsTab.test.tsx; then
+  packages/domains/settings/src/client/tabs/FleetSettingsTab.test.tsx \
+  packages/domains/task/src/client/RunnerCard.test.tsx \
+  packages/domains/projects/src/client/GeneralTab.test.tsx; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))

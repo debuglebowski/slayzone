@@ -46,6 +46,19 @@ test.describe('Task detail page', () => {
     await expect(titleInput).toHaveValue(taskTitle)
   })
 
+  test('metadata sidebar renders + RunnerCard shows the local default (no runners enrolled)', async ({
+    mainWindow
+  }) => {
+    // The TaskMetadataSidebar lives in the settings panel's pinned Details region
+    // in normal mode. With fleet mode off (default — no runners enrolled), the new
+    // RunnerCard degrades to a muted "runs locally" note rather than a live select.
+    const details = mainWindow.getByTestId('settings-details-pinned').last()
+    await expect(details).toBeVisible({ timeout: 5_000 })
+    // Sidebar still renders its existing sections.
+    await expect(details.getByText('Runner', { exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(details.getByText('No runners — runs locally')).toBeVisible({ timeout: 5_000 })
+  })
+
   test('go back to kanban', async ({ mainWindow }) => {
     await goHome(mainWindow)
     // Verify kanban is visible — check for any column header

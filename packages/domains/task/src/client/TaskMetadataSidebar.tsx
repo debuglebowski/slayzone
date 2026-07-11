@@ -4,6 +4,7 @@ import { useTRPC } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { ProjectStatusCard } from './ProjectStatusCard'
+import { RunnerCard } from './RunnerCard'
 import { PriorityDueDateCard } from './PriorityDueDateCard'
 import { SnoozeProgressCard } from './SnoozeProgressCard'
 import { TagsCard } from './TagsCard'
@@ -54,9 +55,21 @@ export function TaskMetadataSidebar({
   const selectedProject = projects.find((project) => project.id === task.project_id)
   const columnsConfig = selectedProject?.columns_config
 
+  // Fleet runner bindings (hub/runner split). `runner_id` / `default_runner_id`
+  // are v149 columns present at runtime (parseTask/parseProject spread the row)
+  // but not yet on the shared Task/Project types — read via a narrow local cast.
+  const taskRunnerId = (task as { runner_id?: string | null }).runner_id ?? null
+  const projectDefaultRunnerId =
+    (selectedProject as { default_runner_id?: string | null } | undefined)?.default_runner_id ?? null
+
   return (
     <div className="space-y-2">
       <ProjectStatusCard task={task} onUpdate={onUpdate} columnsConfig={columnsConfig} />
+      <RunnerCard
+        taskId={task.id}
+        taskRunnerId={taskRunnerId}
+        projectDefaultRunnerId={projectDefaultRunnerId}
+      />
       <PriorityDueDateCard task={task} onUpdate={onUpdate} />
       <SnoozeProgressCard task={task} onUpdate={onUpdate} columnsConfig={columnsConfig} />
       <TagsCard

@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { FolderOpen, Upload, Trash2 } from 'lucide-react'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { ColorPicker } from '@slayzone/ui'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { useDialogStore } from '@slayzone/settings/client'
 import { SettingsTabIntro } from './project-settings-shared'
+
+/** Select sentinel for the project's Local (in-process) default runner (null). */
+const LOCAL_RUNNER_VALUE = '__local__'
 
 interface GeneralTabProps {
   project: Project
@@ -24,6 +28,8 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const showOpenDialog = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
   const uploadProjectIcon = useMutation(trpc.projects.uploadIcon.mutationOptions())
   const updateProject = useMutation(trpc.projects.update.mutationOptions())
+  const runnersQuery = useQuery(trpc.runners.list.queryOptions())
+  const setProjectDefaultRunner = useMutation(trpc.runners.setProjectDefaultRunner.mutationOptions())
   const [name, setName] = useState('')
   const [color, setColor] = useState('')
   const [path, setPath] = useState('')
@@ -32,6 +38,10 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const [iconCacheKey, setIconCacheKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [iconBusy, setIconBusy] = useState(false)
+  // Default runner (hub/runner split). `default_runner_id` is a v149 column present
+  // at runtime (parseProject spreads the row) but not yet on the shared Project type
+  // — read via a narrow local cast. null = Local (in-process).
+  const [defaultRunnerId, setDefaultRunnerId] = useState<string | null>(null)
 
   useEffect(() => {
     setName(project.name)
@@ -40,7 +50,10 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setIconLetters(project.icon_letters || '')
     setIconImagePath(project.icon_image_path)
     setIconCacheKey(project.updated_at)
+    setDefaultRunnerId((project as { default_runner_id?: string | null }).default_runner_id ?? null)
   }, [project])
+
+  const runners = runnersQuery.data ?? []
 
   const fallbackLetters = (name || project.name).slice(0, 2).toUpperCase()
   const lettersPreview = iconLetters.trim().toUpperCase() || fallbackLetters
@@ -87,6 +100,14 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     } finally {
       setIconBusy(false)
     }
+  }
+
+  // The default runner is its own binding (persisted immediately), not part of the
+  // name/color/path form save. null = Local.
+  const handleDefaultRunnerChange = async (value: string): Promise<void> => {
+    const runnerId = value === LOCAL_RUNNER_VALUE ? null : value
+    setDefaultRunnerId(runnerId)
+    await setProjectDefaultRunner.mutateAsync({ projectId: project.id, runnerId })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -143,6 +164,32 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
             </div>
             <p className="text-xs text-muted-foreground">
               Claude Code terminal will open in this directory
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="default-runner">Default runner</Label>
+            {runners.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No runners — tasks run locally</p>
+            ) : (
+              <Select
+                value={defaultRunnerId ?? LOCAL_RUNNER_VALUE}
+                onValueChange={handleDefaultRunnerChange}
+              >
+                <SelectTrigger id="default-runner" className="max-w-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={LOCAL_RUNNER_VALUE}>Local</SelectItem>
+                  {runners.map((runner) => (
+                    <SelectItem key={runner.id} value={runner.id}>
+                      {runner.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Where tasks in this project run by default. Tasks can override this individually.
             </p>
           </div>
           <div className="space-y-1">
