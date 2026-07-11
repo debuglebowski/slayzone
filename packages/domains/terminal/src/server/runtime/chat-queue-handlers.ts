@@ -9,7 +9,7 @@ import {
   isSessionAwaitingUserInput,
   registerChatQueueDrainer
 } from './chat-transport-manager'
-import { listChatQueue, removeChatQueueItem, clearChatQueue } from '../chat-queue-store'
+import { createDbChatQueueData, type ChatQueueData } from './chat-queue-data'
 import { getPtyHostBridge } from '../pty-host'
 import type { QueuedChatMessage } from '../../shared/types'
 
@@ -60,7 +60,11 @@ function broadcast(channel: 'chat:queue-changed' | 'chat:queue-drained', ...args
  * Pop is atomic via a transaction; if `sendUserMessage` fails we
  * re-insert at head so the next drain retries.
  */
-export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<void> {
+export async function drainChatQueue(
+  db: SlayzoneDb,
+  tabId: string,
+  data: ChatQueueData = createDbChatQueueData(db)
+): Promise<void> {
   const state = getSessionTerminalState(tabId)
   // Pre-spawn lazy trigger: a queued message arrived before the user ever
   // sent one (so the subprocess was never started). Fire ensureSpawned —
@@ -69,7 +73,7 @@ export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<voi
   // queue. Only trigger when there's actually something queued to avoid
   // spinning up a process for nothing.
   if (state === 'not-spawned') {
-    if ((await listChatQueue(db, tabId)).length === 0) return
+    if ((await data.list(tabId)).length === 0) return
     void ensureSpawned(tabId).catch((err) => {
       console.error('[chat-queue] ensureSpawned failed for pre-spawn drain:', err)
     })
@@ -80,7 +84,7 @@ export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<voi
   const info = getSessionInfo(tabId)
   if (!info || info.ended) return
 
-  const head = await db.namedTxn('chat-queue:pop', { tabId })
+  const head = await data.pop(tabId)
   if (!head) return
 
   const sent = sendUserMessage(tabId, head.send)
@@ -88,7 +92,7 @@ export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<voi
     // Session died between gate-check and stdin write. Put it back so the
     // next idle transition (e.g. fresh respawn) can retry.
     try {
-      await db.namedTxn('chat-queue:requeue', { msg: head })
+      await data.requeue(head)
     } catch (err) {
       console.error('[chat-queue] requeue failed:', err)
     }
@@ -106,43 +110,39 @@ export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<voi
  * handlers (`registerChatQueueHandlers`) and the tRPC `chat.queue` router
  * (injected via `setChatDeps`). Wires the drainer side-effect once on creation.
  */
-export function createChatQueueOps(db: SlayzoneDb) {
+export function createChatQueueOps(db: SlayzoneDb, data: ChatQueueData = createDbChatQueueData(db)) {
   // Wire drain into the transport so state transitions can pull from queue.
   // drainChatQueue is async; the drainer slot is fire-and-forget (invoked via
   // setImmediate in the transport), so float the promise explicitly.
   registerChatQueueDrainer((tabId) => {
-    void drainChatQueue(db, tabId)
+    void drainChatQueue(db, tabId, data)
   })
 
   return {
-    list: (tabId: string): Promise<QueuedChatMessage[]> => listChatQueue(db, tabId),
+    list: (tabId: string): Promise<QueuedChatMessage[]> => data.list(tabId),
 
     push: async (tabId: string, send: string, original: string): Promise<QueuedChatMessage> => {
-      const msg = await db.namedTxn('chat-queue:push', {
-        tabId,
-        send,
-        original
-      })
+      const msg = await data.push(tabId, send, original)
       broadcast('chat:queue-changed', tabId)
       // Belt-and-suspenders drain: if the session is already idle when push
       // lands (renderer's inFlight mirror lags the transport), no fresh
       // state transition is coming — kick the drainer so the queue doesn't
       // sit. drainChatQueue itself gates on idle so this is safe.
-      await drainChatQueue(db, tabId)
+      await drainChatQueue(db, tabId, data)
       return msg
     },
 
     remove: async (id: string): Promise<boolean> => {
-      const row = (await db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id)) as
-        | { tab_id: string }
-        | undefined
-      const removed = await removeChatQueueItem(db, id)
-      if (removed && row) broadcast('chat:queue-changed', row.tab_id)
+      const tabId = await data.getTabIdForItem(id)
+      const removed = await data.remove(id)
+      // Gate on row existence (null check), not string truthiness — exact
+      // parity with the pre-seam `removed && row` condition.
+      if (removed && tabId !== null) broadcast('chat:queue-changed', tabId)
       return removed
     },
 
     clear: async (tabId: string): Promise<number> => {
-      const cleared = await clearChatQueue(db, tabId)
+      const cleared = await data.clear(tabId)
       if (cleared > 0) broadcast('chat:queue-changed', tabId)
       return cleared
     }
