@@ -60,6 +60,8 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cha
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_test_electron_strict_loader packages/apps/server/src/fleet-auth.test.ts
+# Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
@@ -73,6 +75,8 @@ run_test packages/domains/sidebar/src/views/projectDrop.test.ts
 run_test packages/domains/processes/src/server/process-manager.test.ts
 # Persistence seam — fake ProcessPersistence records insert/update/remove; loadAll hydration.
 run_test packages/domains/processes/src/server/process-persistence.test.ts
+# Wave-2 spawn backend seam — fake ProcessBackend streaming/exit/autoRestart/kill.
+run_test packages/domains/processes/src/server/process-backend.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/ai-config.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
