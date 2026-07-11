@@ -11,6 +11,7 @@ import { tagsCommand } from './commands/tags'
 import { templatesCommand } from './commands/templates'
 import { automationsCommand } from './commands/automations'
 import { panelsCommand } from './commands/panels'
+import { hubCommand } from './commands/hub'
 
 const program = new Command()
   .name('slay')
@@ -34,6 +35,7 @@ program.addCommand(processesCommand())
 program.addCommand(completionsCommand())
 program.addCommand(initCommand())
 program.addCommand(ptyCommand())
+program.addCommand(hubCommand())
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err instanceof Error ? err.message : String(err))

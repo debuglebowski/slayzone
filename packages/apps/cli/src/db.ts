@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { getStateDir, DB_PRAGMAS } from '@slayzone/platform'
+import { resolveHubTarget, type HubTarget } from './hub-config'
 export { resolveProject, resolveProjectArg, resolveProjectByPath } from './db-helpers.mjs'
 export type { SlayDb } from './db-helpers.mjs'
 import type { SlayDb } from './db-helpers.mjs'
@@ -86,7 +87,34 @@ function probePort(port: number): Promise<boolean> {
   return postJson(port, '/api/notify', 1000)
 }
 
+async function postHubNotify(hub: HubTarget, timeoutMs = 3000): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = hub.token
+      ? { Authorization: `Bearer ${hub.token}` }
+      : {}
+    const res = await fetch(`${hub.baseUrl}/api/notify`, {
+      method: 'POST',
+      headers,
+      signal: AbortSignal.timeout(timeoutMs)
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 export async function notifyApp(): Promise<void> {
+  const hub = resolveHubTarget()
+  if (hub) {
+    const ok = await postHubNotify(hub)
+    if (!ok) {
+      console.error(
+        'Warning: hub notify failed (POST /api/notify) — hub may be stale or unreachable'
+      )
+    }
+    return
+  }
+
   const port = getMcpPort()
   if (port) {
     const ok = await postJson(port, '/api/notify')
