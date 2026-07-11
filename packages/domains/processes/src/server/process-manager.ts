@@ -1,13 +1,13 @@
-import { spawn, execFile, execFileSync } from 'child_process'
-import type { ChildProcess } from 'child_process'
+import { execFile } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createStatsPoller } from './pid-stats'
 import { createDbProcessPersistence } from './process-persistence'
 import type { ProcessPersistence } from './process-persistence'
+import { getProcessBackend } from './process-backend'
+import type { ProcHandle } from './process-backend'
 import { extractOscTitle } from '@slayzone/terminal/shared'
 import { getEnrichedPath } from '@slayzone/terminal/server'
-import { buildShellInvocation } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import type { ProcessEventMap } from '@slayzone/types'
 
@@ -39,7 +39,7 @@ export interface ProcessInfo {
 }
 
 interface ManagedProcess extends ProcessInfo {
-  child: ChildProcess | null
+  handle: ProcHandle | null
   titlePollTimer: ReturnType<typeof setInterval> | null
   oscTitleSet: boolean
 }
@@ -59,25 +59,6 @@ export interface ProcessShutdownResult {
   killed: number
   timedOut: number
   errors: Array<{ id: string; phase: string; message: string }>
-}
-
-/** Kill the entire process tree rooted at `child` (must be spawned with `detached: true` on POSIX). */
-function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
-  const pid = child.pid
-  if (pid == null) return
-  if (process.platform === 'win32') {
-    try {
-      execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)])
-    } catch {
-      // ignore
-    }
-  } else {
-    try {
-      process.kill(-pid, signal)
-    } catch {
-      // ignore
-    }
-  }
 }
 
 let win: ProcessBroadcastWindow | null = null
@@ -133,7 +114,7 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       pid: null,
       exitCode: null,
       logBuffer: [],
-      child: null,
+      handle: null,
       startedAt: new Date().toISOString(),
       restartCount: 0,
       spawnedAt: null,
@@ -189,8 +170,7 @@ function stopTitlePolling(proc: ManagedProcess): void {
   }
 }
 
-function handleProcessData(proc: ManagedProcess, data: Buffer): void {
-  const str = data.toString()
+function handleProcessData(proc: ManagedProcess, str: string): void {
   // Check for OSC title sequences
   const oscTitle = extractOscTitle(str)
   if (oscTitle) {
@@ -207,30 +187,32 @@ function doSpawn(proc: ManagedProcess): void {
   if (isShuttingDown) return
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling()
-  const isWin = process.platform === 'win32'
-  // buildShellInvocation handles fish (-i -l for PATH init inside
-  // `if status is-interactive` blocks), bash/zsh (-l only), and Windows (cmd /c).
-  const { file, args } = buildShellInvocation(proc.command)
-  const env: Record<string, string | undefined> = { ...process.env }
-  const enrichedPath = getEnrichedPath()
-  if (enrichedPath) env.PATH = enrichedPath
-  const child = spawn(file, args, { cwd: proc.cwd, env, detached: !isWin })
+  // Spawn via the pluggable backend. The default (local) backend keeps the exact
+  // shell/env/detached semantics this used to run inline; a runner backend can
+  // remote the exec. runnerId is dark today (always null → local backend).
+  const handle = getProcessBackend().spawn({
+    id: proc.id,
+    taskId: proc.taskId,
+    projectId: proc.projectId,
+    runnerId: null,
+    command: proc.command,
+    cwd: proc.cwd
+  })
 
-  proc.child = child
-  proc.pid = child.pid ?? null
+  proc.handle = handle
+  proc.pid = handle.pid ?? null
   proc.exitCode = null
   proc.processTitle = null
   proc.oscTitleSet = false
   startTitlePolling(proc)
 
-  child.stdout?.on('data', (data: Buffer) => handleProcessData(proc, data))
-  child.stderr?.on('data', (data: Buffer) => handleProcessData(proc, data))
+  handle.onData((chunk) => handleProcessData(proc, chunk))
 
-  child.on('exit', (code) => {
-    if (proc.child !== child) return // stale exit from restarted process
+  handle.onExit(({ code }) => {
+    if (proc.handle !== handle) return // stale exit from restarted process
     stopTitlePolling(proc)
     proc.pid = null
-    proc.child = null
+    proc.handle = null
     proc.exitCode = code
     proc.processTitle = null
     proc.oscTitleSet = false
@@ -271,7 +253,7 @@ export function createProcess(
     pid: null,
     exitCode: null,
     logBuffer: [],
-    child: null,
+    handle: null,
     startedAt: new Date().toISOString(),
     restartCount: 0,
     spawnedAt: null,
@@ -306,7 +288,7 @@ export function spawnProcess(
     pid: null,
     exitCode: null,
     logBuffer: [],
-    child: null,
+    handle: null,
     startedAt: new Date().toISOString(),
     restartCount: 0,
     spawnedAt: null,
@@ -345,13 +327,13 @@ export function stopProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
   stopTitlePolling(proc)
-  // Set child to null before kill so the exit handler's `proc.child !== child`
+  // Set handle to null before kill so the exit handler's `proc.handle !== handle`
   // guard bails out (prevents auto-restart from firing)
-  const child = proc.child
-  proc.child = null
+  const handle = proc.handle
+  proc.handle = null
   proc.pid = null
   proc.spawnedAt = null
-  if (child) killProcessTree(child)
+  if (handle) handle.kill()
   setStatus(proc, 'stopped')
   return true
 }
@@ -361,8 +343,8 @@ export function killProcess(id: string): boolean {
   if (!proc) return false
   stopTitlePolling(proc)
   proc.autoRestart = false
-  if (proc.child) killProcessTree(proc.child)
-  proc.child = null
+  if (proc.handle) proc.handle.kill()
+  proc.handle = null
   processes.delete(id)
   void persistence?.remove(id)
   return true
@@ -373,8 +355,8 @@ export function restartProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
   stopTitlePolling(proc)
-  if (proc.child) killProcessTree(proc.child)
-  proc.child = null
+  if (proc.handle) proc.handle.kill()
+  proc.handle = null
   proc.logBuffer.push('[restarting...]')
   setStatus(proc, 'running')
   setTimeout(() => doSpawn(proc), 500)
@@ -396,12 +378,12 @@ export function listForTask(taskId: string | null, projectId: string | null): Pr
         (taskId != null && p.taskId === taskId) ||
         (p.taskId === null && p.projectId != null && p.projectId === projectId)
     )
-    .map(({ child: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
+    .map(({ handle: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
 }
 
 export function listAllProcesses(): ProcessInfo[] {
   return Array.from(processes.values()).map(
-    ({ child: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info
+    ({ handle: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info
   )
 }
 
@@ -428,8 +410,8 @@ export function killAllProcesses(): void {
   for (const proc of processes.values()) {
     stopTitlePolling(proc)
     proc.autoRestart = false
-    if (proc.child) killProcessTree(proc.child)
-    proc.child = null
+    if (proc.handle) proc.handle.kill()
+    proc.handle = null
   }
   processes.clear()
 }
@@ -449,10 +431,10 @@ function shutdownManagedProcess(
   errors: ProcessShutdownResult['errors']
 }> {
   return new Promise((resolve) => {
-    const child = proc.child
+    const handle = proc.handle
     const id = proc.id
     const errors: ProcessShutdownResult['errors'] = []
-    if (!child) {
+    if (!handle) {
       resolve({ id, exited: true, killed: false, timedOut: false, errors })
       return
     }
@@ -461,6 +443,7 @@ function shutdownManagedProcess(
     let killed = false
     let termTimer: ReturnType<typeof setTimeout> | null = null
     let hardTimer: ReturnType<typeof setTimeout> | null = null
+    let exitSub: { dispose(): void } | null = null
 
     const recordError = (phase: string, err: unknown): void => {
       errors.push({ id, phase, message: toErrorMessage(err) })
@@ -468,7 +451,7 @@ function shutdownManagedProcess(
     const cleanup = (): void => {
       if (termTimer) clearTimeout(termTimer)
       if (hardTimer) clearTimeout(hardTimer)
-      child.off('exit', onExit)
+      exitSub?.dispose()
     }
     const settle = (timedOut: boolean): void => {
       if (settled) return
@@ -476,7 +459,7 @@ function shutdownManagedProcess(
       cleanup()
       if (timedOut) {
         stopTitlePolling(proc)
-        proc.child = null
+        proc.handle = null
         proc.pid = null
         proc.spawnedAt = null
       }
@@ -486,10 +469,10 @@ function shutdownManagedProcess(
 
     proc.autoRestart = false
     stopTitlePolling(proc)
-    child.once('exit', onExit)
+    exitSub = handle.onExit(onExit)
 
     try {
-      killProcessTree(child, 'SIGTERM')
+      handle.kill('SIGTERM')
     } catch (err) {
       recordError('sigterm', err)
     }
@@ -497,7 +480,7 @@ function shutdownManagedProcess(
     termTimer = setTimeout(() => {
       killed = true
       try {
-        killProcessTree(child, 'SIGKILL')
+        handle.kill('SIGKILL')
       } catch (err) {
         recordError('sigkill', err)
       }
