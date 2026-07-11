@@ -28,17 +28,13 @@ import {
   type TransportShutdownResult
 } from './chat-transport-manager'
 import {
-  persistChatEvent,
-  loadChatEvents,
-  getNextSeqForTab,
-  clearChatEventsForTab
-} from '../chat-events-store'
-import { recordConversation } from '@slayzone/task/server'
+  createDbChatDataOps,
+  type ChatDataOps,
+  type ProviderConfigEntry
+} from './chat-data-ops'
 import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
-import { clearChatQueue } from '../chat-queue-store'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from '../adapters/flag-parser'
-import { buildMcpEnv } from '../mcp-env'
 import { getEnrichedPath } from '../shell-env'
 import { supportsChatMode } from '../agents/registry'
 import { getAutoModeEligibility, type AutoModeEligibility } from '../auto-mode-eligibility'
@@ -47,11 +43,7 @@ import { listSkills } from '../skills'
 import { listCommands } from '../commands'
 import { listAgents } from '../agents-registry'
 import { listProjectFiles } from '../files-scan'
-import {
-  bumpAutocompleteUsage,
-  getAutocompleteUsage,
-  type UsageMap
-} from '../autocomplete-usage-store'
+import type { UsageMap } from '../autocomplete-usage-store'
 import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '../../shared/types'
 import type { AgentEvent } from '../../shared/agent-events'
 import {
@@ -75,6 +67,9 @@ export interface ChatHandlerOpts {
   /** Optional secondary subscriber to every persisted chat event. Used by the
    * agent-turns domain to detect turn boundaries (user-message + result). */
   onChatEvent?: (tabId: string, event: AgentEvent) => void
+  /** Injectable data seam (hub/runner split). Defaults to the local-DB impl
+   * (`createDbChatDataOps`) which runs the same SQL the handlers always ran. */
+  dataOps?: ChatDataOps
 }
 
 interface ChatCreateOpts {
@@ -122,177 +117,14 @@ async function resolveSafeChatMode(stored: string): Promise<string> {
   return cap.optedIn ? 'auto' : 'auto-accept'
 }
 
-interface ProviderConfigEntry {
-  conversationId?: string | null
-  /**
-   * Chat-transport session id. Separate from PTY's conversationId because the two
-   * transports store Claude sessions under different paths — a session spawned via
-   * PTY `claude --session-id X` is NOT resumable by `claude -p --resume X` (headless
-   * stream-json store differs).
-   */
-  chatConversationId?: string | null
-  flags?: string | null
-  /** Chat permission/runtime mode (Claude `ChatMode` / Codex runtime mode). */
-  chatMode?: string | null
-  /** Provider-specific chat model id (Claude alias / Codex model id). */
-  chatModel?: string | null
-  /** Reasoning effort level. `null`/missing = inherit provider default. */
-  chatEffort?: ChatEffort | null
-  /** Collaboration mode (Codex `plan`/`default`). `null`/missing = provider default. */
-  chatCollaboration?: ChatCollaborationMode | null
-  /** Codex Fast Mode (`serviceTier: 'fast'`). `undefined`/missing = off. */
-  chatFastMode?: boolean
-}
-
-async function readProviderConfig(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string
-): Promise<ProviderConfigEntry> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  if (!row?.provider_config) return {}
-  try {
-    const parsed = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-    return parsed?.[mode] ?? {}
-  } catch {
-    return {}
-  }
-}
+// ProviderConfigEntry + the provider-config read/write helpers moved to
+// ./chat-data-ops (hub/runner data seam). chat-handlers routes all data
+// access through the injected `ChatDataOps` — see `ChatHandlerOpts.dataOps`.
 
 // (writeChatConversationId removed — replaced by recordConversation w/
 //  legacyJsonField:'chatConversationId' in task-conversations.ts. The dual-write
 //  to provider_config.{mode}.chatConversationId still happens, but provenance
 //  is checked first.)
-
-async function writeChatModel(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string,
-  chatModel: string
-): Promise<void> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  let cfg: Record<string, ProviderConfigEntry> = {}
-  if (row?.provider_config) {
-    try {
-      cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-    } catch {
-      cfg = {}
-    }
-  }
-  const existing = cfg[mode] ?? {}
-  if (existing.chatModel === chatModel) return
-  cfg[mode] = { ...existing, chatModel }
-  await db
-    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-    .run(JSON.stringify(cfg), taskId)
-}
-
-async function writeChatEffort(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string,
-  chatEffort: ChatEffort | null
-): Promise<void> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  let cfg: Record<string, ProviderConfigEntry> = {}
-  if (row?.provider_config) {
-    try {
-      cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-    } catch {
-      cfg = {}
-    }
-  }
-  const existing = cfg[mode] ?? {}
-  if ((existing.chatEffort ?? null) === chatEffort) return
-  cfg[mode] = { ...existing, chatEffort }
-  await db
-    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-    .run(JSON.stringify(cfg), taskId)
-}
-
-async function writeChatCollaboration(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string,
-  chatCollaboration: ChatCollaborationMode | null
-): Promise<void> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  let cfg: Record<string, ProviderConfigEntry> = {}
-  if (row?.provider_config) {
-    try {
-      cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-    } catch {
-      cfg = {}
-    }
-  }
-  const existing = cfg[mode] ?? {}
-  if ((existing.chatCollaboration ?? null) === chatCollaboration) return
-  cfg[mode] = { ...existing, chatCollaboration }
-  await db
-    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-    .run(JSON.stringify(cfg), taskId)
-}
-
-async function writeChatFastMode(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string,
-  chatFastMode: boolean
-): Promise<void> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  let cfg: Record<string, ProviderConfigEntry> = {}
-  if (row?.provider_config) {
-    try {
-      cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-    } catch {
-      cfg = {}
-    }
-  }
-  const existing = cfg[mode] ?? {}
-  if ((existing.chatFastMode ?? false) === chatFastMode) return
-  cfg[mode] = { ...existing, chatFastMode }
-  await db
-    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-    .run(JSON.stringify(cfg), taskId)
-}
-
-async function writeChatMode(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string,
-  chatMode: string
-): Promise<void> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  let cfg: Record<string, ProviderConfigEntry> = {}
-  if (row?.provider_config) {
-    try {
-      cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-    } catch {
-      cfg = {}
-    }
-  }
-  const existing = cfg[mode] ?? {}
-  // Idempotent: skip the write when nothing changed. Persisted chat events
-  // tick this on every turn-init (live sync); no-op writes would burn I/O for
-  // the common case where mode hasn't moved.
-  if (existing.chatMode === chatMode) return
-  cfg[mode] = { ...existing, chatMode }
-  await db
-    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-    .run(JSON.stringify(cfg), taskId)
-}
 
 /**
  * One-shot backfill: every chat-capable task gets `chatMode='bypass'` set on
@@ -362,36 +194,6 @@ export async function backfillChatModes(
   return { scanned, updated }
 }
 
-async function clearChatConversationId(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string
-): Promise<void> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  if (!row?.provider_config) return
-  let cfg: Record<string, ProviderConfigEntry> = {}
-  try {
-    cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-  } catch {
-    return
-  }
-  const existing = cfg[mode]
-  if (!existing?.chatConversationId) return
-  cfg[mode] = { ...existing, chatConversationId: null }
-  await db
-    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-    .run(JSON.stringify(cfg), taskId)
-}
-
-async function readTaskModeDefaultFlags(db: SlayzoneDb, mode: string): Promise<string | null> {
-  const row = (await db
-    .prepare('SELECT default_flags FROM terminal_modes WHERE id = ?')
-    .get(mode)) as { default_flags: string | null } | undefined
-  return row?.default_flags ?? null
-}
-
 /**
  * Check whether effective flags contain a non-interactive permission mode.
  * Chat mode has no prompt events; without this, tool calls fail silently.
@@ -441,7 +243,7 @@ export function inspectPermissionFlags(flags: string[]): {
  * (transactional) without a race where the builder re-reads stale DB.
  */
 async function buildHydrateOpts(
-  db: SlayzoneDb,
+  data: ChatDataOps,
   opts: ChatCreateOpts,
   {
     fresh,
@@ -459,7 +261,7 @@ async function buildHydrateOpts(
     chatFastModeOverride?: boolean
   }
 ): Promise<Parameters<typeof hydrateSession>[0]> {
-  const providerCfg = await readProviderConfig(db, opts.taskId, opts.mode)
+  const providerCfg = await data.readProviderConfig(opts.taskId, opts.mode)
   // Flag-resolution priority for chat:
   //   1. per-call override (`providerFlagsOverride`)
   //   2. per-task explicit flags (`providerCfg.flags`)
@@ -522,12 +324,12 @@ async function buildHydrateOpts(
     providerFlags = [...providerFlags, ...chatEffortToFlags(resolvedChatEffort)]
   }
 
-  const initialBuffer = fresh ? [] : await loadChatEvents(db, opts.tabId)
-  const initialNextSeq = fresh ? 0 : await getNextSeqForTab(db, opts.tabId)
+  const initialBuffer = fresh ? [] : await data.loadChatEvents(opts.tabId)
+  const initialNextSeq = fresh ? 0 : await data.getNextSeqForTab(opts.tabId)
 
   const enrichedPath = getEnrichedPath()
   const subprocessEnv: Record<string, string> = {
-    ...(await buildMcpEnv(db, opts.taskId, opts.mode)),
+    ...(await data.buildMcpEnv(opts.taskId, opts.mode)),
     ...(enrichedPath ? { PATH: enrichedPath } : {})
   }
 
@@ -553,7 +355,7 @@ async function buildHydrateOpts(
       // we spawned, `foreign-observed` when it doesn't (manual --resume in PTY).
       // Foreign rows are stored for audit but never honored by
       // getCurrentConversationId, so the bug class is closed structurally.
-      void recordConversation(db, {
+      void data.recordConversation({
         taskId: opts.taskId,
         mode: opts.mode,
         conversationId,
@@ -562,7 +364,7 @@ async function buildHydrateOpts(
       })
     },
     onInvalidResume: () => {
-      void clearChatConversationId(db, opts.taskId, opts.mode)
+      void data.clearChatConversationId(opts.taskId, opts.mode)
     }
   }
 }
@@ -574,6 +376,9 @@ async function buildHydrateOpts(
  * transport once on creation; the IPC and tRPC layers are thin delegators.
  */
 export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
+  // Data seam: all tasks/chat_events/autocomplete access goes through this.
+  // Default is the local-DB impl (same SQL as before the hub/runner split).
+  const data = opts.dataOps ?? createDbChatDataOps(db)
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.
   configureTransport({
@@ -593,7 +398,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
     persistEvent: (tabId, seq, event) => {
       void (async () => {
         try {
-          await persistChatEvent(db, tabId, seq, event)
+          await data.persistChatEvent(tabId, seq, event)
         } catch (err) {
           console.error('[chat-handlers] persistChatEvent failed:', err)
         }
@@ -604,16 +409,12 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
           if (info) {
             try {
               const now = Date.now()
-              const res = await db
-                .prepare(
-                  `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
-                )
-                .run(now, info.taskId, now)
+              const changed = await data.bumpLastInteraction(info.taskId, now)
               // Notify renderer so the tree-view sort reorders without waiting
               // for an unrelated tasks reload. Skip when UPDATE was a no-op.
               // Host bridge: real windows in Electron, inert (no-op) in tests +
               // standalone server.
-              if (res.changes > 0) {
+              if (changed) {
                 for (const w of getPtyHostBridge().getAllWindows()) {
                   if (!w.isDestroyed()) w.webContents.send('tasks:changed')
                 }
@@ -632,7 +433,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
             const info = getSessionInfo(tabId)
             if (info) {
               try {
-                await writeChatMode(db, info.taskId, info.mode, mapped)
+                await data.writeChatMode(info.taskId, info.mode, mapped)
               } catch (err) {
                 console.error('[chat-handlers] writeChatMode (live sync) failed:', err)
               }
@@ -660,7 +461,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
      * reattaches to an existing live session for the same tab.
      */
     hydrate: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      return hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+      return hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
     },
 
     /**
@@ -670,7 +471,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
      * sessions.
      */
     start: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+      hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
       return ensureSpawned(o.tabId)
     },
 
@@ -752,7 +553,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // typically continues the turn immediately, so a ready process avoids the
       // double-latency of "interrupt → next send waits on spawn".
       removeSession(o.tabId)
-      hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+      hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
       return ensureSpawned(o.tabId)
     },
 
@@ -769,7 +570,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // Stop button discards queued follow-ups alongside the in-flight turn —
       // matches pre-backend behavior where handleStop did `setQueuedMessages([])`.
       try {
-        await clearChatQueue(db, o.tabId)
+        await data.clearChatQueue(o.tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
@@ -778,7 +579,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // big red button on a turn, the implicit expectation is "ready to keep
       // chatting"; making them wait for spawn on next send is worse UX than the
       // lazy mode the rest of the app uses for first-ever messages.
-      hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+      hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
       await ensureSpawned(o.tabId)
       return { popped: result.popped, text: result.text }
     },
@@ -793,12 +594,12 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // also clears them when the terminal_tabs row itself is deleted, but
       // chat:remove can be invoked before the tab row is gone, so be explicit.)
       try {
-        await clearChatEventsForTab(db, tabId)
+        await data.clearChatEventsForTab(tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatEventsForTab failed:', err)
       }
       try {
-        await clearChatQueue(db, tabId)
+        await data.clearChatQueue(tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
@@ -816,21 +617,21 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
     reset: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
       removeSession(o.tabId)
       try {
-        await clearChatEventsForTab(db, o.tabId)
+        await data.clearChatEventsForTab(o.tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatEventsForTab failed:', err)
       }
       try {
-        await clearChatQueue(db, o.tabId)
+        await data.clearChatQueue(o.tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
       try {
-        await clearChatConversationId(db, o.taskId, o.mode)
+        await data.clearChatConversationId(o.taskId, o.mode)
       } catch (err) {
         console.error('[chat-handlers] clearChatConversationId failed:', err)
       }
-      return hydrateSession(await buildHydrateOpts(db, o, { fresh: true }))
+      return hydrateSession(await buildHydrateOpts(data, o, { fresh: true }))
     },
 
     getBufferSince: (tabId: string, afterSeq: number) => getEventBufferSince(tabId, afterSeq),
@@ -851,13 +652,13 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
           permissionModeValue: null
         }
       }
-      const providerCfg = await readProviderConfig(db, taskId, mode)
-      const flagsString = providerCfg.flags ?? (await readTaskModeDefaultFlags(db, mode)) ?? ''
+      const providerCfg = await data.readProviderConfig(taskId, mode)
+      const flagsString = providerCfg.flags ?? (await data.getModeDefaultFlags(mode)) ?? ''
       return inspectPermissionFlags(parseShellArgs(flagsString))
     },
 
     getMode: async (taskId: string, mode: string): Promise<string> => {
-      const cfg = await readProviderConfig(db, taskId, mode)
+      const cfg = await data.readProviderConfig(taskId, mode)
       const stored = cfg.chatMode ?? defaultChatModeForMode(mode)
       // Hide stale `auto` from UI when capability is gone — pill would otherwise
       // show violet, and the next mode change would attempt a forbidden flag.
@@ -881,7 +682,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // picks it up via buildSpawnArgs. No control_request, no respawn.
       const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatMode(db, o.taskId, o.mode, safe)
+        await data.writeChatMode(o.taskId, o.mode, safe)
         updateSessionChatMode(o.tabId, safe)
         const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
@@ -901,7 +702,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
             subtype: 'set_permission_mode',
             mode: cliMode
           })
-          await writeChatMode(db, o.taskId, o.mode, safe)
+          await data.writeChatMode(o.taskId, o.mode, safe)
           updateSessionChatMode(o.tabId, safe)
           const refreshed = getSessionInfo(o.tabId)
           if (refreshed) return refreshed
@@ -921,9 +722,9 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // DB read so the new child uses `safe` flags even though provider_config
       // still has the old value.
       removeSession(o.tabId)
-      hydrateSession(await buildHydrateOpts(db, o, { fresh: false, chatModeOverride: safe }))
+      hydrateSession(await buildHydrateOpts(data, o, { fresh: false, chatModeOverride: safe }))
       const created = await ensureSpawned(o.tabId)
-      await writeChatMode(db, o.taskId, o.mode, safe)
+      await data.writeChatMode(o.taskId, o.mode, safe)
       // Returned ChatSessionInfo carries `chatMode: safe` via Session.chatMode,
       // so renderer trusts the server's resolved value (e.g. auto → auto-accept
       // downgrade) instead of its optimistic guess.
@@ -931,7 +732,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
     },
 
     getModel: async (taskId: string, mode: string): Promise<string> => {
-      const cfg = await readProviderConfig(db, taskId, mode)
+      const cfg = await data.readProviderConfig(taskId, mode)
       const stored = cfg.chatModel
       if (isValidModelForMode(mode, stored)) return stored
       // No (or legacy/invalid) stored value → provider default. codex-chat uses
@@ -949,7 +750,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // Pre-spawn fast path: DB write + skeleton mutation only.
       const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatModel(db, o.taskId, o.mode, o.chatModel)
+        await data.writeChatModel(o.taskId, o.mode, o.chatModel)
         updateSessionChatModel(o.tabId, o.chatModel)
         const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
@@ -966,7 +767,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
             subtype: 'set_model',
             model: o.chatModel
           })
-          await writeChatModel(db, o.taskId, o.mode, o.chatModel)
+          await data.writeChatModel(o.taskId, o.mode, o.chatModel)
           updateSessionChatModel(o.tabId, o.chatModel)
           const refreshed = getSessionInfo(o.tabId)
           if (refreshed) return refreshed
@@ -983,15 +784,15 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // child uses the requested model before we persist.
       removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, o, { fresh: false, chatModelOverride: o.chatModel })
+        await buildHydrateOpts(data, o, { fresh: false, chatModelOverride: o.chatModel })
       )
       const created = await ensureSpawned(o.tabId)
-      await writeChatModel(db, o.taskId, o.mode, o.chatModel)
+      await data.writeChatModel(o.taskId, o.mode, o.chatModel)
       return created
     },
 
     getEffort: async (taskId: string, mode: string): Promise<ChatEffort | null> => {
-      const cfg = await readProviderConfig(db, taskId, mode)
+      const cfg = await data.readProviderConfig(taskId, mode)
       const stored = cfg.chatEffort ?? null
       return isChatEffort(stored) ? stored : null
     },
@@ -1007,7 +808,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // first spawn via buildSpawnArgs reading the (now-updated) skeleton.
       const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatEffort(db, o.taskId, o.mode, o.chatEffort)
+        await data.writeChatEffort(o.taskId, o.mode, o.chatEffort)
         updateSessionChatEffort(o.tabId, o.chatEffort)
         const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
@@ -1017,10 +818,10 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // new child uses the requested level before we persist.
       removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, o, { fresh: false, chatEffortOverride: o.chatEffort })
+        await buildHydrateOpts(data, o, { fresh: false, chatEffortOverride: o.chatEffort })
       )
       const created = await ensureSpawned(o.tabId)
-      await writeChatEffort(db, o.taskId, o.mode, o.chatEffort)
+      await data.writeChatEffort(o.taskId, o.mode, o.chatEffort)
       return created
     },
 
@@ -1029,7 +830,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       mode: string
     ): Promise<ChatCollaborationMode | null> => {
       if (!modeSupportsCollaboration(mode)) return null
-      const cfg = await readProviderConfig(db, taskId, mode)
+      const cfg = await data.readProviderConfig(taskId, mode)
       const stored = cfg.chatCollaboration ?? null
       return isChatCollaborationMode(stored) ? stored : null
     },
@@ -1050,7 +851,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // off the skeleton when the first spawn builds the driver context.
       const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatCollaboration(db, o.taskId, o.mode, o.chatCollaboration)
+        await data.writeChatCollaboration(o.taskId, o.mode, o.chatCollaboration)
         updateSessionChatCollaboration(o.tabId, o.chatCollaboration)
         const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
@@ -1060,19 +861,19 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // thread cleanly re-initialized on the new mode.
       removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, o, {
+        await buildHydrateOpts(data, o, {
           fresh: false,
           chatCollaborationOverride: o.chatCollaboration
         })
       )
       const created = await ensureSpawned(o.tabId)
-      await writeChatCollaboration(db, o.taskId, o.mode, o.chatCollaboration)
+      await data.writeChatCollaboration(o.taskId, o.mode, o.chatCollaboration)
       return created
     },
 
     getFastMode: async (taskId: string, mode: string): Promise<boolean> => {
       if (!modeSupportsFastMode(mode)) return false
-      const cfg = await readProviderConfig(db, taskId, mode)
+      const cfg = await data.readProviderConfig(taskId, mode)
       return cfg.chatFastMode ?? false
     },
 
@@ -1089,7 +890,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // the skeleton when building the driver context.
       const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatFastMode(db, o.taskId, o.mode, o.chatFastMode)
+        await data.writeChatFastMode(o.taskId, o.mode, o.chatFastMode)
         updateSessionChatFastMode(o.tabId, o.chatFastMode)
         const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
@@ -1097,13 +898,13 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       // Live session: kill+respawn (same pattern as setEffort).
       removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, o, {
+        await buildHydrateOpts(data, o, {
           fresh: false,
           chatFastModeOverride: o.chatFastMode
         })
       )
       const created = await ensureSpawned(o.tabId)
-      await writeChatFastMode(db, o.taskId, o.mode, o.chatFastMode)
+      await data.writeChatFastMode(o.taskId, o.mode, o.chatFastMode)
       return created
     },
 
@@ -1118,7 +919,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
 
     bumpAutocompleteUsage: async (source: string, name: string): Promise<void> => {
       try {
-        await bumpAutocompleteUsage(db, source, name)
+        await data.bumpAutocompleteUsage(source, name)
       } catch (err) {
         console.error('[chat-handlers] bumpAutocompleteUsage failed:', err)
       }
@@ -1126,7 +927,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
 
     getAutocompleteUsage: async (): Promise<UsageMap> => {
       try {
-        return await getAutocompleteUsage(db)
+        return await data.getAutocompleteUsage()
       } catch (err) {
         console.error('[chat-handlers] getAutocompleteUsage failed:', err)
         return {}
