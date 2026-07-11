@@ -42,7 +42,7 @@ import {
   type ViewBounds
 } from './browser-view-manager'
 import { attachRendererCsp } from './renderer-csp'
-import { probeRemoteHealth, readBootConfig, writeBootSettings } from './boot-config'
+import { fleetEnvFor, probeRemoteHealth, readBootConfig, writeBootSettings } from './boot-config'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   isBlockedExternalProtocolUrl,
@@ -2107,7 +2107,16 @@ app
                       'node_modules'
                     )
                   }
-                : {})
+                : {}),
+              // Hub/runner split (wave 3): light the sidecar's fleet gateway when
+              // boot-config opts in. `fleetEnvFor` adds SLAYZONE_FLEET_MODE:'1'
+              // only when fleet_mode === true; otherwise it adds NOTHING — the
+              // fleet-off env is byte-identical to prior boot (an operator-set
+              // SLAYZONE_FLEET_MODE still flows through the `...process.env`
+              // spread above, matching pre-wave-3 behavior + composition's doc'd
+              // manual lever). It sits after that spread so a true boot-config
+              // opt-in wins over an absent/empty inherited value.
+              ...fleetEnvFor(bootConfig)
             },
             logger: (line) => logBoot(line),
             onReady: (info) => {
@@ -2868,10 +2877,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // Writes the pre-boot config file. Throws on an unnormalizable URL.
     ipcMain.handle(
       'app:set-boot-settings',
-      (_event, payload: { server_mode?: 'local' | 'remote'; remote_server_url?: string }) => {
+      (
+        _event,
+        payload: {
+          server_mode?: 'local' | 'remote'
+          remote_server_url?: string
+          fleet_mode?: boolean
+        }
+      ) => {
         writeBootSettings(getTrpcDataRoot(), {
           server_mode: payload?.server_mode,
-          remote_server_url: payload?.remote_server_url
+          remote_server_url: payload?.remote_server_url,
+          fleet_mode: payload?.fleet_mode
         })
         return { ok: true as const }
       }

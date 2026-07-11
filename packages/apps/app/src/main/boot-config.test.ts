@@ -9,7 +9,8 @@ import {
   toHealthUrl,
   readBootConfig,
   writeBootSettings,
-  probeRemoteHealth
+  probeRemoteHealth,
+  fleetEnvFor
 } from './boot-config'
 
 describe('normalizeRemoteUrl', () => {
@@ -130,6 +131,31 @@ describe('readBootConfig / writeBootSettings', () => {
     const cfg = readBootConfig(dir)
     expect(cfg.server_mode).toBe('remote')
     expect(cfg.fleet_mode).toBe(true)
+  })
+
+  it('a persisted fleet_mode:true flows into the sidecar env flag (renderer→boot→sidecar)', () => {
+    // Simulates the wave-3 gate bridge end to end at the config layer: the
+    // renderer's setBootSettings write persists fleet_mode, boot reads it back,
+    // and the sidecar env-builder lights SLAYZONE_FLEET_MODE.
+    writeBootSettings(dir, { fleet_mode: true })
+    expect(fleetEnvFor(readBootConfig(dir))).toEqual({ SLAYZONE_FLEET_MODE: '1' })
+    writeBootSettings(dir, { fleet_mode: false })
+    expect(fleetEnvFor(readBootConfig(dir))).toEqual({})
+  })
+})
+
+describe('fleetEnvFor', () => {
+  it('adds SLAYZONE_FLEET_MODE:1 only when fleet_mode is true', () => {
+    expect(fleetEnvFor({ fleet_mode: true })).toEqual({ SLAYZONE_FLEET_MODE: '1' })
+  })
+
+  it('adds NOTHING when fleet_mode is false/unset (byte-identical off)', () => {
+    // The var must be ABSENT (not empty-string / not "0") — composition reads
+    // `SLAYZONE_FLEET_MODE === '1'`, and an absent key keeps the spread a no-op.
+    expect(fleetEnvFor({ fleet_mode: false })).toEqual({})
+    expect(fleetEnvFor({})).toEqual({})
+    expect('SLAYZONE_FLEET_MODE' in fleetEnvFor({})).toBe(false)
+    expect('SLAYZONE_FLEET_MODE' in fleetEnvFor({ fleet_mode: false })).toBe(false)
   })
 })
 

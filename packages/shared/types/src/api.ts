@@ -405,6 +405,7 @@ export interface ElectronAPI {
     setBootSettings: (payload: {
       server_mode?: 'local' | 'remote'
       remote_server_url?: string
+      fleet_mode?: boolean
     }) => Promise<{ ok: true }>
     probeServerHealth: (url: string) => Promise<{
       ok: boolean
@@ -671,6 +672,7 @@ export interface _LegacyElectronAPI {
     setBootSettings: (payload: {
       server_mode?: 'local' | 'remote'
       remote_server_url?: string
+      fleet_mode?: boolean
     }) => Promise<{ ok: true }>
     probeServerHealth: (url: string) => Promise<{
       ok: boolean

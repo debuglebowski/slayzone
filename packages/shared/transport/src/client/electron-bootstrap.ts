@@ -13,8 +13,11 @@ function api(): ElectronAPI {
 export const electronBootstrap = {
   getServerUrl: () => api().app.getServerUrl(),
   getWindowId: () => api().app.getWindowId(),
-  setBootSettings: (payload: { server_mode?: 'local' | 'remote'; remote_server_url?: string }) =>
-    api().app.setBootSettings(payload),
+  setBootSettings: (payload: {
+    server_mode?: 'local' | 'remote'
+    remote_server_url?: string
+    fleet_mode?: boolean
+  }) => api().app.setBootSettings(payload),
   probeServerHealth: (url: string) => api().app.probeServerHealth(url),
   relaunch: () => api().app.relaunch(),
   restartSidecar: () => api().app.restartSidecar(),

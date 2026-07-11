@@ -134,6 +134,23 @@ export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootCo
 }
 
 /**
+ * Builds the fleet-mode fragment of the sidecar child env from boot-config.
+ *
+ * Hub/runner split (wave 3): the sidecar's hub gateway + auth + runners deps are
+ * gated in the server composition on `SLAYZONE_FLEET_MODE === '1'`. This is the
+ * bridge that lights that gate up from the pre-boot config field — when
+ * `fleet_mode` is true we add `SLAYZONE_FLEET_MODE: '1'` to the sidecar's env,
+ * otherwise we add NOTHING (an absent var is exactly what composition reads as
+ * fleet-off), so the default (fleet unset/false) stays byte-identical. Kept pure
+ * + electron-free so the env-building decision is unit-testable without a boot.
+ */
+export function fleetEnvFor(
+  config: Pick<BootConfig, 'fleet_mode'>
+): { SLAYZONE_FLEET_MODE: '1' } | Record<string, never> {
+  return config.fleet_mode === true ? { SLAYZONE_FLEET_MODE: '1' } : {}
+}
+
+/**
  * Probes a remote server's GET /health from the MAIN process. Runs here (not
  * a renderer fetch) because the renderer CSP floor only allows loopback WS
  * origins and /health sets no CORS headers — and because pre-TrpcProvider
