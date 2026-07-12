@@ -89,6 +89,8 @@ run_test packages/apps/server/src/port-claim.test.ts
 run_test packages/apps/server/src/remote-mcp-env-provider.test.ts
 # Wave-3.5 fleet TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
 run_test packages/apps/server/src/fleet-tls-listener.test.ts
+# Wave-3.5 loopback join-token mint route (main auto-enroll channel).
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/runners/join-token.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree

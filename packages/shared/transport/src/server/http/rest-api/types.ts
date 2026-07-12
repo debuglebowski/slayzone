@@ -142,6 +142,21 @@ export interface RestApiDeps {
    * `Authorization` header (every local loopback hook) → the route is unchanged.
    */
   verifyTaskToken?: (token: string) => TaskTokenVerifyResult
+  /**
+   * Fleet listener info accessors (hub/runner split, Wave3.5-D3). Set ONLY under
+   * fleet mode (composition root, closed over the same late-bound refs the
+   * `runnersRouter`'s `RunnersDeps` reads). Powers `POST /api/runners/join-token`
+   * — the loopback channel the Electron MAIN process hits at boot to mint a token
+   * for its auto-enrolling local runner (main has no tRPC client to the sidecar).
+   * Absent (fleet off — the default) → the route 503s and nothing mints, so the
+   * default boot is byte-identical.
+   */
+  runners?: {
+    /** `wss://host:port/fleet` URL the join token embeds. Null until bound. */
+    getHubUrl: () => string | null
+    /** Hub TLS leaf sha256 (lowercase hex) the token pins. Null until loaded. */
+    getCertFingerprint: () => string | null
+  }
 }
 
 /** Uniform 501 payload for routes whose capability slot is absent in this host. */

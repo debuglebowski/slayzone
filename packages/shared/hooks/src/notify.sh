@@ -79,26 +79,56 @@ SLAY_SESSION_FIELD=""
 
 ENVELOPE="{\"agentId\":\"$SLAYZONE_AGENT_ID\",\"hookEvent\":\"$HOOK_EVENT\"$TASK_FIELD$CWD_FIELD$SESSION_FIELD$SLAY_SESSION_FIELD,\"raw\":$PAYLOAD}"
 
+# Remote (hub/runner split): a runner-routed pty carries a scoped per-task bearer
+# in SLAYZONE_HUB_TOKEN (injected by buildMcpEnv). Forward it as
+# `Authorization: Bearer` so the hub's agent-hook route can verify it. LOCAL
+# loopback ptys set no token → no header added → byte-identical to before.
+AUTH_HEADER=""
+[ -n "$SLAYZONE_HUB_TOKEN" ] && AUTH_HEADER="Authorization: Bearer $SLAYZONE_HUB_TOKEN"
+
 # Fire-and-forget. Errors swallowed; never block the agent.
 # curl is the primary path — present on macOS, most Linux, and bundled with
 # Git for Windows (whose bash runs this script). wget is a fallback for minimal
 # environments; if neither exists the POST is skipped silently.
 if command -v curl >/dev/null 2>&1; then
-  curl -s \
-    --connect-timeout 2 \
-    --max-time 5 \
-    -X POST \
-    -H 'Content-Type: application/json' \
-    --data-binary "$ENVELOPE" \
-    "$SLAYZONE_AGENT_HOOK_URL" \
-    >/dev/null 2>&1 || true
+  # Only pass the -H auth flag when a token is set (empty AUTH_HEADER ⇒ no flag).
+  if [ -n "$AUTH_HEADER" ]; then
+    curl -s \
+      --connect-timeout 2 \
+      --max-time 5 \
+      -X POST \
+      -H 'Content-Type: application/json' \
+      -H "$AUTH_HEADER" \
+      --data-binary "$ENVELOPE" \
+      "$SLAYZONE_AGENT_HOOK_URL" \
+      >/dev/null 2>&1 || true
+  else
+    curl -s \
+      --connect-timeout 2 \
+      --max-time 5 \
+      -X POST \
+      -H 'Content-Type: application/json' \
+      --data-binary "$ENVELOPE" \
+      "$SLAYZONE_AGENT_HOOK_URL" \
+      >/dev/null 2>&1 || true
+  fi
 elif command -v wget >/dev/null 2>&1; then
-  wget -q -O /dev/null \
-    --timeout=5 \
-    --header='Content-Type: application/json' \
-    --post-data="$ENVELOPE" \
-    "$SLAYZONE_AGENT_HOOK_URL" \
-    >/dev/null 2>&1 || true
+  if [ -n "$AUTH_HEADER" ]; then
+    wget -q -O /dev/null \
+      --timeout=5 \
+      --header='Content-Type: application/json' \
+      --header="$AUTH_HEADER" \
+      --post-data="$ENVELOPE" \
+      "$SLAYZONE_AGENT_HOOK_URL" \
+      >/dev/null 2>&1 || true
+  else
+    wget -q -O /dev/null \
+      --timeout=5 \
+      --header='Content-Type: application/json' \
+      --post-data="$ENVELOPE" \
+      "$SLAYZONE_AGENT_HOOK_URL" \
+      >/dev/null 2>&1 || true
+  fi
 fi
 
 exit 0

@@ -62,6 +62,7 @@ import { registerTabsCreateRoute } from './tabs/create'
 import { registerTabsSplitRoute } from './tabs/split'
 import { registerTabsRenameRoute } from './tabs/rename'
 import { registerResolveSessionTaskRoute } from './sessions/resolve-task'
+import { registerRunnersJoinTokenRoute } from './runners/join-token'
 
 export type { RestApiDeps } from './types'
 
@@ -150,6 +151,10 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
 
   // Agent sessions (pool: session → bound task resolution for the slay CLI)
   registerResolveSessionTaskRoute(app, deps)
+
+  // Runners (hub/runner split): loopback join-token mint for the MAIN process's
+  // boot-time local-runner auto-enroll. 503 when fleet mode is off (default).
+  registerRunnersJoinTokenRoute(app, deps)
 
   // Browser
   registerBrowserUrlRoute(app, deps)

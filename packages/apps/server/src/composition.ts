@@ -779,6 +779,18 @@ export function composeServer(opts: {
     verifyTaskToken: isFleetEnabled
       ? (token: string) => verifyTaskToken(fleetSecret, token)
       : undefined,
+    // Fleet listener info for the loopback `POST /api/runners/join-token` route
+    // (Wave3.5-D3) — the MAIN process's boot-time auto-enroll mints through it
+    // (no tRPC client in main). Closed over the SAME late-bound refs the runners
+    // registry reads (setFleetListenerInfo feeds them once the /fleet listener
+    // binds). Wired ONLY under fleet mode; absent → the route 503s and nothing
+    // mints, so the default boot is byte-identical.
+    runners: isFleetEnabled
+      ? {
+          getHubUrl: () => fleetHubUrl,
+          getCertFingerprint: () => fleetCertFingerprint
+        }
+      : undefined,
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's
     // bus → renderer); only the window raise is bridged to the Electron host.

@@ -48,4 +48,15 @@ export default function globalSetup(): void {
     fs.symlinkSync(path.join('..', '..', 'server'), linkPath)
     console.log('[global-setup] Created out/server symlink for the side-car')
   }
+
+  // Same shape for the local runner (hub/runner split): its dev scriptPath
+  // (`app.getAppPath()/../runner/dist/bin.cjs`) resolves to out/runner/... under
+  // Playwright, so the fleet-loopback auto-enroll spec can find the bundle the
+  // runner build produced at packages/apps/runner/dist. Idempotent.
+  const runnerLinkPath = path.join(appDir, 'out', 'runner')
+  if (!fs.existsSync(runnerLinkPath)) {
+    fs.mkdirSync(path.dirname(runnerLinkPath), { recursive: true })
+    fs.symlinkSync(path.join('..', '..', 'runner'), runnerLinkPath)
+    console.log('[global-setup] Created out/runner symlink for the local runner')
+  }
 }

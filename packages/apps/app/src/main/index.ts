@@ -547,6 +547,119 @@ function getSidecarStatusSnapshot(): import('./sidecar-server-supervisor').Sidec
 function revealSidecarLogInFinder(): void {
   shell.showItemInFolder(join(ensureDataRoot(), 'logs', 'sidecar.log'))
 }
+
+/**
+ * Mint a runner join token over LOOPBACK REST against the sidecar (hub/runner
+ * split, Wave3.5-D3). Retries while the fleet listener is still binding — the
+ * sidecar reports "ready" (health) as soon as its shared http server listens,
+ * but the SEPARATE /fleet wss listener binds a beat later + only THEN feeds its
+ * url/fingerprint to the runners registry (server.ts), so `/api/runners/join-token`
+ * 503s until then. Returns the token + wss url, or null once the budget is spent.
+ */
+async function mintLocalRunnerJoinToken(
+  sidecarPort: number
+): Promise<{ token: string; hubUrl: string } | null> {
+  const url = `http://127.0.0.1:${sidecarPort}/api/runners/join-token`
+  const MAX_ATTEMPTS = 40
+  const RETRY_DELAY_MS = 1000
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label: process.env.SLAYZONE_RUNNER_NAME ?? 'local-runner' })
+      })
+      if (res.ok) {
+        const body = (await res.json()) as { token?: unknown; hubUrl?: unknown }
+        if (typeof body.token === 'string' && typeof body.hubUrl === 'string') {
+          return { token: body.token, hubUrl: body.hubUrl }
+        }
+        logBoot('[local-runner] mint response malformed — giving up')
+        return null
+      }
+      // 503 = fleet listener not bound yet → keep retrying. Any other status is a
+      // hard error (misconfig / fleet off despite the gate) → stop.
+      if (res.status !== 503) {
+        logBoot(`[local-runner] mint failed status=${res.status} — not retrying`)
+        return null
+      }
+    } catch {
+      // Connection refused / sidecar mid-restart → retry.
+    }
+    if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
+  }
+  logBoot(`[local-runner] mint timed out after ${MAX_ATTEMPTS} attempts`)
+  return null
+}
+
+/**
+ * Boot-time local-runner auto-enroll (Wave3.5-D3). Waits for the sidecar to be
+ * ready, mints a join token over loopback REST, then spawns the co-located
+ * runner with the token + wss hub url injected → it dials + enrolls with ZERO
+ * manual config. Called ONLY under the fleet_mode gate (see the boot block); a
+ * mint failure leaves the runner unspawned (log-only, never crashes boot).
+ */
+async function startLocalRunnerWithAutoEnroll(): Promise<void> {
+  logBoot('local-runner auto-enroll: awaiting sidecar ready')
+  const handle = await sidecarHandlePromise
+  await handle.waitForReady()
+  const sidecarPort = handle.getPort()
+  if (!sidecarPort) {
+    logBoot('[local-runner] sidecar has no port after ready — skipping auto-enroll')
+    return
+  }
+
+  const minted = await mintLocalRunnerJoinToken(sidecarPort)
+  if (!minted) {
+    // Fleet just has no local runner — the user can still enroll remote runners
+    // via the UI. Do NOT spawn a token-less runner (it would only backoff-loop).
+    logBoot('[local-runner] no join token minted — leaving runner unspawned')
+    return
+  }
+
+  // The mint window (waitForReady + retries) can straddle an app quit: the quit
+  // drain already ran localRunnerCleanup (while it was still null), so spawning
+  // now would orphan a child no cleanup hook tracks. Skip if quit has drained.
+  if (quitDrainComplete) {
+    logBoot('[local-runner] app quitting — skipping runner spawn')
+    return
+  }
+
+  const { startLocalRunner } = await import('./local-runner-supervisor')
+  const runnerScriptPath = is.dev
+    ? join(app.getAppPath(), '../runner/dist/bin.cjs')
+    : join(process.resourcesPath, 'runner', 'bin.cjs')
+  // Keep the runner's credential store + allowed roots off any shared global
+  // path so parallel/isolated app instances (incl. e2e) never clobber each
+  // other. Creds land under the app data root; roots default to the user's home
+  // (local runner operates on the user's own projects) unless the operator
+  // overrides via SLAYZONE_RUNNER_ALLOWED_ROOTS.
+  const credentialsDir = join(ensureDataRoot(), 'runner-creds')
+  const handleRunner = startLocalRunner({
+    execPath: process.execPath,
+    scriptPath: runnerScriptPath,
+    env: {
+      ...process.env,
+      // Auto-enroll: the freshly minted token embeds the cert fingerprint the
+      // runner pins; SLAYZONE_HUB_URL is the wss /fleet listener url from the
+      // token/mint response. These OVERRIDE any inherited values so the local
+      // runner always dials THIS boot's hub.
+      SLAYZONE_HUB_URL: minted.hubUrl,
+      SLAYZONE_JOIN_TOKEN: minted.token,
+      SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? 'local-runner',
+      SLAYZONE_RUNNER_CREDENTIALS_DIR:
+        process.env.SLAYZONE_RUNNER_CREDENTIALS_DIR ?? credentialsDir,
+      SLAYZONE_RUNNER_ALLOWED_ROOTS:
+        process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS ?? homedir()
+    },
+    logger: (line) => logBoot(line),
+    onPermanentFailure: (info) => {
+      console.error('[local-runner] permanent failure (fleet-mode, non-fatal):', info)
+    }
+  })
+  localRunnerCleanup = () => void handleRunner.stop()
+  logBoot('local-runner supervisor started (auto-enrolled)')
+}
 let quitDrainComplete = false
 let quitSubprocessCleanupPromise: Promise<void> | null = null
 const QUIT_SUBPROCESS_TERM_GRACE_MS = 1500
@@ -2156,66 +2269,37 @@ app
         })
     })
 
-    // Local-runner supervisor (hub/runner split, wave 2B). Spawns a co-located
-    // @slayzone/runner subprocess so THIS machine can host runner work, pointed
-    // at the local hub's fleet URL. Gated STRICTLY on boot-config `fleet_mode`
-    // (default off) AND local mode (remote mode has no local hub to dial): when
-    // off, NOTHING new spawns — byte-identical boot. Skipped under Playwright so
-    // e2e never launches a runner — UNLESS a fleet-loopback spec explicitly opts
-    // in via `SLAYZONE_E2E_ALLOW_RUNNER=1` (mirrors the `SLAYZONE_E2E_INSTALL_HOOKS`
+    // Local-runner supervisor (hub/runner split, wave 3.5-D3). Spawns a
+    // co-located @slayzone/runner subprocess so THIS machine can host runner
+    // work, pointed at the local hub's fleet URL — and AUTO-ENROLLS it with zero
+    // manual token. Gated STRICTLY on boot-config `fleet_mode` (default off) AND
+    // local mode (remote mode has no local hub to dial): when off, NOTHING new
+    // spawns — byte-identical boot. Skipped under Playwright so e2e never launches
+    // a runner — UNLESS a fleet-loopback spec explicitly opts in via
+    // `SLAYZONE_E2E_ALLOW_RUNNER=1` (mirrors the `SLAYZONE_E2E_INSTALL_HOOKS`
     // opt-in below); the default e2e path still skips the runner, byte-identical.
     // Off the boot critical path (setImmediate); failure is log-only.
     //
-    // Join token: DEFERRED. Auto-minting one at boot is circular (the token must
-    // be minted against the hub identity, which the sidecar owns, and delivered
-    // before the runner dials) — validating that auto-enroll handshake is a
-    // wave-2 integration follow-up. For now the token is read from the
-    // SLAYZONE_JOIN_TOKEN env var (operator-supplied); absent ⇒ the runner still
-    // spawns but its dialer fails auth and backs off (the runner's own fatal-auth
-    // handling), which is the correct dark behavior — no half-wired minting.
+    // The auto-enroll resolves the circular problem the wave-2 skeleton deferred:
+    // main has NO tRPC client to the sidecar (the capability bridge only flows
+    // sidecar→main), and the fleet /fleet wss URL is on an OS-assigned port main
+    // never learns. So main waits for the sidecar to report ready, then mints a
+    // join token over LOOPBACK REST (`POST /api/runners/join-token`, which wraps
+    // the same store logic as the runners tRPC proc + returns the wss fleet URL).
+    // It injects that token + url into the runner env; the runner decodes the
+    // token → cert fingerprint → dials wss with pinning → enrolls. If minting
+    // fails after retries (fleet listener never bound, etc.) the runner is left
+    // UNSPAWNED — boot never crashes; the user can still enroll remote runners
+    // via the UI.
     if (
       bootConfig.fleet_mode === true &&
       !isRemoteMode &&
       (!process.env.PLAYWRIGHT || process.env.SLAYZONE_E2E_ALLOW_RUNNER === '1')
     ) {
       setImmediate(() => {
-        logBoot('local-runner supervisor import dispatched')
-        import('./local-runner-supervisor')
-          .then(({ startLocalRunner }) => {
-            const runnerScriptPath = is.dev
-              ? join(app.getAppPath(), '../runner/dist/bin.cjs')
-              : join(process.resourcesPath, 'runner', 'bin.cjs')
-            const handle = startLocalRunner({
-              execPath: process.execPath,
-              scriptPath: runnerScriptPath,
-              env: {
-                ...process.env,
-                // Fleet WS endpoint the runner dials. DEFERRED, same as the token:
-                // the hub's /fleet listener is muxed onto the sidecar's tRPC port
-                // (OS-assigned), which THIS process cannot know at boot without a
-                // discovery hop — so there is no correct URL to hardcode here. The
-                // operator supplies SLAYZONE_HUB_URL (+ SLAYZONE_JOIN_TOKEN); the
-                // wave-2 integration follow-up wires real URL/token discovery. When
-                // both are absent the runner's config load fails fast and the
-                // supervisor backs off — correct dark behavior, no live enroll.
-                SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? 'local-runner'
-                // SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN / SLAYZONE_RUNNER_ALLOWED_ROOTS
-                // flow through from process.env when the operator sets them.
-              },
-              logger: (line) => logBoot(line),
-              onPermanentFailure: (info) => {
-                console.error(
-                  '[local-runner] permanent failure (fleet-mode, non-fatal):',
-                  info
-                )
-              }
-            })
-            localRunnerCleanup = () => void handle.stop()
-            logBoot('local-runner supervisor started')
-          })
-          .catch((err) => {
-            console.error('[local-runner] Failed to start supervisor:', err)
-          })
+        void startLocalRunnerWithAutoEnroll().catch((err) => {
+          console.error('[local-runner] auto-enroll failed (fleet-mode, non-fatal):', err)
+        })
       })
     }
 

@@ -25,18 +25,18 @@ import { launchIsolatedElectron } from '../fixtures/electron'
  *      spawn → runner node-pty → `pty.data` → hub → renderer buffer, so the
  *      command's output streams back into `pty.getBuffer`.
  *
- * This is approach (b) from the unit brief (spawn the runner DIRECTLY rather
- * than let the app supervisor spawn it): the in-app supervisor spawns at boot,
- * BEFORE the OS-assigned fleet URL/token exist (the supervisor code itself
- * documents this as circular / DEFERRED), so it could only ever spawn a
- * token-less runner that fast-fails — no enroll to assert on. A direct spawn
- * against a token minted AFTER the listener binds is the deterministic path.
- *
- * The supervisor opt-in switch (`SLAYZONE_E2E_ALLOW_RUNNER`, wired in index.ts +
- * the electron.ts allowlist) is therefore NOT enabled here: turning it on would
- * only add a token-less runner backoff-looping in the background (noise, no
- * assertion value). The switch stays available for a future auto-enroll spec
- * (approach a) once boot-time token discovery lands.
+ * Two tests share this fleet-ON boot:
+ *   (b) MANUAL runner — mint a token via the tRPC proc, spawn the bundled runner
+ *       DIRECTLY as a loopback child, assert enroll + a pty round-trips output.
+ *       The deterministic full-loop baseline.
+ *   (a) AUTO-ENROLL runner (Wave3.5-D3) — set `SLAYZONE_E2E_ALLOW_RUNNER=1` so
+ *       the in-app supervisor spawns the runner itself: main waits for the
+ *       sidecar ready, mints a token over loopback REST (`POST
+ *       /api/runners/join-token`), injects it + the wss url into the runner env,
+ *       and the runner auto-enrolls with ZERO manual token/spawn. Asserts the
+ *       local runner reaches "connected" in `runners.list`. (The full pty-exec
+ *       round-trip stays on the manual test (b) — auto-enroll timing to a live
+ *       pty is the flaky part; connected is the D3 contract.)
  *
  * Isolation: `launchIsolatedElectron` gives a throwaway userdata dir, and the
  * spec pins `SLAYZONE_STORE_DIR` to it (via the fixture's extraEnv) so the
@@ -191,8 +191,8 @@ base.describe('Fleet loopback (fleet ON)', () => {
       // Past the SLAYZONE_*/ELECTRON_* strip: light fleet mode in the sidecar
       // and pin its store to the isolated dir (identity + hub-auth.sqlite land
       // here, NOT the real dev store). We do NOT set SLAYZONE_E2E_ALLOW_RUNNER
-      // (see header) — the assertions ride our explicitly-spawned loopback
-      // runner whose token we mint post-listener-bind.
+      // in THIS test (the auto-enroll test below does) — here the assertions ride
+      // our explicitly-spawned loopback runner whose token we mint post-bind.
       extraEnv: (userDataDir) => ({
         SLAYZONE_FLEET_MODE: '1',
         SLAYZONE_STORE_DIR: userDataDir
@@ -351,6 +351,115 @@ base.describe('Fleet loopback (fleet ON)', () => {
         .toBe(true)
     } finally {
       if (runner) await runner.stop()
+      await launched.close()
+    }
+  })
+
+  base('in-app supervisor auto-enrolls a local runner with zero manual token (D3)', async () => {
+    base.setTimeout(180_000)
+    ensureRunnerBuilt()
+
+    // Fleet-ON boot WITH the runner-supervisor opt-in. The in-app supervisor
+    // (index.ts, gated on fleet_mode + SLAYZONE_E2E_ALLOW_RUNNER under Playwright)
+    // waits for the sidecar ready, mints a join token over loopback REST, and
+    // spawns + auto-enrolls the co-located runner — no manual mint/spawn here.
+    const launched = await launchIsolatedElectron({
+      name: 'fleet-auto-enroll',
+      seedUserData: (userDataDir) => {
+        fs.writeFileSync(
+          path.join(userDataDir, 'boot-config.json'),
+          JSON.stringify({ server_mode: 'local', fleet_mode: true }, null, 2)
+        )
+      },
+      extraEnv: (userDataDir) => ({
+        SLAYZONE_FLEET_MODE: '1',
+        SLAYZONE_STORE_DIR: userDataDir,
+        // Opt the runner supervisor back in despite PLAYWRIGHT (default skips it).
+        SLAYZONE_E2E_ALLOW_RUNNER: '1',
+        // Keep the auto-spawned runner's node-pty ABI matching + roots/creds
+        // confined to the isolated dir (main defaults roots to $HOME otherwise).
+        SLAYZONE_RUNNER_NAME: 'auto-enroll-runner',
+        SLAYZONE_RUNNER_ALLOWED_ROOTS: userDataDir,
+        SLAYZONE_RUNNER_CREDENTIALS_DIR: path.join(userDataDir, 'auto-runner-creds')
+      })
+    })
+
+    try {
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+
+      // The whole chain is automatic: sidecar ready → main mints over loopback
+      // REST → runner spawns → dials wss → enrolls. Poll runners.list until the
+      // auto-spawned runner reports connected. Generous budget: it waits on the
+      // async fleet init (createHubAuth migrations) + listener bind + a mint
+      // retry cycle + the runner build/spawn/dial.
+      let connectedRunnerId: string | null = null
+      await expect
+        .poll(
+          async () => {
+            const rows = await listRunners(page)
+            const mine = rows.find((r) => r.name === 'auto-enroll-runner' && r.connected)
+            connectedRunnerId = mine?.id ?? null
+            return connectedRunnerId !== null
+          },
+          { timeout: 120_000, intervals: [1_000, 2_000, 3_000] }
+        )
+        .toBe(true)
+      expect(connectedRunnerId).not.toBeNull()
+    } finally {
+      await launched.close()
+    }
+  })
+
+  base('fleet OFF: no runner auto-spawns + the fleet path stays dark (byte-identical)', async () => {
+    base.setTimeout(120_000)
+
+    // DEFAULT boot: server_mode local, fleet_mode OFF. Even WITH the runner
+    // supervisor opt-in set, the gate (`bootConfig.fleet_mode === true`) is false
+    // → the auto-enroll block never runs → no runner spawns, and the sidecar's
+    // fleet gateway / listener / runners registry are never wired. Proving both:
+    // no runner ever connects, AND mintJoinToken is unavailable (fleet dark).
+    const launched = await launchIsolatedElectron({
+      name: 'fleet-off',
+      seedUserData: (userDataDir) => {
+        fs.writeFileSync(
+          path.join(userDataDir, 'boot-config.json'),
+          JSON.stringify({ server_mode: 'local', fleet_mode: false }, null, 2)
+        )
+      },
+      // Set the runner opt-in on purpose: proves the fleet_mode gate — not the
+      // Playwright skip — is what keeps the runner unspawned when fleet is off.
+      // No SLAYZONE_FLEET_MODE → the sidecar boots fleet-off (byte-identical).
+      extraEnv: (userDataDir) => ({
+        SLAYZONE_STORE_DIR: userDataDir,
+        SLAYZONE_E2E_ALLOW_RUNNER: '1'
+      })
+    })
+
+    try {
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+
+      // Give the (would-be) auto-enroll ample time to NOT happen.
+      await page.waitForTimeout(8_000)
+
+      // No runner ever connects — the supervisor block never ran.
+      const rows = await listRunners(page)
+      expect(rows.filter((r) => r.connected).length).toBe(0)
+
+      // The fleet mint path is dark: mintJoinToken throws when fleet mode is off
+      // (the runners registry was never populated). This is the same clean-fail
+      // the runners router documents for fleet-off.
+      const mintThrew = await page.evaluate(async () => {
+        try {
+          await window.getTrpcVanillaClient().runners.mintJoinToken.mutate({ label: 'x' })
+          return false
+        } catch {
+          return true
+        }
+      })
+      expect(mintThrew).toBe(true)
+    } finally {
       await launched.close()
     }
   })
