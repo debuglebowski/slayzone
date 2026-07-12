@@ -23,9 +23,12 @@ import { FleetErrorCodes, RpcError } from '@slayzone/fleet/shared'
 import { type HubAuth, mintRunnerApiKey, verifyRunnerApiKey } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
+  deterministicLocalRunnerId,
   getRunner,
   hashJoinToken,
+  registerOrReplaceRunner,
   registerRunner,
+  retireStaleLocalRunners,
   touchRunnerLastSeen,
   verifyJoinToken
 } from '@slayzone/runners/server'
@@ -50,6 +53,16 @@ export interface FleetAuthAdapterDeps {
    * instead of failing `used`. Default 5 minutes.
    */
   reenrollGraceMs?: number
+  /**
+   * Name of the co-located ("local") auto-spawned runner (Wave3.5-D5). When an
+   * enroll arrives for THIS name, the runner is treated as local: it gets a
+   * DETERMINISTIC id (`deterministicLocalRunnerId`) + an UPSERT register, and any
+   * OTHER rows sharing this name (historical duplicates from the pre-fix boots)
+   * are retired — collapsing the local runner to a single row. ALL other names
+   * (remote runners) keep the fresh-uuid INSERT path untouched. Absent ⇒ no name
+   * is treated as local (every enroll is a plain remote INSERT, prior behavior).
+   */
+  localRunnerName?: string
   /** Clock override (tests). Defaults to `Date.now`. */
   now?: () => number
 }
@@ -85,6 +98,7 @@ export function createFleetAuthAdapters(deps: FleetAuthAdapterDeps): FleetAuthAd
   const { db, auth } = deps
   const graceMs = deps.reenrollGraceMs ?? DEFAULT_REENROLL_GRACE_MS
   const now = deps.now ?? Date.now
+  const localRunnerName = deps.localRunnerName
 
   const grace = new Map<string, GraceEntry>()
 
@@ -114,21 +128,43 @@ export function createFleetAuthAdapters(deps: FleetAuthAdapterDeps): FleetAuthAd
       )
     }
 
-    // Mint the runnerId here so the API key can carry it as metadata, then mint
-    // the key BEFORE registering the runner — the store persists `auth_key_id`
-    // only at row creation (it exposes no post-hoc update), so the key id must be
-    // known first.
-    const runnerId = randomUUID()
+    // Local vs remote enroll (Wave3.5-D5). The co-located auto-spawned runner is
+    // identified purely by its NAME (localRunnerName); it gets a DETERMINISTIC id
+    // + an UPSERT so a re-enroll collapses onto its own single row rather than
+    // accumulating an orphan per boot. Every other name is a REMOTE runner and
+    // keeps the fresh-uuid INSERT path — a disconnected remote laptop is never
+    // touched or deduped.
+    const isLocal = localRunnerName !== undefined && params.name === localRunnerName
+    const runnerId = isLocal ? deterministicLocalRunnerId(params.name) : randomUUID()
+
+    // Mint the key BEFORE registering — the store persists `auth_key_id` only at
+    // write time, so the key id must be known first.
     const minted = await mintRunnerApiKey(auth, { runnerId, name: params.name })
-    await registerRunner(db, {
-      id: runnerId,
-      name: params.name,
-      platform: params.platform,
-      version: params.version,
-      capabilities: toCapabilityMap(params.capabilities),
-      authKeyId: minted.keyId,
-      now: at
-    })
+    if (isLocal) {
+      await registerOrReplaceRunner(db, {
+        id: runnerId,
+        name: params.name,
+        platform: params.platform,
+        version: params.version,
+        capabilities: toCapabilityMap(params.capabilities),
+        authKeyId: minted.keyId,
+        now: at
+      })
+      // One-time (idempotent) collapse of any pre-fix duplicate local rows: retire
+      // every OTHER row sharing the local name. No-op once collapsed. Identity-only
+      // (by name) — never status-based, never touches a remote runner.
+      await retireStaleLocalRunners(db, { name: params.name, keepRunnerId: runnerId })
+    } else {
+      await registerRunner(db, {
+        id: runnerId,
+        name: params.name,
+        platform: params.platform,
+        version: params.version,
+        capabilities: toCapabilityMap(params.capabilities),
+        authKeyId: minted.keyId,
+        now: at
+      })
+    }
 
     grace.set(key, { runnerId, apiKey: minted.key, expiresAt: at + graceMs })
     return { runnerId, apiKey: minted.key }

@@ -43,7 +43,9 @@ import {
   defaultWorktreeExecAdapters,
   startArtifactWatcher,
   purgeStaleAndOrphanedTasks,
-  handleAttentionTransition
+  handleAttentionTransition,
+  registerConversationHealer,
+  registerConversationResolver
 } from '@slayzone/task/server'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
@@ -120,7 +122,7 @@ import {
   type HubFleetGateway
 } from '@slayzone/fleet/server'
 import { createHubAuth, verifyTaskToken, type HubAuth } from '@slayzone/hub-auth/server'
-import { resolveTaskRunnerId } from '@slayzone/runners/server'
+import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runners/server'
 import { createFleetAuthAdapters } from './fleet-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 
@@ -301,6 +303,15 @@ export function composeServer(opts: {
   // host's handler only sees its own (empty) session maps post-cutover.
   setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
   setTaskDeps({ ops: taskOps, onMutation: notifyRenderer })
+
+  // Conversation self-heal + authoritative resolver. `createPty` runs in THIS
+  // process post-slice-9, so the healer/resolver seams it calls must be wired
+  // here — pre-fix they were registered only in the Electron host, leaving the
+  // sidecar's copy null: a stale/phantom conversation id then looped `--resume`
+  // ("No conversation found") forever with no self-heal. Same orphaned-listener
+  // class as the state-change consumers wired just below.
+  registerConversationHealer(db, notifyRenderer)
+  registerConversationResolver(db)
 
   // Terminal state-change consumers: task auto-move + the needs_attention flag.
   // Both listened in the Electron host pre-cutover and regressed dead at slice 9
@@ -871,7 +882,17 @@ export function composeServer(opts: {
         secret: fleetSecret
       })
       hubAuthRef = hubAuth
-      const fleetGateway = createHubFleetGateway(createFleetAuthAdapters({ db, auth: hubAuth }))
+      // Identity-based local-runner dedup (Wave3.5-D5): tell the auth adapters
+      // which enroll name is the co-located auto-spawned runner so it collapses to
+      // ONE deterministic-id row instead of orphaning one per boot. MUST match the
+      // name main injects at auto-enroll — both read the SHARED
+      // DEFAULT_LOCAL_RUNNER_NAME const (and honor the SAME SLAYZONE_RUNNER_NAME
+      // override), so they can't silently diverge. Remote runners (any other name)
+      // keep the fresh-uuid path.
+      const localRunnerName = process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME
+      const fleetGateway = createHubFleetGateway(
+        createFleetAuthAdapters({ db, auth: hubAuth, localRunnerName })
+      )
       fleetGatewayRef = fleetGateway
 
       // Route OS-level exec (pty/proc) to the resolved runner; a null runnerId

@@ -53,6 +53,7 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/projects": "workspace:*",
+    "@slayzone/runners": "workspace:*",
     "@slayzone/search": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/shortcuts": "workspace:*",

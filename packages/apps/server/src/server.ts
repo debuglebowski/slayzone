@@ -22,7 +22,7 @@ import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-so
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
 import { createLogger } from './log.js'
-import { claimMcpServerPort } from './port-claim.js'
+import { claimMcpServerPort, claimFleetServerPort, resolveDesiredFleetPort } from './port-claim.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
 
@@ -279,26 +279,54 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // stays dark (no listener info ⇒ `mintJoinToken` throws a clear error) until the
   // conflict is cleared + the sidecar restarts.
   if (fleetGateway && hubIdentity && fleetHttpsServer) {
-    const info = await startFleetListener({
-      server: fleetHttpsServer,
-      host,
-      fingerprintSha256Hex: hubIdentity.fingerprintSha256Hex,
-      ...(process.env.SLAYZONE_FLEET_PORT ? { fleetPortEnv: process.env.SLAYZONE_FLEET_PORT } : {}),
-      log,
-      onBindFailure: (error) => {
-        recordDiagnosticEvent({
-          level: 'error',
-          source: 'server',
-          event: 'fleet.listener_bind_failed',
-          message: error.message
-        })
-      }
-    })
+    // Resolve a STABLE fleet port (Wave3.5-D5): explicit SLAYZONE_FLEET_PORT >
+    // persisted settings.fleet_server_port > 0 (OS-assigned). Pinning the port
+    // keeps the `wss://host:<port>/fleet` URL — and thus the runner's credential
+    // key (hubHostFromUrl → host_port) — identical across reboots, so the local
+    // runner `hello`s back into its existing row instead of re-enrolling a new one.
+    const desiredFleetPort = await resolveDesiredFleetPort(db, process.env.SLAYZONE_FLEET_PORT)
+    const bindFleet = (portEnv: string): Promise<Awaited<ReturnType<typeof startFleetListener>>> =>
+      startFleetListener({
+        server: fleetHttpsServer!,
+        host,
+        fingerprintSha256Hex: hubIdentity.fingerprintSha256Hex,
+        fleetPortEnv: portEnv,
+        log,
+        onBindFailure: (error) => {
+          recordDiagnosticEvent({
+            level: 'error',
+            source: 'server',
+            event: 'fleet.listener_bind_failed',
+            message: error.message
+          })
+        }
+      })
+    let info = await bindFleet(String(desiredFleetPort))
+    // Robustness: a PINNED (non-zero) port that is stale-but-taken must NOT
+    // darken fleet permanently. When a non-zero pin fails, retry with an
+    // OS-assigned port (0) — same fallback the pre-pin default always had — and
+    // re-persist below so the next boot pins the new one. An explicit operator
+    // SLAYZONE_FLEET_PORT is intentionally NOT retried (respect the exact override
+    // + surface the conflict). startFleetListener closes the server on failure;
+    // the fleet-tls-listener test proves the same object rebinds cleanly after.
+    let fellBackFromPinned = false
+    if (!info && desiredFleetPort !== 0 && !process.env.SLAYZONE_FLEET_PORT) {
+      log(`fleet listener could not bind pinned port ${desiredFleetPort} — retrying OS-assigned`)
+      info = await bindFleet('0')
+      fellBackFromPinned = info !== null
+    }
     if (info) {
       composition.setFleetListenerInfo({
         hubUrl: info.hubUrl,
         certFingerprint: info.certFingerprint
       })
+      // Persist the actually-bound port so the next boot reuses it (claim-once-
+      // and-persist). Non-clobber guarded: won't overwrite a DIFFERENT port that
+      // still has a live listener — EXCEPT when we just fell back from a failed
+      // pinned bind, where the stored (conflicting) port is exactly what we must
+      // overwrite. `force` skips the guard so the fleet URL stops churning every
+      // boot. A same-value write (the steady-state reuse path) is a no-op.
+      await claimFleetServerPort(db, host, info.port, log, { force: fellBackFromPinned })
       log(`fleet listener ready on ${info.hubUrl}`)
     } else {
       // Bind failed → drop our refs so stop() does not try to re-close the (already

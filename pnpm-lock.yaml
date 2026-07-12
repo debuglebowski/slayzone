@@ -160,6 +160,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/runners':
+        specifier: workspace:*
+        version: link:../../domains/runners
       '@slayzone/search':
         specifier: workspace:*
         version: link:../../domains/search

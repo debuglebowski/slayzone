@@ -230,7 +230,9 @@ import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
   handleAttentionTransition,
-  taskOps
+  taskOps,
+  registerConversationHealer,
+  registerConversationResolver
 } from '@slayzone/task/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
@@ -293,6 +295,7 @@ import {
 } from './task-windows'
 import { createPtyEnricher, markTabSpawned, markTabHibernated } from '@slayzone/task-terminals/electron'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
+import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/runners/shared'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import {
   registerDiagnosticsHandlers,
@@ -334,7 +337,6 @@ import {
   readFilePaths,
   hasFilePaths
 } from './clipboard-handlers'
-import { registerConversationHealer, registerConversationResolver } from './conversation-healer'
 import {
   setProcessManagerWindow,
   initProcessManager,
@@ -567,7 +569,9 @@ async function mintLocalRunnerJoinToken(
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ label: process.env.SLAYZONE_RUNNER_NAME ?? 'local-runner' })
+        body: JSON.stringify({
+          label: process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME
+        })
       })
       if (res.ok) {
         const body = (await res.json()) as { token?: unknown; hubUrl?: unknown }
@@ -646,7 +650,7 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       // runner always dials THIS boot's hub.
       SLAYZONE_HUB_URL: minted.hubUrl,
       SLAYZONE_JOIN_TOKEN: minted.token,
-      SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? 'local-runner',
+      SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME,
       SLAYZONE_RUNNER_CREDENTIALS_DIR:
         process.env.SLAYZONE_RUNNER_CREDENTIALS_DIR ?? credentialsDir,
       SLAYZONE_RUNNER_ALLOWED_ROOTS:

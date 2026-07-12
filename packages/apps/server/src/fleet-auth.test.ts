@@ -23,7 +23,13 @@ import Database from 'better-sqlite3'
 import { FLEET_PROTOCOL_VERSION } from '@slayzone/fleet/shared'
 import { createHubAuth, RUNNER_KEY_PREFIX } from '@slayzone/hub-auth/server'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
-import { getRunner, listRunners, mintJoinToken, revokeRunner } from '@slayzone/runners/server'
+import {
+  deterministicLocalRunnerId,
+  getRunner,
+  listRunners,
+  mintJoinToken,
+  revokeRunner
+} from '@slayzone/runners/server'
 import { createSlayzoneDbAdapter } from '@slayzone/test-utils'
 import { runMigrations } from '@slayzone/transport/db-bootstrap'
 import { createFleetAuthAdapters } from './fleet-auth.js'
@@ -218,6 +224,78 @@ async function main(): Promise<void> {
         null,
         'revoked runner no longer authenticates'
       )
+    })
+
+    // --- Local-runner dedup (Wave3.5-D5) -----------------------------------
+    await test('LOCAL enroll uses a deterministic id + UPSERTs one row across relaunches', async () => {
+      const localAdapters = createFleetAuthAdapters({ db, auth, localRunnerName: 'local-runner' })
+      const before = (await listRunners(db)).filter((r) => r.name === 'local-runner').length
+
+      const t1 = await mintToken(db, 'local-1')
+      const first = await localAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'local-runner',
+        joinToken: t1
+      })
+      // A relaunch: a NEW join token (new port/creds) but the same local name.
+      const t2 = await mintToken(db, 'local-2')
+      const second = await localAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'local-runner',
+        joinToken: t2
+      })
+
+      assertEq(first.runnerId, deterministicLocalRunnerId('local-runner'), 'id is deterministic')
+      assertEq(second.runnerId, first.runnerId, 'relaunch keeps the SAME local runnerId')
+      assertEq(
+        (await listRunners(db)).filter((r) => r.name === 'local-runner').length,
+        before + 1,
+        'exactly one local runner row after two enrolls (no orphan)'
+      )
+    })
+
+    await test('a fresh LOCAL enroll collapses PRE-EXISTING duplicate local rows to one', async () => {
+      const localAdapters = createFleetAuthAdapters({ db, auth, localRunnerName: 'dup-local' })
+      // Seed the pre-fix state: two random-id rows named 'dup-local' (orphans from
+      // prior boots) via the REMOTE (fresh-uuid) path, imitating the historical bug.
+      const remoteAdapters = createFleetAuthAdapters({ db, auth }) // no localRunnerName
+      await remoteAdapters.verifyEnrollment({ ...ENROLL_BASE, name: 'dup-local', joinToken: await mintToken(db, 'd1') })
+      await remoteAdapters.verifyEnrollment({ ...ENROLL_BASE, name: 'dup-local', joinToken: await mintToken(db, 'd2') })
+      assert(
+        (await listRunners(db)).filter((r) => r.name === 'dup-local').length === 2,
+        'two orphaned local rows seeded'
+      )
+
+      // The next fleet-enabled boot enrolls the local runner → cleanup collapses.
+      const enrolled = await localAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'dup-local',
+        joinToken: await mintToken(db, 'd3')
+      })
+      const localRows = (await listRunners(db)).filter((r) => r.name === 'dup-local')
+      assertEq(localRows.length, 1, 'collapsed to a single local row')
+      assertEq(localRows[0].id, enrolled.runnerId, 'the surviving row is the deterministic-id one')
+      assertEq(localRows[0].id, deterministicLocalRunnerId('dup-local'), 'kept the deterministic id')
+    })
+
+    await test('REMOTE enroll keeps a fresh uuid + is never deduped by the local path', async () => {
+      // A hub configured with a local name; a REMOTE runner (different name) must
+      // NOT get the deterministic id and NEVER be retired.
+      const localAdapters = createFleetAuthAdapters({ db, auth, localRunnerName: 'the-local' })
+      const r1 = await localAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'remote-alpha',
+        joinToken: await mintToken(db, 'r1')
+      })
+      const r2 = await localAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'remote-beta',
+        joinToken: await mintToken(db, 'r2')
+      })
+      assert(r1.runnerId !== deterministicLocalRunnerId('remote-alpha'), 'remote id is a fresh uuid')
+      // Both remote runners survive — dedup is scoped to the single local name only.
+      assert((await getRunner(db, r1.runnerId)) !== null, 'remote-alpha survives')
+      assert((await getRunner(db, r2.runnerId)) !== null, 'remote-beta survives')
     })
   } finally {
     close()

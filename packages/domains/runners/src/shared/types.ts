@@ -3,6 +3,22 @@
  * (snake_case columns), matching the store's SELECT * reads.
  */
 
+/**
+ * Name of the co-located ("local") auto-spawned runner (Wave3.5-D5). This is the
+ * SINGLE source of truth shared by BOTH sides of the local-runner dedup so they
+ * can never silently diverge:
+ *   - the Electron MAIN process injects it as `SLAYZONE_RUNNER_NAME` into the
+ *     runner child (its enroll `name`), and
+ *   - the sidecar composition passes it as `localRunnerName` to the fleet-auth
+ *     adapters (which treat an enroll for THIS name as the local runner → gets a
+ *     deterministic id + UPSERT + duplicate collapse).
+ * If these two ever disagree the dedup silently disables (every local enroll
+ * takes the remote fresh-uuid path → an orphan per boot), so both read this const
+ * (each still honors an explicit `SLAYZONE_RUNNER_NAME` override — but the SAME
+ * env var feeds both sides, so an override stays consistent too).
+ */
+export const DEFAULT_LOCAL_RUNNER_NAME = 'local-runner'
+
 /** Lifecycle of a runner's checkout of a project. */
 export type RunnerCheckoutStatus = 'pending' | 'cloning' | 'ready' | 'error'
 
