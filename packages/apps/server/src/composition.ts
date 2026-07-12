@@ -51,6 +51,7 @@ import {
   createDbPtySpawnLookups,
   setPtyBackend,
   setPtySpawnLookups,
+  setRemoteMcpEnvProvider,
   localPtyBackend,
   ptyEvents,
   createChatOps,
@@ -118,9 +119,10 @@ import {
   createRemoteWorktreeAdapters,
   type HubFleetGateway
 } from '@slayzone/fleet/server'
-import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import { createHubAuth, verifyTaskToken, type HubAuth } from '@slayzone/hub-auth/server'
 import { resolveTaskRunnerId } from '@slayzone/runners/server'
 import { createFleetAuthAdapters } from './fleet-auth.js'
+import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 
 /**
  * Composition root for the standalone server: populates every transport
@@ -200,6 +202,12 @@ export function composeServer(opts: {
   // stays hub-local via the seams' local defaults). A later unit replaces this
   // env probe with the real boot-config field. Runner routing is opt-in.
   const isFleetEnabled = process.env.SLAYZONE_FLEET_MODE === '1'
+  // Single HMAC secret backing ALL hub-auth signing: better-auth's session/cookie
+  // signer (createHubAuth) AND the per-task bearer tokens the remote-MCP-env
+  // provider mints (mintTaskToken) / the agent-hook route verifies
+  // (verifyTaskToken). Hoisted so all three use ONE secret — a mismatch would make
+  // every minted token unverifiable. Same env default as before the hoist.
+  const fleetSecret = process.env.SLAYZONE_FLEET_SECRET ?? 'slayzone-dev-fleet-secret'
   // Populated by the async fleet init (createHubAuth is async — migrations); a
   // later unit reads these after `fleetReady` to mount the gateway in server.ts.
   let fleetGatewayRef: HubFleetGateway | null = null
@@ -764,6 +772,13 @@ export function composeServer(opts: {
     agentLifecycle: agentLifecycleEvents,
     menu: menuEvents,
     taskBus,
+    // Fleet mode only: enforce the per-task hub bearer a runner-routed pty's hook
+    // carries. Verifier is closed over `fleetSecret` (the SAME secret the provider
+    // above mints with). Undefined when fleet is off → the agent-hook route skips
+    // enforcement (loopback hooks, which send no bearer, stay byte-identical).
+    verifyTaskToken: isFleetEnabled
+      ? (token: string) => verifyTaskToken(fleetSecret, token)
+      : undefined,
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's
     // bus → renderer); only the window raise is bridged to the Electron host.
@@ -825,11 +840,23 @@ export function composeServer(opts: {
       getHubUrl: () => fleetHubUrl,
       getCertFingerprint: () => fleetCertFingerprint
     })
+
+    // Remote-MCP-env provider (hub/runner split, wave 3.5). Wired synchronously
+    // here — it depends only on boundPort (read LAZILY inside the closure) +
+    // fleetSecret, neither of which needs the async gateway — so a runner-routed
+    // pty spawned before `fleetReady` resolves still gets a valid hub env. With
+    // no provider (fleet OFF) `resolveRemoteMcpEnv` short-circuits to null and
+    // every spawn keeps today's loopback env, byte-identical. See
+    // `createRemoteMcpEnvProvider` for hubBaseUrl derivation + SLAYZONE_HUB_PUBLIC_URL.
+    setRemoteMcpEnvProvider(
+      createRemoteMcpEnvProvider({ fleetSecret, getBoundPort: () => boundPort })
+    )
+
     fleetReady = (async () => {
       const hubAuth = await createHubAuth({
         dbPath: join(dataRoot, 'hub-auth.sqlite'),
         baseURL: process.env.SLAYZONE_FLEET_BASE_URL ?? 'http://127.0.0.1:8788',
-        secret: process.env.SLAYZONE_FLEET_SECRET ?? 'slayzone-dev-fleet-secret'
+        secret: fleetSecret
       })
       hubAuthRef = hubAuth
       const fleetGateway = createHubFleetGateway(createFleetAuthAdapters({ db, auth: hubAuth }))

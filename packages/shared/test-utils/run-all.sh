@@ -85,6 +85,8 @@ run_test_electron_strict_loader packages/domains/diagnostics/src/electron/servic
 run_test packages/apps/server/src/build-info.test.ts
 # mcp_server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/server/src/port-claim.test.ts
+# Wave-3.5 remote-mcp-env provider (fleet-mode hub URL + scoped task token).
+run_test packages/apps/server/src/remote-mcp-env-provider.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
@@ -236,6 +238,8 @@ run_test_electron_loader packages/apps/cli/test/tasks-ext.test.ts
 run_test_electron_loader packages/apps/cli/test/projects-update.test.ts
 # Wave-3 CLI read commands routed through REST (hub-aware cutover).
 run_test_electron_loader packages/apps/cli/test/cli-read-rest.test.ts
+# Wave-3.5 CLI artifact metadata commands routed through REST.
+run_test_electron_loader packages/apps/cli/test/cli-artifacts-rest.test.ts
 
 if [ -n "$LINEAR_API_KEY" ]; then
   run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.linear.test.ts
@@ -262,7 +266,8 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/settings/src/client/tabs/FleetSettingsTab.test.tsx \
   packages/domains/task/src/client/RunnerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
-  packages/domains/hub-auth/src/server/task-tokens.test.ts; then
+  packages/domains/hub-auth/src/server/task-tokens.test.ts \
+  packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))

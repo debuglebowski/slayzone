@@ -351,10 +351,27 @@ async function persistConversationId(
 }
 
 /**
+ * Extract the token from an `Authorization: Bearer <token>` header, or null when
+ * absent / not a bearer. Case-insensitive on the scheme; trims surrounding space.
+ * A local loopback hook (notify.sh with no SLAYZONE_HUB_TOKEN) sends no such
+ * header → null → the enforcement below is skipped (loopback path unchanged).
+ */
+function extractBearer(header: string | undefined): string | null {
+  if (!header) return null
+  const match = /^\s*Bearer\s+(.+)\s*$/i.exec(header)
+  const token = match?.[1]?.trim()
+  return token ? token : null
+}
+
+/**
  * Receives agent lifecycle pings from the bundled `notify.sh` hook script.
  *
- * Loopback-only (the MCP server binds to 127.0.0.1). No auth: blast radius
- * is renderer-side status updates and a future chime — matches Superset.
+ * Auth: loopback hooks (the local pty spawns bind the MCP server to 127.0.0.1
+ * and carry NO bearer) stay unauthed — blast radius is renderer-side status
+ * updates + a future chime. A pty routed to a REMOTE runner (hub/runner split)
+ * instead posts to the HUB with a scoped `Authorization: Bearer` token; when
+ * fleet verification is wired (deps.verifyTaskToken), that bearer is enforced
+ * before any side effect (see the enforcement block below).
  *
  * Hot path: hooks fire 5-20× per turn (PreToolUse + PostToolUse per tool).
  * Must stay cheap. The ONLY DB write is the once-per-session `SessionStart`
@@ -380,6 +397,55 @@ export function registerAgentHookRoute(
       res.status(400).json({ ok: false, error: parsed.error.message })
       return
     }
+
+    // Per-task hub-bearer enforcement (hub/runner split, wave 3.5). A pty routed
+    // to a REMOTE runner posts its hook to the HUB carrying a scoped bearer
+    // (SLAYZONE_HUB_TOKEN → `Authorization: Bearer`). Enforced ONLY when BOTH a
+    // bearer is present AND fleet verification is wired (deps.verifyTaskToken):
+    //   - NO bearer  → proceed unchanged. Every LOCAL loopback hook takes this
+    //     path: the local buildMcpEnv branch never sets SLAYZONE_HUB_TOKEN, so
+    //     notify.sh sends no Authorization header → byte-identical to today.
+    //   - bearer + no verifier (fleet off) → also proceed unchanged (a stray
+    //     header must not lock out the loopback hook when fleet isn't even on).
+    //   - bearer + verifier → the token MUST verify AND its taskId claim MUST
+    //     match the payload's taskId, else reject (a token minted for task A
+    //     can't drive task B's session).
+    const bearer = extractBearer(req.headers.authorization)
+    if (bearer && deps.verifyTaskToken) {
+      const result = deps.verifyTaskToken(bearer)
+      if (!result.ok) {
+        // 401: the credential itself is bad (forged / malformed / expired).
+        // Record it: notify.sh is fire-and-forget (exit 0, output discarded), so
+        // a rejected/expired hub token would otherwise be invisible — the operator
+        // would see a remote session's state updates silently stop with no trace.
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'pty',
+          event: 'agent_hook.token_rejected',
+          taskId: parsed.data.taskId,
+          message: `invalid hub token: ${result.reason}`,
+          payload: { reason: result.reason, agentId: parsed.data.agentId }
+        })
+        res.status(401).json({ ok: false, error: `invalid hub token: ${result.reason}` })
+        return
+      }
+      if (parsed.data.taskId != null && result.claims.taskId !== parsed.data.taskId) {
+        // 403: a valid token, but scoped to a different task than it's driving.
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'pty',
+          event: 'agent_hook.token_scope_mismatch',
+          taskId: parsed.data.taskId,
+          message: 'hub token task scope does not match payload taskId',
+          payload: { tokenTaskId: result.claims.taskId, agentId: parsed.data.agentId }
+        })
+        res
+          .status(403)
+          .json({ ok: false, error: 'hub token task scope does not match payload taskId' })
+        return
+      }
+    }
+
     const type = mapEventType(parsed.data.hookEvent, parsed.data.agentId)
     if (!type) {
       // Unknown event → drop silently. Never default to Stop.
