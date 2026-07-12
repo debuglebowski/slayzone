@@ -3,6 +3,11 @@ import { hostname, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { assertPathAllowed, ENV_VARS, loadRunnerConfig } from './config'
+import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from './join-token'
+
+function mintToken(payload: JoinTokenPayload): string {
+  return `${JOIN_TOKEN_PREFIX}.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`
+}
 
 let dir: string
 
@@ -66,6 +71,81 @@ describe('loadRunnerConfig', () => {
 
   it('fails with a readable error when hubUrl is missing', () => {
     expect(() => loadRunnerConfig({})).toThrow(/SLAYZONE_HUB_URL/)
+  })
+
+  it('is self-sufficient from a join token alone (hubUrl + pin extracted)', () => {
+    const token = mintToken({
+      hubUrl: 'wss://hub.example:8443/fleet',
+      certFingerprint: 'a'.repeat(64),
+      secret: 's'
+    })
+    const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
+    expect(config.hubUrl).toBe('wss://hub.example:8443/fleet')
+    expect(config.pinnedCertSha256).toBe('a'.repeat(64))
+    expect(config.joinToken).toBe(token)
+  })
+
+  it('lets an explicit env hubUrl + pin override the join-token values', () => {
+    const token = mintToken({
+      hubUrl: 'wss://from-token/fleet',
+      certFingerprint: 'a'.repeat(64),
+      secret: 's'
+    })
+    const config = loadRunnerConfig({
+      [ENV_VARS.joinToken]: token,
+      [ENV_VARS.hubUrl]: 'wss://override.example/fleet',
+      [ENV_VARS.pinnedCertSha256]: 'b'.repeat(64)
+    })
+    expect(config.hubUrl).toBe('wss://override.example/fleet')
+    expect(config.pinnedCertSha256).toBe('b'.repeat(64))
+  })
+
+  it('ignores a malformed join token for fallback (schema still reports missing hubUrl)', () => {
+    expect(() => loadRunnerConfig({ [ENV_VARS.joinToken]: 'not-a-token' })).toThrow(
+      /SLAYZONE_HUB_URL/
+    )
+  })
+
+  it('fails fast when an EXPLICIT env pin is set on a ws:// hub url (no silent downgrade)', () => {
+    expect(() =>
+      loadRunnerConfig({
+        [ENV_VARS.hubUrl]: 'ws://hub.example/fleet',
+        [ENV_VARS.pinnedCertSha256]: 'a'.repeat(64)
+      })
+    ).toThrow(/requires a wss:\/\/ hub url/)
+  })
+
+  it('fails fast when an EXPLICIT config-file pin is set on a ws:// hub url', () => {
+    const filePath = join(dir, 'runner.json')
+    writeFileSync(
+      filePath,
+      JSON.stringify({ hubUrl: 'ws://hub.example/fleet', pinnedCertSha256: 'a'.repeat(64) })
+    )
+    expect(() => loadRunnerConfig({ [ENV_VARS.configFile]: filePath })).toThrow(
+      /requires a wss:\/\/ hub url/
+    )
+  })
+
+  it('does NOT fail when only the join-token pin lands on a ws:// url (soft auto path)', () => {
+    // A ws:// join token carries a fingerprint but the pin is NOT explicit — it is
+    // softly ignored downstream (startRunner), so config assembly must not throw.
+    const token = mintToken({
+      hubUrl: 'ws://127.0.0.1:9000/fleet',
+      certFingerprint: 'a'.repeat(64),
+      secret: 's'
+    })
+    const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
+    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/fleet')
+    // The decoded pin is still present in config; startRunner drops it for ws://.
+    expect(config.pinnedCertSha256).toBe('a'.repeat(64))
+  })
+
+  it('accepts an explicit pin on a wss:// hub url', () => {
+    const config = loadRunnerConfig({
+      [ENV_VARS.hubUrl]: 'wss://hub.example/fleet',
+      [ENV_VARS.pinnedCertSha256]: 'a'.repeat(64)
+    })
+    expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
   it('rejects malformed config files and non-integer heartbeat', () => {

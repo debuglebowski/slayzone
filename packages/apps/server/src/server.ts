@@ -1,4 +1,5 @@
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import {
@@ -16,6 +17,7 @@ import {
   openServerDiagnosticsDatabase
 } from './db.js'
 import { composeServer } from './composition.js'
+import { startFleetListener } from './fleet-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
@@ -99,13 +101,17 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // which would consume the body before better-auth sees it.
   const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
   // Hub TLS identity — loaded only under fleet mode (creates <dataRoot>/identity/
-  // on first run). For THIS unit its `fingerprintSha256Hex` is fed to the runners
-  // registry so `mintJoinToken` can pin it in a join token; the fleet WS listener
-  // itself stays plain `ws` on the shared HTTP server (see the demux below).
-  // TLS TERMINATION + actual cert-pinning ENFORCEMENT is DEFERRED to a follow-up:
-  // upgrading the muxed HTTP server to https risks the shared /trpc + /health +
-  // /mcp + REST-proxy stack, so we do not half-wire it here (the join token
-  // already carries the correct fingerprint for when TLS lands).
+  // on first run). Its `fingerprintSha256Hex` is fed to the runners registry so
+  // `mintJoinToken` can pin it in a join token, AND its key/cert terminate TLS on
+  // the SEPARATE https `/fleet` listener stood up below. Cert-pinning is enforced
+  // end-to-end: the hub presents this leaf, the runner pins its fingerprint (from
+  // the join token) before sending any fleet frame (see hub-dialer verifyPinnedCert).
+  //
+  // The /fleet listener is its OWN https server on its OWN port — the shared HTTP
+  // server (/trpc + /health + /mcp + /api + REST-proxy) stays plain http, so the
+  // renderer / CLI / e2e loopback assumptions are byte-identical. Upgrading the
+  // muxed server to https would have risked all of those; isolating fleet onto a
+  // second listener keeps the blast radius to fleet-mode-only.
   const hubIdentity = fleetGateway ? await loadOrCreateHubIdentity(dataRoot) : null
   if (fleetGateway) log('fleet mode enabled (gateway + hub-auth + identity loaded)')
 
@@ -180,36 +186,35 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     if (isAllowedWsOrigin(origin)) cb(true)
     else cb(false, 403, 'forbidden origin')
   }
-  // Fleet mode: the shared HTTP server must carry BOTH `/trpc` (browser renderer,
-  // origin-guarded) and `/fleet` (non-browser runners, authenticated via
-  // enroll/hello + join token, NOT Origin). A single `WebSocketServer({ server,
-  // path })` would `abortHandshake(400)` the other path, so we run both in
-  // `noServer` mode and demux upgrades ourselves. Default (fleet off) keeps the
-  // exact original single-WSS construction → byte-identical behavior.
-  let wss: WebSocketServer
+  // The shared HTTP server carries ONLY `/trpc` (browser renderer, origin-guarded).
+  // `/fleet` (non-browser runners) lives on a SEPARATE https listener stood up
+  // below — so the shared server's WSS is the exact single-WSS construction whether
+  // or not fleet mode is enabled → byte-identical behavior on the default path.
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: '/trpc',
+    verifyClient: verifyTrpcClient
+  })
+  // Fleet mode: `/fleet` runs on its OWN https server (TLS-terminated with the hub
+  // identity leaf) on its OWN port. Runners dial `wss://…/fleet` and pin the cert
+  // fingerprint (carried in their join token) BEFORE any fleet frame is sent
+  // (hub-dialer verifyPinnedCert). `noServer` — we demux `/fleet` ourselves so a
+  // stray path can't reach the gateway. Both null when fleet mode is off (no https
+  // server, no TLS termination) → shared http stack untouched.
   let fleetWss: WebSocketServer | null = null
-  if (fleetGateway) {
-    wss = new WebSocketServer({ noServer: true, verifyClient: verifyTrpcClient })
+  let fleetHttpsServer: HttpsServer | null = null
+  if (fleetGateway && hubIdentity) {
     fleetWss = new WebSocketServer({ noServer: true })
-    httpServer.on('upgrade', (req, socket, head) => {
+    fleetHttpsServer = createHttpsServer({ key: hubIdentity.keyPem, cert: hubIdentity.certPem })
+    fleetHttpsServer.on('upgrade', (req, socket, head) => {
       const pathname = (req.url ?? '').split('?')[0]
-      if (pathname === '/trpc') {
-        wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
-      } else if (pathname === '/fleet') {
-        // No origin allowlist here — runners are non-browser clients that
-        // authenticate via the fleet protocol (enroll/hello frames + join token),
-        // not Origin. TLS/cert-pinning is deferred (see hubIdentity note above);
-        // this is plain `ws` on the shared server for now.
+      if (pathname === '/fleet') {
+        // No origin allowlist — runners are non-browser clients authenticated via
+        // the fleet protocol (enroll/hello frames + join token), not Origin.
         fleetWss!.handleUpgrade(req, socket, head, (ws) => fleetGateway.handleConnection(ws))
       } else {
         socket.destroy()
       }
-    })
-  } else {
-    wss = new WebSocketServer({
-      server: httpServer,
-      path: '/trpc',
-      verifyClient: verifyTrpcClient
     })
   }
   const wssHandler = applyWSSHandler({
@@ -261,16 +266,46 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   state.port = actualPort
   state.ready = true
   composition.setBoundPort(actualPort)
-  // Fleet mode: now that the port is bound + the identity is loaded, feed the
-  // fleet WS URL + cert fingerprint to the runners registry so `mintJoinToken`
-  // can embed them. Plain `ws://` for now (TLS deferred — see hubIdentity note);
-  // the fingerprint is still the real one, so a future TLS listener can pin it.
-  if (fleetGateway && hubIdentity) {
-    composition.setFleetListenerInfo({
-      hubUrl: `ws://${host}:${actualPort}/fleet`,
-      certFingerprint: hubIdentity.fingerprintSha256Hex
+  // Fleet mode: bind the SEPARATE https `/fleet` listener on its own port (env
+  // `SLAYZONE_FLEET_PORT`, else OS-assigned), then feed the resulting `wss://` URL
+  // + cert fingerprint to the runners registry so `mintJoinToken` embeds them. The
+  // fingerprint is the real hub leaf, and the listener now actually terminates TLS
+  // with that leaf → the pin the runner extracts from its join token is enforced
+  // end-to-end.
+  //
+  // Fleet is OPT-IN, so a fleet-port conflict must NOT abort startup: on a bind
+  // failure `startFleetListener` closes the fleet listener + returns null, leaving
+  // the shared http server (/trpc,/health,/mcp,REST) fully functional. Fleet just
+  // stays dark (no listener info ⇒ `mintJoinToken` throws a clear error) until the
+  // conflict is cleared + the sidecar restarts.
+  if (fleetGateway && hubIdentity && fleetHttpsServer) {
+    const info = await startFleetListener({
+      server: fleetHttpsServer,
+      host,
+      fingerprintSha256Hex: hubIdentity.fingerprintSha256Hex,
+      ...(process.env.SLAYZONE_FLEET_PORT ? { fleetPortEnv: process.env.SLAYZONE_FLEET_PORT } : {}),
+      log,
+      onBindFailure: (error) => {
+        recordDiagnosticEvent({
+          level: 'error',
+          source: 'server',
+          event: 'fleet.listener_bind_failed',
+          message: error.message
+        })
+      }
     })
-    log(`fleet listener ready on ws://${host}:${actualPort}/fleet`)
+    if (info) {
+      composition.setFleetListenerInfo({
+        hubUrl: info.hubUrl,
+        certFingerprint: info.certFingerprint
+      })
+      log(`fleet listener ready on ${info.hubUrl}`)
+    } else {
+      // Bind failed → drop our refs so stop() does not try to re-close the (already
+      // closed) listener, and no `/fleet` upgrades are accepted.
+      fleetHttpsServer = null
+      fleetWss = null
+    }
   }
   // Agents spawned BY this process discover their hook endpoint via this global.
   ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
@@ -339,7 +374,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         /* ignore */
       }
       // Fleet mode: terminate every runner connection + reject in-flight requests,
-      // then close the fleet WSS. No-op when fleet mode is off (both are null).
+      // then close the fleet WSS + its https listener. No-op when fleet mode is off
+      // (all null).
       if (fleetGateway) {
         try {
           fleetGateway.close()
@@ -350,6 +386,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       if (fleetWss) {
         try {
           fleetWss.close()
+        } catch {
+          /* ignore */
+        }
+      }
+      if (fleetHttpsServer) {
+        const srv = fleetHttpsServer
+        try {
+          await new Promise<void>((r) => srv.close(() => r()))
         } catch {
           /* ignore */
         }

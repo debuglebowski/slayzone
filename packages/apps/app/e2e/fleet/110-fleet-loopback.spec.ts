@@ -12,9 +12,11 @@ import { launchIsolatedElectron } from '../fixtures/electron'
  * Validates the WHOLE hub/runner chain over a real fleet link, in-process:
  *   1. Boot a fully isolated app with boot-config `{ server_mode:'local',
  *      fleet_mode:true }`. The sidecar comes up with the hub gateway + hub-auth
- *      + identity live, and binds the `/fleet` WS listener (see server.ts).
+ *      + identity live, and binds the TLS `/fleet` wss listener on its own port
+ *      (Wave3.5-D2 — separate https server from the shared http /trpc; see
+ *      server.ts).
  *   2. Mint a real join token via the `runners.mintJoinToken` tRPC mutation
- *      (embeds the hub's bound `ws://…/fleet` URL + cert fingerprint).
+ *      (embeds the hub's bound `wss://…/fleet` URL + cert fingerprint to pin).
  *   3. Spawn the bundled @slayzone/runner as a loopback child process, pointed
  *      at that token → it dials the hub, enrolls, and appears connected in
  *      `runners.list`.
@@ -229,7 +231,10 @@ base.describe('Fleet loopback (fleet ON)', () => {
       expect(minted).not.toBeNull()
       const token = minted!.token
       const hubUrl = decodeHubUrl(token)
-      expect(hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/fleet$/)
+      // Wave3.5-D2: `/fleet` is now a TLS-terminated wss listener on its own port
+      // (separate from the shared http /trpc server). The runner extracts the pin
+      // + this url from the token and dials wss with cert-pinning.
+      expect(hubUrl).toMatch(/^wss:\/\/127\.0\.0\.1:\d+\/fleet$/)
 
       // Spawn the loopback runner against the freshly minted token. Its creds +
       // allowedRoots live under the isolated userdata dir (nothing leaks).

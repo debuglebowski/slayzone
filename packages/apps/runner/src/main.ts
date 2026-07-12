@@ -106,6 +106,27 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
       ...(config.credentialsDir ? { baseDir: config.credentialsDir } : {})
     })
 
+  // The dialer THROWS if a pin is set on a `ws://` url (pinning is meaningless
+  // without TLS). An EXPLICITLY-configured pin (env/file) on a ws:// url already
+  // fails loudly in loadRunnerConfig — so any pin reaching here on a ws:// url can
+  // only be the join-token-DECODED fingerprint (the auto path). Softly drop it so a
+  // ws token stays usable for loopback/dev; the real fleet path is wss:// (the hub's
+  // /fleet listener is https), where the pin is fed through and enforced.
+  const isSecureUrl = (() => {
+    try {
+      return new URL(config.hubUrl).protocol === 'wss:'
+    } catch {
+      return false
+    }
+  })()
+  const pinnedCertSha256 =
+    config.pinnedCertSha256 && isSecureUrl ? config.pinnedCertSha256 : undefined
+  if (config.pinnedCertSha256 && !isSecureUrl) {
+    log('ignoring token-decoded cert fingerprint on a non-wss hub url (pinning requires wss://)', {
+      hubUrl: config.hubUrl
+    })
+  }
+
   let handle: RunnerHandle
   let dispatch: HubRequestDispatch
   const dialer = new HubDialer({
@@ -118,7 +139,7 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     },
     credentialStore,
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
-    ...(config.pinnedCertSha256 ? { pinnedCertSha256: config.pinnedCertSha256 } : {}),
+    ...(pinnedCertSha256 ? { pinnedCertSha256 } : {}),
     ...(config.heartbeatIntervalMs ? { heartbeatIntervalMs: config.heartbeatIntervalMs } : {}),
     onHubRequest: (method, params) => dispatch.handle(method, params),
     log

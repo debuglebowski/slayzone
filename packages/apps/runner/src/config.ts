@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
+import { decodeJoinToken } from './join-token'
 
 export const runnerConfigSchema = z.object({
   /** `ws://` or `wss://` hub fleet endpoint. */
@@ -151,10 +152,23 @@ export function loadRunnerConfig(env: Env = process.env): RunnerConfig {
     throw new Error(`${ENV_VARS.heartbeatIntervalMs} must be an integer, got '${heartbeatRaw}'`)
   }
 
+  // A join token is self-sufficient: it embeds the hub's `wss://…/fleet` URL and
+  // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
+  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_JOIN_TOKEN=… runner` works
+  // with no other config. An explicit hubUrl / pin (file or env) still wins, so an
+  // operator can point a token at a different endpoint or override the pin. A
+  // malformed token decodes to null → no fallback (schema then reports the missing
+  // hubUrl, exactly as before).
+  const joinToken = env[ENV_VARS.joinToken] ?? fromFile.joinToken
+  const fromToken = joinToken ? decodeJoinToken(joinToken) : null
+
   const merged = {
     name: hostname(),
     allowedRoots: [] as string[],
     capabilities: [...DEFAULT_CAPABILITIES],
+    ...(fromToken
+      ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint }
+      : {}),
     ...fromFile,
     ...(env[ENV_VARS.hubUrl] !== undefined ? { hubUrl: env[ENV_VARS.hubUrl] } : {}),
     ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {}),
@@ -181,5 +195,28 @@ export function loadRunnerConfig(env: Env = process.env): RunnerConfig {
       `invalid runner configuration (${issues}). Set ${ENV_VARS.hubUrl} (and ${ENV_VARS.joinToken} for first contact) or provide ${ENV_VARS.configFile}.`
     )
   }
+
+  // Fail-fast on an EXPLICITLY-configured pin (env or config file) against a
+  // plaintext ws:// hub: pinning is meaningless without TLS, and silently dropping
+  // it would downgrade an operator who asked for pinning to an unpinned connection.
+  // A pin that came ONLY from the join token (the auto path) is NOT explicit — it
+  // is softly ignored downstream (startRunner) when the resolved url is ws://, so a
+  // ws token stays usable for loopback/dev without a hard failure.
+  const explicitPin = env[ENV_VARS.pinnedCertSha256] ?? fromFile.pinnedCertSha256
+  if (explicitPin !== undefined && urlProtocol(result.data.hubUrl) === 'ws:') {
+    throw new Error(
+      `${ENV_VARS.pinnedCertSha256} (or config pinnedCertSha256) requires a wss:// hub url; ` +
+        `got '${result.data.hubUrl}'. Pinning has no effect without TLS — use a wss:// url or drop the pin.`
+    )
+  }
   return result.data
+}
+
+/** Parse a url's protocol (`ws:` / `wss:` / …), or `null` if malformed. */
+function urlProtocol(url: string): string | null {
+  try {
+    return new URL(url).protocol
+  } catch {
+    return null
+  }
 }

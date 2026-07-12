@@ -87,6 +87,8 @@ run_test packages/apps/server/src/build-info.test.ts
 run_test packages/apps/server/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (fleet-mode hub URL + scoped task token).
 run_test packages/apps/server/src/remote-mcp-env-provider.test.ts
+# Wave-3.5 fleet TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
+run_test packages/apps/server/src/fleet-tls-listener.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
