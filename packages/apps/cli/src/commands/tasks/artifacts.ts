@@ -37,8 +37,29 @@ import {
   canExportAsHtml,
   type RenderMode
 } from '@slayzone/task/shared/types'
-import { apiPost } from '../../api'
+import { apiGet, apiPost, apiPatch, apiDelete } from '../../api'
 import { cliAuthor, resolveId } from './_shared'
+
+/*
+ * Hub/runner split (Wave 3.5): the METADATA-ONLY subcommands below route through
+ * api.ts — the hub when configured, else the local app's REST — matching the
+ * wave-3 read/CRUD cutover:
+ *   list  → GET    /api/tasks/:id/artifacts
+ *   mkdir → POST   /api/artifact-folders
+ *   rmdir → DELETE /api/artifact-folders/:id
+ *   mvdir → PATCH  /api/artifact-folders/:id
+ *   mv    → PATCH  /api/artifacts/:id
+ *
+ * Everything else stays DISK-LOCAL (still `openDb()` + BlobStore) because it
+ * reads or writes artifact *content* / *version history* — blob bytes and the
+ * on-disk file live next to the DB and have no metadata-only REST mapping:
+ *   read/write/append/create/upload/delete/path/download, all `versions:*`.
+ * `update` is MIXED (metadata db.run + a disk file rename when the extension
+ * changes) and its `--json` echoes the full artifact row incl. version/view
+ * columns the PATCH route's parseArtifact reshapes — kept disk-local to preserve
+ * that exact output. When no hub is configured and the local app is running, the
+ * converted commands behave exactly as before (same DB, via the app's REST).
+ */
 
 interface ArtifactRow extends Record<string, unknown> {
   id: string
@@ -364,23 +385,19 @@ export function artifactsSubcommand(): Command {
     .option('--json', 'Output as JSON')
     .option('--tree', 'Show as indented tree')
     .action(async (taskId: string, opts) => {
-      const db = openDb()
-      const task = await resolveTaskForArtifact(db, taskId)
-      const rows = db.query<ArtifactRow>(
-        `SELECT * FROM task_artifacts WHERE task_id = :taskId ORDER BY "order" ASC, created_at ASC`,
-        { ':taskId': task.id }
-      )
-      const folderRows = db.query<ArtifactFolderRow>(
-        `SELECT * FROM artifact_folders WHERE task_id = :taskId ORDER BY "order" ASC, created_at ASC`,
-        { ':taskId': task.id }
-      )
-      db.close()
+      // GET /api/tasks/:id/artifacts resolves the task by id prefix and returns
+      // both lists ordered by "order", created_at — same rows/shape the direct
+      // sqlite read produced (SELECT *), so JSON/tree/table output is unchanged.
+      const { data } = await apiGet<{
+        ok: true
+        data: { folders: ArtifactFolderRow[]; artifacts: ArtifactRow[] }
+      }>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts`)
       if (opts.json) {
-        console.log(JSON.stringify({ folders: folderRows, artifacts: rows }, null, 2))
+        console.log(JSON.stringify(data, null, 2))
       } else if (opts.tree) {
-        printArtifactTree(rows, folderRows)
+        printArtifactTree(data.artifacts, data.folders)
       } else {
-        printArtifacts(rows, folderRows)
+        printArtifacts(data.artifacts, data.folders)
       }
     })
 
@@ -867,51 +884,19 @@ export function artifactsSubcommand(): Command {
     .option('--parent <id>', 'Parent folder ID')
     .option('--json', 'Output as JSON')
     .action(async (name: string, opts) => {
-      const db = openDb()
-      const task = await resolveTaskForArtifact(db, opts.task)
-      const parentId = opts.parent ? resolveFolder(db, opts.parent).id : null
-      const id = crypto.randomUUID()
-      const now = new Date().toISOString()
-      const maxOrder =
-        db.query<{ m: number | null }>(
-          parentId
-            ? `SELECT MAX("order") as m FROM artifact_folders WHERE task_id = :taskId AND parent_id = :parentId`
-            : `SELECT MAX("order") as m FROM artifact_folders WHERE task_id = :taskId AND parent_id IS NULL`,
-          parentId ? { ':taskId': task.id, ':parentId': parentId } : { ':taskId': task.id }
-        )[0]?.m ?? -1
-
-      db.run(
-        `INSERT INTO artifact_folders (id, task_id, parent_id, name, "order", created_at)
-         VALUES (:id, :taskId, :parentId, :name, :order, :now)`,
-        {
-          ':id': id,
-          ':taskId': task.id,
-          ':parentId': parentId,
-          ':name': name,
-          ':order': maxOrder + 1,
-          ':now': now
-        }
+      // POST /api/artifact-folders resolves the task + optional parent by id
+      // prefix, allocates the next "order", and returns the created folder row
+      // (parseFolder shape) — same fields the direct insert echoed in --json.
+      // resolveId keeps the $SLAYZONE_TASK_ID / session-id env fallback.
+      const taskRef = await resolveId(opts.task)
+      const { data: folder } = await apiPost<{ ok: true; data: ArtifactFolderRow }>(
+        '/api/artifact-folders',
+        { taskId: taskRef, name, parentId: opts.parent }
       )
-      db.close()
-      await notifyApp()
-
       if (opts.json) {
-        console.log(
-          JSON.stringify(
-            {
-              id,
-              task_id: task.id,
-              parent_id: parentId,
-              name,
-              order: maxOrder + 1,
-              created_at: now
-            },
-            null,
-            2
-          )
-        )
+        console.log(JSON.stringify(folder, null, 2))
       } else {
-        console.log(`Created folder: ${id.slice(0, 8)}  ${name}`)
+        console.log(`Created folder: ${folder.id.slice(0, 8)}  ${name}`)
       }
     })
 
@@ -921,12 +906,12 @@ export function artifactsSubcommand(): Command {
     .description('Delete a folder (artifacts move to root)')
     .option('--json', 'Output as JSON')
     .action(async (folderId: string, opts) => {
-      const db = openDb()
-      const folder = resolveFolder(db, folderId)
-      db.run(`DELETE FROM artifact_folders WHERE id = :id`, { ':id': folder.id })
-      db.close()
-      await notifyApp()
-
+      // DELETE /api/artifact-folders/:id resolves the id prefix (404/400 parity)
+      // and returns the deleted folder's { id, name }. Contained artifacts fall
+      // back to root via the ON DELETE SET NULL fk — same as the raw DELETE.
+      const { data: folder } = await apiDelete<{ ok: true; data: { id: string; name: string } }>(
+        `/api/artifact-folders/${encodeURIComponent(folderId)}`
+      )
       if (opts.json) {
         console.log(JSON.stringify({ deleted: folder.id, name: folder.name }))
       } else {
@@ -941,38 +926,18 @@ export function artifactsSubcommand(): Command {
     .requiredOption('--parent <id>', 'Target parent folder ID, or "root" for top level')
     .option('--json', 'Output as JSON')
     .action(async (folderId: string, opts) => {
-      const db = openDb()
-      const folder = resolveFolder(db, folderId)
-      let targetParentId: string | null = null
-      let targetName = 'root'
-      if (opts.parent !== 'root') {
-        const parent = resolveFolder(db, opts.parent)
-        targetParentId = parent.id
-        targetName = parent.name
-        // cycle check: walk ancestors of target — reject if source appears
-        let cur: string | null = targetParentId
-        while (cur) {
-          if (cur === folder.id) {
-            console.error('Cannot move folder into its own descendant')
-            process.exit(1)
-          }
-          const row: { parent_id: string | null } | undefined = db.query<{
-            parent_id: string | null
-          }>(`SELECT parent_id FROM artifact_folders WHERE id = :id`, { ':id': cur })[0]
-          cur = row?.parent_id ?? null
-        }
-      }
-      db.run(`UPDATE artifact_folders SET parent_id = :parentId WHERE id = :id`, {
-        ':parentId': targetParentId,
-        ':id': folder.id
-      })
-      db.close()
-      await notifyApp()
-
+      // PATCH /api/artifact-folders/:id resolves the folder + target parent by id
+      // prefix, enforces the same descendant-cycle guard, moves the folder, and
+      // echoes the target's `parentName` (null for "root") for the human line.
+      const { data } = await apiPatch<{
+        ok: true
+        data: ArtifactFolderRow & { parentName: string | null }
+      }>(`/api/artifact-folders/${encodeURIComponent(folderId)}`, { parentId: opts.parent })
+      const targetName = data.parentName ?? 'root'
       if (opts.json) {
-        console.log(JSON.stringify({ id: folder.id, parent_id: targetParentId }))
+        console.log(JSON.stringify({ id: data.id, parent_id: data.parent_id }))
       } else {
-        console.log(`Moved folder: ${folder.id.slice(0, 8)} -> ${targetName}`)
+        console.log(`Moved folder: ${data.id.slice(0, 8)} -> ${targetName}`)
       }
     })
 
@@ -983,27 +948,18 @@ export function artifactsSubcommand(): Command {
     .requiredOption('--folder <id>', 'Target folder ID, or "root" for top level')
     .option('--json', 'Output as JSON')
     .action(async (artifactId: string, opts) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      let targetFolderId: string | null = null
-      let targetName = 'root'
-      if (opts.folder !== 'root') {
-        const folder = resolveFolder(db, opts.folder)
-        targetFolderId = folder.id
-        targetName = folder.name
-      }
-      db.run(`UPDATE task_artifacts SET folder_id = :folderId, updated_at = :now WHERE id = :id`, {
-        ':folderId': targetFolderId,
-        ':now': new Date().toISOString(),
-        ':id': artifact.id
-      })
-      db.close()
-      await notifyApp()
-
+      // PATCH /api/artifacts/:id resolves the artifact + target folder by id
+      // prefix, updates folder_id + updated_at, and echoes the target folder's
+      // `folderName` (null for "root") for the human line.
+      const { data } = await apiPatch<{
+        ok: true
+        data: ArtifactRow & { folderName: string | null }
+      }>(`/api/artifacts/${encodeURIComponent(artifactId)}`, { folderId: opts.folder })
+      const targetName = data.folderName ?? 'root'
       if (opts.json) {
-        console.log(JSON.stringify({ id: artifact.id, folder_id: targetFolderId }))
+        console.log(JSON.stringify({ id: data.id, folder_id: data.folder_id }))
       } else {
-        console.log(`Moved: ${artifact.id.slice(0, 8)} -> ${targetName}`)
+        console.log(`Moved: ${data.id.slice(0, 8)} -> ${targetName}`)
       }
     })
 

@@ -56,8 +56,8 @@ interface Folder {
   parent_id: string | null
   name: string
 }
-type ArtResp = { ok: boolean; data: Artifact; error?: string }
-type FolderResp = { ok: boolean; data: Folder; error?: string }
+type ArtResp = { ok: boolean; data: Artifact & { folderName?: string | null }; error?: string }
+type FolderResp = { ok: boolean; data: Folder & { parentName?: string | null }; error?: string }
 type DelResp = { ok: boolean; data: { id: string; title?: string; name?: string }; error?: string }
 
 let artifactId = ''
@@ -117,12 +117,32 @@ await describe('/api/artifacts + /api/artifact-folders CRUD', () => {
     expect(res.status).toBe(404)
   })
 
-  test('PATCH /api/artifacts/:id: moves artifact into a folder', async () => {
+  test('PATCH /api/artifacts/:id: moves artifact into a folder (id prefix + echoes folderName)', async () => {
+    // Target folder addressed by an 8-char prefix — the CLI `mv` path.
     const res = await rest.request<ArtResp>('PATCH', `/api/artifacts/${artifactId.slice(0, 8)}`, {
-      folderId: childFolderId
+      folderId: childFolderId.slice(0, 8)
     })
     expect(res.status).toBe(200)
     expect(res.body.data.folder_id).toBe(childFolderId)
+    expect(res.body.data.folderName).toBe('Sub')
+  })
+
+  test('PATCH /api/artifacts/:id: folderId "root" clears folder + folderName null', async () => {
+    const res = await rest.request<ArtResp>('PATCH', `/api/artifacts/${artifactId}`, {
+      folderId: 'root'
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.data.folder_id).toBeNull()
+    expect(res.body.data.folderName).toBeNull()
+    // Re-nest for later delete assertions (leave it where the original test expected).
+    await rest.request<ArtResp>('PATCH', `/api/artifacts/${artifactId}`, { folderId: childFolderId })
+  })
+
+  test('PATCH /api/artifacts/:id 404: unknown target folder', async () => {
+    const res = await rest.request<ArtResp>('PATCH', `/api/artifacts/${artifactId}`, {
+      folderId: 'ffffffff'
+    })
+    expect(res.status).toBe(404)
   })
 
   test('PATCH /api/artifacts/:id: renames + sets render mode', async () => {
@@ -140,12 +160,26 @@ await describe('/api/artifacts + /api/artifact-folders CRUD', () => {
     expect(res.status).toBe(400)
   })
 
-  test('PATCH /api/artifact-folders/:id: move child to root', async () => {
+  test('PATCH /api/artifact-folders/:id: move child to root (parentName null)', async () => {
     const res = await rest.request<FolderResp>('PATCH', `/api/artifact-folders/${childFolderId}`, {
       parentId: 'root'
     })
     expect(res.status).toBe(200)
     expect(res.body.data.parent_id).toBeNull()
+    expect(res.body.data.parentName).toBeNull()
+  })
+
+  test('PATCH /api/artifact-folders/:id: move under parent by prefix echoes parentName', async () => {
+    const res = await rest.request<FolderResp>('PATCH', `/api/artifact-folders/${childFolderId}`, {
+      parentId: rootFolderId.slice(0, 8)
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.data.parent_id).toBe(rootFolderId)
+    expect(res.body.data.parentName).toBe('Docs')
+    // Restore to root for the cycle test below (it re-nests itself first).
+    await rest.request<FolderResp>('PATCH', `/api/artifact-folders/${childFolderId}`, {
+      parentId: 'root'
+    })
   })
 
   test('PATCH /api/artifact-folders/:id 400: cycle (into own descendant)', async () => {

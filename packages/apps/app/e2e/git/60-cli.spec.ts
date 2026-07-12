@@ -767,6 +767,108 @@ test.describe('CLI: slay', () => {
     })
   })
 
+  // --- slay tasks artifacts (metadata commands routed through the app's REST) ---
+  // Wave-3.5: list/mkdir/rmdir/mvdir/mv now hit the running app over REST; the
+  // full lifecycle here proves they still work against the live app. create is
+  // disk-local (content path) and seeds the artifact these operate on.
+  test.describe('slay tasks artifacts', () => {
+    let artifactTaskId = ''
+    let folderId = ''
+    let childFolderId = ''
+    let artifactId = ''
+
+    test('mkdir creates a root folder via REST', async ({ mainWindow }) => {
+      const s = seed(mainWindow)
+      const task = await s.createTask({ projectId, title: 'CLI artifacts task', status: 'todo' })
+      artifactTaskId = task.id
+      const r = runCli('tasks', 'artifacts', 'mkdir', 'Docs', '--task', artifactTaskId, '--json')
+      expect(r.status).toBe(0)
+      const folder = JSON.parse(r.stdout) as { id: string; name: string; parent_id: string | null }
+      expect(folder.name).toBe('Docs')
+      expect(folder.parent_id).toBeNull()
+      folderId = folder.id
+    })
+
+    test('mkdir --parent creates a child folder via REST', () => {
+      const r = runCli(
+        'tasks',
+        'artifacts',
+        'mkdir',
+        'Sub',
+        '--task',
+        artifactTaskId,
+        '--parent',
+        folderId.slice(0, 8),
+        '--json'
+      )
+      expect(r.status).toBe(0)
+      const folder = JSON.parse(r.stdout) as { id: string; parent_id: string | null }
+      expect(folder.parent_id).toBe(folderId)
+      childFolderId = folder.id
+    })
+
+    test('create (disk-local) seeds an artifact', () => {
+      const r = spawnSync(
+        'node',
+        [SLAY_JS, 'tasks', 'artifacts', 'create', 'notes.md', '--task', artifactTaskId, '--json'],
+        {
+          env: (() => {
+            const env: Record<string, string> = {
+              ...process.env,
+              SLAYZONE_DB_PATH: dbPath,
+              SLAYZONE_MCP_PORT: String(mcpPort)
+            }
+            delete env.SLAYZONE_PROJECT_ID
+            delete env.SLAYZONE_TASK_ID
+            return env
+          })(),
+          encoding: 'utf8',
+          input: '# hello'
+        }
+      )
+      expect(r.status).toBe(0)
+      const artifact = JSON.parse(r.stdout) as { id: string; title: string }
+      expect(artifact.title).toBe('notes.md')
+      artifactId = artifact.id
+    })
+
+    test('list returns folders + artifacts via REST', () => {
+      const r = runCli('tasks', 'artifacts', 'list', artifactTaskId, '--json')
+      expect(r.status).toBe(0)
+      const out = JSON.parse(r.stdout) as {
+        folders: { id: string }[]
+        artifacts: { id: string }[]
+      }
+      expect(out.folders.map((f) => f.id).sort()).toEqual([folderId, childFolderId].sort())
+      expect(out.artifacts.map((a) => a.id)).toContain(artifactId)
+    })
+
+    test('mv moves an artifact into a folder via REST', () => {
+      const r = runCli('tasks', 'artifacts', 'mv', artifactId.slice(0, 8), '--folder', childFolderId.slice(0, 8))
+      expect(r.status).toBe(0)
+      expect(r.stdout.trim()).toBe(`Moved: ${artifactId.slice(0, 8)} -> Sub`)
+    })
+
+    test('mvdir moves a folder to root via REST', () => {
+      const r = runCli('tasks', 'artifacts', 'mvdir', childFolderId.slice(0, 8), '--parent', 'root')
+      expect(r.status).toBe(0)
+      expect(r.stdout.trim()).toBe(`Moved folder: ${childFolderId.slice(0, 8)} -> root`)
+    })
+
+    test('rmdir deletes a folder via REST', () => {
+      const r = runCli('tasks', 'artifacts', 'rmdir', childFolderId.slice(0, 8), '--json')
+      expect(r.status).toBe(0)
+      const out = JSON.parse(r.stdout) as { deleted: string }
+      expect(out.deleted).toBe(childFolderId)
+    })
+
+    test('list unknown task exits non-zero (REST 404)', () => {
+      const r = runCli('tasks', 'artifacts', 'list', 'ffffffff', '--json')
+      expect(r.status).not.toBe(0)
+      expect(r.stderr).toContain('Task not found')
+    })
+  })
+
   // --- slay completions ---
 
   test.describe('slay completions', () => {

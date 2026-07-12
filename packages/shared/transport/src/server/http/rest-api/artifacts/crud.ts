@@ -13,11 +13,17 @@ import { getArtifactsDataRoot } from './shared'
  * flows (worker `namedTxn`s that also place/version the file on disk):
  *
  * - POST   /api/artifacts               { taskId, title, folderId?, renderMode?, content? }
- * - PATCH  /api/artifacts/:id           { title?, renderMode?, folderId? }
+ * - PATCH  /api/artifacts/:id           { title?, renderMode?, folderId? }  → echoes `folderName`
  * - DELETE /api/artifacts/:id
  * - POST   /api/artifact-folders        { taskId, name, parentId? }
  * - DELETE /api/artifact-folders/:id
- * - PATCH  /api/artifact-folders/:id    { parentId }   (move to another parent / "root")
+ * - PATCH  /api/artifact-folders/:id    { parentId }   → move to another parent / "root", echoes `parentName`
+ *
+ * The two PATCH routes double as the CLI `mv` / `mvdir` moves: a `folderId` /
+ * `parentId` is resolved as an id *prefix* to its full id (parity with the CLI's
+ * resolveFolder — 404/400 on miss/ambiguous), `"root"` / `null` promotes to top
+ * level, and the target's name is echoed (`folderName` / `parentName`, null for
+ * "root") so the CLI can print `-> <name>` without a second round-trip.
  *
  * The content-transfer + version-history subcommands (read/write/append/
  * download/path, versions:*) stay CLI-local: they stream blob-store bytes off
@@ -129,8 +135,19 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       if (body.renderMode !== undefined) {
         input.renderMode = typeof body.renderMode === 'string' ? (body.renderMode as RenderMode) : null
       }
+      // Move target (CLI `mv`): resolve a folder id *prefix* to its full id
+      // ("root"/empty/null → top level). `folderName` is echoed so the CLI can
+      // render `-> <name>` without a second lookup.
+      let folderName: string | null = null
       if (body.folderId !== undefined) {
-        input.folderId = typeof body.folderId === 'string' && body.folderId ? body.folderId : null
+        if (typeof body.folderId === 'string' && body.folderId && body.folderId !== 'root') {
+          const folder = await resolveFolderPrefix(db, body.folderId, res)
+          if (!folder) return
+          input.folderId = folder.id
+          folderName = folder.name
+        } else {
+          input.folderId = null
+        }
       }
       const artifact = await store().updateArtifact(db, input)
       if (!artifact) {
@@ -138,7 +155,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         return
       }
       deps.notifyRenderer()
-      res.json({ ok: true, data: artifact })
+      res.json({ ok: true, data: { ...artifact, folderName } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
@@ -237,10 +254,12 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       if (!folder) return
 
       let targetParentId: string | null = null
+      let parentName: string | null = null
       if (typeof body.parentId === 'string' && body.parentId && body.parentId !== 'root') {
         const parent = await resolveFolderPrefix(db, body.parentId, res)
         if (!parent) return
         targetParentId = parent.id
+        parentName = parent.name
         // Cycle check: walk ancestors of the target — reject if source appears.
         let cur: string | null = targetParentId
         while (cur) {
@@ -261,7 +280,8 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         return
       }
       deps.notifyRenderer()
-      res.json({ ok: true, data: updated })
+      // `parentName` (null for "root") echoed so the CLI can print `-> <name>`.
+      res.json({ ok: true, data: { ...updated, parentName } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
