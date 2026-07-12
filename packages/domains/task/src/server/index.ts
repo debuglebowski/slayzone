@@ -78,3 +78,9 @@ export type {
 export { taskOps } from './task-ops-bundle'
 export type { TaskOps } from './task-ops-bundle'
 export { handleAttentionTransition } from './attention'
+// Conversation self-heal + resolver. Registered by BOTH composition roots (the
+// Electron main process and the slice-9 sidecar that owns the pty runtime) so
+// the healer/resolver seams `createPty` calls are never left null. Lives here
+// because it needs task DB ops + terminal transcript helpers + worktrees branch
+// lookup, and the package graph runs task → those (a cycle from terminal/server).
+export { registerConversationHealer, registerConversationResolver } from './conversation-healer'

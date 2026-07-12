@@ -53,8 +53,32 @@ const id = (i: HealInput): string | undefined => {
 
 // keep: healthy pointers are never touched
 assert(act(base({ storedExists: true })) === 'keep', 'stored transcript exists → keep')
-assert(act(base({ storedInHistory: true })) === 'keep', 'stored in history → keep')
 assert(act(base({ storedId: null })) === 'keep', 'no stored id → keep (nothing to resume)')
+
+// PROOF-OF-LIFE: transcript-on-disk is the ONLY evidence a stored id is
+// resumable. `storedInHistory` alone is NOT proof — a zero-turn session (or one
+// whose transcript was pruned) is in history but has no `.jsonl` to resume, so
+// `claude --resume` fails forever. When history-membership is the only signal
+// and the transcript is gone, heal must NOT keep the phantom.
+assert(
+  act(base({ storedInHistory: true, storedExists: true })) === 'keep',
+  'in history AND transcript exists → keep'
+)
+assert(
+  act(base({ storedInHistory: true, storedExists: false })) === 'overlay',
+  'in history but transcript MISSING → overlay (phantom, not resumable)'
+)
+// …and if a surviving history entry exists, repoint to it rather than keep the
+// phantom (the stored id itself must be skipped, per rule 2).
+const phantomWithFallback = base({
+  storedInHistory: true,
+  storedExists: false,
+  history: [{ id: 'phantom', exists: false }, { id: 'survivor', exists: true }]
+})
+assert(
+  act(phantomWithFallback) === 'history' && id(phantomWithFallback) === 'survivor',
+  'phantom-in-history with a surviving sibling → repoint to survivor'
+)
 // even with a perfect orphan candidate, a healthy stored id wins
 assert(
   act(base({ storedExists: true, candidates: [cand({})] })) === 'keep',

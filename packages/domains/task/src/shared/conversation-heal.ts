@@ -69,11 +69,22 @@ export type HealDecision =
   | { action: 'overlay' }
 
 export function decideConversationHeal(input: HealInput): HealDecision {
-  const { storedId, storedExists, storedInHistory, history, task, candidates, windowMs } = input
+  // `storedInHistory` is intentionally NOT destructured/used: history membership
+  // is no longer treated as proof-of-life (see the storedExists gate below). The
+  // field stays on HealInput for callers + the pre-fix decision matrix's audit.
+  const { storedId, storedExists, history, task, candidates, windowMs } = input
 
-  // Nothing to resume, or the pointer is provably healthy → never touch it.
+  // Nothing to resume → never touch it.
   if (!storedId) return { action: 'keep' }
-  if (storedInHistory || storedExists) return { action: 'keep' }
+  // Proof-of-life is the transcript ON DISK — the only thing `claude --resume`
+  // can actually reload. `storedInHistory` means "slay once recorded this id for
+  // this task", NOT "the session is resumable": a zero-turn session (killed
+  // before its first turn) or one whose `.jsonl` was pruned lives in history yet
+  // has nothing to resume, so keeping it loops `--resume` → "No conversation
+  // found" forever. Only a real transcript short-circuits to keep; a
+  // history-only id falls through to the surviving-sibling / orphan / overlay
+  // rules below.
+  if (storedExists) return { action: 'keep' }
 
   // Exact fallback: most-recent prior id WE recorded for this task that survives.
   for (let i = history.length - 1; i >= 0; i--) {

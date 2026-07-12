@@ -194,22 +194,26 @@ export function useTaskTerminalSession({
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
   }, [task, resetTaskState, getMainSessionId, trpcClient])
 
-  // Reset terminal (kill PTY, clear session ID, remount fresh)
+  // Reset terminal (kill PTY, clear session ID, remount fresh). Routes through
+  // `task.resetConversation` (a `manual-reset` ledger write) — NOT a plain
+  // provider_config null. The renderer's resume hint comes from the ledger-backed
+  // `currentConversationByMode`; only a `session_resets` cutoff clears the honored
+  // binding. Nulling provider_config alone left a phantom/stale id that survived
+  // "Start fresh" and looped `--resume` on reopen. See conversation-healer.ts.
   const handleResetTerminal = useCallback(async () => {
     if (!task) return
     const mainSessionId = getMainSessionId(task.id)
     resetTaskState(mainSessionId)
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
-    // Clear session ID so new session starts fresh
-    const updated = await updateTask.mutateAsync({
+    const updated = await trpcClient.task.resetConversation.mutate({
       id: task.id,
-      providerConfig: { [task.terminal_mode]: { conversationId: null } }
+      mode: task.terminal_mode
     })
     onTaskUpdated(updated)
     await new Promise((r) => setTimeout(r, 100))
     markSkipCache(mainSessionId)
     setTerminalKey((k) => k + 1)
-  }, [task, resetTaskState, onTaskUpdated, getMainSessionId, trpcClient, updateTask, setTerminalKey])
+  }, [task, resetTaskState, onTaskUpdated, getMainSessionId, trpcClient, setTerminalKey])
 
   // Revive: when main broadcasts pty:respawn-suggested for this task (after a
   // terminal → non-terminal status transition), remount the terminal so the user

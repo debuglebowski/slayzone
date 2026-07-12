@@ -7,16 +7,16 @@ import {
   listClaudeTranscriptIds,
   readClaudeTranscriptMeta,
   type ConversationHealRequest
-} from '@slayzone/terminal/electron'
+} from '@slayzone/terminal/server'
+import { getCurrentBranch } from '@slayzone/worktrees/server'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '../shared/index.js'
 import {
   getTaskOp,
   collectReferencedConversationIds,
   recordConversation,
   getCurrentConversationId
-} from '@slayzone/task/server'
-import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '@slayzone/task/shared'
-import { getCurrentBranch } from '@slayzone/worktrees/server'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+} from './ops/index.js'
 
 /** Max gap between task creation and the real Claude session's first message,
  *  used to bound the orphan candidate window. */
@@ -30,15 +30,24 @@ const HEAL_WINDOW_MS = 5 * 60 * 1000
 const FIX_SHIP_TS = Date.parse('2026-06-04T00:00:00Z')
 
 /**
- * Register the conversation self-heal invoked by `createPty` before a resume.
- * Lives in the app (composition root) because it needs task-DB access while the
- * package graph runs task → terminal (so terminal/main can't import task/main).
+ * Register the conversation self-heal + authoritative resolver invoked by
+ * `createPty` before a resume. Lives in `task/server` (not the composition root)
+ * so BOTH hosts — the Electron main process AND the slice-9 sidecar, which now
+ * owns the pty runtime — wire the SAME implementation by importing this one
+ * module. Pre-fix it lived in `apps/app/src/main`, so post-inversion the sidecar
+ * (where `createPty` actually runs) had a null healer/resolver and a stale
+ * conversation id looped `--resume` forever. See plans/conv-id-robustness-v2.md
+ * and the slice-9 orphaned-listener class (composition.ts state-change note).
+ *
+ * The package graph runs task → terminal/worktrees/diagnostics, so this module
+ * can reach the task DB ops, transcript helpers, branch lookup, and diagnostics
+ * without a cycle — the reason it could not live in `terminal/server` directly.
  *
  * Safety: never guesses. A healthy pointer is left untouched; any ambiguity in the
  * legacy orphan path resolves to the honest "session expired" overlay. The decision
  * matrix is the pure, unit-tested `decideConversationHeal`; this wrapper only does
  * the IO (disk stats, transcript head parsing, referenced-id lookup) and the
- * atomic compare-and-swap repoint. See plans/conv-id-robustness-v2.md.
+ * atomic compare-and-swap repoint.
  */
 export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () => void): void {
   setConversationHealer(async ({ taskId, mode, cwd, storedId }: ConversationHealRequest) => {
@@ -52,8 +61,12 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
       const storedInHistory = history.includes(storedId)
       const storedExists = claudeTranscriptExists(cwd, storedId)
 
-      // Rule 1 (hot path): healthy pointer → keep, no disk scan.
-      if (storedInHistory || storedExists) return { id: storedId, healed: false }
+      // Rule 1 (hot path): a transcript ON DISK is the only proof the stored id
+      // is resumable → keep, no disk scan. History membership alone is NOT proof
+      // (a zero-turn/pruned session is in history but has no `.jsonl`), so it no
+      // longer short-circuits here — it flows into decideConversationHeal, which
+      // repoints to a surviving sibling or surfaces the honest overlay.
+      if (storedExists) return { id: storedId, healed: false }
 
       const createdAtMs = parseSqliteUtc(task.created_at)
       const isLegacy = !Number.isNaN(createdAtMs) && createdAtMs < FIX_SHIP_TS
@@ -114,11 +127,7 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
 
       // history | orphan → append a `cas-repoint-heal` row to task_conversations.
       // Under append-only semantics there is no CAS to fail: getCurrentConversationId
-      // picks up the newest honored row on the next read. The previous CAS guarded
-      // a mutable field against concurrent writes; with the field replaced by an
-      // append-only ledger this race is gone — the latest decision wins by being
-      // the latest row. The legacy `casRepointConversationId` also dual-wrote the
-      // legacy column; `recordConversation` does the same for honored origins.
+      // picks up the newest honored row on the next read.
       await recordConversation(db, {
         taskId,
         mode,
@@ -146,8 +155,7 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
  * Register the authoritative conversation-id resolver invoked by `createPty`
  * when the renderer passes no `existingConversationId`. Reads the latest honored
  * id from the append-only ledger (`getCurrentConversationId` — manual-reset
- * cutoff + provenance gate enforced in SQL). Lives in the app for the same
- * task → terminal dependency reason as the healer.
+ * cutoff + provenance gate enforced in SQL).
  *
  * This is the structural fix for the restart-clobber: previously a boot-time
  * null hint from the renderer made every auto-respawned tab spawn fresh and

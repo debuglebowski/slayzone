@@ -50,6 +50,7 @@ import {
   getShellStartupArgs
 } from '../shell-env'
 import { shouldShellFallback, buildRecoveryMessage } from '../pty-exit-strategy'
+import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
 import { filterBufferData } from '../filter-buffer-data'
 import { shouldHonorDetectedError } from '../session-error-gate'
@@ -2299,15 +2300,33 @@ export async function createPty(
           // Stale-resume detection. A failed `--resume` (the provider
           // auto-cleaned the session — issue #90) exits NON-ZERO, which would
           // otherwise trip the interactive-shell fallback below and bury the
-          // "No conversation found" error in a raw recovery shell. Detect it here
-          // (ring-buffer scan via the adapter — authoritative + exit-code
-          // agnostic) so `shouldShellFallback` suppresses the fallback and the
-          // friendly "session expired" dead overlay surfaces instead. The code
-          // rides `pty:exit` (see finalizeSessionExit) to drive that overlay.
+          // "No conversation found" error in a raw recovery shell. Detecting it
+          // suppresses the fallback so the friendly "session expired" dead
+          // overlay surfaces instead. The code rides `pty:exit` (see
+          // finalizeSessionExit) to drive that overlay.
+          //
+          // TWO signals, deterministic first:
+          //  (1) DISK TRUTH — a claude-code resume that exits non-zero while its
+          //      target transcript does not exist on disk is DEFINITIVELY stale.
+          //      This needs no output and is immune to the string-scan timing
+          //      race (a fast exit can beat the "No conversation found" line into
+          //      the ring buffer, which made the overlay-vs-recovery-shell choice
+          //      flaky). Disk is the same source of truth the healer uses.
+          //  (2) STRING SCAN — the exit-code-agnostic fallback (covers providers
+          //      whose path we don't read, and mid-run cleanups).
           // Gated on `resuming`: only a resume attempt can hit a stale session.
           if (resuming && !session.error) {
-            const scanned = session.adapter.detectError(session.buffer.toString())
-            if (scanned) session.error = scanned
+            const transcriptGone =
+              terminalMode === 'claude-code' &&
+              exitCode !== 0 &&
+              !!resolvedExistingId &&
+              !claudeTranscriptExists(cwd, resolvedExistingId)
+            if (transcriptGone) {
+              session.error = { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
+            } else {
+              const scanned = session.adapter.detectError(session.buffer.toString())
+              if (scanned) session.error = scanned
+            }
           }
           const isStaleResume = resuming && session.error?.code === 'SESSION_NOT_FOUND'
 

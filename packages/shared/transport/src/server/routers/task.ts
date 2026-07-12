@@ -1,7 +1,12 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
-import { taskEvents, recordPendingSpawn, type TaskEventMap } from '@slayzone/task/server'
+import {
+  taskEvents,
+  recordPendingSpawn,
+  recordConversation,
+  type TaskEventMap
+} from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import { router, publicProcedure } from '../trpc'
 import { getTaskOps, getTaskOnMutation } from '../app-deps'
@@ -77,6 +82,31 @@ export const taskRouter = router({
     if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
     return r
   }),
+
+  // "Start fresh" / reset conversation. Appends a `manual-reset` sentinel to the
+  // append-only ledger, which (a) writes a `session_resets` cutoff so the
+  // authoritative `currentConversationByMode` / resolver read returns NULL, and
+  // (b) clears the legacy `provider_config.{mode}.conversationId` + column. The
+  // old renderer path only nulled provider_config, which the ledger-backed read
+  // ignored — so a phantom/stale conversation id survived "Start fresh" and came
+  // back on reopen. Routing through `recordConversation('manual-reset')` is the
+  // one write that actually clears the honored binding. Returns the refreshed task.
+  resetConversation: publicProcedure
+    .input(z.object({ id: z.string(), mode: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ops().getTaskOp(ctx.db, input.id)
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+      await recordConversation(ctx.db, {
+        taskId: input.id,
+        mode: input.mode,
+        conversationId: null,
+        origin: 'manual-reset'
+      })
+      getTaskOnMutation()?.()
+      const r = await ops().getTaskOp(ctx.db, input.id)
+      if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+      return r
+    }),
 
   updateMany: publicProcedure
     .input(z.unknown())

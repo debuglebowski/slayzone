@@ -96,6 +96,18 @@ export {
   killPtysByTaskId,
   broadcastRespawnRequest,
   onGlobalStateChange,
+  // Conversation self-heal + authoritative-resolve seams. `createPty` (which
+  // lives in THIS process post-slice-9) calls the injected healer before a
+  // resume and the resolver when the renderer passes no hint. The composition
+  // root registers both — the sidecar MUST wire them here (the pty runtime is
+  // here), or a stale/phantom conversation id loops `--resume` forever. Were
+  // exported only from the electron barrel pre-fix, so the main process wired
+  // its (empty, post-inversion) copy while the sidecar's stayed null.
+  setConversationHealer,
+  type ConversationHealer,
+  type ConversationHealRequest,
+  setConversationResolver,
+  type ConversationResolver,
   // Wave-1 session-ledger seam (was landed but left unexported): lets a later
   // hub/runner wave inject a non-DB-backed ledger from the composition root.
   setPtySessionLedger,
