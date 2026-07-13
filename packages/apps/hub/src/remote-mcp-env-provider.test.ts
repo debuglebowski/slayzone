@@ -6,7 +6,7 @@
  * verifyTaskToken accepts with the right scope; a taskless spawn yields a null
  * token; an unresolvable base yields null (→ loopback fallback upstream).
  *
- * Run with: npx tsx packages/apps/server/src/remote-mcp-env-provider.test.ts
+ * Run with: npx tsx packages/apps/hub/src/remote-mcp-env-provider.test.ts
  * (the run-all.sh test-utils loader mocks the better-auth barrel dep).
  */
 import { createRemoteMcpEnvProvider, TASK_TOKEN_TTL_MS } from './remote-mcp-env-provider'

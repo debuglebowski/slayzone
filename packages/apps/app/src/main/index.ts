@@ -210,7 +210,7 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
 // project-icons/artifacts to the same dir the renderer reads — otherwise, under
 // e2e (SLAYZONE_DB_DIR set, SLAYZONE_STORE_DIR unset) the tRPC server would use
 // ensureDataRoot()=getStateDir() (the real dev dir) and uploaded icons "disappear".
-// SLAYZONE_STORE_DIR still wins when explicitly set (headless @slayzone/server).
+// SLAYZONE_STORE_DIR still wins when explicitly set (headless @slayzone/hub).
 function getTrpcDataRoot(): string {
   return process.env.SLAYZONE_STORE_DIR || process.env.SLAYZONE_DB_DIR || app.getPath('userData')
 }
@@ -1286,7 +1286,7 @@ app
     // Local (default): everything below runs as always. Remote: the local
     // backend machinery (in-process tRPC, MCP/REST for the CLI, the sidecar,
     // integration pollers + push handlers) is skipped — the renderer connects
-    // to the user-configured remote @slayzone/server, which owns all of that.
+    // to the user-configured remote @slayzone/hub, which owns all of that.
     const bootConfig = readBootConfig(getTrpcDataRoot())
     const isRemoteMode = bootConfig.server_mode === 'remote'
     logBoot(
@@ -2198,8 +2198,8 @@ app
       Promise.all([import('./sidecar-server-supervisor'), hostCapUrlPromise, hostRestUrlPromise])
         .then(([{ startSidecarServer }, hostCapUrl, hostRestUrl]) => {
           const scriptPath = is.dev
-            ? join(app.getAppPath(), '../server/dist/bin.cjs')
-            : join(process.resourcesPath, 'server', 'bin.cjs')
+            ? join(app.getAppPath(), '../hub/dist/bin.cjs')
+            : join(process.resourcesPath, 'hub', 'bin.cjs')
           const supervisor = startSidecarServer({
             execPath: process.execPath,
             scriptPath,
@@ -2212,7 +2212,7 @@ app
               // the host REST reverse-proxy target (browser-automation + export).
               SLAYZONE_HOST_CAP_URL: hostCapUrl,
               SLAYZONE_HOST_REST_URL: hostRestUrl,
-              // Packaged resolution: only bin.js is copied to Resources/server,
+              // Packaged resolution: only bin.js is copied to Resources/hub,
               // so createRequire's walk-up never finds node_modules. Point the
               // resolver at the unpacked natives (better-sqlite3, node-pty) the
               // app ships anyway — same ABI, ELECTRON_RUN_AS_NODE shares it.

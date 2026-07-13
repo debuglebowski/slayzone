@@ -7,7 +7,7 @@
  *  - GET /health advertises the running build (commit / builtAt / buildId) so a
  *    stale sidecar is detectable by comparing against dist/sidecar-build.json.
  *
- * Run with: npx tsx packages/apps/server/src/build-info.test.ts
+ * Run with: npx tsx packages/apps/hub/src/build-info.test.ts
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getServerBuildInfo } from './build-info.js'

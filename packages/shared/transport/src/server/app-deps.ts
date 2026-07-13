@@ -2,7 +2,7 @@
 //
 // The chat ops live in `@slayzone/terminal/electron`, which lazily `require`s
 // `electron` and pulls in `node-pty` — both forbidden inside the transport
-// package (it must run under plain Node for the standalone `@slayzone/server`
+// package (it must run under plain Node for the standalone `@slayzone/hub`
 // host). So we `import type` only (erased at build → zero electron at runtime)
 // and the Electron-main host injects the concrete instances at startup via
 // `setChatDeps()`. A standalone server without these wired would throw on the
@@ -140,7 +140,7 @@ export type NotifyEventMap = {
   /** Settings changed — renderer refetches affected config. No payload. */
   'settings-changed': []
   /**
-   * The supervised embedded @slayzone/server exhausted its restart backoff
+   * The supervised embedded @slayzone/hub exhausted its restart backoff
    * (slice 7) — renderer shows a persistent toast. Emitted by the Electron
    * host's sidecar supervisor `onPermanentFailure`.
    */

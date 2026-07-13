@@ -56,7 +56,7 @@ export {
 } from './capability-bridge'
 
 // MCP server + REST API (moved from the Electron main in slice 6 so the
-// standalone @slayzone/server can host them too — capability-slot injected).
+// standalone @slayzone/hub can host them too — capability-slot injected).
 export {
   startMcpServer,
   stopMcpServer,

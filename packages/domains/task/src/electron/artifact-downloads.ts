@@ -19,7 +19,7 @@ import {
 // Electron-only artifact download/export flows (native save/open dialogs + headless
 // PDF/PNG rendering). Shared single implementation behind both the IPC handlers
 // (./handlers.ts) and the tRPC `artifacts` router (which dynamic-imports this module
-// only in the Electron-main host; the standalone @slayzone/server returns
+// only in the Electron-main host; the standalone @slayzone/hub returns
 // PRECONDITION_FAILED). `dataDir` is the app data root.
 
 async function getArtifactRow(db: SlayzoneDb, id: string): Promise<Record<string, unknown> | undefined> {

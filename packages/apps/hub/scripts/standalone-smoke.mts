@@ -1,5 +1,5 @@
 /**
- * Standalone-server smoke: drives a booted @slayzone/server instance over its
+ * Standalone-server smoke: drives a booted @slayzone/hub instance over its
  * real surfaces (tRPC WS, REST, MCP, health) and exits non-zero on any failure.
  *
  * Boot the target first (fresh store; ELECTRON_RUN_AS_NODE because the dev
@@ -8,9 +8,9 @@
  *   TMPD=$(mktemp -d)
  *   ELECTRON_RUN_AS_NODE=1 SLAYZONE_STORE_DIR=$TMPD SLAYZONE_PORT=4399 \
  *     ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
- *     packages/apps/server/dist/bin.cjs &
+ *     packages/apps/hub/dist/bin.cjs &
  *
- * Then: npx tsx packages/apps/server/scripts/standalone-smoke.mts 4399
+ * Then: npx tsx packages/apps/hub/scripts/standalone-smoke.mts 4399
  */
 import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'

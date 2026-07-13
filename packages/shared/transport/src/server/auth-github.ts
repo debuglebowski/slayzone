@@ -1,6 +1,6 @@
 // Convex GitHub OAuth "sign-in start" — shared by the Electron-main host
 // (`packages/apps/app/src/main/index.ts` githubSystemSignIn) and the
-// chromium-fork sidecar (`packages/apps/server/src/composition.ts`
+// chromium-fork sidecar (`packages/apps/hub/src/composition.ts`
 // authGithubSystemSignIn). Both shells drive the SAME PKCE handshake: POST the
 // Convex `auth:signIn` action to obtain the GitHub authorize URL + the PKCE
 // verifier, then open that URL in the user's browser. The two shells diverge

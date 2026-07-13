@@ -311,9 +311,9 @@ importers:
       '@playwright/test':
         specifier: ^1.52.0
         version: 1.58.2
-      '@slayzone/server':
+      '@slayzone/hub':
         specifier: workspace:*
-        version: link:../server
+        version: link:../hub
       '@tailwindcss/vite':
         specifier: ^4.1.18
         version: 4.1.18(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
@@ -444,6 +444,100 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/apps/hub:
+    dependencies:
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../../domains/ai-config
+      '@slayzone/automations':
+        specifier: workspace:*
+        version: link:../../domains/automations
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../../domains/diagnostics
+      '@slayzone/feedback':
+        specifier: workspace:*
+        version: link:../../domains/feedback
+      '@slayzone/fleet':
+        specifier: workspace:*
+        version: link:../../domains/fleet
+      '@slayzone/hub-auth':
+        specifier: workspace:*
+        version: link:../../domains/hub-auth
+      '@slayzone/hub-identity':
+        specifier: workspace:*
+        version: link:../../domains/hub-identity
+      '@slayzone/integrations':
+        specifier: workspace:*
+        version: link:../../domains/integrations
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../../domains/processes
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../../domains/projects
+      '@slayzone/runners':
+        specifier: workspace:*
+        version: link:../../domains/runners
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../../domains/settings
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../../domains/task
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../../domains/terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@trpc/client':
+        specifier: ^11.17.0
+        version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
+      '@trpc/server':
+        specifier: ^11.17.0
+        version: 11.17.0(typescript@5.9.3)
+      better-sqlite3:
+        specifier: ^12.8.0
+        version: 12.8.0
+      bufferutil:
+        specifier: ^4.1.0
+        version: 4.1.0
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
+      superjson:
+        specifier: ^2.2.1
+        version: 2.2.6
+      utf-8-validate:
+        specifier: ^6.0.6
+        version: 6.0.6
+      ws:
+        specifier: ^8.18.0
+        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+    devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.19.1
+        version: 22.19.7
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/apps/renderer-app:
     dependencies:
       '@slayzone/agent-panels':
@@ -556,100 +650,6 @@ importers:
       vitest:
         specifier: ^4.1.0
         version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
-
-  packages/apps/server:
-    dependencies:
-      '@slayzone/ai-config':
-        specifier: workspace:*
-        version: link:../../domains/ai-config
-      '@slayzone/automations':
-        specifier: workspace:*
-        version: link:../../domains/automations
-      '@slayzone/diagnostics':
-        specifier: workspace:*
-        version: link:../../domains/diagnostics
-      '@slayzone/feedback':
-        specifier: workspace:*
-        version: link:../../domains/feedback
-      '@slayzone/fleet':
-        specifier: workspace:*
-        version: link:../../domains/fleet
-      '@slayzone/hub-auth':
-        specifier: workspace:*
-        version: link:../../domains/hub-auth
-      '@slayzone/hub-identity':
-        specifier: workspace:*
-        version: link:../../domains/hub-identity
-      '@slayzone/integrations':
-        specifier: workspace:*
-        version: link:../../domains/integrations
-      '@slayzone/platform':
-        specifier: workspace:*
-        version: link:../../shared/platform
-      '@slayzone/processes':
-        specifier: workspace:*
-        version: link:../../domains/processes
-      '@slayzone/projects':
-        specifier: workspace:*
-        version: link:../../domains/projects
-      '@slayzone/runners':
-        specifier: workspace:*
-        version: link:../../domains/runners
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../../domains/settings
-      '@slayzone/task':
-        specifier: workspace:*
-        version: link:../../domains/task
-      '@slayzone/terminal':
-        specifier: workspace:*
-        version: link:../../domains/terminal
-      '@slayzone/transport':
-        specifier: workspace:*
-        version: link:../../shared/transport
-      '@trpc/client':
-        specifier: ^11.17.0
-        version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
-      '@trpc/server':
-        specifier: ^11.17.0
-        version: 11.17.0(typescript@5.9.3)
-      better-sqlite3:
-        specifier: ^12.8.0
-        version: 12.8.0
-      bufferutil:
-        specifier: ^4.1.0
-        version: 4.1.0
-      node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
-      superjson:
-        specifier: ^2.2.1
-        version: 2.2.6
-      utf-8-validate:
-        specifier: ^6.0.6
-        version: 6.0.6
-      ws:
-        specifier: ^8.18.0
-        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-    devDependencies:
-      '@slayzone/test-utils':
-        specifier: workspace:*
-        version: link:../../shared/test-utils
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
-      '@types/node':
-        specifier: ^22.19.1
-        version: 22.19.7
-      '@types/ws':
-        specifier: ^8.5.13
-        version: 8.18.1
-      esbuild:
-        specifier: ^0.25.0
-        version: 0.25.12
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
 
   packages/domains/agent-panels:
     dependencies:

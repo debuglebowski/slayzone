@@ -12,7 +12,7 @@ import { getMenuEvents } from '../app-deps'
  * alongside the legacy broadcasts; each `.emit(...)` fans out to every WS
  * subscriber. The legacy IPC broadcasts stay live in parallel until the renderer
  * drops IPC (slice 5). `getMenuEvents()` is read lazily inside each factory so the
- * standalone `@slayzone/server` host (which never calls `setMenuEvents()`) doesn't
+ * standalone `@slayzone/hub` host (which never calls `setMenuEvents()`) doesn't
  * throw at import.
  */
 export const menuRouter = router({

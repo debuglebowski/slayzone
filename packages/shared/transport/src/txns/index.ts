@@ -14,7 +14,7 @@ import { marketplaceTxns } from '@slayzone/ai-config/db'
  *
  *  - the Electron app's DB worker (`apps/app/.../db/txn-registry.ts`) spreads
  *    this and adds its two app-only sources (export-import, reset-for-test);
- *  - the standalone `@slayzone/server` side-car dispatches `namedTxn` against
+ *  - the standalone `@slayzone/hub` side-car dispatches `namedTxn` against
  *    it directly (app-only txns are deliberately absent there — their call
  *    sites live in `apps/app` only).
  *

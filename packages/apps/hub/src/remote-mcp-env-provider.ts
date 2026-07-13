@@ -28,7 +28,7 @@ export const TASK_TOKEN_TTL_MS = 12 * 60 * 60 * 1000
  * malformed value (missing scheme, not a URL) so the provider degrades the spawn
  * to loopback rather than injecting a broken `SLAYZONE_HUB_URL` into the remote
  * pty. Mirrors the CLI's `normalizeHubUrl` without importing across the app
- * boundary (apps/server must not depend on apps/cli).
+ * boundary (apps/hub must not depend on apps/cli).
  */
 function normalizePublicHubUrl(raw: string): string | null {
   let parsed: URL

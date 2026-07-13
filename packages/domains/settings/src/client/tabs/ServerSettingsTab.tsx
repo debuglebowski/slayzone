@@ -95,7 +95,7 @@ export function ServerSettingsTab() {
     <div className="space-y-6">
       <SettingsTabIntro
         title="Server"
-        description="Run SlayZone with the backend embedded in this app (Local) or pointed at a remote @slayzone/server instance you host yourself (Remote)."
+        description="Run SlayZone with the backend embedded in this app (Local) or pointed at a remote @slayzone/hub instance you host yourself (Remote)."
       />
 
       <div className="space-y-3">
@@ -131,7 +131,7 @@ export function ServerSettingsTab() {
             <div>
               <div className="text-sm font-medium">Remote</div>
               <div className="text-muted-foreground text-xs">
-                Connect to a self-hosted <code>@slayzone/server</code>. Tasks, agents and
+                Connect to a self-hosted <code>@slayzone/hub</code>. Tasks, agents and
                 integrations run on that machine; this app becomes a client.
               </div>
             </div>

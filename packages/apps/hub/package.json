@@ -1,5 +1,5 @@
 {
-  "name": "@slayzone/server",
+  "name": "@slayzone/hub",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "bin": {
-    "slayzone-server": "./dist/bin.cjs"
+    "slayzone-hub": "./dist/bin.cjs"
   },
   "scripts": {
     "build": "node build.mjs",

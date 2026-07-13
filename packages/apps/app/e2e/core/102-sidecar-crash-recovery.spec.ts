@@ -19,7 +19,7 @@ type SidecarStatus = {
 /**
  * Slice 7 — embedded server crash + recovery.
  *
- * Kills the supervised @slayzone/server side-car child with SIGKILL and
+ * Kills the supervised @slayzone/hub side-car child with SIGKILL and
  * asserts the supervisor respawns it to a healthy state. A healthy-crash
  * respawn is immediate (no backoff) and does NOT move `restarts` — the
  * lifetime `totalRespawns` counter is the observable signal.

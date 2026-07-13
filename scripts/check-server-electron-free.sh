@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Server boundary guards:
 #  (1) side-car + its transitive deps must never import electron.
-#  (2) @slayzone/app must never import @slayzone/server — the side-car is
+#  (2) @slayzone/app must never import @slayzone/hub — the side-car is
 #      spawned by file path, never bundled into the Electron main process.
 set -euo pipefail
 fail=0
 
 ELECTRON="from ['\"]electron['\"]|require\(['\"]electron['\"]\)"
-for p in packages/apps/server/src packages/shared/transport/src packages/shared/platform/src; do
+for p in packages/apps/hub/src packages/shared/transport/src packages/shared/platform/src; do
   hit=$(grep -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
     "$ELECTRON" "$p" 2>/dev/null || true)
   if [ -n "$hit" ]; then
@@ -18,7 +18,7 @@ for p in packages/apps/server/src packages/shared/transport/src packages/shared/
 done
 
 # Domain server/ entries must stay Electron-free (slice 4 split). Each
-# packages/domains/<d>/src/server/ is the pure-Node half that @slayzone/server
+# packages/domains/<d>/src/server/ is the pure-Node half that @slayzone/hub
 # bundles; an electron import there breaks the headless build. electron/ glue
 # is exempt — only server/ is guarded.
 for d in packages/domains/*/src/server; do
@@ -32,11 +32,11 @@ for d in packages/domains/*/src/server; do
   fi
 done
 
-SERVER_IMPORT="from ['\"]@slayzone/server"
+SERVER_IMPORT="from ['\"]@slayzone/hub"
 hit=$(grep -rnE --include="*.ts" --include="*.tsx" \
   "$SERVER_IMPORT" packages/apps/app/src 2>/dev/null || true)
 if [ -n "$hit" ]; then
-  echo "@slayzone/app must not import @slayzone/server (spawn dist/bin.js by path):"
+  echo "@slayzone/app must not import @slayzone/hub (spawn dist/bin.js by path):"
   echo "$hit"
   fail=1
 fi
@@ -48,7 +48,7 @@ fi
 #      `import type` (erased) and dynamic `import('…')` (lazy + caught) are
 #      allowed, so strip both before searching — perl handles the multiline
 #      type-import form a line-based grep can't.
-for p in packages/apps/server/src packages/shared/transport/src packages/domains/*/src/server; do
+for p in packages/apps/hub/src packages/shared/transport/src packages/domains/*/src/server; do
   [ -d "$p" ] || continue
   hit=$(find "$p" -name "*.ts" -not -name "*.test.ts" -print0 2>/dev/null | xargs -0 perl -0777 -ne '
     my $src = $_;

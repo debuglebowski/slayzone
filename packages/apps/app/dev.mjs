@@ -1,6 +1,6 @@
 // Dev launcher (plans/sidecar-staleness.md, Phase 3).
 //
-// `pnpm dev` used to be `pnpm --filter @slayzone/server build && electron-vite
+// `pnpm dev` used to be `pnpm --filter @slayzone/hub build && electron-vite
 // dev` — a ONE-SHOT server build, so editing server code left the running
 // sidecar stale until a full app restart. This launcher instead:
 //   1. builds the sidecar once (electron main spawns it from dist/bin.cjs),
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const appDir = dirname(fileURLToPath(import.meta.url))
-const serverDir = join(appDir, '..', 'server')
+const hubDir = join(appDir, '..', 'hub')
 
 const children = []
 let shuttingDown = false
@@ -43,7 +43,7 @@ function run(cmd, args, opts) {
 
 // 1. Build the sidecar once up front — electron main resolves + spawns it from
 //    dist/bin.cjs at boot, so it must exist before electron-vite starts.
-const initial = run('node', ['build.mjs'], { cwd: serverDir })
+const initial = run('node', ['build.mjs'], { cwd: hubDir })
 initial.on('exit', (code) => {
   if (code !== 0) {
     console.error(`[dev] initial sidecar build failed (exit ${code})`)
@@ -51,7 +51,7 @@ initial.on('exit', (code) => {
     return
   }
   // 2. Watch server src for rebuilds (--no-initial: we just built above).
-  run('node', ['build.mjs', '--watch', '--no-initial'], { cwd: serverDir })
+  run('node', ['build.mjs', '--watch', '--no-initial'], { cwd: hubDir })
   // 3. The Electron app (main/preload/renderer via electron-vite HMR). pnpm exec
   //    resolves the electron-vite bin from node_modules (PATH isn't seeded here
   //    the way it is inside an npm script).

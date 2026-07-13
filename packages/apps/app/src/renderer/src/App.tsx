@@ -830,7 +830,7 @@ function App(): React.JSX.Element {
     })
   )
 
-  // Embedded @slayzone/server exhausted its restart backoff (slice 7).
+  // Embedded @slayzone/hub exhausted its restart backoff (slice 7).
   // Persistent toast (no auto-dismiss) — calm copy, since while the sidecar is
   // dark the app keeps running on the in-process server unaffected.
   useSubscription(

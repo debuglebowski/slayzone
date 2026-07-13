@@ -14,7 +14,7 @@
  * Run with:
  *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
  *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/server/src/fleet-auth.test.ts
+ *     packages/apps/hub/src/fleet-auth.test.ts
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

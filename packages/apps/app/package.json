@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node dev.mjs",
     "dev:protocol": "SLAYZONE_REGISTER_DEV_PROTOCOL=1 electron-vite dev",
-    "prebuild": "pnpm --filter @slayzone/server build",
+    "prebuild": "pnpm --filter @slayzone/hub build",
     "build": "npm run typecheck && electron-vite build",
     "build:mac": "pnpm --filter @slayzone/cli build && npm run build && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
@@ -105,7 +105,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron/rebuild": "^4.0.3",
     "@playwright/test": "^1.52.0",
-    "@slayzone/server": "workspace:*",
+    "@slayzone/hub": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.13",

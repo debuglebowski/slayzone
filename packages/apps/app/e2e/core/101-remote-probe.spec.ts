@@ -7,7 +7,7 @@ import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
  *
  * The probe runs in the MAIN process (app:probe-server-health) against a real
  * HTTP server spun up by this spec — success answers GET /health with
- * {ok:true} (the @slayzone/server health shape), failure is a dead port.
+ * {ok:true} (the @slayzone/hub health shape), failure is a dead port.
  */
 test.describe('Remote server health probe', () => {
   let server: http.Server | null = null

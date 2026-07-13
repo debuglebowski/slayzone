@@ -41,7 +41,7 @@ import {
  * Electron-host capability set for the MCP + REST module (now hosted in
  * `@slayzone/transport/server`). Every slot is wired to the same module
  * singletons the legacy in-main registration used — behavior-identical.
- * The standalone @slayzone/server builds its own (smaller) set; routes whose
+ * The standalone @slayzone/hub builds its own (smaller) set; routes whose
  * slot is absent there respond 501.
  */
 export function buildMcpRestDeps(

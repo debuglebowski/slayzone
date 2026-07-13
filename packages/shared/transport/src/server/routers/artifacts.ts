@@ -16,7 +16,7 @@ import { router, publicProcedure } from '../trpc'
 // with the IPC handlers (coexistence until slice 5). The 6 download procedures need
 // Electron dialogs + export renderers, so they dynamic-import the electron-side
 // `@slayzone/task/electron/artifact-downloads` (PRECONDITION_FAILED when absent, e.g. the
-// standalone @slayzone/server host). Complex inputs pass through unchecked — the IPC
+// standalone @slayzone/hub host). Complex inputs pass through unchecked — the IPC
 // path validates by TypeScript only.
 const createArtifactInput = z.unknown() as unknown as z.ZodType<CreateArtifactInput>
 const updateArtifactInput = z.unknown() as unknown as z.ZodType<

@@ -5,7 +5,7 @@ import { readFileSync, watchFile, unwatchFile } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /**
- * Supervises the @slayzone/server side-car subprocess.
+ * Supervises the @slayzone/hub side-car subprocess.
  *
  * Slice 2.5 dark-launch: the side-car is spawned + supervised but nothing
  * depends on it. The renderer keeps using the in-process tRPC server. A

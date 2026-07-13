@@ -423,7 +423,7 @@ test('stop() is graceful and idempotent', async () => {
 
 test('parent-death: the real built side-car self-exits when stdin closes', async () => {
   const here = path.dirname(fileURLToPath(import.meta.url))
-  const binJs = path.resolve(here, '../../..', 'server/dist/bin.cjs')
+  const binJs = path.resolve(here, '../../..', 'hub/dist/bin.cjs')
   if (!fs.existsSync(binJs)) {
     console.log(`  ⊘ skipped — ${binJs} not built (run pnpm build first)`)
     return

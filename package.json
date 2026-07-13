@@ -25,7 +25,7 @@
     "dev": "pnpm --filter @slayzone/app dev",
     "dev:protocol": "pnpm --filter @slayzone/app dev:protocol",
     "dev:chromium": "pnpm build:chromium && pnpm run:chromium",
-    "build:chromium": "pnpm --filter @slayzone/server build && pnpm --filter @slayzone/chromium-shell build",
+    "build:chromium": "pnpm --filter @slayzone/hub build && pnpm --filter @slayzone/chromium-shell build",
     "run:chromium": "scripts/chromium/run.sh -- about:blank",
     "generate-icons": "node scripts/generate-icons.js",
     "patch-electron-name": "node scripts/patch-electron-name.js",

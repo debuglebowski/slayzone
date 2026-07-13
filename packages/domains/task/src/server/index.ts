@@ -1,5 +1,5 @@
 // Electron-free task server surface. Consumed by the transport task/template/artifacts
-// routers (which must run under plain Node for the standalone @slayzone/server host)
+// routers (which must run under plain Node for the standalone @slayzone/hub host)
 // and by the Electron host. The task CRUD ops are pure — ops/shared.ts is seamed via
 // TaskRuntimeAdapters (no Electron `app`/IPC), so the whole op set is exported here.
 // The Electron host injects its runtime adapters at boot via configureTaskRuntimeAdapters.

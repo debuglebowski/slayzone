@@ -12,7 +12,7 @@ import { resetForTestTxns } from './reset-for-test-txn'
  * needed, so the worker invokes it directly without re-wrapping.
  *
  * The domain half lives in `@slayzone/transport/txns` (shared with the
- * standalone `@slayzone/server` side-car, which dispatches against it
+ * standalone `@slayzone/hub` side-car, which dispatches against it
  * directly). This file adds the two app-only sources — their impls and call
  * sites live in `apps/app`, which the shared packages can't import. To add a
  * new named txn: export it from the owning domain's `./db`, augment

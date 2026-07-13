@@ -20,7 +20,7 @@
  * The full through-`startServer` boot (composeServer → better-auth migrations) and
  * the fleet-OFF byte-identical boot are covered by the e2e specs, not here.
  *
- * Run with: npx tsx packages/apps/server/src/fleet-tls-listener.test.ts
+ * Run with: npx tsx packages/apps/hub/src/fleet-tls-listener.test.ts
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'

@@ -11,7 +11,7 @@
  * Pure Node (real ephemeral HTTP servers, an in-memory fake db) — no native
  * deps, runs under plain `npx tsx`.
  *
- * Run with: npx tsx packages/apps/server/src/port-claim.test.ts
+ * Run with: npx tsx packages/apps/hub/src/port-claim.test.ts
  */
 import http from 'node:http'
 import net from 'node:net'

@@ -1,6 +1,6 @@
 // cap-shell — sidecar tRPC server URL resolution for the Chromium fork.
 //
-// The renderer connects to the standalone @slayzone/server over a tRPC
+// The renderer connects to the standalone @slayzone/hub over a tRPC
 // WebSocket (server-mode). Unlike Electron — which discovers a dynamic port via
 // the preload's app.getServerUrl() — the fork pins the sidecar to a fixed
 // loopback port (see scripts/chromium/run.sh: SLAYZONE_PORT) so the renderer can

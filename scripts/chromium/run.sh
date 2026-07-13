@@ -37,7 +37,7 @@ fi
 # regions AND the renderer's tRPC-WS client (Home tab → server-mode) have live
 # data; kills it on exit. Opt out via SLAYZONE_NO_SIDECAR=1.
 #
-# The server (@slayzone/server) binds TCP loopback and serves /trpc + /health.
+# The server (@slayzone/hub) binds TCP loopback and serves /trpc + /health.
 # It MUST run under Electron-as-node (ELECTRON_RUN_AS_NODE=1 + the electron
 # binary), never plain node/tsx — better-sqlite3 / node-pty are compiled against
 # Electron's node ABI and fail to load otherwise. We run the built dist/bin.cjs
@@ -64,10 +64,10 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   fi
   SIDECAR_LOG="$SLAYZONE_RUNTIME_DIR/sidecar.log"
   ELECTRON_BIN="$REPO_ROOT/node_modules/.bin/electron"
-  SERVER_BIN="$REPO_ROOT/packages/apps/server/dist/bin.cjs"
+  SERVER_BIN="$REPO_ROOT/packages/apps/hub/dist/bin.cjs"
   if [[ ! -f "$SERVER_BIN" ]]; then
     echo "[run] server bundle missing: $SERVER_BIN" >&2
-    echo "[run] build it first: pnpm --filter @slayzone/server build" >&2
+    echo "[run] build it first: pnpm --filter @slayzone/hub build" >&2
     exit 1
   fi
   echo "[run] starting sidecar (tRPC ws://$SLAYZONE_HOST:$SLAYZONE_PORT/trpc, log=$SIDECAR_LOG)" >&2

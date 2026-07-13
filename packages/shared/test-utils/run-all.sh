@@ -59,7 +59,7 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cha
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
-run_test_electron_strict_loader packages/apps/server/src/fleet-auth.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/fleet-auth.test.ts
 # Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/runners.test.ts
@@ -82,15 +82,15 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/ai-
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
-run_test packages/apps/server/src/build-info.test.ts
+run_test packages/apps/hub/src/build-info.test.ts
 # mcp_server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
-run_test packages/apps/server/src/port-claim.test.ts
+run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (fleet-mode hub URL + scoped task token).
-run_test packages/apps/server/src/remote-mcp-env-provider.test.ts
+run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
 # Wave-3.5 fleet TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
-run_test packages/apps/server/src/fleet-tls-listener.test.ts
+run_test packages/apps/hub/src/fleet-tls-listener.test.ts
 # Wave-3.5 D5 fleet restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
-run_test_electron_strict_loader packages/apps/server/src/fleet-restart-survival.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/fleet-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/runners/join-token.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts

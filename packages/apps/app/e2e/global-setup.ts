@@ -35,18 +35,18 @@ function killStale(pattern: string, label: string): void {
  */
 export default function globalSetup(): void {
   killStale('Electron.*out/main/index\\.js', 'Electron')
-  killStale('server/dist/bin\\.js', 'side-car')
-  killStale('server/bin\\.js', 'side-car')
+  killStale('hub/dist/bin\\.js', 'side-car')
+  killStale('hub/bin\\.js', 'side-car')
 
   // Under Playwright the app loads from out/main, so the sidecar's dev
-  // scriptPath (`app.getAppPath()/../server/dist/bin.cjs`) resolves to
-  // out/server/... — the root build doesn't create that link. Idempotent.
+  // scriptPath (`app.getAppPath()/../hub/dist/bin.cjs`) resolves to
+  // out/hub/... — the root build doesn't create that link. Idempotent.
   const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const linkPath = path.join(appDir, 'out', 'server')
+  const linkPath = path.join(appDir, 'out', 'hub')
   if (!fs.existsSync(linkPath)) {
     fs.mkdirSync(path.dirname(linkPath), { recursive: true })
-    fs.symlinkSync(path.join('..', '..', 'server'), linkPath)
-    console.log('[global-setup] Created out/server symlink for the side-car')
+    fs.symlinkSync(path.join('..', '..', 'hub'), linkPath)
+    console.log('[global-setup] Created out/hub symlink for the side-car')
   }
 
   // Same shape for the local runner (hub/runner split): its dev scriptPath

@@ -8,7 +8,7 @@ const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.s
 
 /**
  * Removes any on-disk icon file for a project. `iconsDir` is injected so this
- * module stays electron-free (it runs in the headless `apps/server` too); the
+ * module stays electron-free (it runs in the headless `apps/hub` too); the
  * Electron-main IPC path computes the dir itself, the tRPC router derives it
  * from `ctx.dataRoot`.
  */

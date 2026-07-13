@@ -6,7 +6,7 @@ import { normalizeProjectStatusData } from './status-normalization'
 /**
  * Schema bootstrap shared by both DB owners: the Electron app's DB worker
  * (which adds legacy-path migration + pre-migration backup around it) and the
- * standalone @slayzone/server opening a fresh store. Moved out of apps/app in
+ * standalone @slayzone/hub opening a fresh store. Moved out of apps/app in
  * slice 6 so the server package can run migrations without Electron.
  */
 

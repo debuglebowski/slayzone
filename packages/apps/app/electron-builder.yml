@@ -56,8 +56,8 @@ extraResources:
     to: "bin/slay.js"
   - from: "../cli/bin/slay"
     to: "bin/slay"
-  - from: "../server/dist/bin.cjs"
-    to: "server/bin.cjs"
+  - from: "../hub/dist/bin.cjs"
+    to: "hub/bin.cjs"
 npmRebuild: true
 nativeRebuilder: sequential
 publish:
