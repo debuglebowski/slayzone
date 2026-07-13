@@ -1,0 +1,89 @@
+name: Publish hub + runner (npm)
+
+# Publishes @slayzone/hub and @slayzone/runner to npm as install-time-rebuild
+# packages (bin.cjs bundles workspace deps; native addons rebuild on the
+# consumer's machine at `npm install`).
+#
+# SAFE TO COMMIT / INERT UNTIL ENABLED: live `npm publish` only runs when the
+# `NPM_TOKEN` repository secret is set. Without it, every run is a DRY RUN
+# (build + pack + smoke-boot the hub tarball under plain node) that publishes
+# nothing. So merging this workflow cannot push to npm on its own — you must
+# add NPM_TOKEN (from an account that owns the @slayzone npm scope) first.
+#
+# This is a STANDALONE workflow, deliberately separate from the desktop-app
+# release pipeline (release.yml / release-foundation.yml) so it does not touch
+# the policy-governed release files (scripts/ci/check-release-workflow-policy.sh).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Publish mode
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - publish
+
+concurrency:
+  group: publish-hub-runner-${{ github.event_name == 'push' && github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # publish-hub-runner.sh builds from a clean-HEAD worktree
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
+      # Resolve effective mode: a `publish` intent only takes effect when
+      # NPM_TOKEN is present. Otherwise fall back to dry-run so the run is inert.
+      - name: Resolve publish mode
+        id: mode
+        env:
+          HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+          REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}
+        run: |
+          set -euo pipefail
+          if [ "$REQUESTED" = "publish" ] && [ "$HAS_TOKEN" = "true" ]; then
+            echo "effective=publish" >> "$GITHUB_OUTPUT"
+            echo "Publish mode: LIVE (NPM_TOKEN present)"
+          else
+            echo "effective=dry-run" >> "$GITHUB_OUTPUT"
+            if [ "$REQUESTED" = "publish" ]; then
+              echo "::warning::publish requested but NPM_TOKEN is not set — running DRY RUN (nothing published)"
+            else
+              echo "Publish mode: dry-run"
+            fi
+          fi
+
+      - name: Build + pack + smoke (dry run)
+        if: steps.mode.outputs.effective == 'dry-run'
+        run: bash scripts/publish-hub-runner.sh
+
+      - name: Build + pack + smoke + publish
+        if: steps.mode.outputs.effective == 'publish'
+        run: bash scripts/publish-hub-runner.sh --publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

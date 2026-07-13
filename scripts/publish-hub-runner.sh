@@ -18,7 +18,7 @@
 #
 # PRECONDITIONS you must satisfy:
 #   - You own/control the `@slayzone` npm scope (else the scoped publish fails).
-#   - `npm whoami` succeeds (you're logged in) — only needed for --publish.
+#   - Auth for --publish: NODE_AUTH_TOKEN (CI) or `npm login` (local). @slayzone org.
 #   - Decide the version below (VERSION=...). npm versions are near-permanent;
 #     to iterate, bump the patch and publish again.
 #
@@ -145,8 +145,12 @@ if [ "$DO_PUBLISH" -ne 1 ]; then
   exit 0
 fi
 
-# --- PUBLISH (needs your npm auth + @slayzone org) ---
-echo "==> Publishing to npm (whoami: $(npm whoami))"
+# --- PUBLISH (needs npm auth + @slayzone org) ---
+# Auth resolves from NODE_AUTH_TOKEN (CI, via setup-node registry-url) or an
+# interactive `npm login` (local). `npm whoami` is only a courtesy label and is
+# NOT gated on — it can fail under token-only auth even when publish would work.
+WHO="$(npm whoami 2>/dev/null || echo 'token-auth')"
+echo "==> Publishing to npm (auth: $WHO)"
 ( cd packages/apps/hub && npm publish --access public )
 ( cd packages/apps/runner && npm publish --access public )
 echo "==> Published @slayzone/hub@$VERSION + @slayzone/runner@$VERSION"
