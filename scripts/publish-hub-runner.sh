@@ -122,7 +122,16 @@ echo "==> Smoke: clean-install hub tarball under plain node + boot headless"
 SMOKE="$(mktemp -d /tmp/slz-pub-smoke.XXXXXX)"
 ( cd "$SMOKE" && npm init -y >/dev/null && npm install "$HUB_TGZ" >/dev/null 2>&1 )
 SDB="$SMOKE/hub.sqlite"
-SLAYZONE_DB_PATH="$SDB" SLAYZONE_STORE_DIR="$SMOKE" SLAYZONE_PORT=47811 \
+# Scrub any inherited SlayZone env before booting. Running this script from
+# INSIDE a SlayZone session (dogfooding) leaks SLAYZONE_SUPERVISED=1 +
+# SLAYZONE_DB_PATH (pointing at the real dev DB) + ELECTRON_RUN_AS_NODE into
+# the child — which would (a) skip schema bootstrap (supervised mode ⇒ "no such
+# table: tasks") giving a FALSE smoke failure, and (b) risk touching the real
+# store. `env -i`-style scrub via `-u` guarantees a clean standalone boot.
+env -u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_STORE_DIR \
+    -u SLAYZONE_PORT -u SLAYZONE_FLEET_PORT -u SLAYZONE_FLEET_SECRET \
+    -u ELECTRON_RUN_AS_NODE \
+  SLAYZONE_DB_PATH="$SDB" SLAYZONE_STORE_DIR="$SMOKE" SLAYZONE_PORT=47811 \
   SLAYZONE_FLEET_MODE=1 SLAYZONE_FLEET_PORT=47812 \
   SLAYZONE_FLEET_SECRET="$(openssl rand -hex 32)" \
   node "$SMOKE/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
