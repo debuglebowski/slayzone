@@ -1,5 +1,6 @@
 {
   "name": "@slayzone/website",
+  "version": "0.35.0",
   "private": true,
   "type": "module",
   "scripts": {

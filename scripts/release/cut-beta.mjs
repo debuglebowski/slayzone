@@ -72,7 +72,10 @@ function main() {
   writeVersion(APP_PKG_PATH, version)
   writeVersion(CLI_PKG_PATH, version)
 
-  git(['add', APP_PKG_PATH, CLI_PKG_PATH])
+  // Stamp the shared version into every other workspace manifest.
+  execFileSync('node', ['scripts/sync-versions.mjs'], { stdio: 'inherit' })
+
+  git(['add', '-A', '--', '*package.json'])
   git(['commit', '-m', `chore(release): ${tag}`])
   git(['tag', tag])
 

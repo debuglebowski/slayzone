@@ -14,9 +14,12 @@ VERSION=$(node -p "require('./packages/apps/app/package.json').version")
 
 echo "Releasing v$VERSION..."
 
+# Stamp the shared version into every workspace manifest (app is canonical).
+node scripts/sync-versions.mjs
+
 # Rebuild changelog cleanly using last tag's changelog as history base
 { echo "# Changelog"; changelogen --hideAuthorEmail --no-fetch 2>/dev/null; git show "$LAST_TAG:CHANGELOG.md" | tail -n +2; } > CHANGELOG.md
-git add packages/apps/app/package.json CHANGELOG.md
+git add -A -- '*package.json' CHANGELOG.md
 git commit -m "release: v$VERSION"
 git tag "v$VERSION"
 git push origin main

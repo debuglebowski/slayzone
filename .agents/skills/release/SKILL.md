@@ -24,9 +24,13 @@ Invoke the `slay-auto-title` skill to rename the current task to reflect the rel
 
 ### 3. Bump version
 
-Update `"version"` in both:
-- `packages/apps/app/package.json`
-- `packages/apps/cli/package.json`
+Update `"version"` in `packages/apps/app/package.json` (canonical source of truth), then run:
+
+```
+node scripts/sync-versions.mjs
+```
+
+This stamps the shared version into every workspace manifest (cli, all domains/shared/apps, root, website). Do NOT hand-edit other manifests — the script owns them and `pnpm lint:versions` enforces it.
 
 ### 4. Generate changelog
 
@@ -58,7 +62,8 @@ Categories:
 ### 6. Commit and confirm
 
 ```
-git add CHANGELOG.md packages/apps/app/package.json packages/apps/cli/package.json packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
+git add -A -- '*package.json'
+git add CHANGELOG.md packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
 git commit -m "release: v<new-version>"
 ```
 
@@ -83,5 +88,5 @@ Print a summary:
 ## Important
 
 - The release CI triggers on `v*` tag push — builds macOS/Linux/Windows + deploys Convex
-- Do NOT modify `package.json` in the monorepo root — only `packages/apps/app/package.json` matters for electron-builder
+- All workspace manifests share one version, stamped from `packages/apps/app/package.json` by `scripts/sync-versions.mjs`. Only the app version matters to electron-builder; the rest (incl. root) are synced for consistency and enforced by `pnpm lint:versions`.
 - Always confirm with the user before running `git push`
