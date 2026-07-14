@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/hub-auth",
-  "version": "0.35.0",
+  "version": "0.36.0-beta.1",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
