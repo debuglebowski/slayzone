@@ -34,7 +34,15 @@ function bumpVersion(current, bump) {
 }
 
 function nextBetaNumber(baseVersion) {
-  git(['fetch', '--tags', '--quiet'])
+  // Best-effort refresh so we don't reuse a beta number already pushed.
+  // Non-fatal: offline, or local tags that would clobber on fetch (common with
+  // multiple remotes), must not abort a purely-local beta cut — fall back to
+  // whatever tags we have locally.
+  try {
+    git(['fetch', '--tags', '--quiet'])
+  } catch {
+    console.warn('warning: git fetch --tags failed; using local tags only.')
+  }
   const tags = git(['tag', '-l', `v${baseVersion}-beta.*`])
     .split('\n')
     .filter(Boolean)
