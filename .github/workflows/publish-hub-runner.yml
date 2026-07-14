@@ -48,7 +48,10 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          # node 24: the hub bundle uses the node:sqlite builtin. Absent on node
+          # 20 (smoke crashes ERR_UNKNOWN_BUILTIN_MODULE); flag-gated on 22.
+          # Flag-free only from 23.4/24 — 24 is the proven-working version.
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
 

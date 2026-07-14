@@ -28,11 +28,14 @@
 
 set -euo pipefail
 
-VERSION="${SLZ_PUBLISH_VERSION:-0.1.0}"
 DO_PUBLISH=0
 [ "${1:-}" = "--publish" ] && DO_PUBLISH=1
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Version = the shared workspace version (stamped from @slayzone/app by
+# scripts/sync-versions.mjs). Override with SLZ_PUBLISH_VERSION if needed.
+VERSION="${SLZ_PUBLISH_VERSION:-$(node -p "require('$REPO_ROOT/packages/apps/app/package.json').version")}"
 WT="$(mktemp -d /tmp/slz-publish-wt.XXXXXX)"
 HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 
@@ -60,7 +63,7 @@ publish_manifest() {
     const out={
       name, version, description: desc, license:"GPL-3.0-only", private:false,
       type:"module", bin:{[bin]:"./dist/bin.cjs"}, main:"./dist/bin.cjs",
-      files:["dist/","README.md"], engines:{node:">=20"},
+      files:["dist/","README.md"], engines:{node:">=24"},
       repository:{type:"git",url:"git+https://github.com/JCB-K/SlayZone.git"},
       dependencies: deps
     };
@@ -159,7 +162,13 @@ fi
 # interactive `npm login` (local). `npm whoami` is only a courtesy label and is
 # NOT gated on — it can fail under token-only auth even when publish would work.
 WHO="$(npm whoami 2>/dev/null || echo 'token-auth')"
-echo "==> Publishing to npm (auth: $WHO)"
-( cd packages/apps/hub && npm publish --access public )
-( cd packages/apps/runner && npm publish --access public )
-echo "==> Published @slayzone/hub@$VERSION + @slayzone/runner@$VERSION"
+# Prereleases (0.36.0-beta.2) must NOT go to the `latest` dist-tag — npm rejects
+# it. Route pre-releases to `beta`, stable to `latest`.
+case "$VERSION" in
+  *-*) NPM_TAG="beta" ;;
+  *)   NPM_TAG="latest" ;;
+esac
+echo "==> Publishing to npm (auth: $WHO, tag: $NPM_TAG)"
+( cd packages/apps/hub && npm publish --access public --tag "$NPM_TAG" )
+( cd packages/apps/runner && npm publish --access public --tag "$NPM_TAG" )
+echo "==> Published @slayzone/hub@$VERSION + @slayzone/runner@$VERSION (tag: $NPM_TAG)"
