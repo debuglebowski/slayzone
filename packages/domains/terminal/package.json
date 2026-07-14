@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/terminal",
-  "version": "0.36.0-beta.1",
+  "version": "0.36.0-beta.2",
   "private": true,
   "type": "module",
   "//xterm": "@xterm/* + @xterm/headless are pinned (exact, no ^) to the xterm 6.1 beta channel for ScreenDprMonitor + texture-atlas race fixes. Move all 7 in lockstep. Re-bump when xterm 6.1 ships stable, or to a newer beta if a relevant fix lands.",

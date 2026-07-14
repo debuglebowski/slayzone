@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/automations",
-  "version": "0.36.0-beta.1",
+  "version": "0.36.0-beta.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
