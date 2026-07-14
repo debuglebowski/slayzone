@@ -229,6 +229,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.100.9
         version: 5.100.10(react@19.2.3)
+      '@trpc/server':
+        specifier: ^11.17.0
+        version: 11.17.0(typescript@5.9.3)
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.10.2(@types/react@19.2.8)(immer@11.1.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -289,6 +292,9 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
+      ws:
+        specifier: ^8.18.0
+        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod:
         specifier: ^4
         version: 4.3.5
@@ -335,6 +341,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.8)
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^5.1.1
         version: 5.1.2(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
