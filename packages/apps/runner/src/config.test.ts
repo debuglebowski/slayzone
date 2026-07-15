@@ -156,6 +156,82 @@ describe('loadRunnerConfig', () => {
       loadRunnerConfig({ [ENV_VARS.hubUrl]: 'wss://x/fleet', [ENV_VARS.heartbeatIntervalMs]: 'soon' })
     ).toThrow(/integer/)
   })
+
+  // --- shared ~/.slayzone/config.json layering (env > runner file > shared > default) ---
+  it('reads hubUrl/joinToken/runnerName from the shared config as a base', () => {
+    const config = loadRunnerConfig(
+      {},
+      { hubUrl: 'wss://shared.example/fleet', joinToken: 'jt-shared', runnerName: 'shared-runner' }
+    )
+    expect(config.hubUrl).toBe('wss://shared.example/fleet')
+    expect(config.joinToken).toBe('jt-shared')
+    expect(config.name).toBe('shared-runner')
+  })
+
+  it('runner config FILE wins over the shared config', () => {
+    const filePath = join(dir, 'runner.json')
+    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/fleet' }))
+    const config = loadRunnerConfig(
+      { [ENV_VARS.configFile]: filePath },
+      { hubUrl: 'wss://shared.example/fleet', joinToken: 'jt-shared' }
+    )
+    expect(config.hubUrl).toBe('wss://from-file.example/fleet')
+    // joinToken only in shared → still used (file did not set it)
+    expect(config.joinToken).toBe('jt-shared')
+  })
+
+  it('ENV wins over both the runner file and the shared config', () => {
+    const filePath = join(dir, 'runner.json')
+    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/fleet' }))
+    const config = loadRunnerConfig(
+      { [ENV_VARS.configFile]: filePath, [ENV_VARS.hubUrl]: 'wss://from-env.example/fleet' },
+      { hubUrl: 'wss://shared.example/fleet', runnerName: 'shared-runner' }
+    )
+    expect(config.hubUrl).toBe('wss://from-env.example/fleet')
+    expect(config.name).toBe('shared-runner') // shared name survives (no file/env override)
+  })
+
+  it('does not read the developer real config when an explicit env is passed (hermetic)', () => {
+    // Passing an `env` object other than process.env ⇒ shared defaults to {} so
+    // tests never accidentally pick up ~/.slayzone/config.json.
+    expect(() => loadRunnerConfig({})).toThrow(/SLAYZONE_HUB_URL/)
+  })
+
+  it('SUPERVISED runner does NOT layer in the shared config (mirrors hub no-op)', () => {
+    // The app-spawned local runner inherits SLAYZONE_SUPERVISED=1 via {...process.env}.
+    // Drive the DEFAULT `shared` param (real process.env) with SUPERVISED set + a real
+    // config.json (via SLAYZONE_HOME_DIR) carrying a hubUrl. The shared file MUST be
+    // skipped → the only hubUrl source is missing → schema throws. Without the gate
+    // the shared hubUrl would leak in and it would NOT throw.
+    const savedHome = process.env.SLAYZONE_HOME_DIR
+    const savedSup = process.env.SLAYZONE_SUPERVISED
+    const savedHub = process.env.SLAYZONE_HUB_URL
+    const savedToken = process.env.SLAYZONE_JOIN_TOKEN
+    const savedCfg = process.env.SLAYZONE_RUNNER_CONFIG
+    try {
+      delete process.env.SLAYZONE_HUB_URL
+      delete process.env.SLAYZONE_JOIN_TOKEN
+      delete process.env.SLAYZONE_RUNNER_CONFIG
+      process.env.SLAYZONE_HOME_DIR = dir
+      process.env.SLAYZONE_SUPERVISED = '1'
+      writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/fleet' }))
+      // Supervised ⇒ shared skipped ⇒ no hubUrl anywhere ⇒ throws.
+      expect(() => loadRunnerConfig()).toThrow(/SLAYZONE_HUB_URL/)
+      // Sanity: with SUPERVISED unset, the SAME shared config IS read (no throw).
+      delete process.env.SLAYZONE_SUPERVISED
+      expect(loadRunnerConfig().hubUrl).toBe('wss://shared.example/fleet')
+    } finally {
+      const restore = (k: string, v: string | undefined): void => {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+      restore('SLAYZONE_HOME_DIR', savedHome)
+      restore('SLAYZONE_SUPERVISED', savedSup)
+      restore('SLAYZONE_HUB_URL', savedHub)
+      restore('SLAYZONE_JOIN_TOKEN', savedToken)
+      restore('SLAYZONE_RUNNER_CONFIG', savedCfg)
+    }
+  })
 })
 
 describe('assertPathAllowed', () => {

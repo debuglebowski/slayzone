@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./ipc": "./src/ipc-dedup.ts",
     "./slz-file-url": "./src/slz-file-url.ts",
-    "./events": "./src/typed-emitter.ts"
+    "./events": "./src/typed-emitter.ts",
+    "./slayzone-config": "./src/slayzone-config.ts"
   },
   "scripts": {
     "test": "vitest run",

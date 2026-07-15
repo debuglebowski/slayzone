@@ -208,8 +208,29 @@ export function composeServer(opts: {
   // signer (createHubAuth) AND the per-task bearer tokens the remote-MCP-env
   // provider mints (mintTaskToken) / the agent-hook route verifies
   // (verifyTaskToken). Hoisted so all three use ONE secret — a mismatch would make
-  // every minted token unverifiable. Same env default as before the hoist.
-  const fleetSecret = process.env.SLAYZONE_FLEET_SECRET ?? 'slayzone-dev-fleet-secret'
+  // every minted token unverifiable.
+  //
+  // SECURITY SEAM (fleet-secret hardening): a STANDALONE boot resolves this in
+  // bin.ts (applyStandaloneHubConfig → env SLAYZONE_FLEET_SECRET > config.json
+  // fleetSecret > generated+persisted 256-bit secret) and sets the env BEFORE
+  // composeServer runs. So in standalone the env is ALWAYS present and NEVER the
+  // shared dev constant — a per-install unique secret means minted per-task
+  // tokens can't be forged across installs (the npm-published bug). We assert
+  // that invariant here rather than silently applying the constant. SUPERVISED
+  // (Electron host) keeps the historical env-or-dev-constant default untouched:
+  // the host controls the env, config.json is never consulted, and a dev/test
+  // boot without the env still works exactly as before.
+  const DEV_FLEET_SECRET = 'slayzone-dev-fleet-secret'
+  if (opts.standalone && !process.env.SLAYZONE_FLEET_SECRET) {
+    // bin.ts must have seeded this; a standalone boot that reached composeServer
+    // without it means the resolve step was skipped — fail loud instead of
+    // signing tokens with a shared, forgeable constant.
+    throw new Error(
+      '[slayzone-hub] standalone boot reached composeServer without SLAYZONE_FLEET_SECRET — ' +
+        'applyStandaloneHubConfig() must run first (bin.ts)'
+    )
+  }
+  const fleetSecret = process.env.SLAYZONE_FLEET_SECRET ?? DEV_FLEET_SECRET
   // Populated by the async fleet init (createHubAuth is async — migrations); a
   // later unit reads these after `fleetReady` to mount the gateway in server.ts.
   let fleetGatewayRef: HubFleetGateway | null = null

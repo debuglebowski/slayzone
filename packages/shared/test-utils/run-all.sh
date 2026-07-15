@@ -89,6 +89,9 @@ run_test packages/apps/hub/src/port-claim.test.ts
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
 # Wave-3.5 fleet TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
 run_test packages/apps/hub/src/fleet-tls-listener.test.ts
+# Shared ~/.slayzone/config.json (hub+runner; env>file>default, auto-gen secret, race-safe).
+run_test packages/shared/platform/src/slayzone-config.test.ts
+run_test packages/apps/hub/src/standalone-config.test.ts
 # Wave-3.5 D5 fleet restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
 run_test_electron_strict_loader packages/apps/hub/src/fleet-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).

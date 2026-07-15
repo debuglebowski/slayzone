@@ -1,7 +1,14 @@
 /**
  * Runner configuration — env-first with an optional JSON config file
- * (`SLAYZONE_RUNNER_CONFIG=/path/to/config.json`). Env vars win over the
- * file so operators can override a checked-in config per host.
+ * (`SLAYZONE_RUNNER_CONFIG=/path/to/config.json`) AND the shared
+ * `~/.slayzone/config.json` (see @slayzone/platform/slayzone-config) layered in
+ * as a lower-precedence base. Full precedence for the runner keys it reads
+ * (joinToken, runnerName→name, hubUrl):
+ *
+ *   env var  >  SLAYZONE_RUNNER_CONFIG file  >  ~/.slayzone/config.json  >  default
+ *
+ * (plus the join-token embedded hubUrl/cert as the lowest fallback, unchanged).
+ * Env still wins so operators can override a checked-in config per host.
  *
  * @module runner/config
  */
@@ -11,6 +18,7 @@ import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
+import { loadSlayzoneConfig, type SlayzoneConfig } from '@slayzone/platform/slayzone-config'
 import { decodeJoinToken } from './join-token'
 
 export const runnerConfigSchema = z.object({
@@ -140,10 +148,43 @@ function readConfigFile(path: string): Partial<RunnerConfig> {
 }
 
 /**
- * Assemble the effective config: defaults ← config file ← environment.
- * Throws with a readable message when required fields are missing.
+ * Map the shared `~/.slayzone/config.json` onto the runner's partial config
+ * shape (only the runner keys it owns: hubUrl, joinToken, runnerName→name).
+ * Other shared keys (hub-only) are ignored here.
  */
-export function loadRunnerConfig(env: Env = process.env): RunnerConfig {
+function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
+  const out: Partial<RunnerConfig> = {}
+  if (shared.hubUrl !== undefined) out.hubUrl = shared.hubUrl
+  if (shared.joinToken !== undefined) out.joinToken = shared.joinToken
+  if (shared.runnerName !== undefined) out.name = shared.runnerName
+  return out
+}
+
+/**
+ * Assemble the effective config. Precedence (low→high):
+ *   defaults ← ~/.slayzone/config.json ← SLAYZONE_RUNNER_CONFIG file ← environment
+ * (with the join-token embedded hubUrl/cert as the lowest fallback). Throws with
+ * a readable message when required fields are missing.
+ *
+ * `shared` defaults to reading `~/.slayzone/config.json` ONLY for a STANDALONE
+ * runner using the real `process.env`. It is skipped ({}) when:
+ *   - a test passes its own `env` object (hermetic — never touch the dev's real
+ *     config file), or
+ *   - `SLAYZONE_SUPERVISED=1` — the app-spawned local runner
+ *     (startLocalRunnerWithAutoEnroll passes `{...process.env}`, which carries
+ *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
+ *     supplies the runner's env in full (SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN /
+ *     SLAYZONE_RUNNER_NAME), so the shared file must not leak into it. Keeps the
+ *     supervised runner boot byte-identical to pre-config behavior.
+ * Callers can also pass an explicit shared config to test the layering.
+ */
+export function loadRunnerConfig(
+  env: Env = process.env,
+  shared: SlayzoneConfig = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
+    ? loadSlayzoneConfig()
+    : {}
+): RunnerConfig {
+  const fromShared = fromSharedConfig(shared)
   const fromFile = env[ENV_VARS.configFile] ? readConfigFile(env[ENV_VARS.configFile] as string) : {}
 
   const heartbeatRaw = env[ENV_VARS.heartbeatIntervalMs]
@@ -159,7 +200,7 @@ export function loadRunnerConfig(env: Env = process.env): RunnerConfig {
   // operator can point a token at a different endpoint or override the pin. A
   // malformed token decodes to null → no fallback (schema then reports the missing
   // hubUrl, exactly as before).
-  const joinToken = env[ENV_VARS.joinToken] ?? fromFile.joinToken
+  const joinToken = env[ENV_VARS.joinToken] ?? fromFile.joinToken ?? fromShared.joinToken
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 
   const merged = {
@@ -169,6 +210,9 @@ export function loadRunnerConfig(env: Env = process.env): RunnerConfig {
     ...(fromToken
       ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint }
       : {}),
+    // ~/.slayzone/config.json — base under both the per-host runner config file
+    // and env (which are spread after this). Only the runner keys it owns.
+    ...fromShared,
     ...fromFile,
     ...(env[ENV_VARS.hubUrl] !== undefined ? { hubUrl: env[ENV_VARS.hubUrl] } : {}),
     ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {}),
