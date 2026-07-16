@@ -10,7 +10,13 @@ import {
   readBootConfig,
   writeBootSettings,
   probeRemoteHealth,
-  fleetEnvFor
+  fleetEnvFor,
+  resolveHubRegistry,
+  resolveDefaultHubId,
+  localHubEntry,
+  LOCAL_HUB_ID,
+  LEGACY_REMOTE_HUB_ID,
+  type BootConfig
 } from './boot-config'
 
 describe('normalizeRemoteUrl', () => {
@@ -156,6 +162,168 @@ describe('fleetEnvFor', () => {
     expect(fleetEnvFor({})).toEqual({})
     expect('SLAYZONE_FLEET_MODE' in fleetEnvFor({})).toBe(false)
     expect('SLAYZONE_FLEET_MODE' in fleetEnvFor({ fleet_mode: false })).toBe(false)
+  })
+})
+
+describe('multi-hub boot config (Phase 0)', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'slayzone-boot-config-mh-'))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // --- byte-identical: the new fields must be absent for single-hub users ---
+
+  it('local-only config reads back with NO multi-hub keys (byte-identical)', () => {
+    writeBootSettings(dir, { server_mode: 'local' })
+    const cfg = readBootConfig(dir)
+    expect(cfg).toEqual({ server_mode: 'local' })
+    expect(cfg.multi_hub).toBeUndefined()
+    expect(cfg.hubs).toBeUndefined()
+    expect(cfg.default_hub_id).toBeUndefined()
+  })
+
+  it('single-remote config reads back unchanged (no multi-hub keys)', () => {
+    writeBootSettings(dir, { server_mode: 'remote', remote_server_url: 'https://hub.example.com' })
+    expect(readBootConfig(dir)).toEqual({
+      server_mode: 'remote',
+      remote_server_url: 'wss://hub.example.com/trpc'
+    })
+  })
+
+  // --- persistence of the new fields ---
+
+  it('round-trips multi_hub: true and clears it back to absent', () => {
+    writeBootSettings(dir, { multi_hub: true })
+    expect(readBootConfig(dir).multi_hub).toBe(true)
+    writeBootSettings(dir, { multi_hub: false })
+    expect(readBootConfig(dir).multi_hub).toBeUndefined()
+  })
+
+  it('persists + normalizes remote hub entries and drops the list when empty', () => {
+    writeBootSettings(dir, {
+      hubs: [{ id: 'fp-abc', kind: 'remote', label: 'Prod', url: 'https://prod.example.com' }]
+    })
+    expect(readBootConfig(dir).hubs).toEqual([
+      { id: 'fp-abc', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }
+    ])
+    writeBootSettings(dir, { hubs: [] })
+    expect(readBootConfig(dir).hubs).toBeUndefined()
+  })
+
+  it('throws on an invalid hub entry url without persisting it', () => {
+    expect(() =>
+      writeBootSettings(dir, {
+        hubs: [{ id: 'bad', kind: 'remote', label: 'Bad', url: 'not a url' }]
+      })
+    ).toThrow()
+    expect(readBootConfig(dir).hubs).toBeUndefined()
+  })
+
+  it('drops malformed hub entries on read (hand-edited file)', () => {
+    writeFileSync(
+      join(dir, 'boot-config.json'),
+      JSON.stringify({
+        server_mode: 'local',
+        multi_hub: true,
+        hubs: [
+          { id: 'ok', kind: 'remote', label: 'OK', url: 'wss://ok.example.com/trpc' },
+          { id: 'no-url', kind: 'remote', label: 'NoUrl' },
+          { id: 'local-not-allowed', kind: 'local', label: 'Nope' },
+          'garbage'
+        ]
+      })
+    )
+    expect(readBootConfig(dir).hubs).toEqual([
+      { id: 'ok', kind: 'remote', label: 'OK', url: 'wss://ok.example.com/trpc' }
+    ])
+  })
+
+  it('round-trips default_hub_id and clears it', () => {
+    writeBootSettings(dir, { default_hub_id: 'fp-abc' })
+    expect(readBootConfig(dir).default_hub_id).toBe('fp-abc')
+    writeBootSettings(dir, { default_hub_id: '' })
+    expect(readBootConfig(dir).default_hub_id).toBeUndefined()
+  })
+})
+
+describe('resolveHubRegistry (synthesis / migration)', () => {
+  it('local mode, multi_hub off → exactly [local]', () => {
+    const reg = resolveHubRegistry({ server_mode: 'local' })
+    expect(reg).toEqual([localHubEntry()])
+    expect(reg[0].id).toBe(LOCAL_HUB_ID)
+  })
+
+  it('legacy remote mode, multi_hub off → exactly [remote-legacy], NO local', () => {
+    const reg = resolveHubRegistry({
+      server_mode: 'remote',
+      remote_server_url: 'wss://hub.example.com/trpc'
+    })
+    expect(reg).toEqual([
+      { id: LEGACY_REMOTE_HUB_ID, kind: 'remote', label: 'Remote', url: 'wss://hub.example.com/trpc' }
+    ])
+    expect(reg.some((h) => h.kind === 'local')).toBe(false)
+  })
+
+  it('remote mode with no url falls back to [local] (nothing to connect to)', () => {
+    expect(resolveHubRegistry({ server_mode: 'remote' })).toEqual([localHubEntry()])
+  })
+
+  it('multi_hub on → local is always first + present, remotes follow', () => {
+    const reg = resolveHubRegistry({
+      server_mode: 'local',
+      multi_hub: true,
+      hubs: [{ id: 'fp-1', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }]
+    })
+    expect(reg[0]).toEqual(localHubEntry())
+    expect(reg.map((h) => h.id)).toEqual([LOCAL_HUB_ID, 'fp-1'])
+  })
+
+  it('multi_hub on folds a not-yet-migrated remote_server_url into the list once', () => {
+    const cfg: BootConfig = {
+      server_mode: 'remote',
+      remote_server_url: 'wss://old.example.com/trpc',
+      multi_hub: true,
+      hubs: [{ id: 'fp-1', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }]
+    }
+    const reg = resolveHubRegistry(cfg)
+    expect(reg.map((h) => h.id)).toEqual([LOCAL_HUB_ID, 'fp-1', LEGACY_REMOTE_HUB_ID])
+    // Idempotent: an already-migrated remote (same url) is not duplicated.
+    const cfg2: BootConfig = {
+      server_mode: 'local',
+      multi_hub: true,
+      hubs: [{ id: 'fp-1', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }],
+      remote_server_url: 'wss://prod.example.com/trpc'
+    }
+    expect(resolveHubRegistry(cfg2).map((h) => h.id)).toEqual([LOCAL_HUB_ID, 'fp-1'])
+  })
+})
+
+describe('resolveDefaultHubId', () => {
+  it('honors an explicit default_hub_id present in the registry', () => {
+    const cfg: BootConfig = {
+      server_mode: 'local',
+      multi_hub: true,
+      hubs: [{ id: 'fp-1', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }],
+      default_hub_id: 'fp-1'
+    }
+    expect(resolveDefaultHubId(cfg)).toBe('fp-1')
+  })
+
+  it('falls back to the first registry entry when default_hub_id is absent or stale', () => {
+    expect(resolveDefaultHubId({ server_mode: 'local' })).toBe(LOCAL_HUB_ID)
+    expect(
+      resolveDefaultHubId({ server_mode: 'local', multi_hub: true, default_hub_id: 'ghost' })
+    ).toBe(LOCAL_HUB_ID)
+  })
+
+  it('legacy remote mode defaults to the sole remote hub', () => {
+    expect(
+      resolveDefaultHubId({ server_mode: 'remote', remote_server_url: 'wss://hub.example.com/trpc' })
+    ).toBe(LEGACY_REMOTE_HUB_ID)
   })
 })
 

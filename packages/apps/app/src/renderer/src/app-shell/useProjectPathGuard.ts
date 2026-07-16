@@ -11,23 +11,30 @@ export interface ProjectPathGuardApi {
 // Validates that the selected project's path still exists on disk — on selection
 // change and on window focus (the dir may have moved). Exposes a fixer that
 // re-points the project at a new directory.
+//
+// `enabled` gates the disk check: a project living on a REMOTE hub has its files
+// on that hub's host, not the client's default-hub filesystem, so probing
+// `app.files.pathExists` (which hits the default hub) would be meaningless.
+// Multi-hub passes `false` for remote projects; single-hub always `true` →
+// byte-identical.
 export function useProjectPathGuard(
   selectedProjectId: string,
   projects: Project[],
-  updateProject: (project: Project) => void
+  updateProject: (project: Project) => void,
+  enabled = true
 ): ProjectPathGuardApi {
   const trpcClient = useTRPCClient()
   const [projectPathMissing, setProjectPathMissing] = useState(false)
   const validateProjectPath = useCallback(
     async (project: Project | undefined) => {
-      if (!project?.path) {
+      if (!enabled || !project?.path) {
         setProjectPathMissing(false)
         return
       }
       const exists = await trpcClient.app.files.pathExists.query({ filePath: project.path })
       setProjectPathMissing(!exists)
     },
-    [trpcClient]
+    [trpcClient, enabled]
   )
 
   useEffect(() => {
@@ -35,6 +42,7 @@ export function useProjectPathGuard(
   }, [selectedProjectId, projects, validateProjectPath])
 
   useEffect(() => {
+    if (!enabled) return
     const project = projects.find((p) => p.id === selectedProjectId)
     if (!project?.path) return
     const handleFocus = (): void => {
@@ -42,7 +50,7 @@ export function useProjectPathGuard(
     }
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
-  }, [selectedProjectId, projects, validateProjectPath])
+  }, [selectedProjectId, projects, validateProjectPath, enabled])
 
   const handleFixProjectPath = useCallback(async (): Promise<void> => {
     const project = projects.find((p) => p.id === selectedProjectId)

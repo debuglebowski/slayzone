@@ -1,5 +1,5 @@
 import { createSuspenseCache } from '@slayzone/suspense'
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient, getHubClient, type TrpcVanillaClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -30,14 +30,21 @@ export interface TaskDetailData {
   browserTabs: BrowserTabsState
 }
 
-async function checkProjectPathExists(path: string): Promise<boolean> {
-  return getTrpcClient().app.files.pathExists.query({ filePath: path })
+async function checkProjectPathExists(client: TrpcVanillaClient, path: string): Promise<boolean> {
+  return client.app.files.pathExists.query({ filePath: path })
 }
 
 export { fetchTaskDetail }
 
-async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
-  const trpc = getTrpcClient()
+/**
+ * Multi-hub: resolve the tRPC client for the hub that owns this task. `hubId`
+ * comes from the enclosing HubScope (see TaskDetailDataLoader). Absent / default
+ * / unknown hub → the boot singleton (default hub), so single-hub is
+ * byte-identical. The cache keys this fetcher by (taskId, hubId), so the same
+ * task id on two hubs occupies distinct cache slots.
+ */
+async function fetchTaskDetail(taskId: string, hubId?: string): Promise<TaskDetailData | null> {
+  const trpc = (hubId ? getHubClient(hubId)?.client : null) ?? getTrpcClient()
   // Task fetch is critical — let it throw. Secondary data uses defaults on failure.
   const [loadedTask, loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([
     trpc.task.get.query({ id: taskId }),
@@ -53,7 +60,7 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
   const project = projects.find((p) => p.id === loadedTask.project_id) ?? null
   let projectPathMissing = false
   if (project?.path) {
-    projectPathMissing = !(await checkProjectPathExists(project.path))
+    projectPathMissing = !(await checkProjectPathExists(trpc, project.path))
   }
 
   // Resolve parent task

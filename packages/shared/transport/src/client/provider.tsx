@@ -7,7 +7,7 @@ export type TrpcProviderProps = {
   children: ReactNode
 }
 
-function makeQueryClient(): QueryClient {
+export function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {

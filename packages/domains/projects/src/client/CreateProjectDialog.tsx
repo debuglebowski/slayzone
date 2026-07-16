@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient, useFederationOrNull, getHubClient } from '@slayzone/transport/client'
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { ColorPicker } from '@slayzone/ui'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
 export type ProjectStartMode = 'scratch' | 'github' | 'linear'
@@ -46,8 +47,8 @@ const START_OPTIONS: Array<{
 
 export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreateProjectDialogProps) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const showOpenDialog = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
-  const createProject = useMutation(trpc.projects.create.mutationOptions())
   const [name, setName] = useState('')
   const [color, setColor] = useState(
     () => DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)]
@@ -56,6 +57,13 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const [startMode, setStartMode] = useState<ProjectStartMode>('scratch')
   const [loading, setLoading] = useState(false)
   const visibleStartOptions = START_OPTIONS
+
+  // Multi-hub: a new project is created on a chosen hub (it lives in that hub's
+  // DB). Default = the registry's default hub; the picker only shows when the
+  // client is federated (>1 hub). Single-hub → no picker, create hits the one hub.
+  const fed = useFederationOrNull()
+  const federatedHubs = fed && fed.hubs.length > 1 ? fed.hubs : []
+  const [targetHubId, setTargetHubId] = useState(fed?.defaultHubId ?? 'local')
 
   const handleBrowse = async () => {
     const result = await showOpenDialog.mutateAsync({
@@ -78,7 +86,15 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
 
     setLoading(true)
     try {
-      const project = await createProject.mutateAsync({
+      // Route the create to the chosen hub's client (the project lives in that
+      // hub's DB). Default/local resolves to the ambient client → single-hub is
+      // unchanged. The federated rail refetches all hubs, so the new project
+      // surfaces regardless of which hub owns it.
+      const client =
+        targetHubId && targetHubId !== fed?.defaultHubId
+          ? (getHubClient(targetHubId)?.client ?? trpcClient)
+          : trpcClient
+      const project = await client.projects.create.mutate({
         name: name.trim(),
         color,
         path: path || undefined
@@ -137,6 +153,27 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
             <Label>Color</Label>
             <ColorPicker value={color} onChange={setColor} />
           </div>
+          {federatedHubs.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="hub">Hub</Label>
+              <Select value={targetHubId} onValueChange={setTargetHubId}>
+                <SelectTrigger id="hub" data-testid="create-project-hub">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {federatedHubs.map((h) => (
+                    <SelectItem key={h.id} value={h.id}>
+                      {h.label}
+                      {h.id === fed?.defaultHubId ? ' (default)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Which hub this project lives on. Its tasks run on that hub.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>How do you want to start this project?</Label>
             <div className="space-y-2">

@@ -1,4 +1,5 @@
 export type { ElectronAPI, _LegacyElectronAPI, PtyCreateOptions, ChatSessionInfo } from './api'
+export type { HubKind, HubEntry } from './api'
 export type {
   DiagnosticsConfig,
   DiagnosticsExportRequest,

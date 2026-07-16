@@ -39,6 +39,7 @@ run_test_electron_strict_loader() {
 # the Electron node ABI (strict+loader) — plain `npx tsx` ERR_DLOPENs. Paths moved
 # from src/main/ → src/electron/ in the Wave C2 split; repointed here.
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/settings.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/hub.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/tags.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/projects.test.ts
 run_test_electron_strict_loader packages/domains/projects/src/server/task-automation.test.ts
@@ -266,6 +267,9 @@ echo "=== vitest (jsdom client suites) ==="
 if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**' \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \
+  packages/apps/app/src/main/hub-tokens.test.ts \
+  packages/apps/app/src/main/hub-cert-pinning.test.ts \
+  packages/shared/transport/src/client/federation.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \

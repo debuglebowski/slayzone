@@ -6,10 +6,13 @@ import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import {
   TrpcProvider,
+  FederationProvider,
+  HubScope,
   electronBootstrap,
   getTrpcClient,
   initTrpcClient
 } from '@slayzone/transport/client'
+import type { HubEntry } from '@slayzone/types'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
@@ -102,7 +105,12 @@ if (isFloatingGlobalAgentPanel) {
   // hydrates from SQLite (prevents effect race wiping persisted tabs); the
   // server URL (local: embedded port; remote: configured host) is needed to
   // construct the WS URL passed to TrpcProvider.
-  Promise.all([electronBootstrap.getServerUrl(), electronBootstrap.getWindowId()]).then(async ([server, windowId]) => {
+  Promise.all([
+    electronBootstrap.getServerUrl(),
+    electronBootstrap.getWindowId(),
+    electronBootstrap.getHubRegistry(),
+    electronBootstrap.getHubTokens()
+  ]).then(async ([server, windowId, registry, hubTokens]) => {
 
     // Remote mode with a missing/unreachable server → render the recovery
     // screen instead of mounting TrpcProvider against a dead URL (it would
@@ -156,28 +164,48 @@ if (isFloatingGlobalAgentPanel) {
         }
       ).getTrpcVanillaClient = () => initTrpcClient(trpcUrl).client
     }
+    // Multi-hub federation registry. The DEFAULT hub is pinned to `server.url` —
+    // the exact url boot's initTrpcClient() used — so its HubScope reuses that
+    // one boot WS singleton (module-scope getTrpcClient() coherence) and the
+    // single-hub tree stays byte-identical. windowId is appended per-hub via the
+    // same withWindowId the singleton used. Remote/extra hubs (multi_hub on)
+    // carry their own urls from the registry.
+    const hubs: HubEntry[] = registry.hubs.map((h) =>
+      h.id === registry.defaultHubId ? { ...h, url: server.url } : h
+    )
+    const decorateUrl = (url: string): string => withWindowId(url, windowId)
+
     performance.mark('sz:reactMount')
     electronBootstrap.bootMark('reactMount')
     createRoot(document.getElementById('root')!).render(
-      // TrpcProvider must be OUTERMOST: ConvexAuthBootstrap (and Pty/Theme/
-      // Telemetry providers) now call tRPC hooks, so they need the tRPC context.
-      <TrpcProvider url={trpcUrl}>
-        <ConvexAuthBootstrap>
-          <PtyProvider>
-            <ThemeProvider>
-              <TelemetryProvider>
-                <UndoProvider>
-                  <MaybeProfiler>
-                    <TooltipProvider delayDuration={0}>
-                      <App />
-                    </TooltipProvider>
-                  </MaybeProfiler>
-                </UndoProvider>
-              </TelemetryProvider>
-            </ThemeProvider>
-          </PtyProvider>
-        </ConvexAuthBootstrap>
-      </TrpcProvider>
+      // FederationProvider (registry) + HubScope (the default hub's client) must
+      // be OUTERMOST: ConvexAuthBootstrap (and Pty/Theme/Telemetry providers) now
+      // call tRPC hooks, so they need the tRPC context. With one hub this is
+      // identical to the former single TrpcProvider.
+      <FederationProvider
+        hubs={hubs}
+        defaultHubId={registry.defaultHubId}
+        decorateUrl={decorateUrl}
+        tokens={hubTokens}
+      >
+        <HubScope hubId={registry.defaultHubId}>
+          <ConvexAuthBootstrap>
+            <PtyProvider>
+              <ThemeProvider>
+                <TelemetryProvider>
+                  <UndoProvider>
+                    <MaybeProfiler>
+                      <TooltipProvider delayDuration={0}>
+                        <App />
+                      </TooltipProvider>
+                    </MaybeProfiler>
+                  </UndoProvider>
+                </TelemetryProvider>
+              </ThemeProvider>
+            </PtyProvider>
+          </ConvexAuthBootstrap>
+        </HubScope>
+      </FederationProvider>
     )
   })
 }

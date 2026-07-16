@@ -11,7 +11,7 @@ import React, {
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient, useSubscription, useFederationOrNull, HubScope } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
 import {
@@ -114,6 +114,8 @@ function App(): React.JSX.Element {
     tags,
     taskTags,
     blockedTaskIds,
+    hubIdByProject,
+    hubIdByTask,
     setTasks,
     setProjects,
     setTags,
@@ -251,6 +253,18 @@ function App(): React.JSX.Element {
   // Home panel state (extracted — owns its own state fully)
   const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)
 
+  // Multi-hub federation: which hub owns the selected project (selection itself
+  // stays a bare id). `local`-fallback when single-hub / not yet resolved.
+  const fed = useFederationOrNull()
+  const defaultHubId = fed?.defaultHubId ?? 'local'
+  const selectedProjectHubId = useMemo(
+    () => hubIdByProject.get(selectedProjectId) ?? defaultHubId,
+    [hubIdByProject, selectedProjectId, defaultHubId]
+  )
+  // Local-only ops (path existence, repo detection) are meaningless for a
+  // project whose files live on a remote hub's host — gate them to the local hub.
+  const selectedProjectIsLocal = selectedProjectHubId === defaultHubId
+
   // Multi-repo detection for home tab
   const homeSelectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId),
@@ -287,7 +301,8 @@ function App(): React.JSX.Element {
   const { projectPathMissing, validateProjectPath, handleFixProjectPath } = useProjectPathGuard(
     selectedProjectId,
     projects,
-    updateProject
+    updateProject,
+    selectedProjectIsLocal
   )
 
   // Project rename state
@@ -308,7 +323,15 @@ function App(): React.JSX.Element {
     useExplodeMode(openTaskIds, tabs, activeTabIndex)
 
   // Tab lifecycle (extracted — manages sync, cleanup, cache eviction, page tracking)
-  useTabLifecycle({ tasks, projects, tabs, activeTabIndex, setTerminalFocusRequests })
+  useTabLifecycle({
+    tasks,
+    projects,
+    tabs,
+    activeTabIndex,
+    setTerminalFocusRequests,
+    hubIdByProject,
+    hubIdByTask
+  })
 
   // Tab colors (extracted — pure derivation)
   const { taskProjectColors, taskWorktreeColors, tabCycleOrder } = useTabColors(
@@ -1552,6 +1575,18 @@ function App(): React.JSX.Element {
                           }
                           inert={!explodeMode && !isViewActive ? true : undefined}
                         >
+                          {/* Multi-hub: scope each tab's content to the hub that
+                              owns it, so ambient useTRPC() (TaskDetailPage/
+                              HomeDetail + the hub-keyed taskDetailCache) resolves
+                              to the right hub. Single-hub → HubScope(default) is
+                              the same client the app is already wrapped in. */}
+                          <HubScope
+                            hubId={
+                              tab.type === 'task'
+                                ? (hubIdByTask.get(tab.taskId) ?? defaultHubId)
+                                : selectedProjectHubId
+                            }
+                          >
                           {tab.type === 'home' ? (
                             <HomeDetail
                               durationLocked={durationLocked}
@@ -1642,6 +1677,7 @@ function App(): React.JSX.Element {
                               </div>
                             </Suspense>
                           )}
+                          </HubScope>
                         </div>
                       )
                     })}

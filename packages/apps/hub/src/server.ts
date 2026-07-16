@@ -6,9 +6,10 @@ import {
   appRouter,
   createMcpRestApp,
   parseAuthCallbackUrl,
-  getAuthEvents
+  getAuthEvents,
+  setHubDescribeDeps
 } from '@slayzone/transport/server'
-import { createAuthExpressApp } from '@slayzone/hub-auth/server'
+import { createAuthExpressApp, verifySession } from '@slayzone/hub-auth/server'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import { ensureDataRoot, getServerHost, getTrpcPort } from '@slayzone/platform'
 import {
@@ -115,6 +116,16 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const hubIdentity = fleetGateway ? await loadOrCreateHubIdentity(dataRoot) : null
   if (fleetGateway) log('fleet mode enabled (gateway + hub-auth + identity loaded)')
 
+  // Multi-hub: wire the client-facing `hub.describe` identity deps so a
+  // connecting client learns this hub's cert fingerprint + whether it enforces
+  // auth. Both degrade safely (null / false) on a plain local hub — describe
+  // already tolerated the deps being unset, this just fills them when known.
+  const hubAuthRequired = process.env.SLAYZONE_HUB_AUTH_REQUIRED === '1' && hubAuth != null
+  setHubDescribeDeps({
+    getFingerprint: () => hubIdentity?.fingerprintSha256Hex ?? null,
+    getAuthRequired: () => hubAuthRequired
+  })
+
   // Chromium-fork OAuth deep-link bridge. The C++ shell forwards
   // `slayzone://auth/callback` to this Unix socket (auth:deep-link); we parse the
   // code and emit it on `authEvents`, which the `app.auth.onCallback` tRPC
@@ -195,6 +206,35 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     path: '/trpc',
     verifyClient: verifyTrpcClient
   })
+  // Multi-hub auth: a remote hub that enforces auth ALSO terminates TLS on
+  // `/trpc` so clients can dial `wss://…/trpc` and pin the cert (renderer pins in
+  // the Electron main process via setCertificateVerifyProc). This is a SEPARATE
+  // https listener on its own port (SLAYZONE_HUB_TLS_PORT, else OS-assigned),
+  // reusing the hub identity leaf — the plain-http `/trpc` above is untouched, so
+  // local loopback + e2e stay byte-identical. Off unless auth is required + an
+  // identity is loaded.
+  const hubTlsEnabled = hubAuthRequired && hubIdentity != null
+  let tlsWss: WebSocketServer | null = null
+  let tlsHttpsServer: HttpsServer | null = null
+  if (hubTlsEnabled && hubIdentity) {
+    tlsHttpsServer = createHttpsServer(
+      { key: hubIdentity.keyPem, cert: hubIdentity.certPem },
+      (req, res) => {
+        // Mirror the muxed plain server so wss clients get /health etc. too.
+        if (handleHealth(state, req, res)) return
+        if (authApp && (req.url ?? '').split('?')[0].startsWith('/api/auth/')) {
+          authApp(req, res)
+          return
+        }
+        mcpRest.app(req, res)
+      }
+    )
+    tlsWss = new WebSocketServer({
+      server: tlsHttpsServer,
+      path: '/trpc',
+      verifyClient: verifyTrpcClient
+    })
+  }
   // Fleet mode: `/fleet` runs on its OWN https server (TLS-terminated with the hub
   // identity leaf) on its OWN port. Runners dial `wss://…/fleet` and pin the cert
   // fingerprint (carried in their join token) BEFORE any fleet frame is sent
@@ -217,10 +257,16 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       }
     })
   }
-  const wssHandler = applyWSSHandler({
-    wss,
-    router: appRouter,
-    createContext: ({ req }) => {
+  // createContext verifies the bearer only when this hub enforces auth
+  // (`hubAuthRequired`, defined above). Local loopback hubs leave it off →
+  // principal stays null, no verify → byte-identical to trusted loopback.
+  const createTrpcContext = async ({
+    req,
+    info
+  }: {
+    req: IncomingMessage
+    info?: { connectionParams?: Record<string, string | undefined> | null }
+  }) => {
       // Parse windowId from the WS query (?windowId=N) → ctx.windowId. Required by
       // claimSession + panel-ownership + warm-pool (warmSetProjectTabCounts) procs;
       // without it they throw "windowId required". This sidecar's applyWSSHandler
@@ -238,15 +284,39 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       } catch {
         /* malformed URL — leave null */
       }
-      return {
-        db,
-        dataRoot,
-        req,
-        automationEngine: composition.automationEngine,
-        windowId
+    // Verify the bearer token from tRPC connectionParams when this hub enforces
+    // auth. An invalid/absent token → principal stays null; individual
+    // procedures may later gate on ctx.principal (dark today — no proc requires
+    // it yet, so an authed hub still accepts connections but attributes them).
+    let principal: { userId: string; orgId?: string | null } | null = null
+    if (hubAuthRequired && hubAuth) {
+      const token = info?.connectionParams?.token
+      if (typeof token === 'string' && token) {
+        try {
+          const ctx = await verifySession(
+            hubAuth,
+            new Headers({ authorization: `Bearer ${token}` })
+          )
+          if (ctx) principal = { userId: ctx.userId, orgId: ctx.orgId }
+        } catch {
+          /* verification failure → unauthenticated (principal null) */
+        }
       }
     }
-  })
+    return {
+      db,
+      dataRoot,
+      req,
+      automationEngine: composition.automationEngine,
+      windowId,
+      principal
+    }
+  }
+  const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext: createTrpcContext })
+  // Same handler on the TLS /trpc listener (wss) when a remote hub terminates TLS.
+  const tlsWssHandler = tlsWss
+    ? applyWSSHandler({ wss: tlsWss, router: appRouter, createContext: createTrpcContext })
+    : null
 
   const port = cfg.port ?? getTrpcPort() ?? 0
   await new Promise<void>((resolve, reject) => {
@@ -266,6 +336,39 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   state.port = actualPort
   state.ready = true
   composition.setBoundPort(actualPort)
+
+  // Multi-hub TLS `/trpc`: bind the https listener on its own port
+  // (SLAYZONE_HUB_TLS_PORT, else OS-assigned). OPT-IN — a bind failure must NOT
+  // abort startup (the plain http /trpc still serves loopback + e2e), so we log +
+  // leave TLS dark. Report the wss URL for operators/UX.
+  let hubTlsPort: number | null = null
+  if (tlsHttpsServer) {
+    const desiredTlsPort = Number(process.env.SLAYZONE_HUB_TLS_PORT ?? '0') || 0
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (err: unknown): void => {
+          tlsHttpsServer!.off('error', onError)
+          reject(err)
+        }
+        tlsHttpsServer!.once('error', onError)
+        tlsHttpsServer!.listen(desiredTlsPort, host, () => {
+          tlsHttpsServer!.off('error', onError)
+          resolve()
+        })
+      })
+      const tlsAddr = tlsHttpsServer.address()
+      hubTlsPort = typeof tlsAddr === 'object' && tlsAddr ? tlsAddr.port : desiredTlsPort
+      log(`hub TLS /trpc listening: wss://${host}:${hubTlsPort}/trpc`)
+    } catch (err) {
+      log(`hub TLS /trpc bind failed (staying plain http): ${String(err)}`)
+      try {
+        tlsWssHandler?.broadcastReconnectNotification?.()
+      } catch {
+        /* ignore */
+      }
+      tlsHttpsServer = null
+    }
+  }
   // Fleet mode: bind the SEPARATE https `/fleet` listener on its own port (env
   // `SLAYZONE_FLEET_PORT`, else OS-assigned), then feed the resulting `wss://` URL
   // + cert fingerprint to the runners registry so `mintJoinToken` embeds them. The
@@ -420,6 +523,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       }
       if (fleetHttpsServer) {
         const srv = fleetHttpsServer
+        try {
+          await new Promise<void>((r) => srv.close(() => r()))
+        } catch {
+          /* ignore */
+        }
+      }
+      // Multi-hub TLS /trpc: close the wss + its https listener (no-op when off).
+      if (tlsWss) {
+        try {
+          tlsWss.close()
+        } catch {
+          /* ignore */
+        }
+      }
+      if (tlsHttpsServer) {
+        const srv = tlsHttpsServer
         try {
           await new Promise<void>((r) => srv.close(() => r()))
         } catch {

@@ -5,9 +5,18 @@ import {
   useCallback,
   useState,
   useMemo,
+  type Dispatch,
+  type SetStateAction,
+  type MutableRefObject,
   type ReactNode
 } from 'react'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import {
+  useSubscription,
+  useTRPC,
+  useTRPCClient,
+  useFederationOrNull,
+  HubScope
+} from '@slayzone/transport/client'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
 import { disposeTerminal } from './terminal-cache'
 import { useTerminalStateStore, useWireTerminalStateStore } from './useTerminalStateStore'
@@ -57,53 +66,52 @@ interface PtyContextValue {
 
 const PtyContext = createContext<PtyContextValue | null>(null)
 
-export function PtyProvider({ children }: { children: ReactNode }) {
+/** Shared subscriber/state refs the event streams write into. Session ids are
+ *  globally unique (`${taskId}:${taskId}`, tasks unique per hub), so ONE shared
+ *  set of maps is correct even when N hubs' streams fan into it. */
+interface PtyStreamSinks {
+  statesRef: MutableRefObject<Map<string, PtyState>>
+  dataSubsRef: MutableRefObject<Map<string, Set<DataCallback>>>
+  exitSubsRef: MutableRefObject<Map<string, Set<ExitCallback>>>
+  promptSubsRef: MutableRefObject<Map<string, Set<PromptCallback>>>
+  sessionDetectedSubsRef: MutableRefObject<Map<string, Set<SessionDetectedCallback>>>
+  devServerSubsRef: MutableRefObject<Map<string, Set<DevServerCallback>>>
+  titleSubsRef: MutableRefObject<Map<string, Set<TitleChangeCallback>>>
+  setPendingPromptTaskIds: Dispatch<SetStateAction<Set<string>>>
+}
+
+/**
+ * The PTY live event streams for ONE hub. Mounted once per connected hub inside
+ * that hub's `<HubScope>`, so ambient `useTRPC()`/`useTRPCClient()` here resolve
+ * to that hub's client — a remote task's onData/onExit/onPrompt/... arrive from
+ * the hub that actually runs its pty. All streams write into the SHARED sinks
+ * (keyed by globally-unique sessionId), and the reactive terminal-state store is
+ * wired here too, so status dots track every hub. Single-hub → exactly one
+ * instance = byte-identical to the former root-only wiring.
+ */
+function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const {
+    statesRef,
+    dataSubsRef,
+    exitSubsRef,
+    promptSubsRef,
+    sessionDetectedSubsRef,
+    devServerSubsRef,
+    titleSubsRef,
+    setPendingPromptTaskIds
+  } = sinks
 
-  // Wire the reactive terminal-state store (state-change / exit / hibernated
-  // subscriptions + initial hydrate + reconcile). Lives here — PtyProvider is a
-  // singleton mounted once per renderer inside TrpcProvider — so the store's
-  // event wiring runs exactly once with a live tRPC client, instead of at module
-  // import (which would fire before the provider mounted). See useTerminalStateStore.
+  // Reactive terminal-state store wiring (state-change / exit / hibernated subs +
+  // hydrate) — per hub, so this hub's session liveness feeds the shared store.
   useWireTerminalStateStore()
-
-  // Per-sessionId state (metadata only - backend is source of truth for buffer)
-  const statesRef = useRef<Map<string, PtyState>>(new Map())
-
-  // Per-sessionId subscriber sets
-  const dataSubsRef = useRef<Map<string, Set<DataCallback>>>(new Map())
-  const exitSubsRef = useRef<Map<string, Set<ExitCallback>>>(new Map())
-  const promptSubsRef = useRef<Map<string, Set<PromptCallback>>>(new Map())
-  const sessionDetectedSubsRef = useRef<Map<string, Set<SessionDetectedCallback>>>(new Map())
-  const devServerSubsRef = useRef<Map<string, Set<DevServerCallback>>>(new Map())
-  const titleSubsRef = useRef<Map<string, Set<TitleChangeCallback>>>(new Map())
-
-  // Track task IDs with pending prompts for global badge
-  const [pendingPromptTaskIds, setPendingPromptTaskIds] = useState<Set<string>>(new Set())
-  // Ref for stable getPendingPromptTaskIds callback
-  const pendingPromptTaskIdsRef = useRef(pendingPromptTaskIds)
-  pendingPromptTaskIdsRef.current = pendingPromptTaskIds
-
-  // Terminal STATE (incl. hibernation + self-heal reconcile + alive-task
-  // tracking) lives in the reactive store (useTerminalStateStore). PtyContext
-  // owns only the event streams (data/exit/prompt/title/...) + their metadata.
-
-  const getOrCreateState = useCallback((sessionId: string): PtyState => {
-    let state = statesRef.current.get(sessionId)
-    if (!state) {
-      state = { lastSeq: -1 }
-      statesRef.current.set(sessionId, state)
-    }
-    return state
-  }, [])
 
   // Global event-stream subscriptions — survive all view changes. The server
   // fans out ALL sessions (no per-session filter); the payload carries the
   // sessionId, so each handler filters/looks up by sessionId exactly as the IPC
   // path did. Kept ALWAYS enabled (no tab gating) — terminal correctness needs
-  // every frame, in order. Behavior is preserved byte-for-byte from the prior
-  // old preload PTY listeners; only the transport changed.
+  // every frame, in order.
   //
   // Note: only update EXISTING state, don't create state for unknown tasks —
   // state is created when the Terminal component subscribes (the
@@ -243,6 +251,67 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
   )
+
+  return null
+}
+
+export function PtyProvider({ children }: { children: ReactNode }) {
+  // Per-sessionId state (metadata only - backend is source of truth for buffer)
+  const statesRef = useRef<Map<string, PtyState>>(new Map())
+
+  // Per-sessionId subscriber sets
+  const dataSubsRef = useRef<Map<string, Set<DataCallback>>>(new Map())
+  const exitSubsRef = useRef<Map<string, Set<ExitCallback>>>(new Map())
+  const promptSubsRef = useRef<Map<string, Set<PromptCallback>>>(new Map())
+  const sessionDetectedSubsRef = useRef<Map<string, Set<SessionDetectedCallback>>>(new Map())
+  const devServerSubsRef = useRef<Map<string, Set<DevServerCallback>>>(new Map())
+  const titleSubsRef = useRef<Map<string, Set<TitleChangeCallback>>>(new Map())
+
+  // Track task IDs with pending prompts for global badge
+  const [pendingPromptTaskIds, setPendingPromptTaskIds] = useState<Set<string>>(new Set())
+  // Ref for stable getPendingPromptTaskIds callback
+  const pendingPromptTaskIdsRef = useRef(pendingPromptTaskIds)
+  pendingPromptTaskIdsRef.current = pendingPromptTaskIds
+
+  // Multi-hub: the PTY event streams must run per connected hub (a remote task's
+  // pty lives on its hub, so onData/onExit only arrive from that hub's socket).
+  // Mount one PtyEventStreams per hub inside its HubScope, all writing the SHARED
+  // sinks above. Single-hub / no federation → exactly one instance on the
+  // default hub = byte-identical to the former root-only wiring.
+  const fed = useFederationOrNull()
+  const sinks: PtyStreamSinks = {
+    statesRef,
+    dataSubsRef,
+    exitSubsRef,
+    promptSubsRef,
+    sessionDetectedSubsRef,
+    devServerSubsRef,
+    titleSubsRef,
+    setPendingPromptTaskIds
+  }
+  const hubStreams = fed ? (
+    fed.hubs.map((h) => (
+      <HubScope key={h.id} hubId={h.id}>
+        <PtyEventStreams sinks={sinks} />
+      </HubScope>
+    ))
+  ) : (
+    // No FederationProvider (fork / tests) → wire against the ambient client.
+    <PtyEventStreams sinks={sinks} />
+  )
+
+  // Terminal STATE (incl. hibernation + self-heal reconcile + alive-task
+  // tracking) lives in the reactive store (useTerminalStateStore). PtyContext
+  // owns only the event streams (data/exit/prompt/title/...) + their metadata.
+
+  const getOrCreateState = useCallback((sessionId: string): PtyState => {
+    let state = statesRef.current.get(sessionId)
+    if (!state) {
+      state = { lastSeq: -1 }
+      statesRef.current.set(sessionId, state)
+    }
+    return state
+  }, [])
 
   const subscribe = useCallback(
     (sessionId: string, cb: DataCallback): (() => void) => {
@@ -470,7 +539,12 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     ]
   )
 
-  return <PtyContext.Provider value={value}>{children}</PtyContext.Provider>
+  return (
+    <PtyContext.Provider value={value}>
+      {hubStreams}
+      {children}
+    </PtyContext.Provider>
+  )
 }
 
 export function usePty(): PtyContextValue {

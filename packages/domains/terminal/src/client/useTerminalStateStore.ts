@@ -18,6 +18,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useMemo } from 'react'
 import {
   getTrpcClient,
+  listHubClients,
   useSubscription,
   useTRPC,
   useTRPCClient
@@ -284,14 +285,23 @@ async function pullReconcile(): Promise<void> {
     // (PTY-hibernation seeding is a separate slice) and the old
     // The old hibernated-session preload bridge is gone (preload is
     // bootstrap-only), so it resolves to [] until that procedure lands.
-    const [sessions, hibernatedIds] = await Promise.all([
-      getTrpcClient().pty.sessionList.query(),
-      Promise.resolve<string[]>([])
-    ])
+    // Multi-hub: union the live session list across EVERY connected hub (a
+    // remote task's pty lives on its hub, so its liveness only shows in that
+    // hub's sessionList). listHubClients() is [default] when single-hub →
+    // byte-identical. Per-hub failures are swallowed so one down hub doesn't
+    // block reconcile for the others.
+    const clients = listHubClients()
+    const perHub = await Promise.all(
+      (clients.length > 0 ? clients.map((c) => c.client) : [getTrpcClient()]).map((c) =>
+        c.pty.sessionList.query().catch(() => [] as Array<{ sessionId: string; state: string }>)
+      )
+    )
+    const sessions = perHub.flat()
+    const hibernatedIds: string[] = []
     useTerminalStateStore
       .getState()
       .reconcile(
-        sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })),
+        sessions.map((s) => ({ sessionId: s.sessionId, state: s.state as TerminalState })),
         hibernatedIds,
         dispatchedAt
       )

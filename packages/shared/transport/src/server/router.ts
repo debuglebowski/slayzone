@@ -10,6 +10,7 @@ import { diagnosticsRouter } from './routers/diagnostics'
 import { feedbackRouter } from './routers/feedback'
 import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter } from './routers/history'
+import { hubRouter } from './routers/hub'
 import { integrationsRouter } from './routers/integrations'
 import { menuRouter } from './routers/menu'
 import { notifyRouter } from './routers/notify'
@@ -42,6 +43,7 @@ export const appRouter = router({
   feedback: feedbackRouter,
   fileEditor: fileEditorRouter,
   history: historyRouter,
+  hub: hubRouter,
   integrations: integrationsRouter,
   menu: menuRouter,
   notify: notifyRouter,

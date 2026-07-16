@@ -396,18 +396,58 @@ export interface PtyCreateOptions {
   rows?: number
 }
 
+/**
+ * Multi-hub federation (client-side hub registry).
+ *
+ * A "hub" is a full data server: it owns a SQLite DB + all routers/auth. The
+ * client can connect to several at once and merges their projects into one flat
+ * rail. A project belongs to exactly one hub (the DB it lives in) — there is no
+ * user-facing "active hub".
+ *
+ * The registry lives in the pre-boot `boot-config.json` (a hub can't store the
+ * list of hubs — it may be down), so this contract is shared between the main
+ * process (boot-config) and the renderer (via the `app:get-hub-registry` IPC).
+ */
+export type HubKind = 'local' | 'remote'
+
+export interface HubEntry {
+  /** Stable id — the `'local'` sentinel for the co-located sidecar, the pinned
+   * TLS cert fingerprint for a remote hub. */
+  id: string
+  kind: HubKind
+  /** User-facing display name. */
+  label: string
+  /** Canonical ws(s)://host[:port]/trpc URL. Absent for local (resolved at
+   * runtime from the live sidecar port). */
+  url?: string
+  /** Pinned TLS cert sha256 (hex) — remote wss only; the client refuses to
+   * connect to a hub presenting a different leaf. */
+  fingerprint?: string
+}
+
 // Bootstrap-only preload contract. Domain/backend calls use tRPC over WebSocket.
 export interface ElectronAPI {
   app: {
     getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
-    /** Pre-boot config the renderer can't get from the settings DB (fleet mode). */
-    getBootConfig: () => Promise<{ fleetMode: boolean }>
+    /** Pre-boot config the renderer can't get from the settings DB (fleet/multi-hub). */
+    getBootConfig: () => Promise<{ fleetMode: boolean; multiHub: boolean }>
+    /** Resolved multi-hub registry (local always first + present when multiHub on;
+     *  the local hub's `url` is injected from the live sidecar port). */
+    getHubRegistry: () => Promise<{ hubs: HubEntry[]; defaultHubId: string }>
+    /** Per-hub bearer tokens (hubId → token), safeStorage-decrypted in main.
+     *  Threaded into the tRPC client's connectionParams for authed remote hubs. */
+    getHubTokens: () => Promise<Record<string, string>>
+    /** Persist (or clear, empty token) a hub's bearer token, safeStorage-encrypted. */
+    setHubToken: (payload: { hubId: string; token: string }) => Promise<{ ok: true }>
     getWindowId: () => Promise<number | null>
     relaunch: () => Promise<void>
     setBootSettings: (payload: {
       server_mode?: 'local' | 'remote'
       remote_server_url?: string
       fleet_mode?: boolean
+      multi_hub?: boolean
+      hubs?: HubEntry[]
+      default_hub_id?: string
     }) => Promise<{ ok: true }>
     probeServerHealth: (url: string) => Promise<{
       ok: boolean

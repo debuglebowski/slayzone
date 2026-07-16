@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ElectronAPI } from '@slayzone/types'
+import type { ElectronAPI, HubEntry } from '@slayzone/types'
 
 // Intentional bootstrap-only preload surface. Do not add domain APIs here.
 // Renderer/backend traffic uses tRPC over WebSocket after boot.
@@ -36,7 +36,16 @@ const api: ElectronAPI = {
     getServerUrl: () =>
       ipcRenderer.invoke('app:get-server-url') as Promise<{ mode: 'local' | 'remote'; url: string }>,
     getBootConfig: () =>
-      ipcRenderer.invoke('app:get-boot-config') as Promise<{ fleetMode: boolean }>,
+      ipcRenderer.invoke('app:get-boot-config') as Promise<{ fleetMode: boolean; multiHub: boolean }>,
+    getHubRegistry: () =>
+      ipcRenderer.invoke('app:get-hub-registry') as Promise<{
+        hubs: HubEntry[]
+        defaultHubId: string
+      }>,
+    getHubTokens: () =>
+      ipcRenderer.invoke('app:get-hub-tokens') as Promise<Record<string, string>>,
+    setHubToken: (payload) =>
+      ipcRenderer.invoke('app:set-hub-token', payload) as Promise<{ ok: true }>,
     getWindowId: () => ipcRenderer.invoke('app:get-window-id') as Promise<number | null>,
     relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
     setBootSettings: (payload) =>

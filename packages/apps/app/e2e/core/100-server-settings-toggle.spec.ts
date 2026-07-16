@@ -43,7 +43,7 @@ test.describe('Server settings toggle', () => {
       await clickSettings(mainWindow)
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
-    await dialog.locator('aside button').filter({ hasText: 'Server' }).first().click()
+    await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
     await expect(dialog.getByTestId('server-mode-local')).toBeVisible({ timeout: 5_000 })
     return dialog
   }

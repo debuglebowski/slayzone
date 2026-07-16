@@ -42,7 +42,7 @@ test.describe('Server restart button', () => {
       await clickSettings(mainWindow)
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
-    await dialog.locator('aside button').filter({ hasText: 'Server' }).first().click()
+    await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
 
     const button = dialog.getByTestId('server-restart-button')
     await expect(button).toBeEnabled({ timeout: 5_000 })

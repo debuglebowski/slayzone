@@ -39,6 +39,11 @@ export {
   type RunnersFleetGateway
 } from './app-deps'
 export {
+  setHubDescribeDeps,
+  getHubDescribeDepsOrNull,
+  type HubDescribeDeps
+} from './app-deps'
+export {
   setPowerResumeEvents,
   getPowerResumeEvents,
   type PowerResumeEventMap

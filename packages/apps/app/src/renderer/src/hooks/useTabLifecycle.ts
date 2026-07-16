@@ -10,20 +10,31 @@ export function useTabLifecycle({
   projects,
   tabs,
   activeTabIndex,
-  setTerminalFocusRequests
+  setTerminalFocusRequests,
+  hubIdByProject,
+  hubIdByTask
 }: {
   tasks: Task[]
   projects: Project[]
   tabs: Tab[]
   activeTabIndex: number
   setTerminalFocusRequests: React.Dispatch<React.SetStateAction<Record<string, number>>>
+  /** Multi-hub: project→hub / task→hub origin maps (empty when single-hub). */
+  hubIdByProject?: Map<string, string>
+  hubIdByTask?: Map<string, string>
 }): void {
-  // Sync task/project data into tab store for worktree grouping + temp task detection
+  // Sync task/project data into tab store for worktree grouping + temp task
+  // detection. Multi-hub: annotate each project with its owning hub so the
+  // warm-pool feed routes counts to the right hub (absent → default hub).
   useEffect(() => {
-    useTabStore.setState({ _taskLookup: { tasks, projects } })
-  }, [tasks, projects])
+    const annotatedProjects = hubIdByProject
+      ? projects.map((p) => ({ ...p, hubId: hubIdByProject.get(p.id) }))
+      : projects
+    useTabStore.setState({ _taskLookup: { tasks, projects: annotatedProjects } })
+  }, [tasks, projects, hubIdByProject])
 
-  // Evict cache entries when task tabs close (prevent memory leaks).
+  // Evict cache entries when task tabs close (prevent memory leaks). Multi-hub:
+  // evict the (taskId, hubId) slot so a remote task's cached detail is freed.
   const prevTabsRef = useRef(tabs)
   useEffect(() => {
     const prev = prevTabsRef.current
@@ -31,10 +42,10 @@ export function useTabLifecycle({
     for (const tab of prev) {
       if (tab.type !== 'task') continue
       if (!tabs.some((t) => t.type === 'task' && t.taskId === tab.taskId)) {
-        taskDetailCache.evict('taskDetail', tab.taskId)
+        taskDetailCache.evict('taskDetail', tab.taskId, hubIdByTask?.get(tab.taskId))
       }
     }
-  }, [tabs])
+  }, [tabs, hubIdByTask])
 
   // Track whether task data has loaded at least once.
   const tasksLoadedRef = useRef(false)

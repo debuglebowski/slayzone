@@ -20,8 +20,7 @@ import { AboutSettingsTab } from './tabs/AboutSettingsTab'
 import { WorktreesSettingsTab } from './tabs/WorktreesSettingsTab'
 import { BackupSettingsTab } from './tabs/BackupSettingsTab'
 import { LabsSettingsTab } from './tabs/LabsSettingsTab'
-import { ServerSettingsTab } from './tabs/ServerSettingsTab'
-import { FleetSettingsTab } from './tabs/FleetSettingsTab'
+import { ConnectionsSettingsTab } from './tabs/ConnectionsSettingsTab'
 import { SettingsTabIntro } from './tabs/SettingsTabIntro'
 
 function TelemetrySettingsTab() {
@@ -65,6 +64,12 @@ export function UserSettingsDialog({
 
   const trpc = useTRPC()
   const [activeTab, setActiveTab] = useState(initialTab)
+  // Legacy Server/Hubs/Fleet tab keys now resolve to the merged Connections tab;
+  // normalize for the nav highlight so an old deep-link selects it correctly.
+  const navActiveKey =
+    activeTab === 'server' || activeTab === 'hubs' || activeTab === 'fleet'
+      ? 'connections'
+      : activeTab
   const [defaultTerminalMode, setDefaultTerminalMode] = useState<TerminalMode>('claude-code')
 
   const defaultModeQuery = useQuery(
@@ -128,8 +133,7 @@ export function UserSettingsDialog({
     { key: 'backup', label: 'Backup' },
     { key: 'labs', label: 'Labs' },
     { key: 'mcp', label: 'MCP' },
-    { key: 'server', label: 'Server' },
-    { key: 'fleet', label: 'Fleet' },
+    { key: 'connections', label: 'Connections' },
     { key: 'diagnostics', label: 'Diagnostics' },
     { key: 'telemetry', label: 'Telemetry' },
     { key: 'about', label: 'About' }
@@ -156,7 +160,7 @@ export function UserSettingsDialog({
           </div>
         </div>
 
-        <SettingsLayout items={navItems} activeKey={activeTab} onSelect={navigateTo}>
+        <SettingsLayout items={navItems} activeKey={navActiveKey} onSelect={navigateTo}>
           <div className="mx-auto w-full max-w-4xl space-y-8">
             {activeTab === 'worktrees' && <WorktreesSettingsTab />}
 
@@ -198,9 +202,12 @@ export function UserSettingsDialog({
 
             {activeTab === 'mcp' && <McpSettingsTab />}
 
-            {activeTab === 'server' && <ServerSettingsTab />}
-
-            {activeTab === 'fleet' && <FleetSettingsTab />}
+            {/* Server / Hubs / Fleet consolidated into one Connections tab.
+                Legacy deep-links to the old keys still resolve here. */}
+            {(activeTab === 'connections' ||
+              activeTab === 'server' ||
+              activeTab === 'hubs' ||
+              activeTab === 'fleet') && <ConnectionsSettingsTab />}
 
             {activeTab === 'diagnostics' && <DiagnosticsSettingsTab />}
 

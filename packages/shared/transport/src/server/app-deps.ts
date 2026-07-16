@@ -820,3 +820,33 @@ export function getRunnersDeps(): RunnersDeps {
 export function getRunnersDepsOrNull(): RunnersDeps | null {
   return runnersDeps
 }
+
+/**
+ * Multi-hub federation: the intrinsic identity facts a hub reports to a
+ * connecting client via `hub.describe`. Both getters degrade to a safe default
+ * (no identity loaded / no auth) so the `hub.describe` query works with
+ * multi-hub OFF — the co-located local sidecar has no cert + no auth. Wired by
+ * the server composition only when a hub identity is loaded (multi_hub/fleet) or
+ * auth is enforced (Phase 6). Deliberately separate from `RunnersDeps` (the
+ * runner-facing `/fleet` axis) — this is the client-facing `/trpc` axis.
+ */
+export type HubDescribeDeps = {
+  /** The hub's own TLS leaf-cert sha256 (lowercase hex), or null when no hub
+   *  identity is loaded (plain local mode). The client uses this to reconcile a
+   *  pinned remote hub; it is ignored for the local sentinel hub. */
+  getFingerprint: () => string | null
+  /** Whether this hub enforces bearer auth on `/trpc` connections (Phase 6).
+   *  Always false today — local is trusted loopback. */
+  getAuthRequired: () => boolean
+}
+
+let hubDescribeDeps: HubDescribeDeps | null = null
+
+export function setHubDescribeDeps(deps: HubDescribeDeps): void {
+  hubDescribeDeps = deps
+}
+
+/** Non-throwing read — `hub.describe` returns sane defaults when unwired. */
+export function getHubDescribeDepsOrNull(): HubDescribeDeps | null {
+  return hubDescribeDeps
+}

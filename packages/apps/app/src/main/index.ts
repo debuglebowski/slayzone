@@ -42,7 +42,18 @@ import {
   type ViewBounds
 } from './browser-view-manager'
 import { attachRendererCsp } from './renderer-csp'
-import { fleetEnvFor, probeRemoteHealth, readBootConfig, writeBootSettings } from './boot-config'
+import {
+  fleetEnvFor,
+  probeRemoteHealth,
+  readBootConfig,
+  writeBootSettings,
+  resolveHubRegistry,
+  resolveDefaultHubId,
+  LOCAL_HUB_ID
+} from './boot-config'
+import type { HubEntry } from '@slayzone/types'
+import { installHubCertPinning, setPinnedHubs } from './hub-cert-pinning'
+import { setHubTokenCipher, setHubToken, getAllHubTokens } from './hub-tokens'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   isBlockedExternalProtocolUrl,
@@ -1288,9 +1299,14 @@ app
     // integration pollers + push handlers) is skipped — the renderer connects
     // to the user-configured remote @slayzone/hub, which owns all of that.
     const bootConfig = readBootConfig(getTrpcDataRoot())
-    const isRemoteMode = bootConfig.server_mode === 'remote'
+    // Multi-hub: the LOCAL hub is always present in the registry and must always
+    // run, so multi_hub forces the embedded sidecar on regardless of the legacy
+    // `server_mode` (which only governs the single-hub local-vs-one-remote
+    // choice). Remote hubs are dialed from the renderer's FederationProvider, not
+    // by skipping the sidecar. Single-hub (multi_hub off) is unchanged.
+    const isRemoteMode = bootConfig.multi_hub !== true && bootConfig.server_mode === 'remote'
     logBoot(
-      `server mode: ${bootConfig.server_mode}${isRemoteMode ? ` (${bootConfig.remote_server_url ?? 'no url'})` : ''}`
+      `server mode: ${bootConfig.server_mode}${bootConfig.multi_hub ? ' (multi_hub: local always on)' : ''}${isRemoteMode ? ` (${bootConfig.remote_server_url ?? 'no url'})` : ''}`
     )
     if (SHOULD_REGISTER_PROTOCOL_CLIENT) {
       let registered = false
@@ -1826,6 +1842,8 @@ app
     logBoot('ai-config tRPC-only')
     // Inject the Electron safeStorage cipher into the electron-free credential store.
     setCredentialCipher(getSafeStorageCipher())
+    // Same cipher backs the per-hub bearer-token store (multi-hub auth).
+    setHubTokenCipher(getSafeStorageCipher())
     await ensureIntegrationSchema(db)
     const integrationOps = createIntegrationOps(db, { enableTestChannels: isPlaywright })
     const integrationHandles = {
@@ -2590,6 +2608,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       is.dev
     )
 
+    // Multi-hub: install the wss cert-pin verify proc on the renderer session.
+    // Only pinned remote-hub hosts are enforced; every other host defers to
+    // Chromium (empty pin map when single-hub → fully inert). The pin map is
+    // seeded on each app:get-hub-registry call (renderer fetches it at boot).
+    installHubCertPinning(session.defaultSession)
+    try {
+      const cfg = readBootConfig(getTrpcDataRoot())
+      setPinnedHubs(resolveHubRegistry(cfg).filter((h) => h.kind === 'remote'))
+    } catch {
+      /* no registry yet — seeded lazily by app:get-hub-registry */
+    }
+
     // Block external app protocol launches from webviews by registering no-op handlers.
     // External protocol URLs (figma://, slack://, etc.) bypass will-navigate entirely —
     // Chromium passes them straight to the OS. Registering the scheme in the session
@@ -2975,8 +3005,47 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // `app:get-server-url`; this surfaces `fleet_mode` as a plain boolean.
     ipcMain.handle('app:get-boot-config', () => {
       const cfg = readBootConfig(getTrpcDataRoot())
-      return { fleetMode: cfg.fleet_mode === true }
+      return { fleetMode: cfg.fleet_mode === true, multiHub: cfg.multi_hub === true }
     })
+    // Resolved multi-hub registry the renderer's FederationProvider connects to.
+    // Single source of truth for "which hubs exist": synthesized purely from the
+    // pre-boot config (resolveHubRegistry), then the LOCAL hub's runtime ws url
+    // is injected here from the live sidecar handle (the config can't know the
+    // sticky port). With multi_hub off this returns exactly today's single
+    // effective hub, so the renderer's HubScope('local') stays byte-identical.
+    ipcMain.handle('app:get-hub-registry', async () => {
+      const cfg = readBootConfig(getTrpcDataRoot())
+      const hubs = resolveHubRegistry(cfg)
+      const defaultHubId = resolveDefaultHubId(cfg, hubs)
+      // Inject the local hub's live ws url (only when a local hub is listed —
+      // legacy remote mode has none and never spawned the sidecar).
+      const local = hubs.find((h) => h.id === LOCAL_HUB_ID)
+      if (local && !isRemoteMode) {
+        try {
+          const handle = await sidecarHandlePromise
+          await handle.waitForReady()
+          const port = handle.getPort()
+          if (port) local.url = `ws://127.0.0.1:${port}/trpc`
+        } catch {
+          /* sidecar failed — leave url absent; renderer surfaces the toast */
+        }
+      }
+      // Multi-hub: refresh the main-process wss cert-pin map from the registry
+      // (remote hubs with a known fingerprint). No-op / empty when single-hub.
+      setPinnedHubs(hubs.filter((h) => h.kind === 'remote'))
+      return { hubs, defaultHubId }
+    })
+    // Per-hub bearer tokens (safeStorage-encrypted, main-only). The renderer
+    // fetches them to open authed connections; writes come from the enroll/login
+    // flow. Empty when no authed hubs are configured.
+    ipcMain.handle('app:get-hub-tokens', () => getAllHubTokens(getTrpcDataRoot()))
+    ipcMain.handle(
+      'app:set-hub-token',
+      (_event, payload: { hubId: string; token: string }) => {
+        setHubToken(getTrpcDataRoot(), payload.hubId, payload.token)
+        return { ok: true as const }
+      }
+    )
     // Writes the pre-boot config file. Throws on an unnormalizable URL.
     ipcMain.handle(
       'app:set-boot-settings',
@@ -2986,12 +3055,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           server_mode?: 'local' | 'remote'
           remote_server_url?: string
           fleet_mode?: boolean
+          multi_hub?: boolean
+          hubs?: HubEntry[]
+          default_hub_id?: string
         }
       ) => {
         writeBootSettings(getTrpcDataRoot(), {
           server_mode: payload?.server_mode,
           remote_server_url: payload?.remote_server_url,
-          fleet_mode: payload?.fleet_mode
+          fleet_mode: payload?.fleet_mode,
+          multi_hub: payload?.multi_hub,
+          hubs: payload?.hubs,
+          default_hub_id: payload?.default_hub_id
         })
         return { ok: true as const }
       }

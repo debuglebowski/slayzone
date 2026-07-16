@@ -48,8 +48,23 @@ const trpcClientMock = {
   }
 }
 
+// Second hub's client — a distinct mock so a hub-routed fetch is observable.
+const remoteHubClientMock = {
+  task: {
+    get: { query: vi.fn() },
+    getSubTasks: { query: vi.fn() },
+    getAll: { query: vi.fn() },
+    getByProject: { query: vi.fn() }
+  },
+  tags: { list: { query: vi.fn() }, getForTask: { query: vi.fn() } },
+  projects: { list: { query: vi.fn() } },
+  app: { files: { pathExists: { query: vi.fn() } } }
+}
+
 vi.mock('@slayzone/transport/client', () => ({
-  getTrpcClient: () => trpcClientMock
+  getTrpcClient: () => trpcClientMock,
+  getHubClient: (id: string) =>
+    id === 'remote-b' ? { id, url: '', client: remoteHubClientMock, wsClient: {} } : null
 }))
 
 const { fetchTaskDetail } = await import('./taskDetailCache')
@@ -174,5 +189,30 @@ describe('fetchTaskDetail', () => {
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.taskTagIds).toEqual(['tag-a', 'tag-b'])
+  })
+
+  it('routes to the DEFAULT hub client when no hubId is passed (byte-identical)', async () => {
+    await fetchTaskDetail('task-1')
+    expect(trpcClientMock.task.get.query).toHaveBeenCalledWith({ id: 'task-1' })
+    expect(remoteHubClientMock.task.get.query).not.toHaveBeenCalled()
+  })
+
+  it('routes to the OWNING hub client when a hubId is passed (multi-hub)', async () => {
+    remoteHubClientMock.task.get.query.mockResolvedValue(makeTask({ id: 'task-1' }))
+    remoteHubClientMock.task.getSubTasks.query.mockResolvedValue([])
+    remoteHubClientMock.task.getByProject.query.mockResolvedValue([])
+    remoteHubClientMock.tags.list.query.mockResolvedValue([])
+    remoteHubClientMock.tags.getForTask.query.mockResolvedValue([])
+    remoteHubClientMock.projects.list.query.mockResolvedValue([])
+
+    await fetchTaskDetail('task-1', 'remote-b')
+    // The remote hub's client served the fetch; the default client was untouched.
+    expect(remoteHubClientMock.task.get.query).toHaveBeenCalledWith({ id: 'task-1' })
+    expect(trpcClientMock.task.get.query).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the default hub when the hubId is unknown', async () => {
+    await fetchTaskDetail('task-1', 'ghost-hub')
+    expect(trpcClientMock.task.get.query).toHaveBeenCalledWith({ id: 'task-1' })
   })
 })

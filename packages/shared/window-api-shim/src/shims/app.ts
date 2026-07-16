@@ -58,9 +58,24 @@ export const appShim = {
   // build the tRPC-WS URL. Fork pins a fixed loopback port (see server-url.ts);
   // windowId is constant (single window). Boot instrumentation is a no-op here.
   getServerUrl: async (): Promise<{ mode: 'local' | 'remote'; url: string }> => resolveServerUrl(),
-  // Fleet mode is a pre-boot decision for the Electron sidecar; the fork's
-  // sidecar is external and unsupervised, so fleet is always off from the shell.
-  getBootConfig: async (): Promise<{ fleetMode: boolean }> => ({ fleetMode: false }),
+  // Fleet + multi-hub are pre-boot decisions for the Electron sidecar; the
+  // fork's sidecar is external and unsupervised, so both are always off from the
+  // shell (single local hub).
+  getBootConfig: async (): Promise<{ fleetMode: boolean; multiHub: boolean }> => ({
+    fleetMode: false,
+    multiHub: false,
+  }),
+  // Fork is single-hub: the one local sidecar, at the fixed loopback url.
+  getHubRegistry: async (): Promise<{
+    hubs: Array<{ id: string; kind: 'local' | 'remote'; label: string; url?: string }>
+    defaultHubId: string
+  }> => ({
+    hubs: [{ id: 'local', kind: 'local', label: 'Local', url: resolveServerUrl().url }],
+    defaultHubId: 'local',
+  }),
+  // Fork is single-hub → no remote bearer tokens.
+  getHubTokens: async (): Promise<Record<string, string>> => ({}),
+  setHubToken: async (): Promise<{ ok: true }> => ({ ok: true }),
   // The fork's sidecar is an external process the shell doesn't supervise.
   restartSidecar: async (): Promise<{ ok: boolean; error?: string }> => ({
     ok: false,

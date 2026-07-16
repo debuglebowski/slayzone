@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
 import { join } from 'node:path'
+import type { HubEntry } from '@slayzone/types'
 
 /**
  * Pre-boot server-mode config (slice 7).
@@ -17,6 +18,14 @@ import { join } from 'node:path'
 
 export type ServerMode = 'local' | 'remote'
 
+/** Stable sentinel id for the co-located sidecar hub (never a fingerprint). */
+export const LOCAL_HUB_ID = 'local'
+/**
+ * Fixed id assigned to a pre-multi-hub single-remote server when it is migrated
+ * into the `hubs[]` registry. Stable so the migration is idempotent.
+ */
+export const LEGACY_REMOTE_HUB_ID = 'remote-legacy'
+
 export type BootConfig = {
   server_mode: ServerMode
   /** Canonical ws(s)://host[:port]/trpc URL — normalized on write. */
@@ -29,12 +38,34 @@ export type BootConfig = {
    * any DB is open. The UI to set it lands in wave 3; this is read-only wiring.
    */
   fleet_mode?: boolean
+  /**
+   * Multi-hub federation strangler gate. When true, the client connects to the
+   * always-running co-located local hub PLUS every remote hub in `hubs[]` at
+   * once and merges their projects. Default off (absent) → single-hub behavior
+   * (local, or one legacy remote) is byte-identical. Flipping it requires a
+   * relaunch (embedded-server start/skip is decided at boot), exactly like
+   * `server_mode`/`fleet_mode`.
+   */
+  multi_hub?: boolean
+  /**
+   * Persisted REMOTE hubs only. The local hub is never stored here — it is
+   * always synthesized by `resolveHubRegistry` so "local is always present" is
+   * a structural guarantee that no file edit can break. Absent until the user
+   * adds a second hub.
+   */
+  hubs?: HubEntry[]
+  /** Id of the hub new projects land on. Synthesized when absent. */
+  default_hub_id?: string
 }
 
 export type BootSettingsPatch = {
   server_mode?: ServerMode
   remote_server_url?: string
   fleet_mode?: boolean
+  multi_hub?: boolean
+  /** Replaces the persisted remote-hub list wholesale (local is never listed). */
+  hubs?: HubEntry[]
+  default_hub_id?: string
 }
 
 export type HealthProbeResult = {
@@ -80,6 +111,30 @@ export function toHealthUrl(wsUrl: string): string {
   return url.toString()
 }
 
+/**
+ * Validates + normalizes one persisted REMOTE hub entry. Returns null for any
+ * shape we won't trust (missing id/url, unnormalizable url, wrong kind) so a
+ * hand-edited or partially-written file can't inject a broken hub. The local
+ * hub is never persisted, so `kind` must be `'remote'` here.
+ */
+function sanitizeHubEntry(raw: unknown): HubEntry | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const o = raw as Record<string, unknown>
+  if (o.kind !== 'remote') return null
+  if (typeof o.id !== 'string' || !o.id) return null
+  if (typeof o.url !== 'string') return null
+  const url = normalizeRemoteUrl(o.url)
+  if (!url) return null
+  const entry: HubEntry = {
+    id: o.id,
+    kind: 'remote',
+    label: typeof o.label === 'string' && o.label ? o.label : o.id,
+    url
+  }
+  if (typeof o.fingerprint === 'string' && o.fingerprint) entry.fingerprint = o.fingerprint
+  return entry
+}
+
 /** Reads the pre-boot config; any missing/corrupt/invalid state falls back to local. */
 export function readBootConfig(dir: string): BootConfig {
   let parsed: unknown
@@ -101,6 +156,17 @@ export function readBootConfig(dir: string): BootConfig {
   // Only surface fleet_mode when it's explicitly true — a missing/false/garbage
   // value stays absent, so the byte-identical default (no runner spawn) holds.
   if (obj.fleet_mode === true) config.fleet_mode = true
+  // Same discipline for the multi-hub fields: surface them ONLY when present and
+  // well-formed, so a single-hub file reads back exactly as before (the existing
+  // toEqual round-trip tests stay green) and the byte-identical default holds.
+  if (obj.multi_hub === true) config.multi_hub = true
+  if (Array.isArray(obj.hubs)) {
+    const hubs = obj.hubs.map(sanitizeHubEntry).filter((h): h is HubEntry => h !== null)
+    if (hubs.length > 0) config.hubs = hubs
+  }
+  if (typeof obj.default_hub_id === 'string' && obj.default_hub_id) {
+    config.default_hub_id = obj.default_hub_id
+  }
   return config
 }
 
@@ -125,6 +191,25 @@ export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootCo
     if (patch.fleet_mode) next.fleet_mode = true
     else delete next.fleet_mode
   }
+  if (patch.multi_hub !== undefined) {
+    if (patch.multi_hub) next.multi_hub = true
+    else delete next.multi_hub
+  }
+  if (patch.hubs !== undefined) {
+    // Round-trip every entry through the sanitizer so a bad url throws here
+    // (surfaced to the caller) rather than being silently dropped on next read.
+    const sanitized = patch.hubs.map((h) => {
+      const clean = sanitizeHubEntry(h)
+      if (!clean) throw new Error(`Invalid hub entry: ${JSON.stringify(h)}`)
+      return clean
+    })
+    if (sanitized.length > 0) next.hubs = sanitized
+    else delete next.hubs
+  }
+  if (patch.default_hub_id !== undefined) {
+    if (patch.default_hub_id) next.default_hub_id = patch.default_hub_id
+    else delete next.default_hub_id
+  }
   mkdirSync(dir, { recursive: true })
   const target = join(dir, FILE_NAME)
   const tmp = `${target}.tmp`
@@ -148,6 +233,72 @@ export function fleetEnvFor(
   config: Pick<BootConfig, 'fleet_mode'>
 ): { SLAYZONE_FLEET_MODE: '1' } | Record<string, never> {
   return config.fleet_mode === true ? { SLAYZONE_FLEET_MODE: '1' } : {}
+}
+
+/** The synthesized local-hub entry (never persisted; url injected at runtime). */
+export function localHubEntry(): HubEntry {
+  return { id: LOCAL_HUB_ID, kind: 'local', label: 'Local' }
+}
+
+/**
+ * Resolves the effective hub registry the client should connect to — the single
+ * source of truth for "which hubs exist", derived purely from the pre-boot
+ * config (no live port knowledge; the caller injects the local hub's runtime
+ * ws url).
+ *
+ * Discipline (keeps single-hub users byte-identical):
+ *  - multi_hub OFF + local mode  → exactly `[local]` (today: one local sidecar).
+ *  - multi_hub OFF + remote mode → exactly `[remote-legacy]`, NO local (today: a
+ *    single remote server, sidecar never spawned). Listing local here would be a
+ *    lie — the sidecar isn't running in legacy remote mode.
+ *  - multi_hub ON → `[local, ...persisted remotes]`. Local is ALWAYS first +
+ *    present; that guarantee lives here, not in any file the user can corrupt. A
+ *    lingering legacy `remote_server_url` not yet migrated into `hubs[]` is
+ *    folded in defensively as `remote-legacy` so no configured hub is dropped.
+ */
+export function resolveHubRegistry(config: BootConfig): HubEntry[] {
+  if (config.multi_hub !== true) {
+    if (config.server_mode === 'remote' && config.remote_server_url) {
+      return [
+        {
+          id: LEGACY_REMOTE_HUB_ID,
+          kind: 'remote',
+          label: 'Remote',
+          url: config.remote_server_url
+        }
+      ]
+    }
+    return [localHubEntry()]
+  }
+  const remotes: HubEntry[] = config.hubs ? [...config.hubs] : []
+  // Fold a not-yet-migrated single-remote url into the list so flipping the flag
+  // before the management UI migrates it never loses the configured remote.
+  if (
+    config.remote_server_url &&
+    !remotes.some((h) => h.url === config.remote_server_url || h.id === LEGACY_REMOTE_HUB_ID)
+  ) {
+    remotes.push({
+      id: LEGACY_REMOTE_HUB_ID,
+      kind: 'remote',
+      label: 'Remote',
+      url: config.remote_server_url
+    })
+  }
+  return [localHubEntry(), ...remotes]
+}
+
+/**
+ * Resolves the default hub id (where new projects land). Prefers the persisted
+ * `default_hub_id` when it still names a hub in the registry; otherwise falls
+ * back to the first registry entry (local when multi_hub is on, the sole remote
+ * in legacy remote mode). The Phase-5 management UI always writes an explicit
+ * `default_hub_id`, so the fallback only bites a raw hand-edited file.
+ */
+export function resolveDefaultHubId(config: BootConfig, registry = resolveHubRegistry(config)): string {
+  if (config.default_hub_id && registry.some((h) => h.id === config.default_hub_id)) {
+    return config.default_hub_id
+  }
+  return registry[0]?.id ?? LOCAL_HUB_ID
 }
 
 /**

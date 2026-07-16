@@ -22,7 +22,7 @@ test.describe('Fleet settings tab', () => {
       await clickSettings(mainWindow)
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
-    await dialog.locator('aside button').filter({ hasText: 'Fleet' }).first().click()
+    await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
     await expect(dialog.getByTestId('fleet-mode-toggle')).toBeVisible({ timeout: 5_000 })
     return dialog
   }

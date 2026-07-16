@@ -22,6 +22,10 @@ export type TrpcContext = TrpcServerDeps & {
    *  Used by task-windows panel ownership + primary-active tracking. May be
    *  null on standalone server connections (CLI, agents). */
   windowId?: number | null
+  /** Multi-hub auth: the authenticated principal for this connection, or null
+   *  when the hub does not enforce auth (local loopback — the default). Attached
+   *  in the hub's createContext from a bearer token in tRPC connectionParams. */
+  principal?: { userId: string; orgId?: string | null } | null
 }
 
 export type TrpcContextFactory = (req?: IncomingMessage) => TrpcContext

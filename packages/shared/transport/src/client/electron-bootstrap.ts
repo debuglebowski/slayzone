@@ -1,4 +1,4 @@
-import type { ElectronAPI } from '@slayzone/types'
+import type { ElectronAPI, HubEntry } from '@slayzone/types'
 
 declare global {
   interface Window {
@@ -12,13 +12,21 @@ function api(): ElectronAPI {
 
 export const electronBootstrap = {
   getServerUrl: () => api().app.getServerUrl(),
-  // Pre-boot config not backed by the settings DB (fleet mode — decided at boot).
+  // Pre-boot config not backed by the settings DB (fleet/multi-hub — decided at boot).
   getBootConfig: () => api().app.getBootConfig(),
+  // Resolved multi-hub registry (local always first + present when multiHub on).
+  getHubRegistry: () => api().app.getHubRegistry(),
+  // Per-hub bearer tokens (safeStorage-decrypted in main) for authed remote hubs.
+  getHubTokens: () => api().app.getHubTokens(),
+  setHubToken: (payload: { hubId: string; token: string }) => api().app.setHubToken(payload),
   getWindowId: () => api().app.getWindowId(),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
     remote_server_url?: string
     fleet_mode?: boolean
+    multi_hub?: boolean
+    hubs?: HubEntry[]
+    default_hub_id?: string
   }) => api().app.setBootSettings(payload),
   probeServerHealth: (url: string) => api().app.probeServerHealth(url),
   relaunch: () => api().app.relaunch(),

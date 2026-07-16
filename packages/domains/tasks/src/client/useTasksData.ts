@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   electronBootstrap,
   useTRPC,
   useTRPCClient,
-  useSubscription
+  useSubscription,
+  useFederationOrNull,
+  getHubClient,
+  type TrpcVanillaClient
 } from '@slayzone/transport/client'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
@@ -13,6 +16,41 @@ import type { GroupKey } from './kanban'
 
 function hasTaskIdentity(task: Task | null | undefined): task is Task {
   return !!task && typeof task.id === 'string' && task.id.length > 0
+}
+
+/** Sentinel used when no FederationProvider is mounted (e.g. the Chromium fork
+ *  renders useTasksData without federation). Matches the local hub id, so every
+ *  row is attributed to "the one hub" and all routing falls through to the
+ *  ambient client — byte-identical to the pre-federation single-client world. */
+const LOCAL_FALLBACK_HUB_ID = 'local'
+
+/** Structural shape of `task.loadBoardData` (client view — rows are the shared
+ *  Task/Project/Tag types). Mirrors the server op's return without importing
+ *  the electron-coupled server module into renderer code. */
+type BoardData = {
+  tasks: Task[]
+  projects: Project[]
+  tags: Tag[]
+  taskTags: Record<string, string[]>
+  blockedTaskIds: string[]
+}
+
+/** Partition an id list by owning hub (preserving order within each hub), for
+ *  ops that can legitimately span hubs (e.g. the tree-global pinned list). Ids
+ *  absent from the lookup fall to the default hub. */
+function groupIdsByHub(
+  ids: string[],
+  lookup: Map<string, string>,
+  defaultHubId: string
+): Map<string, string[]> {
+  const byHub = new Map<string, string[]>()
+  for (const id of ids) {
+    const hubId = lookup.get(id) ?? defaultHubId
+    const bucket = byHub.get(hubId)
+    if (bucket) bucket.push(id)
+    else byHub.set(hubId, [id])
+  }
+  return byHub
 }
 
 /**
@@ -43,6 +81,12 @@ interface UseTasksDataReturn {
   tags: Tag[]
   taskTags: Map<string, string[]>
   blockedTaskIds: Set<string>
+
+  // Multi-hub federation: project id → owning hub id. App derives the selected
+  // project's hub from this (selection stays a bare id). Empty when single-hub.
+  hubIdByProject: Map<string, string>
+  // task id → owning hub id — lets App scope each open task tab to its hub.
+  hubIdByTask: Map<string, string>
 
   // Board-load lifecycle (the loadBoardData query) so consumers can tell
   // "connecting" / "failed to reach the server" apart from a genuinely empty
@@ -108,10 +152,92 @@ export function useTasksData(): UseTasksDataReturn {
   const [taskTags, setTaskTags] = useState<Map<string, string[]>>(new Map())
   const [blockedTaskIds, setBlockedTaskIds] = useState<Set<string>>(new Set())
 
-  // Board data spine: declarative query is the source of truth; the useState
-  // mirrors below stay so the many optimistic mutation handlers keep working
-  // unchanged and consumers keep reading synchronous arrays.
+  // ── Multi-hub federation ──────────────────────────────────────────────────
+  // The rail shows a flat union of every connected hub's projects/tasks. This
+  // hook is the seam: the DEFAULT hub keeps the exact declarative path below
+  // (byte-identical when single-hub); EXTRA hubs are fetched imperatively via
+  // their registry vanilla clients and MERGED into the same state arrays. Rows
+  // stay bare shared types — origin is tracked in side maps so App's ~48
+  // `id === selectedProjectId` comparisons and the DB contract are untouched.
+  const fed = useFederationOrNull()
+  const defaultHubId = fed?.defaultHubId ?? LOCAL_FALLBACK_HUB_ID
+  const extraHubs = useMemo(
+    () => (fed ? fed.hubs.filter((h) => h.id !== fed.defaultHubId && !!h.url) : []),
+    [fed]
+  )
+
+  // Origin maps: id → owning hub id. Kept in refs (stable-ref mutation routing
+  // reads `.current` without dep churn) AND mirrored to state (App re-derives
+  // the selected project's hub reactively when a remote hub's data lands).
+  const hubIdByProjectRef = useRef<Map<string, string>>(new Map())
+  const hubIdByTaskRef = useRef<Map<string, string>>(new Map())
+  const groupHubIdRef = useRef<Map<string, string>>(new Map())
+  const [hubIdByProject, setHubIdByProject] = useState<Map<string, string>>(new Map())
+  const [hubIdByTask, setHubIdByTask] = useState<Map<string, string>>(new Map())
+
+  // Per-hub raw payloads, recomposed into the merged arrays. The default hub's
+  // board flows through `boardQ`; extra hubs through these refs.
+  const extraBoardsRef = useRef<Map<string, BoardData>>(new Map())
+  const defaultGroupsRef = useRef<ProjectGroup[]>([])
+  const extraGroupsRef = useRef<Map<string, ProjectGroup[]>>(new Map())
+
+  // Board data spine: declarative query is the source of truth for the DEFAULT
+  // hub; the useState mirrors below stay so the many optimistic mutation
+  // handlers keep working unchanged and consumers keep reading synchronous arrays.
   const boardQ = useQuery(trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000 }))
+
+  // Rebuild the merged task/project/tag arrays + origin maps from the default
+  // board (boardQ) plus every extra hub's board. With no extra hubs this is
+  // exactly `setX(boardQ.data.x)` — byte-identical to the pre-federation seed.
+  const recomposeBoards = useCallback(() => {
+    const projByHub = new Map<string, string>()
+    const taskByHub = new Map<string, string>()
+    const allTasks: Task[] = []
+    const allProjects: Project[] = []
+    const allTags: Tag[] = []
+    const allTaskTags = new Map<string, string[]>()
+    const allBlocked = new Set<string>()
+    const absorb = (hubId: string, d: BoardData): void => {
+      for (const p of d.projects as Project[]) {
+        allProjects.push(p)
+        projByHub.set(p.id, hubId)
+      }
+      for (const t of d.tasks as Task[]) {
+        allTasks.push(t)
+        taskByHub.set(t.id, hubId)
+      }
+      for (const tag of d.tags as Tag[]) allTags.push(tag)
+      for (const [k, v] of Object.entries(d.taskTags)) allTaskTags.set(k, v)
+      for (const id of d.blockedTaskIds) allBlocked.add(id)
+    }
+    if (boardQ.data) absorb(defaultHubId, boardQ.data as BoardData)
+    for (const [hubId, d] of extraBoardsRef.current) absorb(hubId, d)
+    hubIdByProjectRef.current = projByHub
+    hubIdByTaskRef.current = taskByHub
+    setTasks(allTasks)
+    setProjects(allProjects)
+    setTags(allTags)
+    setTaskTags(allTaskTags)
+    setBlockedTaskIds(allBlocked)
+    setHubIdByProject(projByHub)
+    setHubIdByTask(taskByHub)
+  }, [boardQ.data, defaultHubId])
+
+  // Rebuild the merged project-groups array + origin map (default + extra hubs).
+  const recomposeGroups = useCallback(() => {
+    const byHub = new Map<string, string>()
+    const all: ProjectGroup[] = []
+    const absorb = (hubId: string, groups: ProjectGroup[]): void => {
+      for (const g of groups) {
+        all.push(g)
+        byHub.set(g.id, hubId)
+      }
+    }
+    absorb(defaultHubId, defaultGroupsRef.current)
+    for (const [hubId, groups] of extraGroupsRef.current) absorb(hubId, groups)
+    groupHubIdRef.current = byHub
+    setProjectGroups(all)
+  }, [defaultHubId])
 
   // Boot timing: mark the board-load start once on mount (the query auto-fires
   // here). Paired with the end/dataReady marks below. `app.bootMark` has no
@@ -128,25 +254,115 @@ export function useTasksData(): UseTasksDataReturn {
   // board query. Vanilla client (stable ref) — fire-and-forget, no hook deps churn.
   const loadGroups = useCallback(() => {
     return trpcClient.projectGroups.list.query().then((groups) => {
-      setProjectGroups(groups as ProjectGroup[])
+      defaultGroupsRef.current = groups as ProjectGroup[]
+      recomposeGroups()
     })
-  }, [trpcClient])
+  }, [trpcClient, recomposeGroups])
 
-  // Seed the useState mirrors from the board query result.
+  // Seed the useState mirrors from the (default hub) board query result, merged
+  // with any extra-hub boards already fetched.
   useEffect(() => {
-    const d = boardQ.data
-    if (!d) return
-    setTasks(d.tasks as Task[])
-    setProjects(d.projects as Project[])
-    setTags(d.tags as Tag[])
-    setTaskTags(new Map(Object.entries(d.taskTags)))
-    setBlockedTaskIds(new Set(d.blockedTaskIds))
-  }, [boardQ.data])
+    if (!boardQ.data) return
+    recomposeBoards()
+  }, [boardQ.data, recomposeBoards])
 
   // Initial groups load (mount-only; refresh paths re-run loadGroups directly).
   useEffect(() => {
     void loadGroups()
   }, [loadGroups])
+
+  // ── Extra-hub board + group fetch (federation) ────────────────────────────
+  // For each non-default hub, fetch its board + groups via its registry vanilla
+  // client, stash into the extra refs, recompose, and subscribe to its
+  // tasks-changed so external writes on that hub surface. No-op with a single
+  // hub (extraHubs empty) → single-hub path is byte-identical.
+  useEffect(() => {
+    if (!fed || extraHubs.length === 0) return
+    let cancelled = false
+    const unsubs: Array<() => void> = []
+    const liveHubIds = new Set(extraHubs.map((h) => h.id))
+    // Drop stale hubs (removed from the registry) before refetch.
+    for (const id of [...extraBoardsRef.current.keys()]) {
+      if (!liveHubIds.has(id)) extraBoardsRef.current.delete(id)
+    }
+    for (const id of [...extraGroupsRef.current.keys()]) {
+      if (!liveHubIds.has(id)) extraGroupsRef.current.delete(id)
+    }
+    const loadHub = (hubId: string, client: TrpcVanillaClient): void => {
+      void client.task.loadBoardData
+        .query()
+        .then((d) => {
+          if (cancelled) return
+          extraBoardsRef.current.set(hubId, d as BoardData)
+          recomposeBoards()
+        })
+        .catch(() => undefined)
+      void client.projectGroups.list
+        .query()
+        .then((groups) => {
+          if (cancelled) return
+          extraGroupsRef.current.set(hubId, groups as ProjectGroup[])
+          recomposeGroups()
+        })
+        .catch(() => undefined)
+    }
+    for (const hub of extraHubs) {
+      const resolved = fed.resolve(hub.id)
+      if (!resolved) continue
+      const client = resolved.ws.client
+      loadHub(hub.id, client)
+      try {
+        const sub = client.notify.onTasksChanged.subscribe(undefined, {
+          onData: () => loadHub(hub.id, client)
+        })
+        unsubs.push(() => sub.unsubscribe())
+      } catch {
+        /* subscription unsupported — polled refresh via __slayzone_refreshData */
+      }
+    }
+    return () => {
+      cancelled = true
+      for (const u of unsubs) u()
+    }
+  }, [fed, extraHubs, recomposeBoards, recomposeGroups])
+
+  // Mutation routing: resolve the vanilla client that OWNS an entity so writes
+  // land on the right hub. Falls back to the ambient default-hub client when the
+  // id isn't federated (single-hub → always the default → byte-identical).
+  const clientForHub = useCallback(
+    (hubId: string | undefined): TrpcVanillaClient => {
+      if (!hubId || hubId === defaultHubId) return trpcClient
+      return getHubClient(hubId)?.client ?? trpcClient
+    },
+    [defaultHubId, trpcClient]
+  )
+  const clientForProject = useCallback(
+    (projectId: string | undefined): TrpcVanillaClient =>
+      clientForHub(projectId ? hubIdByProjectRef.current.get(projectId) : undefined),
+    [clientForHub]
+  )
+  const clientForTask = useCallback(
+    (taskId: string | undefined): TrpcVanillaClient =>
+      clientForHub(taskId ? hubIdByTaskRef.current.get(taskId) : undefined),
+    [clientForHub]
+  )
+  const clientForGroup = useCallback(
+    (groupId: string | undefined): TrpcVanillaClient =>
+      clientForHub(groupId ? groupHubIdRef.current.get(groupId) : undefined),
+    [clientForHub]
+  )
+  // True when the given ids span more than one hub — such an op (cross-hub
+  // reorder / folder) is structurally meaningless (groups + sort_order are
+  // per-DB), so callers reject it.
+  const spansHubs = useCallback((ids: string[], lookup: Map<string, string>): boolean => {
+    let seen: string | undefined
+    for (const id of ids) {
+      const h = lookup.get(id) ?? defaultHubId
+      if (seen === undefined) seen = h
+      else if (seen !== h) return true
+    }
+    return false
+  }, [defaultHubId])
 
   // Boot instrumentation: fire bootMark/dataReady once the board query first
   // lands, preserving the legacy single-shot signal. `app.bootMark`/`dataReady`
@@ -270,14 +486,15 @@ export function useTasksData(): UseTasksDataReturn {
           ? { id: taskId, status: newColumnId as TaskStatus }
           : { id: taskId, priority: parseInt(newColumnId.slice(1), 10) }
 
+      const c = clientForTask(taskId)
       Promise.all([
-        trpcClient.task.update.mutate(updatePayload),
-        trpcClient.task.reorder.mutate({ taskIds: newColumnTaskIds })
+        c.task.update.mutate(updatePayload),
+        c.task.reorder.mutate({ taskIds: newColumnTaskIds })
       ]).catch(() => {
         setTasks(snapshot)
       })
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Move multiple tasks to another column at targetIndex (cross-column).
@@ -323,14 +540,15 @@ export function useTasksData(): UseTasksDataReturn {
           ? { status: newColumnId as TaskStatus }
           : { priority: parseInt(newColumnId.slice(1), 10) }
 
+      const c = clientForTask(taskIds[0])
       Promise.all([
-        trpcClient.task.updateMany.mutate({ ids: taskIds, updates: updatePayload }),
-        trpcClient.task.reorder.mutate({ taskIds: newColumnTaskIds })
+        c.task.updateMany.mutate({ ids: taskIds, updates: updatePayload }),
+        c.task.reorder.mutate({ taskIds: newColumnTaskIds })
       ]).catch(() => {
         setTasks(snapshot)
       })
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Reorder tasks within column
@@ -349,11 +567,11 @@ export function useTasksData(): UseTasksDataReturn {
         })
       })
 
-      trpcClient.task.reorder.mutate({ taskIds }).catch(() => {
+      clientForTask(taskIds[0]).task.reorder.mutate({ taskIds }).catch(() => {
         setTasks(snapshot)
       })
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Reparent task + reorder its new sibling list. Used by tree drag-into-task.
@@ -372,12 +590,13 @@ export function useTasksData(): UseTasksDataReturn {
           return t
         })
       })
+      const c = clientForTask(taskId)
       Promise.all([
-        trpcClient.task.update.mutate({ id: taskId, parentId: newParentId }),
-        trpcClient.task.reorder.mutate({ taskIds: newSiblingTaskIds })
+        c.task.update.mutate({ id: taskId, parentId: newParentId }),
+        c.task.reorder.mutate({ taskIds: newSiblingTaskIds })
       ]).catch(() => setTasks(snapshot))
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Bulk variant — used when dragging a multi-selection in the tree view.
@@ -401,12 +620,13 @@ export function useTasksData(): UseTasksDataReturn {
           return t
         })
       })
+      const c = clientForTask(taskIds[0])
       Promise.all([
-        trpcClient.task.updateMany.mutate({ ids: taskIds, updates: { parentId: newParentId } }),
-        trpcClient.task.reorder.mutate({ taskIds: newSiblingTaskIds })
+        c.task.updateMany.mutate({ ids: taskIds, updates: { parentId: newParentId } }),
+        c.task.reorder.mutate({ taskIds: newSiblingTaskIds })
       ]).catch(() => setTasks(snapshot))
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Archive single task
@@ -414,9 +634,9 @@ export function useTasksData(): UseTasksDataReturn {
     async (taskId: string) => {
       const now = new Date().toISOString()
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, archived_at: now } : t)))
-      await trpcClient.task.archive.mutate({ id: taskId })
+      await clientForTask(taskId).task.archive.mutate({ id: taskId })
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Archive multiple tasks
@@ -424,18 +644,19 @@ export function useTasksData(): UseTasksDataReturn {
     async (taskIds: string[]) => {
       const now = new Date().toISOString()
       setTasks((prev) => prev.map((t) => (taskIds.includes(t.id) ? { ...t, archived_at: now } : t)))
-      await trpcClient.task.archiveMany.mutate({ ids: taskIds })
+      await clientForTask(taskIds[0]).task.archiveMany.mutate({ ids: taskIds })
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Delete task
   const deleteTask = useCallback(
     async (taskId: string) => {
+      const c = clientForTask(taskId)
       setTasks((prev) => prev.filter((t) => t.id !== taskId))
-      await trpcClient.task.delete.mutate({ id: taskId })
+      await c.task.delete.mutate({ id: taskId })
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Bulk delete
@@ -449,12 +670,12 @@ export function useTasksData(): UseTasksDataReturn {
         return prev.filter((t) => !idSet.has(t.id))
       })
       try {
-        await trpcClient.task.deleteMany.mutate({ ids: taskIds })
+        await clientForTask(taskIds[0]).task.deleteMany.mutate({ ids: taskIds })
       } catch {
         setTasks(snapshot)
       }
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Context menu update (status, priority, project, blocked).
@@ -478,7 +699,7 @@ export function useTasksData(): UseTasksDataReturn {
       }
 
       try {
-        await trpcClient.task.update.mutate({
+        await clientForTask(taskId).task.update.mutate({
           id: taskId,
           ...toUpdateTaskFields(updates)
         })
@@ -494,7 +715,7 @@ export function useTasksData(): UseTasksDataReturn {
         }
       }
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Bulk context-menu update (status, priority, project, blocked, ...)
@@ -518,7 +739,7 @@ export function useTasksData(): UseTasksDataReturn {
       }
 
       try {
-        await trpcClient.task.updateMany.mutate({
+        await clientForTask(taskIds[0]).task.updateMany.mutate({
           ids: taskIds,
           updates: toUpdateTaskFields(updates)
         })
@@ -534,7 +755,7 @@ export function useTasksData(): UseTasksDataReturn {
         }
       }
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Reorder the pinned group — writes `pin_order = index` for the ordered ids
@@ -552,9 +773,15 @@ export function useTasksData(): UseTasksDataReturn {
             : t
         )
       })
-      trpcClient.task.reorderPinned.mutate({ taskIds }).catch(() => setTasks(snapshot))
+      // Pinned list is tree-global and may span hubs — reorder each hub's slice
+      // on its own client (pin_order is per-DB, so a cross-hub order is only
+      // meaningful within each hub anyway).
+      const byHub = groupIdsByHub(taskIds, hubIdByTaskRef.current, defaultHubId)
+      Promise.all(
+        [...byHub].map(([hubId, ids]) => clientForHub(hubId).task.reorderPinned.mutate({ taskIds: ids }))
+      ).catch(() => setTasks(snapshot))
     },
-    [trpcClient]
+    [clientForHub, defaultHubId]
   )
 
   // Pin / unpin tasks in the sidebar tree. Pinning appends after the current
@@ -585,15 +812,21 @@ export function useTasksData(): UseTasksDataReturn {
           idSet.has(t.id) ? { ...t, pinned: false, pin_order: 0 } : t
         )
       })
-      const write = pinned
-        ? trpcClient.task.reorderPinned.mutate({ taskIds: orderedPinnedIds })
-        : trpcClient.task.updateMany.mutate({
-            ids: taskIds,
-            updates: { pinned: false, pinOrder: 0 }
-          })
-      write.catch(() => setTasks(snapshot))
+      // Pin/unpin can span hubs (tree-global) — split by owning hub and issue
+      // one write per hub (pin_order is per-DB).
+      const writes = pinned
+        ? [...groupIdsByHub(orderedPinnedIds, hubIdByTaskRef.current, defaultHubId)].map(
+            ([hubId, ids]) => clientForHub(hubId).task.reorderPinned.mutate({ taskIds: ids })
+          )
+        : [...groupIdsByHub(taskIds, hubIdByTaskRef.current, defaultHubId)].map(([hubId, ids]) =>
+            clientForHub(hubId).task.updateMany.mutate({
+              ids,
+              updates: { pinned: false, pinOrder: 0 }
+            })
+          )
+      Promise.all(writes).catch(() => setTasks(snapshot))
     },
-    [trpcClient]
+    [clientForHub, defaultHubId]
   )
 
   const setTaskPinned = useCallback(
@@ -609,17 +842,17 @@ export function useTasksData(): UseTasksDataReturn {
         snapshot = prev
         return prev.map((t) => (t.id === taskId ? { ...t, tree_collapsed: collapsed } : t))
       })
-      trpcClient.task.update
-        .mutate({ id: taskId, treeCollapsed: collapsed })
+      clientForTask(taskId)
+        .task.update.mutate({ id: taskId, treeCollapsed: collapsed })
         .catch(() => setTasks(snapshot))
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Clear all dependency blockers (used when dragging out of __blocked__ col)
   const clearBlockers = useCallback(
     async (taskId: string) => {
-      await trpcClient.task.setBlockers.mutate({ taskId, blockerTaskIds: [] })
+      await clientForTask(taskId).task.setBlockers.mutate({ taskId, blockerTaskIds: [] })
       setBlockedTaskIds((prev) => {
         const next = new Set(prev)
         next.delete(taskId)
@@ -627,7 +860,7 @@ export function useTasksData(): UseTasksDataReturn {
       })
       window.dispatchEvent(new CustomEvent('slayzone:blocked-changed'))
     },
-    [trpcClient]
+    [clientForTask]
   )
 
   // Reorder projects
@@ -649,11 +882,16 @@ export function useTasksData(): UseTasksDataReturn {
         return [...reordered, ...rest]
       })
 
-      trpcClient.projects.reorder.mutate({ projectIds }).catch(() => {
+      // Cross-hub reorder is meaningless (sort_order is per-DB) — reject it.
+      if (spansHubs(projectIds, hubIdByProjectRef.current)) {
+        setProjects(snapshot)
+        return
+      }
+      clientForProject(projectIds[0]).projects.reorder.mutate({ projectIds }).catch(() => {
         setProjects(snapshot)
       })
     },
-    [trpcClient]
+    [clientForProject, spansHubs]
   )
 
   // Update project in state
@@ -681,12 +919,12 @@ export function useTasksData(): UseTasksDataReturn {
   // forget, safe in hook deps).
   //
   // Ordering mutations return an authoritative { projects, groups } snapshot
-  // (the server re-packs both scopes to contiguous 0..n-1). We snapshot current
-  // state for rollback, then replace with the server's truth on success. No
-  // client-side optimism here — the dnd-kit drop animation covers the local IPC
-  // round-trip, and replacing wholesale avoids client/server order divergence.
+  // for ONE hub (the server re-packs both scopes to contiguous 0..n-1). Under
+  // federation we splice only THAT hub's rows back into the merged arrays,
+  // keeping other hubs' projects/groups intact. With a single hub this is a
+  // wholesale replace — byte-identical to before.
   const runGroupMutation = useCallback(
-    (fn: () => Promise<{ projects: Project[]; groups: ProjectGroup[] }>) => {
+    (hubId: string, fn: () => Promise<{ projects: Project[]; groups: ProjectGroup[] }>) => {
       let projSnap: Project[] = []
       let groupSnap: ProjectGroup[] = []
       setProjects((p) => {
@@ -699,52 +937,89 @@ export function useTasksData(): UseTasksDataReturn {
       })
       fn()
         .then((snap) => {
-          setProjects(snap.projects)
-          setProjectGroups(snap.groups)
+          // Cache this hub's authoritative slice, then recompose so the merged
+          // arrays reflect the new order for this hub while preserving others.
+          if (hubId === defaultHubId) {
+            defaultGroupsRef.current = snap.groups
+          } else {
+            extraGroupsRef.current.set(hubId, snap.groups)
+            const b = extraBoardsRef.current.get(hubId)
+            if (b) extraBoardsRef.current.set(hubId, { ...b, projects: snap.projects })
+          }
+          // Projects: replace this hub's rows in-place (origin map unchanged —
+          // same ids, new sort_order), then recompose groups.
+          setProjects((prev) => {
+            const others = prev.filter((p) => (hubIdByProjectRef.current.get(p.id) ?? defaultHubId) !== hubId)
+            return hubId === defaultHubId ? [...snap.projects, ...others] : [...others, ...snap.projects]
+          })
+          recomposeGroups()
         })
         .catch(() => {
           setProjects(projSnap)
           setProjectGroups(groupSnap)
         })
     },
-    []
+    [defaultHubId, recomposeGroups]
   )
 
   const createProjectGroup = useCallback(
-    (name?: string) => runGroupMutation(() => trpcClient.projectGroups.create.mutate({ name })),
-    [trpcClient]
+    (name?: string) =>
+      // A bare new group has no project → attribute it to the default hub.
+      runGroupMutation(defaultHubId, () => trpcClient.projectGroups.create.mutate({ name })),
+    [trpcClient, runGroupMutation, defaultHubId]
   )
   const createFolderWithProjects = useCallback(
     (projectIds: string[]) => {
       if (projectIds.length === 0) return
-      runGroupMutation(() =>
-        trpcClient.projectGroups.createFolderWithProjects.mutate({ projectIds })
+      if (spansHubs(projectIds, hubIdByProjectRef.current)) return // cross-hub folder rejected
+      const hubId = hubIdByProjectRef.current.get(projectIds[0]) ?? defaultHubId
+      runGroupMutation(hubId, () =>
+        clientForProject(projectIds[0]).projectGroups.createFolderWithProjects.mutate({ projectIds })
       )
     },
-    [trpcClient]
+    [clientForProject, runGroupMutation, spansHubs, defaultHubId]
   )
   const deleteProjectGroup = useCallback(
-    (id: string) => runGroupMutation(() => trpcClient.projectGroups.delete.mutate({ id })),
-    [trpcClient]
+    (id: string) => {
+      const hubId = groupHubIdRef.current.get(id) ?? defaultHubId
+      runGroupMutation(hubId, () => clientForGroup(id).projectGroups.delete.mutate({ id }))
+    },
+    [clientForGroup, runGroupMutation, defaultHubId]
   )
   const reorderTopLevel = useCallback(
-    (entries: TopLevelEntryRef[]) =>
-      runGroupMutation(() => trpcClient.projectGroups.reorderTopLevel.mutate({ entries })),
-    [trpcClient]
+    (entries: TopLevelEntryRef[]) => {
+      // Top-level entries mix projects + groups; resolve each to its hub and
+      // reject a cross-hub reorder (top-level order is per-DB).
+      const hubIds = entries.map(
+        (e) =>
+          (e.kind === 'group' ? groupHubIdRef.current.get(e.id) : hubIdByProjectRef.current.get(e.id)) ??
+          defaultHubId
+      )
+      const hubId = hubIds[0] ?? defaultHubId
+      if (hubIds.some((h) => h !== hubId)) return // cross-hub top-level reorder rejected
+      runGroupMutation(hubId, () => clientForHub(hubId).projectGroups.reorderTopLevel.mutate({ entries }))
+    },
+    [clientForHub, runGroupMutation, defaultHubId]
   )
   const moveProjectToGroup = useCallback(
-    (projectId: string, groupId: string | null, targetIndex: number) =>
-      runGroupMutation(() =>
-        trpcClient.projectGroups.moveProject.mutate({ projectId, groupId, targetIndex })
-      ),
-    [trpcClient]
+    (projectId: string, groupId: string | null, targetIndex: number) => {
+      const projHub = hubIdByProjectRef.current.get(projectId) ?? defaultHubId
+      // Moving a project into a group that lives on a different hub is invalid.
+      if (groupId && (groupHubIdRef.current.get(groupId) ?? defaultHubId) !== projHub) return
+      runGroupMutation(projHub, () =>
+        clientForProject(projectId).projectGroups.moveProject.mutate({ projectId, groupId, targetIndex })
+      )
+    },
+    [clientForProject, runGroupMutation, defaultHubId]
   )
   const reorderProjectsInGroup = useCallback(
-    (groupId: string, projectIds: string[]) =>
-      runGroupMutation(() =>
-        trpcClient.projectGroups.reorderProjectsInGroup.mutate({ groupId, projectIds })
-      ),
-    [trpcClient]
+    (groupId: string, projectIds: string[]) => {
+      const hubId = groupHubIdRef.current.get(groupId) ?? defaultHubId
+      runGroupMutation(hubId, () =>
+        clientForGroup(groupId).projectGroups.reorderProjectsInGroup.mutate({ groupId, projectIds })
+      )
+    },
+    [clientForGroup, runGroupMutation, defaultHubId]
   )
 
   // Rename / collapse return a single group → optimistic patch (instant toggle).
@@ -755,9 +1030,9 @@ export function useTasksData(): UseTasksDataReturn {
         snap = prev
         return prev.map((g) => (g.id === id ? { ...g, name } : g))
       })
-      trpcClient.projectGroups.update.mutate({ id, name }).catch(() => setProjectGroups(snap))
+      clientForGroup(id).projectGroups.update.mutate({ id, name }).catch(() => setProjectGroups(snap))
     },
-    [trpcClient]
+    [clientForGroup]
   )
   const setGroupCollapsed = useCallback(
     (id: string, collapsed: boolean) => {
@@ -766,9 +1041,11 @@ export function useTasksData(): UseTasksDataReturn {
         snap = prev
         return prev.map((g) => (g.id === id ? { ...g, collapsed: collapsed ? 1 : 0 } : g))
       })
-      trpcClient.projectGroups.update.mutate({ id, collapsed }).catch(() => setProjectGroups(snap))
+      clientForGroup(id)
+        .projectGroups.update.mutate({ id, collapsed })
+        .catch(() => setProjectGroups(snap))
     },
-    [trpcClient]
+    [clientForGroup]
   )
 
   return {
@@ -778,6 +1055,8 @@ export function useTasksData(): UseTasksDataReturn {
     tags,
     taskTags,
     blockedTaskIds,
+    hubIdByProject,
+    hubIdByTask,
     boardStatus: boardQ.status,
     boardError: boardQ.error,
     setTasks,
