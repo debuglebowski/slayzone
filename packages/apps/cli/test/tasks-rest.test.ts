@@ -33,7 +33,7 @@ import { registerArchiveTaskRoute } from '../../../shared/transport/src/server/h
 import { registerDeleteTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/delete.js'
 import { registerUnarchiveTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/unarchive.js'
 import { registerOpenTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/open.js'
-import { BrowserWindow } from '../../../shared/test-utils/mock-electron.js'
+import { BrowserWindow, ipcMain } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
 if (!fs.existsSync(SLAY_BIN)) {
@@ -70,44 +70,51 @@ db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').r
 let notifyCount = 0
 const app = express()
 app.use(express.json())
+// The task ops emit their `db:tasks:*:done` completion events through an injected
+// `taskBus` (dep-injection refactor — they no longer import `electron` directly).
+// Wire mock-electron's `ipcMain` as that bus so its emits land in `__ipcEmitCalls`
+// for the assertions below; without it the routes fall back to NOOP_TASK_BUS and
+// nothing is captured.
+const taskBus = ipcMain as unknown as { emit: (channel: string, ...args: unknown[]) => boolean }
 registerCreateTaskRoute(app, {
   db: slayDb,
+  taskBus,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerUpdateTaskRoute(app, {
   db: slayDb,
+  taskBus,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerArchiveTaskRoute(app, {
   db: slayDb,
+  taskBus,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerDeleteTaskRoute(app, {
   db: slayDb,
+  taskBus,
   notifyRenderer: () => {
     notifyCount++
   }
 })
 registerUnarchiveTaskRoute(app, {
   db: slayDb,
+  taskBus,
   notifyRenderer: () => {
     notifyCount++
   }
 })
-registerOpenTaskRoute(app, {
-  db: slayDb,
-  notifyRenderer: () => {
-    notifyCount++
-  }
-} as never)
 
-// Capture app:open-task broadcasts + window show/focus calls.
+// Capture app:open-task broadcasts + window show/focus calls. The open route no
+// longer reaches into `electron` directly — it emits via injected `legacyBroadcast`
+// (test-only spy) + `windowActions` (raise/show/focus). Wire both so the spies fire.
 const openTaskBroadcasts: Array<{ taskId: string; background: boolean }> = []
 let showCalled = 0
 let focusCalled = 0
@@ -129,6 +136,21 @@ const fakeWin = {
   }
 }
 ;(BrowserWindow as unknown as { getAllWindows: () => unknown[] }).getAllWindows = () => [fakeWin]
+
+registerOpenTaskRoute(app, {
+  db: slayDb,
+  notifyRenderer: () => {
+    notifyCount++
+  },
+  legacyBroadcast: (channel: string, ...args: unknown[]) =>
+    fakeWin.webContents.send(channel, ...args),
+  windowActions: {
+    raiseMainWindow: () => {
+      fakeWin.show()
+      fakeWin.focus()
+    }
+  }
+} as never)
 function resetOpenSpies(): void {
   openTaskBroadcasts.length = 0
   showCalled = 0

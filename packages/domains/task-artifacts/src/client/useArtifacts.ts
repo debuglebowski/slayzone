@@ -253,7 +253,15 @@ export function useArtifacts(
 
   const readContent = useCallback(
     async (id: string): Promise<string | null> => {
-      return queryClient.fetchQuery(trpc.artifacts.readContent.queryOptions({ id }))
+      // Disk is the source of truth for artifact content, and this is the reload
+      // path (mount + external-change reload in ArtifactContentEditor.loadFromDisk).
+      // `fetchQuery` would serve a STALE cached read — e.g. the initial empty ''
+      // captured on mount — so a post-save reload (the fs.watch onContentChanged
+      // that fires for our OWN write, after dirty was cleared) wipes the editor
+      // back to the cached empty string. staleTime:0 forces a fresh disk read.
+      return queryClient.fetchQuery(
+        trpc.artifacts.readContent.queryOptions({ id }, { staleTime: 0, gcTime: 0 })
+      )
     },
     [queryClient, trpc]
   )
