@@ -239,6 +239,19 @@ case "$VERSION" in
   *)   NPM_TAG="latest" ;;
 esac
 echo "==> Publishing to npm (auth: $WHO, tag: $NPM_TAG)"
-( cd packages/apps/hub && npm publish --access public --tag "$NPM_TAG" )
-( cd packages/apps/runner && npm publish --access public --tag "$NPM_TAG" )
-echo "==> Published @slayzone/hub@$VERSION + @slayzone/runner@$VERSION (tag: $NPM_TAG)"
+
+# Idempotent per package: an immutable npm version means a partial prior run
+# (e.g. hub published, runner failed) must be resumable. Skip any name@version
+# already on the registry; publish the rest. Makes any re-dispatch safe.
+publish_one() {
+  local dir="$1" name="$2"
+  if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+    echo "   skip $name@$VERSION — already on registry"
+    return 0
+  fi
+  ( cd "$dir" && npm publish --access public --tag "$NPM_TAG" )
+  echo "   published $name@$VERSION"
+}
+publish_one packages/apps/hub "@slayzone/hub"
+publish_one packages/apps/runner "@slayzone/runner"
+echo "==> Done — @slayzone/hub@$VERSION + @slayzone/runner@$VERSION at tag: $NPM_TAG"
