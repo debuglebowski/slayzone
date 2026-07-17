@@ -4,11 +4,16 @@ name: Publish hub + runner (npm)
 # packages (bin.cjs bundles workspace deps; native addons rebuild on the
 # consumer's machine at `npm install`).
 #
+# AUTH: npm Trusted Publishing (OIDC) — no NPM_TOKEN. GitHub mints a short-lived
+# OIDC token (needs `id-token: write`); npm (>=11.5.1) exchanges it for a scoped
+# publish credential. The @slayzone npm org must have a Trusted Publisher
+# configured for BOTH packages pointing at debuglebowski/slayzone +
+# this workflow filename, else publish fails.
+#
 # SAFE TO COMMIT / INERT UNTIL ENABLED: live `npm publish` only runs when the
-# `NPM_TOKEN` repository secret is set. Without it, every run is a DRY RUN
-# (build + pack + smoke-boot the hub tarball under plain node) that publishes
-# nothing. So merging this workflow cannot push to npm on its own — you must
-# add NPM_TOKEN (from an account that owns the @slayzone npm scope) first.
+# OIDC token endpoint is available (i.e. `id-token: write` granted, real repo).
+# Fork/PR runs lack it -> DRY RUN (build + pack + smoke-boot under plain node),
+# publishing nothing.
 #
 # This is a STANDALONE workflow, deliberately separate from the desktop-app
 # release pipeline (release.yml / release-foundation.yml) so it does not touch
@@ -34,6 +39,7 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write # OIDC — npm Trusted Publishing (no long-lived token)
 
 jobs:
   publish:
@@ -55,27 +61,36 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      # Trusted publishing needs npm >=11.5.1; node 24 ships 11.3.x.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
           CI_SKIP_POSTINSTALL: '1'
 
-      # Resolve effective mode: a `publish` intent only takes effect when
-      # NPM_TOKEN is present. Otherwise fall back to dry-run so the run is inert.
+      # Resolve effective mode: a `publish` intent only takes effect when the
+      # OIDC token endpoint is available (id-token: write granted — absent on
+      # forks / PRs from forks). Otherwise fall back to dry-run so the run is inert.
       - name: Resolve publish mode
         id: mode
         env:
-          HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
           REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}
         run: |
           set -euo pipefail
-          if [ "$REQUESTED" = "publish" ] && [ "$HAS_TOKEN" = "true" ]; then
+          # OIDC token endpoint is injected into the process env only when
+          # id-token: write is effective (absent on fork PRs) — read it here,
+          # not via the ${{ env.* }} expression context (which never holds it).
+          HAS_OIDC=false
+          [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && HAS_OIDC=true
+          if [ "$REQUESTED" = "publish" ] && [ "$HAS_OIDC" = "true" ]; then
             echo "effective=publish" >> "$GITHUB_OUTPUT"
-            echo "Publish mode: LIVE (NPM_TOKEN present)"
+            echo "Publish mode: LIVE (OIDC available — trusted publishing)"
           else
             echo "effective=dry-run" >> "$GITHUB_OUTPUT"
             if [ "$REQUESTED" = "publish" ]; then
-              echo "::warning::publish requested but NPM_TOKEN is not set — running DRY RUN (nothing published)"
+              echo "::warning::publish requested but OIDC token endpoint absent — running DRY RUN (nothing published)"
             else
               echo "Publish mode: dry-run"
             fi
@@ -85,8 +100,8 @@ jobs:
         if: steps.mode.outputs.effective == 'dry-run'
         run: bash scripts/publish-hub-runner.sh
 
+      # No NODE_AUTH_TOKEN: npm (>=11.5.1) auto-detects OIDC and exchanges it for
+      # a scoped publish credential via the org's Trusted Publisher config.
       - name: Build + pack + smoke + publish
         if: steps.mode.outputs.effective == 'publish'
         run: bash scripts/publish-hub-runner.sh --publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

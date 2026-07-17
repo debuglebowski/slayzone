@@ -18,7 +18,9 @@
 #
 # PRECONDITIONS you must satisfy:
 #   - You own/control the `@slayzone` npm scope (else the scoped publish fails).
-#   - Auth for --publish: NODE_AUTH_TOKEN (CI) or `npm login` (local). @slayzone org.
+#   - Auth for --publish: in CI, npm Trusted Publishing (OIDC) — no token, npm
+#     >=11.5.1 exchanges the GitHub OIDC token for a scoped publish credential
+#     (org must have a Trusted Publisher for both pkgs). Local: `npm login`.
 #   - Decide the version below (VERSION=...). npm versions are near-permanent;
 #     to iterate, bump the patch and publish again.
 #
@@ -64,7 +66,7 @@ publish_manifest() {
       name, version, description: desc, license:"GPL-3.0-only", private:false,
       type:"module", bin:{[bin]:"./dist/bin.cjs"}, main:"./dist/bin.cjs",
       files:["dist/","README.md"], engines:{node:">=24"},
-      repository:{type:"git",url:"git+https://github.com/JCB-K/SlayZone.git"},
+      repository:{type:"git",url:"git+https://github.com/debuglebowski/slayzone.git"},
       dependencies: deps
     };
     fs.writeFileSync(path.join(dir,"package.json"), JSON.stringify(out,null,2)+"\n");
@@ -97,7 +99,7 @@ by default. Do **not** set `SLAYZONE_HOST` to expose it beyond loopback except
 on a fully trusted network — user authentication on `/trpc` is not yet
 implemented. Runner traffic (`/runners`) is TLS + cert-pinned and safe to expose.
 
-GPL-3.0-only. Source: https://github.com/JCB-K/SlayZone
+GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
 cat > packages/apps/runner/README.md <<'EOF'
 # @slayzone/runner (SlayZone runner)
@@ -108,7 +110,7 @@ token (mint one on the hub), then runs terminals/agents/git on this machine.
     SLAYZONE_JOIN_TOKEN=<token from the hub> slayzone-runner
 
 The join token embeds the hub URL + cert fingerprint, so nothing else is
-required. GPL-3.0-only. Source: https://github.com/JCB-K/SlayZone
+required. GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
 
 # --- pack both ---
@@ -225,9 +227,10 @@ if [ "$DO_PUBLISH" -ne 1 ]; then
 fi
 
 # --- PUBLISH (needs npm auth + @slayzone org) ---
-# Auth resolves from NODE_AUTH_TOKEN (CI, via setup-node registry-url) or an
-# interactive `npm login` (local). `npm whoami` is only a courtesy label and is
-# NOT gated on — it can fail under token-only auth even when publish would work.
+# Auth resolves from Trusted Publishing OIDC (CI: npm >=11.5.1 auto-detects the
+# GitHub OIDC token, no NODE_AUTH_TOKEN) or an interactive `npm login` (local).
+# `npm whoami` is only a courtesy label and is NOT gated on — it returns nothing
+# under OIDC even though publish works.
 WHO="$(npm whoami 2>/dev/null || echo 'token-auth')"
 # Prereleases (0.36.0-beta.2) must NOT go to the `latest` dist-tag — npm rejects
 # it. Route pre-releases to `beta`, stable to `latest`.
