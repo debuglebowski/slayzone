@@ -97,10 +97,10 @@ test('runners.revokeRunner: drops the runner from the active list', async () => 
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(false)
 })
 
-// Contract: with the gateway absent (runner mode off), `list` still returns store
+// Contract: with the gateway absent (init not yet resolved), `list` still returns store
 // rows (all disconnected) and `mintJoinToken` fails cleanly instead of crashing.
 test('runners: list degrades + mintJoinToken throws when the gateway is unwired', async () => {
-  // Registry with no gateway + no URL — mirrors runner-mode-off (never populated),
+  // Registry with no gateway + no URL — mirrors init-not-resolved (never populated),
   // but exercised here by resetting the deps to a null-gateway shape.
   setRunnersDeps({ getGateway: () => null, getHubUrl: () => null, getCertFingerprint: () => null })
 

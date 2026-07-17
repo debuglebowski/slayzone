@@ -30,8 +30,14 @@ export interface RunnerListenerInfo {
 export interface StartRunnerListenerOptions {
   /** The https server (already constructed with the hub identity key/cert). */
   server: HttpsServer
-  /** Host to bind (matches the shared server's host — 127.0.0.1 by default). */
+  /** Interface to BIND on (`0.0.0.0` = reachable off-machine). */
   host: string
+  /** Host to ADVERTISE in the minted join token's `wss://…` URL. Distinct from
+   *  `host`: binding `0.0.0.0` is not a dialable address, so the token must carry
+   *  a real host (loopback for the co-located runner; operators override the
+   *  public host via SLAYZONE_HUB_PUBLIC_URL for remote runners). Defaults to
+   *  `host` when the bind host is already dialable. */
+  advertiseHost?: string
   /** The hub leaf fingerprint to advertise + pin. */
   fingerprintSha256Hex: string
   /** `SLAYZONE_RUNNER_TRANSPORT_PORT` raw value; invalid/empty ⇒ OS-assigned (port 0). */
@@ -89,8 +95,11 @@ export async function startRunnerListener(
   }
   const addr = server.address()
   const actualPort = typeof addr === 'object' && addr ? (addr as AddressInfo).port : port
+  // Advertise a DIALABLE host in the token — never the `0.0.0.0` wildcard we bind.
+  const advertiseHost =
+    opts.advertiseHost ?? (host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host)
   return {
-    hubUrl: `wss://${host}:${actualPort}/runners`,
+    hubUrl: `wss://${advertiseHost}:${actualPort}/runners`,
     certFingerprint: opts.fingerprintSha256Hex,
     port: actualPort
   }

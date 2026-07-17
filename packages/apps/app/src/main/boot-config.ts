@@ -31,20 +31,11 @@ export type BootConfig = {
   /** Canonical ws(s)://host[:port]/trpc URL — normalized on write. */
   remote_server_url?: string
   /**
-   * Hub/runner split (wave 2B): when true, the local backend also spawns a
-   * co-located @slayzone/runner subprocess (see index.ts) so this machine can
-   * host runner work. Default off — nothing new spawns. Modeled on `server_mode`
-   * (a pre-boot JSON field, not a settings-table row) so boot can read it before
-   * any DB is open. The UI to set it lands in wave 3; this is read-only wiring.
-   */
-  runners_enabled?: boolean
-  /**
-   * Multi-hub federation strangler gate. When true, the client connects to the
+   * Multi-hub federation gate. When true, the client connects to the
    * always-running co-located local hub PLUS every remote hub in `hubs[]` at
    * once and merges their projects. Default off (absent) → single-hub behavior
    * (local, or one legacy remote) is byte-identical. Flipping it requires a
-   * relaunch (embedded-server start/skip is decided at boot), exactly like
-   * `server_mode`/`runners_enabled`.
+   * relaunch (embedded-server start/skip is decided at boot), like `server_mode`.
    */
   multi_hub?: boolean
   /**
@@ -61,7 +52,6 @@ export type BootConfig = {
 export type BootSettingsPatch = {
   server_mode?: ServerMode
   remote_server_url?: string
-  runners_enabled?: boolean
   multi_hub?: boolean
   /** Replaces the persisted remote-hub list wholesale (local is never listed). */
   hubs?: HubEntry[]
@@ -155,10 +145,7 @@ export function readBootConfig(dir: string): BootConfig {
     const normalized = normalizeRemoteUrl(obj.remote_server_url)
     if (normalized) config.remote_server_url = normalized
   }
-  // Only surface runners_enabled when it's explicitly true — a missing/false/garbage
-  // value stays absent, so the byte-identical default (no runner spawn) holds.
-  if (obj.runners_enabled === true) config.runners_enabled = true
-  // Same discipline for the multi-hub fields: surface them ONLY when present and
+  // Surface the multi-hub fields ONLY when present and
   // well-formed, so a single-hub file reads back exactly as before (the existing
   // toEqual round-trip tests stay green) and the byte-identical default holds.
   if (obj.multi_hub === true) config.multi_hub = true
@@ -187,12 +174,6 @@ export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootCo
     if (!normalized) throw new Error(`Invalid remote server URL: ${patch.remote_server_url}`)
     next.remote_server_url = normalized
   }
-  if (patch.runners_enabled !== undefined) {
-    // Persist only the enabled state; clearing it drops the key entirely so the
-    // file stays minimal (readBootConfig treats absent as off anyway).
-    if (patch.runners_enabled) next.runners_enabled = true
-    else delete next.runners_enabled
-  }
   if (patch.multi_hub !== undefined) {
     if (patch.multi_hub) next.multi_hub = true
     else delete next.multi_hub
@@ -218,23 +199,6 @@ export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootCo
   writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n')
   renameSync(tmp, target)
   return next
-}
-
-/**
- * Builds the runner-mode fragment of the sidecar child env from boot-config.
- *
- * Hub/runner split (wave 3): the sidecar's hub gateway + auth + runners deps are
- * gated in the server composition on `SLAYZONE_RUNNERS_ENABLED === '1'`. This is the
- * bridge that lights that gate up from the pre-boot config field — when
- * `runners_enabled` is true we add `SLAYZONE_RUNNERS_ENABLED: '1'` to the sidecar's env,
- * otherwise we add NOTHING (an absent var is exactly what composition reads as
- * runner-off), so the default (runner unset/false) stays byte-identical. Kept pure
- * + electron-free so the env-building decision is unit-testable without a boot.
- */
-export function runnerTransportEnvFor(
-  config: Pick<BootConfig, 'runners_enabled'>
-): { SLAYZONE_RUNNERS_ENABLED: '1' } | Record<string, never> {
-  return config.runners_enabled === true ? { SLAYZONE_RUNNERS_ENABLED: '1' } : {}
 }
 
 /** The synthesized local-hub entry (never persisted; url injected at runtime). */

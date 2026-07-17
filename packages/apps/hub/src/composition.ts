@@ -112,8 +112,8 @@ import {
   setProcessBackend,
   localProcessBackend
 } from '@slayzone/processes/server'
-// Hub/runner split (wave 2B): runner gateway + hub-auth + runner resolution,
-// wired only under the `runners_enabled` gate below. All dark by default.
+// Runner transport: runner gateway + hub-auth + runner resolution, wired
+// unconditionally at boot (a hub always accepts runners).
 import {
   createHubRunnerGateway,
   createRoutingPtyBackend,
@@ -164,23 +164,22 @@ export type ServerComposition = {
   restDeps: RestApiDeps
   /** Late-bound by the server once listen() resolves the actual port. */
   setBoundPort: (port: number) => void
-  /** Hub runner gateway (runner-WS multiplexer), or `null` when runner mode is off
-   *  or its async init hasn't resolved yet. A later unit mounts it onto the
-   *  server's WS upgrade path (see `runnersReady`). */
+  /** Hub runner gateway (runner-WS multiplexer), or `null` until its async init
+   *  resolves (see `runnersReady`). A later unit mounts it onto the server's WS
+   *  upgrade path. */
   readonly runnerGateway: HubRunnerGateway | null
   /** Hub-auth (better-auth) instance backing runner enroll/verify, or `null`
-   *  (same gating as `runnerGateway`). */
+   *  until the async init resolves (same as `runnerGateway`). */
   readonly hubAuth: HubAuth | null
-  /** Resolves once the async runner init has finished (already-resolved no-op when
-   *  runner mode is off). A later unit awaits this before reading the two fields
-   *  above / mounting the gateway. */
+  /** Resolves once the async runner init (createHubAuth + gateway) has finished.
+   *  A later unit awaits this before reading the two fields above / mounting the
+   *  gateway. */
   runnersReady: Promise<void>
   /** Feed the runner listener's bound WS URL + the hub identity's TLS cert
    *  fingerprint back into the runners registry (`mintJoinToken` embeds both in
    *  a join token). The server host resolves these only after it binds the runner
    *  port + loads `loadOrCreateHubIdentity`, which happens AFTER composeServer
-   *  returns — so it's a late-bound setter, not a constructor arg. No-op when
-   *  runner mode is off (the runners registry was never populated). */
+   *  returns — so it's a late-bound setter, not a constructor arg. */
   setRunnerListenerInfo: (info: { hubUrl: string; certFingerprint: string }) => void
 }
 
@@ -198,12 +197,14 @@ export function composeServer(opts: {
   const { db, dataRoot } = opts
   const supervised = !opts.standalone
 
-  // --- Runner mode gate (hub/runner split, wave 2B) ---------------------------
-  // Single lever: when OFF (default) NOTHING below builds a gateway/auth or swaps
-  // an exec backend, so the composition is byte-identical to today (every spawn
-  // stays hub-local via the seams' local defaults). A later unit replaces this
-  // env probe with the real boot-config field. Runner routing is opt-in.
-  const isRunnersEnabled = process.env.SLAYZONE_RUNNERS_ENABLED === '1'
+  // --- Runner transport (always on) -------------------------------------------
+  // A hub always accepts runners: the gateway + hub-auth are built and the runner
+  // listener binds at startup unconditionally, so a runner can connect (and join
+  // tokens can mint) with no mode to flip. Co-located exec still runs IN-PROCESS —
+  // a task only routes over the transport when it is explicitly bound to a runner
+  // (`resolveTaskRunnerId` → null ⇒ local.spawn), so always-on costs the common
+  // laptop case nothing at runtime.
+  //
   // Single HMAC secret backing ALL hub-auth signing: better-auth's session/cookie
   // signer (createHubAuth) AND the per-task bearer tokens the remote-MCP-env
   // provider mints (mintTaskToken) / the agent-hook route verifies
@@ -302,7 +303,7 @@ export function composeServer(opts: {
   // standalone mode only, when the engine is started (slice 7).
   const taskBus = new EventEmitter()
   // Base task runtime adapters (no worktrees override → the task server's local
-  // git/fs default stays bound). Extracted so the runner-mode path can re-supply a
+  // git/fs default stays bound). Extracted so the runner-routing path can re-supply a
   // COMPLETE object (configureTaskRuntimeAdapters shallow-merges over DEFAULTS,
   // not over the prior call — a partial second call would drop these fields).
   const baseTaskAdapters = {
@@ -414,19 +415,17 @@ export function composeServer(opts: {
     isDarkTheme: () => true,
     bus: { on: () => undefined }
   })
-  // Runner mode: inject runner-aware spawn lookups BEFORE createPtyOps (which
-  // captures the lookups at construction). Only `resolveRunnerId` is overridden —
-  // it needs the db, not the gateway, so it's safe to wire synchronously here;
-  // the mode-row / project-id reads keep their db defaults. With no runner
-  // assigned, `resolveTaskRunnerId` returns null → the spec carries a null
-  // runnerId → every routing backend below falls through to local (byte-identical).
-  if (isRunnersEnabled) {
-    const dbLookups = createDbPtySpawnLookups(db)
-    setPtySpawnLookups({
-      ...dbLookups,
-      resolveRunnerId: (taskId) => resolveTaskRunnerId(db, taskId)
-    })
-  }
+  // Inject runner-aware spawn lookups BEFORE createPtyOps (which captures the
+  // lookups at construction). Only `resolveRunnerId` is overridden — it needs the
+  // db, not the gateway, so it's safe to wire synchronously here; the mode-row /
+  // project-id reads keep their db defaults. With no runner assigned,
+  // `resolveTaskRunnerId` returns null → the spec carries a null runnerId → every
+  // routing backend below falls through to local (in-process, the common case).
+  const dbLookups = createDbPtySpawnLookups(db)
+  setPtySpawnLookups({
+    ...dbLookups,
+    resolveRunnerId: (taskId) => resolveTaskRunnerId(db, taskId)
+  })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
   // Warm-process pool (plans/agent-sessions.md): pre-warm one agent per active
   // project so opening a task adopts instantly. PTY runs in THIS process
@@ -804,25 +803,19 @@ export function composeServer(opts: {
     agentLifecycle: agentLifecycleEvents,
     menu: menuEvents,
     taskBus,
-    // Runner mode only: enforce the per-task hub bearer a runner-routed pty's hook
-    // carries. Verifier is closed over `runnerTransportSecret` (the SAME secret the provider
-    // above mints with). Undefined when runner is off → the agent-hook route skips
-    // enforcement (loopback hooks, which send no bearer, stay byte-identical).
-    verifyTaskToken: isRunnersEnabled
-      ? (token: string) => verifyTaskToken(runnerTransportSecret, token)
-      : undefined,
-    // Runner listener info for the loopback `POST /api/runners/join-token` route
-    // (Wave3.5-D3) — the MAIN process's boot-time auto-enroll mints through it
-    // (no tRPC client in main). Closed over the SAME late-bound refs the runners
-    // registry reads (setRunnerListenerInfo feeds them once the /runners listener
-    // binds). Wired ONLY under runner mode; absent → the route 503s and nothing
-    // mints, so the default boot is byte-identical.
-    runners: isRunnersEnabled
-      ? {
-          getHubUrl: () => runnerHubUrl,
-          getCertFingerprint: () => runnerCertFingerprint
-        }
-      : undefined,
+    // Enforce the per-task hub bearer a runner-routed pty's hook carries. Verifier
+    // is closed over `runnerTransportSecret` (the SAME secret the provider above
+    // mints with). Loopback hooks send no bearer → the agent-hook route only
+    // enforces when a token is present, so co-located hooks stay unaffected.
+    verifyTaskToken: (token: string) => verifyTaskToken(runnerTransportSecret, token),
+    // Runner listener info for the loopback `POST /api/runners/join-token` route —
+    // the MAIN process's boot-time auto-enroll mints through it (no tRPC client in
+    // main). Closed over the SAME late-bound refs the runners registry reads
+    // (setRunnerListenerInfo feeds them once the /runners listener binds).
+    runners: {
+      getHubUrl: () => runnerHubUrl,
+      getCertFingerprint: () => runnerCertFingerprint
+    },
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's
     // bus → renderer); only the window raise is bridged to the Electron host.
@@ -872,90 +865,85 @@ export function composeServer(opts: {
   // without a mid-session straddle. With no runner registered every spawn's
   // resolved runnerId is null → the routing backends fall through to local, so
   // behavior matches runner-OFF until a runner actually enrolls.
-  if (isRunnersEnabled) {
-    // Populate the runners registry synchronously (the router may be called
-    // before the async gateway init below resolves). The getters read the
-    // late-bound refs, so `list` sees the gateway once it exists and
-    // `mintJoinToken` sees the URL/fingerprint once the server host feeds them
-    // via setRunnerListenerInfo. When runner mode is OFF this is never called, so
-    // getRunnersDeps() throws and the runner-dependent procs fail cleanly.
-    setRunnersDeps({
-      getGateway: () => runnerGatewayRef,
-      getHubUrl: () => runnerHubUrl,
-      getCertFingerprint: () => runnerCertFingerprint
-    })
+  // Populate the runners registry synchronously (the router may be called before
+  // the async gateway init below resolves). The getters read the late-bound refs,
+  // so `list` sees the gateway once it exists and `mintJoinToken` sees the
+  // URL/fingerprint once the server host feeds them via setRunnerListenerInfo.
+  setRunnersDeps({
+    getGateway: () => runnerGatewayRef,
+    getHubUrl: () => runnerHubUrl,
+    getCertFingerprint: () => runnerCertFingerprint
+  })
 
-    // Remote-MCP-env provider (hub/runner split, wave 3.5). Wired synchronously
-    // here — it depends only on boundPort (read LAZILY inside the closure) +
-    // runnerTransportSecret, neither of which needs the async gateway — so a runner-routed
-    // pty spawned before `runnersReady` resolves still gets a valid hub env. With
-    // no provider (runner OFF) `resolveRemoteMcpEnv` short-circuits to null and
-    // every spawn keeps today's loopback env, byte-identical. See
-    // `createRemoteMcpEnvProvider` for hubBaseUrl derivation + SLAYZONE_HUB_PUBLIC_URL.
-    setRemoteMcpEnvProvider(
-      createRemoteMcpEnvProvider({ runnerTransportSecret, getBoundPort: () => boundPort })
+  // Remote-MCP-env provider. Wired synchronously here — it depends only on
+  // boundPort (read LAZILY inside the closure) + runnerTransportSecret, neither of
+  // which needs the async gateway — so a runner-routed pty spawned before
+  // `runnersReady` resolves still gets a valid hub env. A task not bound to a
+  // runner keeps today's loopback env (the provider short-circuits on a null
+  // runnerId). See `createRemoteMcpEnvProvider` for hubBaseUrl + SLAYZONE_HUB_PUBLIC_URL.
+  setRemoteMcpEnvProvider(
+    createRemoteMcpEnvProvider({ runnerTransportSecret, getBoundPort: () => boundPort })
+  )
+
+  runnersReady = (async () => {
+    const hubAuth = await createHubAuth({
+      dbPath: join(dataRoot, 'hub-auth.sqlite'),
+      baseURL: process.env.SLAYZONE_RUNNER_TRANSPORT_BASE_URL ?? 'http://127.0.0.1:8788',
+      secret: runnerTransportSecret
+    })
+    hubAuthRef = hubAuth
+    // Identity-based local-runner dedup (Wave3.5-D5): tell the auth adapters
+    // which enroll name is the co-located auto-spawned runner so it collapses to
+    // ONE deterministic-id row instead of orphaning one per boot. MUST match the
+    // name main injects at auto-enroll — both read the SHARED
+    // DEFAULT_LOCAL_RUNNER_NAME const (and honor the SAME SLAYZONE_RUNNER_NAME
+    // override), so they can't silently diverge. Remote runners (any other name)
+    // keep the fresh-uuid path.
+    const localRunnerName = process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME
+    const runnerGateway = createHubRunnerGateway(
+      createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
     )
+    runnerGatewayRef = runnerGateway
 
-    runnersReady = (async () => {
-      const hubAuth = await createHubAuth({
-        dbPath: join(dataRoot, 'hub-auth.sqlite'),
-        baseURL: process.env.SLAYZONE_RUNNER_TRANSPORT_BASE_URL ?? 'http://127.0.0.1:8788',
-        secret: runnerTransportSecret
+    // Route OS-level exec (pty/proc) to the resolved runner; a null runnerId
+    // (baked into the spec by the runner-aware spawn lookups above) falls
+    // through to the in-process local backend.
+    setPtyBackend(
+      createRoutingPtyBackend({
+        gateway: runnerGateway,
+        local: localPtyBackend,
+        resolveRunnerId: (spec) => spec.runnerId ?? null
       })
-      hubAuthRef = hubAuth
-      // Identity-based local-runner dedup (Wave3.5-D5): tell the auth adapters
-      // which enroll name is the co-located auto-spawned runner so it collapses to
-      // ONE deterministic-id row instead of orphaning one per boot. MUST match the
-      // name main injects at auto-enroll — both read the SHARED
-      // DEFAULT_LOCAL_RUNNER_NAME const (and honor the SAME SLAYZONE_RUNNER_NAME
-      // override), so they can't silently diverge. Remote runners (any other name)
-      // keep the fresh-uuid path.
-      const localRunnerName = process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME
-      const runnerGateway = createHubRunnerGateway(
-        createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
-      )
-      runnerGatewayRef = runnerGateway
-
-      // Route OS-level exec (pty/proc) to the resolved runner; a null runnerId
-      // (baked into the spec by the runner-aware spawn lookups above) falls
-      // through to the in-process local backend.
-      setPtyBackend(
-        createRoutingPtyBackend({
-          gateway: runnerGateway,
-          local: localPtyBackend,
-          resolveRunnerId: (spec) => spec.runnerId ?? null
-        })
-      )
-      setProcessBackend(
-        createRoutingProcessBackend({
-          gateway: runnerGateway,
-          local: localProcessBackend,
-          resolveRunnerId: (spec) => spec.runnerId ?? null
-        })
-      )
-      // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
-      // every base field so nothing is dropped, plus the routing worktree adapter.
-      configureTaskRuntimeAdapters({
-        ...baseTaskAdapters,
-        worktrees: createRemoteWorktreeAdapters({
-          gateway: runnerGateway,
-          // Per-task worktree runner routing is a later unit — the WorktreeExecAdapters
-          // seam carries no task id, so there's no task context to route on here.
-          // null keeps worktree git/fs work hub-local (createRemoteWorktreeAdapters
-          // degrades every method to `local`); the seam is wired, ready to route.
-          resolveRunnerId: () => null,
-          local: defaultWorktreeExecAdapters
-        })
+    )
+    setProcessBackend(
+      createRoutingProcessBackend({
+        gateway: runnerGateway,
+        local: localProcessBackend,
+        resolveRunnerId: (spec) => spec.runnerId ?? null
       })
-    })().catch((err) => {
-      recordDiagnosticEvent({
-        level: 'error',
-        source: 'task',
-        event: 'runner.init_failed',
-        message: err instanceof Error ? err.message : String(err)
+    )
+    // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
+    // every base field so nothing is dropped, plus the routing worktree adapter.
+    configureTaskRuntimeAdapters({
+      ...baseTaskAdapters,
+      worktrees: createRemoteWorktreeAdapters({
+        gateway: runnerGateway,
+        // Per-task worktree runner routing is a later unit — the WorktreeExecAdapters
+        // seam carries no task id, so there's no task context to route on here.
+        // null keeps worktree git/fs work hub-local (createRemoteWorktreeAdapters
+        // degrades every method to `local`); the seam is wired, ready to route.
+        resolveRunnerId: () => null,
+        local: defaultWorktreeExecAdapters
       })
     })
-  }
+  })().catch((err) => {
+    recordDiagnosticEvent({
+      level: 'error',
+      source: 'task',
+      event: 'runner.init_failed',
+      message: err instanceof Error ? err.message : String(err)
+    })
+  })
 
   return {
     notifyRenderer,

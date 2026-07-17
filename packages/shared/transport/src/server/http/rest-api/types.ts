@@ -134,7 +134,7 @@ export interface RestApiDeps {
   windowActions?: { raiseMainWindow: () => void }
   artifactExport?: ArtifactExportAccess
   /**
-   * Per-task hub-bearer verifier (hub/runner split). Set ONLY under runner mode
+   * Per-task hub-bearer verifier (hub/runner split). Set once the runner init resolves
    * (the composition root binds `@slayzone/hub-auth`'s `verifyTaskToken` closed
    * over the runner secret). When set, the agent-hook route enforces a bearer
    * that a runner-routed pty's hook carries (rejecting invalid/expired/scope-
@@ -144,7 +144,7 @@ export interface RestApiDeps {
   verifyTaskToken?: (token: string) => TaskTokenVerifyResult
   /**
    * Runner listener info accessors (hub/runner split, Wave3.5-D3). Set ONLY under
-   * runner mode (composition root, closed over the same late-bound refs the
+   * the composition root wires it, closed over the same late-bound refs the
    * `runnersRouter`'s `RunnersDeps` reads). Powers `POST /api/runners/join-token`
    * — the loopback channel the Electron MAIN process hits at boot to mint a token
    * for its auto-enrolling local runner (main has no tRPC client to the sidecar).

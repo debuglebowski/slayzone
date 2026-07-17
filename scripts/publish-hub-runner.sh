@@ -87,7 +87,7 @@ cat > packages/apps/hub/README.md <<'EOF'
 Headless SlayZone hub: owns the SQLite DB, tRPC/REST routers, auth, and the
 runner gateway that runners dial into.
 
-    SLAYZONE_RUNNERS_ENABLED=1 SLAYZONE_DB_PATH=~/.slayzone/hub.sqlite \
+    SLAYZONE_DB_PATH=~/.slayzone/hub.sqlite \
       SLAYZONE_RUNNER_TRANSPORT_SECRET=$(openssl rand -hex 32) slayzone-hub
 
 ## ⚠️ Security
@@ -120,35 +120,102 @@ RUN_TGZ="$WT/packages/apps/runner/$(ls packages/apps/runner/*.tgz | xargs -n1 ba
 echo "   $HUB_TGZ"
 echo "   $RUN_TGZ"
 
-# --- SMOKE: install the hub tarball under PLAIN NODE (proves the ABI rebuild) + boot it ---
-echo "==> Smoke: clean-install hub tarball under plain node + boot headless"
+# --- SMOKE: install BOTH tarballs under PLAIN NODE (proves the ABI rebuild) and
+#     drive the full deploy handshake: boot hub → mint join token → boot runner →
+#     assert the runner enrolls. This is the ONLY place the published-package
+#     native rebuild (better-sqlite3 for the hub, node-pty for the runner) is
+#     exercised end-to-end; the dev-tree bins can't (Electron ABI). ---
+echo "==> Smoke: clean-install hub + runner tarballs under plain node + drive enroll handshake"
 SMOKE="$(mktemp -d /tmp/slz-pub-smoke.XXXXXX)"
-( cd "$SMOKE" && npm init -y >/dev/null && npm install "$HUB_TGZ" >/dev/null 2>&1 )
-SDB="$SMOKE/hub.sqlite"
+HUB_HOME="$SMOKE/hub-home"; RUN_HOME="$SMOKE/runner-home"
+HUB_STORE="$SMOKE/hub-store"; RUN_CREDS="$SMOKE/runner-creds"; RUN_WORK="$SMOKE/work"
+mkdir -p "$HUB_HOME" "$RUN_HOME" "$HUB_STORE" "$RUN_CREDS" "$RUN_WORK"
+( cd "$SMOKE" && mkdir hub runner \
+  && ( cd hub && npm init -y >/dev/null && npm install "$HUB_TGZ" >/dev/null 2>&1 ) \
+  && ( cd runner && npm init -y >/dev/null && npm install "$RUN_TGZ" >/dev/null 2>&1 ) )
+
+# Shared HMAC secret so the hub's runner-auth verifies the runner it enrolls.
+SMOKE_SECRET="$(openssl rand -hex 32)"
+
 # Scrub any inherited SlayZone env before booting. Running this script from
 # INSIDE a SlayZone session (dogfooding) leaks SLAYZONE_SUPERVISED=1 +
-# SLAYZONE_DB_PATH (pointing at the real dev DB) + ELECTRON_RUN_AS_NODE into
-# the child — which would (a) skip schema bootstrap (supervised mode ⇒ "no such
-# table: tasks") giving a FALSE smoke failure, and (b) risk touching the real
-# store. `env -i`-style scrub via `-u` guarantees a clean standalone boot.
-env -u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_STORE_DIR \
-    -u SLAYZONE_PORT -u SLAYZONE_RUNNER_TRANSPORT_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET \
-    -u ELECTRON_RUN_AS_NODE \
-  SLAYZONE_DB_PATH="$SDB" SLAYZONE_STORE_DIR="$SMOKE" SLAYZONE_PORT=47811 \
-  SLAYZONE_RUNNERS_ENABLED=1 SLAYZONE_RUNNER_TRANSPORT_PORT=47812 \
-  SLAYZONE_RUNNER_TRANSPORT_SECRET="$(openssl rand -hex 32)" \
-  node "$SMOKE/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
-SPID=$!
-sleep 9
-if kill -0 $SPID 2>/dev/null && grep -q "listening on http://127.0.0.1:47811" "$SMOKE/hub.log"; then
-  echo "   SMOKE PASS — headless hub booted from the published tarball under plain node"
-  kill $SPID 2>/dev/null || true
-else
-  echo "   SMOKE FAIL — hub did not boot from the tarball. Log tail:"
-  grep -vE "Migration [0-9]+ applied" "$SMOKE/hub.log" | tail -20
-  kill $SPID 2>/dev/null || true
+# SLAYZONE_DB_PATH (pointing at the real dev DB) + ELECTRON_RUN_AS_NODE into a
+# child — which would (a) skip schema bootstrap (supervised ⇒ "no such table:
+# tasks") giving a FALSE failure, and (b) risk touching the real store. Scrub the
+# full set via `-u`; ports are 0 (OS-assigned) so nothing collides with a running
+# app. HUB_HOME/STORE keep the hub's config + identity + auth DB in the tmp tree.
+SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_STORE_DIR -u SLAYZONE_HOME_DIR
+       -u SLAYZONE_PORT -u SLAYZONE_RUNNER_TRANSPORT_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET
+       -u SLAYZONE_HUB_URL -u SLAYZONE_JOIN_TOKEN -u SLAYZONE_RUNNER_CREDENTIALS_DIR
+       -u SLAYZONE_RUNNER_ALLOWED_ROOTS -u ELECTRON_RUN_AS_NODE)
+
+# Fixed loopback port for the hub's shared HTTP server (health + join-token REST);
+# the /runners wss port stays OS-assigned (0) and is embedded in the minted token.
+HUB_PORT=47811
+env "${SCRUB[@]}" \
+  SLAYZONE_HOME_DIR="$HUB_HOME" SLAYZONE_STORE_DIR="$HUB_STORE" SLAYZONE_PORT="$HUB_PORT" \
+  SLAYZONE_RUNNER_TRANSPORT_PORT=0 \
+  SLAYZONE_RUNNER_TRANSPORT_SECRET="$SMOKE_SECRET" \
+  node "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
+HPID=$!
+
+smoke_fail() {
+  echo "   SMOKE FAIL — $1"
+  echo "   --- hub.log ---";    grep -vE "Migration [0-9]+ applied" "$SMOKE/hub.log" 2>/dev/null | tail -25
+  echo "   --- runner.log ---"; tail -25 "$SMOKE/runner.log" 2>/dev/null
+  kill "$HPID" "${RPID:-}" 2>/dev/null || true
+  rm -rf "$SMOKE"
   echo "Aborting before publish." ; exit 1
-fi
+}
+
+# Wait for the hub to boot (listening line) under plain node — proves the hub's
+# better-sqlite3 rebuilt for the consumer ABI.
+for i in $(seq 1 30); do
+  kill -0 "$HPID" 2>/dev/null || smoke_fail "hub process exited during boot"
+  grep -q "listening on http://127.0.0.1:$HUB_PORT" "$SMOKE/hub.log" && break
+  [ "$i" = "30" ] && smoke_fail "hub did not boot from the tarball within 30s"
+  sleep 1
+done
+echo "   ✓ hub booted from the published tarball under plain node"
+
+# Mint a join token over the loopback REST channel (503 until the /runners wss
+# listener has bound). Needs a JSON body; curl is universally present on CI.
+TOKEN_JSON=""
+for i in $(seq 1 20); do
+  TOKEN_JSON="$(curl -s -X POST "http://127.0.0.1:$HUB_PORT/api/runners/join-token" \
+    -H 'content-type: application/json' -d '{"label":"publish-smoke"}' 2>/dev/null || true)"
+  echo "$TOKEN_JSON" | grep -q '"token"' && break
+  [ "$i" = "20" ] && smoke_fail "join-token mint never succeeded (runner listener bind?)"
+  sleep 1
+done
+JOIN_TOKEN="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).token)' "$TOKEN_JSON")"
+HUB_WSS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).hubUrl)' "$TOKEN_JSON")"
+echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
+
+# Boot the runner from ITS tarball (proves node-pty rebuilt for the consumer ABI)
+# and point it at the minted token.
+env "${SCRUB[@]}" \
+  SLAYZONE_HOME_DIR="$RUN_HOME" SLAYZONE_HUB_URL="$HUB_WSS" SLAYZONE_JOIN_TOKEN="$JOIN_TOKEN" \
+  SLAYZONE_RUNNER_NAME=publish-smoke-runner SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
+  SLAYZONE_RUNNER_ALLOWED_ROOTS="$RUN_WORK" \
+  node "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
+RPID=$!
+
+# Assert enrollment via the RUNNER's stdout: on a fresh runner the dialer logs
+# `connected to hub {…,"mode":"enroll"}` — the hub accepted the join token, minted
+# credentials over the pinned wss link, and the handshake completed. (The hub's own
+# "runner enrolled" line goes to <dataRoot>/logs/sidecar.log, NOT stdout — see
+# hub/src/log.ts — so we assert on the runner's captured stdout, and specifically
+# on mode=enroll: a fresh credential-less runner must ENROLL, not hello-reconnect.)
+for i in $(seq 1 20); do
+  if grep -q '"mode":"enroll"' "$SMOKE/runner.log" 2>/dev/null; then break; fi
+  kill -0 "$RPID" 2>/dev/null || smoke_fail "runner process exited before enrolling"
+  [ "$i" = "20" ] && smoke_fail "runner did not enroll within 20s"
+  sleep 1
+done
+echo "   ✓ runner enrolled into the hub over the pinned wss link"
+echo "   SMOKE PASS — installed hub + runner completed the enroll handshake under plain node"
+kill "$HPID" "$RPID" 2>/dev/null || true
 rm -rf "$SMOKE"
 
 if [ "$DO_PUBLISH" -ne 1 ]; then

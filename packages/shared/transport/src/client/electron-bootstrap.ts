@@ -25,7 +25,6 @@ export const electronBootstrap = {
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
     remote_server_url?: string
-    runners_enabled?: boolean
     multi_hub?: boolean
     hubs?: HubEntry[]
     default_hub_id?: string

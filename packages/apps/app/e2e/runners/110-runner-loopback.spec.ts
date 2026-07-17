@@ -10,11 +10,10 @@ import { launchIsolatedElectron } from '../fixtures/electron'
  * Wave 3 — runner-ON loopback end-to-end.
  *
  * Validates the WHOLE hub/runner chain over a real runner link, in-process:
- *   1. Boot a fully isolated app with boot-config `{ server_mode:'local',
- *      runners_enabled:true }`. The sidecar comes up with the hub gateway + hub-auth
+ *   1. Boot a fully isolated app with boot-config `{ server_mode:'local' }`. A hub
+ *      always accepts runners, so the sidecar comes up with the gateway + hub-auth
  *      + identity live, and binds the TLS `/runners` wss listener on its own port
- *      (Wave3.5-D2 — separate https server from the shared http /trpc; see
- *      server.ts).
+ *      (separate https server from the shared http /trpc; see server.ts).
  *   2. Mint a real join token via the `runners.mintJoinToken` tRPC mutation
  *      (embeds the hub's bound `wss://…/runners` URL + cert fingerprint to pin).
  *   3. Spawn the bundled @slayzone/runner as a loopback child process, pointed
@@ -181,20 +180,18 @@ base.describe('Runner loopback (runner ON)', () => {
     const launched = await launchIsolatedElectron({
       name: 'runner-loopback',
       seedUserData: (userDataDir) => {
-        // Runner-ON boot: local mode + runners_enabled true → sidecar lights the hub
-        // gateway and binds the /runners listener.
+        // Local mode — a hub always builds the gateway + binds the /runners
+        // listener, so no flag is needed.
         fs.writeFileSync(
           path.join(userDataDir, 'boot-config.json'),
-          JSON.stringify({ server_mode: 'local', runners_enabled: true }, null, 2)
+          JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
-      // Past the SLAYZONE_*/ELECTRON_* strip: light runner mode in the sidecar
-      // and pin its store to the isolated dir (identity + hub-auth.sqlite land
-      // here, NOT the real dev store). We do NOT set SLAYZONE_E2E_ALLOW_RUNNER
-      // in THIS test (the auto-enroll test below does) — here the assertions ride
-      // our explicitly-spawned loopback runner whose token we mint post-bind.
+      // Pin the sidecar store to the isolated dir (identity + hub-auth.sqlite land
+      // here, NOT the real dev store). We do NOT set SLAYZONE_E2E_ALLOW_RUNNER in
+      // THIS test (the auto-enroll test below does) — here the assertions ride our
+      // explicitly-spawned loopback runner whose token we mint post-bind.
       extraEnv: (userDataDir) => ({
-        SLAYZONE_RUNNERS_ENABLED: '1',
         SLAYZONE_STORE_DIR: userDataDir
       })
     })
@@ -359,20 +356,19 @@ base.describe('Runner loopback (runner ON)', () => {
     base.setTimeout(180_000)
     ensureRunnerBuilt()
 
-    // Runner-ON boot WITH the runner-supervisor opt-in. The in-app supervisor
-    // (index.ts, gated on runners_enabled + SLAYZONE_E2E_ALLOW_RUNNER under Playwright)
-    // waits for the sidecar ready, mints a join token over loopback REST, and
-    // spawns + auto-enrolls the co-located runner — no manual mint/spawn here.
+    // The in-app supervisor (index.ts, runs in local mode + SLAYZONE_E2E_ALLOW_RUNNER
+    // under Playwright) waits for the sidecar ready, mints a join token over
+    // loopback REST, and spawns + auto-enrolls the co-located runner — no manual
+    // mint/spawn here.
     const launched = await launchIsolatedElectron({
       name: 'runner-auto-enroll',
       seedUserData: (userDataDir) => {
         fs.writeFileSync(
           path.join(userDataDir, 'boot-config.json'),
-          JSON.stringify({ server_mode: 'local', runners_enabled: true }, null, 2)
+          JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
       extraEnv: (userDataDir) => ({
-        SLAYZONE_RUNNERS_ENABLED: '1',
         SLAYZONE_STORE_DIR: userDataDir,
         // Opt the runner supervisor back in despite PLAYWRIGHT (default skips it).
         SLAYZONE_E2E_ALLOW_RUNNER: '1',
@@ -411,28 +407,24 @@ base.describe('Runner loopback (runner ON)', () => {
     }
   })
 
-  base('runner OFF: no runner auto-spawns + the runner path stays dark (byte-identical)', async () => {
+  base('a hub always accepts runners: mintJoinToken works with no flag, no supervisor', async () => {
     base.setTimeout(120_000)
 
-    // DEFAULT boot: server_mode local, runners_enabled OFF. Even WITH the runner
-    // supervisor opt-in set, the gate (`bootConfig.runners_enabled === true`) is false
-    // → the auto-enroll block never runs → no runner spawns, and the sidecar's
-    // runner gateway / listener / runners registry are never wired. Proving both:
-    // no runner ever connects, AND mintJoinToken is unavailable (runner dark).
+    // DEFAULT boot: just `server_mode: local`, no runner flag, and (deliberately)
+    // NO SLAYZONE_E2E_ALLOW_RUNNER — so the in-app supervisor does NOT auto-spawn a
+    // local runner. This proves the always-on contract: the hub still builds the
+    // gateway + binds the /runners listener at boot, so mintJoinToken succeeds and
+    // a runner COULD connect — there just isn't one spawned in this test.
     const launched = await launchIsolatedElectron({
-      name: 'runner-off',
+      name: 'runner-always-on',
       seedUserData: (userDataDir) => {
         fs.writeFileSync(
           path.join(userDataDir, 'boot-config.json'),
-          JSON.stringify({ server_mode: 'local', runners_enabled: false }, null, 2)
+          JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
-      // Set the runner opt-in on purpose: proves the runners_enabled gate — not the
-      // Playwright skip — is what keeps the runner unspawned when runner is off.
-      // No SLAYZONE_RUNNERS_ENABLED → the sidecar boots runner-off (byte-identical).
       extraEnv: (userDataDir) => ({
-        SLAYZONE_STORE_DIR: userDataDir,
-        SLAYZONE_E2E_ALLOW_RUNNER: '1'
+        SLAYZONE_STORE_DIR: userDataDir
       })
     })
 
@@ -440,25 +432,31 @@ base.describe('Runner loopback (runner ON)', () => {
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
 
-      // Give the (would-be) auto-enroll ample time to NOT happen.
-      await page.waitForTimeout(8_000)
-
-      // No runner ever connects — the supervisor block never ran.
+      // No supervisor opt-in → no runner auto-spawns, so nothing is connected.
+      await page.waitForTimeout(3_000)
       const rows = await listRunners(page)
       expect(rows.filter((r) => r.connected).length).toBe(0)
 
-      // The runner mint path is dark: mintJoinToken throws when runner mode is off
-      // (the runners registry was never populated). This is the same clean-fail
-      // the runners router documents for runner-off.
-      const mintThrew = await page.evaluate(async () => {
-        try {
-          await window.getTrpcVanillaClient().runners.mintJoinToken.mutate({ label: 'x' })
-          return false
-        } catch {
-          return true
-        }
-      })
-      expect(mintThrew).toBe(true)
+      // But the runner listener IS bound (always-on) → mintJoinToken succeeds and
+      // returns a decodable szjt1 token embedding the wss runner URL. Poll: the
+      // async runner init (createHubAuth migrations + listener bind) resolves
+      // shortly after boot.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(async () => {
+              try {
+                const res = (await window
+                  .getTrpcVanillaClient()
+                  .runners.mintJoinToken.mutate({ label: 'always-on' })) as { token?: string }
+                return typeof res.token === 'string' && res.token.startsWith('szjt1.')
+              } catch {
+                return false
+              }
+            }),
+          { timeout: 60_000, intervals: [1_000, 2_000] }
+        )
+        .toBe(true)
     } finally {
       await launched.close()
     }

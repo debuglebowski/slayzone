@@ -771,8 +771,8 @@ export function getProcessesDeps(): ProcessesDeps {
 // migrations) and the URL/fingerprint are only known after the server binds its
 // port + loads its identity, so the registry must read the live refs each call.
 //
-// Populated only under runner mode (composeServer + the server host wire it); when
-// runner mode is off it is never set and `getRunnersDeps()` throws — the router's
+// Populated once composeServer + the server host wire it (always, barring init failure); when
+// the runner init failed it is not set and `getRunnersDeps()` throws — the router's
 // runner-dependent procedures fail cleanly and nothing calls them (the UI is
 // wave 3). The pure runner-binding mutations (setTaskRunner / … / revokeRunner)
 // go straight through `ctx.db` and never touch this registry, so they work
@@ -810,7 +810,7 @@ export function setRunnersDeps(deps: RunnersDeps): void {
 export function getRunnersDeps(): RunnersDeps {
   if (!runnersDeps)
     throw new Error(
-      'runnersDeps not initialized — runner mode is off, or composeServer/server host have not wired it yet'
+      'runnersDeps not initialized — composeServer/server host have not wired it yet'
     )
   return runnersDeps
 }

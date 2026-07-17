@@ -1,15 +1,12 @@
 import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
 
 /**
- * Wave 3 — Runner settings tab (hub/runner split UI).
+ * Runner settings tab (inside the Connections settings tab).
  *
- * Smoke-level guard that the new "Runner" tab renders inside the settings dialog
- * with runner mode OFF (the byte-identical default): the mode toggle shows
- * unchecked, and runner enrollment is disabled + explained until runner is booted
- * on. The "actually flips runner on and relaunches" path is a boot-config write +
- * a Playwright-noop relaunch (mirrors 100-server-settings-toggle.spec.ts) and is
- * covered by the RunnersSettingsTab unit test; this spec only proves the tab is
- * wired into the dialog and safe with runner off.
+ * Smoke-level guard that the "Runners" section renders with enrollment ALWAYS
+ * available — a hub always accepts runners, so there is no enable-toggle and no
+ * boot-gate. The "Add a runner" control is enabled from the start; the old
+ * enable-mode toggle + its disabled-until-booted explainer are gone.
  */
 test.describe('Runner settings tab', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -23,19 +20,21 @@ test.describe('Runner settings tab', () => {
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
     await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
-    await expect(dialog.getByTestId('runners-enabled-toggle')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByTestId('runner-add')).toBeVisible({ timeout: 5_000 })
     return dialog
   }
 
-  test('renders the Runner tab with runner off by default', async ({ mainWindow }) => {
+  test('renders the Runners section with enrollment always available (no toggle)', async ({
+    mainWindow
+  }) => {
     const dialog = await openRunnersTab(mainWindow)
 
-    // Runner off by default → toggle unchecked.
-    await expect(dialog.getByTestId('runners-enabled-toggle')).toHaveAttribute('aria-checked', 'false')
+    // Enrollment is always on — the Add button is enabled from the start.
+    await expect(dialog.getByTestId('runner-add')).toBeEnabled()
 
-    // Enrollment is gated on the booted runner state → disabled + explained.
-    await expect(dialog.getByTestId('runner-add')).toBeDisabled()
-    await expect(dialog.getByTestId('runner-enroll-disabled')).toBeVisible()
+    // The old enable-mode toggle + its disabled-until-booted explainer are gone.
+    await expect(dialog.getByTestId('runners-enabled-toggle')).toHaveCount(0)
+    await expect(dialog.getByTestId('runner-enroll-disabled')).toHaveCount(0)
 
     await mainWindow.keyboard.press('Escape')
   })

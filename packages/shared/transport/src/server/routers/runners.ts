@@ -14,17 +14,17 @@ import {
  * Runners router — the tRPC surface over the hub/runner-split runner (hub side).
  *
  * Two dependency classes, deliberately separated so the router keeps working
- * with runner mode OFF:
+ * before the async runner init resolves:
  *
  *  - Pure runner-binding CRUD (`list` store rows, `setTaskRunner`,
  *    `setProjectDefaultRunner`, `revokeRunner`) goes straight through `ctx.db`
  *    against the v149 runner tables. These never need the live gateway, so they
- *    work regardless of runner mode (the UI that calls them is wave 3).
+ *    work regardless of runner-init timing.
  *  - Live-runner operations (`list` connection-status merge, `mintJoinToken`)
  *    read the injected `RunnersDeps` (the gateway + hub URL + cert fingerprint).
  *    `list` degrades gracefully when the gateway isn't wired (store rows with a
  *    `connected: false` status); `mintJoinToken` REQUIRES it and throws a clear
- *    error when runner mode is off — minting a token for a hub that isn't
+ *    error before the listener has bound — minting a token for a hub that isn't
  *    listening would hand a runner an un-dialable URL.
  *
  * Follows the `processesRouter` conventions: `ctx.db`, `publicProcedure`, zod
@@ -63,7 +63,7 @@ export const runnersRouter = router({
   /**
    * Mint a single-use enrollment token. The token embeds the hub's runner WS URL
    * and TLS cert fingerprint (both sourced from the injected deps), so it can
-   * only be minted when runner mode is on and the hub is listening.
+   * only be minted once the hub listener has bound.
    */
   mintJoinToken: publicProcedure
     .input(

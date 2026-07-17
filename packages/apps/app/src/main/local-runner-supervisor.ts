@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 /**
  * Supervises a co-located @slayzone/runner subprocess (hub/runner split, wave 2B).
  *
- * Spawned ONLY when boot-config `runners_enabled` is on (see index.ts). Default off ⇒
+ * Spawned in local mode (a hub always accepts runners; see index.ts).
  * this module is never imported/invoked ⇒ byte-identical boot.
  *
  * Mirrors the sidecar-server-supervisor's crash-recovery shape (backoff schedule,

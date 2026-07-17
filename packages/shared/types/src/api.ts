@@ -429,8 +429,8 @@ export interface HubEntry {
 export interface ElectronAPI {
   app: {
     getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
-    /** Pre-boot config the renderer can't get from the settings DB (runner/multi-hub). */
-    getBootConfig: () => Promise<{ runnersEnabled: boolean; multiHub: boolean }>
+    /** Pre-boot config the renderer can't get from the settings DB (multi-hub). */
+    getBootConfig: () => Promise<{ multiHub: boolean }>
     /** Resolved multi-hub registry (local always first + present when multiHub on;
      *  the local hub's `url` is injected from the live sidecar port). */
     getHubRegistry: () => Promise<{ hubs: HubEntry[]; defaultHubId: string }>
@@ -451,7 +451,6 @@ export interface ElectronAPI {
     setBootSettings: (payload: {
       server_mode?: 'local' | 'remote'
       remote_server_url?: string
-      runners_enabled?: boolean
       multi_hub?: boolean
       hubs?: HubEntry[]
       default_hub_id?: string
@@ -717,13 +716,13 @@ export interface _LegacyElectronAPI {
     getVersion: () => Promise<string>
     getTrpcPort: () => Promise<number>
     getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
-    /** Pre-boot config the renderer can't get from the settings DB (runner mode). */
-    getBootConfig: () => Promise<{ runnersEnabled: boolean }>
+    /** Pre-boot config the renderer can't get from the settings DB (multi-hub). */
+    getBootConfig: () => Promise<{ multiHub: boolean }>
     relaunch: () => Promise<void>
     setBootSettings: (payload: {
       server_mode?: 'local' | 'remote'
       remote_server_url?: string
-      runners_enabled?: boolean
+      multi_hub?: boolean
     }) => Promise<{ ok: true }>
     probeServerHealth: (url: string) => Promise<{
       ok: boolean

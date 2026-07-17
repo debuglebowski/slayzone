@@ -10,7 +10,6 @@ import {
   readBootConfig,
   writeBootSettings,
   probeRemoteHealth,
-  runnerTransportEnvFor,
   resolveHubRegistry,
   resolveDefaultHubId,
   localHubEntry,
@@ -108,60 +107,6 @@ describe('readBootConfig / writeBootSettings', () => {
     const raw = readFileSync(join(dir, 'boot-config.json'), 'utf8')
     expect(raw).toContain('\n')
     expect(JSON.parse(raw).server_mode).toBe('remote')
-  })
-
-  it('runners_enabled is absent by default (byte-identical off)', () => {
-    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
-    writeBootSettings(dir, { server_mode: 'local' })
-    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
-  })
-
-  it('round-trips runners_enabled: true and clears it back to absent', () => {
-    writeBootSettings(dir, { runners_enabled: true })
-    expect(readBootConfig(dir).runners_enabled).toBe(true)
-    writeBootSettings(dir, { runners_enabled: false })
-    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
-  })
-
-  it('ignores a non-true runners_enabled value on read (stays off)', () => {
-    writeFileSync(
-      join(dir, 'boot-config.json'),
-      JSON.stringify({ server_mode: 'local', runners_enabled: 'yes' })
-    )
-    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
-  })
-
-  it('runners_enabled is independent of server_mode', () => {
-    writeBootSettings(dir, { server_mode: 'remote', remote_server_url: 'ws://x:1/trpc' })
-    writeBootSettings(dir, { runners_enabled: true })
-    const cfg = readBootConfig(dir)
-    expect(cfg.server_mode).toBe('remote')
-    expect(cfg.runners_enabled).toBe(true)
-  })
-
-  it('a persisted runners_enabled:true flows into the sidecar env flag (renderer→boot→sidecar)', () => {
-    // Simulates the wave-3 gate bridge end to end at the config layer: the
-    // renderer's setBootSettings write persists runners_enabled, boot reads it back,
-    // and the sidecar env-builder lights SLAYZONE_RUNNERS_ENABLED.
-    writeBootSettings(dir, { runners_enabled: true })
-    expect(runnerTransportEnvFor(readBootConfig(dir))).toEqual({ SLAYZONE_RUNNERS_ENABLED: '1' })
-    writeBootSettings(dir, { runners_enabled: false })
-    expect(runnerTransportEnvFor(readBootConfig(dir))).toEqual({})
-  })
-})
-
-describe('runnerTransportEnvFor', () => {
-  it('adds SLAYZONE_RUNNERS_ENABLED:1 only when runners_enabled is true', () => {
-    expect(runnerTransportEnvFor({ runners_enabled: true })).toEqual({ SLAYZONE_RUNNERS_ENABLED: '1' })
-  })
-
-  it('adds NOTHING when runners_enabled is false/unset (byte-identical off)', () => {
-    // The var must be ABSENT (not empty-string / not "0") — composition reads
-    // `SLAYZONE_RUNNERS_ENABLED === '1'`, and an absent key keeps the spread a no-op.
-    expect(runnerTransportEnvFor({ runners_enabled: false })).toEqual({})
-    expect(runnerTransportEnvFor({})).toEqual({})
-    expect('SLAYZONE_RUNNERS_ENABLED' in runnerTransportEnvFor({})).toBe(false)
-    expect('SLAYZONE_RUNNERS_ENABLED' in runnerTransportEnvFor({ runners_enabled: false })).toBe(false)
   })
 })
 

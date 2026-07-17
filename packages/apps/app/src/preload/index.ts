@@ -36,7 +36,7 @@ const api: ElectronAPI = {
     getServerUrl: () =>
       ipcRenderer.invoke('app:get-server-url') as Promise<{ mode: 'local' | 'remote'; url: string }>,
     getBootConfig: () =>
-      ipcRenderer.invoke('app:get-boot-config') as Promise<{ runnersEnabled: boolean; multiHub: boolean }>,
+      ipcRenderer.invoke('app:get-boot-config') as Promise<{ multiHub: boolean }>,
     getHubRegistry: () =>
       ipcRenderer.invoke('app:get-hub-registry') as Promise<{
         hubs: HubEntry[]

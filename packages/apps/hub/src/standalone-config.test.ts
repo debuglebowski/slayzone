@@ -45,7 +45,6 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 const ENV_KEYS = [
   'SLAYZONE_SUPERVISED',
   'SLAYZONE_HOME_DIR',
-  'SLAYZONE_RUNNERS_ENABLED',
   'SLAYZONE_RUNNER_TRANSPORT_SECRET',
   'SLAYZONE_DB_PATH',
   'SLAYZONE_PORT',
@@ -77,17 +76,15 @@ function withIsolatedEnv(seed: Record<string, string>, fn: (home: string) => voi
 console.log('\nstandalone-config: env > file > default')
 console.log('─'.repeat(40))
 
-test('config.json fills unset env (runnersEnabled, dbPath, port, runnerTransportPort, publicUrl)', () => {
+test('config.json fills unset env (dbPath, port, runnerTransportPort, publicUrl)', () => {
   withIsolatedEnv({}, () => {
     saveSlayzoneConfig({
-      runnersEnabled: true,
       dbPath: '/tmp/x/db.sqlite',
       port: 8080,
       runnerTransportPort: 8443,
       publicUrl: 'https://hub.example'
     })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '1', 'runnersEnabled → =1')
     assertEq(process.env.SLAYZONE_DB_PATH, '/tmp/x/db.sqlite', 'dbPath')
     assertEq(process.env.SLAYZONE_PORT, '8080', 'port')
     assertEq(process.env.SLAYZONE_RUNNER_TRANSPORT_PORT, '8443', 'runnerTransportPort')
@@ -107,39 +104,9 @@ test('env WINS over config.json (does not overwrite a set env)', () => {
 test('no config + no env ⇒ only the generated runner secret is set (defaults elsewhere)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_RUNNERS_ENABLED === undefined, 'no runnersEnabled without file/env')
     assert(process.env.SLAYZONE_DB_PATH === undefined, 'no dbPath default here (db.ts handles it)')
     assert(process.env.SLAYZONE_PORT === undefined, 'no port default here')
     assert(!!process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET, 'runner secret always resolved')
-  })
-})
-
-console.log('\nstandalone-config: runnersEnabled enable / disable / env override')
-console.log('─'.repeat(40))
-
-test('config runnersEnabled:true + no env ⇒ runner ON (=1)', () => {
-  withIsolatedEnv({}, () => {
-    saveSlayzoneConfig({ runnersEnabled: true })
-    applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '1', 'runnersEnabled true → 1')
-  })
-})
-
-test('config runnersEnabled:false + no env ⇒ runner OFF (=0, honored not ignored)', () => {
-  withIsolatedEnv({}, () => {
-    saveSlayzoneConfig({ runnersEnabled: false })
-    applyStandaloneHubConfig()
-    // Present-but-false must set '0' (composition gates on === '1'), NOT leave it
-    // unset — so the config file can DISABLE runner, not only enable it.
-    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '0', 'runnersEnabled false → 0')
-  })
-})
-
-test('env SLAYZONE_RUNNERS_ENABLED=1 overrides config runnersEnabled:false', () => {
-  withIsolatedEnv({ SLAYZONE_RUNNERS_ENABLED: '1' }, () => {
-    saveSlayzoneConfig({ runnersEnabled: false })
-    applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '1', 'env wins over file false')
   })
 })
 
@@ -204,16 +171,14 @@ test('supervised does NOT read or write config.json (no file created, no env see
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
     applyStandaloneHubConfig()
     assert(process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET === undefined, 'no secret seeded when supervised')
-    assert(process.env.SLAYZONE_RUNNERS_ENABLED === undefined, 'no runnersEnabled seeded when supervised')
     assert(!existsSync(getSlayzoneConfigPath()), 'no config file written when supervised')
   })
 })
 
 test('supervised IGNORES an existing config.json entirely', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
-    saveSlayzoneConfig({ runnersEnabled: true, port: 8080, runnerTransportSecret: 'should-be-ignored' })
+    saveSlayzoneConfig({ port: 8080, runnerTransportSecret: 'should-be-ignored' })
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_RUNNERS_ENABLED === undefined, 'ignored runnersEnabled')
     assert(process.env.SLAYZONE_PORT === undefined, 'ignored port')
     assert(process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET === undefined, 'ignored runnerTransportSecret')
   })

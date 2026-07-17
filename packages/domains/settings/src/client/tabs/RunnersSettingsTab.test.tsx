@@ -17,17 +17,12 @@ type MockRunner = {
 }
 
 let runnersData: MockRunner[] = []
-let bootConfigReturn: { runnersEnabled: boolean } = { runnersEnabled: false }
-
-const getBootConfigSpy = vi.fn(() => Promise.resolve(bootConfigReturn))
-const setBootSettingsSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
-const relaunchSpy = vi.fn(() => Promise.resolve())
 
 const mintSpy = vi.fn(() => Promise.resolve({ token: 'szjt1.MOCKTOKEN', label: 'x' } as any))
 const revokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
 
-// tRPC transport + bootstrap. The component reads `trpc.runners.*` query/mutation
-// option builders + the `electronBootstrap` bootstrap IPCs.
+// tRPC transport. The component reads `trpc.runners.*` query/mutation builders.
+// No bootstrap IPCs — enrollment is always available (a hub always accepts runners).
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     runners: {
@@ -35,12 +30,7 @@ vi.mock('@slayzone/transport/client', () => ({
       mintJoinToken: { mutationOptions: () => ({ __key: 'mint' }) },
       revokeRunner: { mutationOptions: () => ({ __key: 'revoke' }) }
     }
-  }),
-  electronBootstrap: {
-    getBootConfig: () => getBootConfigSpy(),
-    setBootSettings: (p: unknown) => setBootSettingsSpy(p),
-    relaunch: () => relaunchSpy()
-  }
+  })
 }))
 
 // react-query: useQuery surfaces the runners list; useMutation routes to the
@@ -64,17 +54,7 @@ vi.mock('@slayzone/ui', () => {
         {children}
       </button>
     ),
-    Switch: ({ checked, onCheckedChange, disabled, ...props }: any) => (
-      <button
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={() => onCheckedChange(!checked)}
-        {...props}
-      />
-    ),
     Input: (props: any) => <input {...props} />,
-    Label: ({ children, ...props }: any) => <label {...props}>{children}</label>,
     Card: Pass,
     CardHeader: Pass,
     CardTitle: ({ children }: any) => <div>{children}</div>,
@@ -119,10 +99,6 @@ function makeRunner(overrides: Partial<MockRunner> = {}): MockRunner {
 
 beforeEach(() => {
   runnersData = []
-  bootConfigReturn = { runnersEnabled: false }
-  getBootConfigSpy.mockClear()
-  setBootSettingsSpy.mockClear()
-  relaunchSpy.mockClear()
   mintSpy.mockClear()
   revokeSpy.mockClear()
 })
@@ -130,58 +106,20 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('RunnersSettingsTab', () => {
-  it('renders the Runner tab header and mode toggle', async () => {
+  it('renders the Runners tab header + always-available enrollment (no mode toggle)', async () => {
     await act(async () => {
       render(<RunnersSettingsTab />)
     })
-    expect(screen.getByRole('heading', { name: 'Runner' })).toBeDefined()
-    expect(screen.getByTestId('runners-enabled-toggle')).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Runners' })).toBeDefined()
+    // Enrollment is always available — the old enable-toggle + boot-gate are gone.
+    expect(screen.getByTestId('runner-add').hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByTestId('runners-enabled-toggle')).toBeNull()
+    expect(screen.queryByTestId('runner-enroll-disabled')).toBeNull()
   })
 
-  it('reflects the booted runners_enabled (on) in the toggle', async () => {
-    bootConfigReturn = { runnersEnabled: true }
+  it('mints an enrollment token immediately (no mode to enable)', async () => {
     await act(async () => {
       render(<RunnersSettingsTab />)
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('runners-enabled-toggle').getAttribute('aria-checked')).toBe('true')
-    })
-    expect(getBootConfigSpy).toHaveBeenCalled()
-  })
-
-  it('writes runners_enabled + relaunches when toggled on and saved', async () => {
-    await act(async () => {
-      render(<RunnersSettingsTab />)
-    })
-    // Wait for getBootConfig to resolve → toggle enabled (not disabled).
-    await waitFor(() => {
-      expect(screen.getByTestId('runners-enabled-toggle').hasAttribute('disabled')).toBe(false)
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('runners-enabled-toggle'))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('runners-save-relaunch'))
-    })
-    expect(setBootSettingsSpy).toHaveBeenCalledWith({ runners_enabled: true })
-    expect(relaunchSpy).toHaveBeenCalled()
-  })
-
-  it('enrollment is disabled + explained until runner is booted on', async () => {
-    await act(async () => {
-      render(<RunnersSettingsTab />)
-    })
-    expect(screen.getByTestId('runner-enroll-disabled')).toBeDefined()
-    expect(screen.getByTestId('runner-add').hasAttribute('disabled')).toBe(true)
-  })
-
-  it('mints an enrollment token when runner is booted on', async () => {
-    bootConfigReturn = { runnersEnabled: true }
-    await act(async () => {
-      render(<RunnersSettingsTab />)
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('runner-add').hasAttribute('disabled')).toBe(false)
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add'))
@@ -193,12 +131,8 @@ describe('RunnersSettingsTab', () => {
   })
 
   it('dismisses the minted token via the Done control', async () => {
-    bootConfigReturn = { runnersEnabled: true }
     await act(async () => {
       render(<RunnersSettingsTab />)
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('runner-add').hasAttribute('disabled')).toBe(false)
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add'))
@@ -208,27 +142,6 @@ describe('RunnersSettingsTab', () => {
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-token-dismiss'))
-    })
-    expect(screen.queryByTestId('runner-minted-token')).toBeNull()
-  })
-
-  it('clears a minted token when runner mode is toggled off', async () => {
-    bootConfigReturn = { runnersEnabled: true }
-    await act(async () => {
-      render(<RunnersSettingsTab />)
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('runner-add').hasAttribute('disabled')).toBe(false)
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('runner-add'))
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('runner-minted-token')).toBeDefined()
-    })
-    // Toggle runner off — the on-screen one-time secret must not linger.
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('runners-enabled-toggle'))
     })
     expect(screen.queryByTestId('runner-minted-token')).toBeNull()
   })

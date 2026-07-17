@@ -43,7 +43,6 @@ import {
 } from './browser-view-manager'
 import { attachRendererCsp } from './renderer-csp'
 import {
-  runnerTransportEnvFor,
   probeRemoteHealth,
   hubLogin,
   readBootConfig,
@@ -514,8 +513,8 @@ let mcpCleanup: (() => void) | null = null
 let trpcCleanup: (() => void) | null = null
 let sidecarCleanup: (() => void) | null = null
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
-// Local-runner supervisor (hub/runner split, wave 2B) — only spawned under
-// boot-config `runners_enabled`. Null (never started) on the default path.
+// Local-runner supervisor — spawns the co-located runner in local mode. Null
+// in remote mode (no local hub to dial) or before the async spawn runs.
 let localRunnerCleanup: (() => void) | null = null
 // Local cutover (slice 9): the side-car must be spawned with the host's
 // capability-bridge + REST URLs in env, but those servers start on their own
@@ -612,8 +611,8 @@ async function mintLocalRunnerJoinToken(
  * Boot-time local-runner auto-enroll (Wave3.5-D3). Waits for the sidecar to be
  * ready, mints a join token over loopback REST, then spawns the co-located
  * runner with the token + wss hub url injected → it dials + enrolls with ZERO
- * manual config. Called ONLY under the runners_enabled gate (see the boot block); a
- * mint failure leaves the runner unspawned (log-only, never crashes boot).
+ * manual config. Called in local mode (see the boot block); a mint failure
+ * leaves the runner unspawned (log-only, never crashes boot).
  */
 async function startLocalRunnerWithAutoEnroll(): Promise<void> {
   logBoot('local-runner auto-enroll: awaiting sidecar ready')
@@ -670,7 +669,7 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
     },
     logger: (line) => logBoot(line),
     onPermanentFailure: (info) => {
-      console.error('[local-runner] permanent failure (runner-mode, non-fatal):', info)
+      console.error('[local-runner] permanent failure (local runner, non-fatal):', info)
     }
   })
   localRunnerCleanup = () => void handleRunner.stop()
@@ -2246,16 +2245,11 @@ app
                       'node_modules'
                     )
                   }
-                : {}),
-              // Hub/runner split (wave 3): light the sidecar's runner gateway when
-              // boot-config opts in. `runnerTransportEnvFor` adds SLAYZONE_RUNNERS_ENABLED:'1'
-              // only when runners_enabled === true; otherwise it adds NOTHING — the
-              // runner-off env is byte-identical to prior boot (an operator-set
-              // SLAYZONE_RUNNERS_ENABLED still flows through the `...process.env`
-              // spread above, matching pre-wave-3 behavior + composition's doc'd
-              // manual lever). It sits after that spread so a true boot-config
-              // opt-in wins over an absent/empty inherited value.
-              ...runnerTransportEnvFor(bootConfig)
+                : {})
+              // The sidecar always builds the runner gateway/auth (a hub always
+              // accepts runners) — no env flag needed. The runner listener binds
+              // its own port at startup; SLAYZONE_RUNNER_TRANSPORT_HOST controls
+              // whether it's reachable off-machine (see below).
             },
             logger: (line) => logBoot(line),
             onReady: (info) => {
@@ -2295,36 +2289,29 @@ app
         })
     })
 
-    // Local-runner supervisor (hub/runner split, wave 3.5-D3). Spawns a
-    // co-located @slayzone/runner subprocess so THIS machine can host runner
-    // work, pointed at the local hub's runner URL — and AUTO-ENROLLS it with zero
-    // manual token. Gated STRICTLY on boot-config `runners_enabled` (default off) AND
-    // local mode (remote mode has no local hub to dial): when off, NOTHING new
-    // spawns — byte-identical boot. Skipped under Playwright so e2e never launches
-    // a runner — UNLESS a runner-loopback spec explicitly opts in via
-    // `SLAYZONE_E2E_ALLOW_RUNNER=1` (mirrors the `SLAYZONE_E2E_INSTALL_HOOKS`
-    // opt-in below); the default e2e path still skips the runner, byte-identical.
+    // Local-runner supervisor. Spawns a co-located @slayzone/runner subprocess so
+    // THIS machine can host runner work, pointed at the local hub's runner URL —
+    // and AUTO-ENROLLS it with zero manual token. Always runs in local mode (a
+    // hub always accepts runners; there is no mode to enable). Gated only on
+    // local mode (remote mode has no local hub to dial). Skipped under Playwright
+    // so e2e never launches a runner — UNLESS a runner-loopback spec explicitly
+    // opts in via `SLAYZONE_E2E_ALLOW_RUNNER=1` (mirrors `SLAYZONE_E2E_INSTALL_HOOKS`).
     // Off the boot critical path (setImmediate); failure is log-only.
     //
-    // The auto-enroll resolves the circular problem the wave-2 skeleton deferred:
-    // main has NO tRPC client to the sidecar (the capability bridge only flows
-    // sidecar→main), and the runner /runners wss URL is on an OS-assigned port main
-    // never learns. So main waits for the sidecar to report ready, then mints a
-    // join token over LOOPBACK REST (`POST /api/runners/join-token`, which wraps
-    // the same store logic as the runners tRPC proc + returns the wss runner URL).
-    // It injects that token + url into the runner env; the runner decodes the
-    // token → cert fingerprint → dials wss with pinning → enrolls. If minting
-    // fails after retries (runner listener never bound, etc.) the runner is left
-    // UNSPAWNED — boot never crashes; the user can still enroll remote runners
-    // via the UI.
-    if (
-      bootConfig.runners_enabled === true &&
-      !isRemoteMode &&
-      (!process.env.PLAYWRIGHT || process.env.SLAYZONE_E2E_ALLOW_RUNNER === '1')
-    ) {
+    // The auto-enroll resolves the ordering the wave-2 skeleton deferred: main has
+    // NO tRPC client to the sidecar (the capability bridge only flows sidecar→main),
+    // and the runner /runners wss URL is on an OS-assigned port main never learns.
+    // So main waits for the sidecar to report ready, then mints a join token over
+    // LOOPBACK REST (`POST /api/runners/join-token`, which wraps the same store
+    // logic as the runners tRPC proc + returns the wss runner URL). It injects that
+    // token + url into the runner env; the runner decodes the token → cert
+    // fingerprint → dials wss with pinning → enrolls. If minting fails after
+    // retries the runner is left UNSPAWNED — boot never crashes; the user can
+    // still enroll remote runners via the UI.
+    if (!isRemoteMode && (!process.env.PLAYWRIGHT || process.env.SLAYZONE_E2E_ALLOW_RUNNER === '1')) {
       setImmediate(() => {
         void startLocalRunnerWithAutoEnroll().catch((err) => {
-          console.error('[local-runner] auto-enroll failed (runner-mode, non-fatal):', err)
+          console.error('[local-runner] auto-enroll failed (local runner, non-fatal):', err)
         })
       })
     }
@@ -3003,13 +2990,13 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
     })
     // Reads the pre-boot config the renderer needs for settings toggles that
-    // aren't backed by the settings DB (runner mode — see RunnersSettingsTab). The
+    // aren't backed by the settings DB (multi-hub — see RunnersSettingsTab). The
     // in-memory `bootConfig` was read once at boot; re-read from disk so a save
     // made since boot is reflected. `server_mode`/url are already exposed via
-    // `app:get-server-url`; this surfaces `runners_enabled` as a plain boolean.
+    // `app:get-server-url`; this surfaces `multi_hub` as a plain boolean.
     ipcMain.handle('app:get-boot-config', () => {
       const cfg = readBootConfig(getTrpcDataRoot())
-      return { runnersEnabled: cfg.runners_enabled === true, multiHub: cfg.multi_hub === true }
+      return { multiHub: cfg.multi_hub === true }
     })
     // Resolved multi-hub registry the renderer's FederationProvider connects to.
     // Single source of truth for "which hubs exist": synthesized purely from the
@@ -3075,7 +3062,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         payload: {
           server_mode?: 'local' | 'remote'
           remote_server_url?: string
-          runners_enabled?: boolean
           multi_hub?: boolean
           hubs?: HubEntry[]
           default_hub_id?: string
@@ -3084,7 +3070,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         writeBootSettings(getTrpcDataRoot(), {
           server_mode: payload?.server_mode,
           remote_server_url: payload?.remote_server_url,
-          runners_enabled: payload?.runners_enabled,
           multi_hub: payload?.multi_hub,
           hubs: payload?.hubs,
           default_hub_id: payload?.default_hub_id

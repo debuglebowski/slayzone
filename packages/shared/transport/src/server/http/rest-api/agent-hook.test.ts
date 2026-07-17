@@ -1127,7 +1127,7 @@ describe('POST /api/agent-hook', () => {
 // ── Per-task hub-bearer enforcement (hub/runner split, wave 3.5) ─────────────
 // A pty routed to a REMOTE runner posts its hook to the HUB with a scoped bearer
 // (Authorization: Bearer <SLAYZONE_HUB_TOKEN>). Only when deps.verifyTaskToken is
-// wired (runner mode) AND a bearer is present is it enforced. The LOCAL loopback
+// wired AND a bearer is present is it enforced. The LOCAL loopback
 // hook (no SLAYZONE_HUB_TOKEN → no header) must stay byte-identical — that's the
 // load-bearing invariant these tests pin.
 

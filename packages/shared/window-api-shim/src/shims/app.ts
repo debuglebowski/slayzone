@@ -58,11 +58,9 @@ export const appShim = {
   // build the tRPC-WS URL. Fork pins a fixed loopback port (see server-url.ts);
   // windowId is constant (single window). Boot instrumentation is a no-op here.
   getServerUrl: async (): Promise<{ mode: 'local' | 'remote'; url: string }> => resolveServerUrl(),
-  // Runner + multi-hub are pre-boot decisions for the Electron sidecar; the
-  // fork's sidecar is external and unsupervised, so both are always off from the
-  // shell (single local hub).
-  getBootConfig: async (): Promise<{ runnersEnabled: boolean; multiHub: boolean }> => ({
-    runnersEnabled: false,
+  // Multi-hub is a pre-boot decision for the Electron sidecar; the fork's
+  // sidecar is external + single-hub, so it's always off from the shell.
+  getBootConfig: async (): Promise<{ multiHub: boolean }> => ({
     multiHub: false,
   }),
   // Fork is single-hub: the one local sidecar, at the fixed loopback url.

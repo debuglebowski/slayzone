@@ -153,7 +153,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerResolveSessionTaskRoute(app, deps)
 
   // Runners (hub/runner split): loopback join-token mint for the MAIN process's
-  // boot-time local-runner auto-enroll. 503 when runner mode is off (default).
+  // boot-time local-runner auto-enroll. 503 only if the runner init failed.
   registerRunnersJoinTokenRoute(app, deps)
 
   // Browser

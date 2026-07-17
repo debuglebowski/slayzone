@@ -5,7 +5,7 @@
  * The route is the loopback mint channel the Electron MAIN process hits at boot
  * to auto-enroll its local runner (main has no tRPC client to the sidecar). It
  * wraps the same store `mintJoinToken` as the runners tRPC proc, gated on the
- * `deps.runners` slot (wired ONLY under runner mode):
+ * `deps.runners` slot (wired once the runner init resolves):
  *   - runner ON + listener bound  → 200 { token (decodable szjt1), hubUrl (wss) }
  *   - runner ON + not-yet-bound   → 503 (main retries)
  *   - runner OFF (slot absent)    → 503 (never mints; default boot byte-identical)

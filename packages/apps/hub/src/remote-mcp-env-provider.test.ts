@@ -1,5 +1,5 @@
 /**
- * Unit tests for createRemoteMcpEnvProvider — the runner-mode provider the
+ * Unit tests for createRemoteMcpEnvProvider — the runner-transport provider the
  * composition root injects via setRemoteMcpEnvProvider (hub/runner split, wave
  * 3.5). Asserts the RemoteMcpEnv contract: a runner-routed spawn resolves the
  * hub base URL (public-url override vs loopback boundPort) + mints a bearer that

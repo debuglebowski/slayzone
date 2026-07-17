@@ -103,7 +103,6 @@ test('valid config parses all known keys, drops wrong types', () => {
   writeFileSync(
     p,
     JSON.stringify({
-      runnersEnabled: true,
       runnerTransportSecret: 'abc',
       dbPath: '/x/db.sqlite',
       port: 8080,
@@ -114,12 +113,10 @@ test('valid config parses all known keys, drops wrong types', () => {
       hubUrl: 'wss://hub/runners',
       // wrong-typed / unknown → dropped
       port2: 'nope',
-      runnersEnabled2: 'yes',
       extra: { nested: 1 }
     })
   )
   const cfg = loadSlayzoneConfig(p)
-  assertEq(cfg.runnersEnabled, true, 'runnersEnabled')
   assertEq(cfg.runnerTransportSecret, 'abc', 'runnerTransportSecret')
   assertEq(cfg.dbPath, '/x/db.sqlite', 'dbPath')
   assertEq(cfg.port, 8080, 'port')
@@ -132,13 +129,13 @@ test('valid config parses all known keys, drops wrong types', () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('wrong-typed values are dropped (port as string, runnersEnabled as string)', () => {
+test('wrong-typed values are dropped (port as string, empty dbPath)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  writeFileSync(p, JSON.stringify({ port: '8080', runnersEnabled: 'true', dbPath: '' }))
+  writeFileSync(p, JSON.stringify({ port: '8080', runnerTransportPort: 'nope', dbPath: '' }))
   const cfg = loadSlayzoneConfig(p)
   assert(cfg.port === undefined, 'string port dropped')
-  assert(cfg.runnersEnabled === undefined, 'string runnersEnabled dropped')
+  assert(cfg.runnerTransportPort === undefined, 'string runnerTransportPort dropped')
   assert(cfg.dbPath === undefined, 'empty dbPath dropped')
   rmSync(dir, { recursive: true, force: true })
 })
@@ -149,9 +146,9 @@ console.log('─'.repeat(40))
 test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
   const dir = tmp()
   const p = join(dir, 'sub', 'config.json')
-  saveSlayzoneConfig({ runnersEnabled: true, port: 9 }, p)
+  saveSlayzoneConfig({ runnerTransportPort: 8443, port: 9 }, p)
   const back = loadSlayzoneConfig(p)
-  assertEq(back.runnersEnabled, true, 'runnersEnabled round-trip')
+  assertEq(back.runnerTransportPort, 8443, 'runnerTransportPort round-trip')
   assertEq(back.port, 9, 'port round-trip')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file mode 0600')
@@ -163,15 +160,15 @@ test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
 test('updateSlayzoneConfig merges over on-disk base (no clobber of other keys)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  saveSlayzoneConfig({ runnersEnabled: true, hubUrl: 'wss://a/runners' }, p)
+  saveSlayzoneConfig({ port: 9, hubUrl: 'wss://a/runners' }, p)
   const merged = updateSlayzoneConfig({ runnerTransportSecret: 'sekret' }, p)
-  assertEq(merged.runnersEnabled, true, 'kept runnersEnabled')
+  assertEq(merged.port, 9, 'kept port')
   assertEq(merged.hubUrl, 'wss://a/runners', 'kept hubUrl')
   assertEq(merged.runnerTransportSecret, 'sekret', 'added runnerTransportSecret')
   // persisted on disk too
   const onDisk = loadSlayzoneConfig(p)
   assertEq(onDisk.runnerTransportSecret, 'sekret', 'persisted')
-  assertEq(onDisk.runnersEnabled, true, 'persisted runnersEnabled')
+  assertEq(onDisk.port, 9, 'persisted port')
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -242,11 +239,11 @@ test('preserves other keys when adding a secret to a secret-less config', () => 
   // those keys after ensureRunnerTransportSecret merges the generated secret in.
   const dir = tmp()
   const p = join(dir, 'config.json')
-  saveSlayzoneConfig({ runnersEnabled: true, hubUrl: 'wss://a/runners' }, p)
+  saveSlayzoneConfig({ port: 9, hubUrl: 'wss://a/runners' }, p)
   const secret = ensureRunnerTransportSecret(p)
   const onDisk = loadSlayzoneConfig(p)
   assertEq(onDisk.runnerTransportSecret, secret, 'secret added')
-  assertEq(onDisk.runnersEnabled, true, 'kept runnersEnabled')
+  assertEq(onDisk.port, 9, 'kept port')
   assertEq(onDisk.hubUrl, 'wss://a/runners', 'kept hubUrl')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file still 0600 after merge')

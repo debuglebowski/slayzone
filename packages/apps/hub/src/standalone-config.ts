@@ -5,7 +5,7 @@
  * slayzone-config) into `process.env` at the very start of a STANDALONE boot,
  * filling ONLY the env vars that are currently unset — so the precedence is
  * `env var > config.json > default` for every downstream reader
- * (db.ts getDatabasePathFromEnv, composition.ts SLAYZONE_RUNNERS_ENABLED/
+ * (db.ts getDatabasePathFromEnv, composition.ts
  * SLAYZONE_RUNNER_TRANSPORT_SECRET, server.ts getTrpcPort/getServerHost/
  * SLAYZONE_RUNNER_TRANSPORT_PORT, remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_URL). Nothing
  * downstream changes — they still read env exactly as before; we just seed env
@@ -50,15 +50,6 @@ export function applyStandaloneHubConfig(): void {
     if (value !== undefined && process.env[key] === undefined) process.env[key] = value
   }
 
-  // runnersEnabled (bool) → SLAYZONE_RUNNERS_ENABLED. Precedence: env (if set) > config.json
-  // runnersEnabled (true OR false, when the key is present) > default(off). The config
-  // key can ENABLE *and* DISABLE runner: composition.ts gates on
-  // `SLAYZONE_RUNNERS_ENABLED === '1'`, so we set '1' for true and '0' for false — a
-  // present-but-false key thus forces runner off even if some other default were to
-  // flip. env untouched when already set (env wins).
-  if (process.env.SLAYZONE_RUNNERS_ENABLED === undefined && cfg.runnersEnabled !== undefined) {
-    process.env.SLAYZONE_RUNNERS_ENABLED = cfg.runnersEnabled ? '1' : '0'
-  }
   setIfUnset('SLAYZONE_DB_PATH', cfg.dbPath)
   setIfUnset('SLAYZONE_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
   setIfUnset('SLAYZONE_RUNNER_TRANSPORT_PORT', cfg.runnerTransportPort !== undefined ? String(cfg.runnerTransportPort) : undefined)

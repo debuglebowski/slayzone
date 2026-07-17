@@ -453,7 +453,7 @@ describe('createRemoteWorktreeAdapters', () => {
 // ===========================================================================
 // Runner-OFF / no-runner fall-through
 //
-// The composition wires these routing backends under `SLAYZONE_RUNNERS_ENABLED=1`,
+// The composition wires these routing backends unconditionally (always-on),
 // but with no runner registered `resolveTaskRunnerId` returns null, so the
 // spec's runnerId is null and EVERY spawn must route to the in-process local
 // backend WITHOUT any gateway contact — byte-identical to runner-OFF. This

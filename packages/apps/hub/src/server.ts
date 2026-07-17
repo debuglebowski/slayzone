@@ -90,11 +90,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
 
-  // --- Runner mode (hub/runner split, wave 2B) --------------------------------
+  // --- Runner transport ---
   // `composition.runnersReady` resolves the async runner init (createHubAuth runs
-  // better-auth migrations). It is an already-resolved no-op when runner mode is
-  // off, so awaiting it is invisible on the default path — no listener, no
-  // identity load, no mount happens below when the gateway/auth are null.
+  // better-auth migrations, then the gateway builds). A hub always accepts
+  // runners, so this always runs; the null-guards below are init-FAILURE
+  // degradation (createHubAuth threw) — not a mode — so a broken auth DB can't
+  // crash the whole hub, it just leaves runner enroll unavailable.
   await composition.runnersReady
   const runnerGateway = composition.runnerGateway
   const hubAuth = composition.hubAuth
@@ -103,25 +104,25 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // RAW request body reaches better-auth — mcpRest applies `express.json()`,
   // which would consume the body before better-auth sees it.
   const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
-  // Hub TLS identity — loaded only under runner mode (creates <dataRoot>/identity/
-  // on first run). Its `fingerprintSha256Hex` is fed to the runners registry so
-  // `mintJoinToken` can pin it in a join token, AND its key/cert terminate TLS on
-  // the SEPARATE https `/runners` listener stood up below. Cert-pinning is enforced
-  // end-to-end: the hub presents this leaf, the runner pins its fingerprint (from
-  // the join token) before sending any runner frame (see hub-dialer verifyPinnedCert).
+  // Hub TLS identity (creates <dataRoot>/identity/ on first run). Its
+  // `fingerprintSha256Hex` is fed to the runners registry so `mintJoinToken` can
+  // pin it in a join token, AND its key/cert terminate TLS on the SEPARATE https
+  // `/runners` listener stood up below. Cert-pinning is enforced end-to-end: the
+  // hub presents this leaf, the runner pins its fingerprint (from the join token)
+  // before sending any runner frame (see hub-dialer verifyPinnedCert). Loaded
+  // whenever the gateway came up (i.e. always, barring an init failure).
   //
   // The /runners listener is its OWN https server on its OWN port — the shared HTTP
   // server (/trpc + /health + /mcp + /api + REST-proxy) stays plain http, so the
-  // renderer / CLI / e2e loopback assumptions are byte-identical. Upgrading the
-  // muxed server to https would have risked all of those; isolating runner onto a
-  // second listener keeps the blast radius to runner-mode-only.
+  // renderer / CLI / e2e loopback assumptions are unchanged; isolating the runner
+  // link onto a second listener keeps the shared server plain.
   const hubIdentity = runnerGateway ? await loadOrCreateHubIdentity(dataRoot) : null
-  if (runnerGateway) log('runner mode enabled (gateway + hub-auth + identity loaded)')
+  if (runnerGateway) log('runner transport ready (gateway + hub-auth + identity loaded)')
 
   // Multi-hub: wire the client-facing `hub.describe` identity deps so a
   // connecting client learns this hub's cert fingerprint + whether it enforces
-  // auth. Both degrade safely (null / false) on a plain local hub — describe
-  // already tolerated the deps being unset, this just fills them when known.
+  // auth. `authRequired` is a separate opt-in (SLAYZONE_HUB_AUTH_REQUIRED) — a hub
+  // accepting runners does NOT imply it gates client /trpc procedures.
   const hubAuthRequired = process.env.SLAYZONE_HUB_AUTH_REQUIRED === '1' && hubAuth != null
   setHubDescribeDeps({
     getFingerprint: () => hubIdentity?.fingerprintSha256Hex ?? null,
@@ -155,7 +156,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Single muxed HTTP server: /health (pre-express, stays alive even if the
   // express stack wedges) + Electron-only REST reverse-proxied to the host (when
-  // supervised) + `/api/auth/*` → hub-auth (runner mode only, RAW body) + /api/*
+  // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/*
   // + /mcp via express + /trpc WS upgrade.
   const httpServer = createServer((req, res) => {
     if (handleHealth(state, req, res)) return
@@ -163,9 +164,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       proxyToHostRest(hostRestUrl, req, res)
       return
     }
-    // Runner mode: `/api/auth/*` goes to the hub-auth express app BEFORE the
+    // Runner transport: `/api/auth/*` goes to the hub-auth express app BEFORE the
     // mcpRest stack, which applies `express.json()` — better-auth needs the raw
-    // body. Absent when runner mode is off, so the default path is unchanged.
+    // body. Present whenever hub-auth built (always, barring init failure).
     if (authApp && (req.url ?? '').split('?')[0].startsWith('/api/auth/')) {
       authApp(req, res)
       return
@@ -205,7 +206,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // The shared HTTP server carries ONLY `/trpc` (browser renderer, origin-guarded).
   // `/runners` (non-browser runners) lives on a SEPARATE https listener stood up
   // below — so the shared server's WSS is the exact single-WSS construction whether
-  // or not runner mode is enabled → byte-identical behavior on the default path.
+  // the runner init resolved — the shared server is unaffected either way.
   const wss = new WebSocketServer({
     server: httpServer,
     path: '/trpc',
@@ -240,11 +241,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       verifyClient: verifyTrpcClient
     })
   }
-  // Runner mode: `/runners` runs on its OWN https server (TLS-terminated with the hub
+  // Runner transport: `/runners` runs on its OWN https server (TLS-terminated with the hub
   // identity leaf) on its OWN port. Runners dial `wss://…/runners` and pin the cert
   // fingerprint (carried in their join token) BEFORE any runner frame is sent
   // (hub-dialer verifyPinnedCert). `noServer` — we demux `/runners` ourselves so a
-  // stray path can't reach the gateway. Both null when runner mode is off (no https
+  // stray path can't reach the gateway. Both null when the runner init failed (no https
   // server, no TLS termination) → shared http stack untouched.
   let runnerWss: WebSocketServer | null = null
   let runnerHttpsServer: HttpsServer | null = null
@@ -354,7 +355,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       tlsHttpsServer = null
     }
   }
-  // Runner mode: bind the SEPARATE https `/runners` listener on its own port (env
+  // Bind the SEPARATE https `/runners` listener on its own port (env
   // `SLAYZONE_RUNNER_TRANSPORT_PORT`, else OS-assigned), then feed the resulting `wss://` URL
   // + cert fingerprint to the runners registry so `mintJoinToken` embeds them. The
   // fingerprint is the real hub leaf, and the listener now actually terminates TLS
@@ -373,10 +374,16 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // key (hubHostFromUrl → host_port) — identical across reboots, so the local
     // runner `hello`s back into its existing row instead of re-enrolling a new one.
     const desiredRunnerPort = await resolveDesiredRunnerPort(db, process.env.SLAYZONE_RUNNER_TRANSPORT_PORT)
+    // The runner listener binds on the NETWORK by default (0.0.0.0) so runners on
+    // OTHER machines can dial in — the whole point of a hub accepting runners.
+    // The shared /trpc server stays on `host` (loopback for the co-located
+    // sidecar). Operators can pin the runner bind via SLAYZONE_RUNNER_TRANSPORT_HOST
+    // (e.g. back to 127.0.0.1 for a laptop that only runs a local runner).
+    const runnerHost = process.env.SLAYZONE_RUNNER_TRANSPORT_HOST ?? '0.0.0.0'
     const bindRunnerListener = (portEnv: string): Promise<Awaited<ReturnType<typeof startRunnerListener>>> =>
       startRunnerListener({
         server: runnerHttpsServer!,
-        host,
+        host: runnerHost,
         fingerprintSha256Hex: hubIdentity.fingerprintSha256Hex,
         runnerPortEnv: portEnv,
         log,
@@ -489,8 +496,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       } catch {
         /* ignore */
       }
-      // Runner mode: terminate every runner connection + reject in-flight requests,
-      // then close the runner WSS + its https listener. No-op when runner mode is off
+      // Terminate every runner connection + reject in-flight requests,
+      // then close the runner WSS + its https listener. No-op if the runner init failed
       // (all null).
       if (runnerGateway) {
         try {

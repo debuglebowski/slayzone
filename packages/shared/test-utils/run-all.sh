@@ -66,6 +66,11 @@ run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 # Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/runners.test.ts
+# Hub↔runner install handshake — boots the built hub+runner bins, isolated (tmp
+# home/store, ports 0, scrubbed env), asserts the runner enrolls + the real
+# dev/prod DBs stay byte-unchanged. Auto-builds both bundles on demand (first run
+# is slower). Electron ABI → strict loader.
+run_test_electron_strict_loader packages/apps/hub/src/install-handshake.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
@@ -88,7 +93,7 @@ run_test_electron_strict_loader packages/domains/diagnostics/src/electron/servic
 run_test packages/apps/hub/src/build-info.test.ts
 # mcp_server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts
-# Wave-3.5 remote-mcp-env provider (runner-mode hub URL + scoped task token).
+# Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
 # Wave-3.5 runner TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
 run_test packages/apps/hub/src/runner-tls-listener.test.ts

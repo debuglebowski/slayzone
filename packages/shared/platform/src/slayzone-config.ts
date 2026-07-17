@@ -2,7 +2,7 @@
  * Shared SlayZone config file — a SINGLE JSON document at
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
- * the keys it cares about (hub: runnersEnabled/runnerTransportSecret/dbPath/port/runnerTransportPort/
+ * the keys it cares about (hub: runnerTransportSecret/dbPath/port/runnerTransportPort/
  * publicUrl; runner: joinToken/runnerName/hubUrl).
  *
  * Precedence everywhere: env var > config.json > generated/default. The file is
@@ -39,8 +39,6 @@ import { getSlayzoneHomeDir } from './dirs'
  */
 export interface SlayzoneConfig {
   // --- hub keys ---
-  /** Enable runner mode (equivalent to `SLAYZONE_RUNNERS_ENABLED=1`). */
-  runnersEnabled?: boolean
   /** HMAC secret backing hub-auth + per-task token mint/verify. Auto-generated
    *  + persisted on first standalone boot if absent (see ensureRunnerTransportSecret). */
   runnerTransportSecret?: string
@@ -76,7 +74,6 @@ export function getSlayzoneConfigPath(): string {
  *  values rather than throwing (a partially-corrupt file must not brick boot). */
 function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   const cfg: SlayzoneConfig = {}
-  if (typeof raw.runnersEnabled === 'boolean') cfg.runnersEnabled = raw.runnersEnabled
   if (typeof raw.runnerTransportSecret === 'string' && raw.runnerTransportSecret.length > 0)
     cfg.runnerTransportSecret = raw.runnerTransportSecret
   if (typeof raw.dbPath === 'string' && raw.dbPath.length > 0) cfg.dbPath = raw.dbPath

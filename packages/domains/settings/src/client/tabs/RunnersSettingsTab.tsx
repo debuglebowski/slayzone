@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { Copy, Loader2, Trash2, X } from 'lucide-react'
 import {
   Button,
@@ -10,8 +10,6 @@ import {
   CardDescription,
   CardContent,
   Input,
-  Label,
-  Switch,
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -25,18 +23,15 @@ import {
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 /**
- * Runner settings (hub/runner split, wave 3). The runner toggle is backed by the
- * pre-boot config file — NOT the settings DB — because the hub gateway + auth +
- * runners deps are decided at boot (`SLAYZONE_RUNNERS_ENABLED`, see
- * boot-config.ts:runnerTransportEnvFor). So the mode is read via `getBootConfig` and
- * written via `setBootSettings`, both bootstrap IPCs, and flipping it requires a
- * relaunch (the button label is the consent — mirrors ServerSettingsTab).
+ * Runner settings — enroll + manage the machines this hub runs work on.
  *
- * Runner enrollment + the runners table talk to the `runners` tRPC router.
- * `runners.list` degrades gracefully with runner off (store rows, all
- * disconnected); `runners.mintJoinToken` REQUIRES the bound hub listener and
- * throws when runner is off — so enrollment is gated on the *booted* runner state
- * (`savedRunnersEnabled`) and mint errors are surfaced as a toast rather than crashing.
+ * A hub ALWAYS accepts runners (the gateway + auth + listener come up at boot
+ * unconditionally), so there is no mode to enable: enrollment and the runners
+ * table are always live. Both talk to the `runners` tRPC router —
+ * `runners.mintJoinToken` mints a one-time token embedding the hub's runner URL +
+ * TLS fingerprint; `runners.list` merges live connection status. To actually run
+ * a task's work on a runner, bind the project/task to it (task metadata) — until
+ * then everything executes in-process.
  */
 
 function formatLastSeen(row: { connected: boolean; lastSeenAt: number | null }): string {
@@ -49,55 +44,23 @@ export function RunnersSettingsTab() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
-  const [runner, setRunnersEnabled] = useState(false)
-  const [savedRunnersEnabled, setSavedRunnersEnabled] = useState(false)
-  const [loaded, setLoaded] = useState(false)
-  const [saving, setSaving] = useState(false)
-
   const [label, setLabel] = useState('')
   const [minting, setMinting] = useState(false)
   const [mintedToken, setMintedToken] = useState<string | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null)
 
-  // The store-backed list works regardless of runner mode (pure DB read; the live
-  // connection-status merge is a no-op when the gateway isn't wired), so it's
-  // always safe to query.
+  // A hub always accepts runners, so the list + enrollment are always available
+  // (no mode to enable). `list` merges live connection status when a runner is
+  // connected; it's a plain DB read otherwise.
   const runnersQuery = useQuery(trpc.runners.list.queryOptions())
   const runners = runnersQuery.data ?? []
 
   const mintMutation = useMutation(trpc.runners.mintJoinToken.mutationOptions())
   const revokeMutation = useMutation(trpc.runners.revokeRunner.mutationOptions())
 
-  useEffect(() => {
-    void electronBootstrap.getBootConfig().then((cfg) => {
-      setRunnersEnabled(cfg.runnersEnabled)
-      setSavedRunnersEnabled(cfg.runnersEnabled)
-      setLoaded(true)
-    })
-  }, [])
-
   const reloadRunners = useCallback(() => {
     void queryClient.invalidateQueries(trpc.runners.list.queryFilter())
   }, [queryClient, trpc])
-
-  const dirty = runner !== savedRunnersEnabled
-
-  const save = async (): Promise<void> => {
-    setSaving(true)
-    try {
-      await electronBootstrap.setBootSettings({ runners_enabled: runner })
-      // Runner mode is decided at boot (the sidecar's hub gateway/auth/runners
-      // deps are gated on SLAYZONE_RUNNERS_ENABLED), so a change needs a relaunch. The
-      // button label is the consent. No-op under Playwright — reflect saved state.
-      await electronBootstrap.relaunch()
-      setSavedRunnersEnabled(runner)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      toast.error(`Failed to save: ${msg}`)
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const addRunner = async (): Promise<void> => {
     setMinting(true)
@@ -128,14 +91,6 @@ export function RunnersSettingsTab() {
     setRevokeTarget(null)
   }
 
-  // Toggling runner off should not leave a live one-time enrollment secret on
-  // screen — a token minted while runner was on is meaningless once the user
-  // decides to turn runner off, so drop it.
-  const onRunnersEnabledChange = (next: boolean): void => {
-    setRunnersEnabled(next)
-    if (!next) setMintedToken(null)
-  }
-
   const copyToken = async (token: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(token)
@@ -148,40 +103,9 @@ export function RunnersSettingsTab() {
   return (
     <div className="space-y-6">
       <SettingsTabIntro
-        title="Runner"
-        description="Run terminals and agents on remote runner machines. With runner mode on, this app becomes a hub that enrolled runners dial into over an authenticated connection — task work can then execute on those machines instead of locally."
+        title="Runners"
+        description="Run terminals and agents on other machines. This app is a hub that runners dial into over an authenticated connection; enroll a runner below, then bind a project or task to it to execute its work there instead of locally."
       />
-
-      <div className="space-y-3">
-        <Label className="text-base font-semibold">Runner mode</Label>
-        <div className="flex items-start gap-3">
-          <Switch
-            checked={runner}
-            disabled={!loaded}
-            onCheckedChange={onRunnersEnabledChange}
-            data-testid="runners-enabled-toggle"
-          />
-          <div>
-            <div className="text-sm font-medium">Enable runner mode</div>
-            <div className="text-muted-foreground text-xs">
-              Starts the hub listener and a co-located runner on this machine, and lets you enroll
-              additional remote runners below. Off by default — nothing new runs.
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 pt-2">
-          <Button
-            onClick={() => {
-              void save()
-            }}
-            disabled={!dirty || saving}
-            data-testid="runners-save-relaunch"
-          >
-            {saving ? 'Saving…' : 'Save & relaunch'}
-          </Button>
-          {dirty && <span className="text-muted-foreground text-xs">Unsaved changes</span>}
-        </div>
-      </div>
 
       <Card>
         <CardHeader>
@@ -197,13 +121,13 @@ export function RunnersSettingsTab() {
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="Runner label (e.g. office-mac)"
-              disabled={!savedRunnersEnabled || minting}
+              disabled={minting}
               className="max-w-xs"
               data-testid="runner-enroll-label"
             />
             <Button
               variant="outline"
-              disabled={!savedRunnersEnabled || minting}
+              disabled={minting}
               onClick={() => {
                 void addRunner()
               }}
@@ -213,12 +137,6 @@ export function RunnersSettingsTab() {
               Add a runner
             </Button>
           </div>
-          {!savedRunnersEnabled && (
-            <p className="text-muted-foreground text-xs" data-testid="runner-enroll-disabled">
-              Turn runner mode on and relaunch to enroll runners — the hub listener has to be bound
-              before a token can be minted.
-            </p>
-          )}
           {mintedToken && (
             <div
               className="border-border space-y-2 rounded-md border p-3"

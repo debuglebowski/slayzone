@@ -15,7 +15,7 @@ import type { RestApiDeps } from '../types'
  * logic as that proc.
  *
  * Gating (mirrors the runners router's `mintJoinToken`): only functional under
- * runner mode. `deps.runners` is wired ONLY when runner mode is on (composition),
+ * `deps.runners` is wired by the composition (always, barring init failure),
  * and its getters return the runner listener's bound `wss://…/runners` URL + hub
  * cert fingerprint — both null until the listener has bound. So:
  *   - runner OFF (`deps.runners` absent)              → 503 (never mints)
@@ -50,7 +50,7 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
     if (!deps.runners) {
       res
         .status(503)
-        .json({ error: 'runner mode is off — no runner join token available' })
+        .json({ error: 'runner listener not ready — no join token available' })
       return
     }
     const hubUrl = deps.runners.getHubUrl()
