@@ -133,25 +133,37 @@ export function clearConfigCache(): void {
 async function loadDiagnosticsConfig(): Promise<DiagnosticsConfig> {
   if (!settingsDb) return DEFAULT_CONFIG
   if (cachedConfig) return cachedConfig
-  cachedConfig = {
-    enabled: boolFromSetting(
-      await getSetting(settingsDb, CONFIG_KEYS.enabled),
-      DEFAULT_CONFIG.enabled
-    ),
-    verbose: boolFromSetting(
-      await getSetting(settingsDb, CONFIG_KEYS.verbose),
-      DEFAULT_CONFIG.verbose
-    ),
-    includePtyOutput: boolFromSetting(
-      await getSetting(settingsDb, CONFIG_KEYS.includePtyOutput),
-      DEFAULT_CONFIG.includePtyOutput
-    ),
-    retentionDays: intFromSetting(
-      await getSetting(settingsDb, CONFIG_KEYS.retentionDays),
-      DEFAULT_CONFIG.retentionDays
-    )
+  // The reads can reject — the `settings` table may not exist yet (a supervised
+  // hub boot whose DB the host hasn't finished migrating) or the DB may be
+  // transiently locked. This warm-up is fire-and-forget (`void` at the bind call
+  // site); a rejection there is an unhandledRejection that would kill the hub. So
+  // on ANY read failure leave `cachedConfig` null and return defaults — exactly
+  // the "callers fall back to defaults until it resolves" contract; the next call
+  // retries. Diagnostics config is never load-bearing for serving requests.
+  try {
+    cachedConfig = {
+      enabled: boolFromSetting(
+        await getSetting(settingsDb, CONFIG_KEYS.enabled),
+        DEFAULT_CONFIG.enabled
+      ),
+      verbose: boolFromSetting(
+        await getSetting(settingsDb, CONFIG_KEYS.verbose),
+        DEFAULT_CONFIG.verbose
+      ),
+      includePtyOutput: boolFromSetting(
+        await getSetting(settingsDb, CONFIG_KEYS.includePtyOutput),
+        DEFAULT_CONFIG.includePtyOutput
+      ),
+      retentionDays: intFromSetting(
+        await getSetting(settingsDb, CONFIG_KEYS.retentionDays),
+        DEFAULT_CONFIG.retentionDays
+      )
+    }
+    return cachedConfig
+  } catch {
+    // Leave cachedConfig null → getDiagnosticsConfig() serves DEFAULT_CONFIG.
+    return DEFAULT_CONFIG
   }
-  return cachedConfig
 }
 
 // Synchronous, cache-only view of the config. The DB read happens out-of-band

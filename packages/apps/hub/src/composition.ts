@@ -285,6 +285,19 @@ export function composeServer(opts: {
     notifyEvents.emit('settings-changed')
   }
 
+  // Fire-and-forget a best-effort boot task so a rejection can't become an
+  // unhandledRejection that kills the whole hub. These are cleanup/optimization
+  // steps (startup purge, process-registry hydration) — never load-bearing for
+  // serving requests — so a failure (a transiently-locked DB, disk error, or a
+  // schema not yet present on a supervised boot the host hasn't finished
+  // migrating) must degrade to a logged skip, not a crash. Replaces bare
+  // `void asyncThatQueriesTheDb(db)`, which had no catch.
+  const bootBestEffort = (label: string, run: () => Promise<unknown>): void => {
+    void run().catch((err) => {
+      console.warn(`[hub] boot step "${label}" skipped: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }
+
   // Auth-callback bus — process-local (the sidecar socket server emits, the
   // `app.auth.onCallback` sub consumes; both in THIS process). Set before any
   // WS connection is accepted so the subscription's getAuthEvents() never throws.
@@ -393,7 +406,7 @@ export function composeServer(opts: {
   // so regressed dead at the Slice 9 cutover; restored here in the data-authority
   // boot. The watcher feeds `artifactWatcherEvents` → the tRPC
   // `artifacts.onContentChanged` subscription. Purge is fire-and-forget.
-  void purgeStaleAndOrphanedTasks(db)
+  bootBestEffort('startup-purge', () => purgeStaleAndOrphanedTasks(db))
   startArtifactWatcher(join(dataRoot, 'artifacts'))
 
   // --- PTY + chat runtime --------------------------------------------------
@@ -497,7 +510,7 @@ export function composeServer(opts: {
   // This process owns the process-manager runtime: the renderer drives process
   // ops here (supervised) and standalone owns its own. The Electron host no
   // longer inits it in local mode (would double-spawn auto-restart processes).
-  void initProcessManager(db)
+  bootBestEffort('process-manager-init', () => initProcessManager(db))
   setProcessesDeps({
     create: createProcess,
     spawn: spawnProcess,

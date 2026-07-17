@@ -430,6 +430,65 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   }
   const dir = mkTmp()
   const dbPath = path.join(dir, 'parent-death.sqlite')
+  // Migrate the DB before the supervised spawn. SLAYZONE_SUPERVISED=1 tells the
+  // sidecar the host already owns + migrated this DB (openServerDatabase skips
+  // schema bootstrap in supervised mode) — production always upholds that, since
+  // the Electron host's DB worker migrates before spawning the sidecar. An
+  // unmigrated DB would make the sidecar's compose-time initializers (automations
+  // catchup, etc.) throw "no such table" and exit before printing "listening" — a
+  // test artifact, not the parent-death behaviour under test.
+  //
+  // Seed by booting the SAME bin in STANDALONE mode (no SLAYZONE_SUPERVISED), which
+  // runs the real schema bootstrap, then killing it once it reports listening. We
+  // can't `import { runMigrations }` in-process: migrations.ts pulls
+  // `@slayzone/ai-config/shared` → `@dagrejs/dagre` (ESM) and this test runs with
+  // NO loader (run_test_electron_strict), so the import hits ERR_REQUIRE_CYCLE_MODULE.
+  // The bundled bin has migrations inlined + native ABI matched — the closest thing
+  // to what the host actually does.
+  await new Promise<void>((resolve, reject) => {
+    const seedDir = path.join(dir, 'seed-store')
+    fs.mkdirSync(seedDir, { recursive: true })
+    // Scrub inherited SLAYZONE_* so the seeder boots genuinely STANDALONE. When
+    // this test runs inside a dogfooding session the parent leaks
+    // SLAYZONE_SUPERVISED=1 (+ SLAYZONE_DB_PATH → the real dev DB) — which would
+    // put the seeder in supervised mode (skips schema bootstrap → the seed does
+    // nothing) and point it at the real store. Strip them, then set only the
+    // explicit standalone knobs below.
+    const seedEnv: Record<string, string> = {}
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v == null) continue
+      if (k === 'ELECTRON_RUN_AS_NODE' || /^SLAYZONE_/.test(k)) continue
+      seedEnv[k] = v
+    }
+    const seeder = spawn(process.execPath, [binJs], {
+      env: {
+        ...seedEnv,
+        ELECTRON_RUN_AS_NODE: '1',
+        // Standalone (no SLAYZONE_SUPERVISED) → openServerDatabase bootstraps schema.
+        SLAYZONE_HOST: '127.0.0.1',
+        SLAYZONE_PORT: '0',
+        SLAYZONE_STORE_DIR: seedDir,
+        SLAYZONE_DB_PATH: dbPath,
+        SLAYZONE_RUNNER_TRANSPORT_SECRET: 'seed-only-secret-at-least-32-chars-long'
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    let seedOut = ''
+    const onData = (c: Buffer): void => {
+      seedOut += c.toString()
+      if (seedOut.includes('listening on http')) {
+        seeder.kill('SIGKILL')
+        resolve()
+      }
+    }
+    seeder.stdout?.on('data', onData)
+    seeder.stderr?.on('data', onData)
+    const to = setTimeout(() => {
+      seeder.kill('SIGKILL')
+      reject(new Error(`schema seed never reported listening — output: ${seedOut}`))
+    }, 15_000)
+    seeder.on('exit', () => clearTimeout(to))
+  })
   const child = spawn(process.execPath, [binJs], {
     env: {
       ...process.env,
