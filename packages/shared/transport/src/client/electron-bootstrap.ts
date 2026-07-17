@@ -12,18 +12,20 @@ function api(): ElectronAPI {
 
 export const electronBootstrap = {
   getServerUrl: () => api().app.getServerUrl(),
-  // Pre-boot config not backed by the settings DB (fleet/multi-hub — decided at boot).
+  // Pre-boot config not backed by the settings DB (runner/multi-hub — decided at boot).
   getBootConfig: () => api().app.getBootConfig(),
   // Resolved multi-hub registry (local always first + present when multiHub on).
   getHubRegistry: () => api().app.getHubRegistry(),
   // Per-hub bearer tokens (safeStorage-decrypted in main) for authed remote hubs.
   getHubTokens: () => api().app.getHubTokens(),
   setHubToken: (payload: { hubId: string; token: string }) => api().app.setHubToken(payload),
+  hubLogin: (payload: { hubId: string; url: string; email: string; password: string }) =>
+    api().app.hubLogin(payload),
   getWindowId: () => api().app.getWindowId(),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
     remote_server_url?: string
-    fleet_mode?: boolean
+    runners_enabled?: boolean
     multi_hub?: boolean
     hubs?: HubEntry[]
     default_hub_id?: string

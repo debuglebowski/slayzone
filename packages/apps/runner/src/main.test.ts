@@ -1,5 +1,5 @@
-import type { RunnerCredentialStore } from '@slayzone/fleet/client'
-import { FleetErrorCodes, RpcError } from '@slayzone/fleet/shared'
+import type { RunnerCredentialStore } from '@slayzone/runner-transport/client'
+import { RunnerTransportErrorCodes, RpcError } from '@slayzone/runner-transport/shared'
 import { describe, expect, it, vi } from 'vitest'
 import type { RunnerConfig } from './config'
 import type { RunnerDialer } from './handlers/types'
@@ -8,7 +8,7 @@ import { createHubRequestHandler, startRunner } from './main'
 const fakeDialer: RunnerDialer = { notify: () => true }
 
 const testConfig: RunnerConfig = {
-  hubUrl: 'ws://localhost:0/fleet',
+  hubUrl: 'ws://localhost:0/runners',
   name: 'test-runner',
   allowedRoots: ['/tmp'],
   capabilities: ['pty', 'git', 'fs', 'proc']
@@ -38,7 +38,7 @@ describe('createHubRequestHandler dispatch table', () => {
         (e: unknown) => e
       )
       expect(err).toBeInstanceOf(RpcError)
-      expect((err as RpcError).code).toBe(FleetErrorCodes.unimplemented)
+      expect((err as RpcError).code).toBe(RunnerTransportErrorCodes.unimplemented)
       expect((err as RpcError).message).toBe(`unimplemented: ${method}`)
     }
   )
@@ -83,7 +83,7 @@ describe('startRunner cert-pin guard', () => {
     const handle = startRunner(
       {
         ...testConfig,
-        hubUrl: 'wss://127.0.0.1:0/fleet',
+        hubUrl: 'wss://127.0.0.1:0/runners',
         pinnedCertSha256: 'a'.repeat(64)
       },
       { credentialStore: memoryStore() }
@@ -107,7 +107,7 @@ describe('startRunner cert-pin guard', () => {
       handle = startRunner(
         {
           ...testConfig,
-          hubUrl: 'ws://127.0.0.1:0/fleet',
+          hubUrl: 'ws://127.0.0.1:0/runners',
           pinnedCertSha256: 'a'.repeat(64)
         },
         { credentialStore: memoryStore() }

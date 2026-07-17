@@ -42,7 +42,7 @@ function normalizePublicHubUrl(raw: string): string | null {
 }
 
 /**
- * Build the remote-MCP-env provider the composition root injects under fleet
+ * Build the remote-MCP-env provider the composition root injects under runner
  * mode (hub/runner split, wave 3.5). Extracted from the composition root so it's
  * a pure, directly-testable function: given a task + runner it resolves the
  * hub's externally-reachable base URL and mints a scoped bearer.
@@ -60,10 +60,10 @@ function normalizePublicHubUrl(raw: string): string | null {
  *
  * The bearer is minted ONLY when a task is bound (a pooled/taskless spawn has no
  * task to scope to → `token: null`). `mintTaskToken` here + `verifyTaskToken` on
- * the agent-hook route MUST share the same `fleetSecret`.
+ * the agent-hook route MUST share the same `runnerTransportSecret`.
  */
 export function createRemoteMcpEnvProvider(opts: {
-  fleetSecret: string
+  runnerTransportSecret: string
   getBoundPort: () => number
   ttlMs?: number
 }): SyncRemoteMcpEnvProvider {
@@ -86,7 +86,7 @@ export function createRemoteMcpEnvProvider(opts: {
     if (!hubBaseUrl) return null
     const token =
       taskId != null
-        ? mintTaskToken(opts.fleetSecret, { taskId, runnerId, ttlMs })
+        ? mintTaskToken(opts.runnerTransportSecret, { taskId, runnerId, ttlMs })
         : null
     return { runnerId, hubBaseUrl, token }
   }

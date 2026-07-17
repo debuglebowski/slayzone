@@ -44,12 +44,12 @@ test.describe('Server restart button', () => {
     }
     await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
 
-    const button = dialog.getByTestId('server-restart-button')
+    const button = dialog.getByTestId('hub-local-restart')
     await expect(button).toBeEnabled({ timeout: 5_000 })
     await button.click()
 
     // Resolves only once the new child is healthy.
-    await expect(mainWindow.getByText('Server restarted')).toBeVisible({ timeout: 30_000 })
+    await expect(mainWindow.getByText('Local hub restarted')).toBeVisible({ timeout: 30_000 })
 
     const after = await status()
     expect(after.health).toBe('ready')

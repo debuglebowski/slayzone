@@ -64,10 +64,10 @@ export function UserSettingsDialog({
 
   const trpc = useTRPC()
   const [activeTab, setActiveTab] = useState(initialTab)
-  // Legacy Server/Hubs/Fleet tab keys now resolve to the merged Connections tab;
+  // Legacy Server/Hubs/Runner tab keys now resolve to the merged Connections tab;
   // normalize for the nav highlight so an old deep-link selects it correctly.
   const navActiveKey =
-    activeTab === 'server' || activeTab === 'hubs' || activeTab === 'fleet'
+    activeTab === 'server' || activeTab === 'hubs' || activeTab === 'runner'
       ? 'connections'
       : activeTab
   const [defaultTerminalMode, setDefaultTerminalMode] = useState<TerminalMode>('claude-code')
@@ -202,12 +202,12 @@ export function UserSettingsDialog({
 
             {activeTab === 'mcp' && <McpSettingsTab />}
 
-            {/* Server / Hubs / Fleet consolidated into one Connections tab.
+            {/* Server / Hubs / Runner consolidated into one Connections tab.
                 Legacy deep-links to the old keys still resolve here. */}
             {(activeTab === 'connections' ||
               activeTab === 'server' ||
               activeTab === 'hubs' ||
-              activeTab === 'fleet') && <ConnectionsSettingsTab />}
+              activeTab === 'runner') && <ConnectionsSettingsTab />}
 
             {activeTab === 'diagnostics' && <DiagnosticsSettingsTab />}
 

@@ -21,7 +21,7 @@
     "@slayzone/automations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/feedback": "workspace:*",
-    "@slayzone/fleet": "workspace:*",
+    "@slayzone/runner-transport": "workspace:*",
     "@slayzone/hub-auth": "workspace:*",
     "@slayzone/hub-identity": "workspace:*",
     "@slayzone/integrations": "workspace:*",

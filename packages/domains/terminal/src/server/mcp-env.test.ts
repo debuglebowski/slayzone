@@ -117,7 +117,7 @@ const REMOTE: RemoteMcpEnv = {
   assert(called === false, 'provider must NOT be called for a local (null-runner) spawn')
 }
 
-// 8. runnerId != null + no provider → null (fleet off / provider unset).
+// 8. runnerId != null + no provider → null (runner off / provider unset).
 {
   const r = await resolveRemoteMcpEnv(null, { taskId: 't', runnerId: 'r1', mode: 'claude-code' })
   assert(r === null, 'no provider must resolve to null even with a runnerId')

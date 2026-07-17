@@ -37,14 +37,14 @@ export type BootConfig = {
    * (a pre-boot JSON field, not a settings-table row) so boot can read it before
    * any DB is open. The UI to set it lands in wave 3; this is read-only wiring.
    */
-  fleet_mode?: boolean
+  runners_enabled?: boolean
   /**
    * Multi-hub federation strangler gate. When true, the client connects to the
    * always-running co-located local hub PLUS every remote hub in `hubs[]` at
    * once and merges their projects. Default off (absent) → single-hub behavior
    * (local, or one legacy remote) is byte-identical. Flipping it requires a
    * relaunch (embedded-server start/skip is decided at boot), exactly like
-   * `server_mode`/`fleet_mode`.
+   * `server_mode`/`runners_enabled`.
    */
   multi_hub?: boolean
   /**
@@ -61,7 +61,7 @@ export type BootConfig = {
 export type BootSettingsPatch = {
   server_mode?: ServerMode
   remote_server_url?: string
-  fleet_mode?: boolean
+  runners_enabled?: boolean
   multi_hub?: boolean
   /** Replaces the persisted remote-hub list wholesale (local is never listed). */
   hubs?: HubEntry[]
@@ -74,6 +74,8 @@ export type HealthProbeResult = {
   normalizedUrl?: string
   error?: string
 }
+
+export type HubLoginResult = { ok: true; token: string } | { ok: false; error: string }
 
 const FILE_NAME = 'boot-config.json'
 
@@ -153,9 +155,9 @@ export function readBootConfig(dir: string): BootConfig {
     const normalized = normalizeRemoteUrl(obj.remote_server_url)
     if (normalized) config.remote_server_url = normalized
   }
-  // Only surface fleet_mode when it's explicitly true — a missing/false/garbage
+  // Only surface runners_enabled when it's explicitly true — a missing/false/garbage
   // value stays absent, so the byte-identical default (no runner spawn) holds.
-  if (obj.fleet_mode === true) config.fleet_mode = true
+  if (obj.runners_enabled === true) config.runners_enabled = true
   // Same discipline for the multi-hub fields: surface them ONLY when present and
   // well-formed, so a single-hub file reads back exactly as before (the existing
   // toEqual round-trip tests stay green) and the byte-identical default holds.
@@ -185,11 +187,11 @@ export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootCo
     if (!normalized) throw new Error(`Invalid remote server URL: ${patch.remote_server_url}`)
     next.remote_server_url = normalized
   }
-  if (patch.fleet_mode !== undefined) {
+  if (patch.runners_enabled !== undefined) {
     // Persist only the enabled state; clearing it drops the key entirely so the
     // file stays minimal (readBootConfig treats absent as off anyway).
-    if (patch.fleet_mode) next.fleet_mode = true
-    else delete next.fleet_mode
+    if (patch.runners_enabled) next.runners_enabled = true
+    else delete next.runners_enabled
   }
   if (patch.multi_hub !== undefined) {
     if (patch.multi_hub) next.multi_hub = true
@@ -219,20 +221,20 @@ export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootCo
 }
 
 /**
- * Builds the fleet-mode fragment of the sidecar child env from boot-config.
+ * Builds the runner-mode fragment of the sidecar child env from boot-config.
  *
  * Hub/runner split (wave 3): the sidecar's hub gateway + auth + runners deps are
- * gated in the server composition on `SLAYZONE_FLEET_MODE === '1'`. This is the
+ * gated in the server composition on `SLAYZONE_RUNNERS_ENABLED === '1'`. This is the
  * bridge that lights that gate up from the pre-boot config field — when
- * `fleet_mode` is true we add `SLAYZONE_FLEET_MODE: '1'` to the sidecar's env,
+ * `runners_enabled` is true we add `SLAYZONE_RUNNERS_ENABLED: '1'` to the sidecar's env,
  * otherwise we add NOTHING (an absent var is exactly what composition reads as
- * fleet-off), so the default (fleet unset/false) stays byte-identical. Kept pure
+ * runner-off), so the default (runner unset/false) stays byte-identical. Kept pure
  * + electron-free so the env-building decision is unit-testable without a boot.
  */
-export function fleetEnvFor(
-  config: Pick<BootConfig, 'fleet_mode'>
-): { SLAYZONE_FLEET_MODE: '1' } | Record<string, never> {
-  return config.fleet_mode === true ? { SLAYZONE_FLEET_MODE: '1' } : {}
+export function runnerTransportEnvFor(
+  config: Pick<BootConfig, 'runners_enabled'>
+): { SLAYZONE_RUNNERS_ENABLED: '1' } | Record<string, never> {
+  return config.runners_enabled === true ? { SLAYZONE_RUNNERS_ENABLED: '1' } : {}
 }
 
 /** The synthesized local-hub entry (never persisted; url injected at runtime). */
@@ -246,15 +248,21 @@ export function localHubEntry(): HubEntry {
  * config (no live port knowledge; the caller injects the local hub's runtime
  * ws url).
  *
+ * `server_mode` is AUTHORITATIVE for whether a local hub runs — it literally
+ * means "run a local backend" (`local` = yes, `remote` = no). That single
+ * meaning holds whether or not multi_hub is on; the "Run a local hub" toggle in
+ * the Hubs UI just writes `server_mode`. This replaces the old Server tab.
+ *
  * Discipline (keeps single-hub users byte-identical):
  *  - multi_hub OFF + local mode  → exactly `[local]` (today: one local sidecar).
  *  - multi_hub OFF + remote mode → exactly `[remote-legacy]`, NO local (today: a
- *    single remote server, sidecar never spawned). Listing local here would be a
- *    lie — the sidecar isn't running in legacy remote mode.
- *  - multi_hub ON → `[local, ...persisted remotes]`. Local is ALWAYS first +
- *    present; that guarantee lives here, not in any file the user can corrupt. A
- *    lingering legacy `remote_server_url` not yet migrated into `hubs[]` is
- *    folded in defensively as `remote-legacy` so no configured hub is dropped.
+ *    single remote server, sidecar never spawned).
+ *  - multi_hub ON → `[local?, ...persisted remotes]`. Local is included IFF
+ *    `server_mode === 'local'` (the toggle); a lingering legacy
+ *    `remote_server_url` not yet migrated into `hubs[]` is folded in defensively
+ *    as `remote-legacy` so no configured hub is dropped. A config with local off
+ *    AND no remotes is nonsensical (no hub at all) — we fall back to `[local]`
+ *    so the app always has a working hub.
  */
 export function resolveHubRegistry(config: BootConfig): HubEntry[] {
   if (config.multi_hub !== true) {
@@ -284,7 +292,11 @@ export function resolveHubRegistry(config: BootConfig): HubEntry[] {
       url: config.remote_server_url
     })
   }
-  return [localHubEntry(), ...remotes]
+  // Local presence is governed by server_mode (the "Run a local hub" toggle).
+  // Guard: never return an empty registry — if local is off but there are no
+  // remotes, keep local so the app has a hub to talk to.
+  const includeLocal = config.server_mode !== 'remote' || remotes.length === 0
+  return includeLocal ? [localHubEntry(), ...remotes] : remotes
 }
 
 /**
@@ -342,5 +354,83 @@ export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<Hea
       req.destroy()
       resolve({ ok: false, normalizedUrl, error: `Health check timed out after ${timeoutMs}ms` })
     })
+  })
+}
+
+/** Maps the canonical ws URL to the hub's BetterAuth email sign-in endpoint. */
+function toAuthSignInUrl(wsUrl: string): string {
+  const url = new URL(wsUrl)
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
+  url.pathname = '/api/auth/sign-in/email'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+/**
+ * Signs in to a remote hub's BetterAuth (email+password) from the MAIN process
+ * and returns a bearer token. Runs here (not a renderer fetch) for the same
+ * reasons as `probeRemoteHealth` — CSP + no CORS — and so the main-process cert
+ * pin applies to the wss host. The bearer plugin returns the token in the
+ * `set-auth-token` response header; we also accept a `token` field in the body.
+ * The caller persists it via the safeStorage token store.
+ */
+export function hubLogin(
+  rawUrl: string,
+  email: string,
+  password: string,
+  timeoutMs = 10000
+): Promise<HubLoginResult> {
+  const normalizedUrl = normalizeRemoteUrl(rawUrl)
+  if (!normalizedUrl) return Promise.resolve({ ok: false, error: 'Invalid hub URL' })
+  const signInUrl = toAuthSignInUrl(normalizedUrl)
+  const payload = JSON.stringify({ email, password })
+  const request = signInUrl.startsWith('https:') ? https.request : http.request
+  return new Promise((resolve) => {
+    const req = request(
+      signInUrl,
+      {
+        method: 'POST',
+        timeout: timeoutMs,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
+      },
+      (res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => {
+          if (body.length < 65536) body += chunk
+        })
+        res.on('end', () => {
+          if ((res.statusCode ?? 0) >= 400) {
+            resolve({ ok: false, error: `Sign-in failed (HTTP ${res.statusCode})` })
+            return
+          }
+          // Bearer plugin: token in the `set-auth-token` header. Fallback: body.
+          const header = res.headers['set-auth-token']
+          const headerToken = Array.isArray(header) ? header[0] : header
+          if (headerToken) {
+            resolve({ ok: true, token: headerToken })
+            return
+          }
+          try {
+            const parsed = JSON.parse(body) as { token?: string }
+            if (parsed.token) resolve({ ok: true, token: parsed.token })
+            else resolve({ ok: false, error: 'Hub returned no token' })
+          } catch {
+            resolve({ ok: false, error: 'Bad sign-in response' })
+          }
+        })
+      }
+    )
+    req.on('error', (err) => resolve({ ok: false, error: String(err.message ?? err) }))
+    req.on('timeout', () => {
+      req.destroy()
+      resolve({ ok: false, error: `Sign-in timed out after ${timeoutMs}ms` })
+    })
+    req.write(payload)
+    req.end()
   })
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { SettingsService } from '@slayzone/settings/server'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure, openProcedure } from '../trpc'
 import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
 
 /**
@@ -20,7 +20,7 @@ import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
  * a stored override.
  *
  * This is the `/trpc` (client↔hub) axis — deliberately distinct from the
- * `runners` router's `/fleet` (hub↔runner) axis.
+ * `runners` router's `/runners` (hub↔runner) axis.
  */
 
 const HUB_LABEL_KEY = 'hub_label'
@@ -32,7 +32,7 @@ export const hubRouter = router({
    * `authRequired` reports whether `/trpc` enforces bearer auth (Phase 6; false
    * today). `label` is the stored display-name override or null.
    */
-  describe: publicProcedure.query(async ({ ctx }) => {
+  describe: openProcedure.query(async ({ ctx }) => {
     const deps = getHubDescribeDepsOrNull()
     const label = (await SettingsService.forDatabase(ctx.db).get(HUB_LABEL_KEY)) ?? null
     return {

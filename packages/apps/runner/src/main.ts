@@ -1,7 +1,7 @@
 /**
  * Runner main — wires config + credential store + hub dialer into a running
  * exec node. The transport, enrollment, heartbeats, and reconnect logic live in
- * `@slayzone/fleet`; this module owns the hub→runner request DISPATCH TABLE that
+ * `@slayzone/runner-transport`; this module owns the hub→runner request DISPATCH TABLE that
  * routes each method to its exec handler (pty.*, git.*, fs.*, proc.*), plus a
  * graceful `runner.shutdown`. Unknown methods answer `-32001 unimplemented`.
  *
@@ -13,8 +13,8 @@ import {
   HubDialer,
   hubHostFromUrl,
   type RunnerCredentialStore
-} from '@slayzone/fleet/client'
-import { FleetErrorCodes, HubToRunnerMethods, RpcError, runnerShutdownParamsSchema } from '@slayzone/fleet/shared'
+} from '@slayzone/runner-transport/client'
+import { RunnerTransportErrorCodes, HubToRunnerMethods, RpcError, runnerShutdownParamsSchema } from '@slayzone/runner-transport/shared'
 import type { RunnerConfig } from './config'
 import { createFsHandlers } from './handlers/fs'
 import { createGitHandlers } from './handlers/git'
@@ -85,7 +85,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   const handle = async (method: string, params: unknown): Promise<unknown> => {
     const entry = table[method]
     if (!entry) {
-      throw new RpcError(FleetErrorCodes.unimplemented, `unimplemented: ${method}`)
+      throw new RpcError(RunnerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
     }
     return entry(params)
   }
@@ -110,8 +110,8 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
   // without TLS). An EXPLICITLY-configured pin (env/file) on a ws:// url already
   // fails loudly in loadRunnerConfig — so any pin reaching here on a ws:// url can
   // only be the join-token-DECODED fingerprint (the auto path). Softly drop it so a
-  // ws token stays usable for loopback/dev; the real fleet path is wss:// (the hub's
-  // /fleet listener is https), where the pin is fed through and enforced.
+  // ws token stays usable for loopback/dev; the real runner path is wss:// (the hub's
+  // /runners listener is https), where the pin is fed through and enforced.
   const isSecureUrl = (() => {
     try {
       return new URL(config.hubUrl).protocol === 'wss:'

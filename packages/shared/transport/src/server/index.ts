@@ -1,5 +1,5 @@
 export { appRouter, type AppRouter } from './router'
-export { router, publicProcedure, middleware, mergeRouters } from './trpc'
+export { router, publicProcedure, openProcedure, middleware, mergeRouters } from './trpc'
 export type { TrpcContext, TrpcServerDeps, TrpcContextFactory } from './context'
 export { startTrpcServer, stopTrpcServer, type StartTrpcServerOpts } from './ws-server'
 export { setChatDeps, getChatDeps, type ChatDeps } from './app-deps'
@@ -36,13 +36,14 @@ export {
   getRunnersDeps,
   getRunnersDepsOrNull,
   type RunnersDeps,
-  type RunnersFleetGateway
+  type RunnerGateway
 } from './app-deps'
 export {
   setHubDescribeDeps,
   getHubDescribeDepsOrNull,
   type HubDescribeDeps
 } from './app-deps'
+export { setAuthGate, getAuthGate } from './app-deps'
 export {
   setPowerResumeEvents,
   getPowerResumeEvents,

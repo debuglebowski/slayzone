@@ -22,11 +22,11 @@ afterEach(() => {
 describe('loadRunnerConfig', () => {
   it('builds a config from env with sensible defaults', () => {
     const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example:8443/fleet',
+      [ENV_VARS.hubUrl]: 'wss://hub.example:8443/runners',
       [ENV_VARS.joinToken]: 'jt-1'
     })
     expect(config).toEqual({
-      hubUrl: 'wss://hub.example:8443/fleet',
+      hubUrl: 'wss://hub.example:8443/runners',
       joinToken: 'jt-1',
       name: hostname(),
       allowedRoots: [],
@@ -36,7 +36,7 @@ describe('loadRunnerConfig', () => {
 
   it('parses list-shaped env vars', () => {
     const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example/fleet',
+      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
       [ENV_VARS.allowedRoots]: ['/srv/a', '/srv/b'].join(delimiter),
       [ENV_VARS.capabilities]: 'pty, git',
       [ENV_VARS.name]: 'runner-9',
@@ -53,7 +53,7 @@ describe('loadRunnerConfig', () => {
     writeFileSync(
       filePath,
       JSON.stringify({
-        hubUrl: 'wss://from-file.example/fleet',
+        hubUrl: 'wss://from-file.example/runners',
         name: 'from-file',
         capabilities: ['pty', 'fs'],
         pinnedCertSha256: 'a'.repeat(64)
@@ -63,7 +63,7 @@ describe('loadRunnerConfig', () => {
       [ENV_VARS.configFile]: filePath,
       [ENV_VARS.name]: 'from-env'
     })
-    expect(config.hubUrl).toBe('wss://from-file.example/fleet')
+    expect(config.hubUrl).toBe('wss://from-file.example/runners')
     expect(config.name).toBe('from-env')
     expect(config.capabilities).toEqual(['pty', 'fs'])
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
@@ -75,28 +75,28 @@ describe('loadRunnerConfig', () => {
 
   it('is self-sufficient from a join token alone (hubUrl + pin extracted)', () => {
     const token = mintToken({
-      hubUrl: 'wss://hub.example:8443/fleet',
+      hubUrl: 'wss://hub.example:8443/runners',
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
     const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
-    expect(config.hubUrl).toBe('wss://hub.example:8443/fleet')
+    expect(config.hubUrl).toBe('wss://hub.example:8443/runners')
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
     expect(config.joinToken).toBe(token)
   })
 
   it('lets an explicit env hubUrl + pin override the join-token values', () => {
     const token = mintToken({
-      hubUrl: 'wss://from-token/fleet',
+      hubUrl: 'wss://from-token/runners',
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
     const config = loadRunnerConfig({
       [ENV_VARS.joinToken]: token,
-      [ENV_VARS.hubUrl]: 'wss://override.example/fleet',
+      [ENV_VARS.hubUrl]: 'wss://override.example/runners',
       [ENV_VARS.pinnedCertSha256]: 'b'.repeat(64)
     })
-    expect(config.hubUrl).toBe('wss://override.example/fleet')
+    expect(config.hubUrl).toBe('wss://override.example/runners')
     expect(config.pinnedCertSha256).toBe('b'.repeat(64))
   })
 
@@ -109,7 +109,7 @@ describe('loadRunnerConfig', () => {
   it('fails fast when an EXPLICIT env pin is set on a ws:// hub url (no silent downgrade)', () => {
     expect(() =>
       loadRunnerConfig({
-        [ENV_VARS.hubUrl]: 'ws://hub.example/fleet',
+        [ENV_VARS.hubUrl]: 'ws://hub.example/runners',
         [ENV_VARS.pinnedCertSha256]: 'a'.repeat(64)
       })
     ).toThrow(/requires a wss:\/\/ hub url/)
@@ -119,7 +119,7 @@ describe('loadRunnerConfig', () => {
     const filePath = join(dir, 'runner.json')
     writeFileSync(
       filePath,
-      JSON.stringify({ hubUrl: 'ws://hub.example/fleet', pinnedCertSha256: 'a'.repeat(64) })
+      JSON.stringify({ hubUrl: 'ws://hub.example/runners', pinnedCertSha256: 'a'.repeat(64) })
     )
     expect(() => loadRunnerConfig({ [ENV_VARS.configFile]: filePath })).toThrow(
       /requires a wss:\/\/ hub url/
@@ -130,19 +130,19 @@ describe('loadRunnerConfig', () => {
     // A ws:// join token carries a fingerprint but the pin is NOT explicit — it is
     // softly ignored downstream (startRunner), so config assembly must not throw.
     const token = mintToken({
-      hubUrl: 'ws://127.0.0.1:9000/fleet',
+      hubUrl: 'ws://127.0.0.1:9000/runners',
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
     const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
-    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/fleet')
+    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/runners')
     // The decoded pin is still present in config; startRunner drops it for ws://.
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
   it('accepts an explicit pin on a wss:// hub url', () => {
     const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example/fleet',
+      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
       [ENV_VARS.pinnedCertSha256]: 'a'.repeat(64)
     })
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
@@ -153,7 +153,7 @@ describe('loadRunnerConfig', () => {
     writeFileSync(filePath, '{not json')
     expect(() => loadRunnerConfig({ [ENV_VARS.configFile]: filePath })).toThrow(/not valid JSON/)
     expect(() =>
-      loadRunnerConfig({ [ENV_VARS.hubUrl]: 'wss://x/fleet', [ENV_VARS.heartbeatIntervalMs]: 'soon' })
+      loadRunnerConfig({ [ENV_VARS.hubUrl]: 'wss://x/runners', [ENV_VARS.heartbeatIntervalMs]: 'soon' })
     ).toThrow(/integer/)
   })
 
@@ -161,33 +161,33 @@ describe('loadRunnerConfig', () => {
   it('reads hubUrl/joinToken/runnerName from the shared config as a base', () => {
     const config = loadRunnerConfig(
       {},
-      { hubUrl: 'wss://shared.example/fleet', joinToken: 'jt-shared', runnerName: 'shared-runner' }
+      { hubUrl: 'wss://shared.example/runners', joinToken: 'jt-shared', runnerName: 'shared-runner' }
     )
-    expect(config.hubUrl).toBe('wss://shared.example/fleet')
+    expect(config.hubUrl).toBe('wss://shared.example/runners')
     expect(config.joinToken).toBe('jt-shared')
     expect(config.name).toBe('shared-runner')
   })
 
   it('runner config FILE wins over the shared config', () => {
     const filePath = join(dir, 'runner.json')
-    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/fleet' }))
+    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/runners' }))
     const config = loadRunnerConfig(
       { [ENV_VARS.configFile]: filePath },
-      { hubUrl: 'wss://shared.example/fleet', joinToken: 'jt-shared' }
+      { hubUrl: 'wss://shared.example/runners', joinToken: 'jt-shared' }
     )
-    expect(config.hubUrl).toBe('wss://from-file.example/fleet')
+    expect(config.hubUrl).toBe('wss://from-file.example/runners')
     // joinToken only in shared → still used (file did not set it)
     expect(config.joinToken).toBe('jt-shared')
   })
 
   it('ENV wins over both the runner file and the shared config', () => {
     const filePath = join(dir, 'runner.json')
-    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/fleet' }))
+    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/runners' }))
     const config = loadRunnerConfig(
-      { [ENV_VARS.configFile]: filePath, [ENV_VARS.hubUrl]: 'wss://from-env.example/fleet' },
-      { hubUrl: 'wss://shared.example/fleet', runnerName: 'shared-runner' }
+      { [ENV_VARS.configFile]: filePath, [ENV_VARS.hubUrl]: 'wss://from-env.example/runners' },
+      { hubUrl: 'wss://shared.example/runners', runnerName: 'shared-runner' }
     )
-    expect(config.hubUrl).toBe('wss://from-env.example/fleet')
+    expect(config.hubUrl).toBe('wss://from-env.example/runners')
     expect(config.name).toBe('shared-runner') // shared name survives (no file/env override)
   })
 
@@ -214,12 +214,12 @@ describe('loadRunnerConfig', () => {
       delete process.env.SLAYZONE_RUNNER_CONFIG
       process.env.SLAYZONE_HOME_DIR = dir
       process.env.SLAYZONE_SUPERVISED = '1'
-      writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/fleet' }))
+      writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/runners' }))
       // Supervised ⇒ shared skipped ⇒ no hubUrl anywhere ⇒ throws.
       expect(() => loadRunnerConfig()).toThrow(/SLAYZONE_HUB_URL/)
       // Sanity: with SUPERVISED unset, the SAME shared config IS read (no throw).
       delete process.env.SLAYZONE_SUPERVISED
-      expect(loadRunnerConfig().hubUrl).toBe('wss://shared.example/fleet')
+      expect(loadRunnerConfig().hubUrl).toBe('wss://shared.example/runners')
     } finally {
       const restore = (k: string, v: string | undefined): void => {
         if (v === undefined) delete process.env[k]

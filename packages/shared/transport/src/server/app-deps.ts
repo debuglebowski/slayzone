@@ -763,26 +763,26 @@ export function getProcessesDeps(): ProcessesDeps {
   return processesDeps
 }
 
-// Runners / fleet deps — the hub/runner-split surface the `runnersRouter` needs
-// that transport cannot own itself: the live fleet gateway (runner-WS connection
-// status) plus the two values `mintJoinToken` bakes into a join token (the fleet
+// Runners / runner deps — the hub/runner-split surface the `runnersRouter` needs
+// that transport cannot own itself: the live runner gateway (runner-WS connection
+// status) plus the two values `mintJoinToken` bakes into a join token (the runner
 // WS URL a runner dials + the hub TLS cert fingerprint it pins). All three are
 // exposed as GETTERS, not snapshots: the gateway is built asynchronously (auth
 // migrations) and the URL/fingerprint are only known after the server binds its
 // port + loads its identity, so the registry must read the live refs each call.
 //
-// Populated only under fleet mode (composeServer + the server host wire it); when
-// fleet mode is off it is never set and `getRunnersDeps()` throws — the router's
-// fleet-dependent procedures fail cleanly and nothing calls them (the UI is
+// Populated only under runner mode (composeServer + the server host wire it); when
+// runner mode is off it is never set and `getRunnersDeps()` throws — the router's
+// runner-dependent procedures fail cleanly and nothing calls them (the UI is
 // wave 3). The pure runner-binding mutations (setTaskRunner / … / revokeRunner)
 // go straight through `ctx.db` and never touch this registry, so they work
 // regardless. `getRunnersDepsOrNull()` lets `list` degrade gracefully (store rows
 // with no live status) instead of throwing when the gateway isn't wired.
 
-/** Structural slice of the fleet gateway the runners router reads — connection
- *  status only. Kept structural (not the full `HubFleetGateway`) so transport
- *  stays decoupled from `@slayzone/fleet`. */
-export type RunnersFleetGateway = {
+/** Structural slice of the runner gateway the runners router reads — connection
+ *  status only. Kept structural (not the full `HubRunnerGateway`) so transport
+ *  stays decoupled from `@slayzone/runner-transport`. */
+export type RunnerGateway = {
   listRunners: () => ReadonlyArray<{
     runnerId: string
     connectedAt: number
@@ -791,10 +791,10 @@ export type RunnersFleetGateway = {
 }
 
 export type RunnersDeps = {
-  /** Live fleet gateway, or null until the async fleet init resolves. */
-  getGateway: () => RunnersFleetGateway | null
-  /** ws(s)://host:port/fleet URL a join token embeds for the runner to dial.
-   *  Null until the fleet listener's port is bound. */
+  /** Live runner gateway, or null until the async runner init resolves. */
+  getGateway: () => RunnerGateway | null
+  /** ws(s)://host:port/runners URL a join token embeds for the runner to dial.
+   *  Null until the runner listener's port is bound. */
   getHubUrl: () => string | null
   /** Hub TLS leaf-cert sha256 (lowercase hex) a join token pins. Null until the
    *  hub identity has been loaded. */
@@ -810,7 +810,7 @@ export function setRunnersDeps(deps: RunnersDeps): void {
 export function getRunnersDeps(): RunnersDeps {
   if (!runnersDeps)
     throw new Error(
-      'runnersDeps not initialized — fleet mode is off, or composeServer/server host have not wired it yet'
+      'runnersDeps not initialized — runner mode is off, or composeServer/server host have not wired it yet'
     )
   return runnersDeps
 }
@@ -826,9 +826,9 @@ export function getRunnersDepsOrNull(): RunnersDeps | null {
  * connecting client via `hub.describe`. Both getters degrade to a safe default
  * (no identity loaded / no auth) so the `hub.describe` query works with
  * multi-hub OFF — the co-located local sidecar has no cert + no auth. Wired by
- * the server composition only when a hub identity is loaded (multi_hub/fleet) or
+ * the server composition only when a hub identity is loaded (multi_hub/runners) or
  * auth is enforced (Phase 6). Deliberately separate from `RunnersDeps` (the
- * runner-facing `/fleet` axis) — this is the client-facing `/trpc` axis.
+ * runner-facing `/runners` axis) — this is the client-facing `/trpc` axis.
  */
 export type HubDescribeDeps = {
   /** The hub's own TLS leaf-cert sha256 (lowercase hex), or null when no hub
@@ -849,4 +849,21 @@ export function setHubDescribeDeps(deps: HubDescribeDeps): void {
 /** Non-throwing read — `hub.describe` returns sane defaults when unwired. */
 export function getHubDescribeDepsOrNull(): HubDescribeDeps | null {
   return hubDescribeDeps
+}
+
+/**
+ * Multi-hub auth gate. Returns whether THIS hub enforces bearer auth on tRPC
+ * procedures. Default `false` (trusted loopback / non-authed remote) → the auth
+ * middleware is inert, byte-identical to the pre-auth server. The hub sets a
+ * real predicate (`() => hubAuthRequired`) at boot when
+ * `SLAYZONE_HUB_AUTH_REQUIRED=1`.
+ */
+let authGate: () => boolean = () => false
+
+export function setAuthGate(fn: () => boolean): void {
+  authGate = fn
+}
+
+export function getAuthGate(): boolean {
+  return authGate()
 }

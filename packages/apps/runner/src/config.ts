@@ -22,7 +22,7 @@ import { loadSlayzoneConfig, type SlayzoneConfig } from '@slayzone/platform/slay
 import { decodeJoinToken } from './join-token'
 
 export const runnerConfigSchema = z.object({
-  /** `ws://` or `wss://` hub fleet endpoint. */
+  /** `ws://` or `wss://` hub runner endpoint. */
   hubUrl: z.string().min(1),
   /** Required for first contact; later runs reconnect with stored credentials. */
   joinToken: z.string().min(1).optional(),
@@ -193,7 +193,7 @@ export function loadRunnerConfig(
     throw new Error(`${ENV_VARS.heartbeatIntervalMs} must be an integer, got '${heartbeatRaw}'`)
   }
 
-  // A join token is self-sufficient: it embeds the hub's `wss://…/fleet` URL and
+  // A join token is self-sufficient: it embeds the hub's `wss://…/runners` URL and
   // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
   // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_JOIN_TOKEN=… runner` works
   // with no other config. An explicit hubUrl / pin (file or env) still wins, so an

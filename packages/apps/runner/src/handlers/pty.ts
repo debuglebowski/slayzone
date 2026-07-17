@@ -6,7 +6,7 @@
  * `pty.getBufferSince`; on process exit the runner emits `pty.exit`.
  *
  * This mirrors the terminal domain's pty-manager seq/buffer semantics, scoped
- * down to the exec surface the fleet protocol exposes.
+ * down to the exec surface the runner protocol exposes.
  *
  * @module runner/handlers/pty
  */
@@ -19,7 +19,7 @@ import {
   ptySpawnParamsSchema,
   ptyWriteParamsSchema,
   RunnerNotificationMethods
-} from '@slayzone/fleet/shared'
+} from '@slayzone/runner-transport/shared'
 import * as pty from 'node-pty'
 import { RingBuffer } from '../ring-buffer'
 import type { HandlerContext, HubMethodTable } from './types'

@@ -15,12 +15,12 @@ import type { RestApiDeps } from '../types'
  * logic as that proc.
  *
  * Gating (mirrors the runners router's `mintJoinToken`): only functional under
- * fleet mode. `deps.runners` is wired ONLY when fleet mode is on (composition),
- * and its getters return the fleet listener's bound `wss://…/fleet` URL + hub
+ * runner mode. `deps.runners` is wired ONLY when runner mode is on (composition),
+ * and its getters return the runner listener's bound `wss://…/runners` URL + hub
  * cert fingerprint — both null until the listener has bound. So:
- *   - fleet OFF (`deps.runners` absent)              → 503 (never mints)
- *   - fleet ON but listener not yet bound (null url) → 503 (caller retries)
- *   - fleet ON + listener bound                      → 200 `{ token, hubUrl }`
+ *   - runner OFF (`deps.runners` absent)              → 503 (never mints)
+ *   - runner ON but listener not yet bound (null url) → 503 (caller retries)
+ *   - runner ON + listener bound                      → 200 `{ token, hubUrl }`
  *
  * Loopback-only: the token is a bearer-equivalent secret, so a non-loopback
  * caller is rejected. The shared HTTP server binds loopback anyway (getServerHost
@@ -50,7 +50,7 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
     if (!deps.runners) {
       res
         .status(503)
-        .json({ error: 'fleet mode is off — no runner join token available' })
+        .json({ error: 'runner mode is off — no runner join token available' })
       return
     }
     const hubUrl = deps.runners.getHubUrl()
@@ -58,7 +58,7 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
     if (!hubUrl || !certFingerprint) {
       res
         .status(503)
-        .json({ error: 'fleet listener has not bound its URL / hub identity yet' })
+        .json({ error: 'runner listener has not bound its URL / hub identity yet' })
       return
     }
 
@@ -77,7 +77,7 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
         ttlMs,
         label
       })
-      // Return the token + the wss fleet URL the runner should dial. The cert
+      // Return the token + the wss runner URL the runner should dial. The cert
       // fingerprint is embedded IN the token (decoded runner-side) — never sent
       // as a separate field.
       res.json({ token: minted.token, hubUrl })

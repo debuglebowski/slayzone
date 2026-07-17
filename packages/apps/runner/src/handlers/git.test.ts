@@ -11,7 +11,7 @@ const dialer: RunnerDialer = { notify: () => true }
 
 function ctxWithRoots(roots: string[]) {
   const config: RunnerConfig = {
-    hubUrl: 'ws://localhost:0/fleet',
+    hubUrl: 'ws://localhost:0/runners',
     name: 'test',
     allowedRoots: roots,
     capabilities: ['git']

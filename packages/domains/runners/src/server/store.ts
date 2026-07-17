@@ -3,7 +3,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { RunnerCheckoutStatus, RunnerProjectCheckout, RunnerRecord } from '../shared/types'
 
 /**
- * Fleet store: CRUD over the v149 fleet tables (`runners`,
+ * Runner store: CRUD over the v149 runner tables (`runners`,
  * `runner_project_checkouts`) plus the task/project runner-binding columns.
  * Dark in wave 1 — no tRPC surface yet; the integration wave wires callers.
  */

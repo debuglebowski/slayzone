@@ -3,13 +3,13 @@ import { spawn, type ChildProcess } from 'node:child_process'
 /**
  * Supervises a co-located @slayzone/runner subprocess (hub/runner split, wave 2B).
  *
- * Spawned ONLY when boot-config `fleet_mode` is on (see index.ts). Default off ⇒
+ * Spawned ONLY when boot-config `runners_enabled` is on (see index.ts). Default off ⇒
  * this module is never imported/invoked ⇒ byte-identical boot.
  *
  * Mirrors the sidecar-server-supervisor's crash-recovery shape (backoff schedule,
  * healthy-uptime reset, permanent-failure cutoff, SIGTERM→SIGKILL stop) but
  * WITHOUT health polling: the runner exposes no `/health` endpoint — it dials the
- * hub and reports liveness over the fleet socket. So "healthy" here is simply
+ * hub and reports liveness over the runner socket. So "healthy" here is simply
  * "ran long enough without exiting", which resets the backoff attempt counter.
  *
  * The runner is spawned as the same Electron binary run with

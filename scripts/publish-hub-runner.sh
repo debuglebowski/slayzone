@@ -74,7 +74,7 @@ publish_manifest() {
 
 echo "==> Rewriting publish manifests"
 publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub \
-  "SlayZone hub — headless server (DB, routers, auth, fleet gateway)" \
+  "SlayZone hub — headless server (DB, routers, auth, runner gateway)" \
   better-sqlite3 node-pty bufferutil utf-8-validate
 publish_manifest packages/apps/runner "@slayzone/runner" slayzone-runner \
   "SlayZone runner — remote execution node (pty, git, fs, processes)" \
@@ -85,17 +85,17 @@ cat > packages/apps/hub/README.md <<'EOF'
 # @slayzone/hub (SlayZone hub)
 
 Headless SlayZone hub: owns the SQLite DB, tRPC/REST routers, auth, and the
-fleet gateway that runners dial into.
+runner gateway that runners dial into.
 
-    SLAYZONE_FLEET_MODE=1 SLAYZONE_DB_PATH=~/.slayzone/hub.sqlite \
-      SLAYZONE_FLEET_SECRET=$(openssl rand -hex 32) slayzone-hub
+    SLAYZONE_RUNNERS_ENABLED=1 SLAYZONE_DB_PATH=~/.slayzone/hub.sqlite \
+      SLAYZONE_RUNNER_TRANSPORT_SECRET=$(openssl rand -hex 32) slayzone-hub
 
 ## ⚠️ Security
 
 The client-facing `/trpc` socket is **unauthenticated** and binds `127.0.0.1`
 by default. Do **not** set `SLAYZONE_HOST` to expose it beyond loopback except
 on a fully trusted network — user authentication on `/trpc` is not yet
-implemented. Runner traffic (`/fleet`) is TLS + cert-pinned and safe to expose.
+implemented. Runner traffic (`/runners`) is TLS + cert-pinned and safe to expose.
 
 GPL-3.0-only. Source: https://github.com/JCB-K/SlayZone
 EOF
@@ -132,11 +132,11 @@ SDB="$SMOKE/hub.sqlite"
 # table: tasks") giving a FALSE smoke failure, and (b) risk touching the real
 # store. `env -i`-style scrub via `-u` guarantees a clean standalone boot.
 env -u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_STORE_DIR \
-    -u SLAYZONE_PORT -u SLAYZONE_FLEET_PORT -u SLAYZONE_FLEET_SECRET \
+    -u SLAYZONE_PORT -u SLAYZONE_RUNNER_TRANSPORT_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET \
     -u ELECTRON_RUN_AS_NODE \
   SLAYZONE_DB_PATH="$SDB" SLAYZONE_STORE_DIR="$SMOKE" SLAYZONE_PORT=47811 \
-  SLAYZONE_FLEET_MODE=1 SLAYZONE_FLEET_PORT=47812 \
-  SLAYZONE_FLEET_SECRET="$(openssl rand -hex 32)" \
+  SLAYZONE_RUNNERS_ENABLED=1 SLAYZONE_RUNNER_TRANSPORT_PORT=47812 \
+  SLAYZONE_RUNNER_TRANSPORT_SECRET="$(openssl rand -hex 32)" \
   node "$SMOKE/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
 SPID=$!
 sleep 9

@@ -370,7 +370,7 @@ function extractBearer(header: string | undefined): string | null {
  * and carry NO bearer) stay unauthed — blast radius is renderer-side status
  * updates + a future chime. A pty routed to a REMOTE runner (hub/runner split)
  * instead posts to the HUB with a scoped `Authorization: Bearer` token; when
- * fleet verification is wired (deps.verifyTaskToken), that bearer is enforced
+ * runner verification is wired (deps.verifyTaskToken), that bearer is enforced
  * before any side effect (see the enforcement block below).
  *
  * Hot path: hooks fire 5-20× per turn (PreToolUse + PostToolUse per tool).
@@ -401,12 +401,12 @@ export function registerAgentHookRoute(
     // Per-task hub-bearer enforcement (hub/runner split, wave 3.5). A pty routed
     // to a REMOTE runner posts its hook to the HUB carrying a scoped bearer
     // (SLAYZONE_HUB_TOKEN → `Authorization: Bearer`). Enforced ONLY when BOTH a
-    // bearer is present AND fleet verification is wired (deps.verifyTaskToken):
+    // bearer is present AND runner verification is wired (deps.verifyTaskToken):
     //   - NO bearer  → proceed unchanged. Every LOCAL loopback hook takes this
     //     path: the local buildMcpEnv branch never sets SLAYZONE_HUB_TOKEN, so
     //     notify.sh sends no Authorization header → byte-identical to today.
-    //   - bearer + no verifier (fleet off) → also proceed unchanged (a stray
-    //     header must not lock out the loopback hook when fleet isn't even on).
+    //   - bearer + no verifier (runner off) → also proceed unchanged (a stray
+    //     header must not lock out the loopback hook when runner isn't even on).
     //   - bearer + verifier → the token MUST verify AND its taskId claim MUST
     //     match the payload's taskId, else reject (a token minted for task A
     //     can't drive task B's session).

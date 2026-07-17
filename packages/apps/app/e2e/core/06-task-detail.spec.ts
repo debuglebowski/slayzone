@@ -50,7 +50,7 @@ test.describe('Task detail page', () => {
     mainWindow
   }) => {
     // The TaskMetadataSidebar lives in the settings panel's pinned Details region
-    // in normal mode. With fleet mode off (default — no runners enrolled), the new
+    // in normal mode. With runner mode off (default — no runners enrolled), the new
     // RunnerCard degrades to a muted "runs locally" note rather than a live select.
     const details = mainWindow.getByTestId('settings-details-pinned').last()
     await expect(details).toBeVisible({ timeout: 5_000 })

@@ -1,7 +1,7 @@
 /**
  * slayzone-runner CLI entrypoint.
  *
- *   SLAYZONE_HUB_URL=wss://hub:8443/fleet \
+ *   SLAYZONE_HUB_URL=wss://hub:8443/runners \
  *   SLAYZONE_JOIN_TOKEN=... \
  *   slayzone-runner
  *
@@ -19,7 +19,7 @@ function main(): void {
   } catch (err) {
     process.stderr.write(`slayzone-runner: ${err instanceof Error ? err.message : String(err)}\n`)
     process.stderr.write(
-      `usage: ${ENV_VARS.hubUrl}=wss://<hub>/fleet [${ENV_VARS.joinToken}=<token>] slayzone-runner\n`
+      `usage: ${ENV_VARS.hubUrl}=wss://<hub>/runners [${ENV_VARS.joinToken}=<token>] slayzone-runner\n`
     )
     process.exitCode = 1
     return

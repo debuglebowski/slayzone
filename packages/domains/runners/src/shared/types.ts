@@ -1,5 +1,5 @@
 /**
- * Fleet contracts for the hub/runner split. Row shapes mirror the v149 schema
+ * Runner contracts for the hub/runner split. Row shapes mirror the v149 schema
  * (snake_case columns), matching the store's SELECT * reads.
  */
 
@@ -9,7 +9,7 @@
  * can never silently diverge:
  *   - the Electron MAIN process injects it as `SLAYZONE_RUNNER_NAME` into the
  *     runner child (its enroll `name`), and
- *   - the sidecar composition passes it as `localRunnerName` to the fleet-auth
+ *   - the sidecar composition passes it as `localRunnerName` to the runner-auth
  *     adapters (which treat an enroll for THIS name as the local runner → gets a
  *     deterministic id + UPSERT + duplicate collapse).
  * If these two ever disagree the dedup silently disables (every local enroll

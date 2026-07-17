@@ -14,7 +14,7 @@
  */
 import http from 'node:http'
 import net from 'node:net'
-import { resolveFleetPort } from './fleet-listener.js'
+import { resolveRunnerPort } from './runner-listener.js'
 
 type MinimalDb = {
   get: (sql: string) => Promise<{ value?: string } | undefined>
@@ -36,7 +36,7 @@ function isPortAlive(host: string, port: number, timeoutMs = 300): Promise<boole
 }
 
 /**
- * TCP-level liveness — the fleet listener is a raw TLS/wss upgrade server with no
+ * TCP-level liveness — the runner listener is a raw TLS/wss upgrade server with no
  * HTTP `/health` route (that lives on the shared http server), so its non-clobber
  * guard probes "is anything listening on this port?" via a plain TCP connect
  * rather than `/health` (mcp's guard). A successful connect ⇒ a live listener
@@ -80,34 +80,34 @@ export async function claimMcpServerPort(
 }
 
 /**
- * Resolve the port the `/fleet` TLS listener should REQUEST to bind, so it stays
+ * Resolve the port the `/runners` TLS listener should REQUEST to bind, so it stays
  * STABLE across reboots (Wave3.5-D5). This is the root fix for the orphaned-
  * local-runner bug: the runner keys its credential file by hub host+PORT
  * (`hubHostFromUrl` → `host_port`), so a fresh OS-assigned port every boot minted
  * a new credential filename → the runner couldn't `hello` with prior creds →
- * re-enrolled as a NEW row. Pinning the port keeps the `wss://host:<port>/fleet`
+ * re-enrolled as a NEW row. Pinning the port keeps the `wss://host:<port>/runners`
  * URL — and thus the credential key — identical run-to-run, so the runner
  * reconnects into its existing row.
  *
  * Precedence:
- *   1. explicit `SLAYZONE_FLEET_PORT` env  — operator override, always wins
- *   2. persisted `settings.fleet_server_port` — the previously-claimed stable port
- *   3. `0` — no stored port yet ⇒ bind OS-assigned, then `claimFleetServerPort`
+ *   1. explicit `SLAYZONE_RUNNER_TRANSPORT_PORT` env  — operator override, always wins
+ *   2. persisted `settings.runner_transport_port` — the previously-claimed stable port
+ *   3. `0` — no stored port yet ⇒ bind OS-assigned, then `claimRunnerServerPort`
  *      persists whatever the OS handed us so the NEXT boot reuses it
  *
  * Returns 0 (OS-assigned) whenever neither source yields a valid port, matching
- * `resolveFleetPort`'s own fallback. Never throws — a read failure degrades to 0.
+ * `resolveRunnerPort`'s own fallback. Never throws — a read failure degrades to 0.
  */
-export async function resolveDesiredFleetPort(
+export async function resolveDesiredRunnerPort(
   db: MinimalDb,
-  fleetPortEnv: string | undefined
+  runnerPortEnv: string | undefined
 ): Promise<number> {
   // Operator override wins outright (mirrors the env-first precedence server.ts
-  // already applied to SLAYZONE_FLEET_PORT). A malformed override falls to 0 via
-  // resolveFleetPort rather than silently reusing a stored value.
-  if (fleetPortEnv !== undefined && fleetPortEnv !== '') return resolveFleetPort(fleetPortEnv)
+  // already applied to SLAYZONE_RUNNER_TRANSPORT_PORT). A malformed override falls to 0 via
+  // resolveRunnerPort rather than silently reusing a stored value.
+  if (runnerPortEnv !== undefined && runnerPortEnv !== '') return resolveRunnerPort(runnerPortEnv)
   try {
-    const row = await db.get("SELECT value FROM settings WHERE key = 'fleet_server_port'")
+    const row = await db.get("SELECT value FROM settings WHERE key = 'runner_transport_port'")
     const stored = row?.value ? Number(row.value) : null
     if (stored !== null && Number.isInteger(stored) && stored >= 1 && stored <= 65535) {
       return stored
@@ -119,8 +119,8 @@ export async function resolveDesiredFleetPort(
 }
 
 /**
- * Persist the fleet listener's actually-bound port to `settings.fleet_server_port`
- * so the next boot reuses it (via `resolveDesiredFleetPort`) — the persistence
+ * Persist the runner listener's actually-bound port to `settings.runner_transport_port`
+ * so the next boot reuses it (via `resolveDesiredRunnerPort`) — the persistence
  * half of the claim-once-and-persist pattern. Mirrors `claimMcpServerPort`'s
  * non-clobber guard: before overwriting a DIFFERENT stored port, probe whether it
  * is still live (a TCP listener answering) and, if so, refuse + log loudly rather
@@ -136,12 +136,12 @@ export async function resolveDesiredFleetPort(
  * holds it — which is exactly WHY the pinned bind failed), so the stored value
  * MUST be replaced with the port we actually bound. Without `force` the guard
  * would see the conflicting process's still-live listener and refuse — churning
- * the fleet URL (and thus the runner credential key) on EVERY boot, i.e. the
+ * the runner URL (and thus the runner credential key) on EVERY boot, i.e. the
  * re-enroll bug this whole change exists to kill. The distinction the guard
  * draws: "don't clobber a port we're happily using" (default) vs "we couldn't
  * bind the stored port, we're deliberately re-claiming a new one" (`force`).
  */
-export async function claimFleetServerPort(
+export async function claimRunnerServerPort(
   db: MinimalDb,
   host: string,
   actualPort: number,
@@ -150,20 +150,20 @@ export async function claimFleetServerPort(
 ): Promise<void> {
   try {
     if (!opts.force) {
-      const row = await db.get("SELECT value FROM settings WHERE key = 'fleet_server_port'")
+      const row = await db.get("SELECT value FROM settings WHERE key = 'runner_transport_port'")
       const existingPort = row?.value ? Number(row.value) : null
       if (existingPort && existingPort !== actualPort && (await isTcpPortAlive(host, existingPort))) {
         log(
-          `[fleet_server_port] refusing to overwrite ${existingPort} with ${actualPort} — ` +
+          `[runner_transport_port] refusing to overwrite ${existingPort} with ${actualPort} — ` +
             `the stored port still has a live listener (another hub already owns it)`
         )
         return
       }
     }
     await db
-      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('fleet_server_port', ?)")
+      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('runner_transport_port', ?)")
       .run(String(actualPort))
   } catch {
-    /* non-fatal — the next boot falls back to an OS-assigned fleet port */
+    /* non-fatal — the next boot falls back to an OS-assigned runner port */
   }
 }

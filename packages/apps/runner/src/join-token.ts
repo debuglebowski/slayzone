@@ -4,10 +4,10 @@
  * A join token is `szjt1.<base64url(JSON{hubUrl,certFingerprint,secret})>` — the
  * exact format minted by the hub in `@slayzone/runners/server` (join-tokens.ts).
  * The runner needs the embedded `hubUrl` + `certFingerprint` to dial + pin the
- * hub before sending any fleet frame.
+ * hub before sending any runner frame.
  *
  * This is a dependency-free re-implementation of the hub-side `decodeJoinToken`.
- * The runner package only depends on `@slayzone/fleet`; importing the hub decoder
+ * The runner package only depends on `@slayzone/runner-transport`; importing the hub decoder
  * from `@slayzone/runners/server` would drag its `./store` module (and thus
  * `@slayzone/platform` + better-sqlite3) into the runner bundle. The token grammar
  * is trivial and stable (`szjt1.` prefix), so decoding it locally is the smallest

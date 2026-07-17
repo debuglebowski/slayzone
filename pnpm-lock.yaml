@@ -467,9 +467,6 @@ importers:
       '@slayzone/feedback':
         specifier: workspace:*
         version: link:../../domains/feedback
-      '@slayzone/fleet':
-        specifier: workspace:*
-        version: link:../../domains/fleet
       '@slayzone/hub-auth':
         specifier: workspace:*
         version: link:../../domains/hub-auth
@@ -488,6 +485,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/runner-transport':
+        specifier: workspace:*
+        version: link:../../domains/runner-transport
       '@slayzone/runners':
         specifier: workspace:*
         version: link:../../domains/runners
@@ -634,12 +634,12 @@ importers:
 
   packages/apps/runner:
     dependencies:
-      '@slayzone/fleet':
-        specifier: workspace:*
-        version: link:../../domains/fleet
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/runner-transport':
+        specifier: workspace:*
+        version: link:../../domains/runner-transport
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -1052,37 +1052,6 @@ importers:
         specifier: ^4.1.0
         version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@24.12.0)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
-  packages/domains/fleet:
-    dependencies:
-      '@slayzone/processes':
-        specifier: workspace:*
-        version: link:../processes
-      '@slayzone/task':
-        specifier: workspace:*
-        version: link:../task
-      '@slayzone/terminal':
-        specifier: workspace:*
-        version: link:../terminal
-      ws:
-        specifier: ^8.18.0
-        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      zod:
-        specifier: ^4
-        version: 4.3.5
-    devDependencies:
-      '@types/node':
-        specifier: ^22.19.1
-        version: 22.19.7
-      '@types/ws':
-        specifier: ^8.5.13
-        version: 8.18.1
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
-
   packages/domains/history:
     dependencies:
       '@slayzone/platform':
@@ -1349,6 +1318,37 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/domains/runner-transport:
+    dependencies:
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../processes
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
+      ws:
+        specifier: ^8.18.0
+        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      zod:
+        specifier: ^4
+        version: 4.3.5
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.1
+        version: 22.19.7
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
   packages/domains/runners:
     dependencies:

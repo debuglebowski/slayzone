@@ -36,7 +36,12 @@ h.db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_diag_ts ON diagnostics_events(ts_ms);
 `)
-registerDiagnosticsHandlers(h.ipcMain as never, h.db, h.db)
+// Pass the async `SlayzoneDb` adapter (not the raw better-sqlite3 handle): the
+// store moved to the worker-thread DB interface and drains events via
+// `diagnosticsDb.batchTxn(...)`, which the raw handle doesn't expose (the insert
+// would throw + get swallowed → 0 events persisted). slayDb wraps the SAME
+// in-memory connection the schema above was created on.
+registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, h.slayDb)
 
 // instrumentIpcMain wraps handlers as async, so all invoke() calls return Promises.
 // Run tests sequentially via top-level await to avoid ordering issues.

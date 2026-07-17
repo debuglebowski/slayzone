@@ -18,7 +18,7 @@ function makeCtx() {
     }
   }
   const config: RunnerConfig = {
-    hubUrl: 'ws://localhost:0/fleet',
+    hubUrl: 'ws://localhost:0/runners',
     name: 'test',
     allowedRoots: [tmpdir()],
     capabilities: ['pty']

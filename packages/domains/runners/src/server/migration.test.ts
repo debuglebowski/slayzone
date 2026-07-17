@@ -1,5 +1,5 @@
 /**
- * Fleet schema migration (v149) tests. Runs the FULL production migration
+ * Runner schema migration (v149) tests. Runs the FULL production migration
  * chain on a temp in-memory DB — proves v149 applies cleanly on top of the
  * real v148 schema (the actual upgrade path a live store takes).
  */
@@ -22,12 +22,12 @@ function columnNames(raw: Database.Database, table: string): string[] {
   )
 }
 
-describe('fleet schema migration (v149)', () => {
+describe('runner schema migration (v149)', () => {
   it('registry tail includes v149', () => {
     expect(LATEST_MIGRATION_VERSION).toBeGreaterThanOrEqual(149)
   })
 
-  it('creates the fleet tables on a fresh temp DB', () => {
+  it('creates the runner tables on a fresh temp DB', () => {
     const t = createMigratedDb()
     try {
       const tables = tableNames(t.raw)

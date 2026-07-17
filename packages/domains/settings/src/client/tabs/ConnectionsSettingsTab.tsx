@@ -1,29 +1,24 @@
-import { ServerSettingsTab } from './ServerSettingsTab'
 import { HubsSettingsTab } from './HubsSettingsTab'
-import { FleetSettingsTab } from './FleetSettingsTab'
+import { RunnersSettingsTab } from './RunnersSettingsTab'
 
 /**
- * Connections — one settings tab combining everything about where SlayZone's
- * backend runs and what execution nodes it reaches:
- *  - Server: run the backend embedded (Local) or point this app at one remote
- *    hub (single-hub mode).
- *  - Hubs: connect to multiple full-data hubs at once (federation) + pick the
- *    default hub for new projects.
- *  - Fleet: enroll runner exec nodes that a hub dials work out to.
+ * Connections — one settings tab for how this client is wired to backends:
+ *  - Hubs: run a local hub and/or connect to remote full-data hubs (each owns
+ *    its own data); pick the default hub; sign in to authed hubs. This absorbs
+ *    the former Server tab — "Run a local hub" is the old Local/Remote choice,
+ *    and restarting the embedded backend lives here too.
+ *  - Runner: enroll runner exec nodes that a hub dials work out to (a different
+ *    axis — runners belong to a hub; they are not hubs).
  *
- * They share the "how is this client wired to backends" concern, so they live in
- * one tab (per product decision). Each pane keeps its own component + logic —
- * this is a composition, not a merge — separated by labeled dividers so the
- * three distinct axes stay legible.
+ * A composition, not a merge — each pane keeps its own component + logic,
+ * separated by a divider.
  */
 export function ConnectionsSettingsTab() {
   return (
     <div className="space-y-10">
-      <ServerSettingsTab />
-      <div className="border-border border-t" />
       <HubsSettingsTab />
       <div className="border-border border-t" />
-      <FleetSettingsTab />
+      <RunnersSettingsTab />
     </div>
   )
 }

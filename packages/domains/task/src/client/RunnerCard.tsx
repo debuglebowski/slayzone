@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
  * than run locally) — "local" is expressed by the inherit option resolving to Local,
  * surfaced in the option label as "Inherit project default (Local)".
  *
- * When no runners are enrolled (fleet mode off — the default), everything runs
+ * When no runners are enrolled (runner mode off — the default), everything runs
  * locally, so the card degrades to a minimal muted note instead of an inert select.
  */
 

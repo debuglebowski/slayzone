@@ -115,13 +115,13 @@ export function setPtySessionLedger(ops: PtySessionLedger | null): void {
 // Remote-MCP-env provider (hub/runner split, wave 3). Null by default: with no
 // provider `resolveRemoteMcpEnv` returns null for EVERY spawn, so a session's
 // mcpEnv is byte-identical to today's loopback env. The composition root wires a
-// real provider ONLY under fleet mode; it mints a short-lived per-task bearer +
+// real provider ONLY under runner mode; it mints a short-lived per-task bearer +
 // resolves the hub's externally-reachable base URL so a runner-routed pty's
 // `slay` CLI + agent hooks dial the hub instead of loopback. Injected here (not
 // baked into the ledger) so it's swappable independently of the DB ledger.
 let remoteMcpEnvProvider: RemoteMcpEnvProvider | null = null
 
-/** Wave-3 seam: inject the remote hub-target provider (fleet mode only). */
+/** Wave-3 seam: inject the remote hub-target provider (runner mode only). */
 export function setRemoteMcpEnvProvider(provider: RemoteMcpEnvProvider | null): void {
   remoteMcpEnvProvider = provider
 }

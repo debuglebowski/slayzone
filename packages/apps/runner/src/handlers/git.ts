@@ -7,7 +7,7 @@
  * standalone bundle.
  *
  * The git.* frame method names + param shapes are OWNED by the parallel
- * Wave2-A2 unit and are not yet present in `@slayzone/fleet/shared`; the method
+ * Wave2-A2 unit and are not yet present in `@slayzone/runner-transport/shared`; the method
  * names and schemas below MIRROR the agreed contract and a later integration
  * reconciles them against the canonical frames.
  *
@@ -21,7 +21,7 @@ import { spawn } from 'node:child_process'
 import { accessSync, chmodSync, constants as fsConstants, existsSync } from 'node:fs'
 import { cp, mkdir } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
-import { RunnerNotificationMethods } from '@slayzone/fleet/shared'
+import { RunnerNotificationMethods } from '@slayzone/runner-transport/shared'
 import { z } from 'zod'
 import { assertPathAllowed } from '../config'
 import { execCapture, execGit } from './exec'
@@ -29,7 +29,7 @@ import type { HandlerContext, HubMethodTable } from './types'
 
 /**
  * git.* method names. Mirrors the Wave2-A2 frame contract (not yet in
- * `@slayzone/fleet/shared`).
+ * `@slayzone/runner-transport/shared`).
  */
 export const GitMethods = {
   isGitRepo: 'git.isGitRepo',

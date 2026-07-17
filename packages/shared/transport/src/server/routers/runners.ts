@@ -11,20 +11,20 @@ import {
 } from '@slayzone/runners/server'
 
 /**
- * Runners router — the tRPC surface over the hub/runner-split fleet (hub side).
+ * Runners router — the tRPC surface over the hub/runner-split runner (hub side).
  *
  * Two dependency classes, deliberately separated so the router keeps working
- * with fleet mode OFF:
+ * with runner mode OFF:
  *
  *  - Pure runner-binding CRUD (`list` store rows, `setTaskRunner`,
  *    `setProjectDefaultRunner`, `revokeRunner`) goes straight through `ctx.db`
- *    against the v149 fleet tables. These never need the live gateway, so they
- *    work regardless of fleet mode (the UI that calls them is wave 3).
- *  - Live-fleet operations (`list` connection-status merge, `mintJoinToken`)
+ *    against the v149 runner tables. These never need the live gateway, so they
+ *    work regardless of runner mode (the UI that calls them is wave 3).
+ *  - Live-runner operations (`list` connection-status merge, `mintJoinToken`)
  *    read the injected `RunnersDeps` (the gateway + hub URL + cert fingerprint).
  *    `list` degrades gracefully when the gateway isn't wired (store rows with a
  *    `connected: false` status); `mintJoinToken` REQUIRES it and throws a clear
- *    error when fleet mode is off — minting a token for a hub that isn't
+ *    error when runner mode is off — minting a token for a hub that isn't
  *    listening would hand a runner an un-dialable URL.
  *
  * Follows the `processesRouter` conventions: `ctx.db`, `publicProcedure`, zod
@@ -36,7 +36,7 @@ const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes
 export const runnersRouter = router({
   /**
    * All non-revoked runners from the store, each annotated with live connection
-   * status merged from the fleet gateway (when wired). A runner in the store but
+   * status merged from the runner gateway (when wired). A runner in the store but
    * not currently dialed in reports `connected: false`.
    */
   list: publicProcedure.query(async ({ ctx }) => {
@@ -61,9 +61,9 @@ export const runnersRouter = router({
   }),
 
   /**
-   * Mint a single-use enrollment token. The token embeds the hub's fleet WS URL
+   * Mint a single-use enrollment token. The token embeds the hub's runner WS URL
    * and TLS cert fingerprint (both sourced from the injected deps), so it can
-   * only be minted when fleet mode is on and the hub is listening.
+   * only be minted when runner mode is on and the hub is listening.
    */
   mintJoinToken: publicProcedure
     .input(
@@ -78,7 +78,7 @@ export const runnersRouter = router({
       const certFingerprint = deps.getCertFingerprint()
       if (!hubUrl || !certFingerprint) {
         throw new Error(
-          'cannot mint join token — the fleet listener has not bound its URL / hub identity yet'
+          'cannot mint join token — the runner listener has not bound its URL / hub identity yet'
         )
       }
       const minted = await storeMintJoinToken(ctx.db, {

@@ -3202,7 +3202,7 @@ export const migrations: Migration[] = [
   {
     version: 149,
     up: (db) => {
-      // Fleet schema for the hub/runner split (wave 1). Lands DARK: purely
+      // Runner schema for the hub/runner split (wave 1). Lands DARK: purely
       // additive and all-nullable — nothing reads or writes these until the
       // @slayzone/runners domain is wired up in the integration wave.
       //

@@ -35,7 +35,7 @@ const TMP_SUFFIX = '.tmp'
 const FILE_MODE = 0o600
 const DIR_MODE = 0o700
 const SUBJECT = 'CN=SlayZone Hub'
-// The fingerprint is the hub's pinned fleet identity — an expiring cert would
+// The fingerprint is the hub's pinned runner identity — an expiring cert would
 // force a silent identity rotation, so make expiry practically unreachable.
 const VALIDITY_YEARS = 100
 
@@ -61,7 +61,7 @@ export interface HubIdentity {
   certPem: string
   /**
    * Lowercase hex SHA-256 of the leaf certificate DER. This exact digest is
-   * what fleet peers pin, so its derivation must never change.
+   * what runner peers pin, so its derivation must never change.
    */
   fingerprintSha256Hex: string
   /**
@@ -118,7 +118,7 @@ async function generateIdentity(): Promise<IdentityMaterial> {
   const serial = randomBytes(16)
   serial[0] &= 0x7f
 
-  // Backdate notBefore a day to tolerate clock skew across fleet machines.
+  // Backdate notBefore a day to tolerate clock skew across runner machines.
   const notBefore = new Date(Date.now() - 24 * 60 * 60 * 1000)
   const notAfter = new Date(notBefore)
   notAfter.setFullYear(notAfter.getFullYear() + VALIDITY_YEARS)

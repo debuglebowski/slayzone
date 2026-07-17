@@ -6,7 +6,7 @@ import {
   type TaskTokenClaims
 } from './task-tokens'
 
-const SECRET = 'hub-fleet-secret-at-least-32-chars-long!!'
+const SECRET = 'hub-runner-secret-at-least-32-chars-long!!'
 const NOW = 1_700_000_000_000
 const TTL = 5 * 60_000
 

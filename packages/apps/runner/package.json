@@ -17,7 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@slayzone/fleet": "workspace:*",
+    "@slayzone/runner-transport": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "node-pty": "^1.1.0",
     "zod": "^4.3.5"

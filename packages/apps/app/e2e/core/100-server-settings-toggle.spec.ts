@@ -9,15 +9,16 @@ declare global {
 }
 
 /**
- * Slice 7 — Local/Remote server-mode toggle in user settings.
+ * Connections → Hubs: the "Run a local hub" toggle (replaces the old Server-tab
+ * Local/Remote radio). It writes `server_mode` in the pre-boot config FILE (not
+ * the DB): local on → `server_mode: 'local'` (spawn embedded backend); local off
+ * → `server_mode: 'remote'` (pure client). `Save & relaunch`'s relaunch is a
+ * no-op under PLAYWRIGHT, so the spec asserts on boot-config.json.
  *
- * `Save & relaunch` writes the pre-boot config FILE (not the DB) and calls
- * app:relaunch — which is a no-op under PLAYWRIGHT (the harness owns the
- * process). So the spec asserts on the boot-config.json contents; the
- * "actually boots into remote mode" path is covered by
- * 103-remote-config-screen.spec.ts via an isolated pre-seeded launch.
+ * Turning local OFF requires ≥1 remote hub to fall back to (the app must always
+ * have a hub), so the spec adds a remote hub first.
  */
-test.describe('Server settings toggle', () => {
+test.describe('Run-local-hub toggle', () => {
   let bootConfigPath: string
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -29,7 +30,11 @@ test.describe('Server settings toggle', () => {
     bootConfigPath = path.join(env.SLAYZONE_DB_DIR!, 'boot-config.json')
   })
 
-  const readBootConfig = (): { server_mode?: string; remote_server_url?: string } | null => {
+  const readBootConfig = (): {
+    server_mode?: string
+    multi_hub?: boolean
+    hubs?: Array<{ id: string; url?: string }>
+  } | null => {
     try {
       return JSON.parse(fs.readFileSync(bootConfigPath, 'utf8'))
     } catch {
@@ -37,63 +42,63 @@ test.describe('Server settings toggle', () => {
     }
   }
 
-  const openServerTab = async (mainWindow: import('@playwright/test').Page) => {
+  const openHubsTab = async (mainWindow: import('@playwright/test').Page) => {
     const dialog = mainWindow.getByRole('dialog').last()
     if (!(await dialog.isVisible().catch(() => false))) {
       await clickSettings(mainWindow)
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
     await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
-    await expect(dialog.getByTestId('server-mode-local')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByTestId('hub-local-toggle')).toBeVisible({ timeout: 5_000 })
     return dialog
   }
 
-  test('defaults to Local with the URL input disabled', async ({ mainWindow }) => {
-    const dialog = await openServerTab(mainWindow)
-    await expect(dialog.getByTestId('server-mode-local')).toBeChecked()
-    await expect(dialog.getByTestId('server-mode-remote')).not.toBeChecked()
-    await expect(dialog.getByTestId('server-remote-url')).toBeDisabled()
-    await expect(dialog.getByTestId('server-save-relaunch')).toBeDisabled()
+  test('local hub runs by default; toggle is disabled with no remotes', async ({ mainWindow }) => {
+    const dialog = await openHubsTab(mainWindow)
+    // Local hub row present + running; can't turn it off (nothing to fall back to).
+    await expect(dialog.getByTestId('hub-row-local')).toBeVisible()
+    await expect(dialog.getByTestId('hub-local-toggle')).toBeChecked()
+    await expect(dialog.getByTestId('hub-local-toggle')).toBeDisabled()
+    await expect(dialog.getByTestId('hubs-save-relaunch')).toBeDisabled()
+    await mainWindow.keyboard.press('Escape')
   })
 
-  test('Save & relaunch writes the normalized remote config to boot-config.json', async ({
+  test('add a remote + turn local off → boot-config becomes a pure client', async ({
     mainWindow
   }) => {
-    const dialog = await openServerTab(mainWindow)
-    await dialog.getByTestId('server-mode-remote').check()
-    await dialog.getByTestId('server-remote-url').fill('http://127.0.0.1:45991')
-    await dialog.getByTestId('server-save-relaunch').click()
+    // Use the app's OWN live sidecar as the "remote" hub to add — its /health is
+    // reachable, so the probe passes deterministically and Add arms. (We're
+    // testing the toggle→boot-config write, not real federation.)
+    const server = (await mainWindow.evaluate(() =>
+      window.__testInvoke('app:get-server-url')
+    )) as { mode: string; url: string }
+    const host = new URL(server.url.replace(/^ws/, 'http')).host
 
-    await expect
-      .poll(() => readBootConfig(), { timeout: 5_000 })
-      .toEqual({ server_mode: 'remote', remote_server_url: 'ws://127.0.0.1:45991/trpc' })
-    // Relaunch was a Playwright no-op — the tab reflects the saved state.
-    await expect(dialog.getByText('Unsaved changes')).not.toBeVisible()
-  })
+    const dialog = await openHubsTab(mainWindow)
+    await dialog.getByTestId('hub-add-url').fill(`http://${host}`)
+    await dialog.getByTestId('hub-probe').click()
+    const addBtn = dialog.getByTestId('hub-add')
+    await expect(addBtn).toBeEnabled({ timeout: 10_000 })
+    await addBtn.click()
 
-  test('an invalid URL is rejected and the file stays untouched', async ({ mainWindow }) => {
-    const dialog = await openServerTab(mainWindow)
-    await dialog.getByTestId('server-mode-remote').check()
-    await dialog.getByTestId('server-remote-url').fill('not a url')
-    await dialog.getByTestId('server-save-relaunch').click()
+    // Now local can be turned off (there's a remote to fall back to).
+    const toggle = dialog.getByTestId('hub-local-toggle')
+    await expect(toggle).toBeEnabled()
+    await toggle.click() // → off
+    await dialog.getByTestId('hubs-save-relaunch').click()
 
-    // Save surfaces the rejection as a toast; the config keeps the last value.
-    await expect(mainWindow.getByText(/Failed to save/)).toBeVisible({ timeout: 5_000 })
-    expect(readBootConfig()).toEqual({
-      server_mode: 'remote',
-      remote_server_url: 'ws://127.0.0.1:45991/trpc'
-    })
-  })
+    await expect.poll(() => readBootConfig()?.server_mode, { timeout: 5_000 }).toBe('remote')
+    const cfg = readBootConfig()
+    expect(cfg?.multi_hub).toBe(true)
+    expect((cfg?.hubs ?? []).length).toBeGreaterThan(0)
 
-  test('switching back to Local persists (URL kept for next time)', async ({ mainWindow }) => {
-    const dialog = await openServerTab(mainWindow)
-    await dialog.getByTestId('server-mode-local').check()
-    await dialog.getByTestId('server-save-relaunch').click()
-
-    await expect
-      .poll(() => readBootConfig()?.server_mode, { timeout: 5_000 })
-      .toBe('local')
-
-    await mainWindow.keyboard.press('Escape')
+    // Restore the shared worker app to the default (local hub on, no remotes) so
+    // sibling specs in this worker (104 restart) see a running local hub. Turn
+    // local back on, remove the remote, save.
+    await toggle.click() // → on
+    await dialog.getByTestId('hub-remove').first().click()
+    await dialog.getByTestId('hubs-save-relaunch').click()
+    await expect.poll(() => readBootConfig()?.server_mode, { timeout: 5_000 }).toBe('local')
+    await mainWindow.keyboard.press('Escape').catch(() => {})
   })
 })

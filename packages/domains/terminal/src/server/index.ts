@@ -63,7 +63,7 @@ export {
   type PtySpawnLookups
 } from './runtime/pty-data-ops'
 // Wave-3 remote-MCP-env contracts: the composition root builds a provider of
-// this shape (fleet mode only) and injects it via `setRemoteMcpEnvProvider`.
+// this shape (runner mode only) and injects it via `setRemoteMcpEnvProvider`.
 export {
   AGENT_HOOK_PATH,
   type RemoteMcpEnv,
@@ -111,7 +111,7 @@ export {
   // Wave-1 session-ledger seam (was landed but left unexported): lets a later
   // hub/runner wave inject a non-DB-backed ledger from the composition root.
   setPtySessionLedger,
-  // Wave-3 remote-MCP-env seam: fleet mode injects a provider that mints a
+  // Wave-3 remote-MCP-env seam: runner mode injects a provider that mints a
   // per-task hub bearer + resolves the hub base URL so a runner-routed pty's
   // slay CLI + agent hooks dial the hub instead of loopback. Unset => loopback.
   setRemoteMcpEnvProvider,

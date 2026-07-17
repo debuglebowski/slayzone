@@ -1,6 +1,6 @@
 /**
  * Shared SlayZone config file — loadSlayzoneConfig / save / update /
- * ensureFleetSecret. Pure Node (real temp files, no native deps) → runs under
+ * ensureRunnerTransportSecret. Pure Node (real temp files, no native deps) → runs under
  * plain `npx tsx`.
  *
  * Run with: npx tsx packages/shared/platform/src/slayzone-config.test.ts
@@ -9,8 +9,8 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  DEV_FLEET_SECRET,
-  ensureFleetSecret,
+  DEV_RUNNER_TRANSPORT_SECRET,
+  ensureRunnerTransportSecret,
   getSlayzoneConfigPath,
   loadSlayzoneConfig,
   saveSlayzoneConfig,
@@ -103,42 +103,42 @@ test('valid config parses all known keys, drops wrong types', () => {
   writeFileSync(
     p,
     JSON.stringify({
-      fleetMode: true,
-      fleetSecret: 'abc',
+      runnersEnabled: true,
+      runnerTransportSecret: 'abc',
       dbPath: '/x/db.sqlite',
       port: 8080,
-      fleetPort: 8443,
+      runnerTransportPort: 8443,
       publicUrl: 'https://hub.example',
       joinToken: 'jt-1',
       runnerName: 'r1',
-      hubUrl: 'wss://hub/fleet',
+      hubUrl: 'wss://hub/runners',
       // wrong-typed / unknown → dropped
       port2: 'nope',
-      fleetMode2: 'yes',
+      runnersEnabled2: 'yes',
       extra: { nested: 1 }
     })
   )
   const cfg = loadSlayzoneConfig(p)
-  assertEq(cfg.fleetMode, true, 'fleetMode')
-  assertEq(cfg.fleetSecret, 'abc', 'fleetSecret')
+  assertEq(cfg.runnersEnabled, true, 'runnersEnabled')
+  assertEq(cfg.runnerTransportSecret, 'abc', 'runnerTransportSecret')
   assertEq(cfg.dbPath, '/x/db.sqlite', 'dbPath')
   assertEq(cfg.port, 8080, 'port')
-  assertEq(cfg.fleetPort, 8443, 'fleetPort')
+  assertEq(cfg.runnerTransportPort, 8443, 'runnerTransportPort')
   assertEq(cfg.publicUrl, 'https://hub.example', 'publicUrl')
   assertEq(cfg.joinToken, 'jt-1', 'joinToken')
   assertEq(cfg.runnerName, 'r1', 'runnerName')
-  assertEq(cfg.hubUrl, 'wss://hub/fleet', 'hubUrl')
+  assertEq(cfg.hubUrl, 'wss://hub/runners', 'hubUrl')
   assert(!('extra' in cfg), 'unknown key dropped')
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('wrong-typed values are dropped (port as string, fleetMode as string)', () => {
+test('wrong-typed values are dropped (port as string, runnersEnabled as string)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  writeFileSync(p, JSON.stringify({ port: '8080', fleetMode: 'true', dbPath: '' }))
+  writeFileSync(p, JSON.stringify({ port: '8080', runnersEnabled: 'true', dbPath: '' }))
   const cfg = loadSlayzoneConfig(p)
   assert(cfg.port === undefined, 'string port dropped')
-  assert(cfg.fleetMode === undefined, 'string fleetMode dropped')
+  assert(cfg.runnersEnabled === undefined, 'string runnersEnabled dropped')
   assert(cfg.dbPath === undefined, 'empty dbPath dropped')
   rmSync(dir, { recursive: true, force: true })
 })
@@ -149,9 +149,9 @@ console.log('─'.repeat(40))
 test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
   const dir = tmp()
   const p = join(dir, 'sub', 'config.json')
-  saveSlayzoneConfig({ fleetMode: true, port: 9 }, p)
+  saveSlayzoneConfig({ runnersEnabled: true, port: 9 }, p)
   const back = loadSlayzoneConfig(p)
-  assertEq(back.fleetMode, true, 'fleetMode round-trip')
+  assertEq(back.runnersEnabled, true, 'runnersEnabled round-trip')
   assertEq(back.port, 9, 'port round-trip')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file mode 0600')
@@ -163,41 +163,41 @@ test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
 test('updateSlayzoneConfig merges over on-disk base (no clobber of other keys)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  saveSlayzoneConfig({ fleetMode: true, hubUrl: 'wss://a/fleet' }, p)
-  const merged = updateSlayzoneConfig({ fleetSecret: 'sekret' }, p)
-  assertEq(merged.fleetMode, true, 'kept fleetMode')
-  assertEq(merged.hubUrl, 'wss://a/fleet', 'kept hubUrl')
-  assertEq(merged.fleetSecret, 'sekret', 'added fleetSecret')
+  saveSlayzoneConfig({ runnersEnabled: true, hubUrl: 'wss://a/runners' }, p)
+  const merged = updateSlayzoneConfig({ runnerTransportSecret: 'sekret' }, p)
+  assertEq(merged.runnersEnabled, true, 'kept runnersEnabled')
+  assertEq(merged.hubUrl, 'wss://a/runners', 'kept hubUrl')
+  assertEq(merged.runnerTransportSecret, 'sekret', 'added runnerTransportSecret')
   // persisted on disk too
   const onDisk = loadSlayzoneConfig(p)
-  assertEq(onDisk.fleetSecret, 'sekret', 'persisted')
-  assertEq(onDisk.fleetMode, true, 'persisted fleetMode')
+  assertEq(onDisk.runnerTransportSecret, 'sekret', 'persisted')
+  assertEq(onDisk.runnersEnabled, true, 'persisted runnersEnabled')
   rmSync(dir, { recursive: true, force: true })
 })
 
 test('update ignores undefined patch values (does not erase)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  saveSlayzoneConfig({ hubUrl: 'wss://a/fleet' }, p)
+  saveSlayzoneConfig({ hubUrl: 'wss://a/runners' }, p)
   const merged = updateSlayzoneConfig({ hubUrl: undefined, port: 5 }, p)
-  assertEq(merged.hubUrl, 'wss://a/fleet', 'undefined did not erase hubUrl')
+  assertEq(merged.hubUrl, 'wss://a/runners', 'undefined did not erase hubUrl')
   assertEq(merged.port, 5, 'added port')
   rmSync(dir, { recursive: true, force: true })
 })
 
-console.log('\nslayzone-config: ensureFleetSecret')
+console.log('\nslayzone-config: ensureRunnerTransportSecret')
 console.log('─'.repeat(40))
 
 test('generates + persists a secret when absent (0600, != dev constant)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  const secret = ensureFleetSecret(p)
+  const secret = ensureRunnerTransportSecret(p)
   assert(secret.length === 64, '256-bit hex = 64 chars')
-  assert(secret !== DEV_FLEET_SECRET, 'not the shared dev constant')
+  assert(secret !== DEV_RUNNER_TRANSPORT_SECRET, 'not the shared dev constant')
   assert(/^[0-9a-f]{64}$/.test(secret), 'lowercase hex')
   // persisted
   const onDisk = loadSlayzoneConfig(p)
-  assertEq(onDisk.fleetSecret, secret, 'persisted into config.json')
+  assertEq(onDisk.runnerTransportSecret, secret, 'persisted into config.json')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file mode 0600')
   }
@@ -207,47 +207,47 @@ test('generates + persists a secret when absent (0600, != dev constant)', () => 
 test('stable across calls (reuses persisted secret, no re-generate)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  const s1 = ensureFleetSecret(p)
-  const s2 = ensureFleetSecret(p)
+  const s1 = ensureRunnerTransportSecret(p)
+  const s2 = ensureRunnerTransportSecret(p)
   assertEq(s1, s2, 'same secret on second call')
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('honors a pre-existing config fleetSecret (does not overwrite)', () => {
+test('honors a pre-existing config runnerTransportSecret (does not overwrite)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  saveSlayzoneConfig({ fleetSecret: 'preset-secret-value' }, p)
-  const secret = ensureFleetSecret(p)
+  saveSlayzoneConfig({ runnerTransportSecret: 'preset-secret-value' }, p)
+  const secret = ensureRunnerTransportSecret(p)
   assertEq(secret, 'preset-secret-value', 'returned the pre-existing secret')
   rmSync(dir, { recursive: true, force: true })
 })
 
 test('concurrent fresh boots CONVERGE on one secret (atomic create-if-absent)', () => {
   // Simulate two hubs racing against the SAME fresh config.json. Both call
-  // ensureFleetSecret with no file present; only one wins the `wx` create, the
+  // ensureRunnerTransportSecret with no file present; only one wins the `wx` create, the
   // other re-reads the winner's secret → both return the SAME value, and the
   // on-disk secret equals it. (Sequential calls here still exercise the create
   // + read-back convergence path; the second call hits the file the first wrote.)
   const dir = tmp()
   const p = join(dir, 'config.json')
-  const a = ensureFleetSecret(p)
-  const b = ensureFleetSecret(p)
+  const a = ensureRunnerTransportSecret(p)
+  const b = ensureRunnerTransportSecret(p)
   assertEq(a, b, 'both boots converge on ONE secret')
-  assertEq(loadSlayzoneConfig(p).fleetSecret, a, 'on-disk secret matches')
+  assertEq(loadSlayzoneConfig(p).runnerTransportSecret, a, 'on-disk secret matches')
   rmSync(dir, { recursive: true, force: true })
 })
 
 test('preserves other keys when adding a secret to a secret-less config', () => {
   // A pre-existing config.json WITH other keys but WITHOUT a secret must keep
-  // those keys after ensureFleetSecret merges the generated secret in.
+  // those keys after ensureRunnerTransportSecret merges the generated secret in.
   const dir = tmp()
   const p = join(dir, 'config.json')
-  saveSlayzoneConfig({ fleetMode: true, hubUrl: 'wss://a/fleet' }, p)
-  const secret = ensureFleetSecret(p)
+  saveSlayzoneConfig({ runnersEnabled: true, hubUrl: 'wss://a/runners' }, p)
+  const secret = ensureRunnerTransportSecret(p)
   const onDisk = loadSlayzoneConfig(p)
-  assertEq(onDisk.fleetSecret, secret, 'secret added')
-  assertEq(onDisk.fleetMode, true, 'kept fleetMode')
-  assertEq(onDisk.hubUrl, 'wss://a/fleet', 'kept hubUrl')
+  assertEq(onDisk.runnerTransportSecret, secret, 'secret added')
+  assertEq(onDisk.runnersEnabled, true, 'kept runnersEnabled')
+  assertEq(onDisk.hubUrl, 'wss://a/runners', 'kept hubUrl')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file still 0600 after merge')
   }

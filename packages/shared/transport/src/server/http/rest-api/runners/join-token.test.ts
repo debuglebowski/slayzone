@@ -5,10 +5,10 @@
  * The route is the loopback mint channel the Electron MAIN process hits at boot
  * to auto-enroll its local runner (main has no tRPC client to the sidecar). It
  * wraps the same store `mintJoinToken` as the runners tRPC proc, gated on the
- * `deps.runners` slot (wired ONLY under fleet mode):
- *   - fleet ON + listener bound  → 200 { token (decodable szjt1), hubUrl (wss) }
- *   - fleet ON + not-yet-bound   → 503 (main retries)
- *   - fleet OFF (slot absent)    → 503 (never mints; default boot byte-identical)
+ * `deps.runners` slot (wired ONLY under runner mode):
+ *   - runner ON + listener bound  → 200 { token (decodable szjt1), hubUrl (wss) }
+ *   - runner ON + not-yet-bound   → 503 (main retries)
+ *   - runner OFF (slot absent)    → 503 (never mints; default boot byte-identical)
  */
 import express from 'express'
 import {
@@ -24,9 +24,9 @@ import type { RestApiDeps } from '../types.js'
 
 const h = await createTestHarness()
 
-/** A bound fleet listener (fleet ON, url + fingerprint present). */
+/** A bound runner listener (runner ON, url + fingerprint present). */
 const boundRunners = {
-  getHubUrl: () => 'wss://127.0.0.1:54321/fleet',
+  getHubUrl: () => 'wss://127.0.0.1:54321/runners',
   getCertFingerprint: () => 'abcdef0123456789'
 }
 
@@ -38,7 +38,7 @@ function mount(runners: RestApiDeps['runners']) {
 }
 
 await describe('POST /api/runners/join-token', () => {
-  test('fleet ON + bound: mints a decodable szjt1 token embedding the wss hub url', async () => {
+  test('runner ON + bound: mints a decodable szjt1 token embedding the wss hub url', async () => {
     const rest = await mount(boundRunners)
     try {
       const res = await rest.request<{ token: string; hubUrl: string }>(
@@ -47,17 +47,17 @@ await describe('POST /api/runners/join-token', () => {
         { label: 'local-runner' }
       )
       expect(res.status).toBe(200)
-      expect(res.body.hubUrl).toBe('wss://127.0.0.1:54321/fleet')
+      expect(res.body.hubUrl).toBe('wss://127.0.0.1:54321/runners')
       const payload = decodeJoinToken(res.body.token)
       expect(payload).not.toBeNull()
-      expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/fleet')
+      expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/runners')
       expect(payload!.certFingerprint).toBe('abcdef0123456789')
     } finally {
       await rest.close()
     }
   })
 
-  test('fleet ON but listener not yet bound (null url): 503', async () => {
+  test('runner ON but listener not yet bound (null url): 503', async () => {
     const rest = await mount({ getHubUrl: () => null, getCertFingerprint: () => null })
     try {
       const res = await rest.request<{ error: string }>('POST', '/api/runners/join-token', {})
@@ -67,7 +67,7 @@ await describe('POST /api/runners/join-token', () => {
     }
   })
 
-  test('fleet OFF (runners slot absent): 503, never mints', async () => {
+  test('runner OFF (runners slot absent): 503, never mints', async () => {
     const rest = await mount(undefined)
     try {
       const res = await rest.request<{ error: string }>('POST', '/api/runners/join-token', {})

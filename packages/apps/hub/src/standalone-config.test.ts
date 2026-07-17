@@ -1,7 +1,7 @@
 /**
  * Hub standalone-config resolve — applyStandaloneHubConfig folds
  * ~/.slayzone/config.json into process.env with env>file>default precedence, and
- * resolves/persists the fleet secret (security fix). Supervised = no-op (no file
+ * resolves/persists the runner secret (security fix). Supervised = no-op (no file
  * read/write).
  *
  * Pure Node (real temp home dir via SLAYZONE_HOME_DIR, no native deps) → runs
@@ -13,7 +13,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  DEV_FLEET_SECRET,
+  DEV_RUNNER_TRANSPORT_SECRET,
   getSlayzoneConfigPath,
   loadSlayzoneConfig,
   saveSlayzoneConfig
@@ -45,11 +45,11 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 const ENV_KEYS = [
   'SLAYZONE_SUPERVISED',
   'SLAYZONE_HOME_DIR',
-  'SLAYZONE_FLEET_MODE',
-  'SLAYZONE_FLEET_SECRET',
+  'SLAYZONE_RUNNERS_ENABLED',
+  'SLAYZONE_RUNNER_TRANSPORT_SECRET',
   'SLAYZONE_DB_PATH',
   'SLAYZONE_PORT',
-  'SLAYZONE_FLEET_PORT',
+  'SLAYZONE_RUNNER_TRANSPORT_PORT',
   'SLAYZONE_HUB_PUBLIC_URL'
 ] as const
 
@@ -77,20 +77,20 @@ function withIsolatedEnv(seed: Record<string, string>, fn: (home: string) => voi
 console.log('\nstandalone-config: env > file > default')
 console.log('─'.repeat(40))
 
-test('config.json fills unset env (fleetMode, dbPath, port, fleetPort, publicUrl)', () => {
+test('config.json fills unset env (runnersEnabled, dbPath, port, runnerTransportPort, publicUrl)', () => {
   withIsolatedEnv({}, () => {
     saveSlayzoneConfig({
-      fleetMode: true,
+      runnersEnabled: true,
       dbPath: '/tmp/x/db.sqlite',
       port: 8080,
-      fleetPort: 8443,
+      runnerTransportPort: 8443,
       publicUrl: 'https://hub.example'
     })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_FLEET_MODE, '1', 'fleetMode → =1')
+    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '1', 'runnersEnabled → =1')
     assertEq(process.env.SLAYZONE_DB_PATH, '/tmp/x/db.sqlite', 'dbPath')
     assertEq(process.env.SLAYZONE_PORT, '8080', 'port')
-    assertEq(process.env.SLAYZONE_FLEET_PORT, '8443', 'fleetPort')
+    assertEq(process.env.SLAYZONE_RUNNER_TRANSPORT_PORT, '8443', 'runnerTransportPort')
     assertEq(process.env.SLAYZONE_HUB_PUBLIC_URL, 'https://hub.example', 'publicUrl')
   })
 })
@@ -104,96 +104,96 @@ test('env WINS over config.json (does not overwrite a set env)', () => {
   })
 })
 
-test('no config + no env ⇒ only the generated fleet secret is set (defaults elsewhere)', () => {
+test('no config + no env ⇒ only the generated runner secret is set (defaults elsewhere)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_FLEET_MODE === undefined, 'no fleetMode without file/env')
+    assert(process.env.SLAYZONE_RUNNERS_ENABLED === undefined, 'no runnersEnabled without file/env')
     assert(process.env.SLAYZONE_DB_PATH === undefined, 'no dbPath default here (db.ts handles it)')
     assert(process.env.SLAYZONE_PORT === undefined, 'no port default here')
-    assert(!!process.env.SLAYZONE_FLEET_SECRET, 'fleet secret always resolved')
+    assert(!!process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET, 'runner secret always resolved')
   })
 })
 
-console.log('\nstandalone-config: fleetMode enable / disable / env override')
+console.log('\nstandalone-config: runnersEnabled enable / disable / env override')
 console.log('─'.repeat(40))
 
-test('config fleetMode:true + no env ⇒ fleet ON (=1)', () => {
+test('config runnersEnabled:true + no env ⇒ runner ON (=1)', () => {
   withIsolatedEnv({}, () => {
-    saveSlayzoneConfig({ fleetMode: true })
+    saveSlayzoneConfig({ runnersEnabled: true })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_FLEET_MODE, '1', 'fleetMode true → 1')
+    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '1', 'runnersEnabled true → 1')
   })
 })
 
-test('config fleetMode:false + no env ⇒ fleet OFF (=0, honored not ignored)', () => {
+test('config runnersEnabled:false + no env ⇒ runner OFF (=0, honored not ignored)', () => {
   withIsolatedEnv({}, () => {
-    saveSlayzoneConfig({ fleetMode: false })
+    saveSlayzoneConfig({ runnersEnabled: false })
     applyStandaloneHubConfig()
     // Present-but-false must set '0' (composition gates on === '1'), NOT leave it
-    // unset — so the config file can DISABLE fleet, not only enable it.
-    assertEq(process.env.SLAYZONE_FLEET_MODE, '0', 'fleetMode false → 0')
+    // unset — so the config file can DISABLE runner, not only enable it.
+    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '0', 'runnersEnabled false → 0')
   })
 })
 
-test('env SLAYZONE_FLEET_MODE=1 overrides config fleetMode:false', () => {
-  withIsolatedEnv({ SLAYZONE_FLEET_MODE: '1' }, () => {
-    saveSlayzoneConfig({ fleetMode: false })
+test('env SLAYZONE_RUNNERS_ENABLED=1 overrides config runnersEnabled:false', () => {
+  withIsolatedEnv({ SLAYZONE_RUNNERS_ENABLED: '1' }, () => {
+    saveSlayzoneConfig({ runnersEnabled: false })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_FLEET_MODE, '1', 'env wins over file false')
+    assertEq(process.env.SLAYZONE_RUNNERS_ENABLED, '1', 'env wins over file false')
   })
 })
 
-console.log('\nstandalone-config: fleet secret (security fix)')
+console.log('\nstandalone-config: runner secret (security fix)')
 console.log('─'.repeat(40))
 
-test('generates + persists a fleet secret into config.json (!= dev constant)', () => {
+test('generates + persists a runner secret into config.json (!= dev constant)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    const secret = process.env.SLAYZONE_FLEET_SECRET
+    const secret = process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET
     assert(!!secret, 'env set')
-    assert(secret !== DEV_FLEET_SECRET, 'not the shared dev constant')
+    assert(secret !== DEV_RUNNER_TRANSPORT_SECRET, 'not the shared dev constant')
     assertEq(secret!.length, 64, '256-bit hex')
     // persisted into the temp config.json
-    assertEq(loadSlayzoneConfig().fleetSecret, secret, 'persisted')
+    assertEq(loadSlayzoneConfig().runnerTransportSecret, secret, 'persisted')
   })
 })
 
 test('second boot reuses the SAME persisted secret (stable)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    const first = process.env.SLAYZONE_FLEET_SECRET
+    const first = process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET
     // simulate a fresh process: clear the env, keep the file
-    delete process.env.SLAYZONE_FLEET_SECRET
+    delete process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_FLEET_SECRET, first, 'same secret across boots')
+    assertEq(process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET, first, 'same secret across boots')
   })
 })
 
-test('env SLAYZONE_FLEET_SECRET wins + no config write', () => {
-  withIsolatedEnv({ SLAYZONE_FLEET_SECRET: 'ci-pinned-secret' }, () => {
+test('env SLAYZONE_RUNNER_TRANSPORT_SECRET wins + no config write', () => {
+  withIsolatedEnv({ SLAYZONE_RUNNER_TRANSPORT_SECRET: 'ci-pinned-secret' }, () => {
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_FLEET_SECRET, 'ci-pinned-secret', 'env secret kept')
+    assertEq(process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET, 'ci-pinned-secret', 'env secret kept')
     // config.json should NOT have been created (no generate/persist path taken)
     assert(!existsSync(getSlayzoneConfigPath()), 'no config file written when env pins the secret')
   })
 })
 
-test('config.json fleetSecret used (env unset) and NOT regenerated', () => {
+test('config.json runnerTransportSecret used (env unset) and NOT regenerated', () => {
   withIsolatedEnv({}, () => {
-    saveSlayzoneConfig({ fleetSecret: 'from-config-file' })
+    saveSlayzoneConfig({ runnerTransportSecret: 'from-config-file' })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_FLEET_SECRET, 'from-config-file', 'config secret used')
+    assertEq(process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET, 'from-config-file', 'config secret used')
   })
 })
 
-test('EMPTY env SLAYZONE_FLEET_SECRET counts as absent ⇒ generates (no misleading throw)', () => {
-  withIsolatedEnv({ SLAYZONE_FLEET_SECRET: '' }, () => {
+test('EMPTY env SLAYZONE_RUNNER_TRANSPORT_SECRET counts as absent ⇒ generates (no misleading throw)', () => {
+  withIsolatedEnv({ SLAYZONE_RUNNER_TRANSPORT_SECRET: '' }, () => {
     applyStandaloneHubConfig()
-    const secret = process.env.SLAYZONE_FLEET_SECRET
+    const secret = process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET
     assert(!!secret, 'a real secret was generated (empty treated as absent)')
-    assert(secret !== DEV_FLEET_SECRET, 'not the dev constant')
+    assert(secret !== DEV_RUNNER_TRANSPORT_SECRET, 'not the dev constant')
     assertEq(secret!.length, 64, '256-bit hex generated')
-    assertEq(loadSlayzoneConfig().fleetSecret, secret, 'persisted')
+    assertEq(loadSlayzoneConfig().runnerTransportSecret, secret, 'persisted')
   })
 })
 
@@ -203,19 +203,19 @@ console.log('─'.repeat(40))
 test('supervised does NOT read or write config.json (no file created, no env seeded)', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_FLEET_SECRET === undefined, 'no secret seeded when supervised')
-    assert(process.env.SLAYZONE_FLEET_MODE === undefined, 'no fleetMode seeded when supervised')
+    assert(process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET === undefined, 'no secret seeded when supervised')
+    assert(process.env.SLAYZONE_RUNNERS_ENABLED === undefined, 'no runnersEnabled seeded when supervised')
     assert(!existsSync(getSlayzoneConfigPath()), 'no config file written when supervised')
   })
 })
 
 test('supervised IGNORES an existing config.json entirely', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
-    saveSlayzoneConfig({ fleetMode: true, port: 8080, fleetSecret: 'should-be-ignored' })
+    saveSlayzoneConfig({ runnersEnabled: true, port: 8080, runnerTransportSecret: 'should-be-ignored' })
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_FLEET_MODE === undefined, 'ignored fleetMode')
+    assert(process.env.SLAYZONE_RUNNERS_ENABLED === undefined, 'ignored runnersEnabled')
     assert(process.env.SLAYZONE_PORT === undefined, 'ignored port')
-    assert(process.env.SLAYZONE_FLEET_SECRET === undefined, 'ignored fleetSecret')
+    assert(process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET === undefined, 'ignored runnerTransportSecret')
   })
 })
 

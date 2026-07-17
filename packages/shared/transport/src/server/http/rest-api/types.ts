@@ -134,25 +134,25 @@ export interface RestApiDeps {
   windowActions?: { raiseMainWindow: () => void }
   artifactExport?: ArtifactExportAccess
   /**
-   * Per-task hub-bearer verifier (hub/runner split). Set ONLY under fleet mode
+   * Per-task hub-bearer verifier (hub/runner split). Set ONLY under runner mode
    * (the composition root binds `@slayzone/hub-auth`'s `verifyTaskToken` closed
-   * over the fleet secret). When set, the agent-hook route enforces a bearer
+   * over the runner secret). When set, the agent-hook route enforces a bearer
    * that a runner-routed pty's hook carries (rejecting invalid/expired/scope-
-   * mismatched tokens). Absent (fleet off — the default) OR when a hook sends no
+   * mismatched tokens). Absent (runner off — the default) OR when a hook sends no
    * `Authorization` header (every local loopback hook) → the route is unchanged.
    */
   verifyTaskToken?: (token: string) => TaskTokenVerifyResult
   /**
-   * Fleet listener info accessors (hub/runner split, Wave3.5-D3). Set ONLY under
-   * fleet mode (composition root, closed over the same late-bound refs the
+   * Runner listener info accessors (hub/runner split, Wave3.5-D3). Set ONLY under
+   * runner mode (composition root, closed over the same late-bound refs the
    * `runnersRouter`'s `RunnersDeps` reads). Powers `POST /api/runners/join-token`
    * — the loopback channel the Electron MAIN process hits at boot to mint a token
    * for its auto-enrolling local runner (main has no tRPC client to the sidecar).
-   * Absent (fleet off — the default) → the route 503s and nothing mints, so the
+   * Absent (runner off — the default) → the route 503s and nothing mints, so the
    * default boot is byte-identical.
    */
   runners?: {
-    /** `wss://host:port/fleet` URL the join token embeds. Null until bound. */
+    /** `wss://host:port/runners` URL the join token embeds. Null until bound. */
     getHubUrl: () => string | null
     /** Hub TLS leaf sha256 (lowercase hex) the token pins. Null until loaded. */
     getCertFingerprint: () => string | null

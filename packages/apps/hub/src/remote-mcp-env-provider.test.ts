@@ -1,5 +1,5 @@
 /**
- * Unit tests for createRemoteMcpEnvProvider — the fleet-mode provider the
+ * Unit tests for createRemoteMcpEnvProvider — the runner-mode provider the
  * composition root injects via setRemoteMcpEnvProvider (hub/runner split, wave
  * 3.5). Asserts the RemoteMcpEnv contract: a runner-routed spawn resolves the
  * hub base URL (public-url override vs loopback boundPort) + mints a bearer that
@@ -21,7 +21,7 @@ function assert(cond: boolean, msg: string): void {
   pass++
 }
 
-const SECRET = 'fleet-secret-under-test-at-least-long-enough'
+const SECRET = 'runner-secret-under-test-at-least-long-enough'
 
 // Isolate SLAYZONE_HUB_PUBLIC_URL per case (the provider reads it live).
 function withPublicUrl<T>(value: string | undefined, fn: () => T): T {
@@ -40,7 +40,7 @@ function withPublicUrl<T>(value: string | undefined, fn: () => T): T {
 //    the minted token verifies under the SAME secret with the right scope.
 withPublicUrl(undefined, () => {
   const before = Date.now()
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => 4141 })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => 4141 })
   const env = provider({ taskId: 'task-1', runnerId: 'runner-a' })
   assert(env !== null, 'runner-routed spawn must resolve a non-null target')
   assert(env!.runnerId === 'runner-a', 'runnerId echoed back')
@@ -61,7 +61,7 @@ withPublicUrl(undefined, () => {
 
 // 2. A wrong secret must NOT verify the minted token (secret is load-bearing).
 withPublicUrl(undefined, () => {
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => 4141 })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => 4141 })
   const env = provider({ taskId: 'task-2', runnerId: 'r' })
   const bad = verifyTaskToken('a-totally-different-secret-value!!', env!.token!)
   assert(bad.ok === false, 'token must not verify under a different secret')
@@ -69,7 +69,7 @@ withPublicUrl(undefined, () => {
 
 // 3. SLAYZONE_HUB_PUBLIC_URL override wins over loopback + trailing slash stripped.
 withPublicUrl('https://hub.example:8443/', () => {
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => 4141 })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => 4141 })
   const env = provider({ taskId: 'task-3', runnerId: 'r' })
   assert(
     env!.hubBaseUrl === 'https://hub.example:8443',
@@ -80,19 +80,19 @@ withPublicUrl('https://hub.example:8443/', () => {
 // 3b. A set-but-malformed public URL (no scheme) → null, NOT a silent loopback
 //     substitution (operator asked for a remote base; degrade via the contract).
 withPublicUrl('hub.example:8443', () => {
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => 4141 })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => 4141 })
   assert(provider({ taskId: 't', runnerId: 'r' }) === null, 'malformed public URL → null')
 })
 
 // 3c. A non-http(s) scheme is rejected too.
 withPublicUrl('ftp://hub.example', () => {
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => 4141 })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => 4141 })
   assert(provider({ taskId: 't', runnerId: 'r' }) === null, 'non-http(s) public URL → null')
 })
 
 // 4. Taskless spawn (pooled agent, taskId undefined) → base resolved, token null.
 withPublicUrl(undefined, () => {
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => 4141 })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => 4141 })
   const env = provider({ taskId: undefined, runnerId: 'r' })
   assert(env !== null, 'taskless spawn still resolves a base')
   assert(env!.token === null, 'no task → null token (nothing to scope to)')
@@ -101,7 +101,7 @@ withPublicUrl(undefined, () => {
 // 5. Unresolvable base (port not bound yet, no public URL) → null (→ loopback
 //    fallback upstream, never a poisoned/unreachable hub target).
 withPublicUrl(undefined, () => {
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => 0 })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => 0 })
   const env = provider({ taskId: 'task-5', runnerId: 'r' })
   assert(env === null, 'no reachable base → null')
 })
@@ -110,7 +110,7 @@ withPublicUrl(undefined, () => {
 //    after — proving the closure reads the port at call time, not at build time.
 withPublicUrl(undefined, () => {
   let port = 0
-  const provider = createRemoteMcpEnvProvider({ fleetSecret: SECRET, getBoundPort: () => port })
+  const provider = createRemoteMcpEnvProvider({ runnerTransportSecret: SECRET, getBoundPort: () => port })
   assert(provider({ taskId: 't', runnerId: 'r' }) === null, 'null while port unbound')
   port = 5555
   const env = provider({ taskId: 't', runnerId: 'r' })

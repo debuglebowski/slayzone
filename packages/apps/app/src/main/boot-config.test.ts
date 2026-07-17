@@ -10,7 +10,7 @@ import {
   readBootConfig,
   writeBootSettings,
   probeRemoteHealth,
-  fleetEnvFor,
+  runnerTransportEnvFor,
   resolveHubRegistry,
   resolveDefaultHubId,
   localHubEntry,
@@ -110,58 +110,58 @@ describe('readBootConfig / writeBootSettings', () => {
     expect(JSON.parse(raw).server_mode).toBe('remote')
   })
 
-  it('fleet_mode is absent by default (byte-identical off)', () => {
-    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+  it('runners_enabled is absent by default (byte-identical off)', () => {
+    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
     writeBootSettings(dir, { server_mode: 'local' })
-    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
   })
 
-  it('round-trips fleet_mode: true and clears it back to absent', () => {
-    writeBootSettings(dir, { fleet_mode: true })
-    expect(readBootConfig(dir).fleet_mode).toBe(true)
-    writeBootSettings(dir, { fleet_mode: false })
-    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+  it('round-trips runners_enabled: true and clears it back to absent', () => {
+    writeBootSettings(dir, { runners_enabled: true })
+    expect(readBootConfig(dir).runners_enabled).toBe(true)
+    writeBootSettings(dir, { runners_enabled: false })
+    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
   })
 
-  it('ignores a non-true fleet_mode value on read (stays off)', () => {
+  it('ignores a non-true runners_enabled value on read (stays off)', () => {
     writeFileSync(
       join(dir, 'boot-config.json'),
-      JSON.stringify({ server_mode: 'local', fleet_mode: 'yes' })
+      JSON.stringify({ server_mode: 'local', runners_enabled: 'yes' })
     )
-    expect(readBootConfig(dir).fleet_mode).toBeUndefined()
+    expect(readBootConfig(dir).runners_enabled).toBeUndefined()
   })
 
-  it('fleet_mode is independent of server_mode', () => {
+  it('runners_enabled is independent of server_mode', () => {
     writeBootSettings(dir, { server_mode: 'remote', remote_server_url: 'ws://x:1/trpc' })
-    writeBootSettings(dir, { fleet_mode: true })
+    writeBootSettings(dir, { runners_enabled: true })
     const cfg = readBootConfig(dir)
     expect(cfg.server_mode).toBe('remote')
-    expect(cfg.fleet_mode).toBe(true)
+    expect(cfg.runners_enabled).toBe(true)
   })
 
-  it('a persisted fleet_mode:true flows into the sidecar env flag (renderer→boot→sidecar)', () => {
+  it('a persisted runners_enabled:true flows into the sidecar env flag (renderer→boot→sidecar)', () => {
     // Simulates the wave-3 gate bridge end to end at the config layer: the
-    // renderer's setBootSettings write persists fleet_mode, boot reads it back,
-    // and the sidecar env-builder lights SLAYZONE_FLEET_MODE.
-    writeBootSettings(dir, { fleet_mode: true })
-    expect(fleetEnvFor(readBootConfig(dir))).toEqual({ SLAYZONE_FLEET_MODE: '1' })
-    writeBootSettings(dir, { fleet_mode: false })
-    expect(fleetEnvFor(readBootConfig(dir))).toEqual({})
+    // renderer's setBootSettings write persists runners_enabled, boot reads it back,
+    // and the sidecar env-builder lights SLAYZONE_RUNNERS_ENABLED.
+    writeBootSettings(dir, { runners_enabled: true })
+    expect(runnerTransportEnvFor(readBootConfig(dir))).toEqual({ SLAYZONE_RUNNERS_ENABLED: '1' })
+    writeBootSettings(dir, { runners_enabled: false })
+    expect(runnerTransportEnvFor(readBootConfig(dir))).toEqual({})
   })
 })
 
-describe('fleetEnvFor', () => {
-  it('adds SLAYZONE_FLEET_MODE:1 only when fleet_mode is true', () => {
-    expect(fleetEnvFor({ fleet_mode: true })).toEqual({ SLAYZONE_FLEET_MODE: '1' })
+describe('runnerTransportEnvFor', () => {
+  it('adds SLAYZONE_RUNNERS_ENABLED:1 only when runners_enabled is true', () => {
+    expect(runnerTransportEnvFor({ runners_enabled: true })).toEqual({ SLAYZONE_RUNNERS_ENABLED: '1' })
   })
 
-  it('adds NOTHING when fleet_mode is false/unset (byte-identical off)', () => {
+  it('adds NOTHING when runners_enabled is false/unset (byte-identical off)', () => {
     // The var must be ABSENT (not empty-string / not "0") — composition reads
-    // `SLAYZONE_FLEET_MODE === '1'`, and an absent key keeps the spread a no-op.
-    expect(fleetEnvFor({ fleet_mode: false })).toEqual({})
-    expect(fleetEnvFor({})).toEqual({})
-    expect('SLAYZONE_FLEET_MODE' in fleetEnvFor({})).toBe(false)
-    expect('SLAYZONE_FLEET_MODE' in fleetEnvFor({ fleet_mode: false })).toBe(false)
+    // `SLAYZONE_RUNNERS_ENABLED === '1'`, and an absent key keeps the spread a no-op.
+    expect(runnerTransportEnvFor({ runners_enabled: false })).toEqual({})
+    expect(runnerTransportEnvFor({})).toEqual({})
+    expect('SLAYZONE_RUNNERS_ENABLED' in runnerTransportEnvFor({})).toBe(false)
+    expect('SLAYZONE_RUNNERS_ENABLED' in runnerTransportEnvFor({ runners_enabled: false })).toBe(false)
   })
 })
 
@@ -283,8 +283,9 @@ describe('resolveHubRegistry (synthesis / migration)', () => {
   })
 
   it('multi_hub on folds a not-yet-migrated remote_server_url into the list once', () => {
+    // server_mode 'local' → local is present; the stray remote_server_url folds in.
     const cfg: BootConfig = {
-      server_mode: 'remote',
+      server_mode: 'local',
       remote_server_url: 'wss://old.example.com/trpc',
       multi_hub: true,
       hubs: [{ id: 'fp-1', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }]
@@ -299,6 +300,21 @@ describe('resolveHubRegistry (synthesis / migration)', () => {
       remote_server_url: 'wss://prod.example.com/trpc'
     }
     expect(resolveHubRegistry(cfg2).map((h) => h.id)).toEqual([LOCAL_HUB_ID, 'fp-1'])
+  })
+
+  it('multi_hub on + server_mode remote → NO local (pure client, "run local hub" off)', () => {
+    const reg = resolveHubRegistry({
+      server_mode: 'remote',
+      multi_hub: true,
+      hubs: [{ id: 'fp-1', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }]
+    })
+    expect(reg.map((h) => h.id)).toEqual(['fp-1'])
+    expect(reg.some((h) => h.kind === 'local')).toBe(false)
+  })
+
+  it('server_mode remote but NO remotes → keeps local (never an empty registry)', () => {
+    const reg = resolveHubRegistry({ server_mode: 'remote', multi_hub: true })
+    expect(reg).toEqual([localHubEntry()])
   })
 })
 

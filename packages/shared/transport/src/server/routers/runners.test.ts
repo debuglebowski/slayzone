@@ -4,7 +4,7 @@
  * directly. Two dep classes are exercised:
  *   - pure runner-binding CRUD (list store rows, setTaskRunner,
  *     setProjectDefaultRunner, revokeRunner) — works with NO gateway wired.
- *   - live-fleet ops (list connection-status merge, mintJoinToken) — driven by a
+ *   - live-runner ops (list connection-status merge, mintJoinToken) — driven by a
  *     fake RunnersDeps registry (setRunnersDeps) standing in for the hub gateway.
  * Runs under the electron strict loader (better-sqlite3 native ABI).
  */
@@ -27,14 +27,14 @@ const taskId = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P', '#000')
 h.db.prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)').run(taskId, projectId, 'T')
 
-// Fake fleet gateway registry — one connected runner + a bound hub URL + cert.
+// Fake runner gateway registry — one connected runner + a bound hub URL + cert.
 let liveRunnerIds: string[] = []
 const fakeDeps: RunnersDeps = {
   getGateway: () => ({
     listRunners: () =>
       liveRunnerIds.map((runnerId) => ({ runnerId, connectedAt: 111, lastSeenAt: 222 }))
   }),
-  getHubUrl: () => 'ws://127.0.0.1:8788/fleet',
+  getHubUrl: () => 'ws://127.0.0.1:8788/runners',
   getCertFingerprint: () => 'abcdef0123456789'
 }
 setRunnersDeps(fakeDeps)
@@ -69,7 +69,7 @@ test('runners.mintJoinToken: returns a decodable szjt1 token embedding hub URL +
   expect(typeof minted.token).toBe('string')
   const payload = decodeJoinToken(minted.token)
   expect(payload).not.toBeNull()
-  expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/fleet')
+  expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/runners')
   expect(payload!.certFingerprint).toBe('abcdef0123456789')
   expect(minted.expiresAt).toBeGreaterThan(minted.createdAt)
 })
@@ -97,10 +97,10 @@ test('runners.revokeRunner: drops the runner from the active list', async () => 
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(false)
 })
 
-// Contract: with the gateway absent (fleet mode off), `list` still returns store
+// Contract: with the gateway absent (runner mode off), `list` still returns store
 // rows (all disconnected) and `mintJoinToken` fails cleanly instead of crashing.
 test('runners: list degrades + mintJoinToken throws when the gateway is unwired', async () => {
-  // Registry with no gateway + no URL — mirrors fleet-mode-off (never populated),
+  // Registry with no gateway + no URL — mirrors runner-mode-off (never populated),
   // but exercised here by resetting the deps to a null-gateway shape.
   setRunnersDeps({ getGateway: () => null, getHubUrl: () => null, getCertFingerprint: () => null })
 

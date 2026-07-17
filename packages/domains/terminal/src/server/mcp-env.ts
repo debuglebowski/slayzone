@@ -33,7 +33,7 @@ export interface RemoteMcpEnv {
 
 /**
  * Resolves the remote hub target (base URL + a freshly-minted per-task token)
- * for a session that spawns on a runner. Injected under fleet mode by the
+ * for a session that spawns on a runner. Injected under runner mode by the
  * composition root; UNSET by default (so `resolveRemoteMcpEnv` short-circuits to
  * `null` and every spawn keeps today's loopback env). Kept a plain function so
  * `buildMcpEnv` itself stays a pure function of its inputs — the impurity (mint
@@ -106,7 +106,7 @@ export async function buildMcpEnv(
    *  over the task-derived lookup so `SLAYZONE_PROJECT_ID` is always present,
    *  regardless of whether a task is bound yet. */
   projectId?: string,
-  /** Resolved remote hub target when this session runs on a runner (fleet mode).
+  /** Resolved remote hub target when this session runs on a runner (runner mode).
    *  Absent/`null` => local loopback env (byte-identical to before the seam). */
   remote?: RemoteMcpEnv | null
 ): Promise<Record<string, string>> {

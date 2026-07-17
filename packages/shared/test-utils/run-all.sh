@@ -60,7 +60,9 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cha
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
-run_test_electron_strict_loader packages/apps/hub/src/fleet-auth.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
+# Client↔hub /trpc connection-context seam — windowId parse + bearer→principal verify (real hub-auth).
+run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 # Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/runners.test.ts
@@ -86,15 +88,15 @@ run_test_electron_strict_loader packages/domains/diagnostics/src/electron/servic
 run_test packages/apps/hub/src/build-info.test.ts
 # mcp_server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts
-# Wave-3.5 remote-mcp-env provider (fleet-mode hub URL + scoped task token).
+# Wave-3.5 remote-mcp-env provider (runner-mode hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
-# Wave-3.5 fleet TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
-run_test packages/apps/hub/src/fleet-tls-listener.test.ts
+# Wave-3.5 runner TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
+run_test packages/apps/hub/src/runner-tls-listener.test.ts
 # Shared ~/.slayzone/config.json (hub+runner; env>file>default, auto-gen secret, race-safe).
 run_test packages/shared/platform/src/slayzone-config.test.ts
 run_test packages/apps/hub/src/standalone-config.test.ts
-# Wave-3.5 D5 fleet restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
-run_test_electron_strict_loader packages/apps/hub/src/fleet-restart-survival.test.ts
+# Wave-3.5 D5 runner restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
+run_test_electron_strict_loader packages/apps/hub/src/runner-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/runners/join-token.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
@@ -276,7 +278,7 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/task/src/client/taskDetailCache.test.ts \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
-  packages/domains/settings/src/client/tabs/FleetSettingsTab.test.tsx \
+  packages/domains/settings/src/client/tabs/RunnersSettingsTab.test.tsx \
   packages/domains/task/src/client/RunnerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/hub-auth/src/server/task-tokens.test.ts \

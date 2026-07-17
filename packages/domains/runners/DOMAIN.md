@@ -1,6 +1,6 @@
 # Runners Domain
 
-Fleet registry for the hub/runner split: which runner machines exist, how they
+Runner registry for the hub/runner split: which runner machines exist, how they
 enroll (single-use join tokens, sha256 hashes at rest), and where each runner
 has each project checked out. Wave 1 lands DARK — schema (migration v149) +
 store only, no tRPC router yet.

@@ -3,7 +3,7 @@ import type { AddressInfo } from 'net'
 import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
 
 /**
- * Slice 7 — remote URL /health probe from the Server settings tab.
+ * Remote-hub URL /health probe from the Connections → Hubs "Add a hub" form.
  *
  * The probe runs in the MAIN process (app:probe-server-health) against a real
  * HTTP server spun up by this spec — success answers GET /health with
@@ -39,24 +39,23 @@ test.describe('Remote server health probe', () => {
     }
   })
 
-  const openServerTab = async (mainWindow: import('@playwright/test').Page) => {
+  const openHubsTab = async (mainWindow: import('@playwright/test').Page) => {
     const dialog = mainWindow.getByRole('dialog').last()
     if (!(await dialog.isVisible().catch(() => false))) {
       await clickSettings(mainWindow)
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
     await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
-    await expect(dialog.getByTestId('server-mode-local')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByTestId('hub-add-url')).toBeVisible({ timeout: 5_000 })
     return dialog
   }
 
   test('probe success shows reachable + the normalized ws URL', async ({ mainWindow }) => {
-    const dialog = await openServerTab(mainWindow)
-    await dialog.getByTestId('server-mode-remote').check()
-    await dialog.getByTestId('server-remote-url').fill(`http://127.0.0.1:${port}`)
-    await dialog.getByTestId('server-probe-button').click()
+    const dialog = await openHubsTab(mainWindow)
+    await dialog.getByTestId('hub-add-url').fill(`http://127.0.0.1:${port}`)
+    await dialog.getByTestId('hub-probe').click()
 
-    const result = dialog.getByTestId('server-probe-result')
+    const result = dialog.getByTestId('hub-probe-result')
     await expect(result).toContainText('reachable', { timeout: 10_000 })
     await expect(result).toContainText(`ws://127.0.0.1:${port}/trpc`)
   })
@@ -66,12 +65,11 @@ test.describe('Remote server health probe', () => {
     await new Promise<void>((resolve) => server!.close(() => resolve()))
     server = null
 
-    const dialog = await openServerTab(mainWindow)
-    await dialog.getByTestId('server-mode-remote').check()
-    await dialog.getByTestId('server-remote-url').fill(`http://127.0.0.1:${port}`)
-    await dialog.getByTestId('server-probe-button').click()
+    const dialog = await openHubsTab(mainWindow)
+    await dialog.getByTestId('hub-add-url').fill(`http://127.0.0.1:${port}`)
+    await dialog.getByTestId('hub-probe').click()
 
-    await expect(dialog.getByTestId('server-probe-result')).toContainText('✗', {
+    await expect(dialog.getByTestId('hub-probe-result')).toContainText('✗', {
       timeout: 10_000
     })
   })
@@ -79,12 +77,11 @@ test.describe('Remote server health probe', () => {
   test('probe of an invalid URL reports validation error without a request', async ({
     mainWindow
   }) => {
-    const dialog = await openServerTab(mainWindow)
-    await dialog.getByTestId('server-mode-remote').check()
-    await dialog.getByTestId('server-remote-url').fill('garbage')
-    await dialog.getByTestId('server-probe-button').click()
+    const dialog = await openHubsTab(mainWindow)
+    await dialog.getByTestId('hub-add-url').fill('garbage')
+    await dialog.getByTestId('hub-probe').click()
 
-    await expect(dialog.getByTestId('server-probe-result')).toContainText('Invalid URL', {
+    await expect(dialog.getByTestId('hub-probe-result')).toContainText('Invalid URL', {
       timeout: 5_000
     })
     await mainWindow.keyboard.press('Escape')

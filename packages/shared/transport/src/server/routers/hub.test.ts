@@ -10,7 +10,7 @@
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
-import { setAppDeps, setHubDescribeDeps, type AppDeps } from '../app-deps.js'
+import { setAppDeps, setHubDescribeDeps, setAuthGate, type AppDeps } from '../app-deps.js'
 import { hubRouter } from './hub.js'
 
 const h = await createTestHarness()
@@ -44,4 +44,47 @@ test('hub.describe reflects wired identity deps (fingerprint + authRequired)', a
   expect(d.authRequired).toBe(true)
   // Reset so the unwired-default is not leaked into other suites in-process.
   setHubDescribeDeps({ getFingerprint: () => null, getAuthRequired: () => false })
+})
+
+// ── Auth gate (Phase 6 enforcement) ──────────────────────────────────────────
+
+test('auth gate OFF: gated procedures run without a principal (byte-identical)', async () => {
+  setAuthGate(() => false)
+  // setLabel is a gated (publicProcedure) call — must succeed when the gate is off.
+  await caller.setLabel({ label: 'no-auth-ok' })
+  expect((await caller.describe()).label).toBe('no-auth-ok')
+})
+
+test('auth gate ON + no principal: gated proc 401s, but open describe still works', async () => {
+  setAuthGate(() => true)
+  // describe is openProcedure → reachable for discovery even without a principal.
+  const d = await caller.describe()
+  expect(d.label).toBe('no-auth-ok')
+  // setLabel is gated → UNAUTHORIZED (ctx has no principal).
+  let caught: unknown = null
+  try {
+    await caller.setLabel({ label: 'should-not-persist' })
+  } catch (e) {
+    caught = e
+  }
+  expect(caught).not.toBeNull()
+  // TRPCError carries `.code` (string) + the message we set.
+  const err = caught as { code?: string; message?: string }
+  expect(err.code === 'UNAUTHORIZED' || (err.message ?? '').includes('requires authentication')).toBe(
+    true
+  )
+  // The rejected write did not persist.
+  expect((await caller.describe()).label).toBe('no-auth-ok')
+})
+
+test('auth gate ON + principal present: gated proc runs', async () => {
+  setAuthGate(() => true)
+  const authedCaller = hubRouter.createCaller({
+    db: h.slayDb,
+    principal: { userId: 'u1', orgId: null }
+  } as never)
+  await authedCaller.setLabel({ label: 'authed-write' })
+  expect((await authedCaller.describe()).label).toBe('authed-write')
+  // Reset the gate so other in-process suites are unaffected.
+  setAuthGate(() => false)
 })

@@ -4,7 +4,7 @@
  * {@link assertPathAllowed} realpath containment guard before any access.
  *
  * The fs.* frame method names + param shapes are OWNED by the parallel
- * Wave2-A2 unit and are not yet in `@slayzone/fleet/shared`; the names/schemas
+ * Wave2-A2 unit and are not yet in `@slayzone/runner-transport/shared`; the names/schemas
  * below MIRROR the agreed contract and a later integration reconciles them.
  *
  * @module runner/handlers/fs

@@ -36,7 +36,7 @@ const api: ElectronAPI = {
     getServerUrl: () =>
       ipcRenderer.invoke('app:get-server-url') as Promise<{ mode: 'local' | 'remote'; url: string }>,
     getBootConfig: () =>
-      ipcRenderer.invoke('app:get-boot-config') as Promise<{ fleetMode: boolean; multiHub: boolean }>,
+      ipcRenderer.invoke('app:get-boot-config') as Promise<{ runnersEnabled: boolean; multiHub: boolean }>,
     getHubRegistry: () =>
       ipcRenderer.invoke('app:get-hub-registry') as Promise<{
         hubs: HubEntry[]
@@ -46,6 +46,10 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:get-hub-tokens') as Promise<Record<string, string>>,
     setHubToken: (payload) =>
       ipcRenderer.invoke('app:set-hub-token', payload) as Promise<{ ok: true }>,
+    hubLogin: (payload) =>
+      ipcRenderer.invoke('app:hub-login', payload) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     getWindowId: () => ipcRenderer.invoke('app:get-window-id') as Promise<number | null>,
     relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
     setBootSettings: (payload) =>

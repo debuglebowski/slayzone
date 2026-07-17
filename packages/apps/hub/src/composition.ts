@@ -112,18 +112,18 @@ import {
   setProcessBackend,
   localProcessBackend
 } from '@slayzone/processes/server'
-// Hub/runner split (wave 2B): fleet gateway + hub-auth + runner resolution,
-// wired only under the `fleet_mode` gate below. All dark by default.
+// Hub/runner split (wave 2B): runner gateway + hub-auth + runner resolution,
+// wired only under the `runners_enabled` gate below. All dark by default.
 import {
-  createHubFleetGateway,
+  createHubRunnerGateway,
   createRoutingPtyBackend,
   createRoutingProcessBackend,
   createRemoteWorktreeAdapters,
-  type HubFleetGateway
-} from '@slayzone/fleet/server'
+  type HubRunnerGateway
+} from '@slayzone/runner-transport/server'
 import { createHubAuth, verifyTaskToken, type HubAuth } from '@slayzone/hub-auth/server'
 import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runners/server'
-import { createFleetAuthAdapters } from './fleet-auth.js'
+import { createRunnerAuthAdapters } from './runner-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 
 /**
@@ -164,24 +164,24 @@ export type ServerComposition = {
   restDeps: RestApiDeps
   /** Late-bound by the server once listen() resolves the actual port. */
   setBoundPort: (port: number) => void
-  /** Hub fleet gateway (runner-WS multiplexer), or `null` when fleet mode is off
+  /** Hub runner gateway (runner-WS multiplexer), or `null` when runner mode is off
    *  or its async init hasn't resolved yet. A later unit mounts it onto the
-   *  server's WS upgrade path (see `fleetReady`). */
-  readonly fleetGateway: HubFleetGateway | null
+   *  server's WS upgrade path (see `runnersReady`). */
+  readonly runnerGateway: HubRunnerGateway | null
   /** Hub-auth (better-auth) instance backing runner enroll/verify, or `null`
-   *  (same gating as `fleetGateway`). */
+   *  (same gating as `runnerGateway`). */
   readonly hubAuth: HubAuth | null
-  /** Resolves once the async fleet init has finished (already-resolved no-op when
-   *  fleet mode is off). A later unit awaits this before reading the two fields
+  /** Resolves once the async runner init has finished (already-resolved no-op when
+   *  runner mode is off). A later unit awaits this before reading the two fields
    *  above / mounting the gateway. */
-  fleetReady: Promise<void>
-  /** Feed the fleet listener's bound WS URL + the hub identity's TLS cert
+  runnersReady: Promise<void>
+  /** Feed the runner listener's bound WS URL + the hub identity's TLS cert
    *  fingerprint back into the runners registry (`mintJoinToken` embeds both in
-   *  a join token). The server host resolves these only after it binds the fleet
+   *  a join token). The server host resolves these only after it binds the runner
    *  port + loads `loadOrCreateHubIdentity`, which happens AFTER composeServer
    *  returns — so it's a late-bound setter, not a constructor arg. No-op when
-   *  fleet mode is off (the runners registry was never populated). */
-  setFleetListenerInfo: (info: { hubUrl: string; certFingerprint: string }) => void
+   *  runner mode is off (the runners registry was never populated). */
+  setRunnerListenerInfo: (info: { hubUrl: string; certFingerprint: string }) => void
 }
 
 export function composeServer(opts: {
@@ -198,21 +198,21 @@ export function composeServer(opts: {
   const { db, dataRoot } = opts
   const supervised = !opts.standalone
 
-  // --- Fleet mode gate (hub/runner split, wave 2B) ---------------------------
+  // --- Runner mode gate (hub/runner split, wave 2B) ---------------------------
   // Single lever: when OFF (default) NOTHING below builds a gateway/auth or swaps
   // an exec backend, so the composition is byte-identical to today (every spawn
   // stays hub-local via the seams' local defaults). A later unit replaces this
   // env probe with the real boot-config field. Runner routing is opt-in.
-  const isFleetEnabled = process.env.SLAYZONE_FLEET_MODE === '1'
+  const isRunnersEnabled = process.env.SLAYZONE_RUNNERS_ENABLED === '1'
   // Single HMAC secret backing ALL hub-auth signing: better-auth's session/cookie
   // signer (createHubAuth) AND the per-task bearer tokens the remote-MCP-env
   // provider mints (mintTaskToken) / the agent-hook route verifies
   // (verifyTaskToken). Hoisted so all three use ONE secret — a mismatch would make
   // every minted token unverifiable.
   //
-  // SECURITY SEAM (fleet-secret hardening): a STANDALONE boot resolves this in
-  // bin.ts (applyStandaloneHubConfig → env SLAYZONE_FLEET_SECRET > config.json
-  // fleetSecret > generated+persisted 256-bit secret) and sets the env BEFORE
+  // SECURITY SEAM (runner-secret hardening): a STANDALONE boot resolves this in
+  // bin.ts (applyStandaloneHubConfig → env SLAYZONE_RUNNER_TRANSPORT_SECRET > config.json
+  // runnerTransportSecret > generated+persisted 256-bit secret) and sets the env BEFORE
   // composeServer runs. So in standalone the env is ALWAYS present and NEVER the
   // shared dev constant — a per-install unique secret means minted per-task
   // tokens can't be forged across installs (the npm-published bug). We assert
@@ -220,28 +220,28 @@ export function composeServer(opts: {
   // (Electron host) keeps the historical env-or-dev-constant default untouched:
   // the host controls the env, config.json is never consulted, and a dev/test
   // boot without the env still works exactly as before.
-  const DEV_FLEET_SECRET = 'slayzone-dev-fleet-secret'
-  if (opts.standalone && !process.env.SLAYZONE_FLEET_SECRET) {
+  const DEV_RUNNER_TRANSPORT_SECRET = 'slayzone-dev-runner-secret'
+  if (opts.standalone && !process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET) {
     // bin.ts must have seeded this; a standalone boot that reached composeServer
     // without it means the resolve step was skipped — fail loud instead of
     // signing tokens with a shared, forgeable constant.
     throw new Error(
-      '[slayzone-hub] standalone boot reached composeServer without SLAYZONE_FLEET_SECRET — ' +
+      '[slayzone-hub] standalone boot reached composeServer without SLAYZONE_RUNNER_TRANSPORT_SECRET — ' +
         'applyStandaloneHubConfig() must run first (bin.ts)'
     )
   }
-  const fleetSecret = process.env.SLAYZONE_FLEET_SECRET ?? DEV_FLEET_SECRET
-  // Populated by the async fleet init (createHubAuth is async — migrations); a
-  // later unit reads these after `fleetReady` to mount the gateway in server.ts.
-  let fleetGatewayRef: HubFleetGateway | null = null
+  const runnerTransportSecret = process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET ?? DEV_RUNNER_TRANSPORT_SECRET
+  // Populated by the async runner init (createHubAuth is async — migrations); a
+  // later unit reads these after `runnersReady` to mount the gateway in server.ts.
+  let runnerGatewayRef: HubRunnerGateway | null = null
   let hubAuthRef: HubAuth | null = null
-  let fleetReady: Promise<void> = Promise.resolve()
-  // Fleet listener info the runners router bakes into a join token — bound late
-  // by the server host (setFleetListenerInfo) once it knows its own fleet URL +
+  let runnersReady: Promise<void> = Promise.resolve()
+  // Runner listener info the runners router bakes into a join token — bound late
+  // by the server host (setRunnerListenerInfo) once it knows its own runner URL +
   // cert fingerprint. Null until then, so `mintJoinToken` fails cleanly if
   // called before the listener is up.
-  let fleetHubUrl: string | null = null
-  let fleetCertFingerprint: string | null = null
+  let runnerHubUrl: string | null = null
+  let runnerCertFingerprint: string | null = null
 
   // Make this process's diagnostics queryable (pty + agent-pool run here). Bind
   // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
@@ -302,7 +302,7 @@ export function composeServer(opts: {
   // standalone mode only, when the engine is started (slice 7).
   const taskBus = new EventEmitter()
   // Base task runtime adapters (no worktrees override → the task server's local
-  // git/fs default stays bound). Extracted so the fleet-mode path can re-supply a
+  // git/fs default stays bound). Extracted so the runner-mode path can re-supply a
   // COMPLETE object (configureTaskRuntimeAdapters shallow-merges over DEFAULTS,
   // not over the prior call — a partial second call would drop these fields).
   const baseTaskAdapters = {
@@ -414,13 +414,13 @@ export function composeServer(opts: {
     isDarkTheme: () => true,
     bus: { on: () => undefined }
   })
-  // Fleet mode: inject runner-aware spawn lookups BEFORE createPtyOps (which
+  // Runner mode: inject runner-aware spawn lookups BEFORE createPtyOps (which
   // captures the lookups at construction). Only `resolveRunnerId` is overridden —
   // it needs the db, not the gateway, so it's safe to wire synchronously here;
   // the mode-row / project-id reads keep their db defaults. With no runner
   // assigned, `resolveTaskRunnerId` returns null → the spec carries a null
   // runnerId → every routing backend below falls through to local (byte-identical).
-  if (isFleetEnabled) {
+  if (isRunnersEnabled) {
     const dbLookups = createDbPtySpawnLookups(db)
     setPtySpawnLookups({
       ...dbLookups,
@@ -804,23 +804,23 @@ export function composeServer(opts: {
     agentLifecycle: agentLifecycleEvents,
     menu: menuEvents,
     taskBus,
-    // Fleet mode only: enforce the per-task hub bearer a runner-routed pty's hook
-    // carries. Verifier is closed over `fleetSecret` (the SAME secret the provider
-    // above mints with). Undefined when fleet is off → the agent-hook route skips
+    // Runner mode only: enforce the per-task hub bearer a runner-routed pty's hook
+    // carries. Verifier is closed over `runnerTransportSecret` (the SAME secret the provider
+    // above mints with). Undefined when runner is off → the agent-hook route skips
     // enforcement (loopback hooks, which send no bearer, stay byte-identical).
-    verifyTaskToken: isFleetEnabled
-      ? (token: string) => verifyTaskToken(fleetSecret, token)
+    verifyTaskToken: isRunnersEnabled
+      ? (token: string) => verifyTaskToken(runnerTransportSecret, token)
       : undefined,
-    // Fleet listener info for the loopback `POST /api/runners/join-token` route
+    // Runner listener info for the loopback `POST /api/runners/join-token` route
     // (Wave3.5-D3) — the MAIN process's boot-time auto-enroll mints through it
     // (no tRPC client in main). Closed over the SAME late-bound refs the runners
-    // registry reads (setFleetListenerInfo feeds them once the /fleet listener
-    // binds). Wired ONLY under fleet mode; absent → the route 503s and nothing
+    // registry reads (setRunnerListenerInfo feeds them once the /runners listener
+    // binds). Wired ONLY under runner mode; absent → the route 503s and nothing
     // mints, so the default boot is byte-identical.
-    runners: isFleetEnabled
+    runners: isRunnersEnabled
       ? {
-          getHubUrl: () => fleetHubUrl,
-          getCertFingerprint: () => fleetCertFingerprint
+          getHubUrl: () => runnerHubUrl,
+          getCertFingerprint: () => runnerCertFingerprint
         }
       : undefined,
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
@@ -863,7 +863,7 @@ export function composeServer(opts: {
   // the local emitters (set via setAppDeps above) exist before frames arrive.
   bridge?.connect()
 
-  // --- Fleet gateway + hub-auth (async; dark until a runner enrolls) ----------
+  // --- Runner gateway + hub-auth (async; dark until a runner enrolls) ----------
   // Built off the main path because `createHubAuth` runs better-auth migrations
   // (async). Ordering is safe: the ledger DB stays local (Model A — never
   // proxied); `setPtySpawnLookups` already ran synchronously above; and the
@@ -871,36 +871,36 @@ export function composeServer(opts: {
   // so injecting them once the gateway resolves takes effect for later spawns
   // without a mid-session straddle. With no runner registered every spawn's
   // resolved runnerId is null → the routing backends fall through to local, so
-  // behavior matches fleet-OFF until a runner actually enrolls.
-  if (isFleetEnabled) {
+  // behavior matches runner-OFF until a runner actually enrolls.
+  if (isRunnersEnabled) {
     // Populate the runners registry synchronously (the router may be called
     // before the async gateway init below resolves). The getters read the
     // late-bound refs, so `list` sees the gateway once it exists and
     // `mintJoinToken` sees the URL/fingerprint once the server host feeds them
-    // via setFleetListenerInfo. When fleet mode is OFF this is never called, so
-    // getRunnersDeps() throws and the fleet-dependent procs fail cleanly.
+    // via setRunnerListenerInfo. When runner mode is OFF this is never called, so
+    // getRunnersDeps() throws and the runner-dependent procs fail cleanly.
     setRunnersDeps({
-      getGateway: () => fleetGatewayRef,
-      getHubUrl: () => fleetHubUrl,
-      getCertFingerprint: () => fleetCertFingerprint
+      getGateway: () => runnerGatewayRef,
+      getHubUrl: () => runnerHubUrl,
+      getCertFingerprint: () => runnerCertFingerprint
     })
 
     // Remote-MCP-env provider (hub/runner split, wave 3.5). Wired synchronously
     // here — it depends only on boundPort (read LAZILY inside the closure) +
-    // fleetSecret, neither of which needs the async gateway — so a runner-routed
-    // pty spawned before `fleetReady` resolves still gets a valid hub env. With
-    // no provider (fleet OFF) `resolveRemoteMcpEnv` short-circuits to null and
+    // runnerTransportSecret, neither of which needs the async gateway — so a runner-routed
+    // pty spawned before `runnersReady` resolves still gets a valid hub env. With
+    // no provider (runner OFF) `resolveRemoteMcpEnv` short-circuits to null and
     // every spawn keeps today's loopback env, byte-identical. See
     // `createRemoteMcpEnvProvider` for hubBaseUrl derivation + SLAYZONE_HUB_PUBLIC_URL.
     setRemoteMcpEnvProvider(
-      createRemoteMcpEnvProvider({ fleetSecret, getBoundPort: () => boundPort })
+      createRemoteMcpEnvProvider({ runnerTransportSecret, getBoundPort: () => boundPort })
     )
 
-    fleetReady = (async () => {
+    runnersReady = (async () => {
       const hubAuth = await createHubAuth({
         dbPath: join(dataRoot, 'hub-auth.sqlite'),
-        baseURL: process.env.SLAYZONE_FLEET_BASE_URL ?? 'http://127.0.0.1:8788',
-        secret: fleetSecret
+        baseURL: process.env.SLAYZONE_RUNNER_TRANSPORT_BASE_URL ?? 'http://127.0.0.1:8788',
+        secret: runnerTransportSecret
       })
       hubAuthRef = hubAuth
       // Identity-based local-runner dedup (Wave3.5-D5): tell the auth adapters
@@ -911,24 +911,24 @@ export function composeServer(opts: {
       // override), so they can't silently diverge. Remote runners (any other name)
       // keep the fresh-uuid path.
       const localRunnerName = process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME
-      const fleetGateway = createHubFleetGateway(
-        createFleetAuthAdapters({ db, auth: hubAuth, localRunnerName })
+      const runnerGateway = createHubRunnerGateway(
+        createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
       )
-      fleetGatewayRef = fleetGateway
+      runnerGatewayRef = runnerGateway
 
       // Route OS-level exec (pty/proc) to the resolved runner; a null runnerId
       // (baked into the spec by the runner-aware spawn lookups above) falls
       // through to the in-process local backend.
       setPtyBackend(
         createRoutingPtyBackend({
-          gateway: fleetGateway,
+          gateway: runnerGateway,
           local: localPtyBackend,
           resolveRunnerId: (spec) => spec.runnerId ?? null
         })
       )
       setProcessBackend(
         createRoutingProcessBackend({
-          gateway: fleetGateway,
+          gateway: runnerGateway,
           local: localProcessBackend,
           resolveRunnerId: (spec) => spec.runnerId ?? null
         })
@@ -938,7 +938,7 @@ export function composeServer(opts: {
       configureTaskRuntimeAdapters({
         ...baseTaskAdapters,
         worktrees: createRemoteWorktreeAdapters({
-          gateway: fleetGateway,
+          gateway: runnerGateway,
           // Per-task worktree runner routing is a later unit — the WorktreeExecAdapters
           // seam carries no task id, so there's no task context to route on here.
           // null keeps worktree git/fs work hub-local (createRemoteWorktreeAdapters
@@ -951,7 +951,7 @@ export function composeServer(opts: {
       recordDiagnosticEvent({
         level: 'error',
         source: 'task',
-        event: 'fleet.init_failed',
+        event: 'runner.init_failed',
         message: err instanceof Error ? err.message : String(err)
       })
     })
@@ -964,16 +964,16 @@ export function composeServer(opts: {
     setBoundPort: (port: number) => {
       boundPort = port
     },
-    get fleetGateway(): HubFleetGateway | null {
-      return fleetGatewayRef
+    get runnerGateway(): HubRunnerGateway | null {
+      return runnerGatewayRef
     },
     get hubAuth(): HubAuth | null {
       return hubAuthRef
     },
-    fleetReady,
-    setFleetListenerInfo: (info) => {
-      fleetHubUrl = info.hubUrl
-      fleetCertFingerprint = info.certFingerprint
+    runnersReady,
+    setRunnerListenerInfo: (info) => {
+      runnerHubUrl = info.hubUrl
+      runnerCertFingerprint = info.certFingerprint
     }
   }
 }

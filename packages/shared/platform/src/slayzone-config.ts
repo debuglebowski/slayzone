@@ -2,13 +2,13 @@
  * Shared SlayZone config file — a SINGLE JSON document at
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
- * the keys it cares about (hub: fleetMode/fleetSecret/dbPath/port/fleetPort/
+ * the keys it cares about (hub: runnersEnabled/runnerTransportSecret/dbPath/port/runnerTransportPort/
  * publicUrl; runner: joinToken/runnerName/hubUrl).
  *
  * Precedence everywhere: env var > config.json > generated/default. The file is
  * the BASE — env can still override it (e.g. CI). Only keys that are actually
- * set are persisted; derived state (the resolved fleet listener port) stays in
- * the DB (`settings.fleet_server_port`) and is NEVER written here.
+ * set are persisted; derived state (the resolved runner listener port) stays in
+ * the DB (`settings.runner_transport_port`) and is NEVER written here.
  *
  * SUPERVISED mode (Electron host, `SLAYZONE_SUPERVISED=1`) must NOT touch this
  * file at all — the callers gate reads/writes on `!SUPERVISED`. Nothing in this
@@ -39,17 +39,17 @@ import { getSlayzoneHomeDir } from './dirs'
  */
 export interface SlayzoneConfig {
   // --- hub keys ---
-  /** Enable fleet mode (equivalent to `SLAYZONE_FLEET_MODE=1`). */
-  fleetMode?: boolean
+  /** Enable runner mode (equivalent to `SLAYZONE_RUNNERS_ENABLED=1`). */
+  runnersEnabled?: boolean
   /** HMAC secret backing hub-auth + per-task token mint/verify. Auto-generated
-   *  + persisted on first standalone boot if absent (see ensureFleetSecret). */
-  fleetSecret?: string
+   *  + persisted on first standalone boot if absent (see ensureRunnerTransportSecret). */
+  runnerTransportSecret?: string
   /** Absolute SQLite path (`SLAYZONE_DB_PATH` default). */
   dbPath?: string
   /** tRPC/HTTP listen port (`SLAYZONE_PORT`). */
   port?: number
-  /** Fleet `/fleet` https listener port (`SLAYZONE_FLEET_PORT`). */
-  fleetPort?: number
+  /** Runner `/runners` https listener port (`SLAYZONE_RUNNER_TRANSPORT_PORT`). */
+  runnerTransportPort?: number
   /** Public hub base URL advertised to remote runners (`SLAYZONE_HUB_PUBLIC_URL`). */
   publicUrl?: string
   // --- runner keys ---
@@ -57,14 +57,14 @@ export interface SlayzoneConfig {
   joinToken?: string
   /** Human-readable runner name (`SLAYZONE_RUNNER_NAME`). */
   runnerName?: string
-  /** `ws(s)://` hub fleet endpoint a standalone runner dials (`SLAYZONE_HUB_URL`). */
+  /** `ws(s)://` hub runner endpoint a standalone runner dials (`SLAYZONE_HUB_URL`). */
   hubUrl?: string
 }
 
 /** The dev fallback secret hard-coded in composition.ts. Standalone boots MUST
  *  resolve to something OTHER than this (env / config / generated). Exported so
  *  callers + tests can assert against it. */
-export const DEV_FLEET_SECRET = 'slayzone-dev-fleet-secret'
+export const DEV_RUNNER_TRANSPORT_SECRET = 'slayzone-dev-runner-secret'
 
 /** Absolute path to the shared config file (`<home>/config.json`). Honors
  *  SLAYZONE_HOME_DIR via getSlayzoneHomeDir. */
@@ -76,13 +76,13 @@ export function getSlayzoneConfigPath(): string {
  *  values rather than throwing (a partially-corrupt file must not brick boot). */
 function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   const cfg: SlayzoneConfig = {}
-  if (typeof raw.fleetMode === 'boolean') cfg.fleetMode = raw.fleetMode
-  if (typeof raw.fleetSecret === 'string' && raw.fleetSecret.length > 0)
-    cfg.fleetSecret = raw.fleetSecret
+  if (typeof raw.runnersEnabled === 'boolean') cfg.runnersEnabled = raw.runnersEnabled
+  if (typeof raw.runnerTransportSecret === 'string' && raw.runnerTransportSecret.length > 0)
+    cfg.runnerTransportSecret = raw.runnerTransportSecret
   if (typeof raw.dbPath === 'string' && raw.dbPath.length > 0) cfg.dbPath = raw.dbPath
   if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
-  if (typeof raw.fleetPort === 'number' && Number.isInteger(raw.fleetPort))
-    cfg.fleetPort = raw.fleetPort
+  if (typeof raw.runnerTransportPort === 'number' && Number.isInteger(raw.runnerTransportPort))
+    cfg.runnerTransportPort = raw.runnerTransportPort
   if (typeof raw.publicUrl === 'string' && raw.publicUrl.length > 0) cfg.publicUrl = raw.publicUrl
   if (typeof raw.joinToken === 'string' && raw.joinToken.length > 0) cfg.joinToken = raw.joinToken
   if (typeof raw.runnerName === 'string' && raw.runnerName.length > 0)
@@ -131,13 +131,13 @@ export function loadSlayzoneConfig(configPath: string = getSlayzoneConfigPath())
 /**
  * Atomically write the shared config file. Creates the home dir 0700 and writes
  * the file 0600 (tmp-sibling + rename, so a crash never leaves a half-written
- * file), mirroring fleet's credential-store. Only the passed keys are written —
+ * file), mirroring runner's credential-store. Only the passed keys are written —
  * pass the FULL desired config (callers usually go through updateSlayzoneConfig,
  * which merges over the on-disk base).
  *
  * WINDOWS CAVEAT: the `mode` (0700/0600) is a POSIX permission bitmask and is a
  * no-op on Windows — NTFS ACLs are not touched. The atomic tmp+rename still
- * holds; only the perm hardening is POSIX-only (same limitation as the fleet
+ * holds; only the perm hardening is POSIX-only (same limitation as the runner
  * credential-store).
  */
 export function saveSlayzoneConfig(
@@ -159,7 +159,7 @@ export function saveSlayzoneConfig(
 /**
  * Merge `patch` over the on-disk config and persist the result (atomic, 0600).
  * Reads the current file first so a focused single-key update (e.g. persisting a
- * freshly generated fleetSecret) never clobbers other keys. Returns the merged
+ * freshly generated runnerTransportSecret) never clobbers other keys. Returns the merged
  * config. Undefined patch values are ignored (they don't erase existing keys).
  */
 export function updateSlayzoneConfig(
@@ -176,7 +176,7 @@ export function updateSlayzoneConfig(
 }
 
 /**
- * Resolve the fleet secret for a STANDALONE boot: config.json `fleetSecret` if
+ * Resolve the runner secret for a STANDALONE boot: config.json `runnerTransportSecret` if
  * present, else generate a fresh 256-bit hex secret and PERSIST it into the
  * config file (0600) so it is stable across reboots. Never returns the shared
  * dev constant. The caller layers env on top (env > this) — see the hub's
@@ -196,12 +196,12 @@ export function updateSlayzoneConfig(
  * hand-authored partial config raced by two hubs, which is not a real
  * deployment shape (a single hub per host is the norm).
  */
-export function ensureFleetSecret(configPath: string = getSlayzoneConfigPath()): string {
+export function ensureRunnerTransportSecret(configPath: string = getSlayzoneConfigPath()): string {
   const existing = loadSlayzoneConfig(configPath)
-  if (existing.fleetSecret) return existing.fleetSecret
+  if (existing.runnerTransportSecret) return existing.runnerTransportSecret
 
   const candidate = randomBytes(32).toString('hex')
-  const merged: SlayzoneConfig = { ...existing, fleetSecret: candidate }
+  const merged: SlayzoneConfig = { ...existing, runnerTransportSecret: candidate }
 
   // Atomic create-if-absent: `wx` fails with EEXIST if the file already exists,
   // so only one concurrent fresh boot wins the create. dir 0700 / file 0600
@@ -218,7 +218,7 @@ export function ensureFleetSecret(configPath: string = getSlayzoneConfigPath()):
   // its secret, convergence) or it pre-existed with other keys but no secret
   // (re-read has none → merge our candidate in, preserving those keys).
   const afterRace = loadSlayzoneConfig(configPath)
-  if (afterRace.fleetSecret) return afterRace.fleetSecret
-  const finalCfg = updateSlayzoneConfig({ fleetSecret: candidate }, configPath)
-  return finalCfg.fleetSecret ?? candidate
+  if (afterRace.runnerTransportSecret) return afterRace.runnerTransportSecret
+  const finalCfg = updateSlayzoneConfig({ runnerTransportSecret: candidate }, configPath)
+  return finalCfg.runnerTransportSecret ?? candidate
 }

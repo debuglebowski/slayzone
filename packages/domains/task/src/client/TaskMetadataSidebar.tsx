@@ -55,7 +55,7 @@ export function TaskMetadataSidebar({
   const selectedProject = projects.find((project) => project.id === task.project_id)
   const columnsConfig = selectedProject?.columns_config
 
-  // Fleet runner bindings (hub/runner split). `runner_id` / `default_runner_id`
+  // Runner runner bindings (hub/runner split). `runner_id` / `default_runner_id`
   // are v149 columns present at runtime (parseTask/parseProject spread the row)
   // but not yet on the shared Task/Project types — read via a narrow local cast.
   const taskRunnerId = (task as { runner_id?: string | null }).runner_id ?? null

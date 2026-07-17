@@ -7,9 +7,10 @@ import {
   createMcpRestApp,
   parseAuthCallbackUrl,
   getAuthEvents,
-  setHubDescribeDeps
+  setHubDescribeDeps,
+  setAuthGate
 } from '@slayzone/transport/server'
-import { createAuthExpressApp, verifySession } from '@slayzone/hub-auth/server'
+import { createAuthExpressApp } from '@slayzone/hub-auth/server'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import { ensureDataRoot, getServerHost, getTrpcPort } from '@slayzone/platform'
 import {
@@ -18,12 +19,13 @@ import {
   openServerDiagnosticsDatabase
 } from './db.js'
 import { composeServer } from './composition.js'
-import { startFleetListener } from './fleet-listener.js'
+import { startRunnerListener } from './runner-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
 import { createLogger } from './log.js'
-import { claimMcpServerPort, claimFleetServerPort, resolveDesiredFleetPort } from './port-claim.js'
+import { claimMcpServerPort, claimRunnerServerPort, resolveDesiredRunnerPort } from './port-claim.js'
+import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
 
@@ -88,33 +90,33 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
 
-  // --- Fleet mode (hub/runner split, wave 2B) --------------------------------
-  // `composition.fleetReady` resolves the async fleet init (createHubAuth runs
-  // better-auth migrations). It is an already-resolved no-op when fleet mode is
+  // --- Runner mode (hub/runner split, wave 2B) --------------------------------
+  // `composition.runnersReady` resolves the async runner init (createHubAuth runs
+  // better-auth migrations). It is an already-resolved no-op when runner mode is
   // off, so awaiting it is invisible on the default path — no listener, no
   // identity load, no mount happens below when the gateway/auth are null.
-  await composition.fleetReady
-  const fleetGateway = composition.fleetGateway
+  await composition.runnersReady
+  const runnerGateway = composition.runnerGateway
   const hubAuth = composition.hubAuth
   // better-auth express app for `/api/auth/*`. Mounted via a direct dispatch in
   // the HTTP request handler BELOW (not inside the mcpRest express app) so the
   // RAW request body reaches better-auth — mcpRest applies `express.json()`,
   // which would consume the body before better-auth sees it.
   const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
-  // Hub TLS identity — loaded only under fleet mode (creates <dataRoot>/identity/
+  // Hub TLS identity — loaded only under runner mode (creates <dataRoot>/identity/
   // on first run). Its `fingerprintSha256Hex` is fed to the runners registry so
   // `mintJoinToken` can pin it in a join token, AND its key/cert terminate TLS on
-  // the SEPARATE https `/fleet` listener stood up below. Cert-pinning is enforced
+  // the SEPARATE https `/runners` listener stood up below. Cert-pinning is enforced
   // end-to-end: the hub presents this leaf, the runner pins its fingerprint (from
-  // the join token) before sending any fleet frame (see hub-dialer verifyPinnedCert).
+  // the join token) before sending any runner frame (see hub-dialer verifyPinnedCert).
   //
-  // The /fleet listener is its OWN https server on its OWN port — the shared HTTP
+  // The /runners listener is its OWN https server on its OWN port — the shared HTTP
   // server (/trpc + /health + /mcp + /api + REST-proxy) stays plain http, so the
   // renderer / CLI / e2e loopback assumptions are byte-identical. Upgrading the
-  // muxed server to https would have risked all of those; isolating fleet onto a
-  // second listener keeps the blast radius to fleet-mode-only.
-  const hubIdentity = fleetGateway ? await loadOrCreateHubIdentity(dataRoot) : null
-  if (fleetGateway) log('fleet mode enabled (gateway + hub-auth + identity loaded)')
+  // muxed server to https would have risked all of those; isolating runner onto a
+  // second listener keeps the blast radius to runner-mode-only.
+  const hubIdentity = runnerGateway ? await loadOrCreateHubIdentity(dataRoot) : null
+  if (runnerGateway) log('runner mode enabled (gateway + hub-auth + identity loaded)')
 
   // Multi-hub: wire the client-facing `hub.describe` identity deps so a
   // connecting client learns this hub's cert fingerprint + whether it enforces
@@ -125,6 +127,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     getFingerprint: () => hubIdentity?.fingerprintSha256Hex ?? null,
     getAuthRequired: () => hubAuthRequired
   })
+  // Gate all (non-open) tRPC procedures on a verified principal when this hub
+  // enforces auth. Off → inert pass-through (byte-identical).
+  setAuthGate(() => hubAuthRequired)
 
   // Chromium-fork OAuth deep-link bridge. The C++ shell forwards
   // `slayzone://auth/callback` to this Unix socket (auth:deep-link); we parse the
@@ -150,7 +155,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Single muxed HTTP server: /health (pre-express, stays alive even if the
   // express stack wedges) + Electron-only REST reverse-proxied to the host (when
-  // supervised) + `/api/auth/*` → hub-auth (fleet mode only, RAW body) + /api/*
+  // supervised) + `/api/auth/*` → hub-auth (runner mode only, RAW body) + /api/*
   // + /mcp via express + /trpc WS upgrade.
   const httpServer = createServer((req, res) => {
     if (handleHealth(state, req, res)) return
@@ -158,9 +163,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       proxyToHostRest(hostRestUrl, req, res)
       return
     }
-    // Fleet mode: `/api/auth/*` goes to the hub-auth express app BEFORE the
+    // Runner mode: `/api/auth/*` goes to the hub-auth express app BEFORE the
     // mcpRest stack, which applies `express.json()` — better-auth needs the raw
-    // body. Absent when fleet mode is off, so the default path is unchanged.
+    // body. Absent when runner mode is off, so the default path is unchanged.
     if (authApp && (req.url ?? '').split('?')[0].startsWith('/api/auth/')) {
       authApp(req, res)
       return
@@ -198,9 +203,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     else cb(false, 403, 'forbidden origin')
   }
   // The shared HTTP server carries ONLY `/trpc` (browser renderer, origin-guarded).
-  // `/fleet` (non-browser runners) lives on a SEPARATE https listener stood up
+  // `/runners` (non-browser runners) lives on a SEPARATE https listener stood up
   // below — so the shared server's WSS is the exact single-WSS construction whether
-  // or not fleet mode is enabled → byte-identical behavior on the default path.
+  // or not runner mode is enabled → byte-identical behavior on the default path.
   const wss = new WebSocketServer({
     server: httpServer,
     path: '/trpc',
@@ -235,23 +240,23 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       verifyClient: verifyTrpcClient
     })
   }
-  // Fleet mode: `/fleet` runs on its OWN https server (TLS-terminated with the hub
-  // identity leaf) on its OWN port. Runners dial `wss://…/fleet` and pin the cert
-  // fingerprint (carried in their join token) BEFORE any fleet frame is sent
-  // (hub-dialer verifyPinnedCert). `noServer` — we demux `/fleet` ourselves so a
-  // stray path can't reach the gateway. Both null when fleet mode is off (no https
+  // Runner mode: `/runners` runs on its OWN https server (TLS-terminated with the hub
+  // identity leaf) on its OWN port. Runners dial `wss://…/runners` and pin the cert
+  // fingerprint (carried in their join token) BEFORE any runner frame is sent
+  // (hub-dialer verifyPinnedCert). `noServer` — we demux `/runners` ourselves so a
+  // stray path can't reach the gateway. Both null when runner mode is off (no https
   // server, no TLS termination) → shared http stack untouched.
-  let fleetWss: WebSocketServer | null = null
-  let fleetHttpsServer: HttpsServer | null = null
-  if (fleetGateway && hubIdentity) {
-    fleetWss = new WebSocketServer({ noServer: true })
-    fleetHttpsServer = createHttpsServer({ key: hubIdentity.keyPem, cert: hubIdentity.certPem })
-    fleetHttpsServer.on('upgrade', (req, socket, head) => {
+  let runnerWss: WebSocketServer | null = null
+  let runnerHttpsServer: HttpsServer | null = null
+  if (runnerGateway && hubIdentity) {
+    runnerWss = new WebSocketServer({ noServer: true })
+    runnerHttpsServer = createHttpsServer({ key: hubIdentity.keyPem, cert: hubIdentity.certPem })
+    runnerHttpsServer.on('upgrade', (req, socket, head) => {
       const pathname = (req.url ?? '').split('?')[0]
-      if (pathname === '/fleet') {
+      if (pathname === '/runners') {
         // No origin allowlist — runners are non-browser clients authenticated via
-        // the fleet protocol (enroll/hello frames + join token), not Origin.
-        fleetWss!.handleUpgrade(req, socket, head, (ws) => fleetGateway.handleConnection(ws))
+        // the runner protocol (enroll/hello frames + join token), not Origin.
+        runnerWss!.handleUpgrade(req, socket, head, (ws) => runnerGateway.handleConnection(ws))
       } else {
         socket.destroy()
       }
@@ -267,42 +272,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     req: IncomingMessage
     info?: { connectionParams?: Record<string, string | undefined> | null }
   }) => {
-      // Parse windowId from the WS query (?windowId=N) → ctx.windowId. Required by
-      // claimSession + panel-ownership + warm-pool (warmSetProjectTabCounts) procs;
-      // without it they throw "windowId required". This sidecar's applyWSSHandler
-      // had omitted it (the transport ws-server parses it, but the sidecar uses THIS
-      // handler) — so the whole warm-agent pool silently never fired. The renderer
-      // already sends it (see main.tsx withWindowId).
-      let windowId: number | null = null
-      try {
-        const u = new URL(req.url ?? '/', 'http://localhost')
-        const wid = u.searchParams.get('windowId')
-        if (wid != null) {
-          const n = Number(wid)
-          if (Number.isFinite(n)) windowId = n
-        }
-      } catch {
-        /* malformed URL — leave null */
-      }
+    // windowId (?windowId=N) → ctx.windowId. Required by claimSession +
+    // panel-ownership + warm-pool (warmSetProjectTabCounts) procs; without it they
+    // throw "windowId required". This sidecar's applyWSSHandler had omitted it (the
+    // transport ws-server parses it, but the sidecar uses THIS handler) — so the
+    // whole warm-agent pool silently never fired. The renderer already sends it
+    // (see main.tsx withWindowId).
+    const windowId = parseWindowIdFromUrl(req.url)
     // Verify the bearer token from tRPC connectionParams when this hub enforces
-    // auth. An invalid/absent token → principal stays null; individual
-    // procedures may later gate on ctx.principal (dark today — no proc requires
-    // it yet, so an authed hub still accepts connections but attributes them).
-    let principal: { userId: string; orgId?: string | null } | null = null
-    if (hubAuthRequired && hubAuth) {
-      const token = info?.connectionParams?.token
-      if (typeof token === 'string' && token) {
-        try {
-          const ctx = await verifySession(
-            hubAuth,
-            new Headers({ authorization: `Bearer ${token}` })
-          )
-          if (ctx) principal = { userId: ctx.userId, orgId: ctx.orgId }
-        } catch {
-          /* verification failure → unauthenticated (principal null) */
-        }
-      }
-    }
+    // auth. An invalid/absent token → principal stays null; individual procedures
+    // gate on ctx.principal via the auth gate (an authed hub still accepts the
+    // connection but attributes it). See hub-trpc-context.ts for the decision.
+    const principal = await resolveConnectionPrincipal({
+      hubAuthRequired,
+      hubAuth,
+      token: info?.connectionParams?.token
+    })
     return {
       db,
       dataRoot,
@@ -369,57 +354,57 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       tlsHttpsServer = null
     }
   }
-  // Fleet mode: bind the SEPARATE https `/fleet` listener on its own port (env
-  // `SLAYZONE_FLEET_PORT`, else OS-assigned), then feed the resulting `wss://` URL
+  // Runner mode: bind the SEPARATE https `/runners` listener on its own port (env
+  // `SLAYZONE_RUNNER_TRANSPORT_PORT`, else OS-assigned), then feed the resulting `wss://` URL
   // + cert fingerprint to the runners registry so `mintJoinToken` embeds them. The
   // fingerprint is the real hub leaf, and the listener now actually terminates TLS
   // with that leaf → the pin the runner extracts from its join token is enforced
   // end-to-end.
   //
-  // Fleet is OPT-IN, so a fleet-port conflict must NOT abort startup: on a bind
-  // failure `startFleetListener` closes the fleet listener + returns null, leaving
-  // the shared http server (/trpc,/health,/mcp,REST) fully functional. Fleet just
+  // Runner is OPT-IN, so a runner-port conflict must NOT abort startup: on a bind
+  // failure `startRunnerListener` closes the runner listener + returns null, leaving
+  // the shared http server (/trpc,/health,/mcp,REST) fully functional. Runner just
   // stays dark (no listener info ⇒ `mintJoinToken` throws a clear error) until the
   // conflict is cleared + the sidecar restarts.
-  if (fleetGateway && hubIdentity && fleetHttpsServer) {
-    // Resolve a STABLE fleet port (Wave3.5-D5): explicit SLAYZONE_FLEET_PORT >
-    // persisted settings.fleet_server_port > 0 (OS-assigned). Pinning the port
-    // keeps the `wss://host:<port>/fleet` URL — and thus the runner's credential
+  if (runnerGateway && hubIdentity && runnerHttpsServer) {
+    // Resolve a STABLE runner port (Wave3.5-D5): explicit SLAYZONE_RUNNER_TRANSPORT_PORT >
+    // persisted settings.runner_transport_port > 0 (OS-assigned). Pinning the port
+    // keeps the `wss://host:<port>/runners` URL — and thus the runner's credential
     // key (hubHostFromUrl → host_port) — identical across reboots, so the local
     // runner `hello`s back into its existing row instead of re-enrolling a new one.
-    const desiredFleetPort = await resolveDesiredFleetPort(db, process.env.SLAYZONE_FLEET_PORT)
-    const bindFleet = (portEnv: string): Promise<Awaited<ReturnType<typeof startFleetListener>>> =>
-      startFleetListener({
-        server: fleetHttpsServer!,
+    const desiredRunnerPort = await resolveDesiredRunnerPort(db, process.env.SLAYZONE_RUNNER_TRANSPORT_PORT)
+    const bindRunnerListener = (portEnv: string): Promise<Awaited<ReturnType<typeof startRunnerListener>>> =>
+      startRunnerListener({
+        server: runnerHttpsServer!,
         host,
         fingerprintSha256Hex: hubIdentity.fingerprintSha256Hex,
-        fleetPortEnv: portEnv,
+        runnerPortEnv: portEnv,
         log,
         onBindFailure: (error) => {
           recordDiagnosticEvent({
             level: 'error',
             source: 'server',
-            event: 'fleet.listener_bind_failed',
+            event: 'runner.listener_bind_failed',
             message: error.message
           })
         }
       })
-    let info = await bindFleet(String(desiredFleetPort))
+    let info = await bindRunnerListener(String(desiredRunnerPort))
     // Robustness: a PINNED (non-zero) port that is stale-but-taken must NOT
-    // darken fleet permanently. When a non-zero pin fails, retry with an
+    // darken runner permanently. When a non-zero pin fails, retry with an
     // OS-assigned port (0) — same fallback the pre-pin default always had — and
     // re-persist below so the next boot pins the new one. An explicit operator
-    // SLAYZONE_FLEET_PORT is intentionally NOT retried (respect the exact override
-    // + surface the conflict). startFleetListener closes the server on failure;
-    // the fleet-tls-listener test proves the same object rebinds cleanly after.
+    // SLAYZONE_RUNNER_TRANSPORT_PORT is intentionally NOT retried (respect the exact override
+    // + surface the conflict). startRunnerListener closes the server on failure;
+    // the runner-tls-listener test proves the same object rebinds cleanly after.
     let fellBackFromPinned = false
-    if (!info && desiredFleetPort !== 0 && !process.env.SLAYZONE_FLEET_PORT) {
-      log(`fleet listener could not bind pinned port ${desiredFleetPort} — retrying OS-assigned`)
-      info = await bindFleet('0')
+    if (!info && desiredRunnerPort !== 0 && !process.env.SLAYZONE_RUNNER_TRANSPORT_PORT) {
+      log(`runner listener could not bind pinned port ${desiredRunnerPort} — retrying OS-assigned`)
+      info = await bindRunnerListener('0')
       fellBackFromPinned = info !== null
     }
     if (info) {
-      composition.setFleetListenerInfo({
+      composition.setRunnerListenerInfo({
         hubUrl: info.hubUrl,
         certFingerprint: info.certFingerprint
       })
@@ -427,15 +412,15 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // and-persist). Non-clobber guarded: won't overwrite a DIFFERENT port that
       // still has a live listener — EXCEPT when we just fell back from a failed
       // pinned bind, where the stored (conflicting) port is exactly what we must
-      // overwrite. `force` skips the guard so the fleet URL stops churning every
+      // overwrite. `force` skips the guard so the runner URL stops churning every
       // boot. A same-value write (the steady-state reuse path) is a no-op.
-      await claimFleetServerPort(db, host, info.port, log, { force: fellBackFromPinned })
-      log(`fleet listener ready on ${info.hubUrl}`)
+      await claimRunnerServerPort(db, host, info.port, log, { force: fellBackFromPinned })
+      log(`runner listener ready on ${info.hubUrl}`)
     } else {
       // Bind failed → drop our refs so stop() does not try to re-close the (already
-      // closed) listener, and no `/fleet` upgrades are accepted.
-      fleetHttpsServer = null
-      fleetWss = null
+      // closed) listener, and no `/runners` upgrades are accepted.
+      runnerHttpsServer = null
+      runnerWss = null
     }
   }
   // Agents spawned BY this process discover their hook endpoint via this global.
@@ -504,25 +489,25 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       } catch {
         /* ignore */
       }
-      // Fleet mode: terminate every runner connection + reject in-flight requests,
-      // then close the fleet WSS + its https listener. No-op when fleet mode is off
+      // Runner mode: terminate every runner connection + reject in-flight requests,
+      // then close the runner WSS + its https listener. No-op when runner mode is off
       // (all null).
-      if (fleetGateway) {
+      if (runnerGateway) {
         try {
-          fleetGateway.close()
+          runnerGateway.close()
         } catch {
           /* ignore */
         }
       }
-      if (fleetWss) {
+      if (runnerWss) {
         try {
-          fleetWss.close()
+          runnerWss.close()
         } catch {
           /* ignore */
         }
       }
-      if (fleetHttpsServer) {
-        const srv = fleetHttpsServer
+      if (runnerHttpsServer) {
+        const srv = runnerHttpsServer
         try {
           await new Promise<void>((r) => srv.close(() => r()))
         } catch {

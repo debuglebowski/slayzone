@@ -5,7 +5,7 @@
  * Map keyed by the hub-assigned `id` and cleaned up on exit.
  *
  * The proc.* frame method/notification names + param shapes are OWNED by the
- * parallel Wave2-A2 unit and are not yet in `@slayzone/fleet/shared`; the names
+ * parallel Wave2-A2 unit and are not yet in `@slayzone/runner-transport/shared`; the names
  * and schemas below MIRROR the agreed contract and a later integration
  * reconciles them.
  *

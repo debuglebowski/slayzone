@@ -4,7 +4,7 @@ import type { ServerHandle } from './index.js'
 
 async function main(): Promise<void> {
   // Standalone-only: fold ~/.slayzone/config.json into process.env (env-wins) +
-  // resolve/persist the fleet secret, BEFORE any downstream env reader runs. A
+  // resolve/persist the runner secret, BEFORE any downstream env reader runs. A
   // no-op under SLAYZONE_SUPERVISED=1 (the Electron host owns the env + secret),
   // so the supervised sidecar boot is byte-identical. See ./standalone-config.ts.
   applyStandaloneHubConfig()
