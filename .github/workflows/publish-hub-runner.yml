@@ -61,9 +61,13 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing needs npm >=11.5.1; node 24 ships 11.3.x.
+      # Trusted publishing needs npm >=11.5.1; node 24 ships 11.3.x. Pin to
+      # 11.5.1 (NOT @latest) — @latest is npm 12.x, a new major whose install-
+      # script defaults break node-pty's compile-at-install (smoke fails with a
+      # missing pty.node). 11.5.1 stays on the same 11.x line as stock 11.3.x
+      # (proven to build node-pty) while satisfying the OIDC minimum.
       - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
