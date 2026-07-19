@@ -1,8 +1,45 @@
+import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
+import { loadSlayzoneConfig } from '@slayzone/platform/slayzone-config'
 import { startServer } from './server.js'
 import { applyStandaloneHubConfig } from './standalone-config.js'
 import type { ServerHandle } from './index.js'
 
+/**
+ * First-run interactive setup for a STANDALONE hub. Runs ONLY when
+ * {@link canPrompt}. The hub never hard-fails (it auto-generates its secret and
+ * defaults its ports), so this asks for the ONE recommended-but-optional value
+ * that silently degrades a REMOTE deployment when absent: the public URL that
+ * minted join tokens embed. Leaving it empty is fine for a loopback-only hub —
+ * an empty answer is skipped, so nothing is written and no re-prompt occurs
+ * once the operator has answered once (a persisted value stops being missing).
+ *
+ * Called BEFORE applyStandaloneHubConfig so an accepted value is already in
+ * `process.env` when the standard env-first resolver runs — keeping the rest of
+ * the boot byte-identical. No-op when non-interactive / already set.
+ */
+async function maybeInteractiveSetup(): Promise<void> {
+  if (!canPrompt()) return
+  const cfg = loadSlayzoneConfig()
+  if ((process.env.SLAYZONE_HUB_PUBLIC_URL ?? cfg.publicUrl) !== undefined) return
+
+  await runInteractiveConfig({
+    title: 'Hub setup — values to save to config.json:',
+    fields: [
+      {
+        configKey: 'publicUrl',
+        envKey: 'SLAYZONE_HUB_PUBLIC_URL',
+        label: 'Public hub URL for remote runners (leave empty for loopback-only)',
+        hint: 'e.g. https://hub.example.com'
+      }
+    ]
+  })
+}
+
 async function main(): Promise<void> {
+  // Interactive first-run setup (TTY only) — may seed env + write config.json
+  // before applyStandaloneHubConfig reads it. No-op when non-interactive / set.
+  await maybeInteractiveSetup()
+
   // Standalone-only: fold ~/.slayzone/config.json into process.env (env-wins) +
   // resolve/persist the runner secret, BEFORE any downstream env reader runs. A
   // no-op under SLAYZONE_SUPERVISED=1 (the Electron host owns the env + secret),

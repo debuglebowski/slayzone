@@ -10,7 +10,8 @@
     "./ipc": "./src/ipc-dedup.ts",
     "./slz-file-url": "./src/slz-file-url.ts",
     "./events": "./src/typed-emitter.ts",
-    "./slayzone-config": "./src/slayzone-config.ts"
+    "./slayzone-config": "./src/slayzone-config.ts",
+    "./config-prompt": "./src/config-prompt.ts"
   },
   "scripts": {
     "test": "vitest run",
