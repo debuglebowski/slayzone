@@ -90,7 +90,7 @@ export async function claimMcpServerPort(
  * reconnects into its existing row.
  *
  * Precedence:
- *   1. explicit `SLAYZONE_RUNNER_TRANSPORT_PORT` env  — operator override, always wins
+ *   1. explicit `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` env  — operator override, always wins
  *   2. persisted `settings.runner_transport_port` — the previously-claimed stable port
  *   3. `0` — no stored port yet ⇒ bind OS-assigned, then `claimRunnerServerPort`
  *      persists whatever the OS handed us so the NEXT boot reuses it
@@ -103,7 +103,7 @@ export async function resolveDesiredRunnerPort(
   runnerPortEnv: string | undefined
 ): Promise<number> {
   // Operator override wins outright (mirrors the env-first precedence server.ts
-  // already applied to SLAYZONE_RUNNER_TRANSPORT_PORT). A malformed override falls to 0 via
+  // already applied to SLAYZONE_HUB_RUNNER_TRANSPORT_PORT). A malformed override falls to 0 via
   // resolveRunnerPort rather than silently reusing a stored value.
   if (runnerPortEnv !== undefined && runnerPortEnv !== '') return resolveRunnerPort(runnerPortEnv)
   try {

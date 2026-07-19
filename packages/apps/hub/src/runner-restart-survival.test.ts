@@ -111,7 +111,7 @@ interface BootDeps {
    *  returns that exact port when free, or `null` when TAKEN (models EADDRINUSE
    *  → the server.ts pinned-bind failure that must fall back + re-persist). */
   bindPort: (requested: number) => number | null
-  /** Override SLAYZONE_RUNNER_TRANSPORT_PORT for this boot (operator pin). */
+  /** Override SLAYZONE_HUB_RUNNER_TRANSPORT_PORT for this boot (operator pin). */
   runnerPortEnv?: string
   /** Match production: the auth adapters know the local runner's name. */
   localRunnerName?: string
@@ -343,7 +343,7 @@ async function main(): Promise<void> {
       }
     })
 
-    await test('operator SLAYZONE_RUNNER_TRANSPORT_PORT override pins directly (also stays 1 across boots)', async () => {
+    await test('operator SLAYZONE_HUB_RUNNER_TRANSPORT_PORT override pins directly (also stays 1 across boots)', async () => {
       const { db, close } = createMigratedDb()
       const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-envpin-'))
       const bindPort = makePortAllocator(51000)

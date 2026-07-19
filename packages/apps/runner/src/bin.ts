@@ -2,7 +2,7 @@
  * slayzone-runner CLI entrypoint.
  *
  *   SLAYZONE_HUB_URL=wss://hub:8443/runners \
- *   SLAYZONE_JOIN_TOKEN=... \
+ *   SLAYZONE_RUNNER_JOIN_TOKEN=... \
  *   slayzone-runner
  *
  * On an interactive terminal a fresh runner (no join token AND no stored

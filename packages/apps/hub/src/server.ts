@@ -397,7 +397,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     }
   }
   // Bind the SEPARATE https `/runners` listener on its own port (env
-  // `SLAYZONE_RUNNER_TRANSPORT_PORT`, else OS-assigned), then feed the resulting `wss://` URL
+  // `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`, else OS-assigned), then feed the resulting `wss://` URL
   // + cert fingerprint to the runners registry so `mintJoinToken` embeds them. The
   // fingerprint is the real hub leaf, and the listener now actually terminates TLS
   // with that leaf → the pin the runner extracts from its join token is enforced
@@ -409,20 +409,20 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // stays dark (no listener info ⇒ `mintJoinToken` throws a clear error) until the
   // conflict is cleared + the sidecar restarts.
   if (runnerGateway && hubIdentity && runnerHttpsServer) {
-    // Resolve a STABLE runner port (Wave3.5-D5): explicit SLAYZONE_RUNNER_TRANSPORT_PORT >
+    // Resolve a STABLE runner port (Wave3.5-D5): explicit SLAYZONE_HUB_RUNNER_TRANSPORT_PORT >
     // persisted settings.runner_transport_port > 0 (OS-assigned). Pinning the port
     // keeps the `wss://host:<port>/runners` URL — and thus the runner's credential
     // key (hubHostFromUrl → host_port) — identical across reboots, so the local
     // runner `hello`s back into its existing row instead of re-enrolling a new one.
-    const desiredRunnerPort = await resolveDesiredRunnerPort(db, process.env.SLAYZONE_RUNNER_TRANSPORT_PORT)
+    const desiredRunnerPort = await resolveDesiredRunnerPort(db, process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_PORT)
     // Runner-listener bind. Supervised keeps its historical 0.0.0.0 (byte-identical
     // — the Electron host's advertise-host logic already points the co-located
     // runner at a dialable address). Standalone splits on SLAYZONE_MODE: a remote
     // hub binds 0.0.0.0 so off-box runners can dial in; a local hub binds loopback
     // (no reason to expose the listener on a dev box). TLS+cert-pinned either way;
-    // operators can still pin via SLAYZONE_RUNNER_TRANSPORT_HOST.
+    // operators can still pin via SLAYZONE_HUB_RUNNER_TRANSPORT_HOST.
     const runnerHost =
-      process.env.SLAYZONE_RUNNER_TRANSPORT_HOST ??
+      process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_HOST ??
       (supervised || isRemoteMode() ? '0.0.0.0' : '127.0.0.1')
     const bindRunnerListener = (portEnv: string): Promise<Awaited<ReturnType<typeof startRunnerListener>>> =>
       startRunnerListener({
@@ -445,11 +445,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // darken runner permanently. When a non-zero pin fails, retry with an
     // OS-assigned port (0) — same fallback the pre-pin default always had — and
     // re-persist below so the next boot pins the new one. An explicit operator
-    // SLAYZONE_RUNNER_TRANSPORT_PORT is intentionally NOT retried (respect the exact override
+    // SLAYZONE_HUB_RUNNER_TRANSPORT_PORT is intentionally NOT retried (respect the exact override
     // + surface the conflict). startRunnerListener closes the server on failure;
     // the runner-tls-listener test proves the same object rebinds cleanly after.
     let fellBackFromPinned = false
-    if (!info && desiredRunnerPort !== 0 && !process.env.SLAYZONE_RUNNER_TRANSPORT_PORT) {
+    if (!info && desiredRunnerPort !== 0 && !process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_PORT) {
       log(`runner listener could not bind pinned port ${desiredRunnerPort} — retrying OS-assigned`)
       info = await bindRunnerListener('0')
       fellBackFromPinned = info !== null

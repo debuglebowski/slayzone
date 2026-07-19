@@ -667,7 +667,7 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       // token/mint response. These OVERRIDE any inherited values so the local
       // runner always dials THIS boot's hub.
       SLAYZONE_HUB_URL: minted.hubUrl,
-      SLAYZONE_JOIN_TOKEN: minted.token,
+      SLAYZONE_RUNNER_JOIN_TOKEN: minted.token,
       SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME,
       SLAYZONE_RUNNER_ALLOWED_ROOTS:
         process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS ?? homedir()
@@ -1662,8 +1662,12 @@ app
       recordDiagnosticEvent,
       requestPtyRespawn: broadcastRespawnRequest,
       onReachedTerminal: onTaskReachedTerminal,
-      // Electron data-root seam so task ops/ stays server-pure (env override wins).
-      getDataRoot: () => app.getPath('userData')
+      // Data-root seam so task ops/ stays server-pure. MUST be the resolved
+      // storage dir (<ROOT>/storage), NOT app.getPath('userData') — after the
+      // storage migration artifacts live under <ROOT>/storage/artifacts, so a
+      // userData-based root would strand deleted-task artifact cleanup at the
+      // empty legacy dir.
+      getDataRoot: () => getStorageDir()
     })
     // Wire the cross-domain terminal seam so server-pure callers (integrations
     // sync) reach the real pty-killing impl.
@@ -2256,7 +2260,7 @@ app
                 : {})
               // The sidecar always builds the runner gateway/auth (a hub always
               // accepts runners) — no env flag needed. The runner listener binds
-              // its own port at startup; SLAYZONE_RUNNER_TRANSPORT_HOST controls
+              // its own port at startup; SLAYZONE_HUB_RUNNER_TRANSPORT_HOST controls
               // whether it's reachable off-machine (see below).
             },
             logger: (line) => logBoot(line),

@@ -192,8 +192,8 @@ async function main(): Promise<void> {
       SLAYZONE_HOME_DIR: homeDir,
       SLAYZONE_STORE_DIR: storeDir,
       SLAYZONE_PORT: '0',
-      SLAYZONE_RUNNER_TRANSPORT_PORT: '0',
-      SLAYZONE_RUNNER_TRANSPORT_SECRET: secret
+      SLAYZONE_HUB_RUNNER_TRANSPORT_PORT: '0',
+      SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: secret
     })
 
     // Parse the hub's listening line: "listening on http://127.0.0.1:PORT (data=… db=…)".
@@ -248,7 +248,7 @@ async function main(): Promise<void> {
       ...scrubbedEnv(),
       SLAYZONE_HOME_DIR: homeDir,
       SLAYZONE_HUB_URL: tok.hubUrl,
-      SLAYZONE_JOIN_TOKEN: tok.token,
+      SLAYZONE_RUNNER_JOIN_TOKEN: tok.token,
       SLAYZONE_RUNNER_NAME: 'install-handshake-runner',
       SLAYZONE_RUNNER_CREDENTIALS_DIR: credsDir,
       SLAYZONE_RUNNER_ALLOWED_ROOTS: workDir

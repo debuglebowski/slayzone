@@ -217,10 +217,10 @@ describe('loadRunnerConfig', () => {
     const savedHome = process.env.SLAYZONE_HOME_DIR
     const savedSup = process.env.SLAYZONE_SUPERVISED
     const savedHub = process.env.SLAYZONE_HUB_URL
-    const savedToken = process.env.SLAYZONE_JOIN_TOKEN
+    const savedToken = process.env.SLAYZONE_RUNNER_JOIN_TOKEN
     try {
       delete process.env.SLAYZONE_HUB_URL
-      delete process.env.SLAYZONE_JOIN_TOKEN
+      delete process.env.SLAYZONE_RUNNER_JOIN_TOKEN
       process.env.SLAYZONE_HOME_DIR = dir
       process.env.SLAYZONE_SUPERVISED = '1'
       writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/runners' }))
@@ -237,7 +237,7 @@ describe('loadRunnerConfig', () => {
       restore('SLAYZONE_HOME_DIR', savedHome)
       restore('SLAYZONE_SUPERVISED', savedSup)
       restore('SLAYZONE_HUB_URL', savedHub)
-      restore('SLAYZONE_JOIN_TOKEN', savedToken)
+      restore('SLAYZONE_RUNNER_JOIN_TOKEN', savedToken)
     }
   })
 })

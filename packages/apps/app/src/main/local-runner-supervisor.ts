@@ -15,7 +15,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
  * The runner is spawned as the same Electron binary run with
  * ELECTRON_RUN_AS_NODE=1 (shares the app's node-pty native ABI), by file path —
  * never imported as a module (keeps it out of the main bundle). Its config comes
- * entirely from env (SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN / … — see runner
+ * entirely from env (SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN / … — see runner
  * config.ts), supplied by the caller.
  */
 
@@ -39,7 +39,7 @@ export type LocalRunnerOpts = {
   /** Absolute path to the runner's dist/bin.cjs. */
   scriptPath: string
   /** Base env for the child (ELECTRON_RUN_AS_NODE + the SLAYZONE_RUNNER_* /
-   *  SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN vars are merged in by the caller). */
+   *  SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN vars are merged in by the caller). */
   env: NodeJS.ProcessEnv
   /** Receives the runner's stdout/stderr lines + supervisor notices. */
   logger: (line: string) => void

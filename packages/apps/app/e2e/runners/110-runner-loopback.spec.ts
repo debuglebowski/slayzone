@@ -117,7 +117,7 @@ function spawnLoopbackRunner(opts: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_HUB_URL: opts.hubUrl,
-      SLAYZONE_JOIN_TOKEN: opts.joinToken,
+      SLAYZONE_RUNNER_JOIN_TOKEN: opts.joinToken,
       SLAYZONE_RUNNER_NAME: 'e2e-loopback-runner',
       SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir,
       SLAYZONE_RUNNER_ALLOWED_ROOTS: opts.allowedRoots

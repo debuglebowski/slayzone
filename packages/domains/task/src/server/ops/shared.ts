@@ -409,12 +409,11 @@ export async function cleanupTaskFull(
 ): Promise<void> {
   cleanupTaskImmediate(taskId)
   runtimeAdapters.killTaskProcesses(taskId)
-  // Clean up artifact files on disk
-  const artifactsBaseDir = path.join(
-    process.env.SLAYZONE_STORE_DIR || runtimeAdapters.getDataRoot(),
-    'artifacts',
-    taskId
-  )
+  // Clean up artifact files on disk. getDataRoot() is the single source of truth
+  // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage);
+  // do NOT read SLAYZONE_STORE_DIR here — it isn't set in the app, so it only
+  // risked stranding cleanup at a stale path.
+  const artifactsBaseDir = path.join(runtimeAdapters.getDataRoot(), 'artifacts', taskId)
   if (await runtimeAdapters.worktrees.pathExists(artifactsBaseDir)) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
   }

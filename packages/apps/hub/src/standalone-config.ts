@@ -6,8 +6,8 @@
  * filling ONLY the env vars that are currently unset — so the precedence is
  * `env var > config.json > default` for every downstream reader
  * (db.ts getDatabasePathFromEnv, composition.ts
- * SLAYZONE_RUNNER_TRANSPORT_SECRET, server.ts getTrpcPort/getServerHost/
- * SLAYZONE_RUNNER_TRANSPORT_PORT, remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_URL). Nothing
+ * SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, server.ts getTrpcPort/getServerHost/
+ * SLAYZONE_HUB_RUNNER_TRANSPORT_PORT, remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_URL). Nothing
  * downstream changes — they still read env exactly as before; we just seed env
  * from the file first. This keeps the whole server pipeline byte-identical apart
  * from where a value ultimately comes from.
@@ -17,8 +17,8 @@
  * byte-identical to today (its env is fully supplied by the Electron host).
  *
  * SECURITY SEAM (runner secret): the standalone boot resolves the runner secret
- * (`env SLAYZONE_RUNNER_TRANSPORT_SECRET > config.json runnerTransportSecret > generate + persist`)
- * and sets `process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET` to it BEFORE composeServer runs.
+ * (`env SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET > config.json runnerTransportSecret > generate + persist`)
+ * and sets `process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` to it BEFORE composeServer runs.
  * composition.ts then reads that env value and NEVER falls back to the shared
  * `'slayzone-dev-runner-secret'` dev constant in standalone (that forgeable-token
  * default now only applies in supervised/dev, where the Electron host controls
@@ -70,7 +70,7 @@ export function applyStandaloneHubConfig(): void {
   // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so
   // there is nothing to thread through env here.
   setIfUnset('SLAYZONE_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
-  setIfUnset('SLAYZONE_RUNNER_TRANSPORT_PORT', cfg.runnerTransportPort !== undefined ? String(cfg.runnerTransportPort) : undefined)
+  setIfUnset('SLAYZONE_HUB_RUNNER_TRANSPORT_PORT', cfg.runnerTransportPort !== undefined ? String(cfg.runnerTransportPort) : undefined)
   setIfUnset('SLAYZONE_HUB_PUBLIC_URL', cfg.publicUrl)
 
   // Runner secret — security fix. Resolve env > config > generate+persist and set
@@ -78,9 +78,9 @@ export function applyStandaloneHubConfig(): void {
   // ensureRunnerTransportSecret returns the config value if present, else generates + writes
   // a fresh 256-bit secret to config.json (0600, atomic create-if-absent). An
   // EMPTY env value counts as ABSENT (env-wins only when meaningfully set) — so a
-  // stray `SLAYZONE_RUNNER_TRANSPORT_SECRET=''` generates rather than tripping composition's
+  // stray `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET=''` generates rather than tripping composition's
   // fail-loud guard. A non-empty env pin is left untouched (CI path, no write).
-  if (!process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET) {
-    process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET = ensureRunnerTransportSecret()
+  if (!process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET) {
+    process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET = ensureRunnerTransportSecret()
   }
 }

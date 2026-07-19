@@ -1,12 +1,15 @@
 import { join } from 'node:path'
-import { getStateDir } from '@slayzone/platform'
+import { getStorageDir } from '@slayzone/platform'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 
-// Data root for artifact files — SLAYZONE_STORE_DIR (the single data-root var,
-// same as hub/db.ts + ensureDataRoot), else the platform default. Lazy (function,
-// not module-load const) so tests can point env at a temp root after import.
+// Data root for artifact files = the single storage dir (`<ROOT>/storage`,
+// derived from SLAYZONE_ROOT via platform.getStorageDir — same as the DB +
+// ensureDataRoot). Must NOT read SLAYZONE_STORE_DIR directly: that env is not set
+// in the app (state derives from ROOT), so reading it stranded artifact lookups at
+// the legacy getStateDir() path after the <ROOT>/storage migration. Lazy (function,
+// not module-load const) so tests can point SLAYZONE_ROOT/STORE_DIR at a temp root.
 export function getArtifactsDataRoot(): string {
-  return process.env.SLAYZONE_STORE_DIR || getStateDir()
+  return getStorageDir()
 }
 
 export const artifactsDir = join(getArtifactsDataRoot(), 'artifacts')

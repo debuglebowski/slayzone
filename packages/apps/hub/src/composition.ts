@@ -212,7 +212,7 @@ export function composeServer(opts: {
   // every minted token unverifiable.
   //
   // SECURITY SEAM (runner-secret hardening): a STANDALONE boot resolves this in
-  // bin.ts (applyStandaloneHubConfig → env SLAYZONE_RUNNER_TRANSPORT_SECRET > config.json
+  // bin.ts (applyStandaloneHubConfig → env SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET > config.json
   // runnerTransportSecret > generated+persisted 256-bit secret) and sets the env BEFORE
   // composeServer runs. So in standalone the env is ALWAYS present and NEVER the
   // shared dev constant — a per-install unique secret means minted per-task
@@ -222,16 +222,16 @@ export function composeServer(opts: {
   // the host controls the env, config.json is never consulted, and a dev/test
   // boot without the env still works exactly as before.
   const DEV_RUNNER_TRANSPORT_SECRET = 'slayzone-dev-runner-secret'
-  if (opts.standalone && !process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET) {
+  if (opts.standalone && !process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET) {
     // bin.ts must have seeded this; a standalone boot that reached composeServer
     // without it means the resolve step was skipped — fail loud instead of
     // signing tokens with a shared, forgeable constant.
     throw new Error(
-      '[slayzone-hub] standalone boot reached composeServer without SLAYZONE_RUNNER_TRANSPORT_SECRET — ' +
+      '[slayzone-hub] standalone boot reached composeServer without SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET — ' +
         'applyStandaloneHubConfig() must run first (bin.ts)'
     )
   }
-  const runnerTransportSecret = process.env.SLAYZONE_RUNNER_TRANSPORT_SECRET ?? DEV_RUNNER_TRANSPORT_SECRET
+  const runnerTransportSecret = process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET ?? DEV_RUNNER_TRANSPORT_SECRET
   // Populated by the async runner init (createHubAuth is async — migrations); a
   // later unit reads these after `runnersReady` to mount the gateway in server.ts.
   let runnerGatewayRef: HubRunnerGateway | null = null

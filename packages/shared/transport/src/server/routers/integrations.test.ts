@@ -37,8 +37,6 @@ import { execSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-process.env.SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS = '1'
-
 const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
   try {
     await fn()
@@ -49,8 +47,9 @@ const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
 }
 
 const h = await createTestHarness()
-// No cipher injected → credentials use the plaintext fallback (gated by the env
-// var above). Explicit for clarity / isolation from other suites in the runner.
+// No cipher injected → credentials use the plaintext fallback (allowed precisely
+// because no working cipher exists — cipher-availability is the gate now, no env
+// flag). Explicit for clarity / isolation from other suites in the runner.
 setCredentialCipher(null)
 
 // Seed a readable credential via the plaintext fallback (the same row shape

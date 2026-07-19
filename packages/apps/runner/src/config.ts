@@ -38,7 +38,7 @@ export type RunnerConfig = z.infer<typeof runnerConfigSchema>
 
 export const ENV_VARS = {
   hubUrl: 'SLAYZONE_HUB_URL',
-  joinToken: 'SLAYZONE_JOIN_TOKEN',
+  joinToken: 'SLAYZONE_RUNNER_JOIN_TOKEN',
   // name + allowedRoots: the Electron host injects these into its supervised
   // local runner (see app main startLocalRunnerWithAutoEnroll). Kept as the
   // supervised channel; for a STANDALONE runner name defaults to hostname and
@@ -154,7 +154,7 @@ function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
  *   - `SLAYZONE_SUPERVISED=1` — the app-spawned local runner
  *     (startLocalRunnerWithAutoEnroll passes `{...process.env}`, which carries
  *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
- *     supplies the runner's env in full (SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN /
+ *     supplies the runner's env in full (SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN /
  *     SLAYZONE_RUNNER_NAME), so the shared file must not leak into it. Keeps the
  *     supervised runner boot byte-identical to pre-config behavior.
  * Callers can also pass an explicit shared config to test the layering.
@@ -169,7 +169,7 @@ export function loadRunnerConfig(
 
   // A join token is self-sufficient: it embeds the hub's `wss://…/runners` URL and
   // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
-  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_JOIN_TOKEN=… runner` works
+  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_RUNNER_JOIN_TOKEN=… runner` works
   // with no other config. An explicit hubUrl / pin (file or env) still wins, so an
   // operator can point a token at a different endpoint or override the pin. A
   // malformed token decodes to null → no fallback (schema then reports the missing

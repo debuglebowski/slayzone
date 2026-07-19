@@ -253,7 +253,7 @@ async function launchElectronWithRetry(args: {
   executablePath: string
   /** Extra env merged LAST into the launch literal — lets an isolated spec pass
    *  otherwise-stripped SLAYZONE_* vars (e.g. 
-   *  SLAYZONE_E2E_ALLOW_RUNNER / SLAYZONE_HUB_URL / SLAYZONE_JOIN_TOKEN) through
+   *  SLAYZONE_E2E_ALLOW_RUNNER / SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN) through
    *  the strip below. Wins over the fixed keys, so a spec may also override an
    *  isolation default intentionally. */
   extraEnv?: Record<string, string>
@@ -345,7 +345,7 @@ async function launchElectronWithRetry(args: {
           // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
           // isolated spec needs (runner-loopback:
           // SLAYZONE_E2E_ALLOW_RUNNER, SLAYZONE_STORE_DIR, SLAYZONE_HUB_URL,
-          // SLAYZONE_JOIN_TOKEN). Merged LAST so a spec can also override an
+          // SLAYZONE_RUNNER_JOIN_TOKEN). Merged LAST so a spec can also override an
           // isolation default on purpose. Undefined for every default launch
           // (shared worker app + 103) → byte-identical there.
           ...(args.extraEnv ?? {})

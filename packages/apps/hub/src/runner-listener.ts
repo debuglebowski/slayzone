@@ -40,14 +40,14 @@ export interface StartRunnerListenerOptions {
   advertiseHost?: string
   /** The hub leaf fingerprint to advertise + pin. */
   fingerprintSha256Hex: string
-  /** `SLAYZONE_RUNNER_TRANSPORT_PORT` raw value; invalid/empty ⇒ OS-assigned (port 0). */
+  /** `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` raw value; invalid/empty ⇒ OS-assigned (port 0). */
   runnerPortEnv?: string
   log?: (message: string, meta?: Record<string, unknown>) => void
   /** Invoked once on a bind failure (e.g. to record a diagnostics event). */
   onBindFailure?: (error: Error) => void
 }
 
-/** Resolve the requested runner port: a valid `SLAYZONE_RUNNER_TRANSPORT_PORT`, else 0. */
+/** Resolve the requested runner port: a valid `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`, else 0. */
 export function resolveRunnerPort(raw: string | undefined): number {
   const n = raw ? Number(raw) : undefined
   return n !== undefined && Number.isInteger(n) && n >= 0 && n <= 65535 ? n : 0

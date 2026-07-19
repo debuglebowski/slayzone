@@ -471,7 +471,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
         SLAYZONE_HOST: '127.0.0.1',
         SLAYZONE_PORT: '0',
         SLAYZONE_STORE_DIR: dir,
-        SLAYZONE_RUNNER_TRANSPORT_SECRET: 'seed-only-secret-at-least-32-chars-long'
+        SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'seed-only-secret-at-least-32-chars-long'
       },
       stdio: ['pipe', 'pipe', 'pipe']
     })

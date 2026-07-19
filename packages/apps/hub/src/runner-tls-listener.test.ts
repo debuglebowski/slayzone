@@ -15,7 +15,7 @@
  *   3. Bind-failure degradation: `startRunnerListener` returns null (runner stays
  *      dark) instead of throwing when its port is already taken, so a runner-port
  *      conflict can never abort `startServer` / take down the shared http server.
- *   4. `resolveRunnerPort` honours a valid SLAYZONE_RUNNER_TRANSPORT_PORT and falls back to 0.
+ *   4. `resolveRunnerPort` honours a valid SLAYZONE_HUB_RUNNER_TRANSPORT_PORT and falls back to 0.
  *
  * The full through-`startServer` boot (composeServer → better-auth migrations) and
  * the runner-OFF byte-identical boot are covered by the e2e specs, not here.

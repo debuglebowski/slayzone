@@ -50,12 +50,12 @@ export interface SlayzoneConfig {
   runnerTransportSecret?: string
   /** tRPC/HTTP listen port (`SLAYZONE_PORT`). */
   port?: number
-  /** Runner `/runners` https listener port (`SLAYZONE_RUNNER_TRANSPORT_PORT`). */
+  /** Runner `/runners` https listener port (`SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`). */
   runnerTransportPort?: number
   /** Public hub base URL advertised to remote runners (`SLAYZONE_HUB_PUBLIC_URL`). */
   publicUrl?: string
   // --- runner keys ---
-  /** First-contact join token for a standalone runner (`SLAYZONE_JOIN_TOKEN`). */
+  /** First-contact join token for a standalone runner (`SLAYZONE_RUNNER_JOIN_TOKEN`). */
   joinToken?: string
   /** Human-readable runner name (`SLAYZONE_RUNNER_NAME`). */
   runnerName?: string
