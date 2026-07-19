@@ -4,7 +4,7 @@
  * The Electron-only download procedures are covered by e2e (93-artifacts-panel),
  * not here. The task row is seeded via createTaskOp (knows all columns + the FK).
  */
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
@@ -43,6 +43,18 @@ test('artifacts router: create → getByTask → readContent', async () => {
   expect(a!.title).toBe('note.md')
   expect((await caller.getByTask({ taskId })).length).toBe(1)
   expect(await caller.readContent({ id: a!.id })).toBe('hello')
+})
+
+test('artifacts router: readContent falls back to the blob when no working file', async () => {
+  // Artifacts created via `slay artifacts write` persist ONLY blobs — no
+  // materialized working file. Simulate that by deleting the working file after
+  // create, then assert readContent still returns the content (from the current
+  // version's blob) instead of '' (the blank-editor bug).
+  const a = await caller.create(mkArtifact('blob-only.md', 'from-blob'))
+  const workingFile = join(ctx.dataRoot, 'artifacts', taskId, `${a!.id}.md`)
+  rmSync(workingFile, { force: true })
+  expect(existsSync(workingFile)).toBe(false)
+  expect(await caller.readContent({ id: a!.id })).toBe('from-blob')
 })
 
 test('artifacts router: folders create → list', async () => {

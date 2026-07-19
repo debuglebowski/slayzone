@@ -14,7 +14,8 @@ import { join } from 'node:path'
  * Scope (explicit — NOT a glob, so diagnostics/chromium/hub-auth are left):
  *   - slayzone.sqlite      (+ -wal, -shm)
  *   - slayzone.dev.sqlite  (+ -wal, -shm)
- *   - artifacts/
+ *   - blobs/     — artifact CONTENT (content-addressed; the DB only stores hashes)
+ *   - artifacts/ — artifact working-copy cache
  *   - backups/ — the 2 MOST RECENT backup files only (older ones stay behind)
  *
  * Safety: copy → (main-db present) → delete originals. The source is untouched
@@ -57,14 +58,14 @@ function migrateDb(oldDir: string, newDir: string, base: string): void {
   removeIfPresent(srcMain)
 }
 
-/** Migrate the artifacts/ dir old→new (copy-verify-delete), once. */
-function migrateArtifacts(oldDir: string, newDir: string): void {
-  const src = join(oldDir, 'artifacts')
-  const dst = join(newDir, 'artifacts')
+/** Migrate one content dir old→new (recursive copy-verify-delete), once. */
+function migrateContentDir(oldDir: string, newDir: string, name: string): void {
+  const src = join(oldDir, name)
+  const dst = join(newDir, name)
   if (!existsSync(src) || existsSync(dst)) return
   cpSync(src, dst, { recursive: true })
   if (!existsSync(dst)) {
-    throw new Error('[storage-migration] artifacts copy failed verification; leaving source intact')
+    throw new Error(`[storage-migration] ${name}/ copy failed verification; leaving source intact`)
   }
   rmSync(src, { recursive: true, force: true })
 }
@@ -104,17 +105,22 @@ function migrateRecentBackups(oldDir: string, newDir: string): void {
 }
 
 /**
- * Migrate the DB + artifacts + recent backups from `oldDir` (the legacy userData
- * location) into `storageDir` (`<ROOT>/storage`, resolved by the caller via the
- * shared platform derivation) if needed. Idempotent; never throws for an empty
- * source, only if a copy half-completes (source kept intact).
+ * Migrate the DB + artifacts + blobs + recent backups from `oldDir` (the legacy
+ * userData location) into `storageDir` (`<ROOT>/storage`, resolved by the caller
+ * via the shared platform derivation) if needed. Idempotent; never throws for an
+ * empty source, only if a copy half-completes (source kept intact).
+ *
+ * NB: `blobs/` holds the actual artifact CONTENT (content-addressed by hash — the
+ * DB only stores hashes; `artifacts/` is just a working-copy cache). Omitting it
+ * strands every artifact's content, so it MUST migrate alongside the DB.
  */
 export function ensureStorageDir(oldDir: string, storageDir: string): void {
   mkdirSync(storageDir, { recursive: true })
   // A no-op when oldDir === storageDir (already anchored) or nothing to move.
   if (oldDir !== storageDir) {
     for (const base of DB_BASENAMES) migrateDb(oldDir, storageDir, base)
-    migrateArtifacts(oldDir, storageDir)
+    migrateContentDir(oldDir, storageDir, 'blobs')
+    migrateContentDir(oldDir, storageDir, 'artifacts')
     migrateRecentBackups(oldDir, storageDir)
   }
 }

@@ -220,6 +220,17 @@ export function createArtifactStore(dataDir: string) {
         existing.title as string
       )
       if (existsSync(legacyPath)) return readFileSync(legacyPath, 'utf-8')
+      // No working file on disk (e.g. artifacts created via `slay artifacts write`,
+      // which only persists blobs — no materialized working copy). Fall back to the
+      // CURRENT version's blob so content still loads. Returns '' only when the
+      // artifact genuinely has no version yet.
+      if (existing.current_version_id != null) {
+        try {
+          return await this.readArtifactVersion(db, { artifactId: id, versionRef: 'current' })
+        } catch {
+          return ''
+        }
+      }
       return ''
     },
 

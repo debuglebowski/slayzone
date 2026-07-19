@@ -47,6 +47,9 @@ try {
     writeFileSync(join(old, 'slayzone.dev.sqlite'), 'DEVDB')
     mkdirSync(join(old, 'artifacts', 't1'), { recursive: true })
     writeFileSync(join(old, 'artifacts', 't1', 'a.md'), 'ART')
+    // blobs/ = the actual artifact CONTENT (content-addressed) — MUST migrate.
+    mkdirSync(join(old, 'blobs', 'd8'), { recursive: true })
+    writeFileSync(join(old, 'blobs', 'd8', '3c76abcd'), 'BLOBCONTENT')
     // Excluded siblings that MUST stay behind:
     writeFileSync(join(old, 'slayzone.diagnostics.sqlite'), 'DIAG')
     writeFileSync(join(old, 'hub-auth.sqlite'), 'AUTH')
@@ -56,8 +59,10 @@ try {
     check('wal + shm copied', existsSync(join(storage, 'slayzone.sqlite-wal')) && existsSync(join(storage, 'slayzone.sqlite-shm')))
     check('dev DB copied', readFileSync(join(storage, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
     check('artifacts copied (recursive)', readFileSync(join(storage, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART')
+    check('blobs copied (recursive)', readFileSync(join(storage, 'blobs', 'd8', '3c76abcd'), 'utf8') === 'BLOBCONTENT')
     check('source DB deleted', !existsSync(join(old, 'slayzone.sqlite')))
     check('source artifacts deleted', !existsSync(join(old, 'artifacts')))
+    check('source blobs deleted', !existsSync(join(old, 'blobs')))
     check('EXCLUDED diagnostics stays behind', existsSync(join(old, 'slayzone.diagnostics.sqlite')))
     check('EXCLUDED hub-auth stays behind', existsSync(join(old, 'hub-auth.sqlite')))
     check('diagnostics NOT copied', !existsSync(join(storage, 'slayzone.diagnostics.sqlite')))
