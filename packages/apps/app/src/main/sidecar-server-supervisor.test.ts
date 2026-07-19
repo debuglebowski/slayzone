@@ -429,7 +429,11 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
     return
   }
   const dir = mkTmp()
-  const dbPath = path.join(dir, 'parent-death.sqlite')
+  // Single store dir for BOTH the seeder and the supervised child: the DB path is
+  // now DERIVED (`<SLAYZONE_STORE_DIR>/slayzone.sqlite`), not handed via
+  // SLAYZONE_DB_PATH, so both processes must point at the SAME store dir to open
+  // the same file.
+  //
   // Migrate the DB before the supervised spawn. SLAYZONE_SUPERVISED=1 tells the
   // sidecar the host already owns + migrated this DB (openServerDatabase skips
   // schema bootstrap in supervised mode) — production always upholds that, since
@@ -439,15 +443,13 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   // test artifact, not the parent-death behaviour under test.
   //
   // Seed by booting the SAME bin in STANDALONE mode (no SLAYZONE_SUPERVISED), which
-  // runs the real schema bootstrap, then killing it once it reports listening. We
-  // can't `import { runMigrations }` in-process: migrations.ts pulls
-  // `@slayzone/ai-config/shared` → `@dagrejs/dagre` (ESM) and this test runs with
-  // NO loader (run_test_electron_strict), so the import hits ERR_REQUIRE_CYCLE_MODULE.
-  // The bundled bin has migrations inlined + native ABI matched — the closest thing
-  // to what the host actually does.
+  // runs the real schema bootstrap at `<dir>/slayzone.sqlite`, then killing it once
+  // it reports listening. We can't `import { runMigrations }` in-process:
+  // migrations.ts pulls `@slayzone/ai-config/shared` → `@dagrejs/dagre` (ESM) and
+  // this test runs with NO loader (run_test_electron_strict), so the import hits
+  // ERR_REQUIRE_CYCLE_MODULE. The bundled bin has migrations inlined + native ABI
+  // matched — the closest thing to what the host actually does.
   await new Promise<void>((resolve, reject) => {
-    const seedDir = path.join(dir, 'seed-store')
-    fs.mkdirSync(seedDir, { recursive: true })
     // Scrub inherited SLAYZONE_* so the seeder boots genuinely STANDALONE. When
     // this test runs inside a dogfooding session the parent leaks
     // SLAYZONE_SUPERVISED=1 (+ SLAYZONE_DB_PATH → the real dev DB) — which would
@@ -464,11 +466,11 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
       env: {
         ...seedEnv,
         ELECTRON_RUN_AS_NODE: '1',
-        // Standalone (no SLAYZONE_SUPERVISED) → openServerDatabase bootstraps schema.
+        // Standalone (no SLAYZONE_SUPERVISED) → openServerDatabase bootstraps schema
+        // at the DERIVED <SLAYZONE_STORE_DIR>/slayzone.sqlite (same dir the child opens).
         SLAYZONE_HOST: '127.0.0.1',
         SLAYZONE_PORT: '0',
-        SLAYZONE_STORE_DIR: seedDir,
-        SLAYZONE_DB_PATH: dbPath,
+        SLAYZONE_STORE_DIR: dir,
         SLAYZONE_RUNNER_TRANSPORT_SECRET: 'seed-only-secret-at-least-32-chars-long'
       },
       stdio: ['pipe', 'pipe', 'pipe']
@@ -496,8 +498,9 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
       SLAYZONE_SUPERVISED: '1',
       SLAYZONE_HOST: '127.0.0.1',
       SLAYZONE_PORT: '0',
-      SLAYZONE_STORE_DIR: dir,
-      SLAYZONE_DB_PATH: dbPath
+      // DB path DERIVES from the store dir now (no SLAYZONE_DB_PATH handoff); the
+      // seeder above bootstrapped <dir>/slayzone.sqlite, which this child opens.
+      SLAYZONE_STORE_DIR: dir
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
