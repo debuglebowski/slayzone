@@ -2,13 +2,10 @@ import { openDb, type SlayDb } from '../../db'
 import { apiGet } from '../../api'
 import { parseColumnsConfig } from '@slayzone/projects/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
-import type { AuthorContext } from '@slayzone/task-artifacts/shared'
 
-export function cliAuthor(): AuthorContext {
-  const mode = process.env.SLAYZONE_AGENT_MODE
-  if (mode) return { type: 'agent', id: mode }
-  return { type: 'user', id: null }
-}
+// Re-exported for existing call sites; implementation lives in a decoupled,
+// unit-testable module (no CLI DB/api graph).
+export { cliAuthor } from './cli-author'
 
 export interface TaskRow extends Record<string, unknown> {
   id: string
