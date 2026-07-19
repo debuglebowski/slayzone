@@ -3,6 +3,7 @@ import { appLevelRouter } from './routers/app'
 import { agentLifecycleRouter } from './routers/agent-lifecycle'
 import { aiConfigRouter } from './routers/ai-config'
 import { agentPromptsRouter } from './routers/agent-prompts'
+import { agentSessionsRouter } from './routers/agent-sessions'
 import { agentTurnsRouter } from './routers/agent-turns'
 import { automationsRouter } from './routers/automations'
 import { chatRouter } from './routers/chat'
@@ -35,6 +36,7 @@ export const appRouter = router({
   agentLifecycle: agentLifecycleRouter,
   aiConfig: aiConfigRouter,
   agentPrompts: agentPromptsRouter,
+  agentSessions: agentSessionsRouter,
   agentTurns: agentTurnsRouter,
   automations: automationsRouter,
   artifacts: artifactsRouter,

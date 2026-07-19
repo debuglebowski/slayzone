@@ -27,6 +27,12 @@ import {
   AgentPromptsToggleButton,
   usePromptsSidebarOpen
 } from './agent-prompts/AgentPromptsSidebar'
+import {
+  SessionsSidebar,
+  SessionHistoryToggleButton,
+  useSessionsSidebarOpen
+} from './agent-sessions/SessionsSidebar'
+import { useTaskSessions } from './agent-sessions/useTaskSessions'
 
 export interface TerminalContainerHandle {
   closeActiveGroup: () => Promise<boolean>
@@ -170,6 +176,16 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     const canShowPrompts =
       (activeGroup?.isMain ?? false) && !!mainMode && isPromptCaptureMode(mainMode)
     const [promptsOpen, togglePrompts] = usePromptsSidebarOpen(taskId)
+
+    // Session history: lists every agent session (distinct provider conversation)
+    // tied to the MAIN agent. Same gate as the prompts sidebar (main group active,
+    // capture-capable terminal agent). The toggle button only appears once the
+    // task has MORE THAN ONE session — a single-session task has no history worth
+    // a separate view. Query only runs while that gate holds, so idle tasks pay
+    // nothing.
+    const sessions = useTaskSessions(taskId, mainMode ?? '', canShowPrompts && !!mainMode)
+    const canShowSessions = canShowPrompts && sessions.length > 1
+    const [sessionsOpen, toggleSessions] = useSessionsSidebarOpen(taskId)
 
     // Notify parent when main tab active state changes
     useEffect(() => {
@@ -482,9 +498,14 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             onPaneMove={movePane}
             onGroupRename={renameTab}
             rightContent={
-              canShowPrompts && !promptsOpen ? (
+              (canShowSessions && !sessionsOpen) || (canShowPrompts && !promptsOpen) ? (
                 <div className="flex items-center gap-2">
-                  <AgentPromptsToggleButton onToggle={togglePrompts} />
+                  {canShowSessions && !sessionsOpen && (
+                    <SessionHistoryToggleButton onToggle={toggleSessions} />
+                  )}
+                  {canShowPrompts && !promptsOpen && (
+                    <AgentPromptsToggleButton onToggle={togglePrompts} />
+                  )}
                   {rightContent}
                 </div>
               ) : (
@@ -508,6 +529,9 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             {overlay}
           </div>
         </div>
+        {canShowSessions && sessionsOpen && mainMode && (
+          <SessionsSidebar taskId={taskId} agentId={mainMode} onToggle={toggleSessions} />
+        )}
         {canShowPrompts && promptsOpen && mainMode && (
           <AgentPromptsSidebar taskId={taskId} agentId={mainMode} onToggle={togglePrompts} />
         )}

@@ -4,6 +4,7 @@ import {
   HONORED_ORIGINS,
   type ConversationOrigin
 } from '@slayzone/task/shared'
+import { agentSessionsEvents } from '../events'
 
 /**
  * Append-only ledger of conversation IDs per task per provider (table
@@ -162,6 +163,12 @@ export async function recordConversation(
   }
 
   await db.batchTxn(ops)
+
+  // The session set for this task just changed (new spawn/confirm, or a reset).
+  // Notify the renderer's session-history list. Best-effort — never block the
+  // write path. A pending-spawn shadow is filtered out of the list, but firing
+  // here is harmless (the refetch simply returns the same set).
+  agentSessionsEvents.emit('agent-sessions:changed', { taskId })
 }
 
 /**

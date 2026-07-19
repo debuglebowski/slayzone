@@ -1,5 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ConversationOrigin } from '@slayzone/task/shared'
+import { agentSessionsEvents } from '../events'
 
 /**
  * Read-side of the first-class agent-session entity (tables `agent_sessions` +
@@ -82,6 +83,91 @@ export async function listConversationHistory(
     conversationId: r.conversation_id,
     origin: r.origin,
     createdAt: r.created_at
+  }))
+}
+
+/** One user-facing agent session for a task: a distinct provider conversation. */
+export interface TaskSessionSummary {
+  /** Provider thread id — the session's stable identity. */
+  conversationId: string
+  /** Provenance of the session's first spawn (fresh / resume / heal / …). */
+  origin: ConversationOrigin
+  /** Earliest spawn timestamp for this conversation. */
+  startedAt: number
+  /** Latest spawn timestamp for this conversation (most recent re-spawn/resume). */
+  lastActiveAt: number
+  /** User prompts captured for this conversation (join on cli_session_id). */
+  messageCount: number
+  /** Earliest captured user prompt text — the human-readable session label. */
+  firstPrompt: string | null
+  /** True when this conversation is the honored "current" one (reset-aware). */
+  isCurrent: boolean
+}
+
+/**
+ * Every agent session tied to (taskId, mode), one entry per distinct
+ * `conversation_id`, newest first. This is the user's mental model of a
+ * "session": a `--resume` re-spawn reuses the same conversation and collapses
+ * into one entry here (multiple `agent_sessions` rows → one session), while a
+ * fresh start / reset mints a new conversation → a new entry.
+ *
+ * Only HONORED origins count as sessions the user actually started
+ * (`slay-spawned-fresh|resume`, `cas-repoint-heal`, `legacy-migration`).
+ * `pending-spawn` rows are excluded even though they carry the pre-minted
+ * expected id — many belong to spawns that died before the agent confirmed a
+ * SessionStart, so surfacing them would show phantom sessions. `foreign-observed`
+ * is audit-only (a manual `--resume X`), never a session slay owns. Warm-pool
+ * rows (null task) and null-conversation rows are excluded too.
+ *
+ * `messageCount` + `firstPrompt` join `agent_prompts` on
+ * `cli_session_id = conversation_id` (they are the same value). `isCurrent`
+ * mirrors `getCurrentConversationId` — the latest honored conversation strictly
+ * after the most recent reset — so a reset leaves the history intact but marks
+ * no session current.
+ */
+export async function listTaskSessions(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string
+): Promise<TaskSessionSummary[]> {
+  const current = await getCurrentConversationId(db, taskId, mode)
+  const rows = await db.all<{
+    conversation_id: string
+    origin: ConversationOrigin
+    started_at: number
+    last_active_at: number
+    message_count: number
+    first_prompt: string | null
+  }>(
+    `SELECT
+       s.conversation_id                         AS conversation_id,
+       (SELECT o.origin FROM agent_sessions o
+          WHERE o.task_id = s.task_id AND o.mode = s.mode
+            AND o.conversation_id = s.conversation_id
+            AND o.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+          ORDER BY o.created_at ASC, o.rowid ASC LIMIT 1) AS origin,
+       min(s.created_at)                         AS started_at,
+       max(s.created_at)                         AS last_active_at,
+       (SELECT count(*) FROM agent_prompts p
+          WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id) AS message_count,
+       (SELECT p.text FROM agent_prompts p
+          WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id
+          ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1) AS first_prompt
+     FROM agent_sessions s
+     WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
+       AND s.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+     GROUP BY s.conversation_id
+     ORDER BY started_at DESC`,
+    [taskId, mode]
+  )
+  return rows.map((r) => ({
+    conversationId: r.conversation_id,
+    origin: r.origin,
+    startedAt: r.started_at,
+    lastActiveAt: r.last_active_at,
+    messageCount: r.message_count,
+    firstPrompt: r.first_prompt,
+    isCurrent: r.conversation_id === current
   }))
 }
 
@@ -293,6 +379,10 @@ export async function bindSessionToTask(
       WHERE id = ? AND status = 'pooled' AND task_id IS NULL`,
     [args.taskId, args.tabId, Date.now(), args.sessionId]
   )
+  if (res.changes > 0) {
+    // A pooled session just became this task's session → refresh its history.
+    agentSessionsEvents.emit('agent-sessions:changed', { taskId: args.taskId })
+  }
   return res.changes > 0
 }
 

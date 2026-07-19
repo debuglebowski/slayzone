@@ -4,8 +4,8 @@
 // TaskRuntimeAdapters (no Electron `app`/IPC), so the whole op set is exported here.
 // The Electron host injects its runtime adapters at boot via configureTaskRuntimeAdapters.
 
-export { taskEvents } from './events'
-export type { TaskEventMap } from './events'
+export { taskEvents, agentSessionsEvents } from './events'
+export type { TaskEventMap, AgentSessionsEventMap } from './events'
 
 export {
   artifactWatcherEvents,
@@ -51,6 +51,7 @@ export {
   recordConversation,
   getCurrentConversationId,
   listConversationHistory,
+  listTaskSessions,
   recordPendingSpawn,
   findPendingSpawn,
   prunePendingSpawns,
@@ -61,7 +62,7 @@ export {
   bindSessionToTask,
   getBoundTaskId
 } from './ops'
-export type { CreateImportedTaskInput } from './ops'
+export type { CreateImportedTaskInput, TaskSessionSummary } from './ops'
 export {
   configureTaskRuntimeAdapters,
   updateTask,

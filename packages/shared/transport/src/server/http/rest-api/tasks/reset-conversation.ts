@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Express } from 'express'
+import { agentSessionsEvents } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 
@@ -61,6 +62,9 @@ export function registerTaskResetConversationRoute(app: Express, deps: RestApiDe
         ]
       })
       await db.batchTxn(ops)
+
+      // Reset shifts the "current" session cutoff — refresh the history list.
+      agentSessionsEvents.emit('agent-sessions:changed', { taskId: task.row.id })
 
       res.json({ ok: true, data: { id: task.row.id, reset: modes } })
     } catch (err) {
