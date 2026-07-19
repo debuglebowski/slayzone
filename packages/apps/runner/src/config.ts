@@ -1,20 +1,17 @@
 /**
- * Runner configuration — env-first with an optional JSON config file
- * (`SLAYZONE_RUNNER_CONFIG=/path/to/config.json`) AND the shared
- * `~/.slayzone/config.json` (see @slayzone/platform/slayzone-config) layered in
- * as a lower-precedence base. Full precedence for the runner keys it reads
- * (joinToken, runnerName→name, hubUrl):
+ * Runner configuration — env-first, layered over the single shared config file
+ * at `<ROOT>/config.json` (see @slayzone/platform/slayzone-config). Precedence:
  *
- *   env var  >  SLAYZONE_RUNNER_CONFIG file  >  ~/.slayzone/config.json  >  default
+ *   env var  >  <ROOT>/config.json  >  default
  *
- * (plus the join-token embedded hubUrl/cert as the lowest fallback, unchanged).
- * Env still wins so operators can override a checked-in config per host.
+ * (plus the join-token embedded hubUrl/cert as the lowest fallback). Env still
+ * wins so operators / the supervised host can override per boot. There is no
+ * separate `SLAYZONE_RUNNER_CONFIG` path-pointing knob — one derived config file.
  *
  * @module runner/config
  */
 
 import { realpathSync } from 'node:fs'
-import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
@@ -35,21 +32,21 @@ export const runnerConfigSchema = z.object({
   /** sha256 pin of the hub TLS leaf cert (lowercase hex; colons tolerated). */
   pinnedCertSha256: z.string().min(1).optional(),
   /** Override for the credential-store directory (tests, packaging). */
-  credentialsDir: z.string().min(1).optional(),
-  heartbeatIntervalMs: z.number().int().positive().optional()
+  credentialsDir: z.string().min(1).optional()
 })
 export type RunnerConfig = z.infer<typeof runnerConfigSchema>
 
 export const ENV_VARS = {
   hubUrl: 'SLAYZONE_HUB_URL',
   joinToken: 'SLAYZONE_JOIN_TOKEN',
+  // name + allowedRoots: the Electron host injects these into its supervised
+  // local runner (see app main startLocalRunnerWithAutoEnroll). Kept as the
+  // supervised channel; for a STANDALONE runner name defaults to hostname and
+  // allowedRoots come from <ROOT>/config.json (+ the ROOT default in bin.ts).
   name: 'SLAYZONE_RUNNER_NAME',
   allowedRoots: 'SLAYZONE_RUNNER_ALLOWED_ROOTS',
-  capabilities: 'SLAYZONE_RUNNER_CAPABILITIES',
   pinnedCertSha256: 'SLAYZONE_HUB_CERT_SHA256',
-  credentialsDir: 'SLAYZONE_RUNNER_CREDENTIALS_DIR',
-  heartbeatIntervalMs: 'SLAYZONE_RUNNER_HEARTBEAT_MS',
-  configFile: 'SLAYZONE_RUNNER_CONFIG'
+  credentialsDir: 'SLAYZONE_RUNNER_CREDENTIALS_DIR'
 } as const
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
@@ -120,53 +117,37 @@ type Env = Record<string, string | undefined>
 
 function splitList(value: string | undefined, separator: string): string[] | undefined {
   if (value === undefined) return undefined
-  const parts = value
+  return value
     .split(separator)
     .map((p) => p.trim())
     .filter((p) => p.length > 0)
-  return parts
-}
-
-function readConfigFile(path: string): Partial<RunnerConfig> {
-  let raw: string
-  try {
-    raw = readFileSync(path, 'utf8')
-  } catch (err) {
-    throw new Error(`cannot read runner config file '${path}': ${String(err)}`)
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch (err) {
-    throw new Error(`runner config file '${path}' is not valid JSON: ${String(err)}`)
-  }
-  const result = runnerConfigSchema.partial().safeParse(parsed)
-  if (!result.success) {
-    throw new Error(`runner config file '${path}' is invalid: ${result.error.message}`)
-  }
-  return result.data
 }
 
 /**
- * Map the shared `~/.slayzone/config.json` onto the runner's partial config
- * shape (only the runner keys it owns: hubUrl, joinToken, runnerName→name).
- * Other shared keys (hub-only) are ignored here.
+ * Map the shared `<ROOT>/config.json` onto the runner's config shape. This is
+ * the SINGLE config file for a standalone runner — the former
+ * `SLAYZONE_RUNNER_CONFIG` env var (a second path-pointing knob at an arbitrary
+ * file) is gone; there is one derived config at `<ROOT>/config.json`.
  */
 function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
   const out: Partial<RunnerConfig> = {}
   if (shared.hubUrl !== undefined) out.hubUrl = shared.hubUrl
   if (shared.joinToken !== undefined) out.joinToken = shared.joinToken
   if (shared.runnerName !== undefined) out.name = shared.runnerName
+  // The FS path-jail — locally-declared only, never sourced from hub-pushed data.
+  if (shared.allowedRoots !== undefined) out.allowedRoots = shared.allowedRoots
+  if (shared.pinnedCertSha256 !== undefined) out.pinnedCertSha256 = shared.pinnedCertSha256
+  if (shared.credentialsDir !== undefined) out.credentialsDir = shared.credentialsDir
   return out
 }
 
 /**
  * Assemble the effective config. Precedence (low→high):
- *   defaults ← ~/.slayzone/config.json ← SLAYZONE_RUNNER_CONFIG file ← environment
+ *   defaults ← <ROOT>/config.json ← environment
  * (with the join-token embedded hubUrl/cert as the lowest fallback). Throws with
  * a readable message when required fields are missing.
  *
- * `shared` defaults to reading `~/.slayzone/config.json` ONLY for a STANDALONE
+ * `shared` defaults to reading `<ROOT>/config.json` ONLY for a STANDALONE
  * runner using the real `process.env`. It is skipped ({}) when:
  *   - a test passes its own `env` object (hermetic — never touch the dev's real
  *     config file), or
@@ -185,13 +166,6 @@ export function loadRunnerConfig(
     : {}
 ): RunnerConfig {
   const fromShared = fromSharedConfig(shared)
-  const fromFile = env[ENV_VARS.configFile] ? readConfigFile(env[ENV_VARS.configFile] as string) : {}
-
-  const heartbeatRaw = env[ENV_VARS.heartbeatIntervalMs]
-  const heartbeatFromEnv = heartbeatRaw === undefined ? undefined : Number(heartbeatRaw)
-  if (heartbeatFromEnv !== undefined && !Number.isInteger(heartbeatFromEnv)) {
-    throw new Error(`${ENV_VARS.heartbeatIntervalMs} must be an integer, got '${heartbeatRaw}'`)
-  }
 
   // A join token is self-sufficient: it embeds the hub's `wss://…/runners` URL and
   // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
@@ -200,7 +174,7 @@ export function loadRunnerConfig(
   // operator can point a token at a different endpoint or override the pin. A
   // malformed token decodes to null → no fallback (schema then reports the missing
   // hubUrl, exactly as before).
-  const joinToken = env[ENV_VARS.joinToken] ?? fromFile.joinToken ?? fromShared.joinToken
+  const joinToken = env[ENV_VARS.joinToken] ?? fromShared.joinToken
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 
   const merged = {
@@ -210,47 +184,54 @@ export function loadRunnerConfig(
     ...(fromToken
       ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint }
       : {}),
-    // ~/.slayzone/config.json — base under both the per-host runner config file
-    // and env (which are spread after this). Only the runner keys it owns.
+    // <ROOT>/config.json — base under env (spread after). The single config file.
     ...fromShared,
-    ...fromFile,
     ...(env[ENV_VARS.hubUrl] !== undefined ? { hubUrl: env[ENV_VARS.hubUrl] } : {}),
     ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {}),
     ...(env[ENV_VARS.name] !== undefined ? { name: env[ENV_VARS.name] } : {}),
+    // allowedRoots env read is the SUPERVISED injection channel (host passes the
+    // path-jail); standalone gets it from config.json / the ROOT default.
     ...(splitList(env[ENV_VARS.allowedRoots], delimiter) !== undefined
       ? { allowedRoots: splitList(env[ENV_VARS.allowedRoots], delimiter) }
-      : {}),
-    ...(splitList(env[ENV_VARS.capabilities], ',') !== undefined
-      ? { capabilities: splitList(env[ENV_VARS.capabilities], ',') }
       : {}),
     ...(env[ENV_VARS.pinnedCertSha256] !== undefined
       ? { pinnedCertSha256: env[ENV_VARS.pinnedCertSha256] }
       : {}),
     ...(env[ENV_VARS.credentialsDir] !== undefined
       ? { credentialsDir: env[ENV_VARS.credentialsDir] }
-      : {}),
-    ...(heartbeatFromEnv !== undefined ? { heartbeatIntervalMs: heartbeatFromEnv } : {})
+      : {})
   }
 
   const result = runnerConfigSchema.safeParse(merged)
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
     throw new Error(
-      `invalid runner configuration (${issues}). Set ${ENV_VARS.hubUrl} (and ${ENV_VARS.joinToken} for first contact) or provide ${ENV_VARS.configFile}.`
+      `invalid runner configuration (${issues}). Set ${ENV_VARS.hubUrl} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/config.json.`
     )
   }
 
-  // Fail-fast on an EXPLICITLY-configured pin (env or config file) against a
+  // Fail-fast on an EXPLICITLY-configured pin (env or config.json) against a
   // plaintext ws:// hub: pinning is meaningless without TLS, and silently dropping
   // it would downgrade an operator who asked for pinning to an unpinned connection.
   // A pin that came ONLY from the join token (the auto path) is NOT explicit — it
   // is softly ignored downstream (startRunner) when the resolved url is ws://, so a
   // ws token stays usable for loopback/dev without a hard failure.
-  const explicitPin = env[ENV_VARS.pinnedCertSha256] ?? fromFile.pinnedCertSha256
+  const explicitPin = env[ENV_VARS.pinnedCertSha256] ?? fromShared.pinnedCertSha256
   if (explicitPin !== undefined && urlProtocol(result.data.hubUrl) === 'ws:') {
     throw new Error(
       `${ENV_VARS.pinnedCertSha256} (or config pinnedCertSha256) requires a wss:// hub url; ` +
         `got '${result.data.hubUrl}'. Pinning has no effect without TLS — use a wss:// url or drop the pin.`
+    )
+  }
+
+  // SLAYZONE_MODE=remote hardening: a remote runner MUST dial the hub over TLS.
+  // A plaintext ws:// hub on the open internet is a hard error (credentials +
+  // command stream would be unencrypted). Read mode from the passed env so the
+  // check stays hermetic under tests. Local mode still allows ws:// for loopback.
+  if (env.SLAYZONE_MODE?.trim().toLowerCase() === 'remote' && urlProtocol(result.data.hubUrl) === 'ws:') {
+    throw new Error(
+      `SLAYZONE_MODE=remote requires a wss:// hub url; got '${result.data.hubUrl}'. ` +
+        `A remote runner must use TLS — use a wss:// url (or SLAYZONE_MODE=local for loopback/dev).`
     )
   }
   return result.data

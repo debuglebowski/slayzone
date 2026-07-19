@@ -34,39 +34,55 @@ describe('loadRunnerConfig', () => {
     })
   })
 
-  it('parses list-shaped env vars', () => {
-    const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
-      [ENV_VARS.allowedRoots]: ['/srv/a', '/srv/b'].join(delimiter),
-      [ENV_VARS.capabilities]: 'pty, git',
-      [ENV_VARS.name]: 'runner-9',
-      [ENV_VARS.heartbeatIntervalMs]: '5000'
-    })
+  it('reads allowedRoots from the shared config (standalone operator channel)', () => {
+    const config = loadRunnerConfig(
+      { [ENV_VARS.hubUrl]: 'wss://hub.example/runners' },
+      { allowedRoots: ['/srv/a', '/srv/b'] }
+    )
     expect(config.allowedRoots).toEqual(['/srv/a', '/srv/b'])
-    expect(config.capabilities).toEqual(['pty', 'git'])
-    expect(config.name).toBe('runner-9')
-    expect(config.heartbeatIntervalMs).toBe(5000)
+    // capabilities always defaults to the full set (env knob removed).
+    expect(config.capabilities).toEqual(['pty', 'git', 'fs', 'proc'])
   })
 
-  it('merges config file under env (env wins)', () => {
-    const filePath = join(dir, 'runner.json')
-    writeFileSync(
-      filePath,
-      JSON.stringify({
-        hubUrl: 'wss://from-file.example/runners',
-        name: 'from-file',
-        capabilities: ['pty', 'fs'],
-        pinnedCertSha256: 'a'.repeat(64)
-      })
+  it('env allowedRoots + name win (the supervised host-injection channel)', () => {
+    // The Electron host injects SLAYZONE_RUNNER_ALLOWED_ROOTS + SLAYZONE_RUNNER_NAME
+    // into its local runner; env must override the shared config.
+    const config = loadRunnerConfig(
+      {
+        [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
+        [ENV_VARS.allowedRoots]: ['/home/me', '/srv/x'].join(delimiter),
+        [ENV_VARS.name]: 'local-runner'
+      },
+      { allowedRoots: ['/from/config'], runnerName: 'from-config' }
     )
-    const config = loadRunnerConfig({
-      [ENV_VARS.configFile]: filePath,
-      [ENV_VARS.name]: 'from-env'
-    })
-    expect(config.hubUrl).toBe('wss://from-file.example/runners')
-    expect(config.name).toBe('from-env')
-    expect(config.capabilities).toEqual(['pty', 'fs'])
+    expect(config.allowedRoots).toEqual(['/home/me', '/srv/x'])
+    expect(config.name).toBe('local-runner')
+  })
+
+  it('reads hubUrl/name/pinnedCertSha256/credentialsDir from the shared config', () => {
+    // The single <ROOT>/config.json now carries pin + creds-dir too (the former
+    // SLAYZONE_RUNNER_CONFIG path-pointing env var is gone).
+    const config = loadRunnerConfig(
+      {},
+      {
+        hubUrl: 'wss://from-config.example/runners',
+        runnerName: 'from-config',
+        pinnedCertSha256: 'a'.repeat(64),
+        credentialsDir: '/var/lib/slayzone/runner'
+      }
+    )
+    expect(config.hubUrl).toBe('wss://from-config.example/runners')
+    expect(config.name).toBe('from-config')
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
+    expect(config.credentialsDir).toBe('/var/lib/slayzone/runner')
+  })
+
+  it('env wins over the shared config', () => {
+    const config = loadRunnerConfig(
+      { [ENV_VARS.hubUrl]: 'wss://from-env.example/runners' },
+      { hubUrl: 'wss://from-config.example/runners' }
+    )
+    expect(config.hubUrl).toBe('wss://from-env.example/runners')
   })
 
   it('fails with a readable error when hubUrl is missing', () => {
@@ -115,15 +131,13 @@ describe('loadRunnerConfig', () => {
     ).toThrow(/requires a wss:\/\/ hub url/)
   })
 
-  it('fails fast when an EXPLICIT config-file pin is set on a ws:// hub url', () => {
-    const filePath = join(dir, 'runner.json')
-    writeFileSync(
-      filePath,
-      JSON.stringify({ hubUrl: 'ws://hub.example/runners', pinnedCertSha256: 'a'.repeat(64) })
-    )
-    expect(() => loadRunnerConfig({ [ENV_VARS.configFile]: filePath })).toThrow(
-      /requires a wss:\/\/ hub url/
-    )
+  it('fails fast when an EXPLICIT config.json pin is set on a ws:// hub url', () => {
+    expect(() =>
+      loadRunnerConfig(
+        {},
+        { hubUrl: 'ws://hub.example/runners', pinnedCertSha256: 'a'.repeat(64) }
+      )
+    ).toThrow(/requires a wss:\/\/ hub url/)
   })
 
   it('does NOT fail when only the join-token pin lands on a ws:// url (soft auto path)', () => {
@@ -148,16 +162,27 @@ describe('loadRunnerConfig', () => {
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
-  it('rejects malformed config files and non-integer heartbeat', () => {
-    const filePath = join(dir, 'bad.json')
-    writeFileSync(filePath, '{not json')
-    expect(() => loadRunnerConfig({ [ENV_VARS.configFile]: filePath })).toThrow(/not valid JSON/)
+  // --- SLAYZONE_MODE=remote hardening: plaintext ws:// hub is a hard error ------
+  it('rejects a plaintext ws:// hub url in remote mode', () => {
     expect(() =>
-      loadRunnerConfig({ [ENV_VARS.hubUrl]: 'wss://x/runners', [ENV_VARS.heartbeatIntervalMs]: 'soon' })
-    ).toThrow(/integer/)
+      loadRunnerConfig({ [ENV_VARS.hubUrl]: 'ws://hub.example/runners', SLAYZONE_MODE: 'remote' })
+    ).toThrow(/wss:\/\//)
   })
 
-  // --- shared ~/.slayzone/config.json layering (env > runner file > shared > default) ---
+  it('accepts a wss:// hub url in remote mode', () => {
+    const config = loadRunnerConfig({
+      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
+      SLAYZONE_MODE: 'remote'
+    })
+    expect(config.hubUrl).toBe('wss://hub.example/runners')
+  })
+
+  it('still allows ws:// in local mode (dev/loopback)', () => {
+    const config = loadRunnerConfig({ [ENV_VARS.hubUrl]: 'ws://127.0.0.1:9000/runners' })
+    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/runners')
+  })
+
+  // --- shared <ROOT>/config.json layering (env > shared > default) ---
   it('reads hubUrl/joinToken/runnerName from the shared config as a base', () => {
     const config = loadRunnerConfig(
       {},
@@ -168,27 +193,13 @@ describe('loadRunnerConfig', () => {
     expect(config.name).toBe('shared-runner')
   })
 
-  it('runner config FILE wins over the shared config', () => {
-    const filePath = join(dir, 'runner.json')
-    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/runners' }))
+  it('ENV wins over the shared config; unset keys fall through', () => {
     const config = loadRunnerConfig(
-      { [ENV_VARS.configFile]: filePath },
-      { hubUrl: 'wss://shared.example/runners', joinToken: 'jt-shared' }
-    )
-    expect(config.hubUrl).toBe('wss://from-file.example/runners')
-    // joinToken only in shared → still used (file did not set it)
-    expect(config.joinToken).toBe('jt-shared')
-  })
-
-  it('ENV wins over both the runner file and the shared config', () => {
-    const filePath = join(dir, 'runner.json')
-    writeFileSync(filePath, JSON.stringify({ hubUrl: 'wss://from-file.example/runners' }))
-    const config = loadRunnerConfig(
-      { [ENV_VARS.configFile]: filePath, [ENV_VARS.hubUrl]: 'wss://from-env.example/runners' },
+      { [ENV_VARS.hubUrl]: 'wss://from-env.example/runners' },
       { hubUrl: 'wss://shared.example/runners', runnerName: 'shared-runner' }
     )
     expect(config.hubUrl).toBe('wss://from-env.example/runners')
-    expect(config.name).toBe('shared-runner') // shared name survives (no file/env override)
+    expect(config.name).toBe('shared-runner') // shared name survives (no env override)
   })
 
   it('does not read the developer real config when an explicit env is passed (hermetic)', () => {
@@ -207,11 +218,9 @@ describe('loadRunnerConfig', () => {
     const savedSup = process.env.SLAYZONE_SUPERVISED
     const savedHub = process.env.SLAYZONE_HUB_URL
     const savedToken = process.env.SLAYZONE_JOIN_TOKEN
-    const savedCfg = process.env.SLAYZONE_RUNNER_CONFIG
     try {
       delete process.env.SLAYZONE_HUB_URL
       delete process.env.SLAYZONE_JOIN_TOKEN
-      delete process.env.SLAYZONE_RUNNER_CONFIG
       process.env.SLAYZONE_HOME_DIR = dir
       process.env.SLAYZONE_SUPERVISED = '1'
       writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/runners' }))
@@ -229,7 +238,6 @@ describe('loadRunnerConfig', () => {
       restore('SLAYZONE_SUPERVISED', savedSup)
       restore('SLAYZONE_HUB_URL', savedHub)
       restore('SLAYZONE_JOIN_TOKEN', savedToken)
-      restore('SLAYZONE_RUNNER_CONFIG', savedCfg)
     }
   })
 })

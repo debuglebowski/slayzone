@@ -140,7 +140,6 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     credentialStore,
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
     ...(pinnedCertSha256 ? { pinnedCertSha256 } : {}),
-    ...(config.heartbeatIntervalMs ? { heartbeatIntervalMs: config.heartbeatIntervalMs } : {}),
     onHubRequest: (method, params) => dispatch.handle(method, params),
     log
   })
