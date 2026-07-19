@@ -983,8 +983,6 @@ function buildTransportSpawn(
     for (const [k, v] of Object.entries({ ...adapterEnv, ...mcpEnv })) {
       dockerArgs.push('-e', `${k}=${v}`)
     }
-    // Rewrite MCP host so CLI can reach the host's MCP server from inside container
-    dockerArgs.push('-e', 'SLAYZONE_MCP_HOST=host.docker.internal')
     dockerArgs.push('-w', workdir, '--', ctx.container, containerShell, '-i', '-l')
 
     return { file: 'docker', args: dockerArgs, cwd: homedir(), env }
@@ -1006,9 +1004,6 @@ function buildTransportSpawn(
     const parts: string[] = [`cd ${quoteForShell(workdir)}`]
     for (const [k, v] of Object.entries({ ...adapterEnv, ...mcpEnv })) {
       parts.push(`export ${k}=${quoteForShell(v)}`)
-    }
-    if (mcpPort) {
-      parts.push(`export SLAYZONE_MCP_HOST=localhost`)
     }
     parts.push(`${quoteForShell(remoteShell)} -i -l`)
     sshArgs.push(parts.join(' && '))
