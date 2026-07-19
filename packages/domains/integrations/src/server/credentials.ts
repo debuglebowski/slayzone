@@ -39,8 +39,21 @@ export function setCredentialCipher(c: CredentialCipher | null): void {
 
 const PLAINTEXT_PREFIX = 'plain:'
 
-function allowPlaintextFallback(): boolean {
-  return process.env.SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS === '1' || process.env.NODE_ENV === 'test'
+/**
+ * Whether plaintext credential storage is permitted. DERIVED from the runtime,
+ * not an env flag: a headless standalone hub has no OS keychain (no cipher wired,
+ * or a wired cipher whose `isEncryptionAvailable()` is false), so plaintext is its
+ * ONLY option and forcing an extra opt-in flag was pure ceremony. Encryption is
+ * used whenever a working cipher exists — plaintext is a fallback, never a
+ * preference. (`NODE_ENV=test` also permits it so unit tests need no OS keychain.)
+ * Replaces the former SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS knob.
+ */
+async function cipherAvailable(): Promise<boolean> {
+  return cipher != null && (await cipher.isEncryptionAvailable())
+}
+
+async function allowPlaintextFallback(): Promise<boolean> {
+  return process.env.NODE_ENV === 'test' || !(await cipherAvailable())
 }
 
 function toSettingKey(ref: string): string {
@@ -48,25 +61,23 @@ function toSettingKey(ref: string): string {
 }
 
 export async function storeCredential(db: SlayzoneDb, ref: string, secret: string): Promise<void> {
-  if (!cipher) {
-    if (!allowPlaintextFallback()) {
-      throw new Error('OS secure credential storage is unavailable on this machine')
-    }
-    // Node-only / pre-injection fallback (no cipher wired).
+  // Encrypt whenever a working cipher exists; otherwise fall back to plaintext
+  // (headless standalone hub with no OS keychain). Availability is the sole gate.
+  if (await cipherAvailable()) {
+    const encrypted = await cipher!.encryptString(secret)
     await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
       toSettingKey(ref),
-      `${PLAINTEXT_PREFIX}${secret}`
+      encrypted.toString('base64')
     )
     return
   }
 
-  if (!(await cipher.isEncryptionAvailable())) {
+  if (!(await allowPlaintextFallback())) {
     throw new Error('OS secure credential storage is unavailable on this machine')
   }
-  const encrypted = await cipher.encryptString(secret)
   await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
     toSettingKey(ref),
-    encrypted.toString('base64')
+    `${PLAINTEXT_PREFIX}${secret}`
   )
 }
 
@@ -79,18 +90,18 @@ export async function readCredential(db: SlayzoneDb, ref: string): Promise<strin
   }
 
   if (row.value.startsWith(PLAINTEXT_PREFIX)) {
-    if (!allowPlaintextFallback()) {
+    if (!(await allowPlaintextFallback())) {
       throw new Error('Plaintext credential fallback is disabled')
     }
     return row.value.slice(PLAINTEXT_PREFIX.length)
   }
 
-  if (!cipher || !(await cipher.isEncryptionAvailable())) {
+  if (!(await cipherAvailable())) {
     throw new Error('OS secure credential storage is unavailable on this machine')
   }
 
   const encrypted = Buffer.from(row.value, 'base64')
-  return await cipher.decryptString(encrypted)
+  return await cipher!.decryptString(encrypted)
 }
 
 export async function deleteCredential(db: SlayzoneDb, ref: string): Promise<void> {

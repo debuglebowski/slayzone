@@ -20,7 +20,9 @@ import { pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProvider
 import { parseGitHubExternalKey } from './sync-helpers'
 import type { ProviderStatus } from '../shared'
 
-process.env.SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS = '1'
+// No OS keychain cipher is wired in this test, so credential storage falls back
+// to plaintext automatically (the former SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS
+// flag is gone — plaintext is now gated on cipher availability).
 
 const GITHUB_TOKEN = requireEnv('GITHUB_TOKEN')
 const GITHUB_TEST_REPO = requireEnv('GITHUB_TEST_REPO')

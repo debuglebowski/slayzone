@@ -18,7 +18,9 @@ import * as linearClient from './linear-client'
 import { pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders } from '../server/sync'
 import type { ProviderStatus } from '../shared'
 
-process.env.SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS = '1'
+// No OS keychain cipher is wired in this test, so credential storage falls back
+// to plaintext automatically (the former SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS
+// flag is gone — plaintext is now gated on cipher availability).
 
 const LINEAR_API_KEY = requireEnv('LINEAR_API_KEY')
 const LINEAR_TEST_TEAM_ID = requireEnv('LINEAR_TEST_TEAM_ID')
