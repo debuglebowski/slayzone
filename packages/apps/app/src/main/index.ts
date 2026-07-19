@@ -662,6 +662,12 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
     scriptPath: runnerScriptPath,
     env: {
       ...process.env,
+      // This local runner is HOST-SUPERVISED: the Electron app spawns + manages it
+      // and supplies its env in full below. Flag it so the runner does NOT cwd-seed
+      // SLAYZONE_ROOT (bin.ts) — without this it treated the app's CWD (the repo in
+      // dev) as its root and wrote creds to <repo>/runners/. Supervised → creds
+      // resolve to the shared ~/.slayzone/runners like the rest of app state.
+      SLAYZONE_SUPERVISED: '1',
       // Auto-enroll: the freshly minted token embeds the cert fingerprint the
       // runner pins; SLAYZONE_HUB_URL is the wss /runners listener url from the
       // token/mint response. These OVERRIDE any inherited values so the local
