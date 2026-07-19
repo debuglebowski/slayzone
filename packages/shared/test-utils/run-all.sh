@@ -100,6 +100,19 @@ run_test packages/apps/hub/src/runner-tls-listener.test.ts
 # Shared ~/.slayzone/config.json (hub+runner; env>file>default, auto-gen secret, race-safe).
 run_test packages/shared/platform/src/slayzone-config.test.ts
 run_test packages/apps/hub/src/standalone-config.test.ts
+# Interactive first-run setup (hub+runner): TTY/supervised/noninteractive gating,
+# confirm-to-save, env seed, config.json merge (fake IO — no real TTY).
+run_test packages/shared/platform/src/config-prompt.test.ts
+# CLI author context resolves from SLAYZONE_AGENT_ID (the injected var), not AGENT_MODE.
+run_test packages/apps/cli/src/commands/tasks/cli-author.test.ts
+# Artifacts data-root: SLAYZONE_STORE_DIR (retired DB_DIR ignored).
+run_test packages/shared/transport/src/server/http/rest-api/artifacts/data-root.test.ts
+# Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
+run_test packages/apps/app/src/main/storage-migration.test.ts
+# SLAYZONE_MODE resolver + mode/bind contradiction guard (local+exposed = fatal).
+run_test packages/shared/platform/src/slayzone-mode.test.ts
+# Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
+run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 runner restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
 run_test_electron_strict_loader packages/apps/hub/src/runner-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).

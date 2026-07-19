@@ -104,13 +104,15 @@ test('valid config parses all known keys, drops wrong types', () => {
     p,
     JSON.stringify({
       runnerTransportSecret: 'abc',
-      dbPath: '/x/db.sqlite',
       port: 8080,
       runnerTransportPort: 8443,
       publicUrl: 'https://hub.example',
       joinToken: 'jt-1',
       runnerName: 'r1',
       hubUrl: 'wss://hub/runners',
+      allowedRoots: ['/srv/a', '/srv/b'],
+      pinnedCertSha256: 'a'.repeat(64),
+      credentialsDir: '/var/lib/slayzone/runner',
       // wrong-typed / unknown → dropped
       port2: 'nope',
       extra: { nested: 1 }
@@ -118,25 +120,27 @@ test('valid config parses all known keys, drops wrong types', () => {
   )
   const cfg = loadSlayzoneConfig(p)
   assertEq(cfg.runnerTransportSecret, 'abc', 'runnerTransportSecret')
-  assertEq(cfg.dbPath, '/x/db.sqlite', 'dbPath')
   assertEq(cfg.port, 8080, 'port')
   assertEq(cfg.runnerTransportPort, 8443, 'runnerTransportPort')
   assertEq(cfg.publicUrl, 'https://hub.example', 'publicUrl')
   assertEq(cfg.joinToken, 'jt-1', 'joinToken')
   assertEq(cfg.runnerName, 'r1', 'runnerName')
   assertEq(cfg.hubUrl, 'wss://hub/runners', 'hubUrl')
+  assertEq(JSON.stringify(cfg.allowedRoots), JSON.stringify(['/srv/a', '/srv/b']), 'allowedRoots')
+  assertEq(cfg.pinnedCertSha256, 'a'.repeat(64), 'pinnedCertSha256')
+  assertEq(cfg.credentialsDir, '/var/lib/slayzone/runner', 'credentialsDir')
   assert(!('extra' in cfg), 'unknown key dropped')
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('wrong-typed values are dropped (port as string, empty dbPath)', () => {
+test('wrong-typed values are dropped (port as string, empty publicUrl)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  writeFileSync(p, JSON.stringify({ port: '8080', runnerTransportPort: 'nope', dbPath: '' }))
+  writeFileSync(p, JSON.stringify({ port: '8080', runnerTransportPort: 'nope', publicUrl: '' }))
   const cfg = loadSlayzoneConfig(p)
   assert(cfg.port === undefined, 'string port dropped')
   assert(cfg.runnerTransportPort === undefined, 'string runnerTransportPort dropped')
-  assert(cfg.dbPath === undefined, 'empty dbPath dropped')
+  assert(cfg.publicUrl === undefined, 'empty publicUrl dropped')
   rmSync(dir, { recursive: true, force: true })
 })
 

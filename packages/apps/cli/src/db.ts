@@ -3,14 +3,16 @@ import http from 'node:http'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { getStateDir, DB_PRAGMAS } from '@slayzone/platform'
+import { getStorageDir, DB_PRAGMAS } from '@slayzone/platform'
 import { resolveHubTarget, type HubTarget } from './hub-config'
 export { resolveProject, resolveProjectArg, resolveProjectByPath } from './db-helpers.mjs'
 export type { SlayDb } from './db-helpers.mjs'
 import type { SlayDb } from './db-helpers.mjs'
 
 function defaultDir(): string {
-  const dir = getStateDir()
+  // Same derivation as the app/hub: <SLAYZONE_ROOT>/storage. Keeps the CLI's DB
+  // location in lockstep with wherever the app writes it (no split).
+  const dir = getStorageDir()
   if (fs.existsSync(dir)) return dir
   // Fallback: CLI runs before app has migrated data on Linux
   // TODO: remove legacy fallback once Linux migration has been out for a few releases
@@ -25,7 +27,7 @@ function defaultDir(): string {
 function getDbPath(dev: boolean): string {
   // Full path override — used by e2e tests to share the running app's DB
   if (process.env.SLAYZONE_DB_PATH) return process.env.SLAYZONE_DB_PATH
-  const dir = process.env.SLAYZONE_DB_DIR ?? defaultDir()
+  const dir = process.env.SLAYZONE_STORE_DIR ?? defaultDir()
   const name = dev ? 'slayzone.dev.sqlite' : 'slayzone.sqlite'
   return path.join(dir, name)
 }
@@ -139,7 +141,7 @@ export async function notifyApp(): Promise<void> {
 }
 
 export function getArtifactsDir(): string {
-  const dir = process.env.SLAYZONE_DB_DIR ?? defaultDir()
+  const dir = process.env.SLAYZONE_STORE_DIR ?? defaultDir()
   return path.join(dir, 'artifacts')
 }
 
@@ -182,5 +184,5 @@ export function openDb(): SlayDb {
 }
 
 export function getDataDir(): string {
-  return process.env.SLAYZONE_DB_DIR ?? defaultDir()
+  return process.env.SLAYZONE_STORE_DIR ?? defaultDir()
 }

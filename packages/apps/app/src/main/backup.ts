@@ -3,6 +3,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import fs from 'fs'
 import path from 'path'
 import { getDatabasePath, closeDatabase } from './db'
+import { getStorageDir } from './data-paths'
 import type { BackupInfo, BackupSettings } from '@slayzone/types'
 
 const DB_SUFFIXES = ['', '-wal', '-shm'] as const
@@ -19,7 +20,7 @@ const BACKUP_REGEX =
   /^slayzone(?:\.dev)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration)\.sqlite$/
 
 function getBackupsDir(): string {
-  const userDataPath = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const userDataPath = getStorageDir()
   const dir = path.join(userDataPath, 'backups')
   fs.mkdirSync(dir, { recursive: true })
   return dir

@@ -178,7 +178,6 @@ import {
   migrateXdgIfNeeded,
   migrateCliBinIfNeeded,
   getStateDir,
-  ensureDataRoot,
   installCli,
   checkCliInstalled,
   getCliBinTarget,
@@ -186,6 +185,7 @@ import {
   SLZ_FILE_HOST,
   fileUrlToSlzFileUrl
 } from '@slayzone/platform'
+import { initStorageDir, getStorageDir } from './data-paths'
 if (process.platform === 'linux') {
   const result = migrateXdgIfNeeded()
   if (!result.failed) {
@@ -197,6 +197,10 @@ if (process.platform === 'linux') {
   }
 }
 
+// The legacy state location = userData BEFORE any dev/e2e profile swap below.
+// This is the migration source (our DB/artifacts historically lived here).
+const legacyStateDir = app.getPath('userData')
+
 if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // Playwright runs alongside the user's dev app, so isolate the entire
   // Electron profile instead of only redirecting the SQLite DB path.
@@ -206,29 +210,33 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // Dev runs alongside the packaged app. Two Chromium instances sharing one
   // profile corrupts partition storage (wedged IndexedDB/quota service,
   // "Database IO error" on service worker DB), so isolate dev's Electron
-  // profile the same way Playwright does above. The SQLite DB and artifacts
-  // stay in the original dir via the SLAYZONE_DB_DIR fallback — only the
-  // Chromium profile (Partitions, storage, caches) moves.
-  const sharedDataDir = app.getPath('userData')
-  process.env.SLAYZONE_DB_DIR ??= sharedDataDir
-  const devProfileDir = `${sharedDataDir}-dev`
+  // profile the same way Playwright does above. Only the Chromium profile
+  // (Partitions, storage, caches) moves; our DB/artifacts are anchored to
+  // <ROOT>/storage below.
+  const devProfileDir = `${legacyStateDir}-dev`
   mkdirSync(devProfileDir, { recursive: true })
   app.setPath('userData', devProfileDir)
 }
 
-// tRPC server data root. Mirrors the app/IPC icon+DB convention
-// (SLAYZONE_DB_DIR || userData) so every router's ctx.dataRoot resolves
-// project-icons/artifacts to the same dir the renderer reads — otherwise, under
-// e2e (SLAYZONE_DB_DIR set, SLAYZONE_STORE_DIR unset) the tRPC server would use
-// ensureDataRoot()=getStateDir() (the real dev dir) and uploaded icons "disappear".
-// SLAYZONE_STORE_DIR still wins when explicitly set (headless @slayzone/hub).
+// Anchor all our state (DB, artifacts, recent backups, logs) under
+// <SLAYZONE_ROOT>/storage — the same layout on every machine — migrating it once
+// out of the legacy Electron userData dir (Electron keeps its own profile there).
+// Every process (this app, the sidecar it spawns, the hub) derives the SAME
+// <ROOT>/storage from SLAYZONE_ROOT via platform.getStorageDir() — no
+// SLAYZONE_STORE_DIR / SLAYZONE_DB_PATH is threaded across the boundary. Uses the
+// pre-swap userData as the migration SOURCE so the dev profile-swap above doesn't
+// hide the legacy data.
+initStorageDir(legacyStateDir)
+
+// tRPC server data root = the resolved storage dir, so every router's ctx.dataRoot
+// resolves project-icons/artifacts to the same dir the renderer reads.
 function getTrpcDataRoot(): string {
-  return process.env.SLAYZONE_STORE_DIR || process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  return getStorageDir()
 }
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
-import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase } from './db'
+import { initDatabases, closeDatabase, closeDiagnosticsDatabase } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { buildBackupOps, startAutoBackup, stopAutoBackup } from './backup'
 import { startProactiveGc } from './proactive-gc'
@@ -558,7 +566,8 @@ function getSidecarStatusSnapshot(): import('./sidecar-server-supervisor').Sidec
 }
 
 function revealSidecarLogInFinder(): void {
-  shell.showItemInFolder(join(ensureDataRoot(), 'logs', 'sidecar.log'))
+  // The sidecar writes logs under the storage dir it was handed (getStorageDir()).
+  shell.showItemInFolder(join(getStorageDir(), 'logs', 'sidecar.log'))
 }
 
 /**
@@ -644,12 +653,10 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
   const runnerScriptPath = is.dev
     ? join(app.getAppPath(), '../runner/dist/bin.cjs')
     : join(process.resourcesPath, 'runner', 'bin.cjs')
-  // Keep the runner's credential store + allowed roots off any shared global
-  // path so parallel/isolated app instances (incl. e2e) never clobber each
-  // other. Creds land under the app data root; roots default to the user's home
-  // (local runner operates on the user's own projects) unless the operator
-  // overrides via SLAYZONE_RUNNER_ALLOWED_ROOTS.
-  const credentialsDir = join(ensureDataRoot(), 'runner-creds')
+  // The local runner derives its own credential store at `<ROOT>/runners` (same
+  // SLAYZONE_ROOT/$HOME it inherits from us) — no explicit handoff. Allowed roots
+  // default to the user's home (local runner operates on the user's own projects)
+  // unless the operator overrides via SLAYZONE_RUNNER_ALLOWED_ROOTS.
   const handleRunner = startLocalRunner({
     execPath: process.execPath,
     scriptPath: runnerScriptPath,
@@ -662,8 +669,6 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       SLAYZONE_HUB_URL: minted.hubUrl,
       SLAYZONE_JOIN_TOKEN: minted.token,
       SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME,
-      SLAYZONE_RUNNER_CREDENTIALS_DIR:
-        process.env.SLAYZONE_RUNNER_CREDENTIALS_DIR ?? credentialsDir,
       SLAYZONE_RUNNER_ALLOWED_ROOTS:
         process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS ?? homedir()
     },
@@ -1366,7 +1371,7 @@ app
     // left user content orphaned in assets/. This block recovers from that and
     // also handles fresh upgrades. See db/v127-disk-migration.ts.
     {
-      const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+      const dataDir = getStorageDir()
       try {
         const report = migrateV127DiskDir(join(dataDir, 'assets'), join(dataDir, 'artifacts'))
         if (report.mode !== 'noop') {
@@ -1385,7 +1390,7 @@ app
     // read-file → write blob+version txn) so the file IO + writes stay atomic
     // and the sync better-sqlite3 logic never touches the async proxy.
     {
-      const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+      const dataDir = getStorageDir()
       const artifactsDir = join(dataDir, 'artifacts')
       const seedReport = await db.namedTxn('artifacts:seed-initial-versions', {
         dataDir,
@@ -2227,8 +2232,11 @@ app
             host: '127.0.0.1',
             env: {
               ...process.env,
-              SLAYZONE_STORE_DIR: ensureDataRoot(),
-              SLAYZONE_DB_PATH: getDatabasePath(),
+              // The sidecar derives <ROOT>/storage + DB path from SLAYZONE_ROOT itself
+              // (inherited $HOME → same getSlayzoneHomeDir()), so no STORE_DIR/DB_PATH
+              // is handed over. Pass only the dev-vs-packaged bit it can't infer
+              // (it has no Electron `app.isPackaged`), so it derives the right filename.
+              SLAYZONE_DEV: app.isPackaged ? undefined : '1',
               // Capability bridge (renderer Electron-only calls + host events) and
               // the host REST reverse-proxy target (browser-automation + export).
               SLAYZONE_HOST_CAP_URL: hostCapUrl,

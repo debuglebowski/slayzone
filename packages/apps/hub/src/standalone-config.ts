@@ -36,21 +36,39 @@ function isSupervised(): boolean {
 }
 
 /**
- * Seed `process.env` from `~/.slayzone/config.json` for a standalone hub boot.
+ * Seed `process.env` for a standalone hub boot from `<ROOT>/config.json`.
  * Call ONCE at the top of the standalone entrypoint (bin.ts), before startServer.
  * Returns silently (no file access) when supervised.
+ *
+ * ROOT anchoring: a standalone hub anchors ALL on-disk state to `SLAYZONE_ROOT`,
+ * defaulting to the launch directory (`process.cwd()`). This MUST be seeded
+ * before `loadSlayzoneConfig()` runs, because the config file itself lives at
+ * `<ROOT>/config.json` (getSlayzoneHomeDir reads SLAYZONE_ROOT). We then derive
+ * `SLAYZONE_STORE_DIR` (DB + logs + diagnostics) from the same root so a bare
+ * `slayzone-hub` in an empty dir keeps everything local to it.
  */
 export function applyStandaloneHubConfig(): void {
   if (isSupervised()) return
-
-  const cfg = loadSlayzoneConfig()
 
   // env-wins: only fill an env var the operator/CI has NOT already set.
   const setIfUnset = (key: string, value: string | undefined): void => {
     if (value !== undefined && process.env[key] === undefined) process.env[key] = value
   }
 
-  setIfUnset('SLAYZONE_DB_PATH', cfg.dbPath)
+  // Anchor to the launch dir FIRST, so the config-file lookup below resolves
+  // under ROOT. Only default when NEITHER SLAYZONE_ROOT NOR the back-compat
+  // SLAYZONE_HOME_DIR is set — otherwise a cwd default would clobber an explicit
+  // SLAYZONE_HOME_DIR (getSlayzoneHomeDir prefers ROOT), breaking the E2E/test
+  // sandbox + power-user relocation that rely on SLAYZONE_HOME_DIR.
+  if (!process.env.SLAYZONE_ROOT && !process.env.SLAYZONE_HOME_DIR) {
+    process.env.SLAYZONE_ROOT = process.cwd()
+  }
+  const cfg = loadSlayzoneConfig()
+
+  // No SLAYZONE_STORE_DIR / SLAYZONE_DB_PATH seeding: the DB + state dir DERIVE
+  // from SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
+  // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so
+  // there is nothing to thread through env here.
   setIfUnset('SLAYZONE_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
   setIfUnset('SLAYZONE_RUNNER_TRANSPORT_PORT', cfg.runnerTransportPort !== undefined ? String(cfg.runnerTransportPort) : undefined)
   setIfUnset('SLAYZONE_HUB_PUBLIC_URL', cfg.publicUrl)

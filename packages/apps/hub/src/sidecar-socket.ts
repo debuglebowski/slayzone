@@ -2,6 +2,12 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { mkdirSync, unlinkSync, existsSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import { getSlayzoneHomeDir } from '@slayzone/platform'
+
+// Unix domain socket paths have a hard OS length cap (~104 bytes on macOS/BSD,
+// 108 on Linux). Below this we anchor the socket under <ROOT>/run; if that path
+// would exceed the cap (deep ROOT), fall back to a short OS-runtime dir.
+const MAX_SOCKET_PATH = 100
 
 // Unix-domain-socket JSON-RPC 2.0 server — the JS half of the chromium fork's
 // C++ `slayzone::SidecarClient` (patches/chromium/0003 + 0030). The shell
@@ -24,16 +30,27 @@ export interface SidecarSocketServer {
   close: () => Promise<void>
 }
 
-/** Resolve the socket path the same way the C++ shim does (ResolveSocketPath). */
+/**
+ * Resolve the sidecar socket path. Precedence:
+ *   1. explicit `SLAYZONE_RUNTIME_DIR` (the shared override the C++ shell + JS
+ *      both read — set by scripts/chromium/run.sh so both sides agree),
+ *   2. `<SLAYZONE_ROOT>/run/sidecar.sock` — derived from ROOT, the standard anchor,
+ *   3. a short OS-runtime dir fallback WHEN the ROOT-derived path would exceed the
+ *      ~104-char Unix-socket limit (deep ROOT).
+ */
 export function resolveSidecarSocketPath(runtimeDir?: string): string {
   const override = runtimeDir ?? process.env.SLAYZONE_RUNTIME_DIR
   if (override && override.trim()) return join(override, 'sidecar.sock')
+
+  const rootPath = join(getSlayzoneHomeDir(), 'run', 'sidecar.sock')
+  if (rootPath.length <= MAX_SOCKET_PATH) return rootPath
+
+  // ROOT-derived path too long for a Unix socket → shortest writable runtime dir.
+  const xdg = process.env.XDG_RUNTIME_DIR
+  if (xdg && xdg.trim()) return join(xdg, 'slayzone', 'sidecar.sock')
   if (process.platform === 'darwin') {
     return join(homedir(), 'Library', 'Application Support', 'SlayZone', 'run', 'sidecar.sock')
   }
-  const xdg = process.env.XDG_RUNTIME_DIR
-  if (xdg && xdg.trim()) return join(xdg, 'slayzone', 'sidecar.sock')
-  // Last resort — keep it under the home dir so it's writable.
   return join(homedir(), '.slayzone', 'run', 'sidecar.sock')
 }
 

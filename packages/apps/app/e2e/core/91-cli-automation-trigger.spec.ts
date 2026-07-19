@@ -21,7 +21,7 @@ test.describe('CLI: automation triggers (end-to-end)', () => {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
 
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_DB_DIR!)
+    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_STORE_DIR!)
     dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
 
     // Slice 9 cutover: the SIDE-CAR is the discoverable backend (it owns the

@@ -3,7 +3,7 @@ import path from 'node:path'
 import {
   DB_PRAGMAS,
   getDbName,
-  getStateDir,
+  getStorageDir,
   type SlayzoneDb,
   type PreparedBridge,
   type BatchOp,
@@ -16,30 +16,16 @@ import { domainTxnRegistry } from '@slayzone/transport/txns'
 import { bootstrapSchema } from '@slayzone/transport/db-bootstrap'
 
 /**
- * Resolves the SQLite path the side-car should open.
- *
- * Supervised (`SLAYZONE_SUPERVISED=1`): the Electron host already resolved its
- * DB path once and passes that exact absolute string as `SLAYZONE_DB_PATH`.
- * We open it verbatim — no dir/name/dev recombination. If it is missing we
- * hard-error rather than guess: divergence becomes a loud crash, never a
- * silent two-DB split.
- *
- * Standalone: resolve from dir + name like the CLI does.
+ * Resolves the SQLite path the side-car should open — DERIVED from the storage
+ * dir, identically in every mode. `getStorageDir()` returns `<ROOT>/storage`
+ * (from SLAYZONE_ROOT), the SAME dir the Electron host + standalone entrypoint
+ * derive; the filename is dev-vs-packaged (`SLAYZONE_DEV`). No `SLAYZONE_DB_PATH`
+ * is threaded across the process boundary — supervised and standalone both
+ * compute the same path from ROOT, so there is no two-DB-split risk to guard.
  */
 export function getDatabasePathFromEnv(): string {
-  if (process.env.SLAYZONE_SUPERVISED === '1') {
-    const p = process.env.SLAYZONE_DB_PATH
-    if (!p) {
-      throw new Error(
-        '[slayzone-server] supervised but SLAYZONE_DB_PATH unset — refusing to guess a DB path'
-      )
-    }
-    return p
-  }
-  if (process.env.SLAYZONE_DB_PATH) return process.env.SLAYZONE_DB_PATH
-  const dir = process.env.SLAYZONE_STORE_DIR ?? process.env.SLAYZONE_DB_DIR ?? getStateDir()
-  const name = process.env.SLAYZONE_DB_NAME ?? getDbName(process.env.SLAYZONE_DEV !== '1')
-  return path.join(dir, name)
+  const name = getDbName(process.env.SLAYZONE_DEV !== '1')
+  return path.join(getStorageDir(), name)
 }
 
 /**

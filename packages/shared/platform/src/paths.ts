@@ -1,35 +1,34 @@
 import { mkdirSync } from 'node:fs'
-import { getStateDir } from './dirs'
+import { join } from 'node:path'
+import { getSlayzoneHomeDir } from './dirs'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 let warnedHost: string | null = null
 
 /**
- * Root for all SlayZone state (DB, artifacts, project-icons, backups,
- * Electron internal data). Honors SLAYZONE_STORE_DIR override; otherwise
- * falls back to the platform default from getStateDir().
+ * The single storage dir for all SlayZone state (DB, artifacts, backups, logs,
+ * diagnostics). DERIVED from `SLAYZONE_ROOT` as `<ROOT>/storage` — one anchor,
+ * one on-disk shape on every machine. `SLAYZONE_ROOT` is the ONLY env var in
+ * this chain; there is no separate `SLAYZONE_STORE_DIR`/`SLAYZONE_DB_PATH` to
+ * thread across processes — each process derives the same path from ROOT.
  *
- * mkdir's the dir before returning so better-sqlite3 + Electron both find it.
- * The `ensure` prefix flags this side-effect — pure read is `getStateDir()`.
+ * `SLAYZONE_STORE_DIR` is honored ONLY as an explicit operator/e2e override
+ * (unset in normal use). getSlayzoneHomeDir resolves ROOT (`SLAYZONE_ROOT` >
+ * `SLAYZONE_HOME_DIR` > platform home); the standalone entrypoints seed
+ * `SLAYZONE_ROOT=cwd`, the desktop app seeds it to the migrated location.
  */
-export function ensureDataRoot(): string {
-  const dir = process.env.SLAYZONE_STORE_DIR || getStateDir()
-  mkdirSync(dir, { recursive: true })
-  return dir
+export function getStorageDir(): string {
+  return process.env.SLAYZONE_STORE_DIR?.trim() || join(getSlayzoneHomeDir(), 'storage')
 }
 
 /**
- * Returns the local server port from SLAYZONE_SERVER_PORT, or undefined if
- * unset/invalid. The local server hosts MCP, REST API, and (slice 2+) tRPC
- * on a single port. Callers should fall back to a stored or auto-assigned
- * port when undefined.
+ * Root for all SlayZone state — `getStorageDir()` with a mkdir side-effect so
+ * better-sqlite3 finds the dir. The `ensure` prefix flags the side-effect.
  */
-export function getServerPort(): number | undefined {
-  const raw = process.env.SLAYZONE_SERVER_PORT
-  if (!raw) return undefined
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n < 0 || n > 65535) return undefined
-  return n
+export function ensureDataRoot(): string {
+  const dir = getStorageDir()
+  mkdirSync(dir, { recursive: true })
+  return dir
 }
 
 /**

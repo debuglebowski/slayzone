@@ -14,7 +14,7 @@ test.describe('Automations: catchup_on_start (tRPC end-to-end)', () => {
   test.beforeAll(async ({ electronApp, mainWindow }) => {
     await resetApp(mainWindow)
 
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_DB_DIR!)
+    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_STORE_DIR!)
     dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
 
     const s = seed(mainWindow)

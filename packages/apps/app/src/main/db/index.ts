@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import path from 'path'
 import { getDbName } from '@slayzone/platform'
+import { getStorageDir } from '../data-paths'
 import { LATEST_MIGRATION_VERSION } from '@slayzone/transport/db-bootstrap'
 import { createDbBridge, type DbBridge } from './db-bridge'
 import { createDiagBridge, type DiagBridge } from './diag-bridge'
@@ -9,18 +10,18 @@ import type { LegacyMigrationPaths } from './worker-protocol'
 const LEGACY_APP_NAME = 'omgslayzone'
 
 export const getDatabasePath = (): string => {
-  const userDataPath = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const userDataPath = getStorageDir()
   return path.join(userDataPath, getDbName(app.isPackaged))
 }
 
 const getDiagnosticsDatabasePath = (): string => {
-  const userDataPath = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const userDataPath = getStorageDir()
   const dbName = app.isPackaged ? 'slayzone.diagnostics.sqlite' : 'slayzone.dev.diagnostics.sqlite'
   return path.join(userDataPath, dbName)
 }
 
 const getBackupsDir = (): string => {
-  const userDataPath = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const userDataPath = getStorageDir()
   return path.join(userDataPath, 'backups')
 }
 

@@ -9,8 +9,8 @@ export {
 } from './dirs'
 export {
   ensureDataRoot,
+  getStorageDir,
   getTrpcPort,
-  getServerPort,
   getServerHost,
   SIDECAR_FIXED_PORT
 } from './paths'

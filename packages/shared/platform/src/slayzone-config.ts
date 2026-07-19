@@ -2,8 +2,10 @@
  * Shared SlayZone config file — a SINGLE JSON document at
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
- * the keys it cares about (hub: runnerTransportSecret/dbPath/port/runnerTransportPort/
- * publicUrl; runner: joinToken/runnerName/hubUrl).
+ * the keys it cares about (hub: runnerTransportSecret/port/runnerTransportPort/
+ * publicUrl; runner: joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256/
+ * credentialsDir). The DB path derives from SLAYZONE_ROOT (`<ROOT>/storage`), so
+ * there is no dbPath key.
  *
  * Precedence everywhere: env var > config.json > generated/default. The file is
  * the BASE — env can still override it (e.g. CI). Only keys that are actually
@@ -32,6 +34,10 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path'
 import { getSlayzoneHomeDir } from './dirs'
 
+// Re-exported on this lean subpath so the runner bundle can resolve the ROOT
+// anchor without importing the platform barrel (which pulls better-sqlite3).
+export { getSlayzoneHomeDir } from './dirs'
+
 /**
  * The superset of keys the shared config file may carry. Hub reads the hub keys,
  * runner reads the runner keys; unknown keys are preserved on write (merge) but
@@ -42,8 +48,6 @@ export interface SlayzoneConfig {
   /** HMAC secret backing hub-auth + per-task token mint/verify. Auto-generated
    *  + persisted on first standalone boot if absent (see ensureRunnerTransportSecret). */
   runnerTransportSecret?: string
-  /** Absolute SQLite path (`SLAYZONE_DB_PATH` default). */
-  dbPath?: string
   /** tRPC/HTTP listen port (`SLAYZONE_PORT`). */
   port?: number
   /** Runner `/runners` https listener port (`SLAYZONE_RUNNER_TRANSPORT_PORT`). */
@@ -57,6 +61,15 @@ export interface SlayzoneConfig {
   runnerName?: string
   /** `ws(s)://` hub runner endpoint a standalone runner dials (`SLAYZONE_HUB_URL`). */
   hubUrl?: string
+  /** Filesystem roots the runner may operate under (the fs/git/proc path jail).
+   *  Locally-declared on the runner box, NEVER pushed from the hub. Defaults to
+   *  `[<ROOT>]` when absent; operator appends project dirs here. */
+  allowedRoots?: string[]
+  /** sha256 pin of the hub TLS leaf cert (lowercase hex). Override for a
+   *  wss-without-token path; normally the join token carries the pin. */
+  pinnedCertSha256?: string
+  /** Override for the runner credential-store dir (default `<ROOT>/runner`). */
+  credentialsDir?: string
 }
 
 /** The dev fallback secret hard-coded in composition.ts. Standalone boots MUST
@@ -76,7 +89,6 @@ function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   const cfg: SlayzoneConfig = {}
   if (typeof raw.runnerTransportSecret === 'string' && raw.runnerTransportSecret.length > 0)
     cfg.runnerTransportSecret = raw.runnerTransportSecret
-  if (typeof raw.dbPath === 'string' && raw.dbPath.length > 0) cfg.dbPath = raw.dbPath
   if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
   if (typeof raw.runnerTransportPort === 'number' && Number.isInteger(raw.runnerTransportPort))
     cfg.runnerTransportPort = raw.runnerTransportPort
@@ -85,6 +97,16 @@ function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   if (typeof raw.runnerName === 'string' && raw.runnerName.length > 0)
     cfg.runnerName = raw.runnerName
   if (typeof raw.hubUrl === 'string' && raw.hubUrl.length > 0) cfg.hubUrl = raw.hubUrl
+  if (Array.isArray(raw.allowedRoots)) {
+    const roots = raw.allowedRoots.filter(
+      (r): r is string => typeof r === 'string' && r.length > 0
+    )
+    if (roots.length > 0) cfg.allowedRoots = roots
+  }
+  if (typeof raw.pinnedCertSha256 === 'string' && raw.pinnedCertSha256.length > 0)
+    cfg.pinnedCertSha256 = raw.pinnedCertSha256
+  if (typeof raw.credentialsDir === 'string' && raw.credentialsDir.length > 0)
+    cfg.credentialsDir = raw.credentialsDir
   return cfg
 }
 

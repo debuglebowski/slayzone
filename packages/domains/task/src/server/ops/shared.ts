@@ -110,7 +110,7 @@ export interface TaskRuntimeAdapters {
    *  effects there, not at call sites. */
   onReachedTerminal: (taskId: string) => void
   /** Resolve the app data root (Electron `app.getPath('userData')`). Electron-free
-   *  seam so ops/ stays server-pure; only reached when `SLAYZONE_DB_DIR` is unset. */
+   *  seam so ops/ stays server-pure; only reached when `SLAYZONE_STORE_DIR` is unset. */
   getDataRoot: () => string
   /** Exec-side worktree/git/fs ops. Defaults to the in-process implementations
    *  below; overrides must be COMPLETE (shallow merge — see WorktreeExecAdapters). */
@@ -145,7 +145,7 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   onReachedTerminal: () => {},
   getDataRoot: () => {
     throw new Error(
-      'TaskRuntimeAdapters.getDataRoot not configured (set SLAYZONE_DB_DIR or call configureTaskRuntimeAdapters)'
+      'TaskRuntimeAdapters.getDataRoot not configured (set SLAYZONE_STORE_DIR or call configureTaskRuntimeAdapters)'
     )
   },
   worktrees: defaultWorktreeExecAdapters
@@ -411,7 +411,7 @@ export async function cleanupTaskFull(
   runtimeAdapters.killTaskProcesses(taskId)
   // Clean up artifact files on disk
   const artifactsBaseDir = path.join(
-    process.env.SLAYZONE_DB_DIR || runtimeAdapters.getDataRoot(),
+    process.env.SLAYZONE_STORE_DIR || runtimeAdapters.getDataRoot(),
     'artifacts',
     taskId
   )

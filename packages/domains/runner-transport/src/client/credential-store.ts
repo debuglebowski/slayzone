@@ -1,8 +1,8 @@
 /**
  * Runner credential persistence. After enrollment the runner holds a
  * hub-scoped {runnerId, apiKey} pair; it lives in a 0600 file at
- * `~/.slayzone/runner/<hub-host>.json` so reconnects (`hello`) survive
- * restarts without re-consuming a join token.
+ * `<ROOT>/runners/<hub-host>.json` so reconnects (`hello`) survive restarts
+ * without re-consuming a join token.
  *
  * @module runner/client/credential-store
  */
@@ -11,6 +11,21 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
+
+/**
+ * The SlayZone root dir for the default credential store. Mirrors platform's
+ * getSlayzoneHomeDir precedence (`SLAYZONE_ROOT` > `SLAYZONE_HOME_DIR` >
+ * `$HOME/.slayzone`) — inlined here so runner-transport stays free of the
+ * @slayzone/platform dep (keeps the runner bundle lean). The standalone runner
+ * entrypoint seeds `SLAYZONE_ROOT=cwd`, so this honors the ROOT anchor; without
+ * it, the raw home fallback applied and creds landed at `~/.slayzone/runners`.
+ */
+function slayzoneRootDir(): string {
+  if (process.env.SLAYZONE_ROOT) return process.env.SLAYZONE_ROOT
+  if (process.env.SLAYZONE_HOME_DIR) return process.env.SLAYZONE_HOME_DIR
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? homedir()
+  return join(home, '.slayzone')
+}
 
 export const storedRunnerCredentialsSchema = z.object({
   runnerId: z.string().min(1),
@@ -44,7 +59,7 @@ function sanitizeHubHost(hubHost: string): string {
 }
 
 export function credentialFilePathFor(hubHost: string, baseDir?: string): string {
-  const dir = baseDir ?? join(homedir(), '.slayzone', 'runner')
+  const dir = baseDir ?? join(slayzoneRootDir(), 'runners')
   return join(dir, `${sanitizeHubHost(hubHost)}.json`)
 }
 

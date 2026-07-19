@@ -76,16 +76,17 @@ function withIsolatedEnv(seed: Record<string, string>, fn: (home: string) => voi
 console.log('\nstandalone-config: env > file > default')
 console.log('─'.repeat(40))
 
-test('config.json fills unset env (dbPath, port, runnerTransportPort, publicUrl)', () => {
+test('config.json fills unset env (port, runnerTransportPort, publicUrl)', () => {
   withIsolatedEnv({}, () => {
     saveSlayzoneConfig({
-      dbPath: '/tmp/x/db.sqlite',
       port: 8080,
       runnerTransportPort: 8443,
       publicUrl: 'https://hub.example'
     })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_DB_PATH, '/tmp/x/db.sqlite', 'dbPath')
+    // dbPath is NOT seeded — the DB path DERIVES from SLAYZONE_ROOT (<ROOT>/storage)
+    // via platform.getStorageDir(); there is no SLAYZONE_DB_PATH env in this chain.
+    assert(process.env.SLAYZONE_DB_PATH === undefined, 'dbPath NOT seeded (derives from ROOT)')
     assertEq(process.env.SLAYZONE_PORT, '8080', 'port')
     assertEq(process.env.SLAYZONE_RUNNER_TRANSPORT_PORT, '8443', 'runnerTransportPort')
     assertEq(process.env.SLAYZONE_HUB_PUBLIC_URL, 'https://hub.example', 'publicUrl')
@@ -93,11 +94,10 @@ test('config.json fills unset env (dbPath, port, runnerTransportPort, publicUrl)
 })
 
 test('env WINS over config.json (does not overwrite a set env)', () => {
-  withIsolatedEnv({ SLAYZONE_PORT: '9999', SLAYZONE_DB_PATH: '/env/db.sqlite' }, () => {
-    saveSlayzoneConfig({ port: 8080, dbPath: '/file/db.sqlite' })
+  withIsolatedEnv({ SLAYZONE_PORT: '9999' }, () => {
+    saveSlayzoneConfig({ port: 8080 })
     applyStandaloneHubConfig()
     assertEq(process.env.SLAYZONE_PORT, '9999', 'env port kept')
-    assertEq(process.env.SLAYZONE_DB_PATH, '/env/db.sqlite', 'env dbPath kept')
   })
 })
 

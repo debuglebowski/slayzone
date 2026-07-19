@@ -15,9 +15,9 @@ import {
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
 // Point the artifact store's on-disk root at a throwaway dir BEFORE importing
-// the routes — createArtifact/upload place files under $SLAYZONE_DB_DIR/artifacts.
+// the routes — createArtifact/upload place files under $SLAYZONE_STORE_DIR/artifacts.
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-artifacts-crud-'))
-process.env.SLAYZONE_DB_DIR = tmpRoot
+process.env.SLAYZONE_STORE_DIR = tmpRoot
 
 const { registerArtifactsCrudRoutes } = await import('./crud.js')
 

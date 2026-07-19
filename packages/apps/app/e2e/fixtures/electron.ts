@@ -312,7 +312,7 @@ async function launchElectronWithRetry(args: {
         env: {
           ...launchEnv,
           PLAYWRIGHT: '1',
-          SLAYZONE_DB_DIR: args.userDataDir,
+          SLAYZONE_STORE_DIR: args.userDataDir,
           SLAYZONE_USER_DATA_DIR: args.userDataDir,
           // Always-on boot tracing in e2e — cheap (~30 console.log per launch)
           // and lets profiling specs read the timeline from boot.log. We use

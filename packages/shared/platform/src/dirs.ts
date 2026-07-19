@@ -22,15 +22,23 @@ export function getStateDir(): string {
 }
 
 /**
- * User-visible SlayZone home dir. Distinct from getStateDir() (Electron app
- * state) — this hosts assets surfaced to external tools, e.g. the agent hook
- * notify script that lands at `~/.slayzone/hooks/notify.sh`.
+ * User-visible SlayZone home/root dir — the single anchor for on-disk state
+ * (config.json, hooks, and for standalone hub/runner the DB, logs, and runner
+ * creds all derive from it). Distinct from getStateDir() (Electron app state).
  *
- * Honours `SLAYZONE_HOME_DIR` for E2E sandboxing and power-user relocation.
- * Uses `process.env.HOME` first so an E2E fixture's `HOME` override
- * redirects writes deterministically.
+ * Resolution (pure env reader — no CWD default here): `SLAYZONE_ROOT` >
+ * `SLAYZONE_HOME_DIR` (back-compat alias) > `$HOME/.slayzone`. Standalone
+ * hub/runner entrypoints seed `SLAYZONE_ROOT=process.cwd()` before any reader
+ * runs, so a remote deploy anchors to the launch dir; the Electron app leaves
+ * it unset and falls through to `~/.slayzone`. This function stays CWD-agnostic
+ * on purpose — the app main process is NOT flagged SUPERVISED, so a CWD default
+ * gated here would wrongly relocate the app's hook installers.
+ *
+ * Uses `process.env.HOME` first so an E2E fixture's `HOME` override redirects
+ * writes deterministically.
  */
 export function getSlayzoneHomeDir(): string {
+  if (process.env.SLAYZONE_ROOT) return process.env.SLAYZONE_ROOT
   if (process.env.SLAYZONE_HOME_DIR) return process.env.SLAYZONE_HOME_DIR
   const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir()
   return path.join(home, '.slayzone')

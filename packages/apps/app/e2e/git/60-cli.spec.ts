@@ -29,7 +29,7 @@ test.describe('CLI: slay', () => {
     }
 
     // Get the exact DB path the running app is using
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_DB_DIR!)
+    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_STORE_DIR!)
     // Tests always run non-packaged, so DB name is always slayzone.dev.sqlite
     dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
 
