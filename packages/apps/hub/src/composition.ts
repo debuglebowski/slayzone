@@ -901,7 +901,11 @@ export function composeServer(opts: {
   runnersReady = (async () => {
     const hubAuth = await createHubAuth({
       dbPath: join(dataRoot, 'hub-auth.sqlite'),
-      baseURL: process.env.SLAYZONE_RUNNER_TRANSPORT_BASE_URL ?? 'http://127.0.0.1:8788',
+      // better-auth baseURL: a fixed loopback constant. Runners authenticate via
+      // api-key/bearer (not cookies/redirects), so this is internal plumbing and
+      // never needs an operator override — the SLAYZONE_RUNNER_TRANSPORT_BASE_URL
+      // env knob was inlined.
+      baseURL: 'http://127.0.0.1:8788',
       secret: runnerTransportSecret
     })
     hubAuthRef = hubAuth

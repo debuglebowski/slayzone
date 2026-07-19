@@ -42,7 +42,7 @@ export function parseWindowIdFromUrl(rawUrl: string | undefined): number | null 
 }
 
 export interface ResolvePrincipalOptions {
-  /** Whether THIS hub enforces auth (`SLAYZONE_HUB_AUTH_REQUIRED=1` + hubAuth present). */
+  /** Whether THIS hub enforces auth (derived: `SLAYZONE_MODE=remote` + hubAuth present). */
   hubAuthRequired: boolean
   /** The hub's better-auth instance, or null when runner/auth mode is off. */
   hubAuth: HubAuth | null

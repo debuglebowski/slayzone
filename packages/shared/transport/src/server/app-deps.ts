@@ -855,8 +855,8 @@ export function getHubDescribeDepsOrNull(): HubDescribeDeps | null {
  * Multi-hub auth gate. Returns whether THIS hub enforces bearer auth on tRPC
  * procedures. Default `false` (trusted loopback / non-authed remote) → the auth
  * middleware is inert, byte-identical to the pre-auth server. The hub sets a
- * real predicate (`() => hubAuthRequired`) at boot when
- * `SLAYZONE_HUB_AUTH_REQUIRED=1`.
+ * real predicate (`() => hubAuthRequired`) at boot when it runs in remote mode
+ * (`SLAYZONE_MODE=remote`).
  */
 let authGate: () => boolean = () => false
 

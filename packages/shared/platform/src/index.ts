@@ -14,6 +14,13 @@ export {
   getServerHost,
   SIDECAR_FIXED_PORT
 } from './paths'
+export {
+  getSlayzoneMode,
+  isRemoteMode,
+  isLoopbackHost,
+  assertModeHostConsistency,
+  type SlayzoneMode
+} from './slayzone-mode'
 export { writeFileIfChanged } from './fs-utils'
 export {
   migrateXdgIfNeeded,

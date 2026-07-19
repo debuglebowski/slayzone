@@ -193,7 +193,6 @@ async function main(): Promise<void> {
       SLAYZONE_STORE_DIR: storeDir,
       SLAYZONE_PORT: '0',
       SLAYZONE_RUNNER_TRANSPORT_PORT: '0',
-      SLAYZONE_RUNNERS_ENABLED: '1',
       SLAYZONE_RUNNER_TRANSPORT_SECRET: secret
     })
 

@@ -12,7 +12,14 @@ import {
 } from '@slayzone/transport/server'
 import { createAuthExpressApp } from '@slayzone/hub-auth/server'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
-import { ensureDataRoot, getServerHost, getTrpcPort } from '@slayzone/platform'
+import {
+  ensureDataRoot,
+  getServerHost,
+  getTrpcPort,
+  getSlayzoneMode,
+  isRemoteMode,
+  assertModeHostConsistency
+} from '@slayzone/platform'
 import {
   getDatabasePathFromEnv,
   openServerDatabase,
@@ -72,6 +79,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const log = createLogger(dataRoot)
 
   const supervised = process.env.SLAYZONE_SUPERVISED === '1'
+  // SLAYZONE_MODE hardening. Supervised is always local/loopback (the Electron
+  // host owns it), so the mode/bind guard applies to standalone only: refuse to
+  // boot an exposed-but-unhardened hub (mode=local + non-loopback bind).
+  if (!supervised) {
+    assertModeHostConsistency(getSlayzoneMode(), host)
+    // Remote runners reach this hub's MCP/hook callbacks via SLAYZONE_HUB_PUBLIC_URL;
+    // it can't be auto-derived (the hub can't know its own external address). In
+    // remote mode a missing/blank value would silently degrade every remote agent
+    // to an unreachable loopback target — fail loud at boot instead.
+    if (isRemoteMode() && !process.env.SLAYZONE_HUB_PUBLIC_URL?.trim()) {
+      throw new Error(
+        '[slayzone] SLAYZONE_MODE=remote requires SLAYZONE_HUB_PUBLIC_URL ' +
+          '(the externally-reachable hub base URL for remote runners) — set it or use SLAYZONE_MODE=local.'
+      )
+    }
+  }
   const dbPath = getDatabasePathFromEnv()
   // Standalone owns its schema (fresh stores get migrated); supervised opens
   // the Electron host's already-migrated DB and must not touch the schema.
@@ -121,9 +144,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Multi-hub: wire the client-facing `hub.describe` identity deps so a
   // connecting client learns this hub's cert fingerprint + whether it enforces
-  // auth. `authRequired` is a separate opt-in (SLAYZONE_HUB_AUTH_REQUIRED) — a hub
-  // accepting runners does NOT imply it gates client /trpc procedures.
-  const hubAuthRequired = process.env.SLAYZONE_HUB_AUTH_REQUIRED === '1' && hubAuth != null
+  // auth. Auth-required is now DERIVED from SLAYZONE_MODE (remote ⇒ on) rather
+  // than a separate flag — an internet-facing hub gates client /trpc; a loopback
+  // (local/supervised) hub does not. Still requires hubAuth to have loaded.
+  const hubAuthRequired = isRemoteMode() && hubAuth != null
   setHubDescribeDeps({
     getFingerprint: () => hubIdentity?.fingerprintSha256Hex ?? null,
     getAuthRequired: () => hubAuthRequired
@@ -220,6 +244,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // local loopback + e2e stay byte-identical. Off unless auth is required + an
   // identity is loaded.
   const hubTlsEnabled = hubAuthRequired && hubIdentity != null
+  // Remote mode must NOT come up without TLS. If the identity failed to load
+  // (so TLS can't be enabled), fail loud rather than serve an unhardened hub.
+  if (isRemoteMode() && !hubTlsEnabled) {
+    throw new Error(
+      '[slayzone] SLAYZONE_MODE=remote but the hub TLS listener could not be enabled ' +
+        '(hub identity missing or runner gateway down) — refusing to boot an unhardened remote hub.'
+    )
+  }
   let tlsWss: WebSocketServer | null = null
   let tlsHttpsServer: HttpsServer | null = null
   if (hubTlsEnabled && hubIdentity) {
@@ -346,6 +378,15 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       hubTlsPort = typeof tlsAddr === 'object' && tlsAddr ? tlsAddr.port : desiredTlsPort
       log(`hub TLS /trpc listening: wss://${host}:${hubTlsPort}/trpc`)
     } catch (err) {
+      // Remote mode REQUIRES TLS on /trpc — a bind failure must abort the boot,
+      // not silently fall back to plaintext http (that would expose an unencrypted
+      // client channel on an internet-facing hub). Local/multi-hub-opt-in keeps
+      // the lenient "stay plain http" behavior.
+      if (isRemoteMode()) {
+        throw new Error(
+          `[slayzone] SLAYZONE_MODE=remote requires the TLS /trpc listener, but it failed to bind: ${String(err)}`
+        )
+      }
       log(`hub TLS /trpc bind failed (staying plain http): ${String(err)}`)
       try {
         tlsWssHandler?.broadcastReconnectNotification?.()
@@ -374,12 +415,15 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // key (hubHostFromUrl → host_port) — identical across reboots, so the local
     // runner `hello`s back into its existing row instead of re-enrolling a new one.
     const desiredRunnerPort = await resolveDesiredRunnerPort(db, process.env.SLAYZONE_RUNNER_TRANSPORT_PORT)
-    // The runner listener binds on the NETWORK by default (0.0.0.0) so runners on
-    // OTHER machines can dial in — the whole point of a hub accepting runners.
-    // The shared /trpc server stays on `host` (loopback for the co-located
-    // sidecar). Operators can pin the runner bind via SLAYZONE_RUNNER_TRANSPORT_HOST
-    // (e.g. back to 127.0.0.1 for a laptop that only runs a local runner).
-    const runnerHost = process.env.SLAYZONE_RUNNER_TRANSPORT_HOST ?? '0.0.0.0'
+    // Runner-listener bind. Supervised keeps its historical 0.0.0.0 (byte-identical
+    // — the Electron host's advertise-host logic already points the co-located
+    // runner at a dialable address). Standalone splits on SLAYZONE_MODE: a remote
+    // hub binds 0.0.0.0 so off-box runners can dial in; a local hub binds loopback
+    // (no reason to expose the listener on a dev box). TLS+cert-pinned either way;
+    // operators can still pin via SLAYZONE_RUNNER_TRANSPORT_HOST.
+    const runnerHost =
+      process.env.SLAYZONE_RUNNER_TRANSPORT_HOST ??
+      (supervised || isRemoteMode() ? '0.0.0.0' : '127.0.0.1')
     const bindRunnerListener = (portEnv: string): Promise<Awaited<ReturnType<typeof startRunnerListener>>> =>
       startRunnerListener({
         server: runnerHttpsServer!,
