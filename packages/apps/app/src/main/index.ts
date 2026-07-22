@@ -226,7 +226,7 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
 // SLAYZONE_STORE_DIR / SLAYZONE_DB_PATH is threaded across the boundary. Uses the
 // pre-swap userData as the migration SOURCE so the dev profile-swap above doesn't
 // hide the legacy data.
-initStorageDir(legacyStateDir)
+initStorageDir(legacyStateDir, app.isPackaged)
 
 // tRPC server data root = the resolved storage dir, so every router's ctx.dataRoot
 // resolves project-icons/artifacts to the same dir the renderer reads.

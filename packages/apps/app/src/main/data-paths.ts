@@ -13,13 +13,15 @@ import { ensureStorageDir } from './storage-migration'
  */
 
 /**
- * Run the one-time migration of legacy state (Electron userData) into
- * `<ROOT>/storage`, then return that dir. Call once at boot before the DB opens.
- * `legacyStateDir` is the pre-profile-swap userData (the migration source).
+ * Run the one-time COPY of legacy state (Electron userData) into `<ROOT>/storage`,
+ * then return that dir. Call once at boot before the DB opens. `legacyStateDir` is
+ * the pre-profile-swap userData (the copy SOURCE — treated as read-only, since a
+ * pre-refactor peer app may share it). `packaged` scopes the copy to this channel's
+ * DB (`app.isPackaged`): prod copies `slayzone.sqlite`, dev copies the `.dev` DB.
  */
-export function initStorageDir(legacyStateDir: string): string {
+export function initStorageDir(legacyStateDir: string, packaged: boolean): string {
   const target = platformStorageDir()
-  ensureStorageDir(legacyStateDir, target)
+  ensureStorageDir(legacyStateDir, target, packaged)
   return target
 }
 

@@ -1,88 +1,141 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * One-time migration of the app's SQLite DB + artifacts into `<ROOT>/storage`.
+ * One-time COPY of the app's SQLite DB + artifacts + blobs + recent backups from
+ * the legacy Electron userData dir into `<ROOT>/storage`.
  *
  * Historically the desktop app kept its state in Electron's userData
  * (`~/Library/Application Support/slayzone`), separate from `<ROOT>` (`~/.slayzone`,
  * config + hooks). We now nest state under `<ROOT>/storage` so the layout is the
  * same on every machine. Electron's OWN profile data (Partitions, Cache, IndexedDB,
- * Local Storage, Cookies, …) MUST stay in userData — Electron owns that dir — so
- * this is a selective extract of the files WE created, not a whole-dir move.
+ * Local Storage, Cookies, …) stays in userData — Electron owns that dir — so this
+ * is a selective COPY of the files WE created, not a whole-dir move.
+ *
+ * ── The legacy dir is treated as STRICTLY READ-ONLY. ────────────────────────────
+ * We copy OUT and NEVER delete, rename, or move the source. Reason: that userData
+ * dir (`app.name='slayzone'`) is SHARED with a still-installed PRE-REFACTOR prod
+ * app that lives entirely there. An earlier copy-then-DELETE version of this
+ * migration — run by the dev build against that shared dir — deleted prod's live
+ * `slayzone.sqlite` (→ ghost inode) and prod's `artifacts/` working files. Copying
+ * is safe (content-addressed blobs dedupe; DB copy is idempotent); deleting another
+ * app's data is not. So: no `rmSync`/`unlink`/`rename` on `oldDir`, ever.
+ *
+ * ── Channel-scoped. ──────────────────────────────────────────────────────────────
+ * `packaged` selects the ONE DB basename + backup prefix this channel owns
+ * (`getDbName`/prefix): the packaged prod app migrates `slayzone.sqlite`; a dev
+ * build migrates `slayzone.dev.sqlite`. Neither reads or copies the other's DB, so
+ * the dev app can never act on prod's database (or vice-versa).
+ *
+ * ── Genuinely one-time. ──────────────────────────────────────────────────────────
+ * A per-channel sentinel file under `<storage>` records completion. Once set, boots
+ * skip the whole pass — so the running peer app can add new files to the shared dir
+ * afterward without this migration re-scanning (and partially re-copying) it.
  *
  * Scope (explicit — NOT a glob, so diagnostics/chromium/hub-auth are left):
- *   - slayzone.sqlite      (+ -wal, -shm)
- *   - slayzone.dev.sqlite  (+ -wal, -shm)
+ *   - <channel DB>       (+ -wal, -shm)   — slayzone.sqlite | slayzone.dev.sqlite
  *   - blobs/     — artifact CONTENT (content-addressed; the DB only stores hashes)
  *   - artifacts/ — artifact working-copy cache
- *   - backups/ — the 2 MOST RECENT backup files only (older ones stay behind)
- *
- * Safety: copy → (main-db present) → delete originals. The source is untouched
- * until its copy completes, so a crash mid-migration never loses data — the next
- * boot re-runs (idempotent: a DB already present in `<storage>` is skipped, never
- * clobbered). The main `.sqlite` is copied LAST so its presence means the whole
- * triplet copied; `-wal`/`-shm` carry un-checkpointed commits and move with it.
+ *   - backups/ — the 2 MOST RECENT backups of THIS channel (older ones stay behind)
  */
 
-/** DB basenames to migrate; each with its `-wal`/`-shm` sidecars (when present). */
-const DB_BASENAMES = ['slayzone.sqlite', 'slayzone.dev.sqlite'] as const
+/** Channel → DB basename + backup filename prefix. Mirrors platform getDbName(). */
+function channelDbBasename(packaged: boolean): string {
+  return packaged ? 'slayzone.sqlite' : 'slayzone.dev.sqlite'
+}
+function channelBackupPrefix(packaged: boolean): string {
+  return packaged ? 'slayzone' : 'slayzone.dev'
+}
+
+/** Per-channel completion sentinel path under `<storage>`. */
+function sentinelPath(storageDir: string, packaged: boolean): string {
+  return join(storageDir, `.storage-migrated.${packaged ? 'prod' : 'dev'}`)
+}
 
 function copyFileIfPresent(src: string, dst: string): void {
   if (existsSync(src)) cpSync(src, dst)
 }
 
-function removeIfPresent(p: string): void {
-  rmSync(p, { force: true })
-}
-
-/** Migrate one DB triplet (main + wal + shm) old→new, copy-verify-delete. */
-function migrateDb(oldDir: string, newDir: string, base: string): void {
+/**
+ * Copy one DB triplet (main + wal + shm) old→new. COPY-ONLY — source untouched.
+ * Skips when the source is absent or the target already exists (never clobber a DB
+ * the app may already be using). Sidecars copied FIRST, main LAST so the main
+ * file's presence signals a complete triplet.
+ */
+function copyDb(oldDir: string, newDir: string, base: string): void {
   const srcMain = join(oldDir, base)
   const dstMain = join(newDir, base)
-  // Nothing to move, or already migrated (never clobber an existing target).
   if (!existsSync(srcMain) || existsSync(dstMain)) return
 
-  // Copy sidecars FIRST, main LAST — dstMain's existence then means "complete".
   copyFileIfPresent(`${srcMain}-wal`, `${dstMain}-wal`)
   copyFileIfPresent(`${srcMain}-shm`, `${dstMain}-shm`)
   cpSync(srcMain, dstMain)
 
-  // Verify the main copy is non-empty before deleting the source.
   if (!existsSync(dstMain) || statSync(dstMain).size === 0) {
-    throw new Error(`[storage-migration] copy of ${base} failed verification; leaving source intact`)
+    throw new Error(`[storage-migration] copy of ${base} failed verification`)
   }
-
-  removeIfPresent(`${srcMain}-wal`)
-  removeIfPresent(`${srcMain}-shm`)
-  removeIfPresent(srcMain)
-}
-
-/** Migrate one content dir old→new (recursive copy-verify-delete), once. */
-function migrateContentDir(oldDir: string, newDir: string, name: string): void {
-  const src = join(oldDir, name)
-  const dst = join(newDir, name)
-  if (!existsSync(src) || existsSync(dst)) return
-  cpSync(src, dst, { recursive: true })
-  if (!existsSync(dst)) {
-    throw new Error(`[storage-migration] ${name}/ copy failed verification; leaving source intact`)
-  }
-  rmSync(src, { recursive: true, force: true })
 }
 
 /**
- * Migrate the 2 most-recent backup files into `<newDir>/backups`. Backup names are
- * `slayzone[.dev].<ISO-timestamp>.<kind>.sqlite`, so the timestamp sorts lexically
- * → the last 2 `.sqlite` entries are newest. Each moves with its `-wal`/`-shm`.
- * Older backups are intentionally left behind in the old dir.
+ * Recursively copy every file under `src` into `dst`, creating dirs as needed and
+ * copying ONLY files absent from `dst`. Files already present in `dst` are the
+ * current (authoritative) copies and are left untouched — blobs are immutable by
+ * content hash, so a same-path collision is a stale legacy dupe, not a conflict.
+ * COPY-ONLY: the source tree is never modified. Returns true iff every source file
+ * now has a counterpart in `dst`.
  */
-function migrateRecentBackups(oldDir: string, newDir: string): void {
+function mergeMissingFiles(src: string, dst: string): boolean {
+  mkdirSync(dst, { recursive: true })
+  let complete = true
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const s = join(src, entry.name)
+    const d = join(dst, entry.name)
+    if (entry.isDirectory()) {
+      if (!mergeMissingFiles(s, d)) complete = false
+    } else if (existsSync(d)) {
+      // Dest wins (current copy); source is a stale dupe. Counted as present.
+    } else {
+      cpSync(s, d)
+      if (!existsSync(d)) complete = false
+    }
+  }
+  return complete
+}
+
+/**
+ * Copy one content dir (blobs/ or artifacts/) old→new by MERGING missing files.
+ * COPY-ONLY. Heals the case where the running (post-refactor) app already created
+ * `<storage>/{blobs,artifacts}` and wrote NEW content there while legacy files
+ * still sit in `oldDir` — those legacy files still cross over, or their artifacts
+ * render blank (DB row in the migrated DB, content stranded in the legacy dir).
+ */
+function copyContentDir(oldDir: string, newDir: string, name: string): void {
+  const src = join(oldDir, name)
+  if (!existsSync(src)) return
+  const dst = join(newDir, name)
+  if (!mergeMissingFiles(src, dst)) {
+    throw new Error(`[storage-migration] ${name}/ merge incomplete`)
+  }
+}
+
+/**
+ * Copy the 2 most-recent backups OF THIS CHANNEL into `<newDir>/backups`. Backup
+ * names are `<prefix>.<ISO-timestamp>.<kind>.sqlite`, so the timestamp sorts
+ * lexically → the last 2 entries for this channel's prefix are newest. Each copies
+ * with its `-wal`/`-shm`. COPY-ONLY; older backups + the other channel's backups
+ * stay behind untouched.
+ */
+function copyRecentBackups(oldDir: string, newDir: string, packaged: boolean): void {
   const srcBackups = join(oldDir, 'backups')
   if (!existsSync(srcBackups)) return
   const dstBackups = join(newDir, 'backups')
+  const prefix = channelBackupPrefix(packaged)
+  // Dev prefix `slayzone.dev` is also a prefix of prod names, so match on the exact
+  // `<prefix>.<timestamp>` shape: prod = `slayzone.NNNN-`, dev = `slayzone.dev.NNNN-`.
+  const re = new RegExp(`^${prefix.replace('.', '\\.')}\\.\\d{4}-.*\\.sqlite$`)
 
   const recent = readdirSync(srcBackups)
-    .filter((f) => f.endsWith('.sqlite'))
+    .filter((f) => re.test(f))
     .sort()
     .slice(-2)
   if (recent.length === 0) return
@@ -98,29 +151,30 @@ function migrateRecentBackups(oldDir: string, newDir: string): void {
     if (!existsSync(dst) || statSync(dst).size === 0) {
       throw new Error(`[storage-migration] backup copy of ${name} failed verification`)
     }
-    removeIfPresent(`${src}-wal`)
-    removeIfPresent(`${src}-shm`)
-    removeIfPresent(src)
   }
 }
 
 /**
- * Migrate the DB + artifacts + blobs + recent backups from `oldDir` (the legacy
- * userData location) into `storageDir` (`<ROOT>/storage`, resolved by the caller
- * via the shared platform derivation) if needed. Idempotent; never throws for an
- * empty source, only if a copy half-completes (source kept intact).
+ * COPY (never move) this channel's DB + artifacts + blobs + recent backups from
+ * `oldDir` (legacy userData) into `storageDir` (`<ROOT>/storage`). Idempotent and
+ * genuinely one-time via a per-channel sentinel. `packaged` selects the channel:
+ * true = prod (`slayzone.sqlite`), false = dev (`slayzone.dev.sqlite`).
  *
- * NB: `blobs/` holds the actual artifact CONTENT (content-addressed by hash — the
- * DB only stores hashes; `artifacts/` is just a working-copy cache). Omitting it
- * strands every artifact's content, so it MUST migrate alongside the DB.
+ * The legacy dir is READ-ONLY here — a still-installed pre-refactor app of the
+ * OTHER channel may be actively using it. See file header.
  */
-export function ensureStorageDir(oldDir: string, storageDir: string): void {
+export function ensureStorageDir(oldDir: string, storageDir: string, packaged: boolean): void {
   mkdirSync(storageDir, { recursive: true })
-  // A no-op when oldDir === storageDir (already anchored) or nothing to move.
-  if (oldDir !== storageDir) {
-    for (const base of DB_BASENAMES) migrateDb(oldDir, storageDir, base)
-    migrateContentDir(oldDir, storageDir, 'blobs')
-    migrateContentDir(oldDir, storageDir, 'artifacts')
-    migrateRecentBackups(oldDir, storageDir)
-  }
+  if (oldDir === storageDir) return // already anchored — nothing to copy
+
+  const sentinel = sentinelPath(storageDir, packaged)
+  if (existsSync(sentinel)) return // this channel already migrated — do not re-scan the shared dir
+
+  copyDb(oldDir, storageDir, channelDbBasename(packaged))
+  copyContentDir(oldDir, storageDir, 'blobs')
+  copyContentDir(oldDir, storageDir, 'artifacts')
+  copyRecentBackups(oldDir, storageDir, packaged)
+
+  // Mark this channel done so future boots skip the (shared, peer-owned) legacy dir.
+  writeFileSync(sentinel, new Date().toISOString())
 }
