@@ -107,7 +107,7 @@ For each file that exists and does **not** already contain a "SlayZone Environme
 
 You are running inside a SlayZone task terminal — a desktop task management app with integrated AI coding assistants. Your terminal session, browser panel, and task metadata are all managed by the app.
 
-Use the \\\`slay\\\` CLI to read and update your task, manage subtasks, control the browser panel, and more. The current task ID is available via \\\`$SLAYZONE_TASK_ID\\\` and the current project via \\\`$SLAYZONE_PROJECT_ID\\\` (both set automatically in task terminals).
+Use the \\\`slay\\\` CLI to read and update your task, manage subtasks, control the browser panel, and more. When you omit the task-id, commands auto-resolve to your current task: \\\`$SLAYZONE_TASK_ID\\\` is used if set, otherwise the task bound to \\\`$SLAYZONE_SESSION_ID\\\` (always set in a task terminal) is looked up. Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task. The current project is available via \\\`$SLAYZONE_PROJECT_ID\\\`.
 \`\`\`
 
 **Rules:**
@@ -132,7 +132,7 @@ description: "Manage tasks, subtasks, tags, and templates via the slay CLI"
 trigger: auto
 ---
 
-Task commands are the core of the slay CLI. Most commands accept an optional \`[id]\` argument that defaults to \`$SLAYZONE_TASK_ID\`, which is automatically set in every task terminal. Commands that require a project (\`--project\`) default to \`$SLAYZONE_PROJECT_ID\` (also set automatically). All ID arguments support prefix matching — e.g. \`a1b2\` matches a full UUID starting with \`a1b2\`.
+Task commands are the core of the slay CLI. Most commands accept an optional \`[id]\` argument identifying the task to act on. When omitted, it **auto-resolves** to your current task: \`$SLAYZONE_TASK_ID\` is used if set, otherwise the task bound to \`$SLAYZONE_SESSION_ID\` (**always** set in a task terminal) is looked up live. Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task. Note \`$SLAYZONE_SESSION_ID\` is a session id, not a task id — it drives auto-resolution but is not itself a valid \`[id]\` argument. Commands that require a project (\`--project\`) default to \`$SLAYZONE_PROJECT_ID\` (also set automatically). All ID arguments support prefix matching — e.g. \`a1b2\` matches a full UUID starting with \`a1b2\`.
 
 ## Task lifecycle
 

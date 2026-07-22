@@ -20,7 +20,7 @@ If useful, you have a toolbox for acting on SlayZone itself. You can:
 - attach assets, run processes, open web panels, set up automations
 - change your own task's state
 
-The toolbox is the \`slay\` CLI. \`$SLAYZONE_TASK_ID\` holds your task's ID, and most \`slay\` commands default to it. **Load the \`slay\` skill before running any \`slay\` command** — it holds the full reference of commands, flags, and domain-specific guides. Never guess subcommands or flags.
+The toolbox is the \`slay\` CLI. When you omit the task-id, most \`slay\` commands auto-resolve to your current task: \`$SLAYZONE_TASK_ID\` is used if set, otherwise the task bound to \`$SLAYZONE_SESSION_ID\` (always set in a task terminal) is looked up. Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task. **Load the \`slay\` skill before running any \`slay\` command** — it holds the full reference of commands, flags, and domain-specific guides. Never guess subcommands or flags.
 `
 
 type SkillStats = { installed: number; updated: number; skipped: number }

@@ -6,7 +6,7 @@ You (this instance) is actually running inside SlayZone now. We are dogfooding S
 
 You are able to interact with the running SlayZone application via the CLI. But **you MUST load the** **`slay`** **skill before running any** **`slay`** **CLI command.** Do not guess subcommands or flags — the skill has the full reference.
 
-The session is ran with the `$SLAYZONE_TASK_ID` environment variable, so you can omit the task-id unless you want to target another task.
+You can omit the task-id unless you want to target another task — commands auto-resolve to your current task: `$SLAYZONE_TASK_ID` is used if set, otherwise the task bound to `$SLAYZONE_SESSION_ID` (always set in a task terminal) is looked up. Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task.
 
 ## Communication Style
 
