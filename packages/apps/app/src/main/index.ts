@@ -1897,7 +1897,7 @@ app
     logBoot('domain tRPC ops registered')
 
     // Host REST server (slice 9 local cutover). The SIDE-CAR now owns the
-    // discoverable `mcp_server_port` (CLI + agents + external MCP hit it). The
+    // discoverable `server_port` (CLI + agents + external MCP hit it). The
     // host keeps a REST server ONLY as the reverse-proxy target for the
     // Electron-only routes the side-car can't serve itself — browser-automation
     // (live WebContents) + artifact export (offscreen renderer). So it binds a
@@ -2272,10 +2272,10 @@ app
             logger: (line) => logBoot(line),
             onReady: (info) => {
               // Post-cutover the SIDE-CAR is the canonical MCP/REST backend. Point
-              // the host's `__mcpPort` at it so anything resolving the discoverable
+              // the host's `__serverPort` at it so anything resolving the discoverable
               // port in the host process (e2e helpers, diagnostics) targets the
               // side-car — NOT the host's writePort:false reverse-proxy REST.
-              ;(globalThis as Record<string, unknown>).__mcpPort = info.port
+              ;(globalThis as Record<string, unknown>).__serverPort = info.port
             },
             onPermanentFailure: (info) => {
               console.error(
@@ -3562,14 +3562,14 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       ipcMain.handle('e2e:get-mcp-port', async () => {
         // Post-cutover the discoverable backend (CLI + agent-hooks + external
         // MCP) is the SIDE-CAR — production agents spawned by the side-car PTY
-        // get its port. The host's __mcpPort is only the reverse-proxy target.
-        if (isRemoteMode) return (globalThis as Record<string, unknown>).__mcpPort ?? null
+        // get its port. The host's __serverPort is only the reverse-proxy target.
+        if (isRemoteMode) return (globalThis as Record<string, unknown>).__serverPort ?? null
         try {
           const handle = await sidecarHandlePromise
           await handle.waitForReady()
           return handle.getPort() ?? null
         } catch {
-          return (globalThis as Record<string, unknown>).__mcpPort ?? null
+          return (globalThis as Record<string, unknown>).__serverPort ?? null
         }
       })
       // Spy/stub a HOST AppDeps method through the capability bridge. Post-cutover

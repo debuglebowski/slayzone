@@ -24,8 +24,8 @@ import type { RestApiDeps } from '../types'
  *
  * Loopback-only: the token is a bearer-equivalent secret, so a non-loopback
  * caller is rejected. The shared HTTP server binds loopback anyway (getServerHost
- * defaults to 127.0.0.1); this is defense-in-depth for an accidental SLAYZONE_HOST
- * override. Main always dials 127.0.0.1, so it is never rejected.
+ * defaults to 127.0.0.1); this is defense-in-depth for an accidental
+ * SLAYZONE_SERVER_HOST override. Main always dials 127.0.0.1, so it is never rejected.
  */
 
 const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes (matches runnersRouter)

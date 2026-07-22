@@ -84,12 +84,17 @@ export async function resolveRemoteMcpEnv(
  *   SLAYZONE_AGENT_HOOK_URL  - URL for POST /api/agent-hook (loopback locally,
  *                              the hub's endpoint for a remote runner)
  *   SLAYZONE_AGENT_ID        - the mode itself (passed back in hook payload)
- *   SLAYZONE_HOME_DIR        - resolved ~/.slayzone (script lookup base)
+ *   SLAYZONE_ROOT            - resolved on-disk anchor; the `slay` CLI inside the
+ *                              agent derives `<ROOT>/storage` (same DB the app uses)
  *
  * When `remote` is supplied (a task's pty routed to a runner), the loopback
- * `SLAYZONE_MCP_PORT` + hook URL are REPLACED by `SLAYZONE_HUB_URL` (+ an
- * optional `SLAYZONE_HUB_TOKEN`) and a hub-hosted hook URL. With no `remote`
+ * hook URL is REPLACED by a hub-hosted one and `SLAYZONE_HUB_URL` (+ an optional
+ * `SLAYZONE_HUB_TOKEN`) is added so the CLI dials the hub. With no `remote`
  * (the default) nothing about the local env changes.
+ *
+ * No port env var is injected here: the `slay` CLI resolves the local server port
+ * from the sidecar's own `SLAYZONE_SERVER_PORT` (inherited via the pty's env) and
+ * falls back to `settings.server_port` in the DB (written by the server at boot).
  */
 export async function buildMcpEnv(
   db: SlayzoneDb | null | undefined,
@@ -128,27 +133,27 @@ export async function buildMcpEnv(
 
   if (remote) {
     // Remote runner: loopback is meaningless on the runner machine. Point the
-    // CLI + hooks at the hub. `SLAYZONE_MCP_PORT` is deliberately omitted (a
-    // loopback concept); the CLI resolves the hub via `SLAYZONE_HUB_URL` and the
-    // hook uses the absolute `SLAYZONE_AGENT_HOOK_URL` below.
+    // CLI + hooks at the hub: the CLI resolves the hub via `SLAYZONE_HUB_URL` and
+    // the hook uses the absolute `SLAYZONE_AGENT_HOOK_URL` below.
     env.SLAYZONE_HUB_URL = remote.hubBaseUrl
     if (remote.token) env.SLAYZONE_HUB_TOKEN = remote.token
     if (hookCapable) {
       env.SLAYZONE_AGENT_HOOK_URL = `${remote.hubBaseUrl}${AGENT_HOOK_PATH}`
       env.SLAYZONE_AGENT_ID = mode as string
-      env.SLAYZONE_HOME_DIR = getSlayzoneHomeDir()
+      env.SLAYZONE_ROOT = getSlayzoneHomeDir()
     }
     return env
   }
 
-  // Local (hub-local — today's only path): loopback, byte-identical to before.
-  const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
-  if (mcpPort) env.SLAYZONE_MCP_PORT = String(mcpPort)
+  // Local (hub-local — today's only path): loopback. The port is used ONLY to
+  // build the agent-hook URL below. No port var is injected — the CLI resolves
+  // the server port itself (inherited SLAYZONE_SERVER_PORT, else settings.server_port).
+  const serverPort = (globalThis as Record<string, unknown>).__serverPort as number | undefined
 
-  if (mcpPort && hookCapable) {
-    env.SLAYZONE_AGENT_HOOK_URL = `http://127.0.0.1:${mcpPort}${AGENT_HOOK_PATH}`
+  if (serverPort && hookCapable) {
+    env.SLAYZONE_AGENT_HOOK_URL = `http://127.0.0.1:${serverPort}${AGENT_HOOK_PATH}`
     env.SLAYZONE_AGENT_ID = mode as string
-    env.SLAYZONE_HOME_DIR = getSlayzoneHomeDir()
+    env.SLAYZONE_ROOT = getSlayzoneHomeDir()
   }
 
   return env

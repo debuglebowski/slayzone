@@ -1,4 +1,4 @@
-import { getMcpPort } from './db'
+import { getServerPort } from './db'
 import { resolveHubTarget } from './hub-config'
 
 interface ApiTarget {
@@ -11,9 +11,9 @@ interface ApiTarget {
 function resolveTarget(): ApiTarget {
   const hub = resolveHubTarget()
   if (hub) return { baseUrl: hub.baseUrl, token: hub.token, hub: true }
-  const port = getMcpPort()
+  const port = getServerPort()
   if (!port) {
-    console.error('SlayZone MCP port not found. Is the app running?')
+    console.error('SlayZone server port not found. Is the app running?')
     process.exit(1)
   }
   return { baseUrl: `http://127.0.0.1:${port}`, token: null, hub: false }

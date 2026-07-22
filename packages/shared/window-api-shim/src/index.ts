@@ -20,17 +20,17 @@ export function setupWindowApi(): ElectronAPI {
   // sidecar (or get an explicit "deferred" error for integrations:test:*).
   installTestInvoke()
   // cap-migrate-all-tests (sidecar-shim-unblocks P1 / Unblock #5) —
-  // surface the sidecar's MCP server port as `window.__mcpPort` the same
+  // surface the sidecar's server port as `window.__serverPort` the same
   // way Electron main did. Fire-and-forget with a short backoff so the
   // binding works across the sidecar's async listen() call. 95-mcp-server's
-  // `for i<20; __mcpPort check` loop polls up to 5s, which matches.
+  // `for i<20; __serverPort check` loop polls up to 5s, which matches.
   void (async () => {
     const { jsonRpcCall } = await import('./transport/mojo')
     for (let attempt = 0; attempt < 40; attempt += 1) {
       try {
         const res = await jsonRpcCall<{ port: number; ready: boolean }>('mcp:get-port', {})
         if (res?.ready && res.port > 0) {
-          ;(globalThis as unknown as { __mcpPort?: number }).__mcpPort = res.port
+          ;(globalThis as unknown as { __serverPort?: number }).__serverPort = res.port
           return
         }
       } catch {

@@ -165,8 +165,8 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
 // ---------------------------------------------------------------------------
 // Standalone-listener lifecycle (Electron-main host path). Module-singleton,
 // matching the pre-move behavior 1:1: preferred-port lookup, EADDRINUSE
-// fallback to a dynamic port, `settings.mcp_server_port` discovery write,
-// `globalThis.__mcpPort` for in-process consumers.
+// fallback to a dynamic port, `settings.server_port` discovery write,
+// `globalThis.__serverPort` for in-process consumers.
 // ---------------------------------------------------------------------------
 
 let httpServer: Server | null = null
@@ -199,7 +199,7 @@ export async function startMcpServer(
   deps: RestApiDeps,
   opts: { writePort?: boolean } = {}
 ): Promise<{ port: number }> {
-  // writePort=false: bind + serve, but DON'T claim `settings.mcp_server_port`.
+  // writePort=false: bind + serve, but DON'T claim `settings.server_port`.
   // The slice-9 host keeps a REST server only as a reverse-proxy target; the
   // side-car owns the discoverable port (CLI/agents/external MCP hit it).
   const writePort = opts.writePort ?? true
@@ -215,13 +215,13 @@ export async function startMcpServer(
       const actualPort = typeof addr === 'object' && addr ? addr.port : port
       // Only the CANONICAL server claims the discovery globals/settings. The
       // slice-9 host runs writePort:false purely as a reverse-proxy target, so it
-      // must NOT set `__mcpPort` — agents + tests resolve the SIDE-CAR port (the
-      // host sets its `__mcpPort` to the side-car port via the supervisor onReady).
+      // must NOT set `__serverPort` — agents + tests resolve the SIDE-CAR port (the
+      // host sets its `__serverPort` to the side-car port via the supervisor onReady).
       if (writePort) {
-        ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
+        ;(globalThis as Record<string, unknown>).__serverPort = actualPort
         try {
           await deps.db
-            .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)")
+            .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('server_port', ?)")
             .run(String(actualPort))
         } catch {
           /* non-fatal — CLI falls back to default port */

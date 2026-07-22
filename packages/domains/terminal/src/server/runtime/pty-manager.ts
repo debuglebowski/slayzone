@@ -991,12 +991,12 @@ function buildTransportSpawn(
   if (ctx.type === 'ssh') {
     const workdir = ctx.workdir || cwd
     const remoteShell = ctx.shell || '/bin/bash'
-    const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
+    const serverPort = (globalThis as Record<string, unknown>).__serverPort as number | undefined
 
     const sshArgs = ['-t']
-    // Reverse port forward so remote CLI can reach host MCP server
-    if (mcpPort) {
-      sshArgs.push('-R', `${mcpPort}:localhost:${mcpPort}`)
+    // Reverse port forward so remote CLI can reach the host server
+    if (serverPort) {
+      sshArgs.push('-R', `${serverPort}:localhost:${serverPort}`)
     }
     sshArgs.push('--', ctx.target)
 

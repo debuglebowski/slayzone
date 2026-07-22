@@ -69,7 +69,7 @@ export function applyStandaloneHubConfig(): void {
   // from SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
   // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so
   // there is nothing to thread through env here.
-  setIfUnset('SLAYZONE_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
+  setIfUnset('SLAYZONE_SERVER_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
   setIfUnset('SLAYZONE_HUB_RUNNER_TRANSPORT_PORT', cfg.runnerTransportPort !== undefined ? String(cfg.runnerTransportPort) : undefined)
   setIfUnset('SLAYZONE_HUB_PUBLIC_URL', cfg.publicUrl)
 

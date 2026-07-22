@@ -1,4 +1,4 @@
-import { openDb, postJson, getMcpPort } from '../../db'
+import { openDb, postJson, getServerPort } from '../../db'
 import { apiPatch } from '../../api'
 import { getDoneStatus } from '@slayzone/projects/shared'
 import { getProjectColumnsConfig, resolveId } from './_shared'
@@ -36,7 +36,7 @@ export async function doneAction(idPrefix: string | undefined, opts: DoneOpts): 
   console.log(`Done: ${task.id.slice(0, 8)}  ${task.title}`)
 
   if (opts.close) {
-    const port = getMcpPort()
+    const port = getServerPort()
     if (!port) {
       console.error('Warning: cannot close tab — no MCP port (is the app running?)')
     } else {

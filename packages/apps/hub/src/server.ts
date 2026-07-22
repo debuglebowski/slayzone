@@ -31,7 +31,7 @@ import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-so
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
 import { createLogger } from './log.js'
-import { claimMcpServerPort, claimRunnerServerPort, resolveDesiredRunnerPort } from './port-claim.js'
+import { claimServerPort, claimRunnerServerPort, resolveDesiredRunnerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
@@ -475,13 +475,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     }
   }
   // Agents spawned BY this process discover their hook endpoint via this global.
-  ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
+  ;(globalThis as Record<string, unknown>).__serverPort = actualPort
   // Slice 9 live cutover: the side-car is now the discoverable backend — the CLI,
-  // agents, and external MCP resolve `settings.mcp_server_port` to reach HERE
+  // agents, and external MCP resolve `settings.server_port` to reach HERE
   // (the host's REST runs with writePort:false). Single writer of this key —
   // guarded against clobbering a still-live sidecar (plans/sidecar-staleness.md
   // Phase 4, see port-claim.ts).
-  await claimMcpServerPort(db, host, actualPort, log)
+  await claimServerPort(db, host, actualPort, log)
   log(`listening on http://${host}:${actualPort} (/trpc + /health + /api + /mcp)`)
 
   // Boot canary: records THIS process's build identity so the running sidecar's

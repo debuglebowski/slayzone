@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { openDb, getMcpPort } from '../../db'
+import { openDb, getServerPort } from '../../db'
 import { apiPost } from '../../api'
 import { resolveId } from './_shared'
 
@@ -33,7 +33,7 @@ export async function openAction(idPrefix: string | undefined, opts: OpenOpts = 
   const task = tasks[0]
   db.close()
 
-  const port = getMcpPort()
+  const port = getServerPort()
   if (!port) {
     console.error('No running SlayZone app found. Start the app first.')
     process.exit(1)

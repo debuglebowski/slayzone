@@ -3256,6 +3256,29 @@ export const migrations: Migration[] = [
         ALTER TABLE projects ADD COLUMN default_runner_id TEXT;
       `)
     }
+  },
+  {
+    version: 150,
+    up: (db) => {
+      // Rename the local-server discovery key `mcp_server_port` → `server_port`.
+      // The "mcp" name was misleading — the value is the single port the sidecar
+      // binds for /trpc+/api+/mcp+/health, unrelated to MCP-the-protocol. The
+      // running server rewrites `server_port` on every boot (claimServerPort), so
+      // this migration only carries the existing value forward for a CLI that runs
+      // before the next boot.
+      //
+      // Copy the OLD value into the NEW key (old wins — it's the source of truth
+      // being migrated from), then drop the old key. INSERT OR REPLACE + a guarded
+      // SELECT keeps this idempotent and collision-safe: if `mcp_server_port` is
+      // absent (already migrated, or a fresh DB), the INSERT's SELECT yields no row
+      // and nothing changes — unlike a bare DELETE, which would wipe a live value
+      // on a second application.
+      db.exec(`
+        INSERT OR REPLACE INTO settings (key, value)
+          SELECT 'server_port', value FROM settings WHERE key = 'mcp_server_port';
+        DELETE FROM settings WHERE key = 'mcp_server_port';
+      `)
+    }
   }
 ]
 

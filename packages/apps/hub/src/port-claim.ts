@@ -1,5 +1,5 @@
 /**
- * Non-clobber guard for `settings.mcp_server_port` (plans/sidecar-staleness.md,
+ * Non-clobber guard for `settings.server_port` (plans/sidecar-staleness.md,
  * Phase 4).
  *
  * Every sidecar that boots used to overwrite this key unconditionally — so any
@@ -55,24 +55,24 @@ function isTcpPortAlive(host: string, port: number, timeoutMs = 300): Promise<bo
   })
 }
 
-export async function claimMcpServerPort(
+export async function claimServerPort(
   db: MinimalDb,
   host: string,
   actualPort: number,
   log: (line: string) => void
 ): Promise<void> {
   try {
-    const row = await db.get("SELECT value FROM settings WHERE key = 'mcp_server_port'")
+    const row = await db.get("SELECT value FROM settings WHERE key = 'server_port'")
     const existingPort = row?.value ? Number(row.value) : null
     if (existingPort && existingPort !== actualPort && (await isPortAlive(host, existingPort))) {
       log(
-        `[mcp_server_port] refusing to overwrite ${existingPort} with ${actualPort} — ` +
+        `[server_port] refusing to overwrite ${existingPort} with ${actualPort} — ` +
           `the stored port still answers /health (a live sidecar already owns it)`
       )
       return
     }
     await db
-      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)")
+      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('server_port', ?)")
       .run(String(actualPort))
   } catch {
     /* non-fatal — CLI falls back to its default port */
@@ -121,7 +121,7 @@ export async function resolveDesiredRunnerPort(
 /**
  * Persist the runner listener's actually-bound port to `settings.runner_transport_port`
  * so the next boot reuses it (via `resolveDesiredRunnerPort`) — the persistence
- * half of the claim-once-and-persist pattern. Mirrors `claimMcpServerPort`'s
+ * half of the claim-once-and-persist pattern. Mirrors `claimServerPort`'s
  * non-clobber guard: before overwriting a DIFFERENT stored port, probe whether it
  * is still live (a TCP listener answering) and, if so, refuse + log loudly rather
  * than silently repointing enrolling runners at a port some other hub owns.

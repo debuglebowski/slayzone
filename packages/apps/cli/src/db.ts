@@ -34,12 +34,18 @@ function getDbPath(dev: boolean): string {
 
 type SqlParams = Record<string, string | number | bigint | null | Uint8Array>
 
-export function getMcpPort(): number | null {
-  if (process.env.SLAYZONE_MCP_PORT) return parseInt(process.env.SLAYZONE_MCP_PORT, 10) || null
+export function getServerPort(): number | null {
+  // The running server binds SLAYZONE_SERVER_PORT and publishes its actually-bound
+  // port to `settings.server_port` at boot (hub/src/server.ts). Fast-path the env
+  // var (an agent pty inherits the sidecar's SLAYZONE_SERVER_PORT), else read the
+  // DB — the durable source of truth for a CLI run outside a task pty.
+  if (process.env.SLAYZONE_SERVER_PORT) {
+    return parseInt(process.env.SLAYZONE_SERVER_PORT, 10) || null
+  }
   try {
     const db = openDb()
     const row = db.query<{ value: string }>(
-      `SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1`
+      `SELECT value FROM settings WHERE key = 'server_port' LIMIT 1`
     )
     db.close()
     const port = parseInt(row[0]?.value ?? '', 10)
@@ -49,15 +55,15 @@ export function getMcpPort(): number | null {
   }
 }
 
-function getAlternateMcpPort(): number | null {
-  if (process.env.SLAYZONE_DB_PATH || process.env.SLAYZONE_MCP_PORT) return null
+function getAlternateServerPort(): number | null {
+  if (process.env.SLAYZONE_DB_PATH || process.env.SLAYZONE_SERVER_PORT) return null
   const dev = process.env.SLAYZONE_DEV === '1'
   const altPath = getDbPath(!dev)
   if (!fs.existsSync(altPath)) return null
   try {
     const altDb = new DatabaseSync(altPath)
     const row = altDb
-      .prepare(`SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1`)
+      .prepare(`SELECT value FROM settings WHERE key = 'server_port' LIMIT 1`)
       .get() as { value: string } | undefined
     altDb.close()
     const port = parseInt(row?.value ?? '', 10)
@@ -117,7 +123,7 @@ export async function notifyApp(): Promise<void> {
     return
   }
 
-  const port = getMcpPort()
+  const port = getServerPort()
   if (port) {
     const ok = await postJson(port, '/api/notify')
     if (!ok) {
@@ -128,8 +134,8 @@ export async function notifyApp(): Promise<void> {
     return
   }
 
-  // No MCP port in current DB — check if app is running on the other DB
-  const altPort = getAlternateMcpPort()
+  // No server port in current DB — check if app is running on the other DB
+  const altPort = getAlternateServerPort()
   if (altPort && (await probePort(altPort))) {
     const dev = process.env.SLAYZONE_DEV === '1'
     const hint = dev ? 'without --dev' : 'with --dev'

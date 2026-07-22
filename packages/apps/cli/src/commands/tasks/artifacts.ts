@@ -9,7 +9,7 @@ import {
   postJson,
   getArtifactsDir,
   getDataDir,
-  getMcpPort,
+  getServerPort,
   type SlayDb
 } from '../../db'
 import {
@@ -575,7 +575,7 @@ export function artifactsSubcommand(): Command {
 
       db.close()
       await notifyApp()
-      const openPort = getMcpPort()
+      const openPort = getServerPort()
       if (openPort) await postJson(openPort, `/api/open-artifact/${id}`)
 
       if (opts.json) {
@@ -644,7 +644,7 @@ export function artifactsSubcommand(): Command {
 
       db.close()
       await notifyApp()
-      const openPort = getMcpPort()
+      const openPort = getServerPort()
       if (openPort) await postJson(openPort, `/api/open-artifact/${id}`)
 
       if (opts.json) {

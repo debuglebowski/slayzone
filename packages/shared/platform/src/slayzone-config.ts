@@ -48,7 +48,7 @@ export interface SlayzoneConfig {
   /** HMAC secret backing hub-auth + per-task token mint/verify. Auto-generated
    *  + persisted on first standalone boot if absent (see ensureRunnerTransportSecret). */
   runnerTransportSecret?: string
-  /** tRPC/HTTP listen port (`SLAYZONE_PORT`). */
+  /** tRPC/HTTP listen port (`SLAYZONE_SERVER_PORT`). */
   port?: number
   /** Runner `/runners` https listener port (`SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`). */
   runnerTransportPort?: number
