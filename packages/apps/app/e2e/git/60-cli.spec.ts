@@ -8,6 +8,7 @@ import {
   resetApp
 } from '../fixtures/electron'
 import { spawnSync } from 'child_process'
+import { DatabaseSync } from 'node:sqlite'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
@@ -36,7 +37,7 @@ test.describe('CLI: slay', () => {
     // Discover dynamic MCP port
     mcpPort = await electronApp.evaluate(async () => {
       for (let i = 0; i < 20; i++) {
-        const p = (globalThis as Record<string, unknown>).__mcpPort
+        const p = (globalThis as Record<string, unknown>).__serverPort
         if (p) return p as number
         await new Promise((r) => setTimeout(r, 250))
       }
@@ -60,8 +61,7 @@ test.describe('CLI: slay', () => {
   const runCli = (...args: string[]) => {
     const env: Record<string, string> = {
       ...process.env,
-      SLAYZONE_DB_PATH: dbPath,
-      SLAYZONE_MCP_PORT: String(mcpPort)
+      SLAYZONE_DB_PATH: dbPath
     }
     // Strip inherited task-context env so CLI tests exercise default-project
     // logic instead of falling back to the parent shell's project/task.
@@ -156,8 +156,8 @@ test.describe('CLI: slay', () => {
 
     test('UI updates when CLI discovers port from DB (production path)', async ({ mainWindow }) => {
       const title = `CLI prod-path ${Date.now()}`
-      // No SLAYZONE_MCP_PORT — CLI must read port from settings table (like production)
-      const { SLAYZONE_MCP_PORT: _, ...envWithoutPort } = process.env
+      // No SLAYZONE_SERVER_PORT — CLI must read port from settings table (like production)
+      const { SLAYZONE_SERVER_PORT: _, ...envWithoutPort } = process.env
       const r = spawnSync('node', [SLAY_JS, 'tasks', 'create', title, '--project', 'cli test'], {
         env: { ...envWithoutPort, SLAYZONE_DB_PATH: dbPath },
         encoding: 'utf8'
@@ -488,7 +488,7 @@ test.describe('CLI: slay', () => {
 
     const runProcessesCli = (...args: string[]) =>
       spawnSync('node', [SLAY_JS, ...args], {
-        env: { ...process.env, SLAYZONE_DB_PATH: dbPath, SLAYZONE_MCP_PORT: String(mcpPort) },
+        env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
         encoding: 'utf8'
       })
 
@@ -519,12 +519,29 @@ test.describe('CLI: slay', () => {
     })
 
     test('exits non-zero when app is not running', () => {
-      const r = spawnSync('node', [SLAY_JS, 'processes', 'list'], {
-        env: { ...process.env, SLAYZONE_DB_PATH: dbPath, SLAYZONE_MCP_PORT: '1' },
-        encoding: 'utf8'
-      })
-      expect(r.status).not.toBe(0)
-      expect(r.stderr).toContain('not running')
+      // Fake a down server via the DB: a throwaway sqlite whose
+      // settings.server_port points at a dead port. The CLI resolves it, fails to
+      // connect, and reports "not running". Unset SLAYZONE_SERVER_PORT so the env
+      // fast-path can't shadow the seeded dead port.
+      const deadDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-deadport-'))
+      const deadDbPath = path.join(deadDbDir, 'slayzone.dev.sqlite')
+      const seedDb = new DatabaseSync(deadDbPath)
+      seedDb.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+      seedDb
+        .prepare("INSERT INTO settings (key, value) VALUES ('server_port', '1')")
+        .run()
+      seedDb.close()
+      const { SLAYZONE_SERVER_PORT: _drop, ...envNoPort } = process.env
+      try {
+        const r = spawnSync('node', [SLAY_JS, 'processes', 'list'], {
+          env: { ...envNoPort, SLAYZONE_DB_PATH: deadDbPath },
+          encoding: 'utf8'
+        })
+        expect(r.status).not.toBe(0)
+        expect(r.stderr).toContain('not running')
+      } finally {
+        fs.rmSync(deadDbDir, { recursive: true, force: true })
+      }
     })
 
     test('kill stops a process', () => {
@@ -685,7 +702,6 @@ test.describe('CLI: slay', () => {
         env: {
           ...process.env,
           SLAYZONE_DB_PATH: dbPath,
-          SLAYZONE_MCP_PORT: String(mcpPort),
           SLAYZONE_TASK_ID: parentTaskId
         },
         encoding: 'utf8'
@@ -815,8 +831,7 @@ test.describe('CLI: slay', () => {
           env: (() => {
             const env: Record<string, string> = {
               ...process.env,
-              SLAYZONE_DB_PATH: dbPath,
-              SLAYZONE_MCP_PORT: String(mcpPort)
+              SLAYZONE_DB_PATH: dbPath
             }
             delete env.SLAYZONE_PROJECT_ID
             delete env.SLAYZONE_TASK_ID

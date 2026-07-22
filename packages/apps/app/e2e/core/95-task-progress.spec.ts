@@ -35,7 +35,7 @@ test.describe('Task progress', () => {
     dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
     mcpPort = await electronApp.evaluate(async () => {
       for (let i = 0; i < 20; i++) {
-        const p = (globalThis as Record<string, unknown>).__mcpPort
+        const p = (globalThis as Record<string, unknown>).__serverPort
         if (p) return p as number
         await new Promise((r) => setTimeout(r, 250))
       }
@@ -66,7 +66,7 @@ test.describe('Task progress', () => {
 
   const runCli = (...args: string[]) =>
     spawnSync('node', [SLAY_JS, ...args], {
-      env: { ...process.env, SLAYZONE_DB_PATH: dbPath, SLAYZONE_MCP_PORT: String(mcpPort) },
+      env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
       encoding: 'utf8'
     })
 

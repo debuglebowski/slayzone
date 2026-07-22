@@ -53,7 +53,7 @@ test.describe('Tab create/split via REST', () => {
     await resetApp(mainWindow)
     mcpPort = await electronApp.evaluate(async () => {
       for (let i = 0; i < 20; i++) {
-        const p = (globalThis as Record<string, unknown>).__mcpPort
+        const p = (globalThis as Record<string, unknown>).__serverPort
         if (p) return p as number
         await new Promise((r) => setTimeout(r, 250))
       }

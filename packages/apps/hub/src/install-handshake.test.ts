@@ -191,7 +191,7 @@ async function main(): Promise<void> {
       ...scrubbedEnv(),
       SLAYZONE_HOME_DIR: homeDir,
       SLAYZONE_STORE_DIR: storeDir,
-      SLAYZONE_PORT: '0',
+      SLAYZONE_SERVER_PORT: '0',
       SLAYZONE_HUB_RUNNER_TRANSPORT_PORT: '0',
       SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: secret
     })

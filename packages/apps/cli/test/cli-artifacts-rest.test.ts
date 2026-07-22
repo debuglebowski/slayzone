@@ -4,7 +4,7 @@
  * Spawns the bundled CLI (dist/slay.js) as a subprocess against an in-process
  * Express+REST stack on an ephemeral port (same pattern as cli-read-rest.test.ts).
  * Proves the METADATA-ONLY artifact commands hit the REST surface — the CLI
- * resolves the port from SLAYZONE_MCP_PORT and routes through OUR registered
+ * resolves the port from SLAYZONE_SERVER_PORT and routes through OUR registered
  * handlers, so no direct sqlite read/write remains on these paths:
  *   list  → GET    /api/tasks/:id/artifacts
  *   mkdir → POST   /api/artifact-folders
@@ -83,7 +83,7 @@ function runCli(
       SLAYZONE_DB_PATH: dbPath,
       SLAYZONE_STORE_DIR: tmpDir,
       SLAYZONE_DEV: '1',
-      SLAYZONE_MCP_PORT: String(rest.port)
+      SLAYZONE_SERVER_PORT: String(rest.port)
     }
     for (const [k, v] of Object.entries(opts.envOverrides ?? {})) {
       if (v === undefined) delete env[k]
@@ -150,10 +150,10 @@ await describe('CLI artifact metadata commands → REST', () => {
 
   test('create (disk-local) still writes directly to the DB + blob store', async () => {
     // Disk-local path: uses openDb() + BlobStore, NOT REST. Prove it by pointing
-    // SLAYZONE_MCP_PORT at a dead port — a REST call would fail, this must not.
+    // SLAYZONE_SERVER_PORT at a dead port — a REST call would fail, this must not.
     const r = await runCli(['tasks', 'artifacts', 'create', 'notes.md', '--task', short(taskId), '--json'], {
       input: '# hello',
-      envOverrides: { SLAYZONE_MCP_PORT: '1' }
+      envOverrides: { SLAYZONE_SERVER_PORT: '1' }
     })
     expect(r.exitCode).toBe(0)
     const artifact = JSON.parse(r.stdout) as { id: string; title: string }
@@ -167,7 +167,7 @@ await describe('CLI artifact metadata commands → REST', () => {
 
   test('read (disk-local) round-trips content from disk (no REST)', async () => {
     const r = await runCli(['tasks', 'artifacts', 'read', short(artifactId)], {
-      envOverrides: { SLAYZONE_MCP_PORT: '1' }
+      envOverrides: { SLAYZONE_SERVER_PORT: '1' }
     })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe('# hello')
@@ -271,7 +271,7 @@ await describe('CLI artifact metadata commands → REST', () => {
 await describe('CLI artifact metadata — no-server path', () => {
   test('mkdir exits 1 with helpful stderr when REST unreachable', async () => {
     const r = await runCli(['tasks', 'artifacts', 'mkdir', 'Nope', '--task', short(taskId)], {
-      envOverrides: { SLAYZONE_MCP_PORT: '1' }
+      envOverrides: { SLAYZONE_SERVER_PORT: '1' }
     })
     expect(r.exitCode).toBe(1)
     expect(r.stderr.includes('not running') || r.stderr.includes('could not connect')).toBe(true)

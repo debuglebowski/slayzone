@@ -25,13 +25,13 @@ test.describe('CLI: automation triggers (end-to-end)', () => {
     dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
 
     // Slice 9 cutover: the SIDE-CAR is the discoverable backend (it owns the
-    // AutomationEngine + writes settings.mcp_server_port). The CLI hits the
-    // side-car — NOT the host's __mcpPort (whose engine is now unstarted). Read
+    // AutomationEngine + writes settings.server_port). The CLI hits the
+    // side-car — NOT the host's __serverPort (whose engine is now unstarted). Read
     // the port the side-car published, exactly like the production CLI does.
     for (let i = 0; i < 40; i++) {
       const db = openDb()
       const row = db
-        .prepare("SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1")
+        .prepare("SELECT value FROM settings WHERE key = 'server_port' LIMIT 1")
         .get() as { value: string } | undefined
       db.close()
       if (row?.value) {
@@ -50,7 +50,7 @@ test.describe('CLI: automation triggers (end-to-end)', () => {
 
   const runCli = (...args: string[]) =>
     spawnSync('node', [SLAY_JS, ...args], {
-      env: { ...process.env, SLAYZONE_DB_PATH: dbPath, SLAYZONE_MCP_PORT: String(mcpPort) },
+      env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
       encoding: 'utf8'
     })
 

@@ -21,7 +21,6 @@ test.describe('Web panels', () => {
   let projectAbbrev: string
   let figmaPanelName = 'Figma'
   let dbPath = ''
-  let mcpPort = 0
 
   const settingsDialog = (page: import('@playwright/test').Page) =>
     page.locator('[role="dialog"][aria-label="Settings"]').last()
@@ -84,8 +83,7 @@ test.describe('Web panels', () => {
     spawnSync('node', [SLAY_JS, ...args], {
       env: {
         ...process.env,
-        SLAYZONE_DB_PATH: dbPath,
-        SLAYZONE_MCP_PORT: String(mcpPort)
+        SLAYZONE_DB_PATH: dbPath
       },
       encoding: 'utf8'
     })
@@ -93,18 +91,11 @@ test.describe('Web panels', () => {
   test.beforeAll(async ({ electronApp, mainWindow }) => {
     await resetApp(mainWindow)
 
-    // CLI setup (same pattern as 60-cli.spec.ts)
+    // CLI setup (same pattern as 60-cli.spec.ts). The CLI resolves the server
+    // port from the DB itself, so only SLAYZONE_DB_PATH is needed.
     if (fs.existsSync(SLAY_JS)) {
       const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_STORE_DIR!)
       dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
-      mcpPort = await electronApp.evaluate(async () => {
-        for (let i = 0; i < 20; i++) {
-          const p = (globalThis as Record<string, unknown>).__mcpPort
-          if (p) return p as number
-          await new Promise((r) => setTimeout(r, 250))
-        }
-        return 0
-      })
     }
 
     const s = seed(mainWindow)

@@ -94,7 +94,7 @@ test.describe('MCP Server', () => {
     const port = await electronApp.evaluate(async () => {
       // Wait for MCP server to start (port 0 = random)
       for (let i = 0; i < 20; i++) {
-        const p = (globalThis as any).__mcpPort
+        const p = (globalThis as any).__serverPort
         if (p) return p as number
         await new Promise((r) => setTimeout(r, 250))
       }
@@ -385,7 +385,9 @@ test.describe('MCP Server', () => {
     expect(updateTool.description).toContain('SLAYZONE_TASK_ID')
   })
 
-  test('terminal gets SLAYZONE_TASK_ID and SLAYZONE_MCP_PORT env vars', async ({ mainWindow }) => {
+  test('terminal gets SLAYZONE_TASK_ID + inherited SLAYZONE_SERVER_PORT', async ({
+    mainWindow
+  }) => {
     // Reset task title so we can find it on kanban
     const s = seed(mainWindow)
     await s.updateTask({ id: taskId, title: 'MCP env test', status: 'in_progress' })
@@ -402,8 +404,14 @@ test.describe('MCP Server', () => {
     await runCommand(mainWindow, sessionId, 'echo "SZTID=$SLAYZONE_TASK_ID"')
     await waitForBufferContains(mainWindow, sessionId, `SZTID=${taskId}`)
 
-    // Echo SLAYZONE_MCP_PORT and verify it's set (non-empty number)
-    await runCommand(mainWindow, sessionId, 'echo "SZPORT=$SLAYZONE_MCP_PORT"')
-    await waitForBufferContains(mainWindow, sessionId, 'SZPORT=')
+    // No dedicated port var is injected; the pty inherits the sidecar's
+    // SLAYZONE_SERVER_PORT (the CLI reads that, else settings.server_port). The
+    // shell prints SZPORT_SET only when the inherited var is non-empty.
+    await runCommand(
+      mainWindow,
+      sessionId,
+      'test -n "$SLAYZONE_SERVER_PORT" && echo SZPORT_SET || echo SZPORT_UNSET'
+    )
+    await waitForBufferContains(mainWindow, sessionId, 'SZPORT_SET')
   })
 })

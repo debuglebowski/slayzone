@@ -1,11 +1,11 @@
 /**
- * mcp_server_port non-clobber guard (plans/sidecar-staleness.md, Phase 4).
+ * server_port non-clobber guard (plans/sidecar-staleness.md, Phase 4).
  *
  * Reproduces the exact mistake made while validating this plan live: a
  * one-off process (a manual smoke test, a rogue standalone launch) opens the
  * SAME db as a live supervised sidecar and, with the old unconditional write,
- * overwrote `mcp_server_port` with its own throwaway port — breaking CLI/agent
- * discovery of the real backend. claimMcpServerPort() must refuse to clobber a
+ * overwrote `server_port` with its own throwaway port — breaking CLI/agent
+ * discovery of the real backend. claimServerPort() must refuse to clobber a
  * value that still answers /health.
  *
  * Pure Node (real ephemeral HTTP servers, an in-memory fake db) — no native
@@ -17,7 +17,7 @@ import http from 'node:http'
 import net from 'node:net'
 import {
   claimRunnerServerPort,
-  claimMcpServerPort,
+  claimServerPort,
   resolveDesiredRunnerPort
 } from './port-claim.js'
 
@@ -44,7 +44,7 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
   if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
-/** In-memory fake covering only what claimMcpServerPort needs. */
+/** In-memory fake covering only what claimServerPort needs. */
 function fakeDb(initial?: string): {
   get: (sql: string) => Promise<{ value?: string } | undefined>
   prepare: (sql: string) => { run: (...params: unknown[]) => Promise<unknown> }
@@ -93,27 +93,27 @@ function findDeadPort(): Promise<number> {
 }
 
 async function main(): Promise<void> {
-  console.log('\nclaimMcpServerPort (non-clobber guard)')
+  console.log('\nclaimServerPort (non-clobber guard)')
   console.log('─'.repeat(40))
 
   await test('no existing value ⇒ writes freely', async () => {
     const db = fakeDb(undefined)
     const logs: string[] = []
-    await claimMcpServerPort(db, '127.0.0.1', 4001, (l) => logs.push(l))
+    await claimServerPort(db, '127.0.0.1', 4001, (l) => logs.push(l))
     assertEq(db.written.length, 1, 'one write')
     assertEq(db.written[0], '4001', 'wrote the new port')
   })
 
   await test('existing value === actualPort ⇒ writes (no-op value, still fine)', async () => {
     const db = fakeDb('4001')
-    await claimMcpServerPort(db, '127.0.0.1', 4001, () => {})
+    await claimServerPort(db, '127.0.0.1', 4001, () => {})
     assertEq(db.written[0], '4001', 'rewrote same value')
   })
 
   await test('existing value points at a DEAD port ⇒ safe to overwrite', async () => {
     const deadPort = await findDeadPort()
     const db = fakeDb(String(deadPort))
-    await claimMcpServerPort(db, '127.0.0.1', 4002, () => {})
+    await claimServerPort(db, '127.0.0.1', 4002, () => {})
     assertEq(db.written[0], '4002', 'overwrote — old value was not alive')
   })
 
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     try {
       const db = fakeDb(String(alive.port))
       const logs: string[] = []
-      await claimMcpServerPort(db, '127.0.0.1', 4003, (l) => logs.push(l))
+      await claimServerPort(db, '127.0.0.1', 4003, (l) => logs.push(l))
       assertEq(db.written.length, 0, 'did NOT write — a live sidecar already owns the key')
       assert(
         logs.some((l) => l.includes('refus') || l.includes('alive')),

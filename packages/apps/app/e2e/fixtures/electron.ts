@@ -292,8 +292,9 @@ async function launchElectronWithRetry(args: {
       //     the real boot-config.json + data dir (e.g. 100-server-settings-toggle
       //     flips the real app to remote mode → 102-sidecar-crash-recovery + the
       //     rest boot sidecar-less and cascade-fail).
-      //   • SLAYZONE_SUPERVISED / SLAYZONE_PORT / SLAYZONE_HOST* / SLAYZONE_MCP_PORT
-      //     / SLAYZONE_TASK_ID … → dogfood host/task wiring the app must not see.
+      //   • SLAYZONE_SUPERVISED / SLAYZONE_SERVER_PORT / SLAYZONE_SERVER_HOST /
+      //     SLAYZONE_HOST_* / SLAYZONE_TASK_ID … → supervised host/task wiring the
+      //     app must not see.
       // Strip every ELECTRON_*/SLAYZONE_* from the inherited copy; the explicit
       // `env:` literal below re-adds exactly the ones e2e needs.
       const launchEnv: Record<string, string> = {}
