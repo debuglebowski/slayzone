@@ -112,7 +112,6 @@ test('valid config parses all known keys, drops wrong types', () => {
       hubUrl: 'wss://hub/runners',
       allowedRoots: ['/srv/a', '/srv/b'],
       pinnedCertSha256: 'a'.repeat(64),
-      credentialsDir: '/var/lib/slayzone/runner',
       // wrong-typed / unknown → dropped
       port2: 'nope',
       extra: { nested: 1 }
@@ -128,7 +127,6 @@ test('valid config parses all known keys, drops wrong types', () => {
   assertEq(cfg.hubUrl, 'wss://hub/runners', 'hubUrl')
   assertEq(JSON.stringify(cfg.allowedRoots), JSON.stringify(['/srv/a', '/srv/b']), 'allowedRoots')
   assertEq(cfg.pinnedCertSha256, 'a'.repeat(64), 'pinnedCertSha256')
-  assertEq(cfg.credentialsDir, '/var/lib/slayzone/runner', 'credentialsDir')
   assert(!('extra' in cfg), 'unknown key dropped')
   rmSync(dir, { recursive: true, force: true })
 })

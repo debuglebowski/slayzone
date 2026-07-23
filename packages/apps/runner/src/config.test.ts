@@ -81,22 +81,21 @@ describe('loadRunnerConfig', () => {
     expect(config.name).toBe('from-config')
   })
 
-  it('reads hubUrl/name/pinnedCertSha256/credentialsDir from the shared config', () => {
-    // The single <ROOT>/config.json now carries pin + creds-dir too (the former
-    // SLAYZONE_RUNNER_CONFIG path-pointing env var is gone).
+  it('reads hubUrl/name/pinnedCertSha256 from the shared config', () => {
+    // The single <ROOT>/config.json carries the pin too (the former
+    // SLAYZONE_RUNNER_CONFIG path-pointing env var is gone). Creds always derive
+    // from the ROOT anchor (`<ROOT>/runners`) — no credentialsDir knob.
     const config = loadRunnerConfig(
       {},
       {
         hubUrl: 'wss://from-config.example/runners',
         runnerName: 'from-config',
-        pinnedCertSha256: 'a'.repeat(64),
-        credentialsDir: '/var/lib/slayzone/runner'
+        pinnedCertSha256: 'a'.repeat(64)
       }
     )
     expect(config.hubUrl).toBe('wss://from-config.example/runners')
     expect(config.name).toBe('from-config')
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
-    expect(config.credentialsDir).toBe('/var/lib/slayzone/runner')
   })
 
   it('env wins over the shared config', () => {

@@ -100,11 +100,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
 
 export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}): RunnerHandle {
   const log = deps.log ?? (() => {})
+  // Creds always derive from the ROOT anchor (`<ROOT>/runners`, see
+  // credential-store slayzoneRootDir) — no override knob. Tests inject a store
+  // via deps.credentialStore.
   const credentialStore =
-    deps.credentialStore ??
-    createFileCredentialStore(hubHostFromUrl(config.hubUrl), {
-      ...(config.credentialsDir ? { baseDir: config.credentialsDir } : {})
-    })
+    deps.credentialStore ?? createFileCredentialStore(hubHostFromUrl(config.hubUrl))
 
   // The dialer THROWS if a pin is set on a `ws://` url (pinning is meaningless
   // without TLS). An EXPLICITLY-configured pin (env/file) on a ws:// url already

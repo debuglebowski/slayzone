@@ -3,9 +3,10 @@
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
  * the keys it cares about (hub: runnerTransportSecret/port/runnerTransportPort/
- * publicUrl; runner: joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256/
- * credentialsDir). The DB path derives from SLAYZONE_ROOT (`<ROOT>/storage`), so
- * there is no dbPath key.
+ * publicUrl; runner: joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256).
+ * The runner credential store derives from SLAYZONE_ROOT (`<ROOT>/runners`), and
+ * the DB path from SLAYZONE_ROOT (`<ROOT>/storage`), so there is no
+ * credentialsDir or dbPath key.
  *
  * Precedence everywhere: env var > config.json > generated/default. The file is
  * the BASE — env can still override it (e.g. CI). Only keys that are actually
@@ -68,8 +69,6 @@ export interface SlayzoneConfig {
   /** sha256 pin of the hub TLS leaf cert (lowercase hex). Override for a
    *  wss-without-token path; normally the join token carries the pin. */
   pinnedCertSha256?: string
-  /** Override for the runner credential-store dir (default `<ROOT>/runner`). */
-  credentialsDir?: string
 }
 
 /** The dev fallback secret hard-coded in composition.ts. Standalone boots MUST
@@ -122,8 +121,6 @@ function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   }
   if (typeof raw.pinnedCertSha256 === 'string' && raw.pinnedCertSha256.length > 0)
     cfg.pinnedCertSha256 = raw.pinnedCertSha256
-  if (typeof raw.credentialsDir === 'string' && raw.credentialsDir.length > 0)
-    cfg.credentialsDir = raw.credentialsDir
   return cfg
 }
 

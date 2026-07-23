@@ -49,11 +49,8 @@ async function maybeInteractiveSetup(): Promise<string | undefined> {
   const hubUrl = process.env[ENV_VARS.hubUrl] ?? cfg.hubUrl
   if (hubUrl !== undefined) {
     try {
-      const credentialsDir = process.env[ENV_VARS.credentialsDir]
-      const store = createFileCredentialStore(
-        hubHostFromUrl(hubUrl),
-        credentialsDir ? { baseDir: credentialsDir } : {}
-      )
+      // Creds derive from the ROOT anchor (`<ROOT>/runners`) — no override knob.
+      const store = createFileCredentialStore(hubHostFromUrl(hubUrl))
       if (await store.load()) return undefined
     } catch {
       // Unreadable url/creds → fall through to prompting.

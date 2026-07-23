@@ -34,9 +34,7 @@ export const runnerConfigSchema = z.object({
   /** Capability tags advertised at enrollment. */
   capabilities: z.array(z.string().min(1)),
   /** sha256 pin of the hub TLS leaf cert (lowercase hex; colons tolerated). */
-  pinnedCertSha256: z.string().min(1).optional(),
-  /** Override for the credential-store directory (tests, packaging). */
-  credentialsDir: z.string().min(1).optional()
+  pinnedCertSha256: z.string().min(1).optional()
 })
 export type RunnerConfig = z.infer<typeof runnerConfigSchema>
 
@@ -49,8 +47,7 @@ export const ENV_VARS = {
   // bin.ts). The runner NAME has no env channel — it derives from SUPERVISED
   // (→ DEFAULT_LOCAL_RUNNER_NAME) or config.json `runnerName`, else the hostname.
   allowedRoots: 'SLAYZONE_RUNNER_ALLOWED_ROOTS',
-  pinnedCertSha256: 'SLAYZONE_HUB_CERT_SHA256',
-  credentialsDir: 'SLAYZONE_RUNNER_CREDENTIALS_DIR'
+  pinnedCertSha256: 'SLAYZONE_HUB_CERT_SHA256'
 } as const
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
@@ -141,7 +138,6 @@ function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
   // The FS path-jail — locally-declared only, never sourced from hub-pushed data.
   if (shared.allowedRoots !== undefined) out.allowedRoots = shared.allowedRoots
   if (shared.pinnedCertSha256 !== undefined) out.pinnedCertSha256 = shared.pinnedCertSha256
-  if (shared.credentialsDir !== undefined) out.credentialsDir = shared.credentialsDir
   return out
 }
 
@@ -203,9 +199,6 @@ export function loadRunnerConfig(
       : {}),
     ...(env[ENV_VARS.pinnedCertSha256] !== undefined
       ? { pinnedCertSha256: env[ENV_VARS.pinnedCertSha256] }
-      : {}),
-    ...(env[ENV_VARS.credentialsDir] !== undefined
-      ? { credentialsDir: env[ENV_VARS.credentialsDir] }
       : {})
   }
 

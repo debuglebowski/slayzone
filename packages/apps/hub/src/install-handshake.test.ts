@@ -15,9 +15,9 @@
  *     dogfooding parent leaks SLAYZONE_SUPERVISED=1 + SLAYZONE_DB_PATH → real dev
  *     DB, and ELECTRON_RUN_AS_NODE), mirroring e2e/fixtures/electron.ts. Only the
  *     explicit isolation vars below are re-added.
- *   - SLAYZONE_ROOT (hub + runner, separate dirs) + SLAYZONE_RUNNER_CREDENTIALS_DIR
- *     all point under one throwaway mkdtemp dir; ports are 0 (OS-assigned) so nothing
- *     collides with a running app's claimed port.
+ *   - SLAYZONE_ROOT (hub + runner, separate dirs) points under one throwaway
+ *     mkdtemp dir (the runner's creds derive at <ROOT>/runners); ports are 0
+ *     (OS-assigned) so nothing collides with a running app's claimed port.
  *   - The test records the real dev+prod primary DBs' mtime+size before/after and
  *     asserts byte-identical, and asserts the hub's OWN resolved db path (parsed
  *     from its boot line + /health) sits under the tmp dir.
@@ -173,9 +173,8 @@ async function main(): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'slz-install-handshake-'))
   const hubRootDir = join(root, 'hub-root')
   const runnerRootDir = join(root, 'runner-root')
-  const credsDir = join(root, 'runner-creds')
   const workDir = join(root, 'work')
-  for (const d of [hubRootDir, runnerRootDir, credsDir, workDir]) mkdirSync(d, { recursive: true })
+  for (const d of [hubRootDir, runnerRootDir, workDir]) mkdirSync(d, { recursive: true })
   // DB + state derive at <ROOT>/storage; assert the hub landed there, not the real DB.
   const hubStorageDir = join(hubRootDir, 'storage')
 
@@ -256,7 +255,6 @@ async function main(): Promise<void> {
       SLAYZONE_ROOT: runnerRootDir,
       SLAYZONE_HUB_URL: tok.hubUrl,
       SLAYZONE_RUNNER_JOIN_TOKEN: tok.token,
-      SLAYZONE_RUNNER_CREDENTIALS_DIR: credsDir,
       SLAYZONE_RUNNER_ALLOWED_ROOTS: workDir
     })
 
