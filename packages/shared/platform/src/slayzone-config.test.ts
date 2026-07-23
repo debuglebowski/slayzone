@@ -255,23 +255,23 @@ test('preserves other keys when adding a secret to a secret-less config', () => 
   rmSync(dir, { recursive: true, force: true })
 })
 
-console.log('\nslayzone-config: SLAYZONE_HOME_DIR honored')
+console.log('\nslayzone-config: SLAYZONE_ROOT honored')
 console.log('─'.repeat(40))
 
-test('getSlayzoneConfigPath resolves under SLAYZONE_HOME_DIR', () => {
+test('getSlayzoneConfigPath resolves under SLAYZONE_ROOT', () => {
   const dir = tmp()
-  const prev = process.env.SLAYZONE_HOME_DIR
-  process.env.SLAYZONE_HOME_DIR = dir
+  const prev = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = dir
   try {
-    assertEq(getSlayzoneConfigPath(), join(dir, 'config.json'), 'path under home dir override')
+    assertEq(getSlayzoneConfigPath(), join(dir, 'config.json'), 'path under root override')
     // and a default-path save/load round-trips there
     saveSlayzoneConfig({ port: 1234 })
     const raw = readFileSync(join(dir, 'config.json'), 'utf8')
-    assert(/1234/.test(raw), 'wrote to the overridden home dir')
+    assert(/1234/.test(raw), 'wrote to the overridden root dir')
     assertEq(loadSlayzoneConfig().port, 1234, 'default-path load reads the override')
   } finally {
-    if (prev === undefined) delete process.env.SLAYZONE_HOME_DIR
-    else process.env.SLAYZONE_HOME_DIR = prev
+    if (prev === undefined) delete process.env.SLAYZONE_ROOT
+    else process.env.SLAYZONE_ROOT = prev
     rmSync(dir, { recursive: true, force: true })
   }
 })

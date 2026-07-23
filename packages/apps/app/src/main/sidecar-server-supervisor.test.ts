@@ -429,9 +429,9 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
     return
   }
   const dir = mkTmp()
-  // Single store dir for BOTH the seeder and the supervised child: the DB path is
-  // now DERIVED (`<SLAYZONE_STORE_DIR>/slayzone.sqlite`), not handed via
-  // SLAYZONE_DB_PATH, so both processes must point at the SAME store dir to open
+  // Single ROOT for BOTH the seeder and the supervised child: the DB path is
+  // now DERIVED (`<ROOT>/storage/slayzone.sqlite`), not handed via
+  // SLAYZONE_DB_PATH, so both processes must point at the SAME ROOT to open
   // the same file.
   //
   // Migrate the DB before the supervised spawn. SLAYZONE_SUPERVISED=1 tells the
@@ -467,10 +467,10 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
         ...seedEnv,
         ELECTRON_RUN_AS_NODE: '1',
         // Standalone (no SLAYZONE_SUPERVISED) → openServerDatabase bootstraps schema
-        // at the DERIVED <SLAYZONE_STORE_DIR>/slayzone.sqlite (same dir the child opens).
+        // at the DERIVED <ROOT>/storage/slayzone.sqlite (same dir the child opens).
         SLAYZONE_SERVER_HOST: '127.0.0.1',
         SLAYZONE_SERVER_PORT: '0',
-        SLAYZONE_STORE_DIR: dir,
+        SLAYZONE_ROOT: dir,
         SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'seed-only-secret-at-least-32-chars-long'
       },
       stdio: ['pipe', 'pipe', 'pipe']
@@ -498,9 +498,9 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
       SLAYZONE_SUPERVISED: '1',
       SLAYZONE_SERVER_HOST: '127.0.0.1',
       SLAYZONE_SERVER_PORT: '0',
-      // DB path DERIVES from the store dir now (no SLAYZONE_DB_PATH handoff); the
-      // seeder above bootstrapped <dir>/slayzone.sqlite, which this child opens.
-      SLAYZONE_STORE_DIR: dir
+      // DB path DERIVES from ROOT now (no SLAYZONE_DB_PATH handoff); the seeder
+      // above bootstrapped <dir>/storage/slayzone.sqlite, which this child opens.
+      SLAYZONE_ROOT: dir
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })

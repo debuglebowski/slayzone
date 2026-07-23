@@ -24,10 +24,10 @@ test.describe('Run-local-hub toggle', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const env = (await mainWindow.evaluate(() =>
-      window.__testInvoke('e2e:get-env', ['SLAYZONE_STORE_DIR'])
-    )) as { SLAYZONE_STORE_DIR?: string }
-    expect(env.SLAYZONE_STORE_DIR).toBeTruthy()
-    bootConfigPath = path.join(env.SLAYZONE_STORE_DIR!, 'boot-config.json')
+      window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
+    )) as { SLAYZONE_USER_DATA_DIR?: string }
+    expect(env.SLAYZONE_USER_DATA_DIR).toBeTruthy()
+    bootConfigPath = path.join(env.SLAYZONE_USER_DATA_DIR!, 'storage', 'boot-config.json')
   })
 
   const readBootConfig = (): {

@@ -287,7 +287,7 @@ async function launchElectronWithRetry(args: {
       //     it rejects Playwright's --remote-debugging-port=0 ("bad option") and
       //     every spec fails at (0ms) with "Process failed to launch!".
       //   • ELECTRON_RENDERER_URL → points the renderer at the host dev-server.
-      //   • SLAYZONE_STORE_DIR / SLAYZONE_DB_PATH → getTrpcDataRoot() resolves to
+      //   • SLAYZONE_ROOT / SLAYZONE_DB_PATH → getTrpcDataRoot() resolves to
       //     the REAL dev data root instead of the worker dir, so specs read/write
       //     the real boot-config.json + data dir (e.g. 100-server-settings-toggle
       //     flips the real app to remote mode → 102-sidecar-crash-recovery + the
@@ -313,7 +313,11 @@ async function launchElectronWithRetry(args: {
         env: {
           ...launchEnv,
           PLAYWRIGHT: '1',
-          SLAYZONE_STORE_DIR: args.userDataDir,
+          // Single on-disk anchor: the DB derives at <ROOT>/storage and the
+          // agent-hook home at <ROOT> (getSlayzoneHomeDir). SLAYZONE_USER_DATA_DIR
+          // mirrors it so specs can read the anchor back (ROOT itself is stripped
+          // by the app's own env reads, but this passthrough is not).
+          SLAYZONE_ROOT: args.userDataDir,
           SLAYZONE_USER_DATA_DIR: args.userDataDir,
           // Always-on boot tracing in e2e — cheap (~30 console.log per launch)
           // and lets profiling specs read the timeline from boot.log. We use
@@ -325,7 +329,6 @@ async function launchElectronWithRetry(args: {
           // real ~/.slayzone or ~/.claude/settings.json. `SLAYZONE_E2E_INSTALL_HOOKS=1`
           // opts the install path back in despite PLAYWRIGHT=1 skipping it by default.
           SLAYZONE_E2E_INSTALL_HOOKS: '1',
-          SLAYZONE_HOME_DIR: path.join(args.userDataDir, '.slayzone-home'),
           SLAYZONE_CLAUDE_SETTINGS_PATH: path.join(args.userDataDir, '.claude', 'settings.json'),
           SLAYZONE_GEMINI_SETTINGS_PATH: path.join(args.userDataDir, '.gemini', 'settings.json'),
           SLAYZONE_CODEX_HOOKS_PATH: path.join(args.userDataDir, '.codex', 'hooks.json'),
@@ -345,7 +348,7 @@ async function launchElectronWithRetry(args: {
           XDG_CONFIG_HOME: path.join(args.userDataDir, '.config'),
           // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
           // isolated spec needs (runner-loopback:
-          // SLAYZONE_E2E_ALLOW_RUNNER, SLAYZONE_STORE_DIR, SLAYZONE_HUB_URL,
+          // SLAYZONE_E2E_ALLOW_RUNNER, SLAYZONE_ROOT, SLAYZONE_HUB_URL,
           // SLAYZONE_RUNNER_JOIN_TOKEN). Merged LAST so a spec can also override an
           // isolation default on purpose. Undefined for every default launch
           // (shared worker app + 103) → byte-identical there.
@@ -410,7 +413,7 @@ export async function launchIsolatedElectron(opts: {
   /** Extra env for the launch (merged last, past the env strip for
    *  `SLAYZONE_`/`ELECTRON_` prefixes). Receives the resolved `userDataDir` so a
    *  spec can pin store/hub paths into it (e.g. the runner-loopback spec sets
-   *  SLAYZONE_STORE_DIR + opt-in flags). */
+   *  SLAYZONE_ROOT + opt-in flags). */
   extraEnv?: (userDataDir: string) => Record<string, string>
 }): Promise<{
   app: ElectronApplication

@@ -912,11 +912,11 @@ export function composeServer(opts: {
     // Identity-based local-runner dedup (Wave3.5-D5): tell the auth adapters
     // which enroll name is the co-located auto-spawned runner so it collapses to
     // ONE deterministic-id row instead of orphaning one per boot. MUST match the
-    // name main injects at auto-enroll — both read the SHARED
-    // DEFAULT_LOCAL_RUNNER_NAME const (and honor the SAME SLAYZONE_RUNNER_NAME
-    // override), so they can't silently diverge. Remote runners (any other name)
-    // keep the fresh-uuid path.
-    const localRunnerName = process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME
+    // name the supervised runner enrolls under — both derive the SHARED
+    // DEFAULT_LOCAL_RUNNER_NAME const (the supervised runner defaults to it when
+    // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote runners (any
+    // other name) keep the fresh-uuid path.
+    const localRunnerName = DEFAULT_LOCAL_RUNNER_NAME
     const runnerGateway = createHubRunnerGateway(
       createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
     )

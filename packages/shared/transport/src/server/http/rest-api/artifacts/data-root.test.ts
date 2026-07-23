@@ -1,11 +1,12 @@
 /**
- * getArtifactsDataRoot resolution: SLAYZONE_STORE_DIR (the single data-root var,
- * same as hub/db.ts + ensureDataRoot) else the platform default — so artifacts
- * and the SQLite DB always resolve to the same dir. The former DB_DIR fallback
- * is gone (SLAYZONE_DB_DIR retired in favor of SLAYZONE_STORE_DIR).
+ * getArtifactsDataRoot resolution: `<SLAYZONE_ROOT>/storage` (the single
+ * data-root, same as hub/db.ts + ensureDataRoot) — so artifacts and the SQLite
+ * DB always resolve to the same dir. The former DB_DIR fallback is gone
+ * (SLAYZONE_DB_DIR retired in favor of the ROOT-derived storage dir).
  *
  * Pure Node (no native deps) → runs under plain `npx tsx`.
  */
+import { join } from 'node:path'
 import { getArtifactsDataRoot } from './shared'
 
 let passed = 0
@@ -20,29 +21,29 @@ function check(name: string, cond: boolean, detail = ''): void {
   }
 }
 
-const prevStore = process.env.SLAYZONE_STORE_DIR
+const prevRoot = process.env.SLAYZONE_ROOT
 const prevDbDir = process.env.SLAYZONE_DB_DIR
 try {
-  // STORE_DIR is honored when set.
+  // <ROOT>/storage is the data root.
   delete process.env.SLAYZONE_DB_DIR
-  process.env.SLAYZONE_STORE_DIR = '/tmp/store-root'
+  process.env.SLAYZONE_ROOT = '/tmp/store-root'
   check(
-    'STORE_DIR is used when set',
-    getArtifactsDataRoot() === '/tmp/store-root',
+    'data root derives as <ROOT>/storage',
+    getArtifactsDataRoot() === join('/tmp/store-root', 'storage'),
     `got ${getArtifactsDataRoot()}`
   )
 
-  // A leftover SLAYZONE_DB_DIR is IGNORED (retired) — falls through to the default.
-  delete process.env.SLAYZONE_STORE_DIR
+  // A leftover SLAYZONE_DB_DIR is IGNORED (retired) — the root still derives from ROOT.
+  process.env.SLAYZONE_ROOT = '/tmp/root-only'
   process.env.SLAYZONE_DB_DIR = '/tmp/dbdir-only'
   check(
     'retired SLAYZONE_DB_DIR is ignored (not the data root)',
-    getArtifactsDataRoot() !== '/tmp/dbdir-only',
+    getArtifactsDataRoot() === join('/tmp/root-only', 'storage'),
     `got ${getArtifactsDataRoot()}`
   )
 } finally {
-  if (prevStore === undefined) delete process.env.SLAYZONE_STORE_DIR
-  else process.env.SLAYZONE_STORE_DIR = prevStore
+  if (prevRoot === undefined) delete process.env.SLAYZONE_ROOT
+  else process.env.SLAYZONE_ROOT = prevRoot
   if (prevDbDir === undefined) delete process.env.SLAYZONE_DB_DIR
   else process.env.SLAYZONE_DB_DIR = prevDbDir
 }

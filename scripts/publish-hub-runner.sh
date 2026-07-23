@@ -129,9 +129,9 @@ echo "   $RUN_TGZ"
 #     exercised end-to-end; the dev-tree bins can't (Electron ABI). ---
 echo "==> Smoke: clean-install hub + runner tarballs under plain node + drive enroll handshake"
 SMOKE="$(mktemp -d /tmp/slz-pub-smoke.XXXXXX)"
-HUB_HOME="$SMOKE/hub-home"; RUN_HOME="$SMOKE/runner-home"
-HUB_STORE="$SMOKE/hub-store"; RUN_CREDS="$SMOKE/runner-creds"; RUN_WORK="$SMOKE/work"
-mkdir -p "$HUB_HOME" "$RUN_HOME" "$HUB_STORE" "$RUN_CREDS" "$RUN_WORK"
+HUB_ROOT="$SMOKE/hub-root"; RUN_ROOT="$SMOKE/runner-root"
+RUN_CREDS="$SMOKE/runner-creds"; RUN_WORK="$SMOKE/work"
+mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
 ( cd "$SMOKE" && mkdir hub runner \
   && ( cd hub && npm init -y >/dev/null && npm install "$HUB_TGZ" >/dev/null 2>&1 ) \
   && ( cd runner && npm init -y >/dev/null && npm install "$RUN_TGZ" >/dev/null 2>&1 ) )
@@ -145,8 +145,8 @@ SMOKE_SECRET="$(openssl rand -hex 32)"
 # child — which would (a) skip schema bootstrap (supervised ⇒ "no such table:
 # tasks") giving a FALSE failure, and (b) risk touching the real store. Scrub the
 # full set via `-u`; ports are 0 (OS-assigned) so nothing collides with a running
-# app. HUB_HOME/STORE keep the hub's config + identity + auth DB in the tmp tree.
-SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_STORE_DIR -u SLAYZONE_HOME_DIR
+# app. HUB_ROOT anchors the hub's config + identity + auth DB in the tmp tree.
+SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
        -u SLAYZONE_SERVER_PORT -u SLAYZONE_RUNNER_TRANSPORT_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET
        -u SLAYZONE_HUB_URL -u SLAYZONE_JOIN_TOKEN -u SLAYZONE_RUNNER_CREDENTIALS_DIR
        -u SLAYZONE_RUNNER_ALLOWED_ROOTS -u ELECTRON_RUN_AS_NODE)
@@ -155,7 +155,7 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_STORE_DIR -u SLAYZ
 # the /runners wss port stays OS-assigned (0) and is embedded in the minted token.
 HUB_PORT=47811
 env "${SCRUB[@]}" \
-  SLAYZONE_HOME_DIR="$HUB_HOME" SLAYZONE_STORE_DIR="$HUB_STORE" SLAYZONE_SERVER_PORT="$HUB_PORT" \
+  SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_SERVER_PORT="$HUB_PORT" \
   SLAYZONE_RUNNER_TRANSPORT_PORT=0 \
   SLAYZONE_RUNNER_TRANSPORT_SECRET="$SMOKE_SECRET" \
   node "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
@@ -197,8 +197,8 @@ echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
 # Boot the runner from ITS tarball (proves node-pty rebuilt for the consumer ABI)
 # and point it at the minted token.
 env "${SCRUB[@]}" \
-  SLAYZONE_HOME_DIR="$RUN_HOME" SLAYZONE_HUB_URL="$HUB_WSS" SLAYZONE_JOIN_TOKEN="$JOIN_TOKEN" \
-  SLAYZONE_RUNNER_NAME=publish-smoke-runner SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
+  SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_URL="$HUB_WSS" SLAYZONE_JOIN_TOKEN="$JOIN_TOKEN" \
+  SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
   SLAYZONE_RUNNER_ALLOWED_ROOTS="$RUN_WORK" \
   node "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
 RPID=$!

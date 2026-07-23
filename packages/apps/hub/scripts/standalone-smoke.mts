@@ -6,7 +6,7 @@
  * tree's better-sqlite3 is built for Electron's ABI):
  *
  *   TMPD=$(mktemp -d)
- *   ELECTRON_RUN_AS_NODE=1 SLAYZONE_STORE_DIR=$TMPD SLAYZONE_SERVER_PORT=4399 \
+ *   ELECTRON_RUN_AS_NODE=1 SLAYZONE_ROOT=$TMPD SLAYZONE_SERVER_PORT=4399 \
  *     ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
  *     packages/apps/hub/dist/bin.cjs &
  *

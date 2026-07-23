@@ -24,9 +24,9 @@ import { app, webContents, type WebContents } from 'electron'
  * the empty band: above any healthy renderer, well below a runaway / the crash cap.
  */
 
-const THRESHOLD_MB = Number(process.env.SLAYZONE_GC_THRESHOLD_MB ?? 1100)
-const INTERVAL_MS = Number(process.env.SLAYZONE_GC_INTERVAL_MS ?? 30_000)
-const COOLDOWN_MS = Number(process.env.SLAYZONE_GC_COOLDOWN_MS ?? 20_000)
+const THRESHOLD_MB = 1100
+const INTERVAL_MS = 30_000
+const COOLDOWN_MS = 20_000
 
 let timer: ReturnType<typeof setInterval> | null = null
 const lastGcAt = new Map<number, number>() // webContents.id -> last GC timestamp

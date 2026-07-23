@@ -2,6 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'n
 import { hostname, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/slayzone-config'
 import { assertPathAllowed, ENV_VARS, loadRunnerConfig } from './config'
 import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from './join-token'
 
@@ -44,19 +45,40 @@ describe('loadRunnerConfig', () => {
     expect(config.capabilities).toEqual(['pty', 'git', 'fs', 'proc'])
   })
 
-  it('env allowedRoots + name win (the supervised host-injection channel)', () => {
-    // The Electron host injects SLAYZONE_RUNNER_ALLOWED_ROOTS + SLAYZONE_RUNNER_NAME
-    // into its local runner; env must override the shared config.
+  it('env allowedRoots wins (the supervised host-injection channel)', () => {
+    // The Electron host injects SLAYZONE_RUNNER_ALLOWED_ROOTS into its local
+    // runner; env must override the shared config.
     const config = loadRunnerConfig(
       {
         [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
-        [ENV_VARS.allowedRoots]: ['/home/me', '/srv/x'].join(delimiter),
-        [ENV_VARS.name]: 'local-runner'
+        [ENV_VARS.allowedRoots]: ['/home/me', '/srv/x'].join(delimiter)
       },
-      { allowedRoots: ['/from/config'], runnerName: 'from-config' }
+      { allowedRoots: ['/from/config'] }
     )
     expect(config.allowedRoots).toEqual(['/home/me', '/srv/x'])
-    expect(config.name).toBe('local-runner')
+  })
+
+  it('name defaults to the local-runner const when SUPERVISED (dedup pair)', () => {
+    // No env name channel anymore: a supervised runner derives the shared const
+    // so the hub composition can collapse it to one row.
+    const config = loadRunnerConfig({
+      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
+      SLAYZONE_SUPERVISED: '1'
+    })
+    expect(config.name).toBe(DEFAULT_LOCAL_RUNNER_NAME)
+  })
+
+  it('name defaults to the hostname when NOT supervised and no config', () => {
+    const config = loadRunnerConfig({ [ENV_VARS.hubUrl]: 'wss://hub.example/runners' })
+    expect(config.name).toBe(hostname())
+  })
+
+  it('config.json runnerName overrides the hostname default (standalone rename)', () => {
+    const config = loadRunnerConfig(
+      { [ENV_VARS.hubUrl]: 'wss://hub.example/runners' },
+      { runnerName: 'from-config' }
+    )
+    expect(config.name).toBe('from-config')
   })
 
   it('reads hubUrl/name/pinnedCertSha256/credentialsDir from the shared config', () => {
@@ -211,17 +233,17 @@ describe('loadRunnerConfig', () => {
   it('SUPERVISED runner does NOT layer in the shared config (mirrors hub no-op)', () => {
     // The app-spawned local runner inherits SLAYZONE_SUPERVISED=1 via {...process.env}.
     // Drive the DEFAULT `shared` param (real process.env) with SUPERVISED set + a real
-    // config.json (via SLAYZONE_HOME_DIR) carrying a hubUrl. The shared file MUST be
+    // config.json (via SLAYZONE_ROOT) carrying a hubUrl. The shared file MUST be
     // skipped → the only hubUrl source is missing → schema throws. Without the gate
     // the shared hubUrl would leak in and it would NOT throw.
-    const savedHome = process.env.SLAYZONE_HOME_DIR
+    const savedHome = process.env.SLAYZONE_ROOT
     const savedSup = process.env.SLAYZONE_SUPERVISED
     const savedHub = process.env.SLAYZONE_HUB_URL
     const savedToken = process.env.SLAYZONE_RUNNER_JOIN_TOKEN
     try {
       delete process.env.SLAYZONE_HUB_URL
       delete process.env.SLAYZONE_RUNNER_JOIN_TOKEN
-      process.env.SLAYZONE_HOME_DIR = dir
+      process.env.SLAYZONE_ROOT = dir
       process.env.SLAYZONE_SUPERVISED = '1'
       writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/runners' }))
       // Supervised ⇒ shared skipped ⇒ no hubUrl anywhere ⇒ throws.
@@ -234,7 +256,7 @@ describe('loadRunnerConfig', () => {
         if (v === undefined) delete process.env[k]
         else process.env[k] = v
       }
-      restore('SLAYZONE_HOME_DIR', savedHome)
+      restore('SLAYZONE_ROOT', savedHome)
       restore('SLAYZONE_SUPERVISED', savedSup)
       restore('SLAYZONE_HUB_URL', savedHub)
       restore('SLAYZONE_RUNNER_JOIN_TOKEN', savedToken)

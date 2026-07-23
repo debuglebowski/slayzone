@@ -109,8 +109,8 @@ export interface TaskRuntimeAdapters {
    *  Wired by the app to terminal/main's onTaskReachedTerminal. Add new side
    *  effects there, not at call sites. */
   onReachedTerminal: (taskId: string) => void
-  /** Resolve the app data root (Electron `app.getPath('userData')`). Electron-free
-   *  seam so ops/ stays server-pure; only reached when `SLAYZONE_STORE_DIR` is unset. */
+  /** Resolve the app data root (`<ROOT>/storage`). Electron-free seam so ops/
+   *  stays server-pure; the app wires it to getStorageDir(). */
   getDataRoot: () => string
   /** Exec-side worktree/git/fs ops. Defaults to the in-process implementations
    *  below; overrides must be COMPLETE (shallow merge — see WorktreeExecAdapters). */
@@ -145,7 +145,7 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   onReachedTerminal: () => {},
   getDataRoot: () => {
     throw new Error(
-      'TaskRuntimeAdapters.getDataRoot not configured (set SLAYZONE_STORE_DIR or call configureTaskRuntimeAdapters)'
+      'TaskRuntimeAdapters.getDataRoot not configured (call configureTaskRuntimeAdapters)'
     )
   },
   worktrees: defaultWorktreeExecAdapters
@@ -410,9 +410,7 @@ export async function cleanupTaskFull(
   cleanupTaskImmediate(taskId)
   runtimeAdapters.killTaskProcesses(taskId)
   // Clean up artifact files on disk. getDataRoot() is the single source of truth
-  // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage);
-  // do NOT read SLAYZONE_STORE_DIR here — it isn't set in the app, so it only
-  // risked stranding cleanup at a stale path.
+  // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage).
   const artifactsBaseDir = path.join(runtimeAdapters.getDataRoot(), 'artifacts', taskId)
   if (await runtimeAdapters.worktrees.pathExists(artifactsBaseDir)) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)

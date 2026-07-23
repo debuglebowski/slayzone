@@ -58,9 +58,9 @@ test.describe('Codex agent hooks', () => {
 
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
-      return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR'])
+      return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
-    const scriptPath = `${env.SLAYZONE_HOME_DIR}/hooks/notify.sh`
+    const scriptPath = `${env.SLAYZONE_USER_DATA_DIR}/hooks/notify.sh`
     await waitForFile(scriptPath, 5000)
 
     await mainWindow.evaluate(() => {
@@ -117,9 +117,9 @@ test.describe('Codex agent hooks', () => {
 
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
-      return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR'])
+      return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
-    const scriptPath = `${env.SLAYZONE_HOME_DIR}/hooks/notify.sh`
+    const scriptPath = `${env.SLAYZONE_USER_DATA_DIR}/hooks/notify.sh`
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__codexStartEvents = []
@@ -173,9 +173,9 @@ test.describe('Codex agent hooks', () => {
 
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
-      return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR'])
+      return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
-    const scriptPath = `${env.SLAYZONE_HOME_DIR}/hooks/notify.sh`
+    const scriptPath = `${env.SLAYZONE_USER_DATA_DIR}/hooks/notify.sh`
     await waitForFile(scriptPath, 5000)
 
     // A real task row must exist — the server reads provider_config by task id.

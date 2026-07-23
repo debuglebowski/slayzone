@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 
 export type StartServerConfig = {
-  /** Override SLAYZONE_STORE_DIR. Defaults to ensureDataRoot(). */
+  /** Override the derived `<ROOT>/storage` data root. Defaults to ensureDataRoot(). */
   storeDir?: string
   /** Override SLAYZONE_SERVER_PORT. 0 = OS-assigned. Defaults to env-or-0. */
   port?: number

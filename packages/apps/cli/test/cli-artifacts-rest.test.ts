@@ -37,9 +37,11 @@ if (!fs.existsSync(SLAY_BIN)) {
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cli-artifacts-'))
 // The REST artifact store + the CLI's disk-local commands both root their on-disk
-// files at SLAYZONE_STORE_DIR — point them at the throwaway dir.
-process.env.SLAYZONE_STORE_DIR = tmpDir
-const dbPath = path.join(tmpDir, 'slayzone.dev.sqlite')
+// files at <ROOT>/storage — anchor ROOT at the throwaway dir.
+process.env.SLAYZONE_ROOT = tmpDir
+const storageDir = path.join(tmpDir, 'storage')
+fs.mkdirSync(storageDir, { recursive: true })
+const dbPath = path.join(storageDir, 'slayzone.dev.sqlite')
 const db = new Database(dbPath)
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
@@ -81,7 +83,7 @@ function runCli(
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       SLAYZONE_DB_PATH: dbPath,
-      SLAYZONE_STORE_DIR: tmpDir,
+      SLAYZONE_ROOT: tmpDir,
       SLAYZONE_DEV: '1',
       SLAYZONE_SERVER_PORT: String(rest.port)
     }

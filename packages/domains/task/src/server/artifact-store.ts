@@ -21,7 +21,7 @@ import type {
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker
 // `namedTxn` calls live here; callers add their own post-mutation notification
-// (`onMutation` for IPC). `dataDir` is the app data root (env `SLAYZONE_STORE_DIR` /
+// (`onMutation` for IPC). `dataDir` is the app data root (`<ROOT>/storage` via
 // `app.getPath('userData')` for IPC, `ctx.dataRoot` for tRPC — aligned via
 // `app.setPath('userData', dataRoot)` at boot). The binary upload/download flows
 // run here too (uploads are pure fs+worker; the Electron *dialog* orchestration

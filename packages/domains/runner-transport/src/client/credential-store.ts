@@ -14,15 +14,14 @@ import { z } from 'zod'
 
 /**
  * The SlayZone root dir for the default credential store. Mirrors platform's
- * getSlayzoneHomeDir precedence (`SLAYZONE_ROOT` > `SLAYZONE_HOME_DIR` >
- * `$HOME/.slayzone`) — inlined here so runner-transport stays free of the
- * @slayzone/platform dep (keeps the runner bundle lean). The standalone runner
- * entrypoint seeds `SLAYZONE_ROOT=cwd`, so this honors the ROOT anchor; without
- * it, the raw home fallback applied and creds landed at `~/.slayzone/runners`.
+ * getSlayzoneHomeDir precedence (`SLAYZONE_ROOT` > `$HOME/.slayzone`) — inlined
+ * here so runner-transport stays free of the @slayzone/platform dep (keeps the
+ * runner bundle lean). The standalone runner entrypoint seeds `SLAYZONE_ROOT=cwd`,
+ * so this honors the ROOT anchor; without it, the raw home fallback applied and
+ * creds landed at `~/.slayzone/runners`.
  */
 function slayzoneRootDir(): string {
   if (process.env.SLAYZONE_ROOT) return process.env.SLAYZONE_ROOT
-  if (process.env.SLAYZONE_HOME_DIR) return process.env.SLAYZONE_HOME_DIR
   const home = process.env.HOME ?? process.env.USERPROFILE ?? homedir()
   return join(home, '.slayzone')
 }

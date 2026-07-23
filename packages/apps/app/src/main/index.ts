@@ -590,7 +590,7 @@ async function mintLocalRunnerJoinToken(
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          label: process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME
+          label: DEFAULT_LOCAL_RUNNER_NAME
         })
       })
       if (res.ok) {
@@ -674,7 +674,9 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       // runner always dials THIS boot's hub.
       SLAYZONE_HUB_URL: minted.hubUrl,
       SLAYZONE_RUNNER_JOIN_TOKEN: minted.token,
-      SLAYZONE_RUNNER_NAME: process.env.SLAYZONE_RUNNER_NAME ?? DEFAULT_LOCAL_RUNNER_NAME,
+      // No SLAYZONE_RUNNER_NAME handoff: the runner defaults its enroll name to
+      // DEFAULT_LOCAL_RUNNER_NAME because SLAYZONE_SUPERVISED=1 (above), matching
+      // the hub's localRunnerName so the dedup collapses to one row.
       SLAYZONE_RUNNER_ALLOWED_ROOTS:
         process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS ?? homedir()
     },
@@ -2351,7 +2353,7 @@ app
           // once leaked SlayZone hooks into the real ~/.antigravity/hooks.json.)
           if (process.env.PLAYWRIGHT) {
             const sandboxVars = [
-              'SLAYZONE_HOME_DIR',
+              'SLAYZONE_ROOT',
               'SLAYZONE_CLAUDE_SETTINGS_PATH',
               'SLAYZONE_CODEX_HOOKS_PATH',
               'SLAYZONE_GEMINI_SETTINGS_PATH',

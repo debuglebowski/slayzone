@@ -38,9 +38,10 @@ import { launchIsolatedElectron } from '../fixtures/electron'
  *       pty is the flaky part; connected is the D3 contract.)
  *
  * Isolation: `launchIsolatedElectron` gives a throwaway userdata dir, and the
- * spec pins `SLAYZONE_STORE_DIR` to it (via the fixture's extraEnv) so the
- * runner boot's identity/*.pem + hub-auth.sqlite land there, NOT the real dev
- * store. The runner's credential store + config also live under the temp dir.
+ * spec pins `SLAYZONE_ROOT` to it (via the fixture's extraEnv) so the runner
+ * boot's identity/*.pem + hub-auth.sqlite land under `<ROOT>/storage`, NOT the
+ * real dev store. The runner's credential store + config also live under the
+ * temp dir.
  *
  * Uses the raw Playwright base (like 103): the shared worker fixture assumes a
  * plain non-runner server, which is exactly what this spec must boot without.
@@ -104,11 +105,19 @@ interface SpawnedRunner {
 function spawnLoopbackRunner(opts: {
   hubUrl: string
   joinToken: string
+  rootDir: string
   credentialsDir: string
   allowedRoots: string
 }): SpawnedRunner {
   const electronPath = require('electron') as unknown as string
   const logs: string[] = []
+  // The display name now comes from <ROOT>/config.json (the SLAYZONE_RUNNER_NAME
+  // env channel is gone). Write it before spawn so the STANDALONE runner reads it.
+  fs.mkdirSync(opts.rootDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(opts.rootDir, 'config.json'),
+    JSON.stringify({ runnerName: 'e2e-loopback-runner' })
+  )
   // ELECTRON_RUN_AS_NODE runs the Electron binary as plain Node so the runner's
   // node-pty native addon shares the app's ABI — mirrors how the app supervisor
   // spawns it (local-runner-supervisor.ts).
@@ -116,9 +125,12 @@ function spawnLoopbackRunner(opts: {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
+      // Standalone runner: clear any leaked SUPERVISED so loadRunnerConfig reads
+      // <ROOT>/config.json (it skips the shared file when SUPERVISED=1).
+      SLAYZONE_SUPERVISED: '',
+      SLAYZONE_ROOT: opts.rootDir,
       SLAYZONE_HUB_URL: opts.hubUrl,
       SLAYZONE_RUNNER_JOIN_TOKEN: opts.joinToken,
-      SLAYZONE_RUNNER_NAME: 'e2e-loopback-runner',
       SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir,
       SLAYZONE_RUNNER_ALLOWED_ROOTS: opts.allowedRoots
     },
@@ -182,8 +194,9 @@ base.describe('Runner loopback (runner ON)', () => {
       seedUserData: (userDataDir) => {
         // Local mode — a hub always builds the gateway + binds the /runners
         // listener, so no flag is needed.
+        fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
         fs.writeFileSync(
-          path.join(userDataDir, 'boot-config.json'),
+          path.join(userDataDir, 'storage', 'boot-config.json'),
           JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
@@ -192,7 +205,7 @@ base.describe('Runner loopback (runner ON)', () => {
       // THIS test (the auto-enroll test below does) — here the assertions ride our
       // explicitly-spawned loopback runner whose token we mint post-bind.
       extraEnv: (userDataDir) => ({
-        SLAYZONE_STORE_DIR: userDataDir
+        SLAYZONE_ROOT: userDataDir
       })
     })
 
@@ -239,6 +252,7 @@ base.describe('Runner loopback (runner ON)', () => {
       runner = spawnLoopbackRunner({
         hubUrl,
         joinToken: token,
+        rootDir: path.join(launched.userDataDir, 'runner-root'),
         credentialsDir,
         allowedRoots: launched.userDataDir
       })
@@ -363,18 +377,19 @@ base.describe('Runner loopback (runner ON)', () => {
     const launched = await launchIsolatedElectron({
       name: 'runner-auto-enroll',
       seedUserData: (userDataDir) => {
+        fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
         fs.writeFileSync(
-          path.join(userDataDir, 'boot-config.json'),
+          path.join(userDataDir, 'storage', 'boot-config.json'),
           JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
       extraEnv: (userDataDir) => ({
-        SLAYZONE_STORE_DIR: userDataDir,
+        SLAYZONE_ROOT: userDataDir,
         // Opt the runner supervisor back in despite PLAYWRIGHT (default skips it).
         SLAYZONE_E2E_ALLOW_RUNNER: '1',
         // Keep the auto-spawned runner's node-pty ABI matching + roots/creds
         // confined to the isolated dir (main defaults roots to $HOME otherwise).
-        SLAYZONE_RUNNER_NAME: 'auto-enroll-runner',
+        // The supervised runner enrolls as DEFAULT_LOCAL_RUNNER_NAME ('local-runner').
         SLAYZONE_RUNNER_ALLOWED_ROOTS: userDataDir,
         SLAYZONE_RUNNER_CREDENTIALS_DIR: path.join(userDataDir, 'auto-runner-creds')
       })
@@ -394,7 +409,7 @@ base.describe('Runner loopback (runner ON)', () => {
         .poll(
           async () => {
             const rows = await listRunners(page)
-            const mine = rows.find((r) => r.name === 'auto-enroll-runner' && r.connected)
+            const mine = rows.find((r) => r.name === 'local-runner' && r.connected)
             connectedRunnerId = mine?.id ?? null
             return connectedRunnerId !== null
           },
@@ -418,13 +433,14 @@ base.describe('Runner loopback (runner ON)', () => {
     const launched = await launchIsolatedElectron({
       name: 'runner-always-on',
       seedUserData: (userDataDir) => {
+        fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
         fs.writeFileSync(
-          path.join(userDataDir, 'boot-config.json'),
+          path.join(userDataDir, 'storage', 'boot-config.json'),
           JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
       extraEnv: (userDataDir) => ({
-        SLAYZONE_STORE_DIR: userDataDir
+        SLAYZONE_ROOT: userDataDir
       })
     })
 

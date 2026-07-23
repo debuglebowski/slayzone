@@ -5,7 +5,7 @@
  * Channel-scoped: the packaged (prod) app migrates only `slayzone.sqlite`; a dev
  * build migrates only `slayzone.dev.sqlite` — neither ever touches the other's DB
  * or the shared dir it lives in. A per-channel sentinel makes it genuinely
- * one-time. Drives ensureStorageDir against a fake old-dir via SLAYZONE_HOME_DIR.
+ * one-time. Drives ensureStorageDir against a fake old-dir via SLAYZONE_ROOT.
  *
  * Regression context: the userData dir is SHARED between a still-running
  * pre-refactor prod app and the post-refactor dev app (both `app.name='slayzone'`).
@@ -32,7 +32,6 @@ function check(name: string, cond: boolean, detail = ''): void {
   }
 }
 
-const prevHome = process.env.SLAYZONE_HOME_DIR
 const prevRoot = process.env.SLAYZONE_ROOT
 
 function setup(): { home: string; old: string; storage: string } {
@@ -41,9 +40,8 @@ function setup(): { home: string; old: string; storage: string } {
   const old = join(base, 'userData')
   mkdirSync(home, { recursive: true })
   mkdirSync(old, { recursive: true })
-  // getSlayzoneHomeDir reads SLAYZONE_ROOT > SLAYZONE_HOME_DIR; pin both to `home`.
+  // getSlayzoneHomeDir reads SLAYZONE_ROOT; pin it to `home`.
   process.env.SLAYZONE_ROOT = home
-  process.env.SLAYZONE_HOME_DIR = home
   return { home, old, storage: join(home, 'storage') }
 }
 
@@ -169,8 +167,6 @@ try {
     check('source left intact when target exists', existsSync(join(old, 'slayzone.sqlite')))
   }
 } finally {
-  if (prevHome === undefined) delete process.env.SLAYZONE_HOME_DIR
-  else process.env.SLAYZONE_HOME_DIR = prevHome
   if (prevRoot === undefined) delete process.env.SLAYZONE_ROOT
   else process.env.SLAYZONE_ROOT = prevRoot
 }

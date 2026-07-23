@@ -28,7 +28,7 @@ const ENV_KEYS = [
   'SLAYZONE_HUB_URL',
   'SLAYZONE_HUB_TOKEN',
   'SLAYZONE_SERVER_PORT',
-  'SLAYZONE_STORE_DIR',
+  'SLAYZONE_ROOT',
   'SLAYZONE_DB_PATH',
   'SLAYZONE_DEV'
 ] as const
@@ -121,16 +121,16 @@ await describe('normalizeHubUrl', () => {
 
 await describe('resolveHubTarget precedence', () => {
   test('returns null when no env and no file (legacy)', () => {
-    setEnv({ SLAYZONE_STORE_DIR: freshStateDir() })
+    setEnv({ SLAYZONE_ROOT: freshStateDir() })
     expect(resolveHubTarget()).toBeNull()
   })
 
   test('env URL wins over file; file token does not leak to env target', () => {
     const dir = freshStateDir()
-    setEnv({ SLAYZONE_STORE_DIR: dir })
+    setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
     setEnv({
-      SLAYZONE_STORE_DIR: dir,
+      SLAYZONE_ROOT: dir,
       SLAYZONE_HUB_URL: 'http://env.example.com:9999'
     })
     const target = resolveHubTarget()
@@ -140,7 +140,7 @@ await describe('resolveHubTarget precedence', () => {
 
   test('env URL + env token', () => {
     setEnv({
-      SLAYZONE_STORE_DIR: freshStateDir(),
+      SLAYZONE_ROOT: freshStateDir(),
       SLAYZONE_HUB_URL: 'https://env.example.com/',
       SLAYZONE_HUB_TOKEN: 'env-token'
     })
@@ -151,7 +151,7 @@ await describe('resolveHubTarget precedence', () => {
 
   test('file used when env URL unset; file token applies', () => {
     const dir = freshStateDir()
-    setEnv({ SLAYZONE_STORE_DIR: dir })
+    setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
     const target = resolveHubTarget()
     expect(target?.baseUrl).toBe('http://file.example.com:1234')
@@ -160,9 +160,9 @@ await describe('resolveHubTarget precedence', () => {
 
   test('empty env token means explicitly no token (does not fall back to file token)', () => {
     const dir = freshStateDir()
-    setEnv({ SLAYZONE_STORE_DIR: dir })
+    setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
-    setEnv({ SLAYZONE_STORE_DIR: dir, SLAYZONE_HUB_TOKEN: '' })
+    setEnv({ SLAYZONE_ROOT: dir, SLAYZONE_HUB_TOKEN: '' })
     const target = resolveHubTarget()
     expect(target?.baseUrl).toBe('http://file.example.com:1234')
     expect(target?.token).toBeNull()
@@ -170,8 +170,10 @@ await describe('resolveHubTarget precedence', () => {
 
   test('non-object hub.json warns and falls back to null', () => {
     const dir = freshStateDir()
-    setEnv({ SLAYZONE_STORE_DIR: dir })
-    fs.writeFileSync(path.join(dir, 'hub.json'), '"just a string"')
+    setEnv({ SLAYZONE_ROOT: dir })
+    const cfgPath = getHubConfigPath()
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true })
+    fs.writeFileSync(cfgPath, '"just a string"')
     let target: HubTarget | null | undefined
     const { exitCode, stderr } = captureAll(() => {
       target = resolveHubTarget()
@@ -183,16 +185,16 @@ await describe('resolveHubTarget precedence', () => {
 
   test('env token overrides file token for a file target', () => {
     const dir = freshStateDir()
-    setEnv({ SLAYZONE_STORE_DIR: dir })
+    setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
-    setEnv({ SLAYZONE_STORE_DIR: dir, SLAYZONE_HUB_TOKEN: 'env-token' })
+    setEnv({ SLAYZONE_ROOT: dir, SLAYZONE_HUB_TOKEN: 'env-token' })
     const target = resolveHubTarget()
     expect(target?.baseUrl).toBe('http://file.example.com:1234')
     expect(target?.token).toBe('env-token')
   })
 
   test('invalid SLAYZONE_HUB_URL exits 1', () => {
-    setEnv({ SLAYZONE_STORE_DIR: freshStateDir(), SLAYZONE_HUB_URL: 'not a url' })
+    setEnv({ SLAYZONE_ROOT: freshStateDir(), SLAYZONE_HUB_URL: 'not a url' })
     const { exitCode, stderr } = captureAll(() => {
       resolveHubTarget()
     })
@@ -202,8 +204,10 @@ await describe('resolveHubTarget precedence', () => {
 
   test('corrupt hub.json warns and falls back to null', () => {
     const dir = freshStateDir()
-    setEnv({ SLAYZONE_STORE_DIR: dir })
-    fs.writeFileSync(path.join(dir, 'hub.json'), '{ not json')
+    setEnv({ SLAYZONE_ROOT: dir })
+    const cfgPath = getHubConfigPath()
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true })
+    fs.writeFileSync(cfgPath, '{ not json')
     let target: HubTarget | null | undefined
     const { exitCode, stderr } = captureAll(() => {
       target = resolveHubTarget()
@@ -215,8 +219,10 @@ await describe('resolveHubTarget precedence', () => {
 
   test('hub.json with invalid URL warns and falls back to null', () => {
     const dir = freshStateDir()
-    setEnv({ SLAYZONE_STORE_DIR: dir })
-    fs.writeFileSync(path.join(dir, 'hub.json'), JSON.stringify({ url: 'ftp://nope' }))
+    setEnv({ SLAYZONE_ROOT: dir })
+    const cfgPath = getHubConfigPath()
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true })
+    fs.writeFileSync(cfgPath, JSON.stringify({ url: 'ftp://nope' }))
     let target: HubTarget | null | undefined
     const { exitCode, stderr } = captureAll(() => {
       target = resolveHubTarget()
@@ -229,7 +235,7 @@ await describe('resolveHubTarget precedence', () => {
 
 await describe('writeHubConfig / removeHubConfig', () => {
   test('writes hub.json with 0600 perms', () => {
-    setEnv({ SLAYZONE_STORE_DIR: freshStateDir() })
+    setEnv({ SLAYZONE_ROOT: freshStateDir() })
     const p = writeHubConfig('http://example.com:1', 'tok')
     expect(p).toBe(getHubConfigPath())
     expect(fs.statSync(p).mode & 0o777).toBe(0o600)
@@ -239,7 +245,7 @@ await describe('writeHubConfig / removeHubConfig', () => {
   })
 
   test('restores 0600 perms on overwrite', () => {
-    setEnv({ SLAYZONE_STORE_DIR: freshStateDir() })
+    setEnv({ SLAYZONE_ROOT: freshStateDir() })
     const p = writeHubConfig('http://example.com:1', 'tok')
     fs.chmodSync(p, 0o644)
     writeHubConfig('http://example.com:2', null)
@@ -250,7 +256,7 @@ await describe('writeHubConfig / removeHubConfig', () => {
   })
 
   test('removeHubConfig removes, then reports nothing to remove', () => {
-    setEnv({ SLAYZONE_STORE_DIR: freshStateDir() })
+    setEnv({ SLAYZONE_ROOT: freshStateDir() })
     writeHubConfig('http://example.com:1')
     expect(removeHubConfig()).toBe(true)
     expect(fs.existsSync(getHubConfigPath())).toBe(false)
@@ -263,7 +269,7 @@ await describe('api Authorization header', () => {
     const srv = await startServer()
     try {
       setEnv({
-        SLAYZONE_STORE_DIR: freshStateDir(),
+        SLAYZONE_ROOT: freshStateDir(),
         SLAYZONE_HUB_URL: `http://127.0.0.1:${srv.port}`,
         SLAYZONE_HUB_TOKEN: 'sekret'
       })
@@ -281,7 +287,7 @@ await describe('api Authorization header', () => {
     const srv = await startServer()
     try {
       setEnv({
-        SLAYZONE_STORE_DIR: freshStateDir(),
+        SLAYZONE_ROOT: freshStateDir(),
         SLAYZONE_HUB_URL: `http://127.0.0.1:${srv.port}`
       })
       await apiGet<{ ok: boolean }>('/api/ping')
@@ -295,7 +301,7 @@ await describe('api Authorization header', () => {
     const srv = await startServer()
     try {
       setEnv({
-        SLAYZONE_STORE_DIR: freshStateDir(),
+        SLAYZONE_ROOT: freshStateDir(),
         SLAYZONE_SERVER_PORT: String(srv.port)
       })
       const res = await apiGet<{ ok: boolean }>('/api/ping')
@@ -310,7 +316,7 @@ await describe('api Authorization header', () => {
   test('dead hub URL exits 1 with hub connect error', async () => {
     const port = await deadPort()
     setEnv({
-      SLAYZONE_STORE_DIR: freshStateDir(),
+      SLAYZONE_ROOT: freshStateDir(),
       SLAYZONE_HUB_URL: `http://127.0.0.1:${port}`
     })
     const { exitCode, stderr } = await captureAllAsync(async () => {
@@ -326,7 +332,7 @@ await describe('notifyApp via hub', () => {
     const srv = await startServer()
     try {
       setEnv({
-        SLAYZONE_STORE_DIR: freshStateDir(),
+        SLAYZONE_ROOT: freshStateDir(),
         SLAYZONE_HUB_URL: `http://127.0.0.1:${srv.port}`,
         SLAYZONE_HUB_TOKEN: 'sekret'
       })
@@ -343,7 +349,7 @@ await describe('notifyApp via hub', () => {
   test('warns (does not exit) when hub unreachable', async () => {
     const port = await deadPort()
     setEnv({
-      SLAYZONE_STORE_DIR: freshStateDir(),
+      SLAYZONE_ROOT: freshStateDir(),
       SLAYZONE_HUB_URL: `http://127.0.0.1:${port}`
     })
     const { exitCode, stderr } = await captureAllAsync(() => notifyApp())

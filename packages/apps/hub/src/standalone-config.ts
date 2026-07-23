@@ -43,9 +43,9 @@ function isSupervised(): boolean {
  * ROOT anchoring: a standalone hub anchors ALL on-disk state to `SLAYZONE_ROOT`,
  * defaulting to the launch directory (`process.cwd()`). This MUST be seeded
  * before `loadSlayzoneConfig()` runs, because the config file itself lives at
- * `<ROOT>/config.json` (getSlayzoneHomeDir reads SLAYZONE_ROOT). We then derive
- * `SLAYZONE_STORE_DIR` (DB + logs + diagnostics) from the same root so a bare
- * `slayzone-hub` in an empty dir keeps everything local to it.
+ * `<ROOT>/config.json` (getSlayzoneHomeDir reads SLAYZONE_ROOT). The storage dir
+ * (DB + logs + diagnostics) derives as `<ROOT>/storage` from the same root, so a
+ * bare `slayzone-hub` in an empty dir keeps everything local to it.
  */
 export function applyStandaloneHubConfig(): void {
   if (isSupervised()) return
@@ -56,11 +56,9 @@ export function applyStandaloneHubConfig(): void {
   }
 
   // Anchor to the launch dir FIRST, so the config-file lookup below resolves
-  // under ROOT. Only default when NEITHER SLAYZONE_ROOT NOR the back-compat
-  // SLAYZONE_HOME_DIR is set — otherwise a cwd default would clobber an explicit
-  // SLAYZONE_HOME_DIR (getSlayzoneHomeDir prefers ROOT), breaking the E2E/test
-  // sandbox + power-user relocation that rely on SLAYZONE_HOME_DIR.
-  if (!process.env.SLAYZONE_ROOT && !process.env.SLAYZONE_HOME_DIR) {
+  // under ROOT. Only default when SLAYZONE_ROOT is unset — an explicit
+  // SLAYZONE_ROOT (E2E/test sandbox, power-user relocation) is respected.
+  if (!process.env.SLAYZONE_ROOT) {
     process.env.SLAYZONE_ROOT = process.cwd()
   }
   const cfg = loadSlayzoneConfig()

@@ -28,12 +28,12 @@ test.describe('OpenCode agent hooks', () => {
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', [
-        'SLAYZONE_HOME_DIR',
+        'SLAYZONE_USER_DATA_DIR',
         'SLAYZONE_OPENCODE_PLUGIN_PATH'
       ])
     })) as Record<string, string>
 
-    expect(env.SLAYZONE_HOME_DIR).toBeTruthy()
+    expect(env.SLAYZONE_USER_DATA_DIR).toBeTruthy()
     expect(env.SLAYZONE_OPENCODE_PLUGIN_PATH).toBeTruthy()
 
     const pluginPath = env.SLAYZONE_OPENCODE_PLUGIN_PATH
@@ -45,7 +45,7 @@ test.describe('OpenCode agent hooks', () => {
       expect(stat.mode & 0o777).toBe(0o644)
     }
 
-    const expectedNotifyPath = path.join(env.SLAYZONE_HOME_DIR, 'hooks', 'notify.sh')
+    const expectedNotifyPath = path.join(env.SLAYZONE_USER_DATA_DIR, 'hooks', 'notify.sh')
     const content = fs.readFileSync(pluginPath, 'utf8')
     expect(content).toContain('SlayZone opencode plugin v1')
     expect(content).toContain('__slayzoneOpencodePluginV1')

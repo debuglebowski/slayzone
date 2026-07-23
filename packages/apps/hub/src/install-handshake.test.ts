@@ -15,8 +15,8 @@
  *     dogfooding parent leaks SLAYZONE_SUPERVISED=1 + SLAYZONE_DB_PATH → real dev
  *     DB, and ELECTRON_RUN_AS_NODE), mirroring e2e/fixtures/electron.ts. Only the
  *     explicit isolation vars below are re-added.
- *   - SLAYZONE_HOME_DIR + SLAYZONE_STORE_DIR + SLAYZONE_RUNNER_CREDENTIALS_DIR all
- *     point under one throwaway mkdtemp dir; ports are 0 (OS-assigned) so nothing
+ *   - SLAYZONE_ROOT (hub + runner, separate dirs) + SLAYZONE_RUNNER_CREDENTIALS_DIR
+ *     all point under one throwaway mkdtemp dir; ports are 0 (OS-assigned) so nothing
  *     collides with a running app's claimed port.
  *   - The test records the real dev+prod primary DBs' mtime+size before/after and
  *     asserts byte-identical, and asserts the hub's OWN resolved db path (parsed
@@ -29,7 +29,7 @@
  */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -171,11 +171,13 @@ async function main(): Promise<void> {
   const before = GUARDED.map(fingerprint)
 
   const root = mkdtempSync(join(tmpdir(), 'slz-install-handshake-'))
-  const homeDir = join(root, 'home')
-  const storeDir = join(root, 'hub-store')
+  const hubRootDir = join(root, 'hub-root')
+  const runnerRootDir = join(root, 'runner-root')
   const credsDir = join(root, 'runner-creds')
   const workDir = join(root, 'work')
-  for (const d of [homeDir, storeDir, credsDir, workDir]) mkdirSync(d, { recursive: true })
+  for (const d of [hubRootDir, runnerRootDir, credsDir, workDir]) mkdirSync(d, { recursive: true })
+  // DB + state derive at <ROOT>/storage; assert the hub landed there, not the real DB.
+  const hubStorageDir = join(hubRootDir, 'storage')
 
   const secret = require('node:crypto').randomBytes(32).toString('hex') as string
   let hub: Proc | null = null
@@ -189,8 +191,7 @@ async function main(): Promise<void> {
     // --- boot the hub, standalone + fully isolated ---------------------------
     hub = spawnChild(HUB_BIN, {
       ...scrubbedEnv(),
-      SLAYZONE_HOME_DIR: homeDir,
-      SLAYZONE_STORE_DIR: storeDir,
+      SLAYZONE_ROOT: hubRootDir,
       SLAYZONE_SERVER_PORT: '0',
       SLAYZONE_HUB_RUNNER_TRANSPORT_PORT: '0',
       SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: secret
@@ -208,7 +209,7 @@ async function main(): Promise<void> {
     const hubDbPath = m![3]
 
     await test('hub boots against the ISOLATED tmp store (not the real dev/prod DB)', async () => {
-      assert(hubDbPath.startsWith(storeDir), `hub db path under tmp store: ${hubDbPath}`)
+      assert(hubDbPath.startsWith(hubStorageDir), `hub db path under tmp store: ${hubDbPath}`)
       // /health confirms readiness + echoes the same isolated db path.
       const health = await poll(
         async () => {
@@ -220,7 +221,7 @@ async function main(): Promise<void> {
         'hub /health ok'
       )
       assert(health.ok === true, 'health ok')
-      assert(health.dbPath.startsWith(storeDir), `health db path under tmp: ${health.dbPath}`)
+      assert(health.dbPath.startsWith(hubStorageDir), `health db path under tmp: ${health.dbPath}`)
     })
 
     // --- mint a join token over the loopback REST channel --------------------
@@ -244,12 +245,17 @@ async function main(): Promise<void> {
     })
 
     // --- spawn the runner, isolated, pointed at the minted token -------------
+    // The runner display name now comes from <ROOT>/config.json (the SLAYZONE_RUNNER_NAME
+    // env channel is gone). Write it before spawn so the standalone runner reads it.
+    writeFileSync(
+      join(runnerRootDir, 'config.json'),
+      JSON.stringify({ runnerName: 'install-handshake-runner' })
+    )
     runner = spawnChild(RUNNER_BIN, {
       ...scrubbedEnv(),
-      SLAYZONE_HOME_DIR: homeDir,
+      SLAYZONE_ROOT: runnerRootDir,
       SLAYZONE_HUB_URL: tok.hubUrl,
       SLAYZONE_RUNNER_JOIN_TOKEN: tok.token,
-      SLAYZONE_RUNNER_NAME: 'install-handshake-runner',
       SLAYZONE_RUNNER_CREDENTIALS_DIR: credsDir,
       SLAYZONE_RUNNER_ALLOWED_ROOTS: workDir
     })

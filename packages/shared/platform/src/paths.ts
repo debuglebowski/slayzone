@@ -12,13 +12,12 @@ let warnedHost: string | null = null
  * this chain; there is no separate `SLAYZONE_STORE_DIR`/`SLAYZONE_DB_PATH` to
  * thread across processes — each process derives the same path from ROOT.
  *
- * `SLAYZONE_STORE_DIR` is honored ONLY as an explicit operator/e2e override
- * (unset in normal use). getSlayzoneHomeDir resolves ROOT (`SLAYZONE_ROOT` >
- * `SLAYZONE_HOME_DIR` > platform home); the standalone entrypoints seed
- * `SLAYZONE_ROOT=cwd`, the desktop app seeds it to the migrated location.
+ * getSlayzoneHomeDir resolves ROOT (`SLAYZONE_ROOT` > platform home); the
+ * standalone entrypoints seed `SLAYZONE_ROOT=cwd`, the desktop app seeds it to
+ * the migrated location.
  */
 export function getStorageDir(): string {
-  return process.env.SLAYZONE_STORE_DIR?.trim() || join(getSlayzoneHomeDir(), 'storage')
+  return join(getSlayzoneHomeDir(), 'storage')
 }
 
 /**

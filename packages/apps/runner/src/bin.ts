@@ -37,12 +37,12 @@ import { startRunner } from './main'
  * accepted values are seeded into `process.env` and, on a `[Y/n]`-confirm,
  * persisted to <ROOT>/config.json so subsequent boots need no prompt.
  */
-async function maybeInteractiveSetup(): Promise<void> {
-  if (!canPrompt()) return
+async function maybeInteractiveSetup(): Promise<string | undefined> {
+  if (!canPrompt()) return undefined
 
   const cfg = loadSlayzoneConfig()
   // A join token is self-sufficient (first contact) → nothing to ask.
-  if ((process.env[ENV_VARS.joinToken] ?? cfg.joinToken) !== undefined) return
+  if ((process.env[ENV_VARS.joinToken] ?? cfg.joinToken) !== undefined) return undefined
 
   // Already enrolled? A stored credential for the known hub host means we can
   // reconnect without a token. Skip the prompt in that case.
@@ -54,14 +54,14 @@ async function maybeInteractiveSetup(): Promise<void> {
         hubHostFromUrl(hubUrl),
         credentialsDir ? { baseDir: credentialsDir } : {}
       )
-      if (await store.load()) return
+      if (await store.load()) return undefined
     } catch {
       // Unreadable url/creds → fall through to prompting.
     }
   }
 
   const defaultRoot = process.env.SLAYZONE_ROOT ?? process.cwd()
-  await runInteractiveConfig({
+  const result = await runInteractiveConfig({
     title: 'Runner setup — values to save to config.json:',
     fields: [
       {
@@ -85,13 +85,21 @@ async function maybeInteractiveSetup(): Promise<void> {
       {
         // No default → an empty answer is SKIPPED (not persisted), so the runner
         // name resolves to the live hostname each boot instead of a pinned value.
+        // envKey is inert here — the resolver has no env channel for the name; a
+        // saved value reaches config.json (re-read below), a declined-save value
+        // is threaded into loadRunnerConfig via the returned name.
         configKey: 'runnerName',
-        envKey: ENV_VARS.name,
+        envKey: 'SLAYZONE_RUNNER_NAME',
         label: 'Runner display name',
         hint: `default: ${hostname()}`
       }
     ]
   })
+
+  // Return the prompted name (saved or this-run-only) so main can layer it over
+  // the shared config even when the user declines persisting it.
+  const collectedName = result.collected.find((c) => c.field.configKey === 'runnerName')
+  return typeof collectedName?.config === 'string' ? collectedName.config : undefined
 }
 
 async function main(): Promise<void> {
@@ -100,21 +108,21 @@ async function main(): Promise<void> {
   // (which reads <ROOT>/config.json via getSlayzoneHomeDir). Skipped when
   // supervised — the Electron host supplies the runner's env in full. Operator
   // env still wins (explicit SLAYZONE_ROOT respected).
-  if (
-    process.env.SLAYZONE_SUPERVISED !== '1' &&
-    !process.env.SLAYZONE_ROOT &&
-    !process.env.SLAYZONE_HOME_DIR
-  ) {
+  if (process.env.SLAYZONE_SUPERVISED !== '1' && !process.env.SLAYZONE_ROOT) {
     process.env.SLAYZONE_ROOT = process.cwd()
   }
 
   // Interactive first-run setup (TTY only) — may seed env + write config.json
   // before the resolver below reads them. No-op when non-interactive / enrolled.
-  await maybeInteractiveSetup()
+  // Returns the prompted display name (if any) so a declined-save still applies
+  // it this boot (the resolver has no env channel for the name).
+  const promptedName = await maybeInteractiveSetup()
 
   let config
   try {
-    config = loadRunnerConfig()
+    config = promptedName
+      ? loadRunnerConfig(process.env, { ...loadSlayzoneConfig(), runnerName: promptedName })
+      : loadRunnerConfig()
   } catch (err) {
     process.stderr.write(`slayzone-runner: ${err instanceof Error ? err.message : String(err)}\n`)
     process.stderr.write(

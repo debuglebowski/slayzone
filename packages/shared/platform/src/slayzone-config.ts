@@ -16,7 +16,7 @@
  * file at all — the callers gate reads/writes on `!SUPERVISED`. Nothing in this
  * module reads `SLAYZONE_SUPERVISED`; it is a pure file reader/writer.
  *
- * Home dir honors `SLAYZONE_HOME_DIR` (see getSlayzoneHomeDir) for E2E/test
+ * Home dir honors `SLAYZONE_ROOT` (see getSlayzoneHomeDir) for E2E/test
  * sandboxing, so a test can redirect the whole config file to a temp dir.
  *
  * This module lives in @slayzone/platform (where getSlayzoneHomeDir lives) and
@@ -57,7 +57,7 @@ export interface SlayzoneConfig {
   // --- runner keys ---
   /** First-contact join token for a standalone runner (`SLAYZONE_RUNNER_JOIN_TOKEN`). */
   joinToken?: string
-  /** Human-readable runner name (`SLAYZONE_RUNNER_NAME`). */
+  /** Human-readable runner name (config-only; the standalone rename channel). */
   runnerName?: string
   /** `ws(s)://` hub runner endpoint a standalone runner dials (`SLAYZONE_HUB_URL`). */
   hubUrl?: string
@@ -77,8 +77,25 @@ export interface SlayzoneConfig {
  *  callers + tests can assert against it. */
 export const DEV_RUNNER_TRANSPORT_SECRET = 'slayzone-dev-runner-secret'
 
+/**
+ * Name of the co-located ("local") auto-spawned runner. SINGLE source of truth
+ * shared by BOTH sides of the local-runner dedup so they can never silently
+ * diverge:
+ *   - the supervised runner (config.ts) defaults its enroll `name` to this when
+ *     `SLAYZONE_SUPERVISED=1`, and
+ *   - the sidecar composition passes it as `localRunnerName` to the runner-auth
+ *     adapters (which treat an enroll for THIS name as the local runner → gets a
+ *     deterministic id + UPSERT + duplicate collapse).
+ * If these two disagree the dedup silently disables (every local enroll takes
+ * the remote fresh-uuid path → an orphan per boot), so both derive this const.
+ * Lives on this lean subpath so the runner bundle imports it WITHOUT pulling the
+ * heavy `@slayzone/runners/server` graph (better-sqlite3). A standalone runner
+ * renames via the config.json `runnerName` key instead.
+ */
+export const DEFAULT_LOCAL_RUNNER_NAME = 'local-runner'
+
 /** Absolute path to the shared config file (`<home>/config.json`). Honors
- *  SLAYZONE_HOME_DIR via getSlayzoneHomeDir. */
+ *  SLAYZONE_ROOT via getSlayzoneHomeDir. */
 export function getSlayzoneConfigPath(): string {
   return join(getSlayzoneHomeDir(), 'config.json')
 }

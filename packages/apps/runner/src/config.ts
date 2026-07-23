@@ -15,7 +15,11 @@ import { realpathSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
-import { loadSlayzoneConfig, type SlayzoneConfig } from '@slayzone/platform/slayzone-config'
+import {
+  DEFAULT_LOCAL_RUNNER_NAME,
+  loadSlayzoneConfig,
+  type SlayzoneConfig
+} from '@slayzone/platform/slayzone-config'
 import { decodeJoinToken } from './join-token'
 
 export const runnerConfigSchema = z.object({
@@ -39,11 +43,11 @@ export type RunnerConfig = z.infer<typeof runnerConfigSchema>
 export const ENV_VARS = {
   hubUrl: 'SLAYZONE_HUB_URL',
   joinToken: 'SLAYZONE_RUNNER_JOIN_TOKEN',
-  // name + allowedRoots: the Electron host injects these into its supervised
-  // local runner (see app main startLocalRunnerWithAutoEnroll). Kept as the
-  // supervised channel; for a STANDALONE runner name defaults to hostname and
-  // allowedRoots come from <ROOT>/config.json (+ the ROOT default in bin.ts).
-  name: 'SLAYZONE_RUNNER_NAME',
+  // allowedRoots: the Electron host injects this into its supervised local runner
+  // (see app main startLocalRunnerWithAutoEnroll). Kept as the supervised channel;
+  // a STANDALONE runner gets it from <ROOT>/config.json (+ the ROOT default in
+  // bin.ts). The runner NAME has no env channel — it derives from SUPERVISED
+  // (→ DEFAULT_LOCAL_RUNNER_NAME) or config.json `runnerName`, else the hostname.
   allowedRoots: 'SLAYZONE_RUNNER_ALLOWED_ROOTS',
   pinnedCertSha256: 'SLAYZONE_HUB_CERT_SHA256',
   credentialsDir: 'SLAYZONE_RUNNER_CREDENTIALS_DIR'
@@ -154,9 +158,10 @@ function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
  *   - `SLAYZONE_SUPERVISED=1` — the app-spawned local runner
  *     (startLocalRunnerWithAutoEnroll passes `{...process.env}`, which carries
  *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
- *     supplies the runner's env in full (SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN /
- *     SLAYZONE_RUNNER_NAME), so the shared file must not leak into it. Keeps the
- *     supervised runner boot byte-identical to pre-config behavior.
+ *     supplies the runner's env in full (SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN),
+ *     and the name derives from SUPERVISED (→ DEFAULT_LOCAL_RUNNER_NAME), so the
+ *     shared file must not leak into it. Keeps the supervised runner boot
+ *     byte-identical to pre-config behavior.
  * Callers can also pass an explicit shared config to test the layering.
  */
 export function loadRunnerConfig(
@@ -178,7 +183,10 @@ export function loadRunnerConfig(
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 
   const merged = {
-    name: hostname(),
+    // Supervised local runner → the shared const so the hub's dedup collapses it
+    // to one row; standalone → the hostname (config.json `runnerName` overrides
+    // via ...fromShared below).
+    name: env.SLAYZONE_SUPERVISED === '1' ? DEFAULT_LOCAL_RUNNER_NAME : hostname(),
     allowedRoots: [] as string[],
     capabilities: [...DEFAULT_CAPABILITIES],
     ...(fromToken
@@ -188,7 +196,6 @@ export function loadRunnerConfig(
     ...fromShared,
     ...(env[ENV_VARS.hubUrl] !== undefined ? { hubUrl: env[ENV_VARS.hubUrl] } : {}),
     ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {}),
-    ...(env[ENV_VARS.name] !== undefined ? { name: env[ENV_VARS.name] } : {}),
     // allowedRoots env read is the SUPERVISED injection channel (host passes the
     // path-jail); standalone gets it from config.json / the ROOT default.
     ...(splitList(env[ENV_VARS.allowedRoots], delimiter) !== undefined

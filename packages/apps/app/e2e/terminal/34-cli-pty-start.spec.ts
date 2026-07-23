@@ -27,8 +27,8 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
 
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_STORE_DIR!)
-    dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
+    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
+    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
 
     mcpPort = await electronApp.evaluate(async () => {
       for (let i = 0; i < 20; i++) {

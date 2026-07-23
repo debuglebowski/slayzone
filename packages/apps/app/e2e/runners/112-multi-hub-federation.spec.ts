@@ -56,7 +56,7 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
   const electronPath = require('electron') as unknown as string
   // CRITICAL: strip inherited SLAYZONE_*/ELECTRON_* first. When e2e runs from a
   // dogfooding SlayZone terminal, the parent leaks SLAYZONE_DB_PATH (real dev DB)
-  // which db.ts gives precedence over SLAYZONE_STORE_DIR → the second hub would
+  // which db.ts gives precedence over the ROOT-derived path → the second hub would
   // scribble into the real dev store. Re-add only what this hub needs.
   const cleanEnv: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
@@ -70,7 +70,7 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_SERVER_HOST: '127.0.0.1',
       SLAYZONE_SERVER_PORT: String(port),
-      SLAYZONE_STORE_DIR: storeDir
+      SLAYZONE_ROOT: storeDir
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -154,8 +154,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-federation',
         seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
           fs.writeFileSync(
-            path.join(userDataDir, 'boot-config.json'),
+            path.join(userDataDir, 'storage', 'boot-config.json'),
             JSON.stringify(
               {
                 server_mode: 'local',
@@ -168,7 +169,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             )
           )
         },
-        extraEnv: (userDataDir) => ({ SLAYZONE_STORE_DIR: userDataDir })
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
       })
 
       const page = launched.page
@@ -294,8 +295,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-settings',
         seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
           fs.writeFileSync(
-            path.join(userDataDir, 'boot-config.json'),
+            path.join(userDataDir, 'storage', 'boot-config.json'),
             JSON.stringify(
               {
                 server_mode: 'local',
@@ -308,7 +310,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             )
           )
         },
-        extraEnv: (userDataDir) => ({ SLAYZONE_STORE_DIR: userDataDir })
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
       })
 
       const page = launched.page
@@ -391,8 +393,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-pty',
         seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
           fs.writeFileSync(
-            path.join(userDataDir, 'boot-config.json'),
+            path.join(userDataDir, 'storage', 'boot-config.json'),
             JSON.stringify(
               {
                 server_mode: 'local',
@@ -405,7 +408,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             )
           )
         },
-        extraEnv: (userDataDir) => ({ SLAYZONE_STORE_DIR: userDataDir })
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
       })
 
       const page = launched.page

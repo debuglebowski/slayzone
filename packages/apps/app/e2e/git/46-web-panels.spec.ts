@@ -94,8 +94,8 @@ test.describe('Web panels', () => {
     // CLI setup (same pattern as 60-cli.spec.ts). The CLI resolves the server
     // port from the DB itself, so only SLAYZONE_DB_PATH is needed.
     if (fs.existsSync(SLAY_JS)) {
-      const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_STORE_DIR!)
-      dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
+      const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
+      dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
     }
 
     const s = seed(mainWindow)

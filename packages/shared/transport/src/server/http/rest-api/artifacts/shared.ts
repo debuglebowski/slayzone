@@ -4,10 +4,8 @@ import { getExtensionFromTitle } from '@slayzone/task/shared'
 
 // Data root for artifact files = the single storage dir (`<ROOT>/storage`,
 // derived from SLAYZONE_ROOT via platform.getStorageDir — same as the DB +
-// ensureDataRoot). Must NOT read SLAYZONE_STORE_DIR directly: that env is not set
-// in the app (state derives from ROOT), so reading it stranded artifact lookups at
-// the legacy getStateDir() path after the <ROOT>/storage migration. Lazy (function,
-// not module-load const) so tests can point SLAYZONE_ROOT/STORE_DIR at a temp root.
+// ensureDataRoot). Lazy (function, not module-load const) so tests can point
+// SLAYZONE_ROOT at a temp root.
 export function getArtifactsDataRoot(): string {
   return getStorageDir()
 }

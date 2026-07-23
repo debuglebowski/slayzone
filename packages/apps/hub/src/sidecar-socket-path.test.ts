@@ -21,11 +21,9 @@ function check(name: string, cond: boolean, detail = ''): void {
 }
 
 const prevRoot = process.env.SLAYZONE_ROOT
-const prevHome = process.env.SLAYZONE_HOME_DIR
 const prevRuntime = process.env.SLAYZONE_RUNTIME_DIR
 const prevXdg = process.env.XDG_RUNTIME_DIR
 try {
-  delete process.env.SLAYZONE_HOME_DIR
   delete process.env.SLAYZONE_RUNTIME_DIR
   delete process.env.XDG_RUNTIME_DIR
 
@@ -60,7 +58,6 @@ try {
     else process.env[k] = v
   }
   restore('SLAYZONE_ROOT', prevRoot)
-  restore('SLAYZONE_HOME_DIR', prevHome)
   restore('SLAYZONE_RUNTIME_DIR', prevRuntime)
   restore('XDG_RUNTIME_DIR', prevXdg)
 }

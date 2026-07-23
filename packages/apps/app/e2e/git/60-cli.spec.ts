@@ -30,9 +30,9 @@ test.describe('CLI: slay', () => {
     }
 
     // Get the exact DB path the running app is using
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_STORE_DIR!)
+    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
     // Tests always run non-packaged, so DB name is always slayzone.dev.sqlite
-    dbPath = path.join(dbDir, 'slayzone.dev.sqlite')
+    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
 
     // Discover dynamic MCP port
     mcpPort = await electronApp.evaluate(async () => {

@@ -7,7 +7,7 @@ import http from 'http'
  * Hook-driven agent lifecycle E2E.
  *
  * Validates the load-bearing links in the chain:
- *   1. Boot installer writes notify.sh to SLAYZONE_HOME_DIR/hooks and merges
+ *   1. Boot installer writes notify.sh to SLAYZONE_USER_DATA_DIR/hooks and merges
  *      managed entries into SLAYZONE_CLAUDE_SETTINGS_PATH.
  *   2. POST /api/agent-hook end-to-end: HTTP → REST handler → IPC broadcast
  *      → preload listener → renderer callback. Real loopback, real Electron.
@@ -26,15 +26,15 @@ test.describe('Claude agent hooks', () => {
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', [
-        'SLAYZONE_HOME_DIR',
+        'SLAYZONE_USER_DATA_DIR',
         'SLAYZONE_CLAUDE_SETTINGS_PATH'
       ])
     })) as Record<string, string>
 
-    expect(env.SLAYZONE_HOME_DIR).toBeTruthy()
+    expect(env.SLAYZONE_USER_DATA_DIR).toBeTruthy()
     expect(env.SLAYZONE_CLAUDE_SETTINGS_PATH).toBeTruthy()
 
-    const scriptPath = path.join(env.SLAYZONE_HOME_DIR, 'hooks', 'notify.sh')
+    const scriptPath = path.join(env.SLAYZONE_USER_DATA_DIR, 'hooks', 'notify.sh')
     await waitForFile(scriptPath, 5000)
     await waitForFile(env.SLAYZONE_CLAUDE_SETTINGS_PATH, 5000)
 

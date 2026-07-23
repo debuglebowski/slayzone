@@ -4,7 +4,7 @@
  * resolves/persists the runner secret (security fix). Supervised = no-op (no file
  * read/write).
  *
- * Pure Node (real temp home dir via SLAYZONE_HOME_DIR, no native deps) → runs
+ * Pure Node (real temp home dir via SLAYZONE_ROOT, no native deps) → runs
  * under plain `npx tsx`.
  *
  * Run with: npx tsx packages/apps/hub/src/standalone-config.test.ts
@@ -44,7 +44,7 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 /** Env keys this module touches — scrubbed + restored around each case. */
 const ENV_KEYS = [
   'SLAYZONE_SUPERVISED',
-  'SLAYZONE_HOME_DIR',
+  'SLAYZONE_ROOT',
   'SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET',
   'SLAYZONE_DB_PATH',
   'SLAYZONE_SERVER_PORT',
@@ -60,7 +60,7 @@ function withIsolatedEnv(seed: Record<string, string>, fn: (home: string) => voi
     delete process.env[k]
   }
   const home = mkdtempSync(join(tmpdir(), 'slz-hub-home-'))
-  process.env.SLAYZONE_HOME_DIR = home
+  process.env.SLAYZONE_ROOT = home
   for (const [k, v] of Object.entries(seed)) process.env[k] = v
   try {
     fn(home)

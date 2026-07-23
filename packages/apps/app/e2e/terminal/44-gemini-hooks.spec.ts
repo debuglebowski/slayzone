@@ -26,15 +26,15 @@ test.describe('Gemini agent hooks', () => {
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', [
-        'SLAYZONE_HOME_DIR',
+        'SLAYZONE_USER_DATA_DIR',
         'SLAYZONE_GEMINI_SETTINGS_PATH'
       ])
     })) as Record<string, string>
 
-    expect(env.SLAYZONE_HOME_DIR).toBeTruthy()
+    expect(env.SLAYZONE_USER_DATA_DIR).toBeTruthy()
     expect(env.SLAYZONE_GEMINI_SETTINGS_PATH).toBeTruthy()
 
-    const scriptPath = path.join(env.SLAYZONE_HOME_DIR, 'hooks', 'notify.sh')
+    const scriptPath = path.join(env.SLAYZONE_USER_DATA_DIR, 'hooks', 'notify.sh')
     await waitForFile(scriptPath, 5000)
     await waitForFile(env.SLAYZONE_GEMINI_SETTINGS_PATH, 5000)
 

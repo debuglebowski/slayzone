@@ -105,7 +105,7 @@ run_test packages/apps/hub/src/standalone-config.test.ts
 run_test packages/shared/platform/src/config-prompt.test.ts
 # CLI author context resolves from SLAYZONE_AGENT_ID (the injected var), not AGENT_MODE.
 run_test packages/apps/cli/src/commands/tasks/cli-author.test.ts
-# Artifacts data-root: SLAYZONE_STORE_DIR (retired DB_DIR ignored).
+# Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>/storage (retired DB_DIR ignored).
 run_test packages/shared/transport/src/server/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
 run_test packages/apps/app/src/main/storage-migration.test.ts
