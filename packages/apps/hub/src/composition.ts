@@ -36,6 +36,7 @@ import {
   type FloatingAgentState
 } from '@slayzone/transport/server'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
+import { getBridgeCapUrl } from './bridge-url.js'
 import { getServerBuildInfo } from './build-info.js'
 import {
   taskOps,
@@ -262,7 +263,7 @@ export function composeServer(opts: {
   // can't run in this plain-node process — they forward to the host over the
   // bridge, and host-originated events (native menus, power-resume) stream back.
   // Truly standalone (no host): bridge stays null and the fail-loud stubs apply.
-  const hostCapUrl = process.env.SLAYZONE_HOST_CAP_URL
+  const hostCapUrl = getBridgeCapUrl()
   const bridge: HostBridge | null =
     supervised && hostCapUrl
       ? createHostBridge(hostCapUrl, { getTrpcPort: () => boundPort })

@@ -380,7 +380,7 @@ import { automationsEvents } from './automations-events'
 import { telemetryEvents } from './telemetry-events'
 import { agentLifecycleEvents } from './agent-lifecycle-events'
 import { powerResumeEvents } from './power-resume-events'
-import { startHostCapabilityServer } from './host-capability-server'
+import { startHostBridgeServer } from './host-bridge-server'
 import { getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
@@ -517,23 +517,20 @@ const browserViewManager = new BrowserViewManager()
 // Inline DevTools BrowserView system removed — using native docked DevTools via WebContentsView
 let linearSyncPoller: NodeJS.Timeout | null = null
 let discoveryPoller: NodeJS.Timeout | null = null
-let mcpCleanup: (() => void) | null = null
-let trpcCleanup: (() => void) | null = null
+let bridgeCleanup: (() => void) | null = null
 let sidecarCleanup: (() => void) | null = null
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
 // Local-runner supervisor — spawns the co-located runner in local mode. Null
 // in remote mode (no local hub to dial) or before the async spawn runs.
 let localRunnerCleanup: (() => void) | null = null
-// Local cutover (slice 9): the side-car must be spawned with the host's
-// capability-bridge + REST URLs in env, but those servers start on their own
-// async paths. These promises let the sidecar-spawn block await both ports.
-let resolveHostCapUrl!: (url: string) => void
-const hostCapUrlPromise = new Promise<string>((r) => {
-  resolveHostCapUrl = r
-})
-let resolveHostRestUrl!: (url: string) => void
-const hostRestUrlPromise = new Promise<string>((r) => {
-  resolveHostRestUrl = r
+// Local cutover (slice 9): the side-car must be spawned with the host bridge
+// URL in env, but that server starts on its own async path. This promise lets
+// the sidecar-spawn block await the bound port. One listener now carries both
+// the capability bridge (WS `/cap`) and the reverse-proxied Electron-only REST
+// (`/api/*`), advertised as `SLAYZONE_BRIDGE_URL`.
+let resolveBridgeUrl!: (url: string) => void
+const bridgeUrlPromise = new Promise<string>((r) => {
+  resolveBridgeUrl = r
 })
 // Resolves once the side-car supervisor handle exists, so `app:get-server-url`
 // (called early on renderer boot) can await it before reading the port.
@@ -1898,33 +1895,8 @@ app
     startProactiveGc()
     logBoot('domain tRPC ops registered')
 
-    // Host REST server (slice 9 local cutover). The SIDE-CAR now owns the
-    // discoverable `server_port` (CLI + agents + external MCP hit it). The
-    // host keeps a REST server ONLY as the reverse-proxy target for the
-    // Electron-only routes the side-car can't serve itself — browser-automation
-    // (live WebContents) + artifact export (offscreen renderer). So it binds a
-    // port and publishes its URL to the sidecar spawn, but does NOT write the
-    // discovery port (writePort:false). Off the boot critical path.
-    // Remote mode: skipped — CLI remote support is slice 10.
-    if (!isRemoteMode) setImmediate(() => {
-      logBoot('host rest server import dispatched')
-      Promise.all([import('@slayzone/transport/server'), import('./mcp-rest-deps')])
-        .then(async ([mod, depsMod]) => {
-          const { port } = await mod.startMcpServer(
-            depsMod.buildMcpRestDeps(db, automationEngine),
-            { writePort: false }
-          )
-          mcpCleanup = () => mod.stopMcpServer()
-          resolveHostRestUrl(`http://127.0.0.1:${port}`)
-          logBoot(`host rest server started (port ${port}, reverse-proxy target)`)
-        })
-        .catch((err) => {
-          console.error('[MCP] Failed to start host REST server:', err)
-        })
-    })
-
     // Slice 9 local cutover: the renderer connects to the SIDE-CAR for data; the
-    // host serves a capability bridge the side-car forwards Electron-only calls
+    // host serves a bridge the side-car forwards Electron-only calls
     // to. The data-dep registry sets below are now harmless no-ops on the host
     // (no in-process appRouter server reads them) — left in place to minimise
     // churn; only setAppDeps/setMenuEvents/setPowerResumeEvents back the bridge.
@@ -2208,33 +2180,39 @@ app
             killTask: killTaskProcesses,
             events: processEvents
           })
-          // Cutover: no in-process appRouter server. The host serves the
-          // capability bridge (setAppDeps/setMenuEvents/setPowerResumeEvents
-          // above back it); the side-car forwards its Electron-only AppDeps calls
-          // here and streams host menu/power events back. startTrpcServer retired.
-          const capServer = await startHostCapabilityServer({
+          // Cutover: no in-process appRouter server. The host serves ONE bridge
+          // listener (setAppDeps/setMenuEvents/setPowerResumeEvents above back it):
+          //  • WS `/cap` — the side-car forwards its Electron-only AppDeps calls
+          //    here and streams host menu/power events back (startTrpcServer retired).
+          //  • HTTP `/api/*` — the reverse-proxy target for the Electron-only REST
+          //    routes the side-car can't serve itself (browser-automation over live
+          //    WebContents + artifact export via offscreen renderer). No discovery
+          //    port is written — the side-car owns `server_port` (CLI/agents/MCP).
+          const { buildMcpRestDeps } = await import('./mcp-rest-deps')
+          const bridgeServer = await startHostBridgeServer({
             db,
-            dataRoot: getTrpcDataRoot()
+            dataRoot: getTrpcDataRoot(),
+            restDeps: buildMcpRestDeps(db, automationEngine)
           })
-          trpcCleanup = () => void capServer.stop()
-          resolveHostCapUrl(`ws://127.0.0.1:${capServer.port}/cap`)
-          logBoot(`host capability server started (port ${capServer.port})`)
+          bridgeCleanup = () => void bridgeServer.stop()
+          resolveBridgeUrl(`http://127.0.0.1:${bridgeServer.port}`)
+          logBoot(`host bridge server started (port ${bridgeServer.port}, cap WS + REST proxy)`)
         })
         .catch((err) => {
-          console.error('[host-cap] Failed to start capability server:', err)
+          console.error('[host-bridge] Failed to start bridge server:', err)
         })
     })
 
     // Slice 9 LIVE side-car: the renderer now connects here for all data. The
-    // side-car is spawned with the host's capability-bridge + REST URLs so it can
-    // forward Electron-only work back to the host (capabilities + browser/export
-    // REST). We await both host servers' ports before spawning. A permanent
-    // failure surfaces via notify.onEmbeddedServerFailed (persistent toast).
+    // side-car is spawned with the host bridge URL so it can forward Electron-only
+    // work back to the host (capability calls over WS `/cap` + browser/export REST
+    // over HTTP `/api/*`, one listener). We await the bridge port before spawning.
+    // A permanent failure surfaces via notify.onEmbeddedServerFailed (persistent toast).
     // Remote mode: skipped — the backend runs elsewhere.
     if (!isRemoteMode) setImmediate(() => {
       logBoot('sidecar server supervisor import dispatched')
-      Promise.all([import('./sidecar-server-supervisor'), hostCapUrlPromise, hostRestUrlPromise])
-        .then(([{ startSidecarServer }, hostCapUrl, hostRestUrl]) => {
+      Promise.all([import('./sidecar-server-supervisor'), bridgeUrlPromise])
+        .then(([{ startSidecarServer }, bridgeUrl]) => {
           const scriptPath = is.dev
             ? join(app.getAppPath(), '../hub/dist/bin.cjs')
             : join(process.resourcesPath, 'hub', 'bin.cjs')
@@ -2249,10 +2227,10 @@ app
               // is handed over. Pass only the dev-vs-packaged bit it can't infer
               // (it has no Electron `app.isPackaged`), so it derives the right filename.
               SLAYZONE_DEV: app.isPackaged ? undefined : '1',
-              // Capability bridge (renderer Electron-only calls + host events) and
-              // the host REST reverse-proxy target (browser-automation + export).
-              SLAYZONE_HOST_CAP_URL: hostCapUrl,
-              SLAYZONE_HOST_REST_URL: hostRestUrl,
+              // Host bridge: one listener carrying the capability bridge (renderer
+              // Electron-only calls + host events, WS `/cap`) AND the REST
+              // reverse-proxy target (browser-automation + export, HTTP `/api/*`).
+              SLAYZONE_BRIDGE_URL: bridgeUrl,
               // Packaged resolution: only bin.js is copied to Resources/hub,
               // so createRequire's walk-up never finds node_modules. Point the
               // resolver at the unpacked natives (better-sqlite3, node-pty) the
@@ -4109,8 +4087,7 @@ app.on('will-quit', () => {
     clearInterval(discoveryPoller)
     discoveryPoller = null
   }
-  mcpCleanup?.()
-  trpcCleanup?.()
+  bridgeCleanup?.()
   sidecarCleanup?.()
   localRunnerCleanup?.()
   // Record completion BEFORE closing diagnostics DB; a row written here is the last

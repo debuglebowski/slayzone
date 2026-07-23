@@ -26,6 +26,7 @@ import {
   openServerDiagnosticsDatabase
 } from './db.js'
 import { composeServer } from './composition.js'
+import { getBridgeRestUrl } from './bridge-url.js'
 import { startRunnerListener } from './runner-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
@@ -176,7 +177,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Reverse-proxy target for Electron-only REST routes (supervised). Absent when
   // truly standalone → those routes fall through to express + 501 as before.
-  const hostRestUrl = process.env.SLAYZONE_HOST_REST_URL
+  // Derived from the single host bridge URL (same listener serves cap WS + REST).
+  const hostRestUrl = getBridgeRestUrl()
 
   // Single muxed HTTP server: /health (pre-express, stays alive even if the
   // express stack wedges) + Electron-only REST reverse-proxied to the host (when

@@ -63,9 +63,8 @@ export {
 
 // MCP server + REST API (moved from the Electron main in slice 6 so the
 // standalone @slayzone/hub can host them too — capability-slot injected).
+// Callers mux the app onto their own listener (hub server + host bridge server).
 export {
-  startMcpServer,
-  stopMcpServer,
   createMcpRestApp,
   type McpRestAppHandle
 } from './http/mcp-server'

@@ -293,8 +293,8 @@ async function launchElectronWithRetry(args: {
       //     flips the real app to remote mode → 102-sidecar-crash-recovery + the
       //     rest boot sidecar-less and cascade-fail).
       //   • SLAYZONE_SUPERVISED / SLAYZONE_SERVER_PORT / SLAYZONE_SERVER_HOST /
-      //     SLAYZONE_HOST_* / SLAYZONE_TASK_ID … → supervised host/task wiring the
-      //     app must not see.
+      //     SLAYZONE_BRIDGE_URL / SLAYZONE_TASK_ID … → supervised host/task wiring
+      //     the app must not see.
       // Strip every ELECTRON_*/SLAYZONE_* from the inherited copy; the explicit
       // `env:` literal below re-adds exactly the ones e2e needs.
       const launchEnv: Record<string, string> = {}

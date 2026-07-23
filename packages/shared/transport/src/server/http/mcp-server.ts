@@ -2,7 +2,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import express, { type Express } from 'express'
-import type { Server } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { registerRestApi } from './rest-api'
 import type { RestApiDeps } from './rest-api/types'
@@ -35,9 +34,9 @@ export type McpRestAppHandle = {
 
 /**
  * Builds the Express app carrying the `/mcp` endpoint (streamable-HTTP MCP
- * sessions) + the `/api/*` REST routes, WITHOUT binding a port. Host decides:
- * the Electron main listens on its own port via `startMcpServer` below; the
- * standalone server muxes this app onto its existing HTTP server.
+ * sessions) + the `/api/*` REST routes, WITHOUT binding a port. Callers mux it
+ * onto their own HTTP listener: the standalone @slayzone/hub server and the
+ * Electron host's bridge server both do this.
  */
 export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
   const app = express()
@@ -160,88 +159,4 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
       sessionActivity.clear()
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Standalone-listener lifecycle (Electron-main host path). Module-singleton,
-// matching the pre-move behavior 1:1: preferred-port lookup, EADDRINUSE
-// fallback to a dynamic port, `settings.server_port` discovery write,
-// `globalThis.__serverPort` for in-process consumers.
-// ---------------------------------------------------------------------------
-
-let httpServer: Server | null = null
-let appHandle: McpRestAppHandle | null = null
-
-export function stopMcpServer(): void {
-  if (appHandle) {
-    appHandle.dispose()
-    appHandle = null
-  }
-  if (httpServer) {
-    httpServer.close()
-    httpServer = null
-  }
-}
-
-async function getPreferredPort(db: RestApiDeps['db']): Promise<number> {
-  try {
-    const row = (await db
-      .prepare("SELECT value FROM settings WHERE key = 'mcp_preferred_port' LIMIT 1")
-      .get()) as { value: string } | undefined
-    const port = parseInt(row?.value ?? '', 10)
-    return port >= 1024 && port <= 65535 ? port : 0
-  } catch {
-    return 0
-  }
-}
-
-export async function startMcpServer(
-  deps: RestApiDeps,
-  opts: { writePort?: boolean } = {}
-): Promise<{ port: number }> {
-  // writePort=false: bind + serve, but DON'T claim `settings.server_port`.
-  // The slice-9 host keeps a REST server only as a reverse-proxy target; the
-  // side-car owns the discoverable port (CLI/agents/external MCP hit it).
-  const writePort = opts.writePort ?? true
-  const port = await getPreferredPort(deps.db)
-
-  stopMcpServer()
-  const handle = createMcpRestApp(deps)
-  appHandle = handle
-
-  return await new Promise<{ port: number }>((resolve) => {
-    const onListening = async (): Promise<void> => {
-      const addr = httpServer!.address()
-      const actualPort = typeof addr === 'object' && addr ? addr.port : port
-      // Only the CANONICAL server claims the discovery globals/settings. The
-      // slice-9 host runs writePort:false purely as a reverse-proxy target, so it
-      // must NOT set `__serverPort` — agents + tests resolve the SIDE-CAR port (the
-      // host sets its `__serverPort` to the side-car port via the supervisor onReady).
-      if (writePort) {
-        ;(globalThis as Record<string, unknown>).__serverPort = actualPort
-        try {
-          await deps.db
-            .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('server_port', ?)")
-            .run(String(actualPort))
-        } catch {
-          /* non-fatal — CLI falls back to default port */
-        }
-      }
-      console.log(`[MCP] Server listening on http://127.0.0.1:${actualPort}/mcp`)
-      resolve({ port: actualPort })
-    }
-
-    httpServer = handle.app.listen(port, '127.0.0.1')
-    httpServer.on('listening', () => void onListening())
-    httpServer.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && port !== 0) {
-        console.warn(`[MCP] Port ${port} in use, falling back to dynamic port`)
-        httpServer = handle.app.listen(0, '127.0.0.1')
-        httpServer.on('listening', () => void onListening())
-        httpServer.on('error', (err2) => console.error(`[MCP] Server error:`, err2))
-      } else {
-        console.error(`[MCP] Server error:`, err)
-      }
-    })
-  })
 }
