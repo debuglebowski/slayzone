@@ -8,10 +8,10 @@ Content-Transfer-Encoding: 8bit
 
 Browser-process client for the Bun sidecar (Phase 3 still WIP).
 Speaks LSP-framed JSON-RPC 2.0 over a Unix domain socket at
-\$SLAYZONE_RUNTIME_DIR/sidecar.sock; platform default is
-~/Library/Application Support/SlayZone/run/sidecar.sock on macOS and
-\$XDG_RUNTIME_DIR/slayzone/sidecar.sock on Linux. Windows (named pipe)
-is not wired in Phase 2 by design.
+<SLAYZONE_ROOT>/run/sidecar.sock — the path DERIVES from SLAYZONE_ROOT
+(default ~/.slayzone), the single anchor the C++ shell and the JS
+sidecar each compute independently, so both agree with no extra env
+var to thread. Windows (named pipe) is not wired in Phase 2 by design.
 
 Design notes:
 - Dedicated Slayzone.Sidecar base::Thread owns the socket. Blocking
@@ -40,9 +40,9 @@ Design notes:
 ---
  chrome/browser/BUILD.gn                   |   2 +
  chrome/browser/browser_process_impl.cc    |  17 +
- chrome/browser/slayzone/sidecar_client.cc | 511 ++++++++++++++++++++++
+ chrome/browser/slayzone/sidecar_client.cc | 499 ++++++++++++++++++++++
  chrome/browser/slayzone/sidecar_client.h  |  80 ++++
- 4 files changed, 610 insertions(+)
+ 4 files changed, 598 insertions(+)
  create mode 100644 chrome/browser/slayzone/sidecar_client.cc
  create mode 100644 chrome/browser/slayzone/sidecar_client.h
 
@@ -106,7 +106,7 @@ new file mode 100644
 index 0000000000000..d830d8b81bf9e
 --- /dev/null
 +++ b/chrome/browser/slayzone/sidecar_client.cc
-@@ -0,0 +1,511 @@
+@@ -0,0 +1,499 @@
 +// Copyright 2026 The Chromium Authors (SlayZone fork)
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -135,8 +135,6 @@ index 0000000000000..d830d8b81bf9e
 +#include "base/logging.h"
 +#include "base/no_destructor.h"
 +#include "base/rand_util.h"
-+#include "base/strings/string_number_conversions.h"
-+#include "base/strings/strcat.h"
 +#include "base/task/bind_post_task.h"
 +#include "base/task/single_thread_task_runner.h"
 +#include "base/threading/thread.h"
@@ -164,39 +162,29 @@ index 0000000000000..d830d8b81bf9e
 +constexpr base::TimeDelta kInitialBackoff = base::Milliseconds(500);
 +constexpr base::TimeDelta kMaxBackoff = base::Seconds(30);
 +
-+// Resolves $SLAYZONE_RUNTIME_DIR/sidecar.sock with platform defaults.
-+//   - $SLAYZONE_RUNTIME_DIR if set.
-+//   - macOS: $HOME/Library/Application Support/SlayZone/run/
-+//   - Linux: $XDG_RUNTIME_DIR/slayzone/ (falls back to /tmp/slayzone-$UID/)
++// Resolves the sidecar Unix-domain-socket path, DERIVED from SLAYZONE_ROOT so
++// the C++ shell and the JS sidecar agree with no extra env var to thread —
++// both compute the same anchor independently (mirror of getSlayzoneHomeDir +
++// resolveSidecarSocketPath in packages/shared/platform/src/dirs.ts and
++// packages/apps/hub/src/sidecar-socket.ts):
++//   - <SLAYZONE_ROOT>/run/sidecar.sock when SLAYZONE_ROOT is set,
++//   - else <$HOME>/.slayzone/run/sidecar.sock.
 +// Windows uses a named pipe and is not wired in Phase 2.
 +base::FilePath ResolveSocketPath() {
++#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 +  auto env = base::Environment::Create();
-+  std::optional<std::string> override_dir =
-+      env->GetVar("SLAYZONE_RUNTIME_DIR");
-+  if (override_dir && !override_dir->empty()) {
-+    return base::FilePath(*override_dir).Append("sidecar.sock");
-+  }
-+
-+#if BUILDFLAG(IS_MAC)
-+  base::FilePath home;
-+  if (!base::PathService::Get(base::DIR_HOME, &home)) {
-+    return base::FilePath();
-+  }
-+  return home.Append("Library")
-+      .Append("Application Support")
-+      .Append("SlayZone")
-+      .Append("run")
-+      .Append("sidecar.sock");
-+#elif BUILDFLAG(IS_LINUX)
-+  base::FilePath runtime_dir = base::nix::GetXDGDirectory(
-+      env.get(), "XDG_RUNTIME_DIR", nullptr);
-+  if (runtime_dir.empty()) {
-+    runtime_dir = base::FilePath(
-+        base::StrCat({"/tmp/slayzone-", base::NumberToString(getuid())}));
++  std::optional<std::string> root = env->GetVar("SLAYZONE_ROOT");
++  base::FilePath root_dir;
++  if (root && !root->empty()) {
++    root_dir = base::FilePath(*root);
 +  } else {
-+    runtime_dir = runtime_dir.Append("slayzone");
++    base::FilePath home;
++    if (!base::PathService::Get(base::DIR_HOME, &home)) {
++      return base::FilePath();
++    }
++    root_dir = home.Append(".slayzone");
 +  }
-+  return runtime_dir.Append("sidecar.sock");
++  return root_dir.Append("run").Append("sidecar.sock");
 +#else
 +  // Phase 2 doesn't wire Windows (named pipes, different transport).
 +  return base::FilePath();
@@ -648,7 +636,7 @@ index 0000000000000..02e5c014e9e73
 +
 +// Browser-process client for the Bun sidecar.
 +//
-+// Connects to `$SLAYZONE_RUNTIME_DIR/sidecar.sock` (Unix domain socket) and
++// Connects to `<SLAYZONE_ROOT>/run/sidecar.sock` (Unix domain socket) and
 +// speaks LSP-framed JSON-RPC 2.0 (Content-Length header + `\r\n\r\n` + body).
 +// Requests get a monotonic id; responses with matching id invoke the paired
 +// callback on the caller's sequence. On disconnect the client reconnects

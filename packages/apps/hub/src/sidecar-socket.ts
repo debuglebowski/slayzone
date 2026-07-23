@@ -11,7 +11,7 @@ const MAX_SOCKET_PATH = 100
 
 // Unix-domain-socket JSON-RPC 2.0 server — the JS half of the chromium fork's
 // C++ `slayzone::SidecarClient` (patches/chromium/0003 + 0030). The shell
-// connects to `$SLAYZONE_RUNTIME_DIR/sidecar.sock` and speaks LSP framing
+// connects to `<SLAYZONE_ROOT>/run/sidecar.sock` and speaks LSP framing
 // (`Content-Length: N\r\n\r\n{json}`). It sends `sidecar.hello` on connect,
 // `sidecar.ping` every 30s, and — crucially — forwards `slayzone://` OAuth
 // deep-links via `auth:deep-link` ({ url }). This server answers the keepalive
@@ -31,17 +31,17 @@ export interface SidecarSocketServer {
 }
 
 /**
- * Resolve the sidecar socket path. Precedence:
- *   1. explicit `SLAYZONE_RUNTIME_DIR` (the shared override the C++ shell + JS
- *      both read — set by scripts/chromium/run.sh so both sides agree),
- *   2. `<SLAYZONE_ROOT>/run/sidecar.sock` — derived from ROOT, the standard anchor,
- *   3. a short OS-runtime dir fallback WHEN the ROOT-derived path would exceed the
- *      ~104-char Unix-socket limit (deep ROOT).
+ * Resolve the sidecar socket path. DERIVED from `SLAYZONE_ROOT` — the single
+ * anchor both sides compute independently, so the C++ shell + JS agree with no
+ * extra env var to thread (the shell reads SLAYZONE_ROOT too; see
+ * chromium/src/chrome/browser/slayzone/sidecar_client.cc ResolveSocketPath).
+ * Precedence:
+ *   1. `<SLAYZONE_ROOT>/run/sidecar.sock` — the standard anchor,
+ *   2. a short OS-runtime dir fallback WHEN the ROOT-derived path would exceed the
+ *      ~104-char Unix-socket limit (deep ROOT — only reachable by a standalone
+ *      hub, which has no C++ shell connecting, so divergence is moot here).
  */
-export function resolveSidecarSocketPath(runtimeDir?: string): string {
-  const override = runtimeDir ?? process.env.SLAYZONE_RUNTIME_DIR
-  if (override && override.trim()) return join(override, 'sidecar.sock')
-
+export function resolveSidecarSocketPath(): string {
   const rootPath = join(getSlayzoneHomeDir(), 'run', 'sidecar.sock')
   if (rootPath.length <= MAX_SOCKET_PATH) return rootPath
 
@@ -71,10 +71,9 @@ function frame(message: unknown): Buffer {
 export function startSidecarSocketServer(opts: {
   onAuthDeepLink: (url: string) => void
   log?: (msg: string) => void
-  runtimeDir?: string
 }): SidecarSocketServer {
   const log = opts.log ?? (() => {})
-  const socketPath = resolveSidecarSocketPath(opts.runtimeDir)
+  const socketPath = resolveSidecarSocketPath()
 
   try {
     mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 })

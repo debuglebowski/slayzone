@@ -23,11 +23,15 @@ if [[ ! -x "$APP" ]]; then
 fi
 
 USER_DATA_DIR="$(mktemp -d -t slayzone-parity)"
-export SLAYZONE_RUNTIME_DIR="$(mktemp -d -t slayzone-parity-rt)"
-SIDECAR_LOG="$SLAYZONE_RUNTIME_DIR/sidecar.log"
+# ROOT anchors the sidecar socket: both the fork's C++ shell and the JS sidecar
+# derive <ROOT>/run/sidecar.sock from SLAYZONE_ROOT — no separate socket var.
+export SLAYZONE_ROOT="$(mktemp -d -t slayzone-parity-root)"
+RUNTIME_DIR="$SLAYZONE_ROOT/run"
+mkdir -p "$RUNTIME_DIR"
+SIDECAR_LOG="$RUNTIME_DIR/sidecar.log"
 FORK_LOG="$USER_DATA_DIR/fork.log"
 
-echo "[parity] runtime_dir=$SLAYZONE_RUNTIME_DIR" >&2
+echo "[parity] runtime_dir=$RUNTIME_DIR" >&2
 
 (
   cd "$REPO_ROOT"
@@ -38,7 +42,7 @@ FORK_PID=""
 trap 'kill "$SIDECAR_PID" 2>/dev/null || true; [[ -n "$FORK_PID" ]] && kill "$FORK_PID" 2>/dev/null || true' EXIT
 
 for _ in $(seq 1 80); do
-  [[ -S "$SLAYZONE_RUNTIME_DIR/sidecar.sock" ]] && break
+  [[ -S "$RUNTIME_DIR/sidecar.sock" ]] && break
   sleep 0.1
 done
 

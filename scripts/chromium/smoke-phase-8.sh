@@ -24,8 +24,12 @@ fi
 for panel in "${PANELS[@]}"; do
   echo "[smoke] panel=$panel" >&2
   USER_DATA_DIR="$(mktemp -d -t slayzone-smoke)"
-  export SLAYZONE_RUNTIME_DIR="$(mktemp -d -t slayzone-runtime)"
-  SIDECAR_LOG="$SLAYZONE_RUNTIME_DIR/sidecar.log"
+  # ROOT anchors the sidecar socket: both the fork's C++ shell and the JS sidecar
+  # derive <ROOT>/run/sidecar.sock from SLAYZONE_ROOT — no separate socket var.
+  export SLAYZONE_ROOT="$(mktemp -d -t slayzone-root)"
+  RUNTIME_DIR="$SLAYZONE_ROOT/run"
+  mkdir -p "$RUNTIME_DIR"
+  SIDECAR_LOG="$RUNTIME_DIR/sidecar.log"
 
   # Start sidecar.
   (
@@ -34,7 +38,7 @@ for panel in "${PANELS[@]}"; do
   ) >"$SIDECAR_LOG" 2>&1 &
   SIDECAR_PID=$!
   for _ in $(seq 1 80); do
-    [[ -S "$SLAYZONE_RUNTIME_DIR/sidecar.sock" ]] && break
+    [[ -S "$RUNTIME_DIR/sidecar.sock" ]] && break
     sleep 0.1
   done
 

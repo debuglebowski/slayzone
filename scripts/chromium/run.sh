@@ -45,6 +45,20 @@ fi
 # renderer's baked-in default WS URL resolves without extra plumbing; override
 # with SLAYZONE_SERVER_PORT. SLAYZONE_SUPERVISED stays unset → the server does not
 # self-terminate on stdin close, so a backgrounded run survives.
+#
+# Anchor ALL on-disk state to SLAYZONE_ROOT FIRST, before the sidecar branch —
+# the single var the fork's C++ shell (ResolveSocketPath) and the JS sidecar
+# (resolveSidecarSocketPath) each derive `<ROOT>/run/sidecar.sock` from, so both
+# agree with nothing else to thread. Set unconditionally so the fork inherits it
+# even under SLAYZONE_NO_SIDECAR=1 (reusing an externally-launched sidecar), and
+# both sides resolve the same socket. Default to the repo root (DB stays
+# <REPO_ROOT>/storage, as the hub already seeds ROOT=cwd today → byte-identical
+# store); an inherited SLAYZONE_ROOT wins.
+SLAYZONE_ROOT="${SLAYZONE_ROOT:-$REPO_ROOT}"
+export SLAYZONE_ROOT
+RUNTIME_DIR="$SLAYZONE_ROOT/run"
+mkdir -p "$RUNTIME_DIR"
+
 SIDECAR_PID=""
 if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   # Force the host:port the renderer's baked-in default expects (window-api-shim
@@ -58,11 +72,7 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   SLAYZONE_SERVER_HOST=127.0.0.1
   SLAYZONE_SERVER_PORT=8766
   export SLAYZONE_SERVER_HOST SLAYZONE_SERVER_PORT
-  if [[ -z "${SLAYZONE_RUNTIME_DIR:-}" ]]; then
-    SLAYZONE_RUNTIME_DIR="$(mktemp -d -t slayzone-runtime)"
-    export SLAYZONE_RUNTIME_DIR
-  fi
-  SIDECAR_LOG="$SLAYZONE_RUNTIME_DIR/sidecar.log"
+  SIDECAR_LOG="$RUNTIME_DIR/sidecar.log"
   ELECTRON_BIN="$REPO_ROOT/node_modules/.bin/electron"
   SERVER_BIN="$REPO_ROOT/packages/apps/hub/dist/bin.cjs"
   if [[ ! -f "$SERVER_BIN" ]]; then

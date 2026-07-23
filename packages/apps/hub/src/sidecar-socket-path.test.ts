@@ -1,8 +1,8 @@
 /**
  * resolveSidecarSocketPath — the fork sidecar's Unix-socket path DERIVES from
- * SLAYZONE_ROOT (`<ROOT>/run/sidecar.sock`); SLAYZONE_RUNTIME_DIR is only an
- * explicit override (the shared C++-shell/JS channel run.sh sets), and a very
- * deep ROOT falls back to a short OS-runtime dir (Unix socket path length cap).
+ * SLAYZONE_ROOT (`<ROOT>/run/sidecar.sock`), the single anchor the C++ shell +
+ * JS each compute independently (no extra env var to thread). A very deep ROOT
+ * falls back to a short OS-runtime dir (Unix socket path length cap).
  *
  * Pure Node (no native deps) → runs under plain `npx tsx`.
  */
@@ -21,10 +21,8 @@ function check(name: string, cond: boolean, detail = ''): void {
 }
 
 const prevRoot = process.env.SLAYZONE_ROOT
-const prevRuntime = process.env.SLAYZONE_RUNTIME_DIR
 const prevXdg = process.env.XDG_RUNTIME_DIR
 try {
-  delete process.env.SLAYZONE_RUNTIME_DIR
   delete process.env.XDG_RUNTIME_DIR
 
   // Derives <ROOT>/run/sidecar.sock.
@@ -34,14 +32,6 @@ try {
     resolveSidecarSocketPath() === '/srv/slayzone/run/sidecar.sock',
     `got ${resolveSidecarSocketPath()}`
   )
-
-  // Explicit SLAYZONE_RUNTIME_DIR override wins (shared C++/JS channel).
-  process.env.SLAYZONE_RUNTIME_DIR = '/tmp/rt'
-  check('SLAYZONE_RUNTIME_DIR override wins', resolveSidecarSocketPath() === '/tmp/rt/sidecar.sock')
-  delete process.env.SLAYZONE_RUNTIME_DIR
-
-  // The function-arg override also wins.
-  check('arg override wins', resolveSidecarSocketPath('/tmp/arg') === '/tmp/arg/sidecar.sock')
 
   // A very deep ROOT (> ~104 char socket path) falls back off ROOT.
   process.env.SLAYZONE_ROOT = '/' + 'x'.repeat(120)
@@ -58,7 +48,6 @@ try {
     else process.env[k] = v
   }
   restore('SLAYZONE_ROOT', prevRoot)
-  restore('SLAYZONE_RUNTIME_DIR', prevRuntime)
   restore('XDG_RUNTIME_DIR', prevXdg)
 }
 
