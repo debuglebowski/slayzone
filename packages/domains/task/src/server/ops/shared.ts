@@ -2,14 +2,17 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
 import { recordConversation } from './task-conversations.js'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import {
+  getColumnById,
   getDefaultStatus,
   getStatusByCategory,
   isKnownStatus,
   isTerminalStatus,
-  parseColumnsConfig
+  parseColumnsConfig,
+  WORKFLOW_CATEGORIES
 } from '@slayzone/projects/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import path from 'path'
@@ -652,6 +655,47 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       getStatusByCategory('started', targetColumns) ?? getDefaultStatus(targetColumns)
   } else if (projectChanged && existing?.status && !isKnownStatus(existing.status, targetColumns)) {
     normalizedStatusForWrite = getDefaultStatus(targetColumns)
+  }
+
+  // Status-regression telemetry — catches an unexpected demotion of a task back
+  // into the project's default/triage column (the "task keeps jumping to inbox"
+  // class of bug). Fires only on the signature — a write that moves the task
+  // from a MORE-advanced workflow category down to `getDefaultStatus`, without a
+  // project change (which legitimately re-homes out-of-range statuses). The
+  // stack trace (built only in this rare branch, so the common path pays
+  // nothing) names the offending caller. level:'error' forces an immediate
+  // diagnostics flush so a crash/restart can't lose it. Query via:
+  //   SELECT * FROM diagnostics_events WHERE event='task.status_regression'
+  if (normalizedStatusForWrite !== undefined && !projectChanged && existing?.status) {
+    const defaultStatus = getDefaultStatus(targetColumns)
+    const categoryRank = (statusId: string): number => {
+      const category = getColumnById(statusId, targetColumns)?.category
+      const rank = category ? WORKFLOW_CATEGORIES.indexOf(category) : -1
+      return rank
+    }
+    const isDemotionToDefault =
+      normalizedStatusForWrite === defaultStatus &&
+      normalizedStatusForWrite !== existing.status &&
+      categoryRank(existing.status) > categoryRank(normalizedStatusForWrite)
+    if (isDemotionToDefault) {
+      const coerced =
+        data.status !== undefined && !isKnownStatus(data.status, targetColumns)
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'task',
+        event: 'task.status_regression',
+        taskId: data.id,
+        message: `${existing.status} -> ${normalizedStatusForWrite}${coerced ? ' (COERCED from ' + JSON.stringify(data.status) + ')' : ''}`,
+        payload: {
+          incoming: data.status ?? null,
+          existing: existing.status,
+          resolved: normalizedStatusForWrite,
+          coerced,
+          shouldPromoteFromTemp,
+          stack: new Error('status-regression-stack').stack
+        }
+      })
+    }
   }
 
   const fields: string[] = []
