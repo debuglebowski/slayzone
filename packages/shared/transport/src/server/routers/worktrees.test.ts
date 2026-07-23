@@ -958,23 +958,6 @@ await describe('copyIgnoredFiles', () => {
     cfGit(`git worktree remove "${wtPath}" --force`)
   })
 
-  test('fallback path works when clonefile disabled', async () => {
-    const wtPath = path.join(cfRoot, 'wt-copy-fallback')
-    await createWorktree(cfRepo, wtPath, 'copy-test-fallback')
-
-    process.env.SLAYZONE_DISABLE_CLONEFILE = '1'
-    try {
-      await copyIgnoredFiles(cfRepo, wtPath, 'custom', ['dist', 'app.log'])
-    } finally {
-      delete process.env.SLAYZONE_DISABLE_CLONEFILE
-    }
-    expect(fs.existsSync(path.join(wtPath, 'dist', 'bundle.js'))).toBe(true)
-    expect(fs.existsSync(path.join(wtPath, 'dist', 'nested', 'deep.js'))).toBe(true)
-    expect(fs.existsSync(path.join(wtPath, 'app.log'))).toBe(true)
-
-    cfGit(`git worktree remove "${wtPath}" --force`)
-  })
-
   test('does not nest when top-level dir is tracked but has ignored children', async () => {
     // Repro: main repo has tracked `src/` with ignored child `src/build/out.js`.
     // Worktree-creation copy must NOT result in nested `wt/src/src/...`.

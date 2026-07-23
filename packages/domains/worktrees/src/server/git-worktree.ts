@@ -600,10 +600,9 @@ async function getAllIgnoredCopyEntries(repoPath: string): Promise<IgnoredCopyEn
  * Copy with APFS clonefile (`cp -cR`) on macOS, fall back to `fs.cp` on
  * non-darwin, non-APFS volumes, or any clone failure. Clone is copy-on-write
  * — near-instant, near-zero disk overhead for things like node_modules.
- * Set SLAYZONE_DISABLE_CLONEFILE=1 to force fallback path.
  */
 async function clonefileCopy(src: string, dst: string, isDir: boolean): Promise<void> {
-  const useClone = process.platform === 'darwin' && process.env.SLAYZONE_DISABLE_CLONEFILE !== '1'
+  const useClone = process.platform === 'darwin'
   if (useClone) {
     const code = await new Promise<number | null>((resolve) => {
       const child = spawn('cp', ['-cR', src, dst], { stdio: 'ignore' })
