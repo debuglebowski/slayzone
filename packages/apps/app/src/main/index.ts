@@ -651,9 +651,10 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
     ? join(app.getAppPath(), '../runner/dist/bin.cjs')
     : join(process.resourcesPath, 'runner', 'bin.cjs')
   // The local runner derives its own credential store at `<ROOT>/runners` (same
-  // SLAYZONE_ROOT/$HOME it inherits from us) — no explicit handoff. Allowed roots
-  // default to the user's home (local runner operates on the user's own projects)
-  // unless the operator overrides via SLAYZONE_RUNNER_ALLOWED_ROOTS.
+  // SLAYZONE_ROOT/$HOME it inherits from us) — no explicit handoff. Its FS
+  // path-jail likewise self-derives: under SLAYZONE_SUPERVISED=1 loadRunnerConfig
+  // defaults allowedRoots to `[homedir()]` (local runner operates on the user's
+  // own projects), so there is no env handoff here either.
   const handleRunner = startLocalRunner({
     execPath: process.execPath,
     scriptPath: runnerScriptPath,
@@ -670,12 +671,11 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       // token/mint response. These OVERRIDE any inherited values so the local
       // runner always dials THIS boot's hub.
       SLAYZONE_HUB_URL: minted.hubUrl,
-      SLAYZONE_RUNNER_JOIN_TOKEN: minted.token,
-      // No SLAYZONE_RUNNER_NAME handoff: the runner defaults its enroll name to
-      // DEFAULT_LOCAL_RUNNER_NAME because SLAYZONE_SUPERVISED=1 (above), matching
-      // the hub's localRunnerName so the dedup collapses to one row.
-      SLAYZONE_RUNNER_ALLOWED_ROOTS:
-        process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS ?? homedir()
+      // No SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS handoff: under
+      // SLAYZONE_SUPERVISED=1 (above) the runner defaults its enroll name to
+      // DEFAULT_LOCAL_RUNNER_NAME (matching the hub's localRunnerName so the dedup
+      // collapses to one row) and its path-jail to `[homedir()]`.
+      SLAYZONE_RUNNER_JOIN_TOKEN: minted.token
     },
     logger: (line) => logBoot(line),
     onPermanentFailure: (info) => {

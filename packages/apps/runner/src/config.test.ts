@@ -1,6 +1,6 @@
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { hostname, tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { homedir, hostname, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/slayzone-config'
 import { assertPathAllowed, ENV_VARS, loadRunnerConfig } from './config'
@@ -45,17 +45,15 @@ describe('loadRunnerConfig', () => {
     expect(config.capabilities).toEqual(['pty', 'git', 'fs', 'proc'])
   })
 
-  it('env allowedRoots wins (the supervised host-injection channel)', () => {
-    // The Electron host injects SLAYZONE_RUNNER_ALLOWED_ROOTS into its local
-    // runner; env must override the shared config.
-    const config = loadRunnerConfig(
-      {
-        [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
-        [ENV_VARS.allowedRoots]: ['/home/me', '/srv/x'].join(delimiter)
-      },
-      { allowedRoots: ['/from/config'] }
-    )
-    expect(config.allowedRoots).toEqual(['/home/me', '/srv/x'])
+  it('allowedRoots defaults to [homedir()] when SUPERVISED (no env channel)', () => {
+    // The supervised local runner self-derives its FS path-jail — the former
+    // SLAYZONE_RUNNER_ALLOWED_ROOTS host-injection channel is gone. shared={}
+    // for a supervised runner, so this default holds untouched.
+    const config = loadRunnerConfig({
+      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
+      SLAYZONE_SUPERVISED: '1'
+    })
+    expect(config.allowedRoots).toEqual([homedir()])
   })
 
   it('name defaults to the local-runner const when SUPERVISED (dedup pair)', () => {
@@ -122,17 +120,21 @@ describe('loadRunnerConfig', () => {
     expect(config.joinToken).toBe(token)
   })
 
-  it('lets an explicit env hubUrl + pin override the join-token values', () => {
+  it('lets an explicit env hubUrl + config pin override the join-token values', () => {
     const token = mintToken({
       hubUrl: 'wss://from-token/runners',
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
-    const config = loadRunnerConfig({
-      [ENV_VARS.joinToken]: token,
-      [ENV_VARS.hubUrl]: 'wss://override.example/runners',
-      [ENV_VARS.pinnedCertSha256]: 'b'.repeat(64)
-    })
+    // hubUrl overrides via env; the pin has no env channel — config.json is its
+    // explicit override path and still beats the token-decoded fingerprint.
+    const config = loadRunnerConfig(
+      {
+        [ENV_VARS.joinToken]: token,
+        [ENV_VARS.hubUrl]: 'wss://override.example/runners'
+      },
+      { pinnedCertSha256: 'b'.repeat(64) }
+    )
     expect(config.hubUrl).toBe('wss://override.example/runners')
     expect(config.pinnedCertSha256).toBe('b'.repeat(64))
   })
@@ -143,16 +145,7 @@ describe('loadRunnerConfig', () => {
     )
   })
 
-  it('fails fast when an EXPLICIT env pin is set on a ws:// hub url (no silent downgrade)', () => {
-    expect(() =>
-      loadRunnerConfig({
-        [ENV_VARS.hubUrl]: 'ws://hub.example/runners',
-        [ENV_VARS.pinnedCertSha256]: 'a'.repeat(64)
-      })
-    ).toThrow(/requires a wss:\/\/ hub url/)
-  })
-
-  it('fails fast when an EXPLICIT config.json pin is set on a ws:// hub url', () => {
+  it('fails fast when an EXPLICIT config.json pin is set on a ws:// hub url (no silent downgrade)', () => {
     expect(() =>
       loadRunnerConfig(
         {},
@@ -175,11 +168,11 @@ describe('loadRunnerConfig', () => {
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
-  it('accepts an explicit pin on a wss:// hub url', () => {
-    const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
-      [ENV_VARS.pinnedCertSha256]: 'a'.repeat(64)
-    })
+  it('accepts an explicit config.json pin on a wss:// hub url', () => {
+    const config = loadRunnerConfig(
+      { [ENV_VARS.hubUrl]: 'wss://hub.example/runners' },
+      { pinnedCertSha256: 'a'.repeat(64) }
+    )
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 

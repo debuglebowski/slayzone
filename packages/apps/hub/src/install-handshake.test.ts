@@ -244,18 +244,18 @@ async function main(): Promise<void> {
     })
 
     // --- spawn the runner, isolated, pointed at the minted token -------------
-    // The runner display name now comes from <ROOT>/config.json (the SLAYZONE_RUNNER_NAME
-    // env channel is gone). Write it before spawn so the standalone runner reads it.
+    // The runner display name + FS path-jail now come from <ROOT>/config.json (the
+    // SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
+    // Write them before spawn so the standalone runner reads them.
     writeFileSync(
       join(runnerRootDir, 'config.json'),
-      JSON.stringify({ runnerName: 'install-handshake-runner' })
+      JSON.stringify({ runnerName: 'install-handshake-runner', allowedRoots: [workDir] })
     )
     runner = spawnChild(RUNNER_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: runnerRootDir,
       SLAYZONE_HUB_URL: tok.hubUrl,
-      SLAYZONE_RUNNER_JOIN_TOKEN: tok.token,
-      SLAYZONE_RUNNER_ALLOWED_ROOTS: workDir
+      SLAYZONE_RUNNER_JOIN_TOKEN: tok.token
     })
 
     // --- assert enrollment via runners.list over tRPC-WS ---------------------

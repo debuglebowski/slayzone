@@ -149,7 +149,7 @@ SMOKE_SECRET="$(openssl rand -hex 32)"
 SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
        -u SLAYZONE_SERVER_PORT -u SLAYZONE_RUNNER_TRANSPORT_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET
        -u SLAYZONE_HUB_URL -u SLAYZONE_JOIN_TOKEN -u SLAYZONE_RUNNER_CREDENTIALS_DIR
-       -u SLAYZONE_RUNNER_ALLOWED_ROOTS -u ELECTRON_RUN_AS_NODE)
+       -u ELECTRON_RUN_AS_NODE)
 
 # Fixed loopback port for the hub's shared HTTP server (health + join-token REST);
 # the /runners wss port stays OS-assigned (0) and is embedded in the minted token.
@@ -195,11 +195,12 @@ HUB_WSS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).hubUrl)' "$
 echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
 
 # Boot the runner from ITS tarball (proves node-pty rebuilt for the consumer ABI)
-# and point it at the minted token.
+# and point it at the minted token. The FS path-jail has no env channel — it comes
+# from <ROOT>/config.json `allowedRoots` (or the SLAYZONE_ROOT default in bin.ts).
+echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_URL="$HUB_WSS" SLAYZONE_JOIN_TOKEN="$JOIN_TOKEN" \
   SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
-  SLAYZONE_RUNNER_ALLOWED_ROOTS="$RUN_WORK" \
   node "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
 RPID=$!
 

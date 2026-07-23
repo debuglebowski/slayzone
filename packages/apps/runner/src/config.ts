@@ -12,8 +12,8 @@
  */
 
 import { realpathSync } from 'node:fs'
-import { hostname } from 'node:os'
-import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
+import { homedir, hostname } from 'node:os'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_RUNNER_NAME,
@@ -40,14 +40,15 @@ export type RunnerConfig = z.infer<typeof runnerConfigSchema>
 
 export const ENV_VARS = {
   hubUrl: 'SLAYZONE_HUB_URL',
-  joinToken: 'SLAYZONE_RUNNER_JOIN_TOKEN',
-  // allowedRoots: the Electron host injects this into its supervised local runner
-  // (see app main startLocalRunnerWithAutoEnroll). Kept as the supervised channel;
-  // a STANDALONE runner gets it from <ROOT>/config.json (+ the ROOT default in
-  // bin.ts). The runner NAME has no env channel — it derives from SUPERVISED
-  // (→ DEFAULT_LOCAL_RUNNER_NAME) or config.json `runnerName`, else the hostname.
-  allowedRoots: 'SLAYZONE_RUNNER_ALLOWED_ROOTS',
-  pinnedCertSha256: 'SLAYZONE_HUB_CERT_SHA256'
+  joinToken: 'SLAYZONE_RUNNER_JOIN_TOKEN'
+  // allowedRoots has NO env channel: a SUPERVISED runner self-derives its FS
+  // path-jail to `[homedir()]` (below), a STANDALONE runner gets it from
+  // <ROOT>/config.json `allowedRoots` (+ the ROOT default in bin.ts). The runner
+  // NAME likewise has no env channel — it derives from SUPERVISED (→
+  // DEFAULT_LOCAL_RUNNER_NAME) or config.json `runnerName`, else the hostname.
+  // The cert pin has NO env channel either: it arrives via the join token (auto
+  // path) or <ROOT>/config.json `pinnedCertSha256` (explicit standalone path).
+  // Never a bare env var — a fingerprint is never fished out of ambient env.
 } as const
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
@@ -116,14 +117,6 @@ export function assertPathAllowed(candidate: string, allowedRoots: readonly stri
 
 type Env = Record<string, string | undefined>
 
-function splitList(value: string | undefined, separator: string): string[] | undefined {
-  if (value === undefined) return undefined
-  return value
-    .split(separator)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0)
-}
-
 /**
  * Map the shared `<ROOT>/config.json` onto the runner's config shape. This is
  * the SINGLE config file for a standalone runner — the former
@@ -183,7 +176,11 @@ export function loadRunnerConfig(
     // to one row; standalone → the hostname (config.json `runnerName` overrides
     // via ...fromShared below).
     name: env.SLAYZONE_SUPERVISED === '1' ? DEFAULT_LOCAL_RUNNER_NAME : hostname(),
-    allowedRoots: [] as string[],
+    // FS path-jail default. Supervised local runner → `[homedir()]` (it operates
+    // on the user's own projects under $HOME); standalone → `[]` here, then
+    // config.json `allowedRoots` (...fromShared below) or the SLAYZONE_ROOT
+    // fallback in bin.ts. No env channel either way.
+    allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
     ...(fromToken
       ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint }
@@ -191,15 +188,7 @@ export function loadRunnerConfig(
     // <ROOT>/config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(env[ENV_VARS.hubUrl] !== undefined ? { hubUrl: env[ENV_VARS.hubUrl] } : {}),
-    ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {}),
-    // allowedRoots env read is the SUPERVISED injection channel (host passes the
-    // path-jail); standalone gets it from config.json / the ROOT default.
-    ...(splitList(env[ENV_VARS.allowedRoots], delimiter) !== undefined
-      ? { allowedRoots: splitList(env[ENV_VARS.allowedRoots], delimiter) }
-      : {}),
-    ...(env[ENV_VARS.pinnedCertSha256] !== undefined
-      ? { pinnedCertSha256: env[ENV_VARS.pinnedCertSha256] }
-      : {})
+    ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {})
   }
 
   const result = runnerConfigSchema.safeParse(merged)
@@ -210,16 +199,16 @@ export function loadRunnerConfig(
     )
   }
 
-  // Fail-fast on an EXPLICITLY-configured pin (env or config.json) against a
-  // plaintext ws:// hub: pinning is meaningless without TLS, and silently dropping
-  // it would downgrade an operator who asked for pinning to an unpinned connection.
-  // A pin that came ONLY from the join token (the auto path) is NOT explicit — it
-  // is softly ignored downstream (startRunner) when the resolved url is ws://, so a
-  // ws token stays usable for loopback/dev without a hard failure.
-  const explicitPin = env[ENV_VARS.pinnedCertSha256] ?? fromShared.pinnedCertSha256
+  // Fail-fast on an EXPLICITLY-configured pin (config.json `pinnedCertSha256`)
+  // against a plaintext ws:// hub: pinning is meaningless without TLS, and silently
+  // dropping it would downgrade an operator who asked for pinning to an unpinned
+  // connection. A pin that came ONLY from the join token (the auto path) is NOT
+  // explicit — it is softly ignored downstream (startRunner) when the resolved url
+  // is ws://, so a ws token stays usable for loopback/dev without a hard failure.
+  const explicitPin = fromShared.pinnedCertSha256
   if (explicitPin !== undefined && urlProtocol(result.data.hubUrl) === 'ws:') {
     throw new Error(
-      `${ENV_VARS.pinnedCertSha256} (or config pinnedCertSha256) requires a wss:// hub url; ` +
+      `config pinnedCertSha256 requires a wss:// hub url; ` +
         `got '${result.data.hubUrl}'. Pinning has no effect without TLS — use a wss:// url or drop the pin.`
     )
   }

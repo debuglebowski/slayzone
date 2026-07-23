@@ -111,12 +111,13 @@ function spawnLoopbackRunner(opts: {
 }): SpawnedRunner {
   const electronPath = require('electron') as unknown as string
   const logs: string[] = []
-  // The display name now comes from <ROOT>/config.json (the SLAYZONE_RUNNER_NAME
-  // env channel is gone). Write it before spawn so the STANDALONE runner reads it.
+  // The display name + FS path-jail now come from <ROOT>/config.json (the
+  // SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
+  // Write them before spawn so the STANDALONE runner reads them.
   fs.mkdirSync(opts.rootDir, { recursive: true })
   fs.writeFileSync(
     path.join(opts.rootDir, 'config.json'),
-    JSON.stringify({ runnerName: 'e2e-loopback-runner' })
+    JSON.stringify({ runnerName: 'e2e-loopback-runner', allowedRoots: [opts.allowedRoots] })
   )
   // ELECTRON_RUN_AS_NODE runs the Electron binary as plain Node so the runner's
   // node-pty native addon shares the app's ABI — mirrors how the app supervisor
@@ -131,8 +132,7 @@ function spawnLoopbackRunner(opts: {
       SLAYZONE_ROOT: opts.rootDir,
       SLAYZONE_HUB_URL: opts.hubUrl,
       SLAYZONE_RUNNER_JOIN_TOKEN: opts.joinToken,
-      SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir,
-      SLAYZONE_RUNNER_ALLOWED_ROOTS: opts.allowedRoots
+      SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -387,10 +387,10 @@ base.describe('Runner loopback (runner ON)', () => {
         SLAYZONE_ROOT: userDataDir,
         // Opt the runner supervisor back in despite PLAYWRIGHT (default skips it).
         SLAYZONE_E2E_ALLOW_RUNNER: '1',
-        // Keep the auto-spawned runner's node-pty ABI matching + roots/creds
-        // confined to the isolated dir (main defaults roots to $HOME otherwise).
-        // The supervised runner enrolls as DEFAULT_LOCAL_RUNNER_NAME ('local-runner').
-        SLAYZONE_RUNNER_ALLOWED_ROOTS: userDataDir,
+        // The supervised runner self-derives its path-jail to `[homedir()]` (no
+        // env channel). userDataDir lives under `.e2e-runtime` → under the repo →
+        // under $HOME, so it is inside the jail and the PTY exec below passes.
+        // The runner enrolls as DEFAULT_LOCAL_RUNNER_NAME ('local-runner').
         SLAYZONE_RUNNER_CREDENTIALS_DIR: path.join(userDataDir, 'auto-runner-creds')
       })
     })

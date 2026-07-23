@@ -33,16 +33,21 @@ import { startRunner } from './main'
  *
  * Prompts the join token (embeds hub URL + cert pin), the filesystem path-jail
  * (default: the launch dir), and an optional display name (default: hostname —
- * left unset unless the user types a custom one, so it resolves live). The
- * accepted values are seeded into `process.env` and, on a `[Y/n]`-confirm,
- * persisted to <ROOT>/config.json so subsequent boots need no prompt.
+ * left unset unless the user types a custom one, so it resolves live). On a
+ * `[Y/n]`-confirm the values persist to <ROOT>/config.json so later boots need
+ * no prompt. The join token is also seeded into `process.env` (the resolver
+ * reads it via ENV_VARS.joinToken); the name + path-jail have NO env channel, so
+ * this returns them to `main` to layer over the config even on a declined save.
  */
-async function maybeInteractiveSetup(): Promise<string | undefined> {
-  if (!canPrompt()) return undefined
+async function maybeInteractiveSetup(): Promise<{
+  name?: string
+  allowedRoots?: string[]
+}> {
+  if (!canPrompt()) return {}
 
   const cfg = loadSlayzoneConfig()
   // A join token is self-sufficient (first contact) → nothing to ask.
-  if ((process.env[ENV_VARS.joinToken] ?? cfg.joinToken) !== undefined) return undefined
+  if ((process.env[ENV_VARS.joinToken] ?? cfg.joinToken) !== undefined) return {}
 
   // Already enrolled? A stored credential for the known hub host means we can
   // reconnect without a token. Skip the prompt in that case.
@@ -51,7 +56,7 @@ async function maybeInteractiveSetup(): Promise<string | undefined> {
     try {
       // Creds derive from the ROOT anchor (`<ROOT>/runners`) — no override knob.
       const store = createFileCredentialStore(hubHostFromUrl(hubUrl))
-      if (await store.load()) return undefined
+      if (await store.load()) return {}
     } catch {
       // Unreadable url/creds → fall through to prompting.
     }
@@ -67,8 +72,12 @@ async function maybeInteractiveSetup(): Promise<string | undefined> {
         label: 'Hub join token (from `POST /api/runners/join-token` on the hub)'
       },
       {
+        // envKey is inert — the resolver has no env channel for the path-jail
+        // (like `runnerName` below). A saved value reaches config.json (re-read
+        // below); a declined-save value is threaded into loadRunnerConfig via the
+        // returned allowedRoots.
         configKey: 'allowedRoots',
-        envKey: ENV_VARS.allowedRoots,
+        envKey: 'SLAYZONE_RUNNER_ALLOWED_ROOTS',
         label: 'Filesystem roots the runner may access (comma-separated)',
         default: defaultRoot,
         transform: (raw) => {
@@ -93,10 +102,14 @@ async function maybeInteractiveSetup(): Promise<string | undefined> {
     ]
   })
 
-  // Return the prompted name (saved or this-run-only) so main can layer it over
-  // the shared config even when the user declines persisting it.
+  // Return the prompted name + path-jail (saved or this-run-only) so main can
+  // layer them over the shared config even when the user declines persisting.
   const collectedName = result.collected.find((c) => c.field.configKey === 'runnerName')
-  return typeof collectedName?.config === 'string' ? collectedName.config : undefined
+  const collectedRoots = result.collected.find((c) => c.field.configKey === 'allowedRoots')
+  const out: { name?: string; allowedRoots?: string[] } = {}
+  if (typeof collectedName?.config === 'string') out.name = collectedName.config
+  if (Array.isArray(collectedRoots?.config)) out.allowedRoots = collectedRoots.config as string[]
+  return out
 }
 
 async function main(): Promise<void> {
@@ -109,17 +122,23 @@ async function main(): Promise<void> {
     process.env.SLAYZONE_ROOT = process.cwd()
   }
 
-  // Interactive first-run setup (TTY only) — may seed env + write config.json
-  // before the resolver below reads them. No-op when non-interactive / enrolled.
-  // Returns the prompted display name (if any) so a declined-save still applies
-  // it this boot (the resolver has no env channel for the name).
-  const promptedName = await maybeInteractiveSetup()
+  // Interactive first-run setup (TTY only) — may seed the join token into env +
+  // write config.json before the resolver below reads them. No-op when
+  // non-interactive / enrolled. Returns the prompted display name + path-jail (if
+  // any) so a declined-save still applies them this boot (neither has an env
+  // channel).
+  const prompted = await maybeInteractiveSetup()
 
   let config
   try {
-    config = promptedName
-      ? loadRunnerConfig(process.env, { ...loadSlayzoneConfig(), runnerName: promptedName })
-      : loadRunnerConfig()
+    config =
+      prompted.name !== undefined || prompted.allowedRoots !== undefined
+        ? loadRunnerConfig(process.env, {
+            ...loadSlayzoneConfig(),
+            ...(prompted.name !== undefined ? { runnerName: prompted.name } : {}),
+            ...(prompted.allowedRoots !== undefined ? { allowedRoots: prompted.allowedRoots } : {})
+          })
+        : loadRunnerConfig()
   } catch (err) {
     process.stderr.write(`slayzone-runner: ${err instanceof Error ? err.message : String(err)}\n`)
     process.stderr.write(
