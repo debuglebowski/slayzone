@@ -677,6 +677,18 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       roRef.current = null
     }
     if (el) {
+      // Measure synchronously as the ref attaches (commit phase, before paint)
+      // so `containerWidth > 0` on the first paint. Otherwise the terminal panel
+      // renders `flex:1` (full row width) for one frame before its resolved px
+      // width applies, and the terminal's synchronous init fit() bakes columns
+      // for that transient-wide box → the terminal renders wider than its panel
+      // until a later resize corrects it. The ResizeObserver below only reports
+      // on a subsequent frame, which is too late for the mount fit.
+      const initialWidth = Math.floor(el.getBoundingClientRect().width)
+      if (initialWidth > 0 && Math.abs(initialWidth - lastWidthRef.current) >= 2) {
+        lastWidthRef.current = initialWidth
+        setContainerWidth(initialWidth)
+      }
       roRef.current = new ResizeObserver(([entry]) => {
         const w = Math.floor(entry.contentRect.width)
         if (Math.abs(w - lastWidthRef.current) < 2) return

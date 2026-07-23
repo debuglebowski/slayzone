@@ -243,6 +243,26 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     })
   }, [sessionId])
 
+  // Idempotent fit: only calls fit() when the proposed geometry (measured from
+  // the current container width + cell size) differs from what the terminal
+  // currently renders. Safe to call at any time — a matching geometry is a
+  // no-op, so it can back every fit trigger without spurious SIGWINCH/atlas
+  // churn. Covers BOTH drift axes: a container-width change (the mount race)
+  // and a cell-size change (webfont FOUT swapping the measured cell after the
+  // init fit). Returns true when it actually re-fit.
+  const ensureFit = useCallback((site: string): boolean => {
+    const terminal = terminalRef.current
+    const fitAddon = fitAddonRef.current
+    if (!terminal || !fitAddon) return false
+    const proposed = fitAddon.proposeDimensions()
+    if (!proposed || Number.isNaN(proposed.cols) || Number.isNaN(proposed.rows)) return false
+    if (proposed.cols === terminal.cols && proposed.rows === terminal.rows) return false
+    fitAddon.fit()
+    diag(sessionId, 'fit', { site, terminal })
+    scheduleAtlasCorrection()
+    return true
+  }, [sessionId, scheduleAtlasCorrection])
+
   const wasActiveRef = useRef(isActive)
 
   // Reactive store value; local ptyState mirrors it but also carries transient
@@ -668,6 +688,25 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         diag(sessionId, 'fit', { site: 'init', terminal })
         timeline.mark('xterm_opened')
 
+        // Post-init FOUT catch-up. createXterm awaited document.fonts.load, but
+        // that resolves once the face is *requested*, not fully rendered — the
+        // measured cell can still shift as the webfont swaps in, leaving the
+        // init fit's cols sized to the fallback cell and the screen wider/
+        // narrower than the container until some later resize corrects it. For a
+        // terminal that mounts active and never leaves, nothing else re-fits it.
+        // Re-fit once fonts settle, but only if the geometry actually changed
+        // (mismatch-gated, same contract as ensureFit) so it's a no-op in the
+        // common case. Fire-and-forget; guarded on abort + still-current term.
+        void document.fonts.ready.then(() => {
+          if (signal.aborted || terminalRef.current !== terminal) return
+          const proposed = fitAddon.proposeDimensions()
+          if (!proposed || Number.isNaN(proposed.cols) || Number.isNaN(proposed.rows)) return
+          if (proposed.cols === terminal.cols && proposed.rows === terminal.rows) return
+          fitAddon.fit()
+          diag(sessionId, 'fit', { site: 'init-fonts-ready', terminal })
+          scheduleAtlasCorrection()
+        })
+
         // WebGL renderer — 5-10x faster than the DOM renderer.
         // Safe because filterBufferData() strips SGR 4 (underline) codes server-side
         // before data reaches the renderer. CSS override kept as safety net.
@@ -880,7 +919,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       resetTaskState,
       handleTerminalKeyEvent,
       clearBufferWithoutRestart,
-      trpcClient
+      trpcClient,
+      scheduleAtlasCorrection
     ]
   )
 
@@ -1130,26 +1170,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setPtyState((prev) => (storeState === 'starting' && prev !== 'starting' ? prev : storeState))
   }, [storeState])
 
-  // Re-rasterize the WebGL atlas on isActive false→true. A task switch is a
-  // CSS visibility:hidden flip — no fit() fires on its own — so the atlas
-  // built before hide can desync from the renderer's cell metrics by the
-  // time the user returns. Mirrors the resize-needed handler shape: fit()
-  // re-measures the cell, scheduleAtlasCorrection() re-rasterizes against
-  // the new measurement.
+  // Re-fit + re-rasterize on isActive false→true. A task switch is a CSS
+  // visibility:hidden flip — no ResizeObserver fires on its own — so a panel
+  // width change made while this tab was hidden (or a cell-metric change) can
+  // leave stale cols/rows by the time the user returns. NOT gated on the WebGL
+  // addon: DOM-renderer terminals (no addon) need the re-fit too, and
+  // ensureFit's mismatch check makes it a no-op when nothing changed.
+  // scheduleAtlasCorrection() inside ensureFit already no-ops without an addon.
   useEffect(() => {
-    if (
-      isActive &&
-      !wasActiveRef.current &&
-      fitAddonRef.current &&
-      terminalRef.current &&
-      webglAddonRef.current
-    ) {
-      fitAddonRef.current.fit()
-      diag(sessionId, 'fit', { site: 'reactivate', terminal: terminalRef.current })
-      scheduleAtlasCorrection()
+    if (isActive && !wasActiveRef.current) {
+      ensureFit('reactivate')
     }
     wasActiveRef.current = isActive
-  }, [isActive, sessionId, scheduleAtlasCorrection])
+  }, [isActive, ensureFit])
 
   // Re-fit terminal when PTY dimensions need resync (e.g., after floating agent
   // reattach). Server fan-out is global; filter by sessionId. The follow-up
@@ -1255,9 +1288,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         return
       }
 
-      fitAddonRef.current?.fit()
-      diag(sessionId, 'fit', { site: 'resize-observer', terminal: terminalRef.current })
-      scheduleAtlasCorrection()
+      ensureFit('resize-observer')
     }
 
     window.addEventListener('resize', handleResize)
@@ -1270,7 +1301,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       window.removeEventListener('resize', handleResize)
       observer.disconnect()
     }
-  }, [initTerminal, sessionId, scheduleAtlasCorrection])
+  }, [initTerminal, ensureFit])
 
   // Panel resize just ended (`paused` true → false): the ResizeObserver fits
   // were skipped during the drag, so the container now has its final width but
@@ -1284,10 +1315,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (!justResumed || !terminalRef.current) return
     const rect = containerRef.current?.getBoundingClientRect()
     if (!rect || rect.width === 0 || rect.height === 0) return
-    fitAddonRef.current?.fit()
-    diag(sessionId, 'fit', { site: 'resize-end', terminal: terminalRef.current })
-    scheduleAtlasCorrection()
-  }, [paused, sessionId, scheduleAtlasCorrection])
+    ensureFit('resize-end')
+  }, [paused, ensureFit])
 
   // Update font size at runtime when setting changes.
   // Await the font at the NEW size before fitting — otherwise fit() measures
@@ -1308,16 +1337,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         new Promise((resolve) => setTimeout(resolve, 1500))
       ])
       if (cancelled) return
-      const tCurrent = terminalRef.current
-      if (!tCurrent) return
-      fitAddonRef.current?.fit()
-      diag(sessionId, 'fit', { site: 'font-size', terminal: tCurrent })
-      scheduleAtlasCorrection()
+      if (!terminalRef.current) return
+      ensureFit('font-size')
     })()
     return () => {
       cancelled = true
     }
-  }, [terminalFontSize, terminalFontFamily, sessionId, scheduleAtlasCorrection])
+  }, [terminalFontSize, terminalFontFamily, ensureFit])
 
   // Update font family at runtime.
   // Same FOUT race as font-size: await the new face before fit() so the
@@ -1335,16 +1361,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         new Promise((resolve) => setTimeout(resolve, 1500))
       ])
       if (cancelled) return
-      const tCurrent = terminalRef.current
-      if (!tCurrent) return
-      fitAddonRef.current?.fit()
-      diag(sessionId, 'fit', { site: 'font-family', terminal: tCurrent })
-      scheduleAtlasCorrection()
+      if (!terminalRef.current) return
+      ensureFit('font-family')
     })()
     return () => {
       cancelled = true
     }
-  }, [terminalFontFamily, terminalFontSize, sessionId, scheduleAtlasCorrection])
+  }, [terminalFontFamily, terminalFontSize, ensureFit])
 
   // Fit-independent atlas correction.
   //
