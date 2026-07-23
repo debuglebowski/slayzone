@@ -4,7 +4,6 @@ import type { HubEntry } from '@slayzone/types'
 import {
   Button,
   Input,
-  Label,
   toast,
   cn,
   Switch,
@@ -222,7 +221,6 @@ export function HubsSettingsTab() {
 
       {/* Hub list */}
       <div className="space-y-3">
-        <Label className="text-base font-semibold">Hubs</Label>
         <table className="w-full text-sm" data-testid="hubs-table">
           <thead>
             <tr className="text-muted-foreground text-left text-xs">
@@ -404,10 +402,17 @@ export function HubsSettingsTab() {
             </tr>
           </tbody>
         </table>
-        {remotes.length === 0 && (
-          <p className="text-muted-foreground text-xs">
-            Just the local hub. Use the row above to connect to more.
-          </p>
+        {dirty && (
+          <Button
+            className="w-full"
+            onClick={() => {
+              void save()
+            }}
+            disabled={saving}
+            data-testid="hubs-save-relaunch"
+          >
+            {saving ? 'Saving…' : 'Save & relaunch'}
+          </Button>
         )}
       </div>
 
@@ -459,20 +464,6 @@ export function HubsSettingsTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Save */}
-      <div className="flex items-center gap-2 pt-2">
-        <Button
-          onClick={() => {
-            void save()
-          }}
-          disabled={!dirty || saving}
-          data-testid="hubs-save-relaunch"
-        >
-          {saving ? 'Saving…' : 'Save & relaunch'}
-        </Button>
-        {dirty && <span className="text-muted-foreground text-xs">Unsaved changes</span>}
-      </div>
     </div>
   )
 }

@@ -63,7 +63,8 @@ test.describe('Run-local-hub toggle', () => {
     await expect(dialog.getByTestId('hub-row-local')).toBeVisible()
     await expect(dialog.getByTestId('hub-local-toggle')).toBeChecked()
     await expect(dialog.getByTestId('hub-local-toggle')).toBeDisabled()
-    await expect(dialog.getByTestId('hubs-save-relaunch')).toBeDisabled()
+    // Save button only renders when there are unsaved changes — none on open.
+    await expect(dialog.getByTestId('hubs-save-relaunch')).toHaveCount(0)
     await mainWindow.keyboard.press('Escape')
   })
 
