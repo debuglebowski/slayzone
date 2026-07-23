@@ -46,6 +46,11 @@ test.describe('Remote server health probe', () => {
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
     await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+    // The add-hub form lives in a collapsed "＋ Add new hub" row now — expand it
+    // (idempotent: the dialog persists across tests in this describe, so only
+    // click when the collapsed opener is still showing).
+    const opener = dialog.getByTestId('hub-add-open')
+    if (await opener.isVisible().catch(() => false)) await opener.click()
     await expect(dialog.getByTestId('hub-add-url')).toBeVisible({ timeout: 5_000 })
     return dialog
   }

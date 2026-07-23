@@ -8,13 +8,14 @@ import {
   toast,
   cn,
   Switch,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
 } from '@slayzone/ui'
-import { Trash2, RotateCw } from 'lucide-react'
+import { Trash2, RotateCw, Plus, X } from 'lucide-react'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 /**
@@ -22,6 +23,11 @@ import { SettingsTabIntro } from './SettingsTabIntro'
  * connects to at once. The LOCAL hub is always present + always running and is
  * shown read-only; the user adds/removes/relabels REMOTE hubs and picks the
  * default (where new projects land).
+ *
+ * Adding a hub is a row inside the table ("＋ Add new hub") that expands into the
+ * label/url/probe form inline — the add affordance lives with the list, not as a
+ * detached form. Signing in to an authed remote is a per-row action that opens a
+ * modal for that hub (the row identifies which hub, so no picker is needed).
  *
  * The registry lives in the pre-boot `boot-config.json` (a hub can't store the
  * list of hubs), so it is read via `getHubRegistry` and written via
@@ -47,12 +53,14 @@ export function HubsSettingsTab() {
   const [saving, setSaving] = useState(false)
   const [restarting, setRestarting] = useState(false)
 
-  // Add-hub form
+  // Add-hub row — collapsed to a "＋ Add new hub" button until expanded.
+  const [addingHub, setAddingHub] = useState(false)
   const [newLabel, setNewLabel] = useState('')
   const [newUrl, setNewUrl] = useState('')
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' })
 
-  // Sign-in form (per remote hub bearer auth)
+  // Sign-in modal (per remote hub bearer auth). `signInHubId` non-empty = open;
+  // the row that launched it names the hub, so there's no picker.
   const [signInHubId, setSignInHubId] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -72,6 +80,19 @@ export function HubsSettingsTab() {
     setAuthedHubIds(new Set(Object.keys(tokens)))
     setDirty(false)
   }, [])
+
+  const openSignIn = (hubId: string): void => {
+    setSignInHubId(hubId)
+    setEmail('')
+    setPassword('')
+    setSignInState({ kind: 'idle' })
+  }
+
+  const closeSignIn = (): void => {
+    setSignInHubId('')
+    setPassword('')
+    setSignInState({ kind: 'idle' })
+  }
 
   const signIn = async (): Promise<void> => {
     const hub = remotes.find((h) => h.id === signInHubId)
@@ -103,6 +124,13 @@ export function HubsSettingsTab() {
     else setProbe({ kind: 'fail', reason: result.error ?? 'Unreachable' })
   }
 
+  const collapseAddHub = (): void => {
+    setAddingHub(false)
+    setNewLabel('')
+    setNewUrl('')
+    setProbe({ kind: 'idle' })
+  }
+
   const addHub = (): void => {
     if (probe.kind !== 'ok') return
     const url = probe.normalizedUrl
@@ -115,9 +143,7 @@ export function HubsSettingsTab() {
     const id = `hub:${url}`
     const label = newLabel.trim() || new URL(url.replace(/^ws/, 'http')).host
     setRemotes((prev) => [...prev, { id, kind: 'remote', label, url }])
-    setNewLabel('')
-    setNewUrl('')
-    setProbe({ kind: 'idle' })
+    collapseAddHub()
     setDirty(true)
   }
 
@@ -184,6 +210,8 @@ export function HubsSettingsTab() {
       setSaving(false)
     }
   }
+
+  const signInHub = remotes.find((h) => h.id === signInHubId)
 
   return (
     <div className="space-y-6">
@@ -284,102 +312,121 @@ export function HubsSettingsTab() {
                   />
                 </td>
                 <td className="py-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeHub(h.id)}
-                    data-testid="hub-remove"
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
+                  <div className="flex items-center justify-end gap-1">
+                    {!authedHubIds.has(h.id) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openSignIn(h.id)}
+                        data-testid="hub-signin-open"
+                      >
+                        Sign in
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeHub(h.id)}
+                      data-testid="hub-remove"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
+            {/* Add-hub row — collapsed to a button, expands into the probe form. */}
+            <tr className="border-border border-t" data-testid="hub-add-row">
+              {addingHub ? (
+                <td colSpan={4} className="py-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      placeholder="Name (optional)"
+                      className="max-w-[12rem]"
+                      data-testid="hub-add-label"
+                    />
+                    <Input
+                      value={newUrl}
+                      onChange={(e) => {
+                        setNewUrl(e.target.value)
+                        setProbe({ kind: 'idle' })
+                      }}
+                      placeholder="https://box.lan:7800 or wss://box.lan:7800/trpc"
+                      className="max-w-lg font-mono"
+                      data-testid="hub-add-url"
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={probe.kind === 'probing' || !newUrl.trim()}
+                      onClick={() => {
+                        void probeUrl()
+                      }}
+                      data-testid="hub-probe"
+                    >
+                      {probe.kind === 'probing' ? 'Checking…' : 'Validate'}
+                    </Button>
+                    <Button disabled={probe.kind !== 'ok'} onClick={addHub} data-testid="hub-add">
+                      Add
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={collapseAddHub}
+                      data-testid="hub-add-cancel"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="h-4 text-xs" data-testid="hub-probe-result">
+                    {probe.kind === 'ok' && (
+                      <span className="text-green-500">✓ reachable — {probe.normalizedUrl}</span>
+                    )}
+                    {probe.kind === 'fail' && (
+                      <span className="text-destructive">✗ {probe.reason}</span>
+                    )}
+                  </div>
+                </td>
+              ) : (
+                <td colSpan={4} className="py-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddingHub(true)}
+                    className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm"
+                    data-testid="hub-add-open"
+                  >
+                    <Plus className="size-4" />
+                    Add new hub
+                  </button>
+                </td>
+              )}
+            </tr>
           </tbody>
         </table>
         {remotes.length === 0 && (
           <p className="text-muted-foreground text-xs">
-            Just the local hub. Add a remote hub below to connect to more.
+            Just the local hub. Use the row above to connect to more.
           </p>
         )}
       </div>
 
-      {/* Add a hub */}
-      <div className="border-border space-y-3 border-t pt-6">
-        <Label className="text-base font-semibold">Add a hub</Label>
-        <div className="flex items-center gap-2">
-          <Input
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-            placeholder="Name (optional)"
-            className="max-w-[12rem]"
-            data-testid="hub-add-label"
-          />
-          <Input
-            value={newUrl}
-            onChange={(e) => {
-              setNewUrl(e.target.value)
-              setProbe({ kind: 'idle' })
-            }}
-            placeholder="https://box.lan:7800 or wss://box.lan:7800/trpc"
-            className="max-w-lg font-mono"
-            data-testid="hub-add-url"
-          />
-          <Button
-            variant="outline"
-            disabled={probe.kind === 'probing' || !newUrl.trim()}
-            onClick={() => {
-              void probeUrl()
-            }}
-            data-testid="hub-probe"
-          >
-            {probe.kind === 'probing' ? 'Checking…' : 'Validate'}
-          </Button>
-          <Button disabled={probe.kind !== 'ok'} onClick={addHub} data-testid="hub-add">
-            Add
-          </Button>
-        </div>
-        <div className="h-4 text-xs" data-testid="hub-probe-result">
-          {probe.kind === 'ok' && (
-            <span className="text-green-500">✓ reachable — {probe.normalizedUrl}</span>
-          )}
-          {probe.kind === 'fail' && <span className="text-destructive">✗ {probe.reason}</span>}
-        </div>
-      </div>
-
-      {/* Sign in — only relevant when there's a remote hub to authenticate to. */}
-      {remotes.length > 0 && (
-        <div className="border-border space-y-3 border-t pt-6">
-          <Label className="text-base font-semibold">Sign in to a hub</Label>
-          <p className="text-muted-foreground max-w-lg text-xs">
-            Remote hubs that require auth need a bearer token. Sign in with your hub account; the
-            token is stored encrypted on this machine.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={signInHubId || remotes[0]?.id}
-              onValueChange={(v) => {
-                setSignInHubId(v)
-                setSignInState({ kind: 'idle' })
-              }}
-            >
-              <SelectTrigger className="max-w-[12rem]" data-testid="hub-signin-select">
-                <SelectValue placeholder="Choose hub" />
-              </SelectTrigger>
-              <SelectContent>
-                {remotes.map((h) => (
-                  <SelectItem key={h.id} value={h.id}>
-                    {h.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      {/* Sign in — modal launched from a remote row. The row names the hub. */}
+      <Dialog open={!!signInHubId} onOpenChange={(open) => !open && closeSignIn()}>
+        <DialogContent data-testid="hub-signin-dialog">
+          <DialogHeader>
+            <DialogTitle>Sign in to {signInHub?.label ?? 'hub'}</DialogTitle>
+            <DialogDescription>
+              This remote hub requires auth. Sign in with your hub account; the token is stored
+              encrypted on this machine.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
             <Input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="email"
               type="email"
-              className="max-w-[14rem]"
               data-testid="hub-signin-email"
             />
             <Input
@@ -387,9 +434,19 @@ export function HubsSettingsTab() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="password"
               type="password"
-              className="max-w-[14rem]"
               data-testid="hub-signin-password"
             />
+            <div className="h-4 text-xs" data-testid="hub-signin-result">
+              {signInState.kind === 'ok' && <span className="text-green-500">✓ signed in</span>}
+              {signInState.kind === 'fail' && (
+                <span className="text-destructive">✗ {signInState.error}</span>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeSignIn}>
+              {signInState.kind === 'ok' ? 'Done' : 'Cancel'}
+            </Button>
             <Button
               disabled={signInState.kind === 'busy' || !email.trim() || !password}
               onClick={() => {
@@ -399,15 +456,9 @@ export function HubsSettingsTab() {
             >
               {signInState.kind === 'busy' ? 'Signing in…' : 'Sign in'}
             </Button>
-          </div>
-          <div className="h-4 text-xs" data-testid="hub-signin-result">
-            {signInState.kind === 'ok' && <span className="text-green-500">✓ signed in</span>}
-            {signInState.kind === 'fail' && (
-              <span className="text-destructive">✗ {signInState.error}</span>
-            )}
-          </div>
-        </div>
-      )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Save */}
       <div className="flex items-center gap-2 pt-2">

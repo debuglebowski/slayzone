@@ -44,8 +44,9 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() })
 }))
 
-// @slayzone/ui — light stubs. Switch → a role=switch button toggling on click;
-// AlertDialog family are passthroughs so the confirm action is always reachable.
+// @slayzone/ui — light stubs. AlertDialog family are passthroughs so the confirm
+// action is always reachable; Dialog respects `open` so the token modal only
+// renders after minting (the dismiss test asserts it disappears).
 vi.mock('@slayzone/ui', () => {
   const Pass = ({ children }: any) => <>{children}</>
   return {
@@ -55,11 +56,7 @@ vi.mock('@slayzone/ui', () => {
       </button>
     ),
     Input: (props: any) => <input {...props} />,
-    Card: Pass,
-    CardHeader: Pass,
-    CardTitle: ({ children }: any) => <div>{children}</div>,
-    CardDescription: ({ children }: any) => <div>{children}</div>,
-    CardContent: Pass,
+    Label: ({ children }: any) => <label>{children}</label>,
     AlertDialog: Pass,
     AlertDialogAction: ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>,
     AlertDialogCancel: ({ children }: any) => <button>{children}</button>,
@@ -68,6 +65,12 @@ vi.mock('@slayzone/ui', () => {
     AlertDialogFooter: Pass,
     AlertDialogHeader: Pass,
     AlertDialogTitle: ({ children }: any) => <div>{children}</div>,
+    Dialog: ({ open, children }: any) => (open ? <>{children}</> : null),
+    DialogContent: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+    DialogHeader: Pass,
+    DialogTitle: ({ children }: any) => <div>{children}</div>,
+    DialogDescription: ({ children }: any) => <div>{children}</div>,
+    DialogFooter: Pass,
     toast: { success: vi.fn(), error: vi.fn() }
   }
 })
@@ -111,7 +114,12 @@ describe('RunnersSettingsTab', () => {
       render(<RunnersSettingsTab />)
     })
     expect(screen.getByRole('heading', { name: 'Runners' })).toBeDefined()
-    // Enrollment is always available — the old enable-toggle + boot-gate are gone.
+    // Enrollment is always available — the add-row is present (collapsed) with no
+    // enable-toggle / boot-gate. Expanding it reveals an enabled Add button.
+    expect(screen.getByTestId('runner-add-open').hasAttribute('disabled')).toBe(false)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('runner-add-open'))
+    })
     expect(screen.getByTestId('runner-add').hasAttribute('disabled')).toBe(false)
     expect(screen.queryByTestId('runners-enabled-toggle')).toBeNull()
     expect(screen.queryByTestId('runner-enroll-disabled')).toBeNull()
@@ -120,6 +128,9 @@ describe('RunnersSettingsTab', () => {
   it('mints an enrollment token immediately (no mode to enable)', async () => {
     await act(async () => {
       render(<RunnersSettingsTab />)
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('runner-add-open'))
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add'))
@@ -133,6 +144,9 @@ describe('RunnersSettingsTab', () => {
   it('dismisses the minted token via the Done control', async () => {
     await act(async () => {
       render(<RunnersSettingsTab />)
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('runner-add-open'))
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add'))

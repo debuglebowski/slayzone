@@ -20,6 +20,11 @@ test.describe('Runner settings tab', () => {
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
     await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+    // The enroll form lives in a collapsed "＋ Add new runner" row now — expand it
+    // (idempotent: the dialog persists across tests, so only click when the
+    // collapsed opener is still showing).
+    const opener = dialog.getByTestId('runner-add-open')
+    if (await opener.isVisible().catch(() => false)) await opener.click()
     await expect(dialog.getByTestId('runner-add')).toBeVisible({ timeout: 5_000 })
     return dialog
   }
@@ -29,7 +34,7 @@ test.describe('Runner settings tab', () => {
   }) => {
     const dialog = await openRunnersTab(mainWindow)
 
-    // Enrollment is always on — the Add button is enabled from the start.
+    // Enrollment is always on — the Add button is enabled once the row expands.
     await expect(dialog.getByTestId('runner-add')).toBeEnabled()
 
     // The old enable-mode toggle + its disabled-until-booted explainer are gone.
