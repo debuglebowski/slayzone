@@ -133,6 +133,14 @@ export const runnerEventParamsSchema = z.object({
 })
 export type RunnerEventParams = z.infer<typeof runnerEventParamsSchema>
 
+/**
+ * `RunnerEventParams.name` for a relayed agent lifecycle hook. A runner-routed
+ * pty posts its hook to the runner's OWN loopback `/api/agent-hook`, and the
+ * runner forwards the raw envelope to the hub as a generic `event` with THIS
+ * name. Shared wire contract: the runner emits it, the hub matches on it.
+ */
+export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
+
 /** Progress of a workspace checkout/clone on the runner. */
 export const checkoutStatusParamsSchema = z.object({
   checkoutId: z.string().min(1),

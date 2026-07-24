@@ -100,18 +100,6 @@ export interface ArtifactExportAccess {
   renderToPng: (html: string) => Promise<Buffer>
 }
 
-/**
- * Structural result of verifying a per-task hub bearer (hub/runner split). Kept
- * a local structural mirror of `@slayzone/hub-auth`'s `VerifyTaskTokenResult` so
- * this transport package stays hub-auth-free — importing the hub-auth barrel
- * here would drag better-auth + node:sqlite into the Electron main bundle (the
- * host statically value-imports the transport server barrel). The composition
- * root, which already owns hub-auth, binds the real `verifyTaskToken`.
- */
-export type TaskTokenVerifyResult =
-  | { ok: true; claims: { taskId: string; runnerId: string; iat: number; exp: number } }
-  | { ok: false; reason: 'malformed' | 'bad-signature' | 'expired' }
-
 export interface RestApiDeps {
   db: SlayzoneDb
   /** Cross-cutting "data changed" ping (tasks + settings refetch). */
@@ -133,15 +121,6 @@ export interface RestApiDeps {
   /** Raise/show+focus the main window (open-task foreground path). */
   windowActions?: { raiseMainWindow: () => void }
   artifactExport?: ArtifactExportAccess
-  /**
-   * Per-task hub-bearer verifier (hub/runner split). Set once the runner init resolves
-   * (the composition root binds `@slayzone/hub-auth`'s `verifyTaskToken` closed
-   * over the runner secret). When set, the agent-hook route enforces a bearer
-   * that a runner-routed pty's hook carries (rejecting invalid/expired/scope-
-   * mismatched tokens). Absent (runner off — the default) OR when a hook sends no
-   * `Authorization` header (every local loopback hook) → the route is unchanged.
-   */
-  verifyTaskToken?: (token: string) => TaskTokenVerifyResult
   /**
    * Runner listener info accessors (hub/runner split, Wave3.5-D3). Set ONLY under
    * the composition root wires it, closed over the same late-bound refs the

@@ -11,7 +11,13 @@ import type { PtySessionWindow } from '../pty-host'
 import type { IPty } from 'node-pty'
 import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
 import Database from 'better-sqlite3'
-import { createPty, killPty, setDatabase, setConversationResolver } from './pty-manager'
+import {
+  createPty,
+  killPty,
+  setDatabase,
+  setConversationResolver,
+  setReinstallHooks
+} from './pty-manager'
 
 let passed = 0
 let failed = 0
@@ -292,6 +298,88 @@ await test('real-db resolver drives resume from the ledger (renderer hint absent
   killPty(sid)
   setConversationResolver(null)
   setDatabase(stubDb)
+})
+
+// ── Spawn-time hook self-heal (part 3) ───────────────────────────────────────
+// A hook-driven spawn must re-run the version-gated notify.sh installer just-in-
+// time so a stale cross-channel copy can't outlive a boot. Non-hook modes skip
+// it, and a throwing repair must NEVER block the spawn.
+
+await test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {
+  let calls = 0
+  setReinstallHooks(async () => {
+    calls++
+  })
+  setConversationResolver(async () => null)
+  const fake = makeFakePty()
+  const sid = 'healA:healA'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    existingConversationId: undefined,
+    conversationId: undefined,
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '--allow-dangerously-skip-permissions',
+    adoptPty: { pty: fake as unknown as IPty }
+  })
+  expect(calls === 1, `reinstallHooks must fire once for a hook-driven spawn (calls=${calls})`)
+  killPty(sid)
+  setConversationResolver(null)
+  setReinstallHooks(null)
+})
+
+await test('non-hook mode (terminal) does NOT fire reinstallHooks', async () => {
+  let calls = 0
+  setReinstallHooks(async () => {
+    calls++
+  })
+  const fake = makeFakePty()
+  const sid = 'healB:healB'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'terminal',
+    type: 'terminal',
+    existingConversationId: undefined,
+    conversationId: undefined,
+    adoptPty: { pty: fake as unknown as IPty }
+  })
+  expect(calls === 0, `plain terminal must not touch notify.sh (calls=${calls})`)
+  killPty(sid)
+  setReinstallHooks(null)
+})
+
+await test('a throwing reinstallHooks never blocks the spawn', async () => {
+  setReinstallHooks(async () => {
+    throw new Error('installer blew up')
+  })
+  setConversationResolver(async () => null)
+  const fake = makeFakePty()
+  const sid = 'healC:healC'
+  // Must resolve (not reject) despite the throwing repair.
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    existingConversationId: undefined,
+    conversationId: undefined,
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '--allow-dangerously-skip-permissions',
+    adoptPty: { pty: fake as unknown as IPty }
+  })
+  const cmd = fake.written.join('')
+  expect(cmd.includes('claude'), `spawn must still complete despite a failing repair: ${cmd}`)
+  killPty(sid)
+  setConversationResolver(null)
+  setReinstallHooks(null)
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

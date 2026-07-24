@@ -24,6 +24,7 @@ import { getPtyBackend, spawnLocalPty, type PtySpawnSpec } from './pty-backend'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
+  isHookDrivenMode,
   type TerminalMode,
   type TerminalAdapter,
   type SpawnConfig,
@@ -149,6 +150,26 @@ type HibernatedSetter = (tabId: string, hibernated: boolean) => void
 let hibernatedSetter: HibernatedSetter | null = null
 export function setHibernatedTabRecorder(fn: HibernatedSetter | null): void {
   hibernatedSetter = fn
+}
+
+/**
+ * Spawn-time hook self-heal (injected by the composition root — apps/app, which
+ * owns `installNotifyScript` + the Vite-bundled notify.sh source). Called
+ * fire-and-forget just before spawning a hook-driven agent so the shared
+ * `~/.slayzone/hooks/notify.sh` is repaired UPWARD just-in-time.
+ *
+ * Why: that file is shared across SlayZone channels (prod + dev). Another channel
+ * booting between our boots can leave a STALE copy on disk; the install-time
+ * version gate only runs at boot, so a long-lived app would keep firing hooks
+ * through a downgraded script. Re-running the version-gated installer at each
+ * spawn closes that window. The gate guarantees UPWARD-only (never a downgrade),
+ * and the installer is a cheap no-op when bytes already match — so this stays
+ * idempotent and safe on the hot spawn path. Kept behind a seam so this domain
+ * never imports the app / Vite `?raw` graph.
+ */
+let reinstallHooks: (() => Promise<void>) | null = null
+export function setReinstallHooks(fn: (() => Promise<void>) | null): void {
+  reinstallHooks = fn
 }
 
 /**
@@ -1426,11 +1447,24 @@ export async function createPty(
       }
     })
 
+    // Spawn-time hook self-heal: repair the shared ~/.slayzone/hooks/notify.sh
+    // UPWARD just-in-time for a hook-driven agent, closing the window where
+    // another SlayZone channel left a stale copy on disk between our boots. The
+    // version gate makes this upward-only + a byte-match no-op, so it's safe on
+    // the spawn path. Fire-and-forget + swallow: a repair hiccup must NEVER block
+    // or fail a spawn. Skipped for a pre-warmed adopt (env already baked at warm
+    // time) and non-hook modes (plain shells don't use notify.sh).
+    if (reinstallHooks && !opts.adoptPty?.preWarmedAgent && isHookDrivenMode(terminalMode)) {
+      void reinstallHooks().catch(() => {
+        /* best-effort — a stale-hook repair never blocks a spawn */
+      })
+    }
+
     // Hub/runner split (wave 3): when this session spawns on a runner, resolve
-    // its remote hub target (base URL + a freshly-minted per-task bearer) so the
-    // env below points the CLI + agent hooks at the hub instead of loopback.
-    // `runnerId == null` (every local spawn) OR no provider wired => null, so
-    // the mcpEnv resolution stays byte-identical to today's loopback env.
+    // its remote hub target (base URL) so the CLI can reach the hub. The agent
+    // HOOK posts to loopback (local sidecar, or the runner's own relay) — never a
+    // hub URL. `runnerId == null` (every local spawn) OR no provider wired =>
+    // null, so the mcpEnv resolution stays byte-identical to today's loopback env.
     const remoteMcpEnv = await resolveRemoteMcpEnv(remoteMcpEnvProvider, {
       taskId,
       runnerId,

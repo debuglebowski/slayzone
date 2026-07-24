@@ -2,6 +2,10 @@ import type { Express } from 'express'
 import type { RestApiDeps } from './types'
 import { registerNotifyRoute } from './notify'
 import { registerAgentHookRoute } from './agent-hook'
+// Re-exported so the hub composition root can feed a runner-RELAYED agent-hook
+// envelope (arriving over the ws `event` channel) through the SAME authority as
+// the loopback HTTP route.
+export { processAgentHook } from './agent-hook'
 import { registerAuthDeepLinkRoute } from './auth-deep-link'
 import { registerProcessesListRoute } from './processes/list'
 import { registerProcessesLogsRoute } from './processes/logs'

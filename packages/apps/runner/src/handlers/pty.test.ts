@@ -151,4 +151,75 @@ describe('createPtyHandlers', () => {
     }
     expect(res.frames).toEqual([])
   })
+
+  it('overlays the runner loopback SLAYZONE_AGENT_HOOK_URL and strips any hub token', async () => {
+    // The agent must ALWAYS post its hook to the runner's OWN loopback relay —
+    // never to a hub URL the hub baked in. The runner overlays the URL at spawn
+    // and strips any stray SLAYZONE_HUB_TOKEN so no per-agent bearer leaks into
+    // the subprocess env.
+    const { ctx } = makeCtx()
+    const hookUrl = 'http://127.0.0.1:54999/api/agent-hook'
+    const pty = createPtyHandlers({ ...ctx, agentHookUrl: hookUrl })
+    const sessionId = 'env-check'
+
+    // Spawn `env` and capture its output to inspect the child's environment.
+    let out = ''
+    const dialer: RunnerDialer = {
+      notify: (method, params) => {
+        if (method === 'pty.data') out += (params as { data: string }).data
+        return true
+      }
+    }
+    const pty2 = createPtyHandlers({ ...ctx, dialer, agentHookUrl: hookUrl })
+    await pty2.handlers['pty.spawn']({
+      sessionId,
+      command: 'sh',
+      args: ['-c', 'echo HOOK=$SLAYZONE_AGENT_HOOK_URL; echo TOKEN=[$SLAYZONE_HUB_TOKEN]'],
+      cwd: process.cwd(),
+      env: {
+        // The hub baked in a (now-wrong) hub hook URL + a bearer; the runner
+        // must override the URL and drop the token.
+        SLAYZONE_AGENT_HOOK_URL: 'https://hub.example:8443/api/agent-hook',
+        SLAYZONE_HUB_TOKEN: 'should-be-stripped',
+        SLAYZONE_AGENT_ID: 'claude-code'
+      }
+    })
+    await waitFor(() => out.includes('HOOK=') && out.includes('TOKEN='))
+    expect(out).toContain(`HOOK=${hookUrl}`)
+    expect(out).toContain('TOKEN=[]')
+    pty2.disposeAll()
+    pty.disposeAll()
+  })
+
+  it('WITHOUT agentHookUrl, passes env through byte-identically (no overlay, no strip)', async () => {
+    // Pre-init / tests: the relay port is not yet bound → no agentHookUrl. The
+    // env must be passed through UNCHANGED so this stays a no-op seam (behavior
+    // identical to before the split existed).
+    const { ctx } = makeCtx()
+    let out = ''
+    const dialer: RunnerDialer = {
+      notify: (method, params) => {
+        if (method === 'pty.data') out += (params as { data: string }).data
+        return true
+      }
+    }
+    const pty = createPtyHandlers({ ...ctx, dialer }) // NOTE: no agentHookUrl
+    const sessionId = 'passthrough'
+    await pty.handlers['pty.spawn']({
+      sessionId,
+      command: 'sh',
+      args: ['-c', 'echo HOOK=$SLAYZONE_AGENT_HOOK_URL; echo TOKEN=[$SLAYZONE_HUB_TOKEN]'],
+      cwd: process.cwd(),
+      env: {
+        SLAYZONE_AGENT_HOOK_URL: 'https://hub.example:8443/api/agent-hook',
+        SLAYZONE_HUB_TOKEN: 'kept-as-is',
+        SLAYZONE_AGENT_ID: 'claude-code'
+      }
+    })
+    await waitFor(() => out.includes('HOOK=') && out.includes('TOKEN='))
+    // Untouched: whatever the hub sent survives verbatim.
+    expect(out).toContain('HOOK=https://hub.example:8443/api/agent-hook')
+    expect(out).toContain('TOKEN=[kept-as-is]')
+    pty.disposeAll()
+  })
 })

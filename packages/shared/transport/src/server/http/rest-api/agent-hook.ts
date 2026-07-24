@@ -255,21 +255,130 @@ function truncateForDiag(value: unknown, maxChars: number): string {
   return s.length <= maxChars ? s : s.slice(0, maxChars) + '…[truncated]'
 }
 
+const AGENT_IDS = ['claude-code', 'codex', 'gemini', 'antigravity', 'opencode'] as const
+type HookAgentId = (typeof AGENT_IDS)[number]
+function isAgentId(v: unknown): v is HookAgentId {
+  return typeof v === 'string' && (AGENT_IDS as readonly string[]).includes(v)
+}
+
+/**
+ * The hook envelope — INTENTIONALLY loose. It admits BOTH shapes, and the real
+ * validation happens in `resolveHookIdentity` so back-compat never depends on
+ * schema strictness:
+ *
+ *   NEW (benign notify.sh v2+): `{ ctx, raw, arg, agentId }` — three OPAQUE
+ *     channels the script forwards without naming any field:
+ *       - ctx : the app-packed identity blob (`SLAYZONE_HOOK_CONTEXT`) —
+ *               `{ v, taskId, slaySessionId, projectId, agentId, channel }`.
+ *       - raw : the stdin hook payload (Claude/Codex/Gemini/Antigravity), or null.
+ *       - arg : argv $1 (Antigravity's event NAME, or the OpenCode plugin's whole
+ *               JSON payload) as a string, or null.
+ *     ALL field extraction (event name, session ids, cwd) is done HERE, on the
+ *     server — never in the shared shell script (the file that rots when an
+ *     older channel clobbers it).
+ *
+ *   LEGACY (old installed scripts + old released apps): flat
+ *     `{ agentId, hookEvent, sessionId?, taskId?, slaySessionId?, cwd?, raw? }`.
+ *     Still fully resolves — no flag day.
+ */
 const PayloadSchema = z.object({
-  agentId: z.enum(['claude-code', 'codex', 'gemini', 'antigravity', 'opencode']),
-  hookEvent: z.string().min(1),
-  /** The agent CLI's own session id (a UUID forwarded by notify.sh from the
-   *  hook payload's `session_id`) — NOT the SlayZone PTY session id. */
+  agentId: z.string().optional(),
+  hookEvent: z.string().optional(),
   sessionId: z.string().optional(),
   taskId: z.string().optional(),
-  /** The SlayZone runtime session id (`$SLAYZONE_SESSION_ID`), set for a
-   *  pre-warmed POOLED agent that has no `taskId` yet. Lets the conversation be
-   *  captured keyed by session (plans/agent-sessions.md slice 4/B); the
-   *  session→task binding happens later at pool adoption. */
   slaySessionId: z.string().optional(),
   cwd: z.string().optional(),
-  raw: z.unknown().optional()
+  raw: z.unknown().optional(),
+  /** NEW envelope: opaque identity blob (already-parsed JSON object). */
+  ctx: z.unknown().optional(),
+  /** NEW envelope: argv $1 forwarded opaquely (event name OR JSON payload). */
+  arg: z.string().nullable().optional()
 })
+
+/** The fully-resolved hook identity — the server-side result of the field
+ *  extraction that the benign notify.sh no longer does. Downstream consumers
+ *  (state machine, prompt capture, conversation-id persist) read ONLY this. */
+interface ResolvedHook {
+  agentId: HookAgentId
+  hookEvent: string
+  taskId?: string
+  slaySessionId?: string
+  /** CLI session UUID (claude/codex `session_id`, antigravity `conversationId`). */
+  sessionId?: string
+  cwd?: string
+  raw?: unknown
+  /** Attribution only — which SlayZone channel fired the hook (from the blob). */
+  channel?: string
+}
+
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined
+}
+
+/**
+ * Resolve the hook identity from EITHER envelope shape. This is where the field
+ * logic that used to live in notify.sh now lives — in TypeScript, on the server,
+ * so a stale shell copy can never strip it. Returns `null` when the payload
+ * carries no usable identity (no agent id, or no event signal at all) → 400.
+ *
+ * Precedence per field: explicit legacy top-level > ctx blob > derived from the
+ * raw/arg payload. This keeps OLD flat payloads byte-identical while letting the
+ * NEW opaque envelope resolve everything server-side.
+ */
+function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook | null {
+  const ctx = asRecord(body.ctx)
+
+  // agentId: top-level (both shapes set it) → ctx blob. Must be a known agent.
+  const agentIdRaw = body.agentId ?? ctx?.agentId
+  if (!isAgentId(agentIdRaw)) return null
+
+  // Effective raw payload for downstream + event derivation:
+  //   - stdin `raw` when it is an object (Claude/Codex/Gemini/Antigravity), else
+  //   - the argv payload parsed as JSON when `arg` is a JSON string (OpenCode
+  //     plugin shells `bash notify.sh '<json>'` with no stdin).
+  let effRaw = asRecord(body.raw)
+  const arg = body.arg ?? undefined
+  const argIsJson = typeof arg === 'string' && arg.trimStart().startsWith('{')
+  if (!effRaw && argIsJson) {
+    try {
+      effRaw = asRecord(JSON.parse(arg!))
+    } catch {
+      /* not JSON after all — leave effRaw undefined */
+    }
+  }
+
+  // hookEvent: explicit legacy field → argv-as-event-name (Antigravity: `arg` is
+  // a plain event name, not JSON) → payload `hook_event_name` → payload `type`.
+  // This is the exact priority the old notify.sh applied, moved server-side.
+  const argAsEventName = typeof arg === 'string' && !argIsJson && arg.length > 0 ? arg : undefined
+  const hookEvent =
+    body.hookEvent ??
+    argAsEventName ??
+    (typeof effRaw?.hook_event_name === 'string' ? effRaw.hook_event_name : undefined) ??
+    (typeof effRaw?.type === 'string' ? (effRaw.type as string) : undefined)
+
+  // No event signal at all (no explicit event, no argv, no parseable payload) →
+  // malformed. Distinguishes a genuinely-empty ping from an unknown-but-present
+  // event (the latter derives a name and is dropped as 204 downstream).
+  if (!hookEvent) return null
+
+  const cliSessionId =
+    body.sessionId ??
+    (typeof effRaw?.session_id === 'string' ? effRaw.session_id : undefined) ??
+    (typeof effRaw?.conversationId === 'string' ? effRaw.conversationId : undefined)
+
+  return {
+    agentId: agentIdRaw,
+    hookEvent,
+    taskId: body.taskId ?? (typeof ctx?.taskId === 'string' ? ctx.taskId : undefined),
+    slaySessionId:
+      body.slaySessionId ?? (typeof ctx?.slaySessionId === 'string' ? ctx.slaySessionId : undefined),
+    sessionId: cliSessionId,
+    cwd: body.cwd ?? (typeof effRaw?.cwd === 'string' ? effRaw.cwd : undefined),
+    raw: effRaw ?? body.raw,
+    channel: typeof ctx?.channel === 'string' ? ctx.channel : undefined
+  }
+}
 
 /**
  * Persist a CLI's session_id (carried by its `SessionStart` hook) to the task's
@@ -351,33 +460,175 @@ async function persistConversationId(
 }
 
 /**
- * Extract the token from an `Authorization: Bearer <token>` header, or null when
- * absent / not a bearer. Case-insensitive on the scheme; trims surrounding space.
- * A local loopback hook (notify.sh with no SLAYZONE_HUB_TOKEN) sends no such
- * header → null → the enforcement below is skipped (loopback path unchanged).
+ * Process ONE agent-hook envelope — the SINGLE authority shared by the Express
+ * route (local loopback hooks) AND the hub's runner-relay consumer (a remote
+ * runner relays the envelope over its ws channel — see the hub composition
+ * root). Pure of Express so both callers reuse the exact same field-resolution,
+ * state-machine, prompt-capture, and conversation-id logic — no duplication, no
+ * drift.
+ *
+ * Returns a status the HTTP caller maps to a response:
+ *   - 'ok'      → 200 (processed).
+ *   - 'unknown' → 204 (event derived but not mappable; never default to Stop).
+ *   - 'bad'     → 400 (no usable identity in the envelope).
+ * The ws relay consumer ignores the return (fire-and-forget).
+ *
+ * Hot path: hooks fire 5-20× per turn (PreToolUse + PostToolUse per tool). Must
+ * stay cheap. The ONLY DB write is the once-per-session `SessionStart`
+ * conversation-id capture for the capture agents (see `persistConversationId`) —
+ * gated so it never touches the per-tool hot path. Broadcasts no-op when no
+ * renderer is open.
  */
-function extractBearer(header: string | undefined): string | null {
-  if (!header) return null
-  const match = /^\s*Bearer\s+(.+)\s*$/i.exec(header)
-  const token = match?.[1]?.trim()
-  return token ? token : null
+export async function processAgentHook(
+  body: unknown,
+  deps: RestApiDeps,
+  bridge: TerminalStateBridge | undefined
+): Promise<'ok' | 'unknown' | 'bad'> {
+  const parsed = PayloadSchema.safeParse(body)
+  if (!parsed.success) return 'bad'
+
+  // All field extraction the benign notify.sh no longer does happens HERE.
+  const hook = resolveHookIdentity(parsed.data)
+  if (!hook) return 'bad'
+
+  const type = mapEventType(hook.hookEvent, hook.agentId)
+  if (!type) return 'unknown'
+
+  // Resolve the effective task id up front. A warm-pool-adopted session's
+  // payload never carries `taskId` (its env vars were fixed before the task
+  // existed — see `poolSessionTaskIdCache` above) — fall back to the DB binding
+  // so its hooks aren't silently dropped by every taskId-gated consumer below
+  // (was: no spinner, no prompt capture, taskId-less lifecycle events, for the
+  // session's whole life).
+  let resolvedTaskId = hook.taskId
+  if (!resolvedTaskId && hook.slaySessionId) {
+    resolvedTaskId = poolSessionTaskIdCache.get(hook.slaySessionId)
+    if (!resolvedTaskId) {
+      const bound = await getBoundTaskId(deps.db, hook.slaySessionId)
+      if (bound) {
+        resolvedTaskId = bound
+        poolSessionTaskIdCache.set(hook.slaySessionId, bound)
+      }
+    }
+  }
+
+  const event: AgentLifecycleEvent = {
+    agentId: hook.agentId,
+    hookEvent: hook.hookEvent,
+    sessionId: hook.sessionId,
+    cwd: hook.cwd,
+    raw: hook.raw,
+    taskId: resolvedTaskId,
+    type,
+    timestamp: Date.now()
+  }
+  deps.agentLifecycle?.emit('event', event)
+
+  // Capture the user's prompt text (UserPromptSubmit) into agent_prompts for
+  // the agent-terminal "messages" sidebar. capturePrompt self-gates to
+  // capture-capable modes + the UserPromptSubmit event (once per turn → off
+  // the per-tool hot path) and is best-effort: fire-and-forget so a DB hiccup
+  // never blocks the hook ack.
+  if (resolvedTaskId) {
+    void capturePrompt(deps.db, {
+      agentId: hook.agentId,
+      hookEvent: hook.hookEvent,
+      taskId: resolvedTaskId,
+      sessionId: hook.sessionId,
+      raw: hook.raw
+    }).catch(() => {
+      /* best-effort — never block the hook */
+    })
+  }
+
+  // PRIMARY resume-id capture — persist the CLI session id into
+  // provider_config[agentId].conversationId for the capture agents. Gated to
+  // one event per agent (see CONVERSATION_ID_CAPTURE_EVENT) so this stays off
+  // the per-tool hot path. `hook.sessionId` already folded in raw.session_id /
+  // raw.conversationId fallbacks during identity resolution.
+  if (CONVERSATION_ID_CAPTURE_EVENT[hook.agentId] === hook.hookEvent) {
+    const cliSessionId = hook.sessionId
+    if (hook.taskId && cliSessionId) {
+      // Awaited: a single indexed SELECT + UPDATE on local SQLite is sub-ms,
+      // and the capture event is low-frequency (repeats short-circuit in the
+      // helper) — keeping it deterministic beats a fire-and-forget race.
+      await persistConversationId(deps, hook.agentId, hook.taskId, cliSessionId)
+      // Mirror onto the live PTY session for the idle-close gate.
+      const ptySessionId = bridge?.findSession(hook.taskId, hook.agentId as TerminalMode)
+      if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)
+    } else if (!hook.taskId && hook.slaySessionId && cliSessionId) {
+      // Pre-warmed POOLED agent: no task yet, so capture the conversation
+      // keyed by the SlayZone runtime session id (write-once confirm on the
+      // pooled `agent_sessions` row). The session→task binding happens later
+      // at pool adoption (`bindSessionToTask`); the resolver then honors this
+      // conversation for the bound task. Best-effort — swallow on failure.
+      try {
+        await confirmSessionConversation(deps.db, {
+          sessionId: hook.slaySessionId,
+          observedConversationId: cliSessionId
+        })
+      } catch {
+        /* best-effort — pool conversation capture never blocks the hook */
+      }
+    }
+  }
+
+  // Drive the PTY state machine from the hook signal — the source of truth
+  // for hook-driven agents (replaces adapter output detection / bullet-glyph
+  // regex). gemini/opencode still rely on adapter detection.
+  if (bridge && isHookDrivenMode(hook.agentId) && resolvedTaskId) {
+    const mode = hook.agentId as TerminalMode
+    const sessionId = bridge.findSession(resolvedTaskId, mode)
+    if (sessionId) {
+      const newState = hookToTerminalState(hook.agentId, hook.hookEvent, hook.raw)
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'pty',
+        event: 'pty.hook_received',
+        sessionId,
+        taskId: resolvedTaskId,
+        message: hook.hookEvent,
+        // Include raw payload (truncated) so we can see stop_hook_active,
+        // tool_name, tool_response, transcript_path, etc. `channel` makes a
+        // future cross-channel notify.sh clobber visible in Diagnostics.
+        payload: {
+          agentId: hook.agentId,
+          channel: hook.channel ?? 'unknown',
+          mappedState: newState ?? 'mark-active',
+          raw: truncateForDiag(hook.raw, 4096)
+        }
+      })
+      if (newState) {
+        bridge.transition(sessionId, newState, hook.hookEvent)
+      } else {
+        // PostToolUse / SubagentStop / PreCompact / SessionStart: no state
+        // change but the agent is alive — refresh the silence-timer clock so
+        // the fail-safe doesn't flip running→idle mid-turn.
+        bridge.markActive(sessionId)
+      }
+
+      // Feed the idle-close gate the authoritative "blocked on user" signal —
+      // distinguishes a paused-mid-interaction agent (don't hibernate) from a
+      // completed turn (both report 'idle').
+      const awaiting = hookToAwaitingUser(hook.agentId, hook.hookEvent, hook.raw)
+      if (awaiting !== null) bridge.noteAwaitingInput?.(sessionId, awaiting)
+    }
+  }
+
+  return 'ok'
 }
 
 /**
  * Receives agent lifecycle pings from the bundled `notify.sh` hook script.
  *
- * Auth: loopback hooks (the local pty spawns bind the MCP server to 127.0.0.1
- * and carry NO bearer) stay unauthed — blast radius is renderer-side status
- * updates + a future chime. A pty routed to a REMOTE runner (hub/runner split)
- * instead posts to the HUB with a scoped `Authorization: Bearer` token; when
- * runner verification is wired (deps.verifyTaskToken), that bearer is enforced
- * before any side effect (see the enforcement block below).
+ * Auth: NONE. The hook ALWAYS posts to loopback — either the local sidecar's
+ * 127.0.0.1 port, or (for a runner-routed pty) the RUNNER's OWN loopback, which
+ * relays to the hub over its already-authenticated ws channel. So the agent env
+ * carries no per-agent bearer and the route trusts loopback, exactly as the
+ * local path always has. Blast radius is renderer-side status updates + a chime.
  *
- * Hot path: hooks fire 5-20× per turn (PreToolUse + PostToolUse per tool).
- * Must stay cheap. The ONLY DB write is the once-per-session `SessionStart`
- * conversation-id capture for codex/antigravity (see `persistConversationId`) —
- * gated so it never touches the per-tool hot path. Broadcast no-ops
- * automatically when no renderer is open (BrowserWindow.getAllWindows() = []).
+ * The actual work is `processAgentHook` (shared with the hub's ws-relay
+ * consumer); this is a thin Express wrapper mapping its result to a status code.
  */
 export function registerAgentHookRoute(
   app: Express,
@@ -392,204 +643,16 @@ export function registerAgentHookRoute(
   const jsonParser = express.json({ limit: '1mb' })
 
   app.post('/api/agent-hook', jsonParser, async (req, res) => {
-    const parsed = PayloadSchema.safeParse(req.body)
-    if (!parsed.success) {
-      res.status(400).json({ ok: false, error: parsed.error.message })
+    const result = await processAgentHook(req.body, deps, bridge)
+    if (result === 'bad') {
+      res.status(400).json({ ok: false, error: 'unresolvable agent-hook envelope' })
       return
     }
-
-    // Per-task hub-bearer enforcement (hub/runner split, wave 3.5). A pty routed
-    // to a REMOTE runner posts its hook to the HUB carrying a scoped bearer
-    // (SLAYZONE_HUB_TOKEN → `Authorization: Bearer`). Enforced ONLY when BOTH a
-    // bearer is present AND runner verification is wired (deps.verifyTaskToken):
-    //   - NO bearer  → proceed unchanged. Every LOCAL loopback hook takes this
-    //     path: the local buildMcpEnv branch never sets SLAYZONE_HUB_TOKEN, so
-    //     notify.sh sends no Authorization header → byte-identical to today.
-    //   - bearer + no verifier (runner off) → also proceed unchanged (a stray
-    //     header must not lock out the loopback hook when runner isn't even on).
-    //   - bearer + verifier → the token MUST verify AND its taskId claim MUST
-    //     match the payload's taskId, else reject (a token minted for task A
-    //     can't drive task B's session).
-    const bearer = extractBearer(req.headers.authorization)
-    if (bearer && deps.verifyTaskToken) {
-      const result = deps.verifyTaskToken(bearer)
-      if (!result.ok) {
-        // 401: the credential itself is bad (forged / malformed / expired).
-        // Record it: notify.sh is fire-and-forget (exit 0, output discarded), so
-        // a rejected/expired hub token would otherwise be invisible — the operator
-        // would see a remote session's state updates silently stop with no trace.
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'pty',
-          event: 'agent_hook.token_rejected',
-          taskId: parsed.data.taskId,
-          message: `invalid hub token: ${result.reason}`,
-          payload: { reason: result.reason, agentId: parsed.data.agentId }
-        })
-        res.status(401).json({ ok: false, error: `invalid hub token: ${result.reason}` })
-        return
-      }
-      if (parsed.data.taskId != null && result.claims.taskId !== parsed.data.taskId) {
-        // 403: a valid token, but scoped to a different task than it's driving.
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'pty',
-          event: 'agent_hook.token_scope_mismatch',
-          taskId: parsed.data.taskId,
-          message: 'hub token task scope does not match payload taskId',
-          payload: { tokenTaskId: result.claims.taskId, agentId: parsed.data.agentId }
-        })
-        res
-          .status(403)
-          .json({ ok: false, error: 'hub token task scope does not match payload taskId' })
-        return
-      }
-    }
-
-    const type = mapEventType(parsed.data.hookEvent, parsed.data.agentId)
-    if (!type) {
+    if (result === 'unknown') {
       // Unknown event → drop silently. Never default to Stop.
       res.status(204).end()
       return
     }
-    // Resolve the effective task id up front. A warm-pool-adopted session's
-    // payload never carries `taskId` (its env vars were fixed before the task
-    // existed — see `poolSessionTaskIdCache` above) — fall back to the DB
-    // binding so its hooks aren't silently dropped by every taskId-gated
-    // consumer below (was: no spinner, no prompt capture, taskId-less
-    // lifecycle events, for the session's whole life).
-    let resolvedTaskId = parsed.data.taskId
-    if (!resolvedTaskId && parsed.data.slaySessionId) {
-      resolvedTaskId = poolSessionTaskIdCache.get(parsed.data.slaySessionId)
-      if (!resolvedTaskId) {
-        const bound = await getBoundTaskId(deps.db, parsed.data.slaySessionId)
-        if (bound) {
-          resolvedTaskId = bound
-          poolSessionTaskIdCache.set(parsed.data.slaySessionId, bound)
-        }
-      }
-    }
-
-    const event: AgentLifecycleEvent = {
-      ...parsed.data,
-      taskId: resolvedTaskId,
-      type,
-      timestamp: Date.now()
-    }
-    deps.agentLifecycle?.emit('event', event)
-
-    // Capture the user's prompt text (UserPromptSubmit) into agent_prompts for
-    // the agent-terminal "messages" sidebar. capturePrompt self-gates to
-    // capture-capable modes + the UserPromptSubmit event (once per turn → off
-    // the per-tool hot path) and is best-effort: fire-and-forget so a DB hiccup
-    // never blocks the hook ack.
-    if (resolvedTaskId) {
-      void capturePrompt(deps.db, {
-        agentId: parsed.data.agentId,
-        hookEvent: parsed.data.hookEvent,
-        taskId: resolvedTaskId,
-        sessionId: parsed.data.sessionId,
-        raw: parsed.data.raw
-      }).catch(() => {
-        /* best-effort — never block the hook */
-      })
-    }
-
-    // PRIMARY resume-id capture — persist the CLI session id into
-    // provider_config[agentId].conversationId for the capture agents. Gated to
-    // one event per agent (see CONVERSATION_ID_CAPTURE_EVENT) so this stays off
-    // the per-tool hot path. `raw.session_id` / `raw.conversationId` are
-    // fallbacks if the notify.sh envelope ever omits the top-level `sessionId`.
-    if (
-      CONVERSATION_ID_CAPTURE_EVENT[parsed.data.agentId] === parsed.data.hookEvent
-    ) {
-      const rawIds = parsed.data.raw as
-        | { session_id?: string; conversationId?: string }
-        | undefined
-      const cliSessionId =
-        parsed.data.sessionId ?? rawIds?.session_id ?? rawIds?.conversationId
-      if (parsed.data.taskId && cliSessionId) {
-        // Awaited: a single indexed SELECT + UPDATE on local SQLite is sub-ms,
-        // and the capture event is low-frequency (repeats short-circuit in the
-        // helper) — keeping it deterministic beats a fire-and-forget race.
-        await persistConversationId(
-          deps,
-          parsed.data.agentId,
-          parsed.data.taskId,
-          cliSessionId
-        )
-        // Mirror onto the live PTY session for the idle-close gate.
-        const ptySessionId = bridge?.findSession(
-          parsed.data.taskId,
-          parsed.data.agentId as TerminalMode
-        )
-        if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)
-      } else if (!parsed.data.taskId && parsed.data.slaySessionId && cliSessionId) {
-        // Pre-warmed POOLED agent: no task yet, so capture the conversation
-        // keyed by the SlayZone runtime session id (write-once confirm on the
-        // pooled `agent_sessions` row). The session→task binding happens later
-        // at pool adoption (`bindSessionToTask`); the resolver then honors this
-        // conversation for the bound task. Best-effort — swallow on failure.
-        try {
-          await confirmSessionConversation(deps.db, {
-            sessionId: parsed.data.slaySessionId,
-            observedConversationId: cliSessionId
-          })
-        } catch {
-          /* best-effort — pool conversation capture never blocks the hook */
-        }
-      }
-    }
-
-    // Drive the PTY state machine from the hook signal — the source of truth
-    // for hook-driven agents (replaces adapter output detection / bullet-glyph
-    // regex). gemini/opencode still rely on adapter detection.
-    if (bridge && isHookDrivenMode(parsed.data.agentId) && resolvedTaskId) {
-      const mode = parsed.data.agentId as TerminalMode
-      const sessionId = bridge.findSession(resolvedTaskId, mode)
-      if (sessionId) {
-        const newState = hookToTerminalState(
-          parsed.data.agentId,
-          parsed.data.hookEvent,
-          parsed.data.raw
-        )
-        recordDiagnosticEvent({
-          level: 'info',
-          source: 'pty',
-          event: 'pty.hook_received',
-          sessionId,
-          taskId: resolvedTaskId,
-          message: parsed.data.hookEvent,
-          // Include raw payload (truncated) so we can see stop_hook_active,
-          // tool_name, tool_response, transcript_path, etc. Temporary
-          // instrumentation for the "PTY stuck on running after ESC" bug.
-          payload: {
-            agentId: parsed.data.agentId,
-            mappedState: newState ?? 'mark-active',
-            raw: truncateForDiag(parsed.data.raw, 4096),
-          }
-        })
-        if (newState) {
-          bridge.transition(sessionId, newState, parsed.data.hookEvent)
-        } else {
-          // PostToolUse / SubagentStop / PreCompact / SessionStart: no state
-          // change but the agent is alive — refresh the silence-timer clock so
-          // the fail-safe doesn't flip running→idle mid-turn.
-          bridge.markActive(sessionId)
-        }
-
-        // Feed the idle-close gate the authoritative "blocked on user" signal —
-        // distinguishes a paused-mid-interaction agent (don't hibernate) from a
-        // completed turn (both report 'idle').
-        const awaiting = hookToAwaitingUser(
-          parsed.data.agentId,
-          parsed.data.hookEvent,
-          parsed.data.raw
-        )
-        if (awaiting !== null) bridge.noteAwaitingInput?.(sessionId, awaiting)
-      }
-    }
-
     res.json({ ok: true })
   })
 }

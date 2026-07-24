@@ -52,7 +52,16 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     for (const [k, v] of Object.entries(process.env)) {
       if (typeof v === 'string') base[k] = v
     }
-    return overrides ? { ...base, ...overrides } : base
+    const merged = overrides ? { ...base, ...overrides } : base
+    // Hub/runner split: force the agent's lifecycle hook to the runner's OWN
+    // loopback relay (which forwards to the hub over the authed ws channel), and
+    // strip any hub bearer the hub baked in — no per-agent token in subprocess
+    // env, and the agent env is byte-identical to a local spawn's hook wiring.
+    if (ctx.agentHookUrl) {
+      merged.SLAYZONE_AGENT_HOOK_URL = ctx.agentHookUrl
+      delete merged.SLAYZONE_HUB_TOKEN
+    }
+    return merged
   }
 
   function spawn(rawParams: unknown): { pid: number } {

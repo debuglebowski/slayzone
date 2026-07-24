@@ -16,6 +16,7 @@ import {
 } from '@slayzone/runner-transport/client'
 import { RunnerTransportErrorCodes, HubToRunnerMethods, RpcError, runnerShutdownParamsSchema } from '@slayzone/runner-transport/shared'
 import type { RunnerConfig } from './config'
+import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createFsHandlers } from './handlers/fs'
 import { createGitHandlers } from './handlers/git'
 import { createProcHandlers } from './handlers/proc'
@@ -45,6 +46,9 @@ export interface HubRequestHandlerDeps {
   dialer: RunnerDialer
   config: RunnerConfig
   log?: RunnerLog
+  /** Runner loopback agent-hook URL — overlaid into every spawned agent's env
+   *  (see HandlerContext.agentHookUrl). Absent → env passthrough (tests). */
+  agentHookUrl?: string
 }
 
 export interface HubRequestDispatch {
@@ -52,6 +56,10 @@ export interface HubRequestDispatch {
   handle(method: string, params: unknown): Promise<unknown>
   /** Tear down live sessions/processes (runner shutdown). */
   dispose(): void
+  /** Late-bind the runner loopback agent-hook URL once its listener has bound
+   *  (the port is ephemeral, resolved async after the dispatch is built). The
+   *  ctx is shared by reference, so pty spawns issued after this see the URL. */
+  setAgentHookUrl(url: string): void
 }
 
 /**
@@ -61,7 +69,12 @@ export interface HubRequestDispatch {
  */
 export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequestDispatch {
   const log = deps.log ?? (() => {})
-  const ctx: HandlerContext = { dialer: deps.dialer, config: deps.config, log }
+  const ctx: HandlerContext = {
+    dialer: deps.dialer,
+    config: deps.config,
+    log,
+    ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {})
+  }
 
   const pty = createPtyHandlers(ctx)
   const proc = createProcHandlers(ctx)
@@ -95,7 +108,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     proc.disposeAll()
   }
 
-  return { handle, dispose }
+  const setAgentHookUrl = (url: string): void => {
+    ctx.agentHookUrl = url
+  }
+
+  return { handle, dispose, setAgentHookUrl }
 }
 
 export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}): RunnerHandle {
@@ -161,12 +178,27 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
   )
   dialer.events.on('error', ({ error, fatal }) => log(fatal ? 'fatal error' : 'error', { error: error.message, fatal }))
 
+  // Agent-hook loopback relay (hub/runner split): host /api/agent-hook on the
+  // runner's own loopback and forward each envelope to the hub over the existing
+  // authed ws channel. Its ephemeral port binds async; feed the URL into the
+  // dispatch (shared ctx) so ptys spawned after the bind overlay it into the
+  // agent env. Best-effort — a bind failure only means remote hooks fall back to
+  // whatever URL the hub baked in (degraded, not fatal to exec).
+  let agentHookServer: AgentHookServer | null = null
+  void createAgentHookServer({ dialer, config, log })
+    .then((srv) => {
+      agentHookServer = srv
+      dispatch.setAgentHookUrl(srv.url)
+    })
+    .catch((err) => log('agent-hook relay failed to start', { error: String(err) }))
+
   dialer.start()
   handle = {
     dialer,
     stop: async () => {
       // Kill live ptys/processes before the socket drops so nothing is orphaned.
       dispatch.dispose()
+      if (agentHookServer) await agentHookServer.close()
       await dialer.stop()
     }
   }

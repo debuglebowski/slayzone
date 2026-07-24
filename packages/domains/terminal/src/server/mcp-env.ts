@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { getSlayzoneHomeDir } from '@slayzone/platform'
+import { getSlayzoneChannel, getSlayzoneHomeDir } from '@slayzone/platform'
 import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../shared'
 
 /** Path the agent lifecycle hook (notify.sh) POSTs to — see agent-hook.ts. */
@@ -18,26 +18,26 @@ export interface RemoteMcpEnv {
   runnerId: string
   /**
    * The hub's externally-reachable HTTP base URL (e.g. `https://hub:8443`), no
-   * trailing slash. The `slay` CLI + agent hooks inside the remote pty dial THIS
-   * instead of loopback (loopback resolves on the runner machine, where no hub
+   * trailing slash. The `slay` CLI inside the remote pty dials THIS to reach the
+   * hub's REST surface (loopback resolves on the runner machine, where no hub
    * runs). The provider MUST return `null` rather than an empty/invalid base.
+   *
+   * NOTE: the AGENT HOOK no longer uses this. The hook posts to the RUNNER's own
+   * loopback `/api/agent-hook`, and the runner relays to the hub over its
+   * authenticated ws channel (so the agent env is byte-identical local vs
+   * remote and carries no per-agent hub bearer). This field remains only for the
+   * `slay` CLI's hub REST access.
    */
   hubBaseUrl: string
-  /**
-   * A short-lived bearer scoped to `{ taskId, runnerId }`, or `null` when the
-   * minter is unavailable. Injected as `SLAYZONE_HUB_TOKEN`; the CLI's
-   * `resolveHubTarget` already reads it and sends `Authorization: Bearer`.
-   */
-  token: string | null
 }
 
 /**
- * Resolves the remote hub target (base URL + a freshly-minted per-task token)
- * for a session that spawns on a runner. Injected by the
- * composition root; UNSET by default (so `resolveRemoteMcpEnv` short-circuits to
- * `null` and every spawn keeps today's loopback env). Kept a plain function so
- * `buildMcpEnv` itself stays a pure function of its inputs — the impurity (mint
- * a token, read the hub URL) lives behind this seam.
+ * Resolves the remote hub target (base URL) for a session that spawns on a
+ * runner. Injected by the composition root; UNSET by default (so
+ * `resolveRemoteMcpEnv` short-circuits to `null` and every spawn keeps today's
+ * loopback env). Kept a plain function so `buildMcpEnv` itself stays a pure
+ * function of its inputs — the impurity (read the hub URL) lives behind this
+ * seam.
  */
 export type RemoteMcpEnvProvider = (args: {
   taskId: string | undefined
@@ -81,19 +81,32 @@ export async function resolveRemoteMcpEnv(
  *
  * When `mode` is supplied AND the agent supports hook lifecycle events
  * (claude-code initially; see HOOK_SUPPORTED_AGENT_IDS), also injects:
- *   SLAYZONE_AGENT_HOOK_URL  - URL for POST /api/agent-hook (loopback locally,
- *                              the hub's endpoint for a remote runner)
- *   SLAYZONE_AGENT_ID        - the mode itself (passed back in hook payload)
+ *   SLAYZONE_AGENT_HOOK_URL  - URL for POST /api/agent-hook. LOCAL only: the
+ *                              loopback URL. On a REMOTE runner it is NOT set
+ *                              here — the runner overlays its OWN loopback URL at
+ *                              spawn (see runner handlers/pty.ts) and relays to
+ *                              the hub over its ws channel, so the agent env is
+ *                              byte-identical local vs remote.
+ *   SLAYZONE_AGENT_ID        - the mode itself (passed back in the hook envelope)
  *   SLAYZONE_ROOT            - resolved on-disk anchor; the `slay` CLI inside the
  *                              agent derives `<ROOT>/storage` (same DB the app uses)
+ *   SLAYZONE_HOOK_CONTEXT    - an OPAQUE JSON blob carrying every identity field
+ *                              the server needs to attribute a hook (taskId,
+ *                              slaySessionId, projectId, agentId, channel). The
+ *                              benign `notify.sh` forwards it VERBATIM without
+ *                              naming any field — so adding a new identity field
+ *                              later touches only this function + the server,
+ *                              never the shared shell script (the file that rots
+ *                              when an older channel clobbers it).
  *
- * When `remote` is supplied (a task's pty routed to a runner), the loopback
- * hook URL is REPLACED by a hub-hosted one and `SLAYZONE_HUB_URL` (+ an optional
- * `SLAYZONE_HUB_TOKEN`) is added so the CLI dials the hub. With no `remote`
- * (the default) nothing about the local env changes.
+ * `remote` (a task's pty routed to a runner) only suppresses the loopback hook
+ * URL (the runner supplies it). It injects NO hub URL and NO bearer: the hook
+ * posts to runner loopback, and the `slay` CLI reaches the hub via its own
+ * `hub.json` (see apps/cli/hub-config.ts). With no `remote` (the default)
+ * nothing about the local env changes.
  *
  * No port env var is injected here: the `slay` CLI resolves the local server port
- * from the sidecar's own `SLAYZONE_SERVER_PORT` (inherited via the pty's env) and
+ * from the sidecar's own `SLAYZONE_HUB_PORT` (inherited via the pty's env) and
  * falls back to `settings.server_port` in the DB (written by the server at boot).
  */
 export async function buildMcpEnv(
@@ -131,29 +144,40 @@ export async function buildMcpEnv(
 
   const hookCapable = Boolean(mode && HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId))
 
+  // The opaque identity blob the benign notify.sh forwards verbatim. Built ONLY
+  // for hook-capable spawns (it rides the hook env). Carries every field the
+  // server needs to resolve/attribute a hook — the per-field list lives HERE, in
+  // TypeScript, never in the shared shell script (which is what rotted). `v` is
+  // the envelope version; `channel` is attribution-only (which SlayZone channel
+  // fired the hook), so a future cross-channel clobber is visible in Diagnostics.
+  function setHookIdentity(): void {
+    env.SLAYZONE_AGENT_ID = mode as string
+    env.SLAYZONE_ROOT = getSlayzoneHomeDir()
+    const ctx: Record<string, unknown> = { v: 1, agentId: mode, channel: getSlayzoneChannel() }
+    if (taskId) ctx.taskId = taskId
+    if (sessionId) ctx.slaySessionId = sessionId
+    if (resolvedProjectId) ctx.projectId = resolvedProjectId
+    env.SLAYZONE_HOOK_CONTEXT = JSON.stringify(ctx)
+  }
+
   if (remote) {
-    // Remote runner: loopback is meaningless on the runner machine. Point the
-    // CLI + hooks at the hub: the CLI resolves the hub via `SLAYZONE_HUB_URL` and
-    // the hook uses the absolute `SLAYZONE_AGENT_HOOK_URL` below.
-    env.SLAYZONE_HUB_URL = remote.hubBaseUrl
-    if (remote.token) env.SLAYZONE_HUB_TOKEN = remote.token
-    if (hookCapable) {
-      env.SLAYZONE_AGENT_HOOK_URL = `${remote.hubBaseUrl}${AGENT_HOOK_PATH}`
-      env.SLAYZONE_AGENT_ID = mode as string
-      env.SLAYZONE_ROOT = getSlayzoneHomeDir()
-    }
+    // Remote runner: the agent posts to the RUNNER's own loopback /api/agent-hook
+    // (the runner overlays SLAYZONE_AGENT_HOOK_URL at spawn and relays to the hub
+    // over its ws channel). So we set NO hub URL, NO bearer, and NO hook URL here
+    // — the identity env is byte-identical to a local spawn. `remote.hubBaseUrl`
+    // is used only by the `slay` CLI's own hub.json path, not the hook.
+    if (hookCapable) setHookIdentity()
     return env
   }
 
   // Local (hub-local — today's only path): loopback. The port is used ONLY to
   // build the agent-hook URL below. No port var is injected — the CLI resolves
-  // the server port itself (inherited SLAYZONE_SERVER_PORT, else settings.server_port).
+  // the server port itself (inherited SLAYZONE_HUB_PORT, else settings.server_port).
   const serverPort = (globalThis as Record<string, unknown>).__serverPort as number | undefined
 
   if (serverPort && hookCapable) {
     env.SLAYZONE_AGENT_HOOK_URL = `http://127.0.0.1:${serverPort}${AGENT_HOOK_PATH}`
-    env.SLAYZONE_AGENT_ID = mode as string
-    env.SLAYZONE_ROOT = getSlayzoneHomeDir()
+    setHookIdentity()
   }
 
   return env

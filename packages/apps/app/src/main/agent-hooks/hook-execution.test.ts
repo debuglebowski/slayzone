@@ -60,7 +60,7 @@ function captureOnePost(): {
 }
 
 describe('hook execution (issue #88)', () => {
-  test('a hook installed under a spaced path fires via bash and POSTs the envelope', async () => {
+  test('a hook installed under a spaced path fires via bash and POSTs the benign envelope', async () => {
     // Temp dir whose name contains a space — forces formatHookCommand to quote.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz hook-'))
     tmpDirs.push(root)
@@ -77,22 +77,35 @@ describe('hook execution (issue #88)', () => {
       expect(command.startsWith("'")).toBe(true)
 
       // Run the hook the way Claude Code / Gemini do: `bash -c <command>`,
-      // event JSON on stdin.
+      // event JSON on stdin. The app packs its identity blob into
+      // SLAYZONE_HOOK_CONTEXT; the benign forwarder ships it VERBATIM as `ctx`.
       execFileSync('bash', ['-c', command], {
-        input: '{"hook_event_name":"SessionStart"}',
+        input: '{"hook_event_name":"SessionStart","session_id":"sess-xyz"}',
         env: {
           ...process.env,
           SLAYZONE_AGENT_HOOK_URL: hookUrl,
-          SLAYZONE_AGENT_ID: 'claude-code'
+          SLAYZONE_AGENT_ID: 'claude-code',
+          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"task-abc","agentId":"claude-code","channel":"dev"}'
         }
       })
 
-      const body = (await server.received) as { agentId?: string; hookEvent?: string }
+      // The benign forwarder posts THREE opaque channels + agentId — it does NOT
+      // grep/name any field. The server does all extraction.
+      const body = (await server.received) as {
+        agentId?: string
+        ctx?: { taskId?: string; channel?: string }
+        raw?: { hook_event_name?: string; session_id?: string }
+        arg?: string | null
+      }
       expect(body.agentId).toBe('claude-code')
-      expect(body.hookEvent).toBe('SessionStart')
+      // ctx forwarded verbatim (parsed back to the exact blob the app packed).
+      expect(body.ctx).toMatchObject({ taskId: 'task-abc', channel: 'dev' })
+      // stdin payload forwarded verbatim as `raw`.
+      expect(body.raw).toMatchObject({ hook_event_name: 'SessionStart', session_id: 'sess-xyz' })
+      // No argv → arg is null.
+      expect(body.arg).toBeNull()
 
-      // No SLAYZONE_HUB_TOKEN set (local loopback pty) → no Authorization header,
-      // byte-identical to pre-D3 behavior.
+      // No auth header — the hook always posts to loopback, never carries a bearer.
       const headers = await server.headers
       expect(headers.authorization).toBeUndefined()
     } finally {
@@ -100,8 +113,11 @@ describe('hook execution (issue #88)', () => {
     }
   }, 20_000)
 
-  test('forwards SLAYZONE_HUB_TOKEN as an Authorization: Bearer header (remote pty)', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-hub-'))
+  test('forwards argv $1 opaquely as `arg` (Antigravity event name / OpenCode payload)', async () => {
+    // Antigravity passes the event NAME as argv $1 (its stdin omits it); the
+    // benign forwarder ships it opaquely as `arg` and the server derives the
+    // event from it. Proves the argv channel survives the dumb forwarder.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-argv-'))
     tmpDirs.push(root)
     const scriptPath = path.join(root, 'hooks', 'notify.sh')
 
@@ -109,23 +125,21 @@ describe('hook execution (issue #88)', () => {
     const server = captureOnePost()
     try {
       const hookUrl = await server.url
-      const command = formatHookCommand(installedAt)
+      // Antigravity's installer appends the event name after the script path.
+      const command = `${formatHookCommand(installedAt)} PreInvocation`
       execFileSync('bash', ['-c', command], {
-        input: '{"hook_event_name":"SessionStart"}',
+        input: '{"conversationId":"conv-1"}',
         env: {
           ...process.env,
           SLAYZONE_AGENT_HOOK_URL: hookUrl,
-          SLAYZONE_AGENT_ID: 'claude-code',
-          // A runner-routed pty carries a scoped per-task bearer here (buildMcpEnv).
-          SLAYZONE_HUB_TOKEN: 'test-scoped-task-token'
+          SLAYZONE_AGENT_ID: 'antigravity',
+          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"ag-task","agentId":"antigravity"}'
         }
       })
 
-      const headers = await server.headers
-      expect(headers.authorization).toBe('Bearer test-scoped-task-token')
-      // The envelope still arrives intact alongside the header.
-      const body = (await server.received) as { agentId?: string }
-      expect(body.agentId).toBe('claude-code')
+      const body = (await server.received) as { agentId?: string; arg?: string | null }
+      expect(body.agentId).toBe('antigravity')
+      expect(body.arg).toBe('PreInvocation')
     } finally {
       server.close()
     }

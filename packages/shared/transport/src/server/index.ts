@@ -68,7 +68,7 @@ export {
   createMcpRestApp,
   type McpRestAppHandle
 } from './http/mcp-server'
-export { registerRestApi } from './http/rest-api'
+export { registerRestApi, processAgentHook } from './http/rest-api'
 export type {
   RestApiDeps,
   TerminalStateBridge,

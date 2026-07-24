@@ -228,6 +228,21 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
 // hide the legacy data.
 initStorageDir(legacyStateDir, app.isPackaged)
 
+// Release channel → env, BEFORE the sidecar/pty env is built. `buildMcpEnv` (in
+// the electron-free terminal domain) reads this via getSlayzoneChannel() and
+// packs it into the opaque SLAYZONE_HOOK_CONTEXT blob, so the server can log
+// which channel a hook came from. The shared ~/.slayzone/hooks/notify.sh is NOT
+// channel-scoped (prod + dev share one file); recording the channel makes a
+// future cross-channel clobber visible in Diagnostics instead of silent.
+// Derivation: dev (unpackaged) vs beta (prerelease tag) vs stable.
+if (!process.env.SLAYZONE_CHANNEL) {
+  process.env.SLAYZONE_CHANNEL = !app.isPackaged
+    ? 'dev'
+    : app.getVersion().includes('-')
+      ? 'beta'
+      : 'stable'
+}
+
 // tRPC server data root = the resolved storage dir, so every router's ctx.dataRoot
 // resolves project-icons/artifacts to the same dir the renderer reads.
 function getTrpcDataRoot(): string {
@@ -288,6 +303,7 @@ import {
   setPtyEnricher,
   setPtySpawnedTabRecorder,
   setPtyHibernatedTabRecorder,
+  setReinstallHooks,
   setIdleCloseConfigGetter,
   setChatSpawnedTabRecorder,
   beginTerminalShutdown,
@@ -1806,6 +1822,17 @@ app
     setPtySpawnedTabRecorder(recordSpawned)
     setChatSpawnedTabRecorder(recordSpawned)
     setPtyHibernatedTabRecorder((tabId, hibernated) => markTabHibernated(db, tabId, hibernated))
+    // Spawn-time hook self-heal: re-run the version-gated notify.sh installer
+    // just before a hook-driven agent spawns, so a stale cross-channel copy left
+    // on the SHARED ~/.slayzone/hooks/notify.sh between boots is repaired UPWARD
+    // just-in-time (the gate guarantees no downgrade; a byte-match is a no-op).
+    // Dynamic import mirrors the boot-time installer and keeps the agent-hooks
+    // graph off the hot import path. `installNotifyScript` writes under
+    // getSlayzoneHomeDir() (honors SLAYZONE_ROOT) so E2E stays sandboxed.
+    setReinstallHooks(async () => {
+      const { installNotifyScript } = await import('./agent-hooks/notify-script-installer')
+      await installNotifyScript()
+    })
     // Idle-close (hibernation) config — read live each sweep tick. Raw `=== '1'`
     // (NOT isLabEnabled, which defaults ON in dev) keeps it strictly opt-in.
     // SettingsService.set updates the warmed cache, so UI toggles take effect
@@ -2245,9 +2272,9 @@ app
                   }
                 : {})
               // The sidecar always builds the runner gateway/auth (a hub always
-              // accepts runners) — no env flag needed. The runner listener binds
-              // its own port at startup; SLAYZONE_HUB_RUNNER_TRANSPORT_HOST controls
-              // whether it's reachable off-machine (see below).
+              // accepts runners) — no env flag needed. `/runners` rides the ONE hub
+              // listener (same port as /trpc), demuxed by path; supervised binds
+              // loopback (127.0.0.1), so the co-located runner reaches it locally.
             },
             logger: (line) => logBoot(line),
             onReady: (info) => {

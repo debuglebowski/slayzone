@@ -122,7 +122,8 @@ import {
   createRemoteWorktreeAdapters,
   type HubRunnerGateway
 } from '@slayzone/runner-transport/server'
-import { createHubAuth, verifyTaskToken, type HubAuth } from '@slayzone/hub-auth/server'
+import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
 import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runners/server'
 import { createRunnerAuthAdapters } from './runner-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
@@ -206,11 +207,10 @@ export function composeServer(opts: {
   // (`resolveTaskRunnerId` → null ⇒ local.spawn), so always-on costs the common
   // laptop case nothing at runtime.
   //
-  // Single HMAC secret backing ALL hub-auth signing: better-auth's session/cookie
-  // signer (createHubAuth) AND the per-task bearer tokens the remote-MCP-env
-  // provider mints (mintTaskToken) / the agent-hook route verifies
-  // (verifyTaskToken). Hoisted so all three use ONE secret — a mismatch would make
-  // every minted token unverifiable.
+  // Single HMAC secret backing hub-auth signing: better-auth's session/cookie
+  // signer + the runner enroll/api-key credentials (createHubAuth). (The former
+  // per-task agent-hook bearer is gone — a runner-routed hook posts to the
+  // runner's own loopback relay, so no per-task token is minted or verified.)
   //
   // SECURITY SEAM (runner-secret hardening): a STANDALONE boot resolves this in
   // bin.ts (applyStandaloneHubConfig → env SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET > config.json
@@ -809,6 +809,18 @@ export function composeServer(opts: {
     })
   }
 
+  // PTY state-machine bridge — shared by the agent-hook HTTP route (restDeps
+  // below) AND the runner-relay `event` consumer (wired in the async gateway
+  // block), so a local loopback hook and a runner-relayed hook drive the exact
+  // same state machine through the exact same authority (processAgentHook).
+  const terminalStateBridge = {
+    findSession: findSessionByTaskIdAndMode,
+    transition: transitionStateFromHook,
+    markActive: markSessionActiveFromHook,
+    noteConversationId: noteSessionConversationId,
+    noteAwaitingInput: setSessionAwaitingInput
+  }
+
   // --- REST deps (capability slots; absent → 501) ------------------------------
   const restDeps: RestApiDeps = {
     db,
@@ -817,11 +829,26 @@ export function composeServer(opts: {
     agentLifecycle: agentLifecycleEvents,
     menu: menuEvents,
     taskBus,
-    // Enforce the per-task hub bearer a runner-routed pty's hook carries. Verifier
-    // is closed over `runnerTransportSecret` (the SAME secret the provider above
-    // mints with). Loopback hooks send no bearer → the agent-hook route only
-    // enforces when a token is present, so co-located hooks stay unaffected.
-    verifyTaskToken: (token: string) => verifyTaskToken(runnerTransportSecret, token),
+    // NOTE: no per-task hub-bearer verifier. A runner-routed pty's hook posts to
+    // the RUNNER's own loopback relay (which forwards to the hub over the authed
+    // ws channel via the gateway `event` consumer wired below) — the hook never
+    // carries a bearer, so there is nothing to verify on the agent-hook route.
+    //
+    // SECURITY DECISION (intentional — do NOT re-add per-task scoping): the old
+    // path minted a per-task bearer and rejected a hook whose token taskId != the
+    // payload taskId. That guarded a threat this trust model does not have. The
+    // standing trust boundary is TWO layers: (1) the runner→hub ws channel is
+    // AUTHENTICATED at enroll (hub-auth api-key), so only an enrolled runner can
+    // relay hooks at all; (2) `processAgentHook` only mutates a session that
+    // `bridge.findSession(taskId, mode)` actually resolves, so a hook cannot
+    // fabricate state for a non-existent session. An enrolled runner already
+    // executes the agents and spawns the PTYs for its tasks — a per-hook bearer
+    // guarded a side door on a house whose front door it already holds. Re-adding
+    // it would also force per-agent bearers back into subprocess env, undoing the
+    // byte-identical-local-vs-remote agent env the benign-forwarder redesign won.
+    // FUTURE TRIGGER: if runners ever become UNTRUSTED / multi-tenant, restore
+    // scoping as a CHANNEL-level claim (runner X may only drive tasks assigned to
+    // X), NOT a per-agent bearer.
     // Runner listener info for the loopback `POST /api/runners/join-token` route —
     // the MAIN process's boot-time auto-enroll mints through it (no tRPC client in
     // main). Closed over the SAME late-bound refs the runners registry reads
@@ -852,13 +879,7 @@ export function composeServer(opts: {
       onSessionChange,
       getState
     },
-    terminalStateBridge: {
-      findSession: findSessionByTaskIdAndMode,
-      transition: transitionStateFromHook,
-      markActive: markSessionActiveFromHook,
-      noteConversationId: noteSessionConversationId,
-      noteAwaitingInput: setSessionAwaitingInput
-    },
+    terminalStateBridge,
     processes: {
       listAll: listAllProcesses,
       kill: killProcess,
@@ -890,14 +911,12 @@ export function composeServer(opts: {
   })
 
   // Remote-MCP-env provider. Wired synchronously here — it depends only on
-  // boundPort (read LAZILY inside the closure) + runnerTransportSecret, neither of
-  // which needs the async gateway — so a runner-routed pty spawned before
-  // `runnersReady` resolves still gets a valid hub env. A task not bound to a
-  // runner keeps today's loopback env (the provider short-circuits on a null
-  // runnerId). See `createRemoteMcpEnvProvider` for hubBaseUrl + SLAYZONE_HUB_PUBLIC_URL.
-  setRemoteMcpEnvProvider(
-    createRemoteMcpEnvProvider({ runnerTransportSecret, getBoundPort: () => boundPort })
-  )
+  // boundPort (read LAZILY inside the closure), which does not need the async
+  // gateway — so a runner-routed pty spawned before `runnersReady` resolves still
+  // gets a valid hub base URL (used by the `slay` CLI's hub REST access). A task
+  // not bound to a runner keeps today's loopback env (the provider short-circuits
+  // on a null runnerId). See `createRemoteMcpEnvProvider` for hubBaseUrl derivation.
+  setRemoteMcpEnvProvider(createRemoteMcpEnvProvider({ getBoundPort: () => boundPort }))
 
   runnersReady = (async () => {
     const hubAuth = await createHubAuth({
@@ -922,6 +941,14 @@ export function composeServer(opts: {
       createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
     )
     runnerGatewayRef = runnerGateway
+
+    // Agent-hook relay consumer (hub/runner split): a runner-routed pty posts its
+    // lifecycle hook to the runner's OWN loopback relay, which forwards the raw
+    // envelope here over the authed ws channel as a generic `event`
+    // (name: 'agent-hook'). Feed it through the SAME `processAgentHook` authority
+    // the local loopback HTTP route uses. Extracted + unit-tested in
+    // agent-hook-relay-consumer.ts.
+    attachAgentHookRelayConsumer(runnerGateway, restDeps, terminalStateBridge)
 
     // Route OS-level exec (pty/proc) to the resolved runner; a null runnerId
     // (baked into the spec by the runner-aware spawn lookups above) falls

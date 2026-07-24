@@ -1122,242 +1122,120 @@ describe('POST /api/agent-hook', () => {
       await srv.close()
     }
   })
-})
 
-// ── Per-task hub-bearer enforcement (hub/runner split, wave 3.5) ─────────────
-// A pty routed to a REMOTE runner posts its hook to the HUB with a scoped bearer
-// (Authorization: Bearer <SLAYZONE_HUB_TOKEN>). Only when deps.verifyTaskToken is
-// wired AND a bearer is present is it enforced. The LOCAL loopback
-// hook (no SLAYZONE_HUB_TOKEN → no header) must stay byte-identical — that's the
-// load-bearing invariant these tests pin.
+  // ── NEW benign-forwarder envelope: `{ ctx, raw, arg }` ─────────────────────
+  // The v2 notify.sh forwards three OPAQUE channels; the server does all field
+  // extraction (resolveHookIdentity). These pin that the new envelope resolves
+  // every identity path AND that the OLD flat envelope (above) still works.
 
-type VerifyResult =
-  | { ok: true; claims: { taskId: string; runnerId: string; iat: number; exp: number } }
-  | { ok: false; reason: 'malformed' | 'bad-signature' | 'expired' }
-
-function startServerWithVerify(
-  verifyTaskToken?: (token: string) => VerifyResult
-): Promise<ServerHandle> {
-  const app = express()
-  registerAgentHookRoute(app, {
-    db: {} as never,
-    notifyRenderer: () => {},
-    agentLifecycle: {
-      emit: (_channel: string, event: unknown) => {
-        lifecycleSpy(event)
-        return true
-      }
-    } as never,
-    verifyTaskToken,
-    terminalStateBridge: {
-      findSession: (taskId, mode) => findSessionSpy(taskId, mode),
-      transition: (sessionId, state, event) => transitionSpy(sessionId, state, event),
-      markActive: (sessionId) => markActiveSpy(sessionId),
-      noteConversationId: (sessionId, conversationId) =>
-        noteConversationIdSpy(sessionId, conversationId),
-      noteAwaitingInput: (sessionId, awaiting) => noteAwaitingInputSpy(sessionId, awaiting)
-    }
-  })
-  return new Promise((resolve) => {
-    const server = http.createServer(app).listen(0, '127.0.0.1', () => {
-      const addr = server.address()
-      const port = typeof addr === 'object' && addr ? addr.port : 0
-      resolve({
-        port,
-        close: () =>
-          new Promise<void>((r) => {
-            server.close(() => r())
-          })
+  test('ctx envelope: taskId + agentId resolved from the opaque ctx blob', async () => {
+    findSessionSpy.mockReturnValue('ctx-task')
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'ctx-task', agentId: 'claude-code', channel: 'dev' },
+        raw: { hook_event_name: 'UserPromptSubmit' },
+        arg: null
       })
-    })
-  })
-}
-
-function postJsonAuth(
-  port: number,
-  body: unknown,
-  authorization?: string
-): Promise<{ status: number; body: string }> {
-  return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body)
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-      'content-length': String(Buffer.byteLength(payload))
-    }
-    if (authorization) headers.authorization = authorization
-    const req = http.request(
-      { host: '127.0.0.1', port, method: 'POST', path: '/api/agent-hook', headers },
-      (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c) => chunks.push(c as Buffer))
-        res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
-        )
-      }
-    )
-    req.on('error', reject)
-    req.write(payload)
-    req.end()
-  })
-}
-
-describe('POST /api/agent-hook — hub-bearer enforcement', () => {
-  beforeEach(() => {
-    lifecycleSpy.mockClear()
-    findSessionSpy.mockReset()
-    transitionSpy.mockReset()
-    markActiveSpy.mockReset()
-    findSessionSpy.mockReturnValue(null)
-    transitionSpy.mockReturnValue(true)
-    markActiveSpy.mockReturnValue(true)
-    findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
-    getBoundTaskIdSpy.mockResolvedValue(null)
-  })
-
-  test('valid bearer with matching taskId → 200 (proceeds)', async () => {
-    const verify = vi.fn<(t: string) => VerifyResult>().mockReturnValue({
-      ok: true,
-      claims: { taskId: 'task-r', runnerId: 'runner-a', iat: 1, exp: 2 }
-    })
-    const srv = await startServerWithVerify(verify)
-    try {
-      const res = await postJsonAuth(
-        srv.port,
-        { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-r' },
-        'Bearer good-token'
-      )
       expect(res.status).toBe(200)
-      expect(verify).toHaveBeenCalledWith('good-token')
       expect(lifecycleSpy).toHaveBeenCalledTimes(1)
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('bearer scheme is case-insensitive + trims token', async () => {
-    const verify = vi.fn<(t: string) => VerifyResult>().mockReturnValue({
-      ok: true,
-      claims: { taskId: 'task-r', runnerId: 'runner-a', iat: 1, exp: 2 }
-    })
-    const srv = await startServerWithVerify(verify)
-    try {
-      const res = await postJsonAuth(
-        srv.port,
-        { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-r' },
-        'bearer   good-token'
-      )
-      expect(res.status).toBe(200)
-      expect(verify).toHaveBeenCalledWith('good-token')
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('invalid bearer (bad-signature) → 401, no side effects', async () => {
-    const verify = vi
-      .fn<(t: string) => VerifyResult>()
-      .mockReturnValue({ ok: false, reason: 'bad-signature' })
-    const srv = await startServerWithVerify(verify)
-    try {
-      const res = await postJsonAuth(
-        srv.port,
-        { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-r' },
-        'Bearer forged'
-      )
-      expect(res.status).toBe(401)
-      expect(res.body).toContain('bad-signature')
-      expect(lifecycleSpy).not.toHaveBeenCalled()
-      expect(findSessionSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('expired bearer → 401, no side effects', async () => {
-    const verify = vi
-      .fn<(t: string) => VerifyResult>()
-      .mockReturnValue({ ok: false, reason: 'expired' })
-    const srv = await startServerWithVerify(verify)
-    try {
-      const res = await postJsonAuth(
-        srv.port,
-        { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-r' },
-        'Bearer stale'
-      )
-      expect(res.status).toBe(401)
-      expect(res.body).toContain('expired')
-      expect(lifecycleSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('valid bearer but taskId scope mismatch → 403, no side effects', async () => {
-    const verify = vi.fn<(t: string) => VerifyResult>().mockReturnValue({
-      ok: true,
-      claims: { taskId: 'task-OTHER', runnerId: 'runner-a', iat: 1, exp: 2 }
-    })
-    const srv = await startServerWithVerify(verify)
-    try {
-      const res = await postJsonAuth(
-        srv.port,
-        { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-r' },
-        'Bearer scoped-to-other-task'
-      )
-      expect(res.status).toBe(403)
-      expect(lifecycleSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('valid bearer, no taskId in payload → 200 (scope check skipped)', async () => {
-    // A pooled/taskless hook carries a token but no taskId to match against —
-    // the token still must verify, but there is no scope to reject on.
-    const verify = vi.fn<(t: string) => VerifyResult>().mockReturnValue({
-      ok: true,
-      claims: { taskId: 'task-r', runnerId: 'runner-a', iat: 1, exp: 2 }
-    })
-    const srv = await startServerWithVerify(verify)
-    try {
-      const res = await postJsonAuth(
-        srv.port,
-        { agentId: 'claude-code', hookEvent: 'Stop' },
-        'Bearer good-token'
-      )
-      expect(res.status).toBe(200)
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('NO bearer + verifier wired → 200 (loopback path preserved, verifier never called)', async () => {
-    const verify = vi.fn<(t: string) => VerifyResult>()
-    const srv = await startServerWithVerify(verify)
-    try {
-      const res = await postJsonAuth(srv.port, {
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({
         agentId: 'claude-code',
-        hookEvent: 'Stop',
-        taskId: 'task-r'
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'ctx-task'
       })
-      expect(res.status).toBe(200)
-      expect(verify).not.toHaveBeenCalled()
-      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(transitionSpy).toHaveBeenCalledWith('ctx-task', 'running', 'UserPromptSubmit')
     } finally {
       await srv.close()
     }
   })
 
-  test('bearer present but NO verifier (runner off) → 200 (stray header cannot lock out)', async () => {
-    const srv = await startServerWithVerify(undefined)
+  test('ctx envelope: slaySessionId (pooled agent) resolved from the blob', async () => {
+    getBoundTaskIdSpy.mockResolvedValue('bound-from-ctx')
+    findSessionSpy.mockReturnValue('bound-from-ctx:bound-from-ctx')
+    const srv = await startServer()
     try {
-      const res = await postJsonAuth(
-        srv.port,
-        { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-r' },
-        'Bearer whatever'
+      await postJson(srv.port, {
+        ctx: { v: 1, slaySessionId: 'pool-ctx-1', agentId: 'claude-code' },
+        raw: { hook_event_name: 'UserPromptSubmit' }
+      })
+      expect(getBoundTaskIdSpy).toHaveBeenCalledWith(expect.anything(), 'pool-ctx-1')
+      expect(transitionSpy).toHaveBeenCalledWith(
+        'bound-from-ctx:bound-from-ctx',
+        'running',
+        'UserPromptSubmit'
       )
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity: event NAME arrives via `arg` (payload omits it)', async () => {
+    // Antigravity's installer appends the event name as argv $1; its stdin
+    // payload has no hook_event_name. The dumb forwarder ships `arg` opaquely
+    // and the server treats a non-JSON arg as the event name.
+    findSessionSpy.mockReturnValue('ag-arg')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'ag-arg', agentId: 'antigravity' },
+        raw: { conversationId: 'c1' },
+        arg: 'PreInvocation'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('ag-arg', 'running', 'PreInvocation')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('opencode plugin: `arg` carries the whole JSON payload (no stdin raw)', async () => {
+    // The OpenCode plugin shells `bash notify.sh '<json>'`, so the payload is on
+    // argv $1 and stdin is empty (raw:null). The server parses the JSON arg and
+    // derives hook_event_name from it.
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'oc-task', agentId: 'opencode' },
+        raw: null,
+        arg: JSON.stringify({ hook_event_name: 'Stop' })
+      })
       expect(res.status).toBe(200)
+      // opencode is not hook-driven for state, but the lifecycle event still fires.
       expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({
+        agentId: 'opencode',
+        hookEvent: 'Stop',
+        taskId: 'oc-task'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('ctx envelope: codex SessionStart → conversation id from raw.session_id persists', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cx-ctx', agentId: 'codex' },
+        raw: {
+          hook_event_name: 'SessionStart',
+          session_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+        }
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
+      expect(data.conversationId).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('envelope with no usable identity (no agent, no event) → 400', async () => {
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, { ctx: { v: 1 }, raw: null, arg: null })
+      expect(res.status).toBe(400)
+      expect(lifecycleSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }

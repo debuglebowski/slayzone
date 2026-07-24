@@ -58,6 +58,7 @@ export {
   type PtyShutdownResult,
   setSpawnedTabRecorder as setPtySpawnedTabRecorder,
   setHibernatedTabRecorder as setPtyHibernatedTabRecorder,
+  setReinstallHooks,
   setIdleCloseConfigGetter,
   touchPty,
   touchTaskMainSession,

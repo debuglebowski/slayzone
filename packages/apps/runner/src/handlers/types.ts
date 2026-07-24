@@ -22,6 +22,16 @@ export interface HandlerContext {
   dialer: RunnerDialer
   config: RunnerConfig
   log: RunnerLog
+  /**
+   * Runner loopback agent-hook URL (hub/runner split). When set, the pty handler
+   * OVERLAYS `SLAYZONE_AGENT_HOOK_URL` in every spawned agent's env with this
+   * value and STRIPS any `SLAYZONE_HUB_TOKEN` — so a runner-routed agent always
+   * posts its lifecycle hook to the runner's OWN loopback relay (which forwards
+   * to the hub over the authed ws channel), never to a hub URL the hub baked in,
+   * and no per-agent hub bearer ever reaches the subprocess env. Absent (tests /
+   * pre-init) → the env is passed through unchanged.
+   */
+  agentHookUrl?: string
 }
 
 /** A single hub→runner method handler. Params are validated inside. */

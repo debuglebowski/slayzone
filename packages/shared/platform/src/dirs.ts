@@ -44,6 +44,25 @@ export function getSlayzoneHomeDir(): string {
 }
 
 /**
+ * The release channel this SlayZone process belongs to — `stable` / `beta` /
+ * `dev` (or `unknown` when unset). Pure env reader: the Electron app main sets
+ * `SLAYZONE_CHANNEL` at boot (derived from `app.isPackaged` + the version's
+ * prerelease tag) BEFORE any sidecar / pty env is built; standalone hub/runner
+ * boots and tests leave it unset → `unknown`.
+ *
+ * Why it exists: the shared `~/.slayzone/hooks/notify.sh` is NOT channel-scoped,
+ * so two channels (e.g. prod v0.35 + dev v0.36) share one file. This value is
+ * packed into the opaque `SLAYZONE_HOOK_CONTEXT` blob so the server can log which
+ * channel a hook actually came from — making a future cross-channel clobber
+ * visible in Diagnostics instead of silent. It is attribution/diagnostic only;
+ * no control flow keys off it.
+ */
+export function getSlayzoneChannel(): string {
+  const raw = process.env.SLAYZONE_CHANNEL?.trim()
+  return raw ? raw : 'unknown'
+}
+
+/**
  * Absolute path to the user's Claude Code settings.json. Honours
  * `SLAYZONE_CLAUDE_SETTINGS_PATH` so tests can redirect without overriding HOME.
  */

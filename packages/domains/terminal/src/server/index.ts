@@ -111,10 +111,14 @@ export {
   // Wave-1 session-ledger seam (was landed but left unexported): lets a later
   // hub/runner wave inject a non-DB-backed ledger from the composition root.
   setPtySessionLedger,
-  // Wave-3 remote-MCP-env seam: the runner transport injects a provider that mints a
-  // per-task hub bearer + resolves the hub base URL so a runner-routed pty's
-  // slay CLI + agent hooks dial the hub instead of loopback. Unset => loopback.
+  // Wave-3 remote-MCP-env seam: the runner transport injects a provider that
+  // resolves the hub base URL so a runner-routed pty's slay CLI dials the hub.
+  // Unset => loopback. (The agent hook posts to loopback regardless.)
   setRemoteMcpEnvProvider,
+  // Spawn-time hook self-heal seam: the app injects a callback that re-runs the
+  // version-gated notify.sh installer just-in-time, so a hook-driven spawn can't
+  // fire through a stale cross-channel copy left on disk between boots.
+  setReinstallHooks,
   // The real "task reached terminal status" teardown (host-kill hook + kill
   // PTYs + kill chat transports). Aliased to avoid colliding with the seam
   // `onTaskReachedTerminal` (task-events) exported above; the side-car wires
