@@ -117,7 +117,7 @@ export {
   setRemoteMcpEnvProvider,
   // Spawn-time hook self-heal seam: the app injects a callback that re-runs the
   // version-gated notify.sh installer just-in-time, so a hook-driven spawn can't
-  // fire through a stale cross-channel copy left on disk between boots.
+  // fire through a stale cross-release-channel copy left on disk between boots.
   setReinstallHooks,
   // The real "task reached terminal status" teardown (host-kill hook + kill
   // PTYs + kill chat transports). Aliased to avoid colliding with the seam

@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { getSlayzoneChannel, getSlayzoneHomeDir } from '@slayzone/platform'
+import { getSlayzoneReleaseChannel, getSlayzoneHomeDir } from '@slayzone/platform'
 import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../shared'
 
 /** Path the agent lifecycle hook (notify.sh) POSTs to — see agent-hook.ts. */
@@ -148,12 +148,17 @@ export async function buildMcpEnv(
   // for hook-capable spawns (it rides the hook env). Carries every field the
   // server needs to resolve/attribute a hook — the per-field list lives HERE, in
   // TypeScript, never in the shared shell script (which is what rotted). `v` is
-  // the envelope version; `channel` is attribution-only (which SlayZone channel
-  // fired the hook), so a future cross-channel clobber is visible in Diagnostics.
+  // the envelope version; `releaseChannel` is attribution-only (which release
+  // channel fired the hook), so a future cross-release-channel clobber is
+  // visible in Diagnostics.
   function setHookIdentity(): void {
     env.SLAYZONE_AGENT_ID = mode as string
     env.SLAYZONE_ROOT = getSlayzoneHomeDir()
-    const ctx: Record<string, unknown> = { v: 1, agentId: mode, channel: getSlayzoneChannel() }
+    const ctx: Record<string, unknown> = {
+      v: 1,
+      agentId: mode,
+      releaseChannel: getSlayzoneReleaseChannel()
+    }
     if (taskId) ctx.taskId = taskId
     if (sessionId) ctx.slaySessionId = sessionId
     if (resolvedProjectId) ctx.projectId = resolvedProjectId

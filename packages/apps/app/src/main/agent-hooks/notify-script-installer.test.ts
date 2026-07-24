@@ -62,12 +62,12 @@ describe('installNotifyScript', () => {
     }
   })
 
-  // Version gate: two SlayZone channels (prod + dev) share one on-disk
+  // Version gate: two release channels (prod + dev) share one on-disk
   // notify.sh. The newer script is backward-compatible (an older server ignores
   // extra fields), but an OLDER app must never downgrade a NEWER script — that
   // is the clobber that made warm-pool sessions invisible (no slaySessionId →
   // no task resolution → no spinner / no unread). Highest version wins,
-  // regardless of channel or boot order.
+  // regardless of release channel or boot order.
   describe('version gate', () => {
     test('upgrades: newer version overwrites older on-disk script', async () => {
       const dir = tmpDir()

@@ -4,7 +4,7 @@ import type { IPty, IDisposable } from 'node-pty'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { recordSessionSpawn, markSessionDead } from '@slayzone/task/server'
-import { spawnLoginShell } from './pty-manager'
+import { spawnLoginShell, maybeReinstallHooksForSpawn } from './pty-manager'
 import { buildMcpEnv } from '../mcp-env'
 import { buildExecCommand } from '../shell-env'
 import { interpolateTemplate } from '../adapters/template-interpolation'
@@ -297,6 +297,13 @@ async function spawnWarm(projectId: string): Promise<void> {
     const extraEnv = await buildMcpEnv(deps.db, undefined, WARM_MODE, sessionId, projectId)
     // Re-check after awaits (gate may have closed / shutdown / raced).
     if (shuttingDown || warm.has(projectId)) return
+    // Spawn-time hook self-heal for the WARM path. A pre-warmed agent's notify.sh
+    // hooks fire from warm time (before any task), and it's NEVER healed at
+    // adoption (createPty skips preWarmedAgent) — so if we don't heal here, the
+    // warm pool is the one spawn path that can run through a stale cross-release-channel
+    // script. That is the exact frozen-env population the clobber bug made
+    // invisible, so healing here is load-bearing, not belt-and-suspenders.
+    maybeReinstallHooksForSpawn(WARM_MODE)
     const result = (deps.spawnShell ?? spawnLoginShell)({ cwd, extraEnv })
     const handle: WarmHandle = {
       pty: result.pty,

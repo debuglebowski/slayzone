@@ -43,9 +43,9 @@ async function readExisting(target: string): Promise<string | null> {
  * Write the agent lifecycle notify script to `~/.slayzone/hooks/notify.sh`
  * with mode 0755.
  *
- * VERSION GATE — the prod and dev SlayZone channels share ONE on-disk
+ * VERSION GATE — the prod and dev release channels share ONE on-disk
  * notify.sh (the path is `~/.slayzone/hooks/notify.sh` for both, since
- * `getSlayzoneHomeDir()` is not channel-scoped). The script is
+ * `getSlayzoneHomeDir()` is not release-channel-scoped). The script is
  * backward-compatible (an older server ignores newer envelope fields like
  * `slaySessionId`), so a NEWER script is always safe for an OLDER app to run —
  * but an OLDER app must never DOWNGRADE a newer script. That downgrade is what
@@ -53,7 +53,7 @@ async function readExisting(target: string): Promise<string | null> {
  * resolution → no running-spinner, no unread flag).
  *
  * So: write only when the incoming version is >= the on-disk version. Highest
- * version wins regardless of channel or boot order. Below equality it still
+ * version wins regardless of release channel or boot order. Below equality it still
  * defers to `writeFileIfChanged` for byte-level idempotency (equal-version
  * content tweaks in dev still land; a genuine no-op stays a no-op).
  *

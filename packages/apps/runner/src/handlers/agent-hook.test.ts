@@ -64,7 +64,7 @@ describe('createAgentHookServer (runner loopback relay)', () => {
       expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/api\/agent-hook$/)
 
       const envelope = {
-        ctx: { v: 1, taskId: 'task-1', agentId: 'claude-code', channel: 'stable' },
+        ctx: { v: 1, taskId: 'task-1', agentId: 'claude-code', releaseChannel: 'stable' },
         raw: { hook_event_name: 'UserPromptSubmit' },
         arg: null,
         agentId: 'claude-code'

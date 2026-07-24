@@ -269,13 +269,13 @@ function isAgentId(v: unknown): v is HookAgentId {
  *   NEW (benign notify.sh v2+): `{ ctx, raw, arg, agentId }` — three OPAQUE
  *     channels the script forwards without naming any field:
  *       - ctx : the app-packed identity blob (`SLAYZONE_HOOK_CONTEXT`) —
- *               `{ v, taskId, slaySessionId, projectId, agentId, channel }`.
+ *               `{ v, taskId, slaySessionId, projectId, agentId, releaseChannel }`.
  *       - raw : the stdin hook payload (Claude/Codex/Gemini/Antigravity), or null.
  *       - arg : argv $1 (Antigravity's event NAME, or the OpenCode plugin's whole
  *               JSON payload) as a string, or null.
  *     ALL field extraction (event name, session ids, cwd) is done HERE, on the
  *     server — never in the shared shell script (the file that rots when an
- *     older channel clobbers it).
+ *     older release channel clobbers it).
  *
  *   LEGACY (old installed scripts + old released apps): flat
  *     `{ agentId, hookEvent, sessionId?, taskId?, slaySessionId?, cwd?, raw? }`.
@@ -307,8 +307,8 @@ interface ResolvedHook {
   sessionId?: string
   cwd?: string
   raw?: unknown
-  /** Attribution only — which SlayZone channel fired the hook (from the blob). */
-  channel?: string
+  /** Attribution only — which release channel fired the hook (from the blob). */
+  releaseChannel?: string
 }
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
@@ -376,7 +376,7 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
     sessionId: cliSessionId,
     cwd: body.cwd ?? (typeof effRaw?.cwd === 'string' ? effRaw.cwd : undefined),
     raw: effRaw ?? body.raw,
-    channel: typeof ctx?.channel === 'string' ? ctx.channel : undefined
+    releaseChannel: typeof ctx?.releaseChannel === 'string' ? ctx.releaseChannel : undefined
   }
 }
 
@@ -589,11 +589,11 @@ export async function processAgentHook(
         taskId: resolvedTaskId,
         message: hook.hookEvent,
         // Include raw payload (truncated) so we can see stop_hook_active,
-        // tool_name, tool_response, transcript_path, etc. `channel` makes a
-        // future cross-channel notify.sh clobber visible in Diagnostics.
+        // tool_name, tool_response, transcript_path, etc. `releaseChannel` makes
+        // a future cross-release-channel notify.sh clobber visible in Diagnostics.
         payload: {
           agentId: hook.agentId,
-          channel: hook.channel ?? 'unknown',
+          releaseChannel: hook.releaseChannel ?? 'unknown',
           mappedState: newState ?? 'mark-active',
           raw: truncateForDiag(hook.raw, 4096)
         }

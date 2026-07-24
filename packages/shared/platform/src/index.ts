@@ -1,7 +1,7 @@
 export {
   getStateDir,
   getSlayzoneHomeDir,
-  getSlayzoneChannel,
+  getSlayzoneReleaseChannel,
   getClaudeSettingsPath,
   getGeminiSettingsPath,
   getCodexHooksPath,

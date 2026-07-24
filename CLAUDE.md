@@ -65,6 +65,12 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 
 **HMR in dev**: channel kept enabled. Under prod React, react-refresh is an inert no-op (prod react-dom omits `scheduleRefresh` → no targeted hot-reload, never throws), but the channel is required for Vite's full-reload on dep re-optimize — without it, a runtime re-optimize leaves mixed dep-hash modules → multiple React copies. File changes trigger full page reload.
 
+## Env Var Naming
+
+1. Prefix `SLAYZONE_`.
+2. Name by what the value IS, not who reads it. App-specific → include the app (`SLAYZONE_HUB_PORT`). Universal → don't (`SLAYZONE_MODE`, `SLAYZONE_TASK_ID`).
+3. Same concept → same suffix: `_PORT` `_URL` `_TOKEN` `_DIR` `_PATH` `_ID`.
+
 ## Theming
 
 All colors must reference theme tokens. Never use raw Tailwind palette classes (`bg-neutral-*`, `text-zinc-*`, `border-gray-*`) or arbitrary hex (`bg-[#1a1a1a]`) — they bypass the theme and break under custom themes.

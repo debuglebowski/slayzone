@@ -16,6 +16,7 @@ import {
   __resetForTests,
   type WarmPoolDataOps
 } from './warm-process-manager'
+import { setReinstallHooks } from './pty-manager'
 
 let passed = 0
 let failed = 0
@@ -160,6 +161,26 @@ await test('warm spawn sets SLAYZONE_PROJECT_ID even with no task bound yet', as
   await settle()
   expect(lastSpawnOpts?.extraEnv?.SLAYZONE_PROJECT_ID).toBe('p1')
   expect(lastSpawnOpts?.extraEnv?.SLAYZONE_TASK_ID).toBe(undefined as unknown as string)
+})
+
+await test('warm spawn fires the notify.sh self-heal (the clobber-bug population)', async () => {
+  // A pre-warmed claude-code agent's hooks fire from warm time and it is never
+  // healed at adoption (createPty skips preWarmedAgent) — so if the warm path
+  // did not self-heal, this exact population (the one the clobber bug made
+  // invisible) could run through a stale cross-release-channel notify.sh. Guard it.
+  let heals = 0
+  setReinstallHooks(async () => {
+    heals++
+  })
+  try {
+    init()
+    setProjectTabCounts(1, { p1: 1 })
+    await settle()
+    expect(spawnCount).toBe(1)
+    expect(heals).toBe(1)
+  } finally {
+    setReinstallHooks(null)
+  }
 })
 
 await test('count 1→2→1 does not respawn', async () => {

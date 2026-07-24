@@ -158,8 +158,8 @@ export function setHibernatedTabRecorder(fn: HibernatedSetter | null): void {
  * fire-and-forget just before spawning a hook-driven agent so the shared
  * `~/.slayzone/hooks/notify.sh` is repaired UPWARD just-in-time.
  *
- * Why: that file is shared across SlayZone channels (prod + dev). Another channel
- * booting between our boots can leave a STALE copy on disk; the install-time
+ * Why: that file is shared across release channels (prod + dev). Another release
+ * channel booting between our boots can leave a STALE copy on disk; the install-time
  * version gate only runs at boot, so a long-lived app would keep firing hooks
  * through a downgraded script. Re-running the version-gated installer at each
  * spawn closes that window. The gate guarantees UPWARD-only (never a downgrade),
@@ -170,6 +170,22 @@ export function setHibernatedTabRecorder(fn: HibernatedSetter | null): void {
 let reinstallHooks: (() => Promise<void>) | null = null
 export function setReinstallHooks(fn: (() => Promise<void>) | null): void {
   reinstallHooks = fn
+}
+
+/**
+ * Fire the spawn-time hook self-heal for `mode`, if wired + hook-driven.
+ * Fire-and-forget + throw-safe: a repair hiccup must NEVER block or fail a
+ * spawn. Centralised so EVERY agent-spawn path (cold createPty AND the warm
+ * pool) triggers the just-in-time repair through one gate — the warm pool is
+ * precisely the frozen-env population the clobber bug made invisible, so it must
+ * NOT be the one path that skips the heal. No-op when the seam is unset (tests)
+ * or the mode isn't hook-driven (plain shells don't use notify.sh).
+ */
+export function maybeReinstallHooksForSpawn(mode: string): void {
+  if (!reinstallHooks || !isHookDrivenMode(mode)) return
+  void reinstallHooks().catch(() => {
+    /* best-effort — a stale-hook repair never blocks a spawn */
+  })
 }
 
 /**
@@ -1448,16 +1464,14 @@ export async function createPty(
     })
 
     // Spawn-time hook self-heal: repair the shared ~/.slayzone/hooks/notify.sh
-    // UPWARD just-in-time for a hook-driven agent, closing the window where
-    // another SlayZone channel left a stale copy on disk between our boots. The
-    // version gate makes this upward-only + a byte-match no-op, so it's safe on
-    // the spawn path. Fire-and-forget + swallow: a repair hiccup must NEVER block
-    // or fail a spawn. Skipped for a pre-warmed adopt (env already baked at warm
-    // time) and non-hook modes (plain shells don't use notify.sh).
-    if (reinstallHooks && !opts.adoptPty?.preWarmedAgent && isHookDrivenMode(terminalMode)) {
-      void reinstallHooks().catch(() => {
-        /* best-effort — a stale-hook repair never blocks a spawn */
-      })
+    // UPWARD just-in-time, closing the window where another release channel left
+    // a stale copy on disk between our boots. Skipped for a pre-warmed ADOPT: that
+    // agent already self-healed at WARM-spawn time (warm-process-manager), and it
+    // is never re-exec'd here, so re-healing at adoption is redundant. A cold
+    // spawn heals here; a warm spawn heals in the warm path — no agent slips
+    // through (the warm pool is exactly the population the clobber bug hit).
+    if (!opts.adoptPty?.preWarmedAgent) {
+      maybeReinstallHooksForSpawn(terminalMode)
     }
 
     // Hub/runner split (wave 3): when this session spawns on a runner, resolve

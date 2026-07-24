@@ -1,26 +1,27 @@
 #!/bin/sh
 # SlayZone agent lifecycle hook — BENIGN DUMB FORWARDER.
 #
-# SLAYZONE_NOTIFY_VERSION=2
+# SLAYZONE_NOTIFY_VERSION=3
 # ^ Bump on EVERY change to this file. The installer (notify-script-installer.ts)
 #   refuses to overwrite an on-disk script with a strictly-lower version, so a
-#   stale/older SlayZone channel can never downgrade a newer script on the
+#   stale/older release channel can never downgrade a newer script on the
 #   shared ~/.slayzone/hooks/notify.sh. Newer is always backward-compatible.
 #
 # WHY THIS FILE IS LOGIC-FREE (the sustainable fix):
-#   ~/.slayzone/hooks/notify.sh is a SINGLE file shared by every SlayZone channel
-#   (getSlayzoneHomeDir() is NOT channel-scoped), and agents find it via the
-#   shared ~/.claude/settings.json pointer — so it CANNOT be channel-scoped. A
-#   shared file must therefore be BENIGN: it must contain no field-picking logic,
-#   so it does not matter which channel's copy wins the last write. The previous
-#   version cherry-picked named fields (taskId, slaySessionId, session_id,
-#   hook_event_name, …) to forward; when an OLDER channel's copy won, its field
-#   list was missing `slaySessionId`, so warm-pool sessions became invisible (no
-#   task resolution → no running spinner, no unread dot). This version forwards
-#   THREE opaque channels and lets the SERVER do all field extraction:
+#   ~/.slayzone/hooks/notify.sh is a SINGLE file shared by every release channel
+#   (getSlayzoneHomeDir() is NOT release-channel-scoped), and agents find it via
+#   the shared ~/.claude/settings.json pointer — so it CANNOT be
+#   release-channel-scoped. A shared file must therefore be BENIGN: it must
+#   contain no field-picking logic, so it does not matter which release channel's
+#   copy wins the last write. The previous version cherry-picked named fields
+#   (taskId, slaySessionId, session_id, hook_event_name, …) to forward; when an
+#   OLDER release channel's copy won, its field list was missing `slaySessionId`,
+#   so warm-pool sessions became invisible (no task resolution → no running
+#   spinner, no unread dot). This version forwards THREE opaque channels and lets
+#   the SERVER do all field extraction:
 #     - ctx : $SLAYZONE_HOOK_CONTEXT — an opaque JSON blob the app packs at spawn
 #             with every identity field (taskId/slaySessionId/projectId/agentId/
-#             channel). Forwarded VERBATIM; this script never parses it.
+#             releaseChannel). Forwarded VERBATIM; this script never parses it.
 #     - raw : the hook payload piped on stdin (Claude/Codex/Gemini/Antigravity).
 #     - arg : argv $1 — Antigravity passes the EVENT NAME here (its payload omits
 #             it); the OpenCode plugin passes the whole JSON payload here (no

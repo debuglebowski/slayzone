@@ -85,7 +85,8 @@ describe('hook execution (issue #88)', () => {
           ...process.env,
           SLAYZONE_AGENT_HOOK_URL: hookUrl,
           SLAYZONE_AGENT_ID: 'claude-code',
-          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"task-abc","agentId":"claude-code","channel":"dev"}'
+          SLAYZONE_HOOK_CONTEXT:
+            '{"v":1,"taskId":"task-abc","agentId":"claude-code","releaseChannel":"dev"}'
         }
       })
 
@@ -93,13 +94,13 @@ describe('hook execution (issue #88)', () => {
       // grep/name any field. The server does all extraction.
       const body = (await server.received) as {
         agentId?: string
-        ctx?: { taskId?: string; channel?: string }
+        ctx?: { taskId?: string; releaseChannel?: string }
         raw?: { hook_event_name?: string; session_id?: string }
         arg?: string | null
       }
       expect(body.agentId).toBe('claude-code')
       // ctx forwarded verbatim (parsed back to the exact blob the app packed).
-      expect(body.ctx).toMatchObject({ taskId: 'task-abc', channel: 'dev' })
+      expect(body.ctx).toMatchObject({ taskId: 'task-abc', releaseChannel: 'dev' })
       // stdin payload forwarded verbatim as `raw`.
       expect(body.raw).toMatchObject({ hook_event_name: 'SessionStart', session_id: 'sess-xyz' })
       // No argv → arg is null.

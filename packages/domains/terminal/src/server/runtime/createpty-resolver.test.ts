@@ -302,7 +302,7 @@ await test('real-db resolver drives resume from the ledger (renderer hint absent
 
 // ── Spawn-time hook self-heal (part 3) ───────────────────────────────────────
 // A hook-driven spawn must re-run the version-gated notify.sh installer just-in-
-// time so a stale cross-channel copy can't outlive a boot. Non-hook modes skip
+// time so a stale cross-release-channel copy can't outlive a boot. Non-hook modes skip
 // it, and a throwing repair must NEVER block the spawn.
 
 await test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {

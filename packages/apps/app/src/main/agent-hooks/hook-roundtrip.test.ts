@@ -170,7 +170,7 @@ describe('notify.sh → processAgentHook round-trip (real bash bytes)', () => {
         env: {
           SLAYZONE_AGENT_ID: 'claude-code',
           SLAYZONE_HOOK_CONTEXT:
-            '{"v":1,"taskId":"task-rt","agentId":"claude-code","channel":"dev"}'
+            '{"v":1,"taskId":"task-rt","agentId":"claude-code","releaseChannel":"dev"}'
         }
       })
       expect(cap.transitions[0]).toEqual({

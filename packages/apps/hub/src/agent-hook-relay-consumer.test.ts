@@ -93,7 +93,7 @@ describe('attachAgentHookRelayConsumer', () => {
       runnerId: 'runner-a',
       name: 'agent-hook',
       payload: {
-        ctx: { v: 1, taskId: 'task-r', agentId: 'claude-code', channel: 'stable' },
+        ctx: { v: 1, taskId: 'task-r', agentId: 'claude-code', releaseChannel: 'stable' },
         raw: { hook_event_name: 'UserPromptSubmit' },
         arg: null
       }

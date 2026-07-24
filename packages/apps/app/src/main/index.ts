@@ -229,14 +229,15 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
 initStorageDir(legacyStateDir, app.isPackaged)
 
 // Release channel → env, BEFORE the sidecar/pty env is built. `buildMcpEnv` (in
-// the electron-free terminal domain) reads this via getSlayzoneChannel() and
-// packs it into the opaque SLAYZONE_HOOK_CONTEXT blob, so the server can log
-// which channel a hook came from. The shared ~/.slayzone/hooks/notify.sh is NOT
-// channel-scoped (prod + dev share one file); recording the channel makes a
-// future cross-channel clobber visible in Diagnostics instead of silent.
+// the electron-free terminal domain) reads this via getSlayzoneReleaseChannel()
+// and packs it into the opaque SLAYZONE_HOOK_CONTEXT blob, so the server can log
+// which release channel a hook came from. The shared ~/.slayzone/hooks/notify.sh
+// is NOT release-channel-scoped (prod + dev share one file); recording the
+// release channel makes a future cross-release-channel clobber visible in
+// Diagnostics instead of silent.
 // Derivation: dev (unpackaged) vs beta (prerelease tag) vs stable.
-if (!process.env.SLAYZONE_CHANNEL) {
-  process.env.SLAYZONE_CHANNEL = !app.isPackaged
+if (!process.env.SLAYZONE_RELEASE_CHANNEL) {
+  process.env.SLAYZONE_RELEASE_CHANNEL = !app.isPackaged
     ? 'dev'
     : app.getVersion().includes('-')
       ? 'beta'
@@ -1823,7 +1824,7 @@ app
     setChatSpawnedTabRecorder(recordSpawned)
     setPtyHibernatedTabRecorder((tabId, hibernated) => markTabHibernated(db, tabId, hibernated))
     // Spawn-time hook self-heal: re-run the version-gated notify.sh installer
-    // just before a hook-driven agent spawns, so a stale cross-channel copy left
+    // just before a hook-driven agent spawns, so a stale cross-release-channel copy left
     // on the SHARED ~/.slayzone/hooks/notify.sh between boots is repaired UPWARD
     // just-in-time (the gate guarantees no downgrade; a byte-match is a no-op).
     // Dynamic import mirrors the boot-time installer and keeps the agent-hooks
