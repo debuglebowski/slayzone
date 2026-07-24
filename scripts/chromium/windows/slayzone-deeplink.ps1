@@ -20,9 +20,9 @@ if ([string]::IsNullOrWhiteSpace($Url)) {
 # The sidecar binds a baked loopback port (prod 8765, dev 8766), matching the
 # renderer's baked WS URL (there is no server-URL override channel yet — see
 # window-api-shim/src/server-url.ts; align both when one lands). Override with
-# SLAYZONE_SERVER_PORT (space-separated). Try prod first, then dev.
-$ports = if ($env:SLAYZONE_SERVER_PORT) {
-  $env:SLAYZONE_SERVER_PORT -split '\s+' | Where-Object { $_ }
+# SLAYZONE_HUB_PORT (space-separated). Try prod first, then dev.
+$ports = if ($env:SLAYZONE_HUB_PORT) {
+  $env:SLAYZONE_HUB_PORT -split '\s+' | Where-Object { $_ }
 }
 else {
   @('8765', '8766')

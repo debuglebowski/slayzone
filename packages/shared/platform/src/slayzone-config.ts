@@ -2,16 +2,15 @@
  * Shared SlayZone config file — a SINGLE JSON document at
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
- * the keys it cares about (hub: runnerTransportSecret/port/runnerTransportPort/
- * publicUrl; runner: joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256).
+ * the keys it cares about (hub: runnerTransportSecret/port/publicUrl; runner:
+ * joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256).
  * The runner credential store derives from SLAYZONE_ROOT (`<ROOT>/runners`), and
  * the DB path from SLAYZONE_ROOT (`<ROOT>/storage`), so there is no
  * credentialsDir or dbPath key.
  *
  * Precedence everywhere: env var > config.json > generated/default. The file is
  * the BASE — env can still override it (e.g. CI). Only keys that are actually
- * set are persisted; derived state (the resolved runner listener port) stays in
- * the DB (`settings.runner_transport_port`) and is NEVER written here.
+ * set are persisted.
  *
  * SUPERVISED mode (Electron host, `SLAYZONE_SUPERVISED=1`) must NOT touch this
  * file at all — the callers gate reads/writes on `!SUPERVISED`. Nothing in this
@@ -49,10 +48,10 @@ export interface SlayzoneConfig {
   /** HMAC secret backing hub-auth + per-task token mint/verify. Auto-generated
    *  + persisted on first standalone boot if absent (see ensureRunnerTransportSecret). */
   runnerTransportSecret?: string
-  /** tRPC/HTTP listen port (`SLAYZONE_SERVER_PORT`). */
+  /** The hub's single listen port for ALL transport — `/trpc`, `/runners`,
+   *  `/health`, `/mcp`, REST (`SLAYZONE_HUB_PORT`). Protocol (ws/wss) follows
+   *  SLAYZONE_MODE, not a per-listener knob. */
   port?: number
-  /** Runner `/runners` https listener port (`SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`). */
-  runnerTransportPort?: number
   /** Public hub base URL advertised to remote runners (`SLAYZONE_HUB_PUBLIC_URL`). */
   publicUrl?: string
   // --- runner keys ---
@@ -106,8 +105,6 @@ function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   if (typeof raw.runnerTransportSecret === 'string' && raw.runnerTransportSecret.length > 0)
     cfg.runnerTransportSecret = raw.runnerTransportSecret
   if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
-  if (typeof raw.runnerTransportPort === 'number' && Number.isInteger(raw.runnerTransportPort))
-    cfg.runnerTransportPort = raw.runnerTransportPort
   if (typeof raw.publicUrl === 'string' && raw.publicUrl.length > 0) cfg.publicUrl = raw.publicUrl
   if (typeof raw.joinToken === 'string' && raw.joinToken.length > 0) cfg.joinToken = raw.joinToken
   if (typeof raw.runnerName === 'string' && raw.runnerName.length > 0)

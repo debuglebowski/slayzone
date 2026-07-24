@@ -3,7 +3,7 @@
 // The renderer connects to the standalone @slayzone/hub over a tRPC
 // WebSocket (server-mode). Unlike Electron — which discovers a dynamic port via
 // the preload's app.getServerUrl() — the fork pins the sidecar to a fixed
-// loopback port (see scripts/chromium/run.sh: SLAYZONE_SERVER_PORT) so the renderer can
+// loopback port (see scripts/chromium/run.sh: SLAYZONE_HUB_PORT) so the renderer can
 // resolve the URL without any host→renderer port-discovery channel.
 //
 // Resolution order:

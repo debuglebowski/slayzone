@@ -173,7 +173,7 @@ function runCli(
       ...(process.env as Record<string, string>),
       SLAYZONE_DB_PATH: dbPath,
       SLAYZONE_DEV: '1',
-      SLAYZONE_SERVER_PORT: String(rest.port)
+      SLAYZONE_HUB_PORT: String(rest.port)
     }
     for (const [k, v] of Object.entries(envOverrides)) {
       if (v === undefined) delete env[k]
@@ -467,7 +467,7 @@ await describe('CLI app-down path', () => {
   test('apiPost exits with helpful stderr when REST unreachable', async () => {
     // Reserved port 1 — connection refused immediately
     const r = await runCli(['tasks', 'create', 'Lost', '--project', 'CLIREST'], {
-      SLAYZONE_SERVER_PORT: '1'
+      SLAYZONE_HUB_PORT: '1'
     })
     expect(r.exitCode).toBe(1)
     expect(r.stderr.includes('not running') || r.stderr.includes('could not connect')).toBe(true)
@@ -476,7 +476,7 @@ await describe('CLI app-down path', () => {
   test('exits when no server port configured at all (env unset, settings empty)', async () => {
     db.prepare("DELETE FROM settings WHERE key = 'server_port'").run()
     const r = await runCli(['tasks', 'create', 'Lost2', '--project', 'CLIREST'], {
-      SLAYZONE_SERVER_PORT: undefined
+      SLAYZONE_HUB_PORT: undefined
     })
     expect(r.exitCode).toBe(1)
     expect(r.stderr.includes('server port not found')).toBe(true)

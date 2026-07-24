@@ -26,7 +26,7 @@
 #
 # SECURITY NOTE baked into the published READMEs: the hub's client-facing /trpc
 # socket is UNAUTHENTICATED and binds 127.0.0.1 by default. Only expose it
-# (SLAYZONE_SERVER_HOST) on a trusted network until user-auth on /trpc lands.
+# (SLAYZONE_HUB_HOST) on a trusted network until user-auth on /trpc lands.
 
 set -euo pipefail
 
@@ -95,7 +95,7 @@ runner gateway that runners dial into.
 ## ⚠️ Security
 
 The client-facing `/trpc` socket is **unauthenticated** and binds `127.0.0.1`
-by default. Do **not** set `SLAYZONE_SERVER_HOST` to expose it beyond loopback except
+by default. Do **not** set `SLAYZONE_HUB_HOST` to expose it beyond loopback except
 on a fully trusted network — user authentication on `/trpc` is not yet
 implemented. Runner traffic (`/runners`) is TLS + cert-pinned and safe to expose.
 
@@ -147,16 +147,16 @@ SMOKE_SECRET="$(openssl rand -hex 32)"
 # full set via `-u`; ports are 0 (OS-assigned) so nothing collides with a running
 # app. HUB_ROOT anchors the hub's config + identity + auth DB in the tmp tree.
 SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
-       -u SLAYZONE_SERVER_PORT -u SLAYZONE_RUNNER_TRANSPORT_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET
+       -u SLAYZONE_HUB_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET
        -u SLAYZONE_HUB_URL -u SLAYZONE_JOIN_TOKEN -u SLAYZONE_RUNNER_CREDENTIALS_DIR
        -u ELECTRON_RUN_AS_NODE)
 
-# Fixed loopback port for the hub's shared HTTP server (health + join-token REST);
-# the /runners wss port stays OS-assigned (0) and is embedded in the minted token.
+# Fixed loopback port for the hub's ONE listener (tRPC + health + join-token REST +
+# /runners, demuxed by path). The runner URL embedded in the minted token rides
+# this same port; there is no separate runner port to set.
 HUB_PORT=47811
 env "${SCRUB[@]}" \
-  SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_SERVER_PORT="$HUB_PORT" \
-  SLAYZONE_RUNNER_TRANSPORT_PORT=0 \
+  SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_PORT="$HUB_PORT" \
   SLAYZONE_RUNNER_TRANSPORT_SECRET="$SMOKE_SECRET" \
   node "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
 HPID=$!

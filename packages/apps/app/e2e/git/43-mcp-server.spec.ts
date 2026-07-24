@@ -385,7 +385,7 @@ test.describe('MCP Server', () => {
     expect(updateTool.description).toContain('SLAYZONE_TASK_ID')
   })
 
-  test('terminal gets SLAYZONE_TASK_ID + inherited SLAYZONE_SERVER_PORT', async ({
+  test('terminal gets SLAYZONE_TASK_ID + inherited SLAYZONE_HUB_PORT', async ({
     mainWindow
   }) => {
     // Reset task title so we can find it on kanban
@@ -405,12 +405,12 @@ test.describe('MCP Server', () => {
     await waitForBufferContains(mainWindow, sessionId, `SZTID=${taskId}`)
 
     // No dedicated port var is injected; the pty inherits the sidecar's
-    // SLAYZONE_SERVER_PORT (the CLI reads that, else settings.server_port). The
+    // SLAYZONE_HUB_PORT (the CLI reads that, else settings.server_port). The
     // shell prints SZPORT_SET only when the inherited var is non-empty.
     await runCommand(
       mainWindow,
       sessionId,
-      'test -n "$SLAYZONE_SERVER_PORT" && echo SZPORT_SET || echo SZPORT_UNSET'
+      'test -n "$SLAYZONE_HUB_PORT" && echo SZPORT_SET || echo SZPORT_UNSET'
     )
     await waitForBufferContains(mainWindow, sessionId, 'SZPORT_SET')
   })

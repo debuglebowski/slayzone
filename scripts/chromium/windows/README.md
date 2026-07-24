@@ -29,7 +29,7 @@ does not preclude it.
 
 - `slayzone-deeplink.ps1` — the handler. Given a `slayzone://...` URL, POSTs it to
   `http://127.0.0.1:<port>/api/auth/deep-link?url=<encoded>` (tries prod `8765`
-  then dev `8766`; override with `SLAYZONE_SERVER_PORT`). Uses the built-in
+  then dev `8766`; override with `SLAYZONE_HUB_PORT`). Uses the built-in
   `Invoke-RestMethod` — no `curl.exe`/`jq` dependency.
 - `register-deeplink.ps1` — registers `slayzone://` for the current user (HKCU).
 - `unregister-deeplink.ps1` — removes it.

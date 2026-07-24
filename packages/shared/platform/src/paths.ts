@@ -50,12 +50,12 @@ export const SIDECAR_FIXED_PORT = {
 } as const
 
 /**
- * Returns the tRPC server port from SLAYZONE_SERVER_PORT, or undefined if
+ * Returns the tRPC server port from SLAYZONE_HUB_PORT, or undefined if
  * unset/invalid. Callers should fall back to a stored or auto-assigned port when
  * undefined.
  */
 export function getTrpcPort(): number | undefined {
-  const raw = process.env.SLAYZONE_SERVER_PORT
+  const raw = process.env.SLAYZONE_HUB_PORT
   if (!raw) return undefined
   const n = Number(raw)
   if (!Number.isInteger(n) || n < 0 || n > 65535) return undefined
@@ -67,11 +67,11 @@ export function getTrpcPort(): number | undefined {
  * Warns once on stderr when bound to a non-loopback address.
  */
 export function getServerHost(): string {
-  const host = process.env.SLAYZONE_SERVER_HOST || '127.0.0.1'
+  const host = process.env.SLAYZONE_HUB_HOST || '127.0.0.1'
   if (!LOOPBACK_HOSTS.has(host) && warnedHost !== host) {
     warnedHost = host
     console.warn(
-      `[slayzone] SLAYZONE_SERVER_HOST=${host} binds the local server to a non-loopback address. ` +
+      `[slayzone] SLAYZONE_HUB_HOST=${host} binds the local server to a non-loopback address. ` +
         `Anyone on the network can reach it. Use 127.0.0.1 unless you have a reason.`
     )
   }

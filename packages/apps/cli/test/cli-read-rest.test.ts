@@ -5,7 +5,7 @@
  * Express+REST stack on an ephemeral port (same pattern as tasks-rest.test.ts).
  * Proves the converted commands (list/view/search/subtasks/blocking/blockers/
  * blocked/tag/progress; tags/projects/templates/panels/automations) hit the REST
- * surface — the CLI resolves the port from SLAYZONE_SERVER_PORT and routes through
+ * surface — the CLI resolves the port from SLAYZONE_HUB_PORT and routes through
  * OUR registered handlers, so no direct sqlite read remains on these paths.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/cli-read-rest.test.ts
@@ -81,7 +81,7 @@ function runCli(args: string[], envOverrides: Record<string, string | undefined>
       ...(process.env as Record<string, string>),
       SLAYZONE_DB_PATH: dbPath,
       SLAYZONE_DEV: '1',
-      SLAYZONE_SERVER_PORT: String(rest.port)
+      SLAYZONE_HUB_PORT: String(rest.port)
     }
     for (const [k, v] of Object.entries(envOverrides)) {
       if (v === undefined) delete env[k]
@@ -259,7 +259,7 @@ await describe('CLI domain commands → REST', () => {
 
 await describe('CLI no-server path', () => {
   test('read command exits 1 with helpful stderr when REST unreachable', async () => {
-    const r = await runCli(['tasks', 'list', '--project', 'CLIREAD'], { SLAYZONE_SERVER_PORT: '1' })
+    const r = await runCli(['tasks', 'list', '--project', 'CLIREAD'], { SLAYZONE_HUB_PORT: '1' })
     expect(r.exitCode).toBe(1)
     expect(r.stderr.includes('not running') || r.stderr.includes('could not connect')).toBe(true)
   })

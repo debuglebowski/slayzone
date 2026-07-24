@@ -43,7 +43,7 @@ fi
 # Electron's node ABI and fail to load otherwise. We run the built dist/bin.cjs
 # (produced by `pnpm build:chromium`). Port defaults to 8766 (dev) so the
 # renderer's baked-in default WS URL resolves without extra plumbing; override
-# with SLAYZONE_SERVER_PORT. SLAYZONE_SUPERVISED stays unset → the server does not
+# with SLAYZONE_HUB_PORT. SLAYZONE_SUPERVISED stays unset → the server does not
 # self-terminate on stdin close, so a backgrounded run survives.
 #
 # Anchor ALL on-disk state to SLAYZONE_ROOT FIRST, before the sidecar branch —
@@ -63,15 +63,15 @@ SIDECAR_PID=""
 if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   # Force the host:port the renderer's baked-in default expects (window-api-shim
   # server-url.ts → ws://127.0.0.1:8766/trpc). We deliberately do NOT honor an
-  # inherited SLAYZONE_SERVER_PORT/SLAYZONE_SERVER_HOST: the renderer hardcodes the
+  # inherited SLAYZONE_HUB_PORT/SLAYZONE_HUB_HOST: the renderer hardcodes the
   # URL and has no override channel yet, so the sidecar MUST match it. A leaked
-  # SLAYZONE_SERVER_PORT — e.g. from inside a running supervised SlayZone process,
+  # SLAYZONE_HUB_PORT — e.g. from inside a running supervised SlayZone process,
   # which exports its own sidecar's port — would otherwise make this bind the wrong
   # port (and collide: EADDRINUSE), leaving the renderer with nothing to connect to.
   # Relax once the --slayzone-server-url flag is wired through the C++ shell.
-  SLAYZONE_SERVER_HOST=127.0.0.1
-  SLAYZONE_SERVER_PORT=8766
-  export SLAYZONE_SERVER_HOST SLAYZONE_SERVER_PORT
+  SLAYZONE_HUB_HOST=127.0.0.1
+  SLAYZONE_HUB_PORT=8766
+  export SLAYZONE_HUB_HOST SLAYZONE_HUB_PORT
   SIDECAR_LOG="$RUNTIME_DIR/sidecar.log"
   ELECTRON_BIN="$REPO_ROOT/node_modules/.bin/electron"
   SERVER_BIN="$REPO_ROOT/packages/apps/hub/dist/bin.cjs"
@@ -80,7 +80,7 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
     echo "[run] build it first: pnpm --filter @slayzone/hub build" >&2
     exit 1
   fi
-  echo "[run] starting sidecar (tRPC ws://$SLAYZONE_SERVER_HOST:$SLAYZONE_SERVER_PORT/trpc, log=$SIDECAR_LOG)" >&2
+  echo "[run] starting sidecar (tRPC ws://$SLAYZONE_HUB_HOST:$SLAYZONE_HUB_PORT/trpc, log=$SIDECAR_LOG)" >&2
   # -u SLAYZONE_SUPERVISED: this is a standalone run, not a supervised child.
   # The server self-terminates on stdin close ONLY when SLAYZONE_SUPERVISED=1;
   # unset it (it can leak from a parent SlayZone process) and detach stdin so
@@ -94,7 +94,7 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   SIDECAR_PID=$!
   trap 'kill '"$SIDECAR_PID"' 2>/dev/null || true' EXIT
 
-  # Identity check: is the process listening on $SLAYZONE_SERVER_PORT one WE spawned?
+  # Identity check: is the process listening on $SLAYZONE_HUB_PORT one WE spawned?
   # The renderer's WS URL is hard-pinned to this port (window-api-shim
   # server-url.ts) and server.ts has NO port fallback — a collision kills our
   # sidecar with EADDRINUSE while a SQUATTER (an orphaned sidecar from a prior
@@ -110,7 +110,7 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   port_owner_is_ours() {
     command -v lsof >/dev/null 2>&1 || { kill -0 "$SIDECAR_PID" 2>/dev/null; return; }
     local owner cur
-    owner="$(lsof -nP -iTCP:"$SLAYZONE_SERVER_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    owner="$(lsof -nP -iTCP:"$SLAYZONE_HUB_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
     [[ -z "$owner" ]] && return 1
     cur="$owner"
     for _ in 1 2 3 4 5; do
@@ -125,7 +125,7 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   # already exited (EADDRINUSE) — no point waiting on a dead process.
   ready=0
   for _ in $(seq 1 80); do
-    if curl -sf "http://$SLAYZONE_SERVER_HOST:$SLAYZONE_SERVER_PORT/health" >/dev/null 2>&1 && port_owner_is_ours; then
+    if curl -sf "http://$SLAYZONE_HUB_HOST:$SLAYZONE_HUB_PORT/health" >/dev/null 2>&1 && port_owner_is_ours; then
       ready=1
       break
     fi
@@ -133,11 +133,11 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
     sleep 0.1
   done
   if [[ "$ready" != "1" ]]; then
-    foreign="$(lsof -nP -iTCP:"$SLAYZONE_SERVER_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    foreign="$(lsof -nP -iTCP:"$SLAYZONE_HUB_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
     if [[ -n "$foreign" ]] && ! port_owner_is_ours; then
-      echo "[run] FATAL: port $SLAYZONE_SERVER_PORT is held by a FOREIGN process (pid=$foreign), not the sidecar we spawned (pid=$SIDECAR_PID)." >&2
+      echo "[run] FATAL: port $SLAYZONE_HUB_PORT is held by a FOREIGN process (pid=$foreign), not the sidecar we spawned (pid=$SIDECAR_PID)." >&2
       ps -o pid,ppid,command -p "$foreign" >&2 2>/dev/null || true
-      echo "[run] The renderer hard-pins ws://localhost:$SLAYZONE_SERVER_PORT, so it would connect to that process's DB — likely an orphaned sidecar from a prior run or another SlayZone instance." >&2
+      echo "[run] The renderer hard-pins ws://localhost:$SLAYZONE_HUB_PORT, so it would connect to that process's DB — likely an orphaned sidecar from a prior run or another SlayZone instance." >&2
       echo "[run] Free the port (kill $foreign) or stop the other instance, then retry." >&2
     else
       echo "[run] sidecar failed health check within 8s — see $SIDECAR_LOG" >&2

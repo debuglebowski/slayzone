@@ -156,8 +156,8 @@ test.describe('CLI: slay', () => {
 
     test('UI updates when CLI discovers port from DB (production path)', async ({ mainWindow }) => {
       const title = `CLI prod-path ${Date.now()}`
-      // No SLAYZONE_SERVER_PORT — CLI must read port from settings table (like production)
-      const { SLAYZONE_SERVER_PORT: _, ...envWithoutPort } = process.env
+      // No SLAYZONE_HUB_PORT — CLI must read port from settings table (like production)
+      const { SLAYZONE_HUB_PORT: _, ...envWithoutPort } = process.env
       const r = spawnSync('node', [SLAY_JS, 'tasks', 'create', title, '--project', 'cli test'], {
         env: { ...envWithoutPort, SLAYZONE_DB_PATH: dbPath },
         encoding: 'utf8'
@@ -521,7 +521,7 @@ test.describe('CLI: slay', () => {
     test('exits non-zero when app is not running', () => {
       // Fake a down server via the DB: a throwaway sqlite whose
       // settings.server_port points at a dead port. The CLI resolves it, fails to
-      // connect, and reports "not running". Unset SLAYZONE_SERVER_PORT so the env
+      // connect, and reports "not running". Unset SLAYZONE_HUB_PORT so the env
       // fast-path can't shadow the seeded dead port.
       const deadDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-deadport-'))
       const deadDbPath = path.join(deadDbDir, 'slayzone.dev.sqlite')
@@ -531,7 +531,7 @@ test.describe('CLI: slay', () => {
         .prepare("INSERT INTO settings (key, value) VALUES ('server_port', '1')")
         .run()
       seedDb.close()
-      const { SLAYZONE_SERVER_PORT: _drop, ...envNoPort } = process.env
+      const { SLAYZONE_HUB_PORT: _drop, ...envNoPort } = process.env
       try {
         const r = spawnSync('node', [SLAY_JS, 'processes', 'list'], {
           env: { ...envNoPort, SLAYZONE_DB_PATH: deadDbPath },

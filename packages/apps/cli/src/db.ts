@@ -35,12 +35,12 @@ function getDbPath(dev: boolean): string {
 type SqlParams = Record<string, string | number | bigint | null | Uint8Array>
 
 export function getServerPort(): number | null {
-  // The running server binds SLAYZONE_SERVER_PORT and publishes its actually-bound
+  // The running server binds SLAYZONE_HUB_PORT and publishes its actually-bound
   // port to `settings.server_port` at boot (hub/src/server.ts). Fast-path the env
-  // var (an agent pty inherits the sidecar's SLAYZONE_SERVER_PORT), else read the
+  // var (an agent pty inherits the sidecar's SLAYZONE_HUB_PORT), else read the
   // DB — the durable source of truth for a CLI run outside a task pty.
-  if (process.env.SLAYZONE_SERVER_PORT) {
-    return parseInt(process.env.SLAYZONE_SERVER_PORT, 10) || null
+  if (process.env.SLAYZONE_HUB_PORT) {
+    return parseInt(process.env.SLAYZONE_HUB_PORT, 10) || null
   }
   try {
     const db = openDb()
@@ -56,7 +56,7 @@ export function getServerPort(): number | null {
 }
 
 function getAlternateServerPort(): number | null {
-  if (process.env.SLAYZONE_DB_PATH || process.env.SLAYZONE_SERVER_PORT) return null
+  if (process.env.SLAYZONE_DB_PATH || process.env.SLAYZONE_HUB_PORT) return null
   const dev = process.env.SLAYZONE_DEV === '1'
   const altPath = getDbPath(!dev)
   if (!fs.existsSync(altPath)) return null

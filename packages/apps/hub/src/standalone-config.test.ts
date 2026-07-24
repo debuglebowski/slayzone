@@ -47,8 +47,7 @@ const ENV_KEYS = [
   'SLAYZONE_ROOT',
   'SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET',
   'SLAYZONE_DB_PATH',
-  'SLAYZONE_SERVER_PORT',
-  'SLAYZONE_HUB_RUNNER_TRANSPORT_PORT',
+  'SLAYZONE_HUB_PORT',
   'SLAYZONE_HUB_PUBLIC_URL'
 ] as const
 
@@ -76,28 +75,26 @@ function withIsolatedEnv(seed: Record<string, string>, fn: (home: string) => voi
 console.log('\nstandalone-config: env > file > default')
 console.log('─'.repeat(40))
 
-test('config.json fills unset env (port, runnerTransportPort, publicUrl)', () => {
+test('config.json fills unset env (port, publicUrl)', () => {
   withIsolatedEnv({}, () => {
     saveSlayzoneConfig({
       port: 8080,
-      runnerTransportPort: 8443,
       publicUrl: 'https://hub.example'
     })
     applyStandaloneHubConfig()
     // dbPath is NOT seeded — the DB path DERIVES from SLAYZONE_ROOT (<ROOT>/storage)
     // via platform.getStorageDir(); there is no SLAYZONE_DB_PATH env in this chain.
     assert(process.env.SLAYZONE_DB_PATH === undefined, 'dbPath NOT seeded (derives from ROOT)')
-    assertEq(process.env.SLAYZONE_SERVER_PORT, '8080', 'port')
-    assertEq(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_PORT, '8443', 'runnerTransportPort')
+    assertEq(process.env.SLAYZONE_HUB_PORT, '8080', 'port')
     assertEq(process.env.SLAYZONE_HUB_PUBLIC_URL, 'https://hub.example', 'publicUrl')
   })
 })
 
 test('env WINS over config.json (does not overwrite a set env)', () => {
-  withIsolatedEnv({ SLAYZONE_SERVER_PORT: '9999' }, () => {
+  withIsolatedEnv({ SLAYZONE_HUB_PORT: '9999' }, () => {
     saveSlayzoneConfig({ port: 8080 })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_SERVER_PORT, '9999', 'env port kept')
+    assertEq(process.env.SLAYZONE_HUB_PORT, '9999', 'env port kept')
   })
 })
 
@@ -105,7 +102,7 @@ test('no config + no env ⇒ only the generated runner secret is set (defaults e
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
     assert(process.env.SLAYZONE_DB_PATH === undefined, 'no dbPath default here (db.ts handles it)')
-    assert(process.env.SLAYZONE_SERVER_PORT === undefined, 'no port default here')
+    assert(process.env.SLAYZONE_HUB_PORT === undefined, 'no port default here')
     assert(!!process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, 'runner secret always resolved')
   })
 })
@@ -179,7 +176,7 @@ test('supervised IGNORES an existing config.json entirely', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
     saveSlayzoneConfig({ port: 8080, runnerTransportSecret: 'should-be-ignored' })
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_SERVER_PORT === undefined, 'ignored port')
+    assert(process.env.SLAYZONE_HUB_PORT === undefined, 'ignored port')
     assert(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET === undefined, 'ignored runnerTransportSecret')
   })
 })

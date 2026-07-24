@@ -6,11 +6,11 @@
  * filling ONLY the env vars that are currently unset — so the precedence is
  * `env var > config.json > default` for every downstream reader
  * (db.ts getDatabasePathFromEnv, composition.ts
- * SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, server.ts getTrpcPort/getServerHost/
- * SLAYZONE_HUB_RUNNER_TRANSPORT_PORT, remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_URL). Nothing
- * downstream changes — they still read env exactly as before; we just seed env
- * from the file first. This keeps the whole server pipeline byte-identical apart
- * from where a value ultimately comes from.
+ * SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, server.ts getTrpcPort/getServerHost,
+ * remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_URL). Nothing downstream changes —
+ * they still read env exactly as before; we just seed env from the file first.
+ * This keeps the whole server pipeline byte-identical apart from where a value
+ * ultimately comes from.
  *
  * SUPERVISED (`SLAYZONE_SUPERVISED=1`, Electron host): this is a NO-OP — it
  * neither reads nor writes the config file, so the supervised sidecar boot stays
@@ -67,8 +67,7 @@ export function applyStandaloneHubConfig(): void {
   // from SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
   // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so
   // there is nothing to thread through env here.
-  setIfUnset('SLAYZONE_SERVER_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
-  setIfUnset('SLAYZONE_HUB_RUNNER_TRANSPORT_PORT', cfg.runnerTransportPort !== undefined ? String(cfg.runnerTransportPort) : undefined)
+  setIfUnset('SLAYZONE_HUB_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
   setIfUnset('SLAYZONE_HUB_PUBLIC_URL', cfg.publicUrl)
 
   // Runner secret — security fix. Resolve env > config > generate+persist and set

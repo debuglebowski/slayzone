@@ -15,11 +15,7 @@
  */
 import http from 'node:http'
 import net from 'node:net'
-import {
-  claimRunnerServerPort,
-  claimServerPort,
-  resolveDesiredRunnerPort
-} from './port-claim.js'
+import { claimServerPort } from './port-claim.js'
 
 let passed = 0
 let failed = 0
@@ -128,93 +124,6 @@ async function main(): Promise<void> {
         logs.some((l) => l.includes('refus') || l.includes('alive')),
         'logged a loud reason for refusing'
       )
-    } finally {
-      await alive.close()
-    }
-  })
-
-  // --- Runner port: stable claim-once-and-persist (Wave3.5-D5) ----------------
-  console.log('\nresolveDesiredRunnerPort (env > persisted > 0)')
-  console.log('─'.repeat(40))
-
-  await test('explicit env override wins over a persisted value', async () => {
-    const db = fakeDb('51001') // a stored port that must be ignored
-    assertEq(await resolveDesiredRunnerPort(db, '52002'), 52002, 'env value used')
-  })
-
-  await test('a malformed env override falls to 0 (not the stored value)', async () => {
-    const db = fakeDb('51001')
-    assertEq(await resolveDesiredRunnerPort(db, 'not-a-port'), 0, 'bad env ⇒ 0')
-    assertEq(await resolveDesiredRunnerPort(db, '70000'), 0, 'out-of-range env ⇒ 0')
-  })
-
-  await test('no env ⇒ reuses the persisted stable port', async () => {
-    const db = fakeDb('51001')
-    assertEq(await resolveDesiredRunnerPort(db, undefined), 51001, 'stored port reused')
-    assertEq(await resolveDesiredRunnerPort(db, ''), 51001, 'empty env treated as unset')
-  })
-
-  await test('no env + no stored value ⇒ 0 (OS-assigned, fresh claim)', async () => {
-    const db = fakeDb(undefined)
-    assertEq(await resolveDesiredRunnerPort(db, undefined), 0, 'nothing stored ⇒ 0')
-  })
-
-  await test('a garbage stored value ⇒ 0 (OS-assigned)', async () => {
-    assertEq(await resolveDesiredRunnerPort(fakeDb('nonsense'), undefined), 0, 'bad stored ⇒ 0')
-    assertEq(await resolveDesiredRunnerPort(fakeDb('0'), undefined), 0, 'stored 0 ⇒ 0')
-    assertEq(await resolveDesiredRunnerPort(fakeDb('99999'), undefined), 0, 'out-of-range ⇒ 0')
-  })
-
-  console.log('\nclaimRunnerServerPort (persist + non-clobber guard)')
-  console.log('─'.repeat(40))
-
-  await test('no existing value ⇒ persists the bound port', async () => {
-    const db = fakeDb(undefined)
-    await claimRunnerServerPort(db, '127.0.0.1', 51001, () => {})
-    assertEq(db.written.length, 1, 'one write')
-    assertEq(db.written[0], '51001', 'persisted the bound port')
-  })
-
-  await test('same value ⇒ harmless no-op rewrite (the reuse path)', async () => {
-    const db = fakeDb('51001')
-    await claimRunnerServerPort(db, '127.0.0.1', 51001, () => {})
-    assertEq(db.written[0], '51001', 'rewrote same value')
-  })
-
-  await test('stored value points at a DEAD port ⇒ safe to overwrite', async () => {
-    const deadPort = await findDeadPort()
-    const db = fakeDb(String(deadPort))
-    await claimRunnerServerPort(db, '127.0.0.1', 52002, () => {})
-    assertEq(db.written[0], '52002', 'overwrote — old runner port had no live listener')
-  })
-
-  await test('stored value has a LIVE listener ⇒ refuses to clobber', async () => {
-    const alive = await startFakeAlive() // any TCP listener answers the connect probe
-    try {
-      const db = fakeDb(String(alive.port))
-      const logs: string[] = []
-      await claimRunnerServerPort(db, '127.0.0.1', 52003, (l) => logs.push(l))
-      assertEq(db.written.length, 0, 'did NOT write — a live listener owns the stored port')
-      assert(
-        logs.some((l) => l.includes('refus') || l.includes('live')),
-        'logged a loud reason for refusing'
-      )
-    } finally {
-      await alive.close()
-    }
-  })
-
-  await test('force ⇒ overwrites even a stored LIVE port (post-pinned-bind-failure re-claim)', async () => {
-    // The critical fix: when a pinned bind FAILED and we fell back to a fresh
-    // OS-assigned port, the stored (conflicting) port is STILL live — the guard
-    // would refuse and the runner URL would churn every boot. `force` must persist
-    // the new port anyway so the credential key stabilizes on the next boot.
-    const alive = await startFakeAlive()
-    try {
-      const db = fakeDb(String(alive.port))
-      await claimRunnerServerPort(db, '127.0.0.1', 52099, () => {}, { force: true })
-      assertEq(db.written.length, 1, 'wrote despite the stored port being live')
-      assertEq(db.written[0], '52099', 'persisted the OS-assigned fallback port')
     } finally {
       await alive.close()
     }

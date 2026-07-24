@@ -27,7 +27,7 @@ import { notifyApp } from '../src/db'
 const ENV_KEYS = [
   'SLAYZONE_HUB_URL',
   'SLAYZONE_HUB_TOKEN',
-  'SLAYZONE_SERVER_PORT',
+  'SLAYZONE_HUB_PORT',
   'SLAYZONE_ROOT',
   'SLAYZONE_DB_PATH',
   'SLAYZONE_DEV'
@@ -297,12 +297,12 @@ await describe('api Authorization header', () => {
     }
   })
 
-  test('legacy fallback: SLAYZONE_SERVER_PORT target, no Authorization header', async () => {
+  test('legacy fallback: SLAYZONE_HUB_PORT target, no Authorization header', async () => {
     const srv = await startServer()
     try {
       setEnv({
         SLAYZONE_ROOT: freshStateDir(),
-        SLAYZONE_SERVER_PORT: String(srv.port)
+        SLAYZONE_HUB_PORT: String(srv.port)
       })
       const res = await apiGet<{ ok: boolean }>('/api/ping')
       expect(res.ok).toBe(true)

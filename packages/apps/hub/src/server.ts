@@ -1,5 +1,5 @@
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
-import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
+import { createServer as createHttpsServer } from 'node:https'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import {
@@ -27,12 +27,12 @@ import {
 } from './db.js'
 import { composeServer } from './composition.js'
 import { getBridgeRestUrl } from './bridge-url.js'
-import { startRunnerListener } from './runner-listener.js'
+import { deriveRunnerHubUrl } from './runner-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
 import { createLogger } from './log.js'
-import { claimServerPort, claimRunnerServerPort, resolveDesiredRunnerPort } from './port-claim.js'
+import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
@@ -180,11 +180,31 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Derived from the single host bridge URL (same listener serves cap WS + REST).
   const hostRestUrl = getBridgeRestUrl()
 
-  // Single muxed HTTP server: /health (pre-express, stays alive even if the
-  // express stack wedges) + Electron-only REST reverse-proxied to the host (when
-  // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/*
-  // + /mcp via express + /trpc WS upgrade.
-  const httpServer = createServer((req, res) => {
+  // SLAYZONE_MODE is the SINGLE lever for the whole hub's transport: `local`
+  // (default) serves plain http/ws on loopback (dev, e2e, supervised); `remote`
+  // serves https/wss terminated with the hub identity leaf. There is no separate
+  // TLS port and no separate runner port — `/trpc` (clients) and `/runners`
+  // (runners) ride the ONE listener below, demuxed by path. Protocol is never a
+  // knob; it is implied by mode. Both axes present the same identity leaf in
+  // remote, so a runner's pinned fingerprint is unchanged from the old split.
+  const remote = isRemoteMode()
+  // Remote REQUIRES the hub identity leaf to terminate TLS. Fail loud rather than
+  // serve an unhardened (plaintext, unauthenticated) internet-facing hub. The
+  // identity is loaded whenever the runner gateway came up (i.e. always, barring
+  // an init failure); a remote hub whose gateway failed to init has no leaf and
+  // must not boot.
+  if (remote && !hubIdentity) {
+    throw new Error(
+      '[slayzone] SLAYZONE_MODE=remote but the hub identity could not be loaded ' +
+        '(runner gateway init failed) — refusing to boot an unhardened remote hub.'
+    )
+  }
+
+  // Single muxed server: /health (pre-express, stays alive even if the express
+  // stack wedges) + Electron-only REST reverse-proxied to the host (when
+  // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/* + /mcp via express.
+  // `/trpc` + `/runners` WS upgrades are demuxed in the `upgrade` handler below.
+  const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
     if (handleHealth(state, req, res)) return
     if (hostRestUrl && needsHostRest(req.url)) {
       proxyToHostRest(hostRestUrl, req, res)
@@ -198,7 +218,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       return
     }
     mcpRest.app(req, res)
-  })
+  }
+  const httpServer =
+    remote && hubIdentity
+      ? createHttpsServer({ key: hubIdentity.keyPem, cert: hubIdentity.certPem }, handleRequest)
+      : createServer(handleRequest)
 
   // Reject cross-origin WS upgrades. The /trpc socket exposes the ENTIRE app
   // router (browser control, shell.openExternal, file ops, the auth callback
@@ -222,81 +246,42 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     if (u.protocol === 'file:') return true
     return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
   }
-  const verifyTrpcClient = (
-    { origin }: { origin?: string },
-    cb: (verified: boolean, code?: number, message?: string) => void
-  ): void => {
-    if (isAllowedWsOrigin(origin)) cb(true)
-    else cb(false, 403, 'forbidden origin')
-  }
-  // The shared HTTP server carries ONLY `/trpc` (browser renderer, origin-guarded).
-  // `/runners` (non-browser runners) lives on a SEPARATE https listener stood up
-  // below — so the shared server's WSS is the exact single-WSS construction whether
-  // the runner init resolved — the shared server is unaffected either way.
-  const wss = new WebSocketServer({
-    server: httpServer,
-    path: '/trpc',
-    verifyClient: verifyTrpcClient
-  })
-  // Multi-hub auth: a remote hub that enforces auth ALSO terminates TLS on
-  // `/trpc` so clients can dial `wss://…/trpc` and pin the cert (renderer pins in
-  // the Electron main process via setCertificateVerifyProc). This is a SEPARATE
-  // https listener on its own port (SLAYZONE_HUB_TLS_PORT, else OS-assigned),
-  // reusing the hub identity leaf — the plain-http `/trpc` above is untouched, so
-  // local loopback + e2e stay byte-identical. Off unless auth is required + an
-  // identity is loaded.
-  const hubTlsEnabled = hubAuthRequired && hubIdentity != null
-  // Remote mode must NOT come up without TLS. If the identity failed to load
-  // (so TLS can't be enabled), fail loud rather than serve an unhardened hub.
-  if (isRemoteMode() && !hubTlsEnabled) {
-    throw new Error(
-      '[slayzone] SLAYZONE_MODE=remote but the hub TLS listener could not be enabled ' +
-        '(hub identity missing or runner gateway down) — refusing to boot an unhardened remote hub.'
-    )
-  }
-  let tlsWss: WebSocketServer | null = null
-  let tlsHttpsServer: HttpsServer | null = null
-  if (hubTlsEnabled && hubIdentity) {
-    tlsHttpsServer = createHttpsServer(
-      { key: hubIdentity.keyPem, cert: hubIdentity.certPem },
-      (req, res) => {
-        // Mirror the muxed plain server so wss clients get /health etc. too.
-        if (handleHealth(state, req, res)) return
-        if (authApp && (req.url ?? '').split('?')[0].startsWith('/api/auth/')) {
-          authApp(req, res)
-          return
-        }
-        mcpRest.app(req, res)
-      }
-    )
-    tlsWss = new WebSocketServer({
-      server: tlsHttpsServer,
-      path: '/trpc',
-      verifyClient: verifyTrpcClient
-    })
-  }
-  // Runner transport: `/runners` runs on its OWN https server (TLS-terminated with the hub
-  // identity leaf) on its OWN port. Runners dial `wss://…/runners` and pin the cert
-  // fingerprint (carried in their join token) BEFORE any runner frame is sent
-  // (hub-dialer verifyPinnedCert). `noServer` — we demux `/runners` ourselves so a
-  // stray path can't reach the gateway. Both null when the runner init failed (no https
-  // server, no TLS termination) → shared http stack untouched.
-  let runnerWss: WebSocketServer | null = null
-  let runnerHttpsServer: HttpsServer | null = null
-  if (runnerGateway && hubIdentity) {
-    runnerWss = new WebSocketServer({ noServer: true })
-    runnerHttpsServer = createHttpsServer({ key: hubIdentity.keyPem, cert: hubIdentity.certPem })
-    runnerHttpsServer.on('upgrade', (req, socket, head) => {
-      const pathname = (req.url ?? '').split('?')[0]
-      if (pathname === '/runners') {
-        // No origin allowlist — runners are non-browser clients authenticated via
-        // the runner protocol (enroll/hello frames + join token), not Origin.
-        runnerWss!.handleUpgrade(req, socket, head, (ws) => runnerGateway.handleConnection(ws))
-      } else {
+  // Both WS endpoints ride the ONE `httpServer` (plain or TLS per mode) as
+  // `noServer` handlers, demuxed by path in the single `upgrade` listener below.
+  // A `server`-bound WSS would destroy any socket whose path it doesn't own, so
+  // two endpoints on one server MUST both be `noServer` + hand-demuxed. `noServer`
+  // also means `verifyClient` is never invoked — the `/trpc` origin guard is
+  // applied inline in the demux instead (see below).
+  //
+  //   /trpc    — clients (renderer / federated hubs), origin-guarded. In remote
+  //              mode the leaf terminates TLS so clients dial `wss://…/trpc` and
+  //              pin the cert (renderer pins in main via setCertificateVerifyProc).
+  //   /runners — runners (non-browser), NO origin allowlist (authenticated by the
+  //              runner protocol: enroll/hello frames + join token). In remote mode
+  //              the SAME leaf terminates TLS, so the runner's pinned fingerprint
+  //              (carried in its join token) is enforced end-to-end, unchanged from
+  //              the old separate-listener design.
+  const wss = new WebSocketServer({ noServer: true })
+  const runnerWss = runnerGateway && hubIdentity ? new WebSocketServer({ noServer: true }) : null
+  httpServer.on('upgrade', (req, socket, head) => {
+    const pathname = (req.url ?? '').split('?')[0]
+    if (pathname === '/trpc') {
+      // Origin guard (was verifyClient; noServer skips it). A drive-by web page or
+      // DNS-rebind must not reach the full app router — native/loopback origins only.
+      const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
+      if (!isAllowedWsOrigin(origin)) {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
         socket.destroy()
+        return
       }
-    })
-  }
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    } else if (pathname === '/runners' && runnerWss && runnerGateway) {
+      runnerWss.handleUpgrade(req, socket, head, (ws) => runnerGateway.handleConnection(ws))
+    } else {
+      // No handler owns this path — reject rather than leave the socket dangling.
+      socket.destroy()
+    }
+  })
   // createContext verifies the bearer only when this hub enforces auth
   // (`hubAuthRequired`, defined above). Local loopback hubs leave it off →
   // principal stays null, no verify → byte-identical to trusted loopback.
@@ -333,10 +318,6 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     }
   }
   const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext: createTrpcContext })
-  // Same handler on the TLS /trpc listener (wss) when a remote hub terminates TLS.
-  const tlsWssHandler = tlsWss
-    ? applyWSSHandler({ wss: tlsWss, router: appRouter, createContext: createTrpcContext })
-    : null
 
   const port = cfg.port ?? getTrpcPort() ?? 0
   await new Promise<void>((resolve, reject) => {
@@ -357,123 +338,43 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   state.ready = true
   composition.setBoundPort(actualPort)
 
-  // Multi-hub TLS `/trpc`: bind the https listener on its own port
-  // (SLAYZONE_HUB_TLS_PORT, else OS-assigned). OPT-IN — a bind failure must NOT
-  // abort startup (the plain http /trpc still serves loopback + e2e), so we log +
-  // leave TLS dark. Report the wss URL for operators/UX.
-  let hubTlsPort: number | null = null
-  if (tlsHttpsServer) {
-    const desiredTlsPort = Number(process.env.SLAYZONE_HUB_TLS_PORT ?? '0') || 0
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const onError = (err: unknown): void => {
-          tlsHttpsServer!.off('error', onError)
-          reject(err)
-        }
-        tlsHttpsServer!.once('error', onError)
-        tlsHttpsServer!.listen(desiredTlsPort, host, () => {
-          tlsHttpsServer!.off('error', onError)
-          resolve()
-        })
-      })
-      const tlsAddr = tlsHttpsServer.address()
-      hubTlsPort = typeof tlsAddr === 'object' && tlsAddr ? tlsAddr.port : desiredTlsPort
-      log(`hub TLS /trpc listening: wss://${host}:${hubTlsPort}/trpc`)
-    } catch (err) {
-      // Remote mode REQUIRES TLS on /trpc — a bind failure must abort the boot,
-      // not silently fall back to plaintext http (that would expose an unencrypted
-      // client channel on an internet-facing hub). Local/multi-hub-opt-in keeps
-      // the lenient "stay plain http" behavior.
-      if (isRemoteMode()) {
-        throw new Error(
-          `[slayzone] SLAYZONE_MODE=remote requires the TLS /trpc listener, but it failed to bind: ${String(err)}`
-        )
-      }
-      log(`hub TLS /trpc bind failed (staying plain http): ${String(err)}`)
-      try {
-        tlsWssHandler?.broadcastReconnectNotification?.()
-      } catch {
-        /* ignore */
-      }
-      tlsHttpsServer = null
-    }
-  }
-  // Bind the SEPARATE https `/runners` listener on its own port (env
-  // `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`, else OS-assigned), then feed the resulting `wss://` URL
-  // + cert fingerprint to the runners registry so `mintJoinToken` embeds them. The
-  // fingerprint is the real hub leaf, and the listener now actually terminates TLS
-  // with that leaf → the pin the runner extracts from its join token is enforced
-  // end-to-end.
+  // Runner `/runners` rides the SAME listener as `/trpc` (bound above) — no
+  // separate port to claim, no separate bind to fail. Feed the runners registry
+  // the advertised `ws(s)://…/runners` URL + cert fingerprint so `mintJoinToken`
+  // embeds them. Scheme follows mode: local → `ws://` loopback (dev/supervised);
+  // remote → `wss://` derived from SLAYZONE_HUB_PUBLIC_URL (the hub's single
+  // external address, which now serves BOTH axes). The fingerprint is the real hub
+  // leaf — in remote the one listener terminates TLS with it, so the runner's
+  // join-token pin is enforced end-to-end, exactly as under the old split listener.
   //
-  // Runner is OPT-IN, so a runner-port conflict must NOT abort startup: on a bind
-  // failure `startRunnerListener` closes the runner listener + returns null, leaving
-  // the shared http server (/trpc,/health,/mcp,REST) fully functional. Runner just
-  // stays dark (no listener info ⇒ `mintJoinToken` throws a clear error) until the
-  // conflict is cleared + the sidecar restarts.
-  if (runnerGateway && hubIdentity && runnerHttpsServer) {
-    // Resolve a STABLE runner port (Wave3.5-D5): explicit SLAYZONE_HUB_RUNNER_TRANSPORT_PORT >
-    // persisted settings.runner_transport_port > 0 (OS-assigned). Pinning the port
-    // keeps the `wss://host:<port>/runners` URL — and thus the runner's credential
-    // key (hubHostFromUrl → host_port) — identical across reboots, so the local
-    // runner `hello`s back into its existing row instead of re-enrolling a new one.
-    const desiredRunnerPort = await resolveDesiredRunnerPort(db, process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_PORT)
-    // Runner-listener bind. Supervised keeps its historical 0.0.0.0 (byte-identical
-    // — the Electron host's advertise-host logic already points the co-located
-    // runner at a dialable address). Standalone splits on SLAYZONE_MODE: a remote
-    // hub binds 0.0.0.0 so off-box runners can dial in; a local hub binds loopback
-    // (no reason to expose the listener on a dev box). TLS+cert-pinned either way;
-    // operators can still pin via SLAYZONE_HUB_RUNNER_TRANSPORT_HOST.
-    const runnerHost =
-      process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_HOST ??
-      (supervised || isRemoteMode() ? '0.0.0.0' : '127.0.0.1')
-    const bindRunnerListener = (portEnv: string): Promise<Awaited<ReturnType<typeof startRunnerListener>>> =>
-      startRunnerListener({
-        server: runnerHttpsServer!,
-        host: runnerHost,
-        fingerprintSha256Hex: hubIdentity.fingerprintSha256Hex,
-        runnerPortEnv: portEnv,
-        log,
-        onBindFailure: (error) => {
-          recordDiagnosticEvent({
-            level: 'error',
-            source: 'server',
-            event: 'runner.listener_bind_failed',
-            message: error.message
-          })
-        }
-      })
-    let info = await bindRunnerListener(String(desiredRunnerPort))
-    // Robustness: a PINNED (non-zero) port that is stale-but-taken must NOT
-    // darken runner permanently. When a non-zero pin fails, retry with an
-    // OS-assigned port (0) — same fallback the pre-pin default always had — and
-    // re-persist below so the next boot pins the new one. An explicit operator
-    // SLAYZONE_HUB_RUNNER_TRANSPORT_PORT is intentionally NOT retried (respect the exact override
-    // + surface the conflict). startRunnerListener closes the server on failure;
-    // the runner-tls-listener test proves the same object rebinds cleanly after.
-    let fellBackFromPinned = false
-    if (!info && desiredRunnerPort !== 0 && !process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_PORT) {
-      log(`runner listener could not bind pinned port ${desiredRunnerPort} — retrying OS-assigned`)
-      info = await bindRunnerListener('0')
-      fellBackFromPinned = info !== null
-    }
-    if (info) {
+  // The runner URL's port is the hub port (stable via claimServerPort /
+  // SIDECAR_FIXED_PORT), so the runner credential key (hubHostFromUrl → host_port)
+  // stays stable across reboots WITHOUT a dedicated runner-port persistence layer —
+  // that layer existed ONLY to pin a separate OS-assigned port, now gone.
+  if (runnerGateway && hubIdentity) {
+    const runnerHubUrl = deriveRunnerHubUrl({
+      remote,
+      host,
+      port: actualPort,
+      publicUrl: process.env.SLAYZONE_HUB_PUBLIC_URL
+    })
+    if (runnerHubUrl) {
       composition.setRunnerListenerInfo({
-        hubUrl: info.hubUrl,
-        certFingerprint: info.certFingerprint
+        hubUrl: runnerHubUrl,
+        certFingerprint: hubIdentity.fingerprintSha256Hex
       })
-      // Persist the actually-bound port so the next boot reuses it (claim-once-
-      // and-persist). Non-clobber guarded: won't overwrite a DIFFERENT port that
-      // still has a live listener — EXCEPT when we just fell back from a failed
-      // pinned bind, where the stored (conflicting) port is exactly what we must
-      // overwrite. `force` skips the guard so the runner URL stops churning every
-      // boot. A same-value write (the steady-state reuse path) is a no-op.
-      await claimRunnerServerPort(db, host, info.port, log, { force: fellBackFromPinned })
-      log(`runner listener ready on ${info.hubUrl}`)
+      log(`runner transport ready on ${runnerHubUrl}`)
     } else {
-      // Bind failed → drop our refs so stop() does not try to re-close the (already
-      // closed) listener, and no `/runners` upgrades are accepted.
-      runnerHttpsServer = null
-      runnerWss = null
+      // Only reachable if SLAYZONE_HUB_PUBLIC_URL is malformed in remote mode
+      // (an unset value already fails loud at boot). `mintJoinToken` then throws a
+      // clear "hub url unset" until fixed — the /trpc path is unaffected.
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'server',
+        event: 'runner.hub_url_underivable',
+        message: 'runner transport URL could not be derived (check SLAYZONE_HUB_PUBLIC_URL)'
+      })
+      log('runner transport URL could not be derived — runner enroll unavailable')
     }
   }
   // Agents spawned BY this process discover their hook endpoint via this global.
@@ -552,33 +453,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           /* ignore */
         }
       }
+      // `/runners` shares the one httpServer as a noServer WSS — close it to drop
+      // the gateway sockets; there is no separate runner/TLS listener to close.
       if (runnerWss) {
         try {
           runnerWss.close()
-        } catch {
-          /* ignore */
-        }
-      }
-      if (runnerHttpsServer) {
-        const srv = runnerHttpsServer
-        try {
-          await new Promise<void>((r) => srv.close(() => r()))
-        } catch {
-          /* ignore */
-        }
-      }
-      // Multi-hub TLS /trpc: close the wss + its https listener (no-op when off).
-      if (tlsWss) {
-        try {
-          tlsWss.close()
-        } catch {
-          /* ignore */
-        }
-      }
-      if (tlsHttpsServer) {
-        const srv = tlsHttpsServer
-        try {
-          await new Promise<void>((r) => srv.close(() => r()))
         } catch {
           /* ignore */
         }

@@ -68,8 +68,8 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
     env: {
       ...cleanEnv,
       ELECTRON_RUN_AS_NODE: '1',
-      SLAYZONE_SERVER_HOST: '127.0.0.1',
-      SLAYZONE_SERVER_PORT: String(port),
+      SLAYZONE_HUB_HOST: '127.0.0.1',
+      SLAYZONE_HUB_PORT: String(port),
       SLAYZONE_ROOT: storeDir
     },
     stdio: ['pipe', 'pipe', 'pipe']

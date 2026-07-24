@@ -19,8 +19,8 @@ fi
 # The sidecar binds a baked loopback port (prod 8765, dev 8766), matching the
 # renderer's baked WS URL (there is no server-URL override channel yet — see
 # window-api-shim/src/server-url.ts; align both when one lands). Override with
-# SLAYZONE_SERVER_PORT. Try prod first, then dev.
-ports="${SLAYZONE_SERVER_PORT:-8765 8766}"
+# SLAYZONE_HUB_PORT. Try prod first, then dev.
+ports="${SLAYZONE_HUB_PORT:-8765 8766}"
 
 for port in $ports; do
   # -G + --data-urlencode safely encodes the URL into the query string (no body

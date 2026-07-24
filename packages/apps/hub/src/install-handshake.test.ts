@@ -191,8 +191,7 @@ async function main(): Promise<void> {
     hub = spawnChild(HUB_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: hubRootDir,
-      SLAYZONE_SERVER_PORT: '0',
-      SLAYZONE_HUB_RUNNER_TRANSPORT_PORT: '0',
+      SLAYZONE_HUB_PORT: '0',
       SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: secret
     })
 

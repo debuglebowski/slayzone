@@ -35,7 +35,7 @@ build is ever stood up; this landing does not preclude it.
 `scripts/chromium/windows/` (new — mirrors `scripts/chromium/linux/`):
 - `slayzone-deeplink.ps1` — the handler. Given the `slayzone://…` URL as `$args[0]`,
   POSTs it to `http://127.0.0.1:<port>/api/auth/deep-link?url=<encoded>`. Tries prod
-  `8765` then dev `8766`; override via `SLAYZONE_SERVER_PORT`. Uses
+  `8765` then dev `8766`; override via `SLAYZONE_HUB_PORT`. Uses
   `Invoke-RestMethod` (built-in; no `curl.exe`/`jq` dependency) + `[uri]::EscapeDataString`.
 - `register-deeplink.ps1` — per-user install. Writes `HKCU\Software\Classes\slayzone`
   (`URL Protocol`) + `shell\open\command` = `powershell -NoProfile -ExecutionPolicy
