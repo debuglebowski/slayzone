@@ -95,7 +95,10 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   // ensures re-render when shortcuts change, so useHotkeys picks up new key strings.
   const getKeys = useCallback(
     (id: string): string => {
-      if (overrides[id]) return overrides[id]
+      // `id in overrides` distinguishes an explicit `null` (user disabled the
+      // shortcut) from a missing override (never customized → use default).
+      // A `null` override resolves to '' so nothing binds.
+      if (id in overrides) return overrides[id] ?? ''
       const def = shortcutDefinitions.find((d) => d.id === id)
       return def?.defaultKeys ?? ''
     },
