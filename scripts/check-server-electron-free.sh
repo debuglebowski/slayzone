@@ -7,8 +7,12 @@ set -euo pipefail
 fail=0
 
 ELECTRON="from ['\"]electron['\"]|require\(['\"]electron['\"]\)"
+# `*.test.ts` is exempt (same carve-out as (2b) below): tests are never bundled
+# into the side-car, and some MUST resolve the electron binary path to spawn the
+# built bins under Electron's node ABI (install-handshake.test.ts).
 for p in packages/apps/hub/src packages/shared/transport/src packages/shared/platform/src; do
   hit=$(grep -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
+    --exclude="*.test.ts" --exclude="*.test.tsx" \
     "$ELECTRON" "$p" 2>/dev/null || true)
   if [ -n "$hit" ]; then
     echo "Side-car must not import electron:"
