@@ -11,8 +11,8 @@
  * scripts/publish-hub-runner.sh covers the `npm install` ABI-rebuild path).
  *
  * ISOLATION (must never touch the real dev/prod stores):
- *   - The child env is SCRUBBED of every `SLAYZONE_*` / `ELECTRON_*` var (the
- *     dogfooding parent leaks SLAYZONE_SUPERVISED=1 + SLAYZONE_DB_PATH → real dev
+ *   - The child env is SCRUBBED of every `SLAYZONE_*` / `ELECTRON_*` var (a
+ *     supervised parent leaks SLAYZONE_SUPERVISED=1 + SLAYZONE_DB_PATH → real dev
  *     DB, and ELECTRON_RUN_AS_NODE), mirroring e2e/fixtures/electron.ts. Only the
  *     explicit isolation vars below are re-added.
  *   - SLAYZONE_ROOT (hub + runner, separate dirs) points under one throwaway
@@ -191,7 +191,8 @@ async function main(): Promise<void> {
     hub = spawnChild(HUB_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: hubRootDir,
-      SLAYZONE_HUB_PORT: '0',
+      // Bind side of the ONE address var. `:0` = let the OS assign the port.
+      SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
       SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: secret
     })
 
@@ -237,9 +238,18 @@ async function main(): Promise<void> {
       20_000,
       'join-token mint (listener bound)'
     )
-    await test('POST /api/runners/join-token mints a pinned szjt1 token + wss runner url', async () => {
+    // Scheme follows SLAYZONE_MODE (deriveRunnerHubUrl): this hub boots WITHOUT
+    // SLAYZONE_MODE, i.e. LOCAL, so the runner url written into the token is
+    // `ws://` loopback on the hub's own port — no TLS, no cert pin (hub-dialer
+    // pins only on `wss:`).
+    // The remote `wss://`-from-SLAYZONE_HUB_PUBLIC_ADDRESS derivation is unit-covered in
+    // runner-tls-listener.test.ts; asserting wss here would contradict the boot.
+    await test('POST /api/runners/join-token mints a pinned szjt1 token + local ws runner url', async () => {
       assert(typeof tok.token === 'string' && tok.token.startsWith('szjt1.'), 'szjt1 token')
-      assert(tok.hubUrl.startsWith('wss://') && tok.hubUrl.endsWith('/runners'), 'wss runner url')
+      assert(
+        tok.hubUrl === `ws://127.0.0.1:${hubPort}/runners`,
+        `local runner url is ws:// on the hub port, got: ${tok.hubUrl}`
+      )
     })
 
     // --- spawn the runner, isolated, pointed at the minted token -------------
@@ -253,7 +263,8 @@ async function main(): Promise<void> {
     runner = spawnChild(RUNNER_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: runnerRootDir,
-      SLAYZONE_HUB_URL: tok.hubUrl,
+      // Authority only — runner composes ws(s)://<addr>/runners from SLAYZONE_MODE.
+      SLAYZONE_HUB_ADDRESS: new URL(tok.hubUrl).host,
       SLAYZONE_RUNNER_JOIN_TOKEN: tok.token
     })
 

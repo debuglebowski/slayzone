@@ -191,6 +191,66 @@ describe('createPtyHandlers', () => {
     pty.disposeAll()
   })
 
+  it('sanitizes the inherited process.env base: strips infra/secret/identity + non-prefixed infra, keeps PATH', async () => {
+    // The runner inherits its parent (supervisor) process.env, which carries
+    // SlayZone infra/secret/identity vars. NONE of those may leak into a spawned
+    // agent's env — a runner-hosted `slay` reinterpreting an inherited
+    // SLAYZONE_HUB_ADDRESS/HUB_TOKEN/TASK_ID is the exact leak this closes. The
+    // user env (PATH/HOME/toolchains) MUST survive. This is the BASE channel
+    // (process.env), distinct from the hub-passed override channel tested above.
+    const saved: Record<string, string | undefined> = {}
+    const inject: Record<string, string> = {
+      SLAYZONE_HUB_ADDRESS: 'hub.example:8443', // infra
+      SLAYZONE_HUB_TOKEN: 'inherited-secret', // secret
+      SLAYZONE_MODE: 'remote', // infra
+      SLAYZONE_TASK_ID: 'inherited-task', // identity (overlay would re-add correct)
+      SLAYZONE_FUTURE_UNLISTED: 'fail-closed', // unmanifested → fail closed
+      ELECTRON_RUN_AS_NODE: '1' // non-prefixed infra
+    }
+    for (const [k, v] of Object.entries(inject)) {
+      saved[k] = process.env[k]
+      process.env[k] = v
+    }
+    try {
+      const { ctx } = makeCtx()
+      let out = ''
+      const dialer: RunnerDialer = {
+        notify: (method, params) => {
+          if (method === 'pty.data') out += (params as { data: string }).data
+          return true
+        }
+      }
+      const pty = createPtyHandlers({ ...ctx, dialer })
+      await pty.handlers['pty.spawn']({
+        sessionId: 'base-sanitize',
+        command: 'sh',
+        args: [
+          '-c',
+          'echo ADDR=[$SLAYZONE_HUB_ADDRESS]; echo TOK=[$SLAYZONE_HUB_TOKEN]; ' +
+            'echo MODE=[$SLAYZONE_MODE]; echo TASK=[$SLAYZONE_TASK_ID]; ' +
+            'echo FUT=[$SLAYZONE_FUTURE_UNLISTED]; echo ERAN=[$ELECTRON_RUN_AS_NODE]; ' +
+            'echo PATHSET=[${PATH:+yes}]'
+        ],
+        cwd: process.cwd(),
+        env: {}
+      })
+      await waitFor(() => out.includes('PATHSET='))
+      expect(out).toContain('ADDR=[]')
+      expect(out).toContain('TOK=[]')
+      expect(out).toContain('MODE=[]')
+      expect(out).toContain('TASK=[]')
+      expect(out).toContain('FUT=[]')
+      expect(out).toContain('ERAN=[]')
+      expect(out).toContain('PATHSET=[yes]')
+      pty.disposeAll()
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it('WITHOUT agentHookUrl, passes env through byte-identically (no overlay, no strip)', async () => {
     // Pre-init / tests: the relay port is not yet bound → no agentHookUrl. The
     // env must be passed through UNCHANGED so this stays a no-op seam (behavior

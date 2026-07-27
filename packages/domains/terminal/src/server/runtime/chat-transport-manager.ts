@@ -14,6 +14,7 @@ import { getPtyHostBridge } from '../pty-host'
 import { whichBinary as realWhichBinary } from '../shell-env'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { TypedEmitter } from '@slayzone/platform/events'
+import { sanitizeSpawnEnv } from '@slayzone/platform'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import type { BufferedEvent } from '../chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
@@ -1038,7 +1039,10 @@ async function spawnSubprocess(session: Session): Promise<void> {
 
   const child = deps.spawn(binary, args, {
     cwd: opts.cwd,
-    env: { ...process.env, ...opts.env },
+    // Sanitized base (user env survives; SlayZone infra/secret/identity stripped,
+    // fail closed on unmanifested SLAYZONE_*) + the per-spawn overlay `opts.env`
+    // (the mcpEnv identity the caller built for this chat agent) applied on top.
+    env: { ...sanitizeSpawnEnv(process.env), ...opts.env },
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false
   })

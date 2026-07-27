@@ -5,6 +5,7 @@
  *   --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/hub.test.ts
  */
 import http from 'node:http'
+import { DatabaseSync } from 'node:sqlite'
 import type { AddressInfo } from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -25,9 +26,9 @@ import { notifyApp } from '../src/db'
 // --- env + fs scaffolding -------------------------------------------------
 
 const ENV_KEYS = [
-  'SLAYZONE_HUB_URL',
+  'SLAYZONE_HUB_ADDRESS',
+  'SLAYZONE_MODE',
   'SLAYZONE_HUB_TOKEN',
-  'SLAYZONE_HUB_PORT',
   'SLAYZONE_ROOT',
   'SLAYZONE_DB_PATH',
   'SLAYZONE_DEV'
@@ -87,6 +88,20 @@ function startServer(): Promise<{
   })
 }
 
+/**
+ * A minimal DB holding just `settings.server_port` — the durable channel the
+ * running server publishes its bound port to, and the ONLY way the CLI finds the
+ * local app when no hub is configured. Returns the path (for SLAYZONE_DB_PATH).
+ */
+function seedServerPortDb(port: number): string {
+  const dbPath = path.join(freshStateDir(), 'slayzone.sqlite')
+  const db = new DatabaseSync(dbPath)
+  db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('server_port', String(port))
+  db.close()
+  return dbPath
+}
+
 /** A port that is guaranteed refused: bind, grab the port, close. */
 async function deadPort(): Promise<number> {
   const srv = await startServer()
@@ -125,23 +140,25 @@ await describe('resolveHubTarget precedence', () => {
     expect(resolveHubTarget()).toBeNull()
   })
 
-  test('env URL wins over file; file token does not leak to env target', () => {
+  test('env ADDRESS wins over file; file token does not leak to env target', () => {
     const dir = freshStateDir()
     setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
+    // Authority only; local mode (default) composes http://.
     setEnv({
       SLAYZONE_ROOT: dir,
-      SLAYZONE_HUB_URL: 'http://env.example.com:9999'
+      SLAYZONE_HUB_ADDRESS: 'env.example.com:9999'
     })
     const target = resolveHubTarget()
     expect(target?.baseUrl).toBe('http://env.example.com:9999')
     expect(target?.token).toBeNull()
   })
 
-  test('env URL + env token', () => {
+  test('env ADDRESS composes https:// in remote mode + env token', () => {
     setEnv({
       SLAYZONE_ROOT: freshStateDir(),
-      SLAYZONE_HUB_URL: 'https://env.example.com/',
+      SLAYZONE_HUB_ADDRESS: 'env.example.com',
+      SLAYZONE_MODE: 'remote',
       SLAYZONE_HUB_TOKEN: 'env-token'
     })
     const target = resolveHubTarget()
@@ -193,13 +210,15 @@ await describe('resolveHubTarget precedence', () => {
     expect(target?.token).toBe('env-token')
   })
 
-  test('invalid SLAYZONE_HUB_URL exits 1', () => {
-    setEnv({ SLAYZONE_ROOT: freshStateDir(), SLAYZONE_HUB_URL: 'not a url' })
+  test('invalid SLAYZONE_HUB_ADDRESS (carries a scheme) exits 1', () => {
+    // ADDRESS must be authority only; a value with a scheme composes to a
+    // double-scheme url that normalizeHubUrl rejects → hard exit.
+    setEnv({ SLAYZONE_ROOT: freshStateDir(), SLAYZONE_HUB_ADDRESS: 'http://sneaky' })
     const { exitCode, stderr } = captureAll(() => {
       resolveHubTarget()
     })
     expect(exitCode).toBe(1)
-    expect(stderr.some((s) => s.includes('Invalid SLAYZONE_HUB_URL'))).toBe(true)
+    expect(stderr.some((s) => s.includes('Invalid SLAYZONE_HUB_ADDRESS'))).toBe(true)
   })
 
   test('corrupt hub.json warns and falls back to null', () => {
@@ -270,7 +289,7 @@ await describe('api Authorization header', () => {
     try {
       setEnv({
         SLAYZONE_ROOT: freshStateDir(),
-        SLAYZONE_HUB_URL: `http://127.0.0.1:${srv.port}`,
+        SLAYZONE_HUB_ADDRESS: `127.0.0.1:${srv.port}`,
         SLAYZONE_HUB_TOKEN: 'sekret'
       })
       const res = await apiGet<{ ok: boolean }>('/api/ping')
@@ -288,7 +307,7 @@ await describe('api Authorization header', () => {
     try {
       setEnv({
         SLAYZONE_ROOT: freshStateDir(),
-        SLAYZONE_HUB_URL: `http://127.0.0.1:${srv.port}`
+        SLAYZONE_HUB_ADDRESS: `127.0.0.1:${srv.port}`
       })
       await apiGet<{ ok: boolean }>('/api/ping')
       expect(srv.seen[0].auth).toBeNull()
@@ -297,12 +316,14 @@ await describe('api Authorization header', () => {
     }
   })
 
-  test('legacy fallback: SLAYZONE_HUB_PORT target, no Authorization header', async () => {
+  test('no hub configured: falls back to settings.server_port, no Authorization header', async () => {
+    // The local-app path (`hub: false`): no SLAYZONE_HUB_ADDRESS and no hub.json,
+    // so the port comes from the DB the server publishes it to at boot.
     const srv = await startServer()
     try {
       setEnv({
         SLAYZONE_ROOT: freshStateDir(),
-        SLAYZONE_HUB_PORT: String(srv.port)
+        SLAYZONE_DB_PATH: seedServerPortDb(srv.port)
       })
       const res = await apiGet<{ ok: boolean }>('/api/ping')
       expect(res.ok).toBe(true)
@@ -317,7 +338,7 @@ await describe('api Authorization header', () => {
     const port = await deadPort()
     setEnv({
       SLAYZONE_ROOT: freshStateDir(),
-      SLAYZONE_HUB_URL: `http://127.0.0.1:${port}`
+      SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}`
     })
     const { exitCode, stderr } = await captureAllAsync(async () => {
       await apiGet('/api/ping')
@@ -333,7 +354,7 @@ await describe('notifyApp via hub', () => {
     try {
       setEnv({
         SLAYZONE_ROOT: freshStateDir(),
-        SLAYZONE_HUB_URL: `http://127.0.0.1:${srv.port}`,
+        SLAYZONE_HUB_ADDRESS: `127.0.0.1:${srv.port}`,
         SLAYZONE_HUB_TOKEN: 'sekret'
       })
       await notifyApp()
@@ -350,7 +371,7 @@ await describe('notifyApp via hub', () => {
     const port = await deadPort()
     setEnv({
       SLAYZONE_ROOT: freshStateDir(),
-      SLAYZONE_HUB_URL: `http://127.0.0.1:${port}`
+      SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}`
     })
     const { exitCode, stderr } = await captureAllAsync(() => notifyApp())
     expect(exitCode).toBeNull()

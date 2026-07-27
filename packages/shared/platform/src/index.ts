@@ -22,6 +22,19 @@ export {
   assertModeHostConsistency,
   type SlayzoneMode
 } from './slayzone-mode'
+export {
+  ENV_MANIFEST,
+  NON_PREFIXED_INFRA,
+  sanitizeSpawnEnv,
+  type EnvScope
+} from './env-manifest'
+export {
+  hubUrlFromAddr,
+  isBareAuthority,
+  parseHubAddress,
+  LOOPBACK_HOSTS,
+  type HubBindAddress
+} from './hub-addr'
 export { writeFileIfChanged } from './fs-utils'
 export {
   migrateXdgIfNeeded,

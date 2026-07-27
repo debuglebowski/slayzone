@@ -27,8 +27,8 @@ export function hubCommand(): Command {
       const configPath = writeHubConfig(normalized, opts.token ?? null)
       console.log(`Hub configured: ${normalized}`)
       console.log(`Config written: ${configPath}`)
-      if (process.env.SLAYZONE_HUB_URL) {
-        console.error('Note: SLAYZONE_HUB_URL is set and takes precedence over this config.')
+      if (process.env.SLAYZONE_HUB_ADDRESS) {
+        console.error('Note: SLAYZONE_HUB_ADDRESS is set and takes precedence over this config.')
       }
     })
 
@@ -42,7 +42,7 @@ export function hubCommand(): Command {
         console.log('No hub configured — using local app.')
         return
       }
-      const source = process.env.SLAYZONE_HUB_URL ? 'SLAYZONE_HUB_URL env' : getHubConfigPath()
+      const source = process.env.SLAYZONE_HUB_ADDRESS ? 'SLAYZONE_HUB_ADDRESS env' : getHubConfigPath()
       console.log(`Hub:    ${target.baseUrl}`)
       console.log(`Source: ${source}`)
       console.log(`Token:  ${target.token ? 'set' : 'not set'}`)
@@ -73,8 +73,8 @@ export function hubCommand(): Command {
     .action(() => {
       const removed = removeHubConfig()
       console.log(removed ? `Removed: ${getHubConfigPath()}` : 'No hub config to remove.')
-      if (process.env.SLAYZONE_HUB_URL) {
-        console.error('Note: SLAYZONE_HUB_URL is still set in the environment.')
+      if (process.env.SLAYZONE_HUB_ADDRESS) {
+        console.error('Note: SLAYZONE_HUB_ADDRESS is still set in the environment.')
       }
     })
 

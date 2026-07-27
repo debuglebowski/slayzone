@@ -684,10 +684,12 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       // resolve to the shared ~/.slayzone/runners like the rest of app state.
       SLAYZONE_SUPERVISED: '1',
       // Auto-enroll: the freshly minted token embeds the cert fingerprint the
-      // runner pins; SLAYZONE_HUB_URL is the wss /runners listener url from the
-      // token/mint response. These OVERRIDE any inherited values so the local
-      // runner always dials THIS boot's hub.
-      SLAYZONE_HUB_URL: minted.hubUrl,
+      // runner pins. The env channel carries the hub AUTHORITY only
+      // (host[:port]) — the runner re-derives ws(s):// from SLAYZONE_MODE and
+      // appends /runners (see runner config.ts). Extract the authority from the
+      // mint's full ws(s)://host[:port]/runners url. OVERRIDES any inherited
+      // value so the local runner always dials THIS boot's hub.
+      SLAYZONE_HUB_ADDRESS: new URL(minted.hubUrl).host,
       // No SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS handoff: under
       // SLAYZONE_SUPERVISED=1 (above) the runner defaults its enroll name to
       // DEFAULT_LOCAL_RUNNER_NAME (matching the hub's localRunnerName so the dedup

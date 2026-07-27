@@ -1,8 +1,8 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { getSlayzoneHomeDir } from './dirs'
+import { LOOPBACK_HOSTS, parseHubAddress } from './hub-addr'
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 let warnedHost: string | null = null
 
 /**
@@ -50,28 +50,29 @@ export const SIDECAR_FIXED_PORT = {
 } as const
 
 /**
- * Returns the tRPC server port from SLAYZONE_HUB_PORT, or undefined if
- * unset/invalid. Callers should fall back to a stored or auto-assigned port when
- * undefined.
+ * The port the hub should BIND, from `SLAYZONE_HUB_ADDRESS` (`host[:port]`), or
+ * undefined when the var is unset/malformed or names no port. Callers fall back
+ * to a stored or OS-assigned port when undefined.
+ *
+ * PORT GRAMMAR: a bare host (`127.0.0.1`) names no port → undefined → the caller
+ * lets the OS assign one. An explicit `:0` says the same outright and returns 0.
  */
 export function getTrpcPort(): number | undefined {
-  const raw = process.env.SLAYZONE_HUB_PORT
-  if (!raw) return undefined
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n < 0 || n > 65535) return undefined
-  return n
+  return parseHubAddress(process.env.SLAYZONE_HUB_ADDRESS)?.port
 }
 
 /**
- * Returns the host the local server should bind to. Defaults to 127.0.0.1.
- * Warns once on stderr when bound to a non-loopback address.
+ * The host the hub should BIND, from `SLAYZONE_HUB_ADDRESS`. Defaults to
+ * 127.0.0.1 (also when the var is unset or malformed — a bad address must not
+ * silently widen the bind). Warns once on stderr when bound to a non-loopback
+ * address.
  */
 export function getServerHost(): string {
-  const host = process.env.SLAYZONE_HUB_HOST || '127.0.0.1'
+  const host = parseHubAddress(process.env.SLAYZONE_HUB_ADDRESS)?.host || '127.0.0.1'
   if (!LOOPBACK_HOSTS.has(host) && warnedHost !== host) {
     warnedHost = host
     console.warn(
-      `[slayzone] SLAYZONE_HUB_HOST=${host} binds the local server to a non-loopback address. ` +
+      `[slayzone] SLAYZONE_HUB_ADDRESS binds the local server to ${host}, a non-loopback address. ` +
         `Anyone on the network can reach it. Use 127.0.0.1 unless you have a reason.`
     )
   }

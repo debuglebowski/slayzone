@@ -124,26 +124,26 @@ async function main(): Promise<void> {
   await test('collect + confirm-yes persists to config.json and seeds env', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
-    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_URL
-    delete process.env.SLAYZONE_HUB_PUBLIC_URL
+    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+    delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     try {
       // answer: the value, then 'y' to the save confirm.
-      const io = fakeIo(['https://hub.example.com', 'y'])
+      const io = fakeIo(['hub.example.com:8443', 'y'])
       const res = await runInteractiveConfig({
         io,
         configPath: cfgPath,
         fields: [
-          { configKey: 'publicUrl', envKey: 'SLAYZONE_HUB_PUBLIC_URL', label: 'Public URL' }
+          { configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }
         ]
       })
       assertEq(res.saved, true, 'saved')
       assertEq(res.collected.length, 1, 'one collected')
-      assertEq(process.env.SLAYZONE_HUB_PUBLIC_URL, 'https://hub.example.com', 'env seeded')
-      assertEq(loadSlayzoneConfig(cfgPath).publicUrl, 'https://hub.example.com', 'persisted to file')
+      assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example.com:8443', 'env seeded')
+      assertEq(loadSlayzoneConfig(cfgPath).publicAddress, 'hub.example.com:8443', 'persisted to file')
       assert(io.closed === false, 'injected io NOT closed by the runner')
     } finally {
-      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_URL
-      else process.env.SLAYZONE_HUB_PUBLIC_URL = prevEnv
+      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+      else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -151,42 +151,42 @@ async function main(): Promise<void> {
   await test('confirm-no seeds env for this run but does NOT persist', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
-    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_URL
-    delete process.env.SLAYZONE_HUB_PUBLIC_URL
+    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+    delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     try {
-      const io = fakeIo(['https://hub.example.com', 'n'])
+      const io = fakeIo(['hub.example.com:8443', 'n'])
       const res = await runInteractiveConfig({
         io,
         configPath: cfgPath,
-        fields: [{ configKey: 'publicUrl', envKey: 'SLAYZONE_HUB_PUBLIC_URL', label: 'Public URL' }]
+        fields: [{ configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }]
       })
       assertEq(res.saved, false, 'not saved')
-      assertEq(process.env.SLAYZONE_HUB_PUBLIC_URL, 'https://hub.example.com', 'env still seeded')
+      assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example.com:8443', 'env still seeded')
       assert(!existsSync(cfgPath), 'config file NOT written')
     } finally {
-      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_URL
-      else process.env.SLAYZONE_HUB_PUBLIC_URL = prevEnv
+      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+      else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
   await test('empty answer with no default is skipped (not collected/seeded)', async () => {
     const dir = tmp()
-    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_URL
-    delete process.env.SLAYZONE_HUB_PUBLIC_URL
+    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+    delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     try {
       const io = fakeIo(['']) // Enter on the only field, no default → skip
       const res = await runInteractiveConfig({
         io,
         configPath: join(dir, 'config.json'),
-        fields: [{ configKey: 'publicUrl', envKey: 'SLAYZONE_HUB_PUBLIC_URL', label: 'Public URL' }]
+        fields: [{ configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }]
       })
       assertEq(res.collected.length, 0, 'nothing collected')
-      assertEq(process.env.SLAYZONE_HUB_PUBLIC_URL, undefined, 'env NOT seeded')
+      assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, undefined, 'env NOT seeded')
       assert(!existsSync(join(dir, 'config.json')), 'no config written')
     } finally {
-      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_URL
-      else process.env.SLAYZONE_HUB_PUBLIC_URL = prevEnv
+      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+      else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -225,24 +225,24 @@ async function main(): Promise<void> {
   await test('save merges over existing config keys (does not clobber)', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
-    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_URL
-    delete process.env.SLAYZONE_HUB_PUBLIC_URL
+    const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+    delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     try {
       // Pre-seed an unrelated key.
       const { saveSlayzoneConfig } = await import('./slayzone-config')
-      saveSlayzoneConfig({ port: 9999 }, cfgPath)
-      const io = fakeIo(['https://hub.example.com', 'y'])
+      saveSlayzoneConfig({ address: '0.0.0.0:9999' }, cfgPath)
+      const io = fakeIo(['hub.example.com:8443', 'y'])
       await runInteractiveConfig({
         io,
         configPath: cfgPath,
-        fields: [{ configKey: 'publicUrl', envKey: 'SLAYZONE_HUB_PUBLIC_URL', label: 'Public URL' }]
+        fields: [{ configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }]
       })
       const cfg = loadSlayzoneConfig(cfgPath)
-      assertEq(cfg.port, 9999, 'pre-existing key preserved')
-      assertEq(cfg.publicUrl, 'https://hub.example.com', 'new key merged in')
+      assertEq(cfg.address, '0.0.0.0:9999', 'pre-existing key preserved')
+      assertEq(cfg.publicAddress, 'hub.example.com:8443', 'new key merged in')
     } finally {
-      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_URL
-      else process.env.SLAYZONE_HUB_PUBLIC_URL = prevEnv
+      if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+      else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
       rmSync(dir, { recursive: true, force: true })
     }
   })

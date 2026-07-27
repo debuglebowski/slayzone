@@ -47,8 +47,8 @@ const ENV_KEYS = [
   'SLAYZONE_ROOT',
   'SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET',
   'SLAYZONE_DB_PATH',
-  'SLAYZONE_HUB_PORT',
-  'SLAYZONE_HUB_PUBLIC_URL'
+  'SLAYZONE_HUB_ADDRESS',
+  'SLAYZONE_HUB_PUBLIC_ADDRESS'
 ] as const
 
 /** Run `fn` with a clean env + isolated temp home dir; restore env after. */
@@ -75,26 +75,49 @@ function withIsolatedEnv(seed: Record<string, string>, fn: (home: string) => voi
 console.log('\nstandalone-config: env > file > default')
 console.log('─'.repeat(40))
 
-test('config.json fills unset env (port, publicUrl)', () => {
+test('config.json fills unset env (address, publicAddress)', () => {
   withIsolatedEnv({}, () => {
     saveSlayzoneConfig({
-      port: 8080,
-      publicUrl: 'https://hub.example'
+      address: '0.0.0.0:8080',
+      publicAddress: 'hub.example:8443'
     })
     applyStandaloneHubConfig()
     // dbPath is NOT seeded — the DB path DERIVES from SLAYZONE_ROOT (<ROOT>/storage)
     // via platform.getStorageDir(); there is no SLAYZONE_DB_PATH env in this chain.
     assert(process.env.SLAYZONE_DB_PATH === undefined, 'dbPath NOT seeded (derives from ROOT)')
-    assertEq(process.env.SLAYZONE_HUB_PORT, '8080', 'port')
-    assertEq(process.env.SLAYZONE_HUB_PUBLIC_URL, 'https://hub.example', 'publicUrl')
+    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '0.0.0.0:8080', 'address')
+    assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example:8443', 'publicAddress')
+  })
+})
+
+test('legacy port/publicUrl keys still boot (authority extracted, scheme dropped)', () => {
+  withIsolatedEnv({}, () => {
+    // An existing config.json written by an older build must keep working — the
+    // legacy keys are READ (never written back).
+    saveSlayzoneConfig({ port: 8080, publicUrl: 'https://hub.example:8443/' })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '127.0.0.1:8080', 'legacy port → loopback address')
+    assertEq(
+      process.env.SLAYZONE_HUB_PUBLIC_ADDRESS,
+      'hub.example:8443',
+      'legacy publicUrl → authority only (https:// discarded, SLAYZONE_MODE owns the scheme)'
+    )
+  })
+})
+
+test('new address key WINS over the legacy port key', () => {
+  withIsolatedEnv({}, () => {
+    saveSlayzoneConfig({ address: '0.0.0.0:7000', port: 8080 })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '0.0.0.0:7000', 'address wins')
   })
 })
 
 test('env WINS over config.json (does not overwrite a set env)', () => {
-  withIsolatedEnv({ SLAYZONE_HUB_PORT: '9999' }, () => {
-    saveSlayzoneConfig({ port: 8080 })
+  withIsolatedEnv({ SLAYZONE_HUB_ADDRESS: '127.0.0.1:9999' }, () => {
+    saveSlayzoneConfig({ address: '0.0.0.0:8080' })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_HUB_PORT, '9999', 'env port kept')
+    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '127.0.0.1:9999', 'env address kept')
   })
 })
 
@@ -102,7 +125,7 @@ test('no config + no env ⇒ only the generated runner secret is set (defaults e
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
     assert(process.env.SLAYZONE_DB_PATH === undefined, 'no dbPath default here (db.ts handles it)')
-    assert(process.env.SLAYZONE_HUB_PORT === undefined, 'no port default here')
+    assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'no address default here')
     assert(!!process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, 'runner secret always resolved')
   })
 })
@@ -174,9 +197,9 @@ test('supervised does NOT read or write config.json (no file created, no env see
 
 test('supervised IGNORES an existing config.json entirely', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
-    saveSlayzoneConfig({ port: 8080, runnerTransportSecret: 'should-be-ignored' })
+    saveSlayzoneConfig({ address: '0.0.0.0:8080', runnerTransportSecret: 'should-be-ignored' })
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_HUB_PORT === undefined, 'ignored port')
+    assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'ignored address')
     assert(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET === undefined, 'ignored runnerTransportSecret')
   })
 })

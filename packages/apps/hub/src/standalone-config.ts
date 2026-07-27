@@ -7,7 +7,7 @@
  * `env var > config.json > default` for every downstream reader
  * (db.ts getDatabasePathFromEnv, composition.ts
  * SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, server.ts getTrpcPort/getServerHost,
- * remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_URL). Nothing downstream changes —
+ * remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_ADDRESS). Nothing downstream changes —
  * they still read env exactly as before; we just seed env from the file first.
  * This keeps the whole server pipeline byte-identical apart from where a value
  * ultimately comes from.
@@ -33,6 +33,21 @@ import { ensureRunnerTransportSecret, loadSlayzoneConfig } from '@slayzone/platf
 /** True when the hub is running under the Electron host supervisor. */
 function isSupervised(): boolean {
   return process.env.SLAYZONE_SUPERVISED === '1'
+}
+
+/**
+ * Extract the authority (`host[:port]`) from a legacy full-URL config value,
+ * discarding its scheme and path. Returns undefined for an absent or unparseable
+ * value, so the caller simply leaves the env var unset.
+ */
+function authorityOf(rawUrl: string | undefined): string | undefined {
+  if (!rawUrl) return undefined
+  try {
+    const host = new URL(rawUrl).host
+    return host === '' ? undefined : host
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -67,8 +82,16 @@ export function applyStandaloneHubConfig(): void {
   // from SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
   // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so
   // there is nothing to thread through env here.
-  setIfUnset('SLAYZONE_HUB_PORT', cfg.port !== undefined ? String(cfg.port) : undefined)
-  setIfUnset('SLAYZONE_HUB_PUBLIC_URL', cfg.publicUrl)
+  // The hub's own address. `address` is the current key; the legacy `port` key is
+  // still honored (loopback + that port) so an existing config.json keeps booting.
+  setIfUnset(
+    'SLAYZONE_HUB_ADDRESS',
+    cfg.address ?? (cfg.port !== undefined ? `127.0.0.1:${cfg.port}` : undefined)
+  )
+  // The hub's external address, written into join tokens. Legacy `publicUrl` is
+  // still honored by extracting its authority — the scheme it carried is
+  // deliberately discarded (SLAYZONE_MODE decides the scheme now).
+  setIfUnset('SLAYZONE_HUB_PUBLIC_ADDRESS', cfg.publicAddress ?? authorityOf(cfg.publicUrl))
 
   // Runner secret — security fix. Resolve env > config > generate+persist and set
   // the env so composition.ts never reaches the shared dev constant in standalone.

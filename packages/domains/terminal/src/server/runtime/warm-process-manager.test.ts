@@ -16,7 +16,7 @@ import {
   __resetForTests,
   type WarmPoolDataOps
 } from './warm-process-manager'
-import { setReinstallHooks } from './pty-manager'
+import { setReinstallHooks, buildBaseEnv } from './pty-manager'
 
 let passed = 0
 let failed = 0
@@ -330,6 +330,43 @@ await test('injected ops seam handles mode lookup + session writes (db untouched
   await wait(10)
   expect(deadIds.length).toBe(1)
   expect(deadIds[0]).toBe(recorded!.id)
+})
+
+// buildBaseEnv is the shared base for EVERY pty spawn (cold createPty + warm
+// pool + docker/ssh). It must sanitize the host's env: keep the user env
+// (PATH/HOME) but strip SlayZone infra/secret/identity (and unmanifested
+// SLAYZONE_*, fail closed). Per-spawn identity is re-added later via mcpEnv.
+await test('buildBaseEnv sanitizes host env: strips SlayZone infra/secret/identity, keeps user env', () => {
+  const saved: Record<string, string | undefined> = {}
+  const inject: Record<string, string> = {
+    SLAYZONE_HUB_TOKEN: 'host-secret', // secret
+    SLAYZONE_HUB_ADDRESS: 'hub.example:8443', // infra
+    SLAYZONE_MODE: 'remote', // infra
+    SLAYZONE_TASK_ID: 'host-task', // identity (mcpEnv re-adds correct)
+    SLAYZONE_FUTURE_UNLISTED: 'fail-closed', // unmanifested → fail closed
+    SLAYZONE_RELEASE_CHANNEL: 'dev' // global → kept
+  }
+  for (const [k, v] of Object.entries(inject)) {
+    saved[k] = process.env[k]
+    process.env[k] = v
+  }
+  try {
+    const env = buildBaseEnv()
+    expect('SLAYZONE_HUB_TOKEN' in env).toBe(false)
+    expect('SLAYZONE_HUB_ADDRESS' in env).toBe(false)
+    expect('SLAYZONE_MODE' in env).toBe(false)
+    expect('SLAYZONE_TASK_ID' in env).toBe(false)
+    expect('SLAYZONE_FUTURE_UNLISTED' in env).toBe(false)
+    expect(env.SLAYZONE_RELEASE_CHANNEL).toBe('dev')
+    // User env + terminal decoration survive.
+    expect(typeof env.PATH === 'string' && env.PATH.length > 0).toBe(true)
+    expect(env.TERM).toBe('xterm-256color')
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+  }
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

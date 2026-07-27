@@ -8,7 +8,7 @@ import type { ServerHandle } from './index.js'
  * First-run interactive setup for a STANDALONE hub. Runs ONLY when
  * {@link canPrompt}. The hub never hard-fails (it auto-generates its secret and
  * defaults its ports), so this asks for the ONE recommended-but-optional value
- * that silently degrades a REMOTE deployment when absent: the public URL that
+ * that silently degrades a REMOTE deployment when absent: the public address that
  * minted join tokens embed. Leaving it empty is fine for a loopback-only hub —
  * an empty answer is skipped, so nothing is written and no re-prompt occurs
  * once the operator has answered once (a persisted value stops being missing).
@@ -20,16 +20,23 @@ import type { ServerHandle } from './index.js'
 async function maybeInteractiveSetup(): Promise<void> {
   if (!canPrompt()) return
   const cfg = loadSlayzoneConfig()
-  if ((process.env.SLAYZONE_HUB_PUBLIC_URL ?? cfg.publicUrl) !== undefined) return
+  // The legacy `publicUrl` key counts as answered too — an operator who already
+  // filled this in on an older build must never be re-prompted.
+  if (
+    (process.env.SLAYZONE_HUB_PUBLIC_ADDRESS ?? cfg.publicAddress ?? cfg.publicUrl) !== undefined
+  )
+    return
 
   await runInteractiveConfig({
     title: 'Hub setup — values to save to config.json:',
     fields: [
       {
-        configKey: 'publicUrl',
-        envKey: 'SLAYZONE_HUB_PUBLIC_URL',
-        label: 'Public hub URL for remote runners (leave empty for loopback-only)',
-        hint: 'e.g. https://hub.example.com'
+        configKey: 'publicAddress',
+        envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS',
+        // Authority only — the scheme follows SLAYZONE_MODE, so asking for it here
+        // would let the two disagree.
+        label: 'Public hub address for remote runners (leave empty for loopback-only)',
+        hint: 'host[:port], e.g. hub.example.com:8443'
       }
     ]
   })

@@ -68,8 +68,10 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 ## Env Var Naming
 
 1. Prefix `SLAYZONE_`.
-2. Name by what the value IS, not who reads it. App-specific → include the app (`SLAYZONE_HUB_PORT`). Universal → don't (`SLAYZONE_MODE`, `SLAYZONE_TASK_ID`).
-3. Same concept → same suffix: `_PORT` `_URL` `_TOKEN` `_DIR` `_PATH` `_ID`.
+2. Name by what the value IS, not who reads it. App-specific → include the app (`SLAYZONE_HUB_ADDRESS`). Universal → don't (`SLAYZONE_MODE`, `SLAYZONE_TASK_ID`).
+3. Same concept → same suffix: `_ADDRESS` `_TOKEN` `_DIR` `_PATH` `_ID`.
+4. One concept = one var, even when its value differs per role (the hub BINDS `SLAYZONE_HUB_ADDRESS`, the runner/CLI DIAL it). Safe because `sanitizeSpawnEnv` strips non-`global` vars at every terminal-spawn boundary.
+5. Carry authority (`host[:port]`), never a full URL — the scheme derives from `SLAYZONE_MODE` (local → `ws`/`http`, remote → `wss`/`https`), so a scheme/reader mismatch is unrepresentable.
 
 ## Theming
 

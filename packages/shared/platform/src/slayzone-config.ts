@@ -2,8 +2,8 @@
  * Shared SlayZone config file — a SINGLE JSON document at
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
- * the keys it cares about (hub: runnerTransportSecret/port/publicUrl; runner:
- * joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256).
+ * the keys it cares about (hub: runnerTransportSecret/address/publicAddress;
+ * runner: joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256).
  * The runner credential store derives from SLAYZONE_ROOT (`<ROOT>/runners`), and
  * the DB path from SLAYZONE_ROOT (`<ROOT>/storage`), so there is no
  * credentialsDir or dbPath key.
@@ -48,18 +48,31 @@ export interface SlayzoneConfig {
   /** HMAC secret backing hub-auth + per-task token mint/verify. Auto-generated
    *  + persisted on first standalone boot if absent (see ensureRunnerTransportSecret). */
   runnerTransportSecret?: string
-  /** The hub's single listen port for ALL transport — `/trpc`, `/runners`,
-   *  `/health`, `/mcp`, REST (`SLAYZONE_HUB_PORT`). Protocol (ws/wss) follows
-   *  SLAYZONE_MODE, not a per-listener knob. */
+  /** The address the hub BINDS for ALL transport — `/trpc`, `/runners`,
+   *  `/health`, `/mcp`, REST (`SLAYZONE_HUB_ADDRESS`). `host[:port]`, no scheme:
+   *  the protocol (ws/wss, http/https) follows SLAYZONE_MODE, not a stored value.
+   *  A bare host lets the OS assign the port. */
+  address?: string
+  /** The hub's EXTERNAL address (`SLAYZONE_HUB_PUBLIC_ADDRESS`), `host[:port]`, no
+   *  scheme. Written into the join tokens remote runners dial back on. Needed
+   *  alongside `address` only when the two differ (reverse proxy / NAT). */
+  publicAddress?: string
+  /** @deprecated Legacy bind port, superseded by `address`. Still READ (an
+   *  existing config.json must keep booting) — `address` wins when both are set;
+   *  never written for a fresh config. */
   port?: number
-  /** Public hub base URL advertised to remote runners (`SLAYZONE_HUB_PUBLIC_URL`). */
+  /** @deprecated Legacy full public URL, superseded by `publicAddress`. Still READ
+   *  (authority extracted, scheme discarded — the scheme comes from SLAYZONE_MODE);
+   *  never written for a fresh config. */
   publicUrl?: string
   // --- runner keys ---
   /** First-contact join token for a standalone runner (`SLAYZONE_RUNNER_JOIN_TOKEN`). */
   joinToken?: string
   /** Human-readable runner name (config-only; the standalone rename channel). */
   runnerName?: string
-  /** `ws(s)://` hub runner endpoint a standalone runner dials (`SLAYZONE_HUB_URL`). */
+  /** FULL `ws(s)://…/runners` endpoint a standalone runner dials. Config/token-only —
+   *  the ENV channel carries authority only (`SLAYZONE_HUB_ADDRESS`) and derives the
+   *  scheme from `SLAYZONE_MODE`; a config file may state the whole url outright. */
   hubUrl?: string
   /** Filesystem roots the runner may operate under (the fs/git/proc path jail).
    *  Locally-declared on the runner box, NEVER pushed from the hub. Defaults to
@@ -104,6 +117,10 @@ function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   const cfg: SlayzoneConfig = {}
   if (typeof raw.runnerTransportSecret === 'string' && raw.runnerTransportSecret.length > 0)
     cfg.runnerTransportSecret = raw.runnerTransportSecret
+  if (typeof raw.address === 'string' && raw.address.length > 0) cfg.address = raw.address
+  if (typeof raw.publicAddress === 'string' && raw.publicAddress.length > 0)
+    cfg.publicAddress = raw.publicAddress
+  // Legacy keys, still read so an existing config.json keeps booting.
   if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
   if (typeof raw.publicUrl === 'string' && raw.publicUrl.length > 0) cfg.publicUrl = raw.publicUrl
   if (typeof raw.joinToken === 'string' && raw.joinToken.length > 0) cfg.joinToken = raw.joinToken

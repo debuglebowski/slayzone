@@ -252,8 +252,8 @@ async function launchElectronWithRetry(args: {
   workerArtifactsDir: string
   executablePath: string
   /** Extra env merged LAST into the launch literal — lets an isolated spec pass
-   *  otherwise-stripped SLAYZONE_* vars (e.g. 
-   *  SLAYZONE_E2E_ALLOW_RUNNER / SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN) through
+   *  otherwise-stripped SLAYZONE_* vars (e.g.
+   *  SLAYZONE_E2E_ALLOW_RUNNER / SLAYZONE_HUB_ADDRESS / SLAYZONE_RUNNER_JOIN_TOKEN) through
    *  the strip below. Wins over the fixed keys, so a spec may also override an
    *  isolation default intentionally. */
   extraEnv?: Record<string, string>
@@ -279,7 +279,7 @@ async function launchElectronWithRetry(args: {
     let stopAttemptLogCapture: (() => void) | undefined
 
     try {
-      // Sanitize the inherited env. When e2e runs from inside a *dogfooding*
+      // Sanitize the inherited env. When e2e runs from inside a *supervised*
       // SlayZone terminal (the dev app spawns the PTY), the parent leaks a pile
       // of runtime vars that silently override the per-worker isolation this
       // fixture sets up below — and corrupt the whole suite:
@@ -292,7 +292,7 @@ async function launchElectronWithRetry(args: {
       //     the real boot-config.json + data dir (e.g. 100-server-settings-toggle
       //     flips the real app to remote mode → 102-sidecar-crash-recovery + the
       //     rest boot sidecar-less and cascade-fail).
-      //   • SLAYZONE_SUPERVISED / SLAYZONE_HUB_PORT / SLAYZONE_HUB_HOST /
+      //   • SLAYZONE_SUPERVISED / SLAYZONE_HUB_ADDRESS /
       //     SLAYZONE_BRIDGE_URL / SLAYZONE_TASK_ID … → supervised host/task wiring
       //     the app must not see.
       // Strip every ELECTRON_*/SLAYZONE_* from the inherited copy; the explicit
@@ -348,7 +348,7 @@ async function launchElectronWithRetry(args: {
           XDG_CONFIG_HOME: path.join(args.userDataDir, '.config'),
           // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
           // isolated spec needs (runner-loopback:
-          // SLAYZONE_E2E_ALLOW_RUNNER, SLAYZONE_ROOT, SLAYZONE_HUB_URL,
+          // SLAYZONE_E2E_ALLOW_RUNNER, SLAYZONE_ROOT, SLAYZONE_HUB_ADDRESS,
           // SLAYZONE_RUNNER_JOIN_TOKEN). Merged LAST so a spec can also override an
           // isolation default on purpose. Undefined for every default launch
           // (shared worker app + 103) → byte-identical there.

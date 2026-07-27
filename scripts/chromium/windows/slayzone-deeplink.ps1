@@ -19,13 +19,13 @@ if ([string]::IsNullOrWhiteSpace($Url)) {
 
 # The sidecar binds a baked loopback port (prod 8765, dev 8766), matching the
 # renderer's baked WS URL (there is no server-URL override channel yet — see
-# window-api-shim/src/server-url.ts; align both when one lands). Override with
-# SLAYZONE_HUB_PORT (space-separated). Try prod first, then dev.
-$ports = if ($env:SLAYZONE_HUB_PORT) {
-  $env:SLAYZONE_HUB_PORT -split '\s+' | Where-Object { $_ }
+# window-api-shim/src/server-url.ts; align both when one lands). SLAYZONE_HUB_ADDRESS
+# (one `host:port`) pins a single target; unset, try prod first, then dev.
+$addrs = if ($env:SLAYZONE_HUB_ADDRESS) {
+  $env:SLAYZONE_HUB_ADDRESS -split '\s+' | Where-Object { $_ }
 }
 else {
-  @('8765', '8766')
+  @('127.0.0.1:8765', '127.0.0.1:8766')
 }
 
 # EscapeDataString safely encodes the whole URL into the query string (the route
@@ -33,17 +33,17 @@ else {
 # Linux helper's `curl -G --data-urlencode "url=$url"`.
 $encoded = [uri]::EscapeDataString($Url)
 
-foreach ($port in $ports) {
-  $endpoint = "http://127.0.0.1:$port/api/auth/deep-link?url=$encoded"
+foreach ($addr in $addrs) {
+  $endpoint = "http://$addr/api/auth/deep-link?url=$encoded"
   try {
     Invoke-RestMethod -Method Post -Uri $endpoint -TimeoutSec 5 | Out-Null
     exit 0
   }
   catch {
-    # Sidecar not on this port (or not running) — try the next.
+    # Sidecar not at this address (or not running) — try the next.
   }
 }
 
 [Console]::Error.WriteLine(
-  "slayzone-deeplink: no SlayZone sidecar reachable (tried ports: $($ports -join ', '))")
+  "slayzone-deeplink: no SlayZone sidecar reachable (tried: $($addrs -join ', '))")
 exit 1

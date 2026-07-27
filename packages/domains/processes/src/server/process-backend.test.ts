@@ -168,6 +168,35 @@ async function main(): Promise<void> {
   assert(sawDone(), 'localProcessBackend real exit(0) → completed')
   killProcess(idR)
 
+  // === env sanitize: a user `run` process must NOT inherit the host's SlayZone
+  //     infra/secret env (localProcessBackend routes through sanitizeSpawnEnv). ===
+  process.env.SLAYZONE_HUB_TOKEN = 'leak-secret'
+  process.env.SLAYZONE_HUB_ADDRESS = 'hub.example:8443'
+  // Colon delimiters (not [brackets]) — interactive zsh globs `[]` and errors.
+  const idE = spawnProcess(
+    'proj',
+    'task',
+    'E',
+    'echo TOK:$SLAYZONE_HUB_TOKEN: ADDR:$SLAYZONE_HUB_ADDRESS: PATHLEN:${#PATH}:',
+    '/tmp',
+    false
+  )
+  const envLine = (): string =>
+    logs.filter((l) => l.id === idE).map((l) => l.line).join('')
+  const sawEnv = (): boolean => envLine().includes('PATHLEN:')
+  const doneE = (): boolean => statuses.some((s) => s.id === idE && s.status === 'completed')
+  const deadlineE = Date.now() + 15000
+  while (Date.now() < deadlineE && !(sawEnv() && doneE())) {
+    await delay(100)
+  }
+  delete process.env.SLAYZONE_HUB_TOKEN
+  delete process.env.SLAYZONE_HUB_ADDRESS
+  assert(sawEnv(), 'sanitize case: child emitted its env line')
+  assert(envLine().includes('TOK::'), 'sanitize strips inherited SLAYZONE_HUB_TOKEN from a run process')
+  assert(envLine().includes('ADDR::'), 'sanitize strips inherited SLAYZONE_HUB_ADDRESS from a run process')
+  assert(!/PATHLEN:0:/.test(envLine()), 'sanitize keeps a non-empty PATH for a run process')
+  killProcess(idE)
+
   console.log('process-backend seam: all passed')
   process.exit(0)
 }

@@ -82,6 +82,51 @@ describe('createProcHandlers — proc.spawn streaming', () => {
     proc.disposeAll()
   })
 
+  it('sanitizes the inherited process.env base: strips SlayZone infra/secret, keeps PATH', async () => {
+    // A runner-hosted background process must not inherit the runner's own
+    // SlayZone infra/secret env (it would leak creds + confuse any nested slay).
+    // User env (PATH) survives.
+    const saved: Record<string, string | undefined> = {}
+    const inject: Record<string, string> = {
+      SLAYZONE_HUB_TOKEN: 'inherited-secret',
+      SLAYZONE_HUB_ADDRESS: 'hub.example:8443',
+      SLAYZONE_FUTURE_UNLISTED: 'fail-closed',
+      ELECTRON_RUN_AS_NODE: '1'
+    }
+    for (const [k, v] of Object.entries(inject)) {
+      saved[k] = process.env[k]
+      process.env[k] = v
+    }
+    try {
+      const { notifies, ctx } = makeCtx(roots)
+      const proc = createProcHandlers(ctx)
+      const id = 'p-sanitize'
+      await proc.handlers[ProcMethods.procSpawn]({
+        id,
+        command: 'sh',
+        args: [
+          '-c',
+          'echo TOK=[$SLAYZONE_HUB_TOKEN]; echo ADDR=[$SLAYZONE_HUB_ADDRESS]; ' +
+            'echo FUT=[$SLAYZONE_FUTURE_UNLISTED]; echo ERAN=[$ELECTRON_RUN_AS_NODE]; ' +
+            'echo PATHSET=[${PATH:+yes}]'
+        ]
+      })
+      await waitFor(() => exitFor(notifies, id) !== undefined)
+      const out = dataFor(notifies, id, 'stdout')
+      expect(out).toContain('TOK=[]')
+      expect(out).toContain('ADDR=[]')
+      expect(out).toContain('FUT=[]')
+      expect(out).toContain('ERAN=[]')
+      expect(out).toContain('PATHSET=[yes]')
+      proc.disposeAll()
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it('captures stderr separately from stdout', async () => {
     const { notifies, ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)

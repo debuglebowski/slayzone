@@ -85,14 +85,16 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // boot an exposed-but-unhardened hub (mode=local + non-loopback bind).
   if (!supervised) {
     assertModeHostConsistency(getSlayzoneMode(), host)
-    // Remote runners reach this hub's MCP/hook callbacks via SLAYZONE_HUB_PUBLIC_URL;
-    // it can't be auto-derived (the hub can't know its own external address). In
-    // remote mode a missing/blank value would silently degrade every remote agent
-    // to an unreachable loopback target — fail loud at boot instead.
-    if (isRemoteMode() && !process.env.SLAYZONE_HUB_PUBLIC_URL?.trim()) {
+    // Remote runners reach this hub's MCP/hook callbacks via
+    // SLAYZONE_HUB_PUBLIC_ADDRESS; it can't be auto-derived (the hub can't know its
+    // own external address, which in a proxy/NAT deployment differs from the address
+    // it binds). In remote mode a missing/blank value would silently degrade every
+    // remote agent to an unreachable loopback target — fail loud at boot instead.
+    if (isRemoteMode() && !process.env.SLAYZONE_HUB_PUBLIC_ADDRESS?.trim()) {
       throw new Error(
-        '[slayzone] SLAYZONE_MODE=remote requires SLAYZONE_HUB_PUBLIC_URL ' +
-          '(the externally-reachable hub base URL for remote runners) — set it or use SLAYZONE_MODE=local.'
+        '[slayzone] SLAYZONE_MODE=remote requires SLAYZONE_HUB_PUBLIC_ADDRESS ' +
+          '(the externally-reachable hub address, host[:port], for remote runners) — ' +
+          'set it or use SLAYZONE_MODE=local.'
       )
     }
   }
@@ -340,10 +342,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Runner `/runners` rides the SAME listener as `/trpc` (bound above) — no
   // separate port to claim, no separate bind to fail. Feed the runners registry
-  // the advertised `ws(s)://…/runners` URL + cert fingerprint so `mintJoinToken`
+  // the `ws(s)://…/runners` URL + cert fingerprint so `mintJoinToken`
   // embeds them. Scheme follows mode: local → `ws://` loopback (dev/supervised);
-  // remote → `wss://` derived from SLAYZONE_HUB_PUBLIC_URL (the hub's single
-  // external address, which now serves BOTH axes). The fingerprint is the real hub
+  // remote → `wss://` derived from SLAYZONE_HUB_PUBLIC_ADDRESS (the hub's
+  // external address, needed alongside its bind address whenever the two differ —
+  // reverse proxy / NAT). The fingerprint is the real hub
   // leaf — in remote the one listener terminates TLS with it, so the runner's
   // join-token pin is enforced end-to-end, exactly as under the old split listener.
   //
@@ -356,7 +359,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       remote,
       host,
       port: actualPort,
-      publicUrl: process.env.SLAYZONE_HUB_PUBLIC_URL
+      publicAddress: process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     })
     if (runnerHubUrl) {
       composition.setRunnerListenerInfo({
@@ -365,14 +368,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       })
       log(`runner transport ready on ${runnerHubUrl}`)
     } else {
-      // Only reachable if SLAYZONE_HUB_PUBLIC_URL is malformed in remote mode
+      // Only reachable if SLAYZONE_HUB_PUBLIC_ADDRESS is malformed in remote mode
       // (an unset value already fails loud at boot). `mintJoinToken` then throws a
       // clear "hub url unset" until fixed — the /trpc path is unaffected.
       recordDiagnosticEvent({
         level: 'error',
         source: 'server',
         event: 'runner.hub_url_underivable',
-        message: 'runner transport URL could not be derived (check SLAYZONE_HUB_PUBLIC_URL)'
+        message: 'runner transport URL could not be derived (check SLAYZONE_HUB_PUBLIC_ADDRESS)'
       })
       log('runner transport URL could not be derived — runner enroll unavailable')
     }

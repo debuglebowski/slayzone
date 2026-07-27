@@ -20,6 +20,7 @@ import {
   loadSlayzoneConfig,
   type SlayzoneConfig
 } from '@slayzone/platform/slayzone-config'
+import { hubUrlFromAddr, type SlayzoneMode } from '@slayzone/platform/hub-addr'
 import { decodeJoinToken } from './join-token'
 
 export const runnerConfigSchema = z.object({
@@ -39,7 +40,13 @@ export const runnerConfigSchema = z.object({
 export type RunnerConfig = z.infer<typeof runnerConfigSchema>
 
 export const ENV_VARS = {
-  hubUrl: 'SLAYZONE_HUB_URL',
+  // Authority ONLY — `host[:port]`, no scheme, no path. The dial scheme
+  // (ws/wss) is derived from SLAYZONE_MODE via hubUrlFromAddr, and `/runners` is
+  // appended here, so this env channel can never carry a scheme the CLI would
+  // reinterpret (the retired `SLAYZONE_HUB_URL` ws-vs-http collision). config.json
+  // `hubUrl` + the join token still carry a FULL url (they're not env-inherited
+  // into terminals, so outside the collision).
+  hubAddress: 'SLAYZONE_HUB_ADDRESS',
   joinToken: 'SLAYZONE_RUNNER_JOIN_TOKEN'
   // allowedRoots has NO env channel: a SUPERVISED runner self-derives its FS
   // path-jail to `[homedir()]` (below), a STANDALONE runner gets it from
@@ -147,7 +154,7 @@ function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
  *   - `SLAYZONE_SUPERVISED=1` — the app-spawned local runner
  *     (startLocalRunnerWithAutoEnroll passes `{...process.env}`, which carries
  *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
- *     supplies the runner's env in full (SLAYZONE_HUB_URL / SLAYZONE_RUNNER_JOIN_TOKEN),
+ *     supplies the runner's env in full (SLAYZONE_HUB_ADDRESS / SLAYZONE_RUNNER_JOIN_TOKEN),
  *     and the name derives from SUPERVISED (→ DEFAULT_LOCAL_RUNNER_NAME), so the
  *     shared file must not leak into it. Keeps the supervised runner boot
  *     byte-identical to pre-config behavior.
@@ -171,6 +178,16 @@ export function loadRunnerConfig(
   const joinToken = env[ENV_VARS.joinToken] ?? fromShared.joinToken
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 
+  // The env channel carries only the hub AUTHORITY (host[:port]); compose the
+  // full `ws(s)://<addr>/runners` dial url here, scheme from SLAYZONE_MODE (read
+  // from the passed `env` so tests stay hermetic). config.json / join-token
+  // fallbacks below still supply a full url directly.
+  const mode: SlayzoneMode =
+    env.SLAYZONE_MODE?.trim().toLowerCase() === 'remote' ? 'remote' : 'local'
+  const envAddress = env[ENV_VARS.hubAddress]
+  const hubUrlFromEnv =
+    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/runners', mode) : undefined
+
   const merged = {
     // Supervised local runner → the shared const so the hub's dedup collapses it
     // to one row; standalone → the hostname (config.json `runnerName` overrides
@@ -187,7 +204,7 @@ export function loadRunnerConfig(
       : {}),
     // <ROOT>/config.json — base under env (spread after). The single config file.
     ...fromShared,
-    ...(env[ENV_VARS.hubUrl] !== undefined ? { hubUrl: env[ENV_VARS.hubUrl] } : {}),
+    ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
     ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {})
   }
 
@@ -195,7 +212,7 @@ export function loadRunnerConfig(
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
     throw new Error(
-      `invalid runner configuration (${issues}). Set ${ENV_VARS.hubUrl} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/config.json.`
+      `invalid runner configuration (${issues}). Set ${ENV_VARS.hubAddress} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/config.json.`
     )
   }
 
@@ -215,9 +232,12 @@ export function loadRunnerConfig(
 
   // SLAYZONE_MODE=remote hardening: a remote runner MUST dial the hub over TLS.
   // A plaintext ws:// hub on the open internet is a hard error (credentials +
-  // command stream would be unencrypted). Read mode from the passed env so the
-  // check stays hermetic under tests. Local mode still allows ws:// for loopback.
-  if (env.SLAYZONE_MODE?.trim().toLowerCase() === 'remote' && urlProtocol(result.data.hubUrl) === 'ws:') {
+  // command stream would be unencrypted). This can now only trip on a full ws://
+  // url supplied via config.json / join token — an env SLAYZONE_HUB_ADDRESS is
+  // authority-only and hubUrlFromAddr forces wss:// in remote mode, so the env
+  // path is unrepresentable-as-ws here (the whole point of the ADDRESS redesign).
+  // The guard stays to catch the file/token paths. `mode` derived above.
+  if (mode === 'remote' && urlProtocol(result.data.hubUrl) === 'ws:') {
     throw new Error(
       `SLAYZONE_MODE=remote requires a wss:// hub url; got '${result.data.hubUrl}'. ` +
         `A remote runner must use TLS — use a wss:// url (or SLAYZONE_MODE=local for loopback/dev).`

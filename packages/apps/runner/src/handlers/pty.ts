@@ -21,6 +21,7 @@ import {
   RunnerNotificationMethods
 } from '@slayzone/runner-transport/shared'
 import * as pty from 'node-pty'
+import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { RingBuffer } from '../ring-buffer'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -46,17 +47,22 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
   const sessions = new Map<string, PtySession>()
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {
-    // Start from the runner's own environment so PATH/HOME/etc. are present,
-    // then let the hub override specific keys.
-    const base: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) {
-      if (typeof v === 'string') base[k] = v
-    }
-    const merged = overrides ? { ...base, ...overrides } : base
-    // Hub/runner split: force the agent's lifecycle hook to the runner's OWN
+    // Base channel: the runner inherits its parent (supervisor) process.env, so
+    // sanitize it through the shared manifest — keep the user env (PATH/HOME/
+    // toolchains) but strip every SlayZone infra/secret/identity var (and any
+    // unmanifested SLAYZONE_*, fail closed) so nothing the runner was configured
+    // with leaks into a spawned agent, which would reinterpret it. The hub's
+    // per-spawn `overrides` (the identity overlay) apply AFTER and are the
+    // authoritative source for anything an agent legitimately needs.
+    const merged: Record<string, string> = overrides
+      ? { ...sanitizeSpawnEnv(process.env), ...overrides }
+      : sanitizeSpawnEnv(process.env)
+    // Override channel: force the agent's lifecycle hook to the runner's OWN
     // loopback relay (which forwards to the hub over the authed ws channel), and
-    // strip any hub bearer the hub baked in — no per-agent token in subprocess
-    // env, and the agent env is byte-identical to a local spawn's hook wiring.
+    // strip any hub bearer the hub baked into `overrides` — no per-agent token in
+    // subprocess env, and the agent env is byte-identical to a local spawn's hook
+    // wiring. Distinct from the base sanitize above: this guards a token the HUB
+    // passed in, which sanitizeSpawnEnv (base-only) never sees.
     if (ctx.agentHookUrl) {
       merged.SLAYZONE_AGENT_HOOK_URL = ctx.agentHookUrl
       delete merged.SLAYZONE_HUB_TOKEN

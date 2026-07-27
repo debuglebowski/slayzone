@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { sanitizeSpawnEnv } from '@slayzone/platform'
 
 interface ExecResult {
   stdout: string
@@ -14,7 +15,11 @@ function exec(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<Exe
     const child = spawn('git', args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: env ? { ...process.env, ...env } : process.env
+      // Sanitized base (user env survives; SlayZone infra/secret/identity
+      // stripped, fail closed) + the caller's overlay (e.g. GIT_INDEX_FILE for
+      // the isolated-index snapshot). Keeps the host's hub creds out of any git
+      // subprocess env.
+      env: { ...sanitizeSpawnEnv(process.env), ...(env ?? {}) }
     })
     const out: string[] = []
     const err: string[] = []

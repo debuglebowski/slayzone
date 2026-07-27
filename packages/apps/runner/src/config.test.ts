@@ -21,13 +21,14 @@ afterEach(() => {
 })
 
 describe('loadRunnerConfig', () => {
-  it('builds a config from env with sensible defaults', () => {
+  it('builds a config from env with sensible defaults (ADDRESS → ws:// in local mode)', () => {
+    // Env carries authority only; local mode (default) composes ws://…/runners.
     const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example:8443/runners',
+      [ENV_VARS.hubAddress]: 'hub.example:8443',
       [ENV_VARS.joinToken]: 'jt-1'
     })
     expect(config).toEqual({
-      hubUrl: 'wss://hub.example:8443/runners',
+      hubUrl: 'ws://hub.example:8443/runners',
       joinToken: 'jt-1',
       name: hostname(),
       allowedRoots: [],
@@ -35,9 +36,17 @@ describe('loadRunnerConfig', () => {
     })
   })
 
+  it('ADDRESS composes wss://…/runners in remote mode', () => {
+    const config = loadRunnerConfig({
+      [ENV_VARS.hubAddress]: 'hub.example.com',
+      SLAYZONE_MODE: 'remote'
+    })
+    expect(config.hubUrl).toBe('wss://hub.example.com/runners')
+  })
+
   it('reads allowedRoots from the shared config (standalone operator channel)', () => {
     const config = loadRunnerConfig(
-      { [ENV_VARS.hubUrl]: 'wss://hub.example/runners' },
+      { [ENV_VARS.hubAddress]: 'hub.example' },
       { allowedRoots: ['/srv/a', '/srv/b'] }
     )
     expect(config.allowedRoots).toEqual(['/srv/a', '/srv/b'])
@@ -50,7 +59,7 @@ describe('loadRunnerConfig', () => {
     // SLAYZONE_RUNNER_ALLOWED_ROOTS host-injection channel is gone. shared={}
     // for a supervised runner, so this default holds untouched.
     const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
+      [ENV_VARS.hubAddress]: 'hub.example',
       SLAYZONE_SUPERVISED: '1'
     })
     expect(config.allowedRoots).toEqual([homedir()])
@@ -60,20 +69,20 @@ describe('loadRunnerConfig', () => {
     // No env name channel anymore: a supervised runner derives the shared const
     // so the hub composition can collapse it to one row.
     const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
+      [ENV_VARS.hubAddress]: 'hub.example',
       SLAYZONE_SUPERVISED: '1'
     })
     expect(config.name).toBe(DEFAULT_LOCAL_RUNNER_NAME)
   })
 
   it('name defaults to the hostname when NOT supervised and no config', () => {
-    const config = loadRunnerConfig({ [ENV_VARS.hubUrl]: 'wss://hub.example/runners' })
+    const config = loadRunnerConfig({ [ENV_VARS.hubAddress]: 'hub.example' })
     expect(config.name).toBe(hostname())
   })
 
   it('config.json runnerName overrides the hostname default (standalone rename)', () => {
     const config = loadRunnerConfig(
-      { [ENV_VARS.hubUrl]: 'wss://hub.example/runners' },
+      { [ENV_VARS.hubAddress]: 'hub.example' },
       { runnerName: 'from-config' }
     )
     expect(config.name).toBe('from-config')
@@ -96,16 +105,17 @@ describe('loadRunnerConfig', () => {
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
-  it('env wins over the shared config', () => {
+  it('env ADDRESS wins over the shared config full url', () => {
     const config = loadRunnerConfig(
-      { [ENV_VARS.hubUrl]: 'wss://from-env.example/runners' },
+      { [ENV_VARS.hubAddress]: 'from-env.example' },
       { hubUrl: 'wss://from-config.example/runners' }
     )
-    expect(config.hubUrl).toBe('wss://from-env.example/runners')
+    // Env authority (local mode) composes ws://…/runners and beats config.json.
+    expect(config.hubUrl).toBe('ws://from-env.example/runners')
   })
 
-  it('fails with a readable error when hubUrl is missing', () => {
-    expect(() => loadRunnerConfig({})).toThrow(/SLAYZONE_HUB_URL/)
+  it('fails with a readable error when hub address is missing', () => {
+    expect(() => loadRunnerConfig({})).toThrow(/SLAYZONE_HUB_ADDRESS/)
   })
 
   it('is self-sufficient from a join token alone (hubUrl + pin extracted)', () => {
@@ -126,12 +136,14 @@ describe('loadRunnerConfig', () => {
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
-    // hubUrl overrides via env; the pin has no env channel — config.json is its
-    // explicit override path and still beats the token-decoded fingerprint.
+    // hub address overrides via env; the pin has no env channel — config.json is
+    // its explicit override path and still beats the token-decoded fingerprint.
+    // remote mode so the env authority composes wss:// (matches the token's TLS).
     const config = loadRunnerConfig(
       {
         [ENV_VARS.joinToken]: token,
-        [ENV_VARS.hubUrl]: 'wss://override.example/runners'
+        [ENV_VARS.hubAddress]: 'override.example',
+        SLAYZONE_MODE: 'remote'
       },
       { pinnedCertSha256: 'b'.repeat(64) }
     )
@@ -139,9 +151,9 @@ describe('loadRunnerConfig', () => {
     expect(config.pinnedCertSha256).toBe('b'.repeat(64))
   })
 
-  it('ignores a malformed join token for fallback (schema still reports missing hubUrl)', () => {
+  it('ignores a malformed join token for fallback (schema still reports missing address)', () => {
     expect(() => loadRunnerConfig({ [ENV_VARS.joinToken]: 'not-a-token' })).toThrow(
-      /SLAYZONE_HUB_URL/
+      /SLAYZONE_HUB_ADDRESS/
     )
   })
 
@@ -170,29 +182,33 @@ describe('loadRunnerConfig', () => {
 
   it('accepts an explicit config.json pin on a wss:// hub url', () => {
     const config = loadRunnerConfig(
-      { [ENV_VARS.hubUrl]: 'wss://hub.example/runners' },
+      { [ENV_VARS.hubAddress]: 'hub.example', SLAYZONE_MODE: 'remote' },
       { pinnedCertSha256: 'a'.repeat(64) }
     )
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
   // --- SLAYZONE_MODE=remote hardening: plaintext ws:// hub is a hard error ------
-  it('rejects a plaintext ws:// hub url in remote mode', () => {
+  // NOTE: an env SLAYZONE_HUB_ADDRESS can no longer PRODUCE ws:// in remote mode
+  // (hubUrlFromAddr forces wss:// there — the whole point of the redesign). The
+  // guard now only catches a full ws:// url supplied via config.json / join token,
+  // so drive it through the shared config.
+  it('rejects a plaintext ws:// hub url (from config.json) in remote mode', () => {
     expect(() =>
-      loadRunnerConfig({ [ENV_VARS.hubUrl]: 'ws://hub.example/runners', SLAYZONE_MODE: 'remote' })
+      loadRunnerConfig({ SLAYZONE_MODE: 'remote' }, { hubUrl: 'ws://hub.example/runners' })
     ).toThrow(/wss:\/\//)
   })
 
-  it('accepts a wss:// hub url in remote mode', () => {
+  it('ADDRESS in remote mode composes wss:// (never ws://)', () => {
     const config = loadRunnerConfig({
-      [ENV_VARS.hubUrl]: 'wss://hub.example/runners',
+      [ENV_VARS.hubAddress]: 'hub.example',
       SLAYZONE_MODE: 'remote'
     })
     expect(config.hubUrl).toBe('wss://hub.example/runners')
   })
 
-  it('still allows ws:// in local mode (dev/loopback)', () => {
-    const config = loadRunnerConfig({ [ENV_VARS.hubUrl]: 'ws://127.0.0.1:9000/runners' })
+  it('still composes ws:// in local mode (dev/loopback)', () => {
+    const config = loadRunnerConfig({ [ENV_VARS.hubAddress]: '127.0.0.1:9000' })
     expect(config.hubUrl).toBe('ws://127.0.0.1:9000/runners')
   })
 
@@ -209,17 +225,18 @@ describe('loadRunnerConfig', () => {
 
   it('ENV wins over the shared config; unset keys fall through', () => {
     const config = loadRunnerConfig(
-      { [ENV_VARS.hubUrl]: 'wss://from-env.example/runners' },
+      { [ENV_VARS.hubAddress]: 'from-env.example' },
       { hubUrl: 'wss://shared.example/runners', runnerName: 'shared-runner' }
     )
-    expect(config.hubUrl).toBe('wss://from-env.example/runners')
+    // Env authority (local mode) composes ws://…/runners and beats config.json.
+    expect(config.hubUrl).toBe('ws://from-env.example/runners')
     expect(config.name).toBe('shared-runner') // shared name survives (no env override)
   })
 
   it('does not read the developer real config when an explicit env is passed (hermetic)', () => {
     // Passing an `env` object other than process.env ⇒ shared defaults to {} so
     // tests never accidentally pick up ~/.slayzone/config.json.
-    expect(() => loadRunnerConfig({})).toThrow(/SLAYZONE_HUB_URL/)
+    expect(() => loadRunnerConfig({})).toThrow(/SLAYZONE_HUB_ADDRESS/)
   })
 
   it('SUPERVISED runner does NOT layer in the shared config (mirrors hub no-op)', () => {
@@ -230,16 +247,16 @@ describe('loadRunnerConfig', () => {
     // the shared hubUrl would leak in and it would NOT throw.
     const savedHome = process.env.SLAYZONE_ROOT
     const savedSup = process.env.SLAYZONE_SUPERVISED
-    const savedHub = process.env.SLAYZONE_HUB_URL
+    const savedAddr = process.env.SLAYZONE_HUB_ADDRESS
     const savedToken = process.env.SLAYZONE_RUNNER_JOIN_TOKEN
     try {
-      delete process.env.SLAYZONE_HUB_URL
+      delete process.env.SLAYZONE_HUB_ADDRESS
       delete process.env.SLAYZONE_RUNNER_JOIN_TOKEN
       process.env.SLAYZONE_ROOT = dir
       process.env.SLAYZONE_SUPERVISED = '1'
       writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/runners' }))
-      // Supervised ⇒ shared skipped ⇒ no hubUrl anywhere ⇒ throws.
-      expect(() => loadRunnerConfig()).toThrow(/SLAYZONE_HUB_URL/)
+      // Supervised ⇒ shared skipped ⇒ no hub source anywhere ⇒ throws.
+      expect(() => loadRunnerConfig()).toThrow(/SLAYZONE_HUB_ADDRESS/)
       // Sanity: with SUPERVISED unset, the SAME shared config IS read (no throw).
       delete process.env.SLAYZONE_SUPERVISED
       expect(loadRunnerConfig().hubUrl).toBe('wss://shared.example/runners')
@@ -250,7 +267,7 @@ describe('loadRunnerConfig', () => {
       }
       restore('SLAYZONE_ROOT', savedHome)
       restore('SLAYZONE_SUPERVISED', savedSup)
-      restore('SLAYZONE_HUB_URL', savedHub)
+      restore('SLAYZONE_HUB_ADDRESS', savedAddr)
       restore('SLAYZONE_RUNNER_JOIN_TOKEN', savedToken)
     }
   })

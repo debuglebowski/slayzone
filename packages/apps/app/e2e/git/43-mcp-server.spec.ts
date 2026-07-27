@@ -385,7 +385,7 @@ test.describe('MCP Server', () => {
     expect(updateTool.description).toContain('SLAYZONE_TASK_ID')
   })
 
-  test('terminal gets SLAYZONE_TASK_ID + inherited SLAYZONE_HUB_PORT', async ({
+  test('terminal gets SLAYZONE_TASK_ID and does NOT inherit the hub address', async ({
     mainWindow
   }) => {
     // Reset task title so we can find it on kanban
@@ -404,14 +404,17 @@ test.describe('MCP Server', () => {
     await runCommand(mainWindow, sessionId, 'echo "SZTID=$SLAYZONE_TASK_ID"')
     await waitForBufferContains(mainWindow, sessionId, `SZTID=${taskId}`)
 
-    // No dedicated port var is injected; the pty inherits the sidecar's
-    // SLAYZONE_HUB_PORT (the CLI reads that, else settings.server_port). The
-    // shell prints SZPORT_SET only when the inherited var is non-empty.
+    // No hub address/port var reaches the pty: SLAYZONE_HUB_ADDRESS is
+    // infra-scoped, so sanitizeSpawnEnv strips the sidecar's value at the spawn
+    // boundary (that leak is what made a terminal reinterpret the hub's BIND
+    // address as a dial target). The CLI resolves the local server from
+    // settings.server_port in the DB instead — proven by the `slay` commands in
+    // 60-cli.spec.ts, which run with no address env at all.
     await runCommand(
       mainWindow,
       sessionId,
-      'test -n "$SLAYZONE_HUB_PORT" && echo SZPORT_SET || echo SZPORT_UNSET'
+      'test -n "$SLAYZONE_HUB_ADDRESS" && echo SZADDR_SET || echo SZADDR_UNSET'
     )
-    await waitForBufferContains(mainWindow, sessionId, 'SZPORT_SET')
+    await waitForBufferContains(mainWindow, sessionId, 'SZADDR_UNSET')
   })
 })

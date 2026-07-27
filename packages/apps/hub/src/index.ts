@@ -3,9 +3,9 @@ import type { SlayzoneDb } from '@slayzone/platform'
 export type StartServerConfig = {
   /** Override the derived `<ROOT>/storage` data root. Defaults to ensureDataRoot(). */
   storeDir?: string
-  /** Override SLAYZONE_HUB_PORT. 0 = OS-assigned. Defaults to env-or-0. */
+  /** Override the port from SLAYZONE_HUB_ADDRESS. 0 = OS-assigned. Defaults to env-or-0. */
   port?: number
-  /** Override SLAYZONE_HUB_HOST. Defaults to 127.0.0.1. */
+  /** Override the host from SLAYZONE_HUB_ADDRESS. Defaults to 127.0.0.1. */
   host?: string
   /** Unused: MCP + REST are muxed onto the single tRPC/health port. Kept for
    *  config-shape compat until the supervisor's env contract drops it. */

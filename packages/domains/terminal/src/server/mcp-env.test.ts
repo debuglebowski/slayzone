@@ -2,11 +2,16 @@
  * Unit tests for buildMcpEnv + resolveRemoteMcpEnv — the per-PTY env injected
  * for AI-agent subprocesses (hub/runner split, wave 3).
  *
- * The load-bearing invariant: a LOCAL spawn (`runnerId == null`, or no remote
- * target) gets the loopback SLAYZONE_AGENT_HOOK_URL and NO SLAYZONE_HUB_URL/TOKEN.
- * No port env var is injected — the CLI reads the port from the DB. A REMOTE
- * spawn instead points the CLI + hooks at the hub (SLAYZONE_HUB_URL + hub hook
- * URL + a scoped bearer).
+ * The load-bearing invariant: NEITHER a local nor a remote spawn injects hub
+ * dial/auth env. A LOCAL spawn (`runnerId == null`, or no remote target) gets the
+ * loopback SLAYZONE_AGENT_HOOK_URL and no hub env; no port var either — the CLI
+ * reads the port from the DB. A REMOTE spawn is byte-identical for identity: the
+ * agent posts to the RUNNER's loopback, and the runner overlays the hook URL and
+ * relays to the hub over its own ws channel.
+ *
+ * `HUB_ENV_KEYS` below pins both the live dial var (SLAYZONE_HUB_ADDRESS) and the
+ * retired one (SLAYZONE_HUB_URL) so the guard can't silently go dead if a name
+ * changes again.
  *
  * Run with: npx tsx packages/domains/terminal/src/server/mcp-env.test.ts
  */
@@ -24,6 +29,23 @@ function assert(cond: boolean, msg: string): void {
     process.exit(1)
   }
   pass++
+}
+
+/** Every env key that could point an agent at a hub — the CLI must resolve the
+ *  server from the DB, never from an injected address. Includes the RETIRED
+ *  `SLAYZONE_HUB_URL`/`_HOST`/`_PORT` so a rename can't quietly disarm this
+ *  guard (a reintroduced old name would slip through a current-names-only list). */
+const HUB_ENV_KEYS = [
+  'SLAYZONE_HUB_ADDRESS',
+  'SLAYZONE_HUB_URL',
+  'SLAYZONE_HUB_HOST',
+  'SLAYZONE_HUB_PORT'
+] as const
+
+function assertNoHubEnv(env: Record<string, string>, where: string): void {
+  for (const key of HUB_ENV_KEYS) {
+    assert(!(key in env), `${where} must NOT set ${key}`)
+  }
 }
 
 // A fixed port so the loopback assertions are exact. buildMcpEnv reads
@@ -45,10 +67,10 @@ const REMOTE: RemoteMcpEnv = {
     env.SLAYZONE_AGENT_HOOK_URL === `http://127.0.0.1:${MCP_PORT}${AGENT_HOOK_PATH}`,
     `local hook URL must be loopback, got: ${env.SLAYZONE_AGENT_HOOK_URL}`
   )
-  assert(!('SLAYZONE_HUB_PORT' in env), 'local must NOT set SLAYZONE_HUB_PORT (CLI reads DB)')
   assert(env.SLAYZONE_AGENT_ID === 'claude-code', 'local must set SLAYZONE_AGENT_ID')
   assert('SLAYZONE_ROOT' in env, 'local hook-capable must set SLAYZONE_ROOT')
-  assert(!('SLAYZONE_HUB_URL' in env), 'local must NOT set SLAYZONE_HUB_URL')
+  // Covers the address var too: the CLI reads settings.server_port from the DB.
+  assertNoHubEnv(env, 'local')
   assert(!('SLAYZONE_HUB_TOKEN' in env), 'local must NOT set SLAYZONE_HUB_TOKEN')
   assert(env.SLAYZONE_TASK_ID === 'task-1', 'task id present')
   // The opaque context blob the benign notify.sh forwards verbatim. All identity
@@ -58,7 +80,12 @@ const REMOTE: RemoteMcpEnv = {
   assert(ctx.v === 1, `ctx envelope version must be 1, got ${ctx.v}`)
   assert(ctx.taskId === 'task-1', 'ctx carries taskId')
   assert(ctx.agentId === 'claude-code', 'ctx carries agentId')
-  assert('channel' in ctx, 'ctx carries channel (attribution/diagnostic)')
+  // `releaseChannel` (not `channel`) — the field names WHICH release channel fired
+  // the hook, so a cross-release-channel clobber is visible in Diagnostics.
+  assert(
+    typeof ctx.releaseChannel === 'string' && ctx.releaseChannel !== '',
+    `ctx carries releaseChannel (attribution/diagnostic), got: ${JSON.stringify(ctx.releaseChannel)}`
+  )
 }
 
 // 1b. Pooled (taskless) spawn → ctx carries slaySessionId + projectId, no taskId.
@@ -87,9 +114,8 @@ const REMOTE: RemoteMcpEnv = {
 // 3. Local non-hook-capable mode → no hook URL, no port env (unchanged behavior).
 {
   const env = await buildMcpEnv(null, 'task-3', 'some-unknown-mode' as never)
-  assert(!('SLAYZONE_HUB_PORT' in env), 'no port env for non-hook mode either')
   assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'no hook URL for non-hook-capable mode')
-  assert(!('SLAYZONE_HUB_URL' in env), 'still no hub env locally')
+  assertNoHubEnv(env, 'local non-hook mode')
 }
 
 // ── REMOTE (runnerId != null + provider): agent posts to RUNNER LOOPBACK ──────
@@ -103,13 +129,12 @@ const REMOTE: RemoteMcpEnv = {
 // 4. Remote hook-capable → agent id + ROOT + ctx blob; NO hub env, NO hook URL.
 {
   const env = await buildMcpEnv(null, 'task-r1', 'claude-code', undefined, undefined, REMOTE)
-  assert(!('SLAYZONE_HUB_URL' in env), 'remote must NOT set SLAYZONE_HUB_URL (agent posts to runner loopback)')
+  assertNoHubEnv(env, 'remote (agent posts to runner loopback)')
   assert(!('SLAYZONE_HUB_TOKEN' in env), 'remote must NOT inject a bearer (loopback is unauthed)')
   assert(
     !('SLAYZONE_AGENT_HOOK_URL' in env),
     'remote buildMcpEnv must NOT set the hook URL — the runner overlays its own loopback URL'
   )
-  assert(!('SLAYZONE_HUB_PORT' in env), 'remote must NOT set loopback SLAYZONE_HUB_PORT')
   assert(env.SLAYZONE_AGENT_ID === 'claude-code', 'remote still sets SLAYZONE_AGENT_ID')
   assert('SLAYZONE_ROOT' in env, 'remote hook-capable still sets SLAYZONE_ROOT')
   assert('SLAYZONE_HOOK_CONTEXT' in env, 'remote hook-capable still sets the ctx blob')
@@ -132,10 +157,9 @@ const REMOTE: RemoteMcpEnv = {
 // 6. Remote non-hook-capable → nothing hook-related, no hub env.
 {
   const env = await buildMcpEnv(null, 'task-r3', 'some-unknown-mode' as never, undefined, undefined, REMOTE)
-  assert(!('SLAYZONE_HUB_URL' in env), 'no hub URL for non-hook remote')
+  assertNoHubEnv(env, 'non-hook remote')
   assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'no hook URL for non-hook remote mode')
   assert(!('SLAYZONE_HOOK_CONTEXT' in env), 'no ctx blob for non-hook remote mode')
-  assert(!('SLAYZONE_HUB_PORT' in env), 'still no loopback port remotely')
 }
 
 // ── resolveRemoteMcpEnv: the seam that gates remote vs local ─────────────────
@@ -196,7 +220,7 @@ const REMOTE: RemoteMcpEnv = {
 }
 
 // 12. A provider returning a blank hubBaseUrl → null (contract enforced), so
-//     buildMcpEnv never emits SLAYZONE_HUB_URL='' + a relative hook URL.
+//     buildMcpEnv never emits a blank hub target + a relative hook URL.
 {
   const blank = await resolveRemoteMcpEnv(() => ({ ...REMOTE, hubBaseUrl: '' }), {
     taskId: 't',

@@ -167,48 +167,54 @@ async function main(): Promise<void> {
         'ws://127.0.0.1:51101/runners',
       'local loopback ws url'
     )
-    // A wildcard bind host is advertised as a dialable loopback, never 0.0.0.0.
+    // A wildcard bind host goes into the token as a dialable loopback, never 0.0.0.0.
     assert(
       deriveRunnerHubUrl({ remote: false, host: '0.0.0.0', port: 51101 }) ===
         'ws://127.0.0.1:51101/runners',
-      'wildcard bind advertises loopback'
+      'wildcard bind → loopback in the token'
     )
   })
 
-  await test('deriveRunnerHubUrl: remote → wss:// from the public URL (any scheme, port preserved)', async () => {
+  await test('deriveRunnerHubUrl: remote → wss:// from the public ADDRESS (authority only)', async () => {
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicUrl: 'https://hub.example:8443' }) ===
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'hub.example:8443' }) ===
         'wss://hub.example:8443/runners',
-      'https public url → wss, port preserved'
+      'explicit port preserved'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicUrl: 'https://hub.example' }) ===
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'hub.example' }) ===
         'wss://hub.example/runners',
       'bare host keeps the implicit TLS port (443)'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicUrl: 'wss://hub.example:9000/' }) ===
-        'wss://hub.example:9000/runners',
-      'wss public url passes through, trailing path replaced'
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '[2001:db8::1]:9000' }) ===
+        'wss://[2001:db8::1]:9000/runners',
+      'bracketed IPv6 authority'
     )
   })
 
-  await test('deriveRunnerHubUrl: remote with missing/malformed public URL → null', async () => {
+  await test('deriveRunnerHubUrl: remote with missing/non-authority public address → null', async () => {
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicUrl: undefined }) === null,
-      'unset public url → null'
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: undefined }) === null,
+      'unset public address → null'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicUrl: '   ' }) === null,
-      'blank public url → null'
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '   ' }) === null,
+      'blank public address → null'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicUrl: 'not a url' }) === null,
-      'malformed public url → null'
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'not an address' }) === null,
+      'malformed public address → null'
+    )
+    // The whole point of the authority-only channel: a scheme is NOT accepted, so
+    // no reader can ever disagree with the one derived from SLAYZONE_MODE.
+    assert(
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'https://hub.example' }) === null,
+      'a full url (scheme present) → null'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicUrl: 'ftp://hub.example' }) === null,
-      'non-http(s)/ws(s) scheme → null'
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'hub.example/runners' }) === null,
+      'a path → null'
     )
   })
 

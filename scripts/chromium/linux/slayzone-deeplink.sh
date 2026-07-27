@@ -18,20 +18,20 @@ fi
 
 # The sidecar binds a baked loopback port (prod 8765, dev 8766), matching the
 # renderer's baked WS URL (there is no server-URL override channel yet — see
-# window-api-shim/src/server-url.ts; align both when one lands). Override with
-# SLAYZONE_HUB_PORT. Try prod first, then dev.
-ports="${SLAYZONE_HUB_PORT:-8765 8766}"
+# window-api-shim/src/server-url.ts; align both when one lands). SLAYZONE_HUB_ADDRESS
+# (one `host:port`) pins a single target; unset, try prod first, then dev.
+addrs="${SLAYZONE_HUB_ADDRESS:-127.0.0.1:8765 127.0.0.1:8766}"
 
-for port in $ports; do
+for addr in $addrs; do
   # -G + --data-urlencode safely encodes the URL into the query string (no body
   # parser, no jq/python dependency); -X POST keeps it a POST. The route reads
   # req.query.url.
   if curl -sf -m 5 -G -X POST \
        --data-urlencode "url=$url" \
-       "http://127.0.0.1:${port}/api/auth/deep-link" >/dev/null 2>&1; then
+       "http://${addr}/api/auth/deep-link" >/dev/null 2>&1; then
     exit 0
   fi
 done
 
-echo "slayzone-deeplink: no SlayZone sidecar reachable (tried ports: $ports)" >&2
+echo "slayzone-deeplink: no SlayZone sidecar reachable (tried: $addrs)" >&2
 exit 1

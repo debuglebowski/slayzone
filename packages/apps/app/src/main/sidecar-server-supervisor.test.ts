@@ -80,8 +80,11 @@ const FAKE_SIDECAR = `'use strict'
 const http = require('node:http')
 const fs = require('node:fs')
 
-const host = process.env.SLAYZONE_HUB_HOST || '127.0.0.1'
-const port = Number(process.env.SLAYZONE_HUB_PORT || '0')
+// Mirrors the real hub's bind-side read of the ONE address var: host[:port].
+const addr = process.env.SLAYZONE_HUB_ADDRESS || ''
+const colon = addr.lastIndexOf(':')
+const host = (colon > 0 ? addr.slice(0, colon) : addr) || '127.0.0.1'
+const port = Number((colon > 0 ? addr.slice(colon + 1) : '') || '0')
 const counterFile = process.env.FAKE_COUNTER_FILE || ''
 const crashFirst = Number(process.env.FAKE_CRASH_FIRST || '0')
 const crashAlways = process.env.FAKE_CRASH_ALWAYS === '1'
@@ -468,8 +471,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
         ELECTRON_RUN_AS_NODE: '1',
         // Standalone (no SLAYZONE_SUPERVISED) → openServerDatabase bootstraps schema
         // at the DERIVED <ROOT>/storage/slayzone.sqlite (same dir the child opens).
-        SLAYZONE_HUB_HOST: '127.0.0.1',
-        SLAYZONE_HUB_PORT: '0',
+        SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
         SLAYZONE_ROOT: dir,
         SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'seed-only-secret-at-least-32-chars-long'
       },
@@ -496,8 +498,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_SUPERVISED: '1',
-      SLAYZONE_HUB_HOST: '127.0.0.1',
-      SLAYZONE_HUB_PORT: '0',
+      SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
       // DB path DERIVES from ROOT now (no SLAYZONE_DB_PATH handoff); the seeder
       // above bootstrapped <dir>/storage/slayzone.sqlite, which this child opens.
       SLAYZONE_ROOT: dir

@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
-import { buildShellInvocation } from '@slayzone/platform'
+import { buildShellInvocation, sanitizeSpawnEnv } from '@slayzone/platform'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 
 /**
@@ -116,7 +116,11 @@ export const localProcessBackend: ProcessBackend = {
     // buildShellInvocation handles fish (-i -l for PATH init inside
     // `if status is-interactive` blocks), bash/zsh (-l only), and Windows (cmd /c).
     const { file, args } = buildShellInvocation(spec.command)
-    const env: Record<string, string | undefined> = { ...process.env }
+    // Sanitized base: the user's `run` process keeps PATH/HOME/toolchains but
+    // never inherits SlayZone infra/secret/identity vars (fail closed on
+    // unmanifested SLAYZONE_*). PATH-enrichment + the caller's `spec.env` overlay
+    // apply on top.
+    const env: Record<string, string | undefined> = sanitizeSpawnEnv(process.env)
     const enrichedPath = getEnrichedPath()
     if (enrichedPath) env.PATH = enrichedPath
     if (spec.env) Object.assign(env, spec.env)

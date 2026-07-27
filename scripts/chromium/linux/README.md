@@ -20,7 +20,7 @@ sidecar chain (`/api/auth/deep-link` → `parseAuthCallbackUrl` →
 
 - `slayzone-deeplink.sh` — the handler. Given a `slayzone://...` URL, POSTs it to
   `http://127.0.0.1:<port>/api/auth/deep-link` (tries prod `8765` then dev `8766`;
-  override with `SLAYZONE_HUB_PORT`).
+  pin one target with `SLAYZONE_HUB_ADDRESS=127.0.0.1:<port>`).
 - `slayzone-deeplink.desktop` — registers `x-scheme-handler/slayzone`.
 
 ## Install (per-user)

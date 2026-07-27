@@ -26,7 +26,8 @@
 #
 # SECURITY NOTE baked into the published READMEs: the hub's client-facing /trpc
 # socket is UNAUTHENTICATED and binds 127.0.0.1 by default. Only expose it
-# (SLAYZONE_HUB_HOST) on a trusted network until user-auth on /trpc lands.
+# (a non-loopback host in SLAYZONE_HUB_ADDRESS) on a trusted network until
+# user-auth on /trpc lands.
 
 set -euo pipefail
 
@@ -95,9 +96,9 @@ runner gateway that runners dial into.
 ## ⚠️ Security
 
 The client-facing `/trpc` socket is **unauthenticated** and binds `127.0.0.1`
-by default. Do **not** set `SLAYZONE_HUB_HOST` to expose it beyond loopback except
-on a fully trusted network — user authentication on `/trpc` is not yet
-implemented. Runner traffic (`/runners`) is TLS + cert-pinned and safe to expose.
+by default. Do **not** point `SLAYZONE_HUB_ADDRESS` at a non-loopback host to
+expose it beyond loopback except on a fully trusted network — user
+authentication on `/trpc` is not yet implemented. Runner traffic (`/runners`) is TLS + cert-pinned and safe to expose.
 
 GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
@@ -107,7 +108,7 @@ cat > packages/apps/runner/README.md <<'EOF'
 A SlayZone execution node. Dials OUT to a hub over pinned `wss://` using a join
 token (mint one on the hub), then runs terminals/agents/git on this machine.
 
-    SLAYZONE_JOIN_TOKEN=<token from the hub> slayzone-runner
+    SLAYZONE_RUNNER_JOIN_TOKEN=<token from the hub> slayzone-runner
 
 The join token embeds the hub URL + cert fingerprint, so nothing else is
 required. GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
@@ -147,8 +148,9 @@ SMOKE_SECRET="$(openssl rand -hex 32)"
 # full set via `-u`; ports are 0 (OS-assigned) so nothing collides with a running
 # app. HUB_ROOT anchors the hub's config + identity + auth DB in the tmp tree.
 SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
-       -u SLAYZONE_HUB_PORT -u SLAYZONE_RUNNER_TRANSPORT_SECRET
-       -u SLAYZONE_HUB_URL -u SLAYZONE_JOIN_TOKEN -u SLAYZONE_RUNNER_CREDENTIALS_DIR
+       -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
+       -u SLAYZONE_RUNNER_TRANSPORT_SECRET
+       -u SLAYZONE_RUNNER_JOIN_TOKEN -u SLAYZONE_RUNNER_CREDENTIALS_DIR
        -u ELECTRON_RUN_AS_NODE)
 
 # Fixed loopback port for the hub's ONE listener (tRPC + health + join-token REST +
@@ -156,7 +158,7 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
 # this same port; there is no separate runner port to set.
 HUB_PORT=47811
 env "${SCRUB[@]}" \
-  SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_PORT="$HUB_PORT" \
+  SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_ADDRESS="127.0.0.1:$HUB_PORT" \
   SLAYZONE_RUNNER_TRANSPORT_SECRET="$SMOKE_SECRET" \
   node "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
 HPID=$!
@@ -195,11 +197,15 @@ HUB_WSS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).hubUrl)' "$
 echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
 
 # Boot the runner from ITS tarball (proves node-pty rebuilt for the consumer ABI)
-# and point it at the minted token. The FS path-jail has no env channel — it comes
-# from <ROOT>/config.json `allowedRoots` (or the SLAYZONE_ROOT default in bin.ts).
+# and point it at the minted token — which is self-sufficient: it embeds the hub's
+# `wss://…/runners` url AND the cert fingerprint to pin, so no address env is
+# needed (and none would do: SLAYZONE_HUB_ADDRESS is authority-only, and in the
+# default local mode it composes plaintext `ws://` — wrong for the TLS /runners
+# listener). The FS path-jail has no env channel either — it comes from
+# <ROOT>/config.json `allowedRoots` (or the SLAYZONE_ROOT default in bin.ts).
 echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
-  SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_URL="$HUB_WSS" SLAYZONE_JOIN_TOKEN="$JOIN_TOKEN" \
+  SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_RUNNER_JOIN_TOKEN="$JOIN_TOKEN" \
   SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
   node "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
 RPID=$!

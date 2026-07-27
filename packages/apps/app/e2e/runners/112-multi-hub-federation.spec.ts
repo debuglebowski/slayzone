@@ -55,7 +55,7 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
   const port = await freePort()
   const electronPath = require('electron') as unknown as string
   // CRITICAL: strip inherited SLAYZONE_*/ELECTRON_* first. When e2e runs from a
-  // dogfooding SlayZone terminal, the parent leaks SLAYZONE_DB_PATH (real dev DB)
+  // supervised SlayZone terminal, the parent leaks SLAYZONE_DB_PATH (real dev DB)
   // which db.ts gives precedence over the ROOT-derived path → the second hub would
   // scribble into the real dev store. Re-add only what this hub needs.
   const cleanEnv: Record<string, string> = {}
@@ -68,8 +68,8 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
     env: {
       ...cleanEnv,
       ELECTRON_RUN_AS_NODE: '1',
-      SLAYZONE_HUB_HOST: '127.0.0.1',
-      SLAYZONE_HUB_PORT: String(port),
+      // The bind address of this second hub: one var, `host:port`.
+      SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}`,
       SLAYZONE_ROOT: storeDir
     },
     stdio: ['pipe', 'pipe', 'pipe']

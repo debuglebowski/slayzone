@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RunnerConfig } from '../config'
-import { createGitHandlers } from './git'
+import { GitMethods, createGitHandlers } from './git'
 import type { RunnerDialer } from './types'
 
 const dialer: RunnerDialer = { notify: () => true }
@@ -75,5 +75,58 @@ describe('createGitHandlers — allowedRoots guard', () => {
     await expect(handlers['git.isGitRepo']({ path: join(dir, '..', 'escape') })).rejects.toThrow(
       /allowedRoots/
     )
+  })
+})
+
+describe('createGitHandlers — runWorktreeSetupScript env sanitize', () => {
+  it('sanitizes the inherited process.env base: strips SlayZone infra/secret, keeps PATH + WORKTREE_PATH overlay', async () => {
+    // The worktree setup script inherits the runner's process.env. SlayZone
+    // infra/secret must NOT leak into it; the WORKTREE_PATH/REPO_PATH/SOURCE_BRANCH
+    // overlay + user env (PATH) MUST survive.
+    const saved: Record<string, string | undefined> = {}
+    const inject: Record<string, string> = {
+      SLAYZONE_HUB_TOKEN: 'inherited-secret',
+      SLAYZONE_HUB_ADDRESS: 'hub.example:8443',
+      SLAYZONE_FUTURE_UNLISTED: 'fail-closed',
+      ELECTRON_RUN_AS_NODE: '1'
+    }
+    for (const [k, v] of Object.entries(inject)) {
+      saved[k] = process.env[k]
+      process.env[k] = v
+    }
+    try {
+      const wt = realpathSync(dir)
+      mkdirSync(join(wt, '.slay'), { recursive: true })
+      writeFileSync(
+        join(wt, '.slay', 'worktree-setup.sh'),
+        '#!/bin/sh\n' +
+          'echo TOK=[$SLAYZONE_HUB_TOKEN]\n' +
+          'echo ADDR=[$SLAYZONE_HUB_ADDRESS]\n' +
+          'echo FUT=[$SLAYZONE_FUTURE_UNLISTED]\n' +
+          'echo ERAN=[$ELECTRON_RUN_AS_NODE]\n' +
+          'echo WT=[$WORKTREE_PATH]\n' +
+          'echo PATHSET=[${PATH:+yes}]\n',
+        { mode: 0o755 }
+      )
+      const handlers = createGitHandlers(ctxWithRoots([realpathSync(tmpdir())]))
+      const res = (await handlers[GitMethods.runWorktreeSetupScript]({
+        worktreePath: wt,
+        repoPath: wt
+      })) as { ran: boolean; success?: boolean; output?: string }
+      expect(res.ran).toBe(true)
+      expect(res.success).toBe(true)
+      const out = res.output ?? ''
+      expect(out).toContain('TOK=[]')
+      expect(out).toContain('ADDR=[]')
+      expect(out).toContain('FUT=[]')
+      expect(out).toContain('ERAN=[]')
+      expect(out).toContain(`WT=[${wt}]`)
+      expect(out).toContain('PATHSET=[yes]')
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
   })
 })

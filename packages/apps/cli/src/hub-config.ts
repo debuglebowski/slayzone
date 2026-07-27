@@ -3,14 +3,21 @@
  * of the local app's HTTP server.
  *
  * Precedence:
- *   1. `SLAYZONE_HUB_URL` / `SLAYZONE_HUB_TOKEN` environment variables
- *   2. `hub.json` in the CLI state dir (written by `slay hub set-url`)
+ *   1. `SLAYZONE_HUB_ADDRESS` (+ `SLAYZONE_HUB_TOKEN`) environment variables —
+ *      authority only (`host[:port]`); the http(s) scheme is DERIVED from
+ *      SLAYZONE_MODE (local → http, remote → https). The env channel never
+ *      carries a scheme, so it can't collide with the runner's ws(s):// reading
+ *      of the same deployment (the retired `SLAYZONE_HUB_URL` bug).
+ *   2. `hub.json` in the CLI state dir (written by `slay hub set-url`) — a FULL
+ *      http(s) url (an operator pointing at an external hub gives a complete
+ *      url; not the env channel, so no scheme derivation).
  *   3. null — legacy behavior (local port discovery in db.ts, untouched)
  *
  * With no env vars and no hub.json the CLI behaves exactly as before.
  */
 import fs from 'fs'
 import path from 'path'
+import { hubUrlFromAddr, isBareAuthority } from '@slayzone/platform/hub-addr'
 import { getDataDir } from './db'
 
 export interface HubTarget {
@@ -78,23 +85,27 @@ function readHubFile(): HubFileConfig | null {
 
 /**
  * Resolve the hub target, or null when no hub is configured (legacy local-app
- * behavior). An invalid `SLAYZONE_HUB_URL` is a hard error (exit 1) — the user
+ * behavior). An invalid `SLAYZONE_HUB_ADDRESS` is a hard error (exit 1) — the user
  * explicitly asked for a hub, silently falling back to the local app would be
  * surprising. A corrupt hub.json only warns and falls back.
  */
 export function resolveHubTarget(): HubTarget | null {
-  const envUrl = process.env.SLAYZONE_HUB_URL
+  const envAddress = process.env.SLAYZONE_HUB_ADDRESS
   // SLAYZONE_HUB_TOKEN semantics: unset → the file token may apply; set →
   // it wins, and set-but-empty means "explicitly no token" (never falls
   // back to the file token) — consistent across both branches below.
   const envToken = process.env.SLAYZONE_HUB_TOKEN
-  if (envUrl && envUrl.trim() !== '') {
-    const baseUrl = normalizeHubUrl(envUrl)
+  if (envAddress && envAddress.trim() !== '') {
+    const addr = envAddress.trim()
+    // Must be authority ONLY (host[:port]) — reject a value that snuck in a
+    // scheme or path. (A double-scheme like `http://http://x` still URL-parses,
+    // so this explicit guard, not normalizeHubUrl, is what catches it.)
+    const baseUrl = isBareAuthority(addr) ? normalizeHubUrl(hubUrlFromAddr(addr, 'http')) : null
     if (!baseUrl) {
-      console.error(`Invalid SLAYZONE_HUB_URL (expected http(s) URL): ${envUrl}`)
+      console.error(`Invalid SLAYZONE_HUB_ADDRESS (expected host[:port], no scheme/path): ${envAddress}`)
       process.exit(1)
     }
-    // Env URL never picks up the file token — hub.json may target a different hub.
+    // Env address never picks up the file token — hub.json may target a different hub.
     return { baseUrl, token: envToken || null }
   }
 

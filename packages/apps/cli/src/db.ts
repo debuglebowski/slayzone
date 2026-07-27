@@ -3,7 +3,7 @@ import http from 'node:http'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { getStorageDir, DB_PRAGMAS } from '@slayzone/platform'
+import { getStorageDir, DB_PRAGMAS, LOOPBACK_HOSTS, parseHubAddress } from '@slayzone/platform'
 import { resolveHubTarget, type HubTarget } from './hub-config'
 export { resolveProject, resolveProjectArg, resolveProjectByPath } from './db-helpers.mjs'
 export type { SlayDb } from './db-helpers.mjs'
@@ -34,14 +34,29 @@ function getDbPath(dev: boolean): string {
 
 type SqlParams = Record<string, string | number | bigint | null | Uint8Array>
 
+/**
+ * The port of a LOOPBACK `SLAYZONE_HUB_ADDRESS`, else null.
+ *
+ * Every caller of {@link getServerPort} dials `127.0.0.1:<port>`, so the address
+ * may only shortcut the DB read when it actually names loopback — a remote
+ * `hub.example:8443` would otherwise be reinterpreted as "the local app listens
+ * on 8443". (A remote hub is not this function's job anyway: resolveHubTarget
+ * handles it and every caller consults that first.)
+ */
+function loopbackHubPort(): number | null {
+  const parsed = parseHubAddress(process.env.SLAYZONE_HUB_ADDRESS)
+  if (!parsed?.port) return null
+  return LOOPBACK_HOSTS.has(parsed.host) ? parsed.port : null
+}
+
 export function getServerPort(): number | null {
-  // The running server binds SLAYZONE_HUB_PORT and publishes its actually-bound
-  // port to `settings.server_port` at boot (hub/src/server.ts). Fast-path the env
-  // var (an agent pty inherits the sidecar's SLAYZONE_HUB_PORT), else read the
-  // DB — the durable source of truth for a CLI run outside a task pty.
-  if (process.env.SLAYZONE_HUB_PORT) {
-    return parseInt(process.env.SLAYZONE_HUB_PORT, 10) || null
-  }
+  // The running server binds SLAYZONE_HUB_ADDRESS and publishes its actually-bound
+  // port to `settings.server_port` at boot (hub/src/server.ts). Fast-path a
+  // loopback address when one is set (an explicitly-configured local hub), else
+  // read the DB — the durable source of truth, and the ONLY path inside a task
+  // pty (sanitizeSpawnEnv strips the infra-scoped address at every spawn).
+  const envPort = loopbackHubPort()
+  if (envPort) return envPort
   try {
     const db = openDb()
     const row = db.query<{ value: string }>(
@@ -56,7 +71,9 @@ export function getServerPort(): number | null {
 }
 
 function getAlternateServerPort(): number | null {
-  if (process.env.SLAYZONE_DB_PATH || process.env.SLAYZONE_HUB_PORT) return null
+  // Both env pins mean "you were told which target to use" — probing the OTHER
+  // DB's port would contradict an explicit instruction.
+  if (process.env.SLAYZONE_DB_PATH || loopbackHubPort()) return null
   const dev = process.env.SLAYZONE_DEV === '1'
   const altPath = getDbPath(!dev)
   if (!fs.existsSync(altPath)) return null

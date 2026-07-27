@@ -81,11 +81,11 @@ resolve hubUrl first (env/config/none). If creds exist for that host → no toke
 ## Hub wiring (`packages/apps/hub/src/bin.ts` + `standalone-config.ts`)
 Hub never hard-fails. Prompt only for **recommended** values that materially improve a
 remote deploy, and only when interactive + not already set:
-- **publicUrl** (`SLAYZONE_HUB_PUBLIC_URL`): if unset, prompt (default = empty → skip,
-  loopback token). This is the one that actually matters for remote runners (token URL
-  host). Explain in the prompt one-liner.
-- **port** (`SLAYZONE_PORT`): prompt with default = current default (empty = OS/default).
-- **runnerTransportPort**: same, optional.
+- **publicAddress** (`SLAYZONE_HUB_PUBLIC_ADDRESS`, `host[:port]`): if unset, prompt
+  (default = empty → skip, loopback token). This is the one that actually matters for
+  remote runners (the address written into join tokens). Explain in the prompt one-liner.
+- **bind address** (`SLAYZONE_HUB_ADDRESS`, `host[:port]`): prompt with default = current
+  default (empty = default host, OS-assigned port).
 
 Call `runInteractiveConfig` at the very top of `bin.ts main()` BEFORE
 `applyStandaloneHubConfig()` (which is the env-seeding step). Because the helper seeds
@@ -101,7 +101,7 @@ prompted — it's a generated secret, not a user value).
 - Runner: extend `main.test.ts` or a new `bin-interactive.test.ts` — non-TTY path unchanged
   (existing tests already cover), + a TTY-simulated path collecting a token → writes config.
 - Hub: `standalone-config.test.ts` stays green (helper is a no-op when values preset / not
-  TTY). Add a case: preset `SLAYZONE_HUB_PUBLIC_URL` → no prompt, no write.
+  TTY). Add a case: preset `SLAYZONE_HUB_PUBLIC_ADDRESS` → no prompt, no write.
 - `install-handshake.test.ts` MUST stay green untouched (piped stdio ⇒ not a TTY ⇒ helper
   no-op). This is the guardrail proving we didn't break the deploy path.
 

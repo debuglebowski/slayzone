@@ -130,7 +130,9 @@ function spawnLoopbackRunner(opts: {
       // <ROOT>/config.json (it skips the shared file when SUPERVISED=1).
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: opts.rootDir,
-      SLAYZONE_HUB_URL: opts.hubUrl,
+      // Authority only — the runner composes ws(s)://<addr>/runners from
+      // SLAYZONE_MODE (local here → ws, matching the loopback hub).
+      SLAYZONE_HUB_ADDRESS: new URL(opts.hubUrl).host,
       SLAYZONE_RUNNER_JOIN_TOKEN: opts.joinToken,
       SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir
     },
@@ -241,10 +243,11 @@ base.describe('Runner loopback (runner ON)', () => {
       expect(minted).not.toBeNull()
       const token = minted!.token
       const hubUrl = decodeHubUrl(token)
-      // Wave3.5-D2: `/runners` is now a TLS-terminated wss listener on its own port
-      // (separate from the shared http /trpc server). The runner extracts the pin
-      // + this url from the token and dials wss with cert-pinning.
-      expect(hubUrl).toMatch(/^wss:\/\/127\.0\.0\.1:\d+\/runners$/)
+      // `/runners` rides the ONE hub listener, demuxed by path, and its scheme
+      // follows SLAYZONE_MODE: local (this test) → plaintext `ws://` loopback on the
+      // hub's own port; only remote terminates TLS and mints `wss://` (from
+      // SLAYZONE_HUB_PUBLIC_ADDRESS). The runner extracts this url from the token.
+      expect(hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/runners$/)
 
       // Spawn the loopback runner against the freshly minted token. Its creds +
       // allowedRoots live under the isolated userdata dir (nothing leaks).

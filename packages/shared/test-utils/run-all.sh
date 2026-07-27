@@ -111,6 +111,10 @@ run_test packages/shared/transport/src/server/http/rest-api/artifacts/data-root.
 run_test packages/apps/app/src/main/storage-migration.test.ts
 # SLAYZONE_MODE resolver + mode/bind contradiction guard (local+exposed = fatal).
 run_test packages/shared/platform/src/slayzone-mode.test.ts
+# Env scope manifest + sanitizeSpawnEnv — spawn-boundary denylist (fail closed).
+run_test packages/shared/platform/src/env-manifest.test.ts
+# hubUrlFromAddr — authority-only SLAYZONE_HUB_ADDRESS + scheme from SLAYZONE_MODE.
+run_test packages/shared/platform/src/hub-addr.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 runner restart-survival — stable port + local-runner dedup (count stays 1 across reboots).

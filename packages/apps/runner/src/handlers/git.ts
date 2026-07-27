@@ -22,6 +22,7 @@ import { accessSync, chmodSync, constants as fsConstants, existsSync } from 'nod
 import { cp, mkdir } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
 import { RunnerNotificationMethods } from '@slayzone/runner-transport/shared'
+import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { z } from 'zod'
 import { assertPathAllowed } from '../config'
 import { execCapture, execGit } from './exec'
@@ -157,10 +158,11 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       }
     }
 
-    const env: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) {
-      if (typeof v === 'string') env[k] = v
-    }
+    // Sanitize the inherited runner env: the setup script gets the user env
+    // (PATH/HOME) but none of SlayZone's own infra/secret/identity vars (fail
+    // closed on anything unmanifested). The worktree-scoped vars below are the
+    // authoritative overlay the script actually needs.
+    const env = sanitizeSpawnEnv(process.env)
     env.WORKTREE_PATH = worktreePath
     env.REPO_PATH = repoPath
     env.SOURCE_BRANCH = params.sourceBranch ?? ''

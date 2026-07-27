@@ -9,6 +9,7 @@ import {
 } from '../pty-host'
 import { homedir, platform, userInfo } from 'os'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { sanitizeSpawnEnv } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   containsSubmitEnter,
@@ -1113,10 +1114,16 @@ function stopTitlePolling(session: PtySession): void {
   }
 }
 
-/** Base shell environment shared by every PTY spawn (cold createPty + warm pool). */
-function buildBaseEnv(): Record<string, string> {
+/** Base shell environment shared by every PTY spawn (cold createPty + warm pool).
+ *  Sanitized through the shared env manifest: the user's own env
+ *  (PATH/HOME/toolchains) survives, but every SlayZone infra/secret/identity var
+ *  (and any unmanifested SLAYZONE_*, fail closed) is STRIPPED — a user terminal
+ *  must never inherit the host's hub address/creds/task-identity. Per-spawn
+ *  identity is re-added afterward via `mcpEnv` (buildMcpEnv), so a terminal for
+ *  task B never carries task A's SLAYZONE_TASK_ID and a bare shell has none. */
+export function buildBaseEnv(): Record<string, string> {
   return {
-    ...process.env,
+    ...sanitizeSpawnEnv(process.env),
     USER: process.env.USER || process.env.USERNAME || userInfo().username,
     HOME: process.env.HOME || homedir(),
     TERM: 'xterm-256color',

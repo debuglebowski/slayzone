@@ -64,8 +64,8 @@ export async function resolveRemoteMcpEnv(
       mode: args.mode
     })
     if (!resolved) return null
-    // Enforce the provider contract defensively: a blank base URL would inject
-    // SLAYZONE_HUB_URL='' + a relative hook URL (both broken on the runner), so
+    // Enforce the provider contract defensively: a blank base URL would yield an
+    // empty hub target + a relative hook URL (both broken on the runner), so
     // treat it as "no valid remote target" rather than emit a poisoned env.
     if (resolved.hubBaseUrl.trim() === '') return null
     return resolved
@@ -105,9 +105,11 @@ export async function resolveRemoteMcpEnv(
  * `hub.json` (see apps/cli/hub-config.ts). With no `remote` (the default)
  * nothing about the local env changes.
  *
- * No port env var is injected here: the `slay` CLI resolves the local server port
- * from the sidecar's own `SLAYZONE_HUB_PORT` (inherited via the pty's env) and
- * falls back to `settings.server_port` in the DB (written by the server at boot).
+ * No port/address env var is injected here: the `slay` CLI resolves the local
+ * server port from `settings.server_port` in the DB (written by the server at
+ * boot). It is NOT inherited — `SLAYZONE_HUB_ADDRESS` is infra-scoped, so
+ * sanitizeSpawnEnv strips it at the spawn boundary; the DB is the durable
+ * source of truth for every pty.
  */
 export async function buildMcpEnv(
   db: SlayzoneDb | null | undefined,
@@ -176,8 +178,8 @@ export async function buildMcpEnv(
   }
 
   // Local (hub-local — today's only path): loopback. The port is used ONLY to
-  // build the agent-hook URL below. No port var is injected — the CLI resolves
-  // the server port itself (inherited SLAYZONE_HUB_PORT, else settings.server_port).
+  // build the agent-hook URL below. No port/address var is injected — the CLI
+  // resolves the server port itself from settings.server_port.
   const serverPort = (globalThis as Record<string, unknown>).__serverPort as number | undefined
 
   if (serverPort && hookCapable) {

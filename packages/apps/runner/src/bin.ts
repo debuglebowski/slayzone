@@ -1,9 +1,12 @@
 /**
  * slayzone-runner CLI entrypoint.
  *
- *   SLAYZONE_HUB_URL=wss://hub:8443/runners \
+ *   SLAYZONE_HUB_ADDRESS=hub:8443 \
  *   SLAYZONE_RUNNER_JOIN_TOKEN=... \
  *   slayzone-runner
+ *
+ * SLAYZONE_HUB_ADDRESS carries the hub AUTHORITY only (host[:port]); the dial
+ * scheme (ws/wss) is derived from SLAYZONE_MODE, and `/runners` is appended.
  *
  * On an interactive terminal a fresh runner (no join token AND no stored
  * credentials) is prompted for its join token + path-jail + name, then offered
@@ -19,6 +22,7 @@ import { hostname } from 'node:os'
 import { delimiter } from 'node:path'
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
 import { loadSlayzoneConfig } from '@slayzone/platform/slayzone-config'
+import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/runner-transport/client'
 import { ENV_VARS, loadRunnerConfig } from './config'
 import { startRunner } from './main'
@@ -50,8 +54,11 @@ async function maybeInteractiveSetup(): Promise<{
   if ((process.env[ENV_VARS.joinToken] ?? cfg.joinToken) !== undefined) return {}
 
   // Already enrolled? A stored credential for the known hub host means we can
-  // reconnect without a token. Skip the prompt in that case.
-  const hubUrl = process.env[ENV_VARS.hubUrl] ?? cfg.hubUrl
+  // reconnect without a token. Skip the prompt in that case. The env channel
+  // carries authority only, so compose it into a url (scheme from MODE) before
+  // deriving the credential-store host key; config.json still carries a full url.
+  const envAddress = process.env[ENV_VARS.hubAddress]
+  const hubUrl = envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/runners') : cfg.hubUrl
   if (hubUrl !== undefined) {
     try {
       // Creds derive from the ROOT anchor (`<ROOT>/runners`) — no override knob.
@@ -142,7 +149,7 @@ async function main(): Promise<void> {
   } catch (err) {
     process.stderr.write(`slayzone-runner: ${err instanceof Error ? err.message : String(err)}\n`)
     process.stderr.write(
-      `usage: ${ENV_VARS.hubUrl}=wss://<hub>/runners [${ENV_VARS.joinToken}=<token>] slayzone-runner\n`
+      `usage: ${ENV_VARS.hubAddress}=<hub-host[:port]> [${ENV_VARS.joinToken}=<token>] slayzone-runner\n`
     )
     process.exitCode = 1
     return

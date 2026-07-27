@@ -104,8 +104,10 @@ test('valid config parses all known keys, drops wrong types', () => {
     p,
     JSON.stringify({
       runnerTransportSecret: 'abc',
+      address: '0.0.0.0:8080',
+      publicAddress: 'hub.example:8443',
+      // legacy bind/public keys — still READ so an existing file keeps booting
       port: 8080,
-      runnerTransportPort: 8443,
       publicUrl: 'https://hub.example',
       joinToken: 'jt-1',
       runnerName: 'r1',
@@ -119,9 +121,10 @@ test('valid config parses all known keys, drops wrong types', () => {
   )
   const cfg = loadSlayzoneConfig(p)
   assertEq(cfg.runnerTransportSecret, 'abc', 'runnerTransportSecret')
-  assertEq(cfg.port, 8080, 'port')
-  assertEq(cfg.runnerTransportPort, 8443, 'runnerTransportPort')
-  assertEq(cfg.publicUrl, 'https://hub.example', 'publicUrl')
+  assertEq(cfg.address, '0.0.0.0:8080', 'address')
+  assertEq(cfg.publicAddress, 'hub.example:8443', 'publicAddress')
+  assertEq(cfg.port, 8080, 'legacy port')
+  assertEq(cfg.publicUrl, 'https://hub.example', 'legacy publicUrl')
   assertEq(cfg.joinToken, 'jt-1', 'joinToken')
   assertEq(cfg.runnerName, 'r1', 'runnerName')
   assertEq(cfg.hubUrl, 'wss://hub/runners', 'hubUrl')
@@ -131,13 +134,17 @@ test('valid config parses all known keys, drops wrong types', () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('wrong-typed values are dropped (port as string, empty publicUrl)', () => {
+test('wrong-typed values are dropped (port as string, empty address/publicUrl)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  writeFileSync(p, JSON.stringify({ port: '8080', runnerTransportPort: 'nope', publicUrl: '' }))
+  writeFileSync(
+    p,
+    JSON.stringify({ port: '8080', address: '', publicAddress: 42, publicUrl: '' })
+  )
   const cfg = loadSlayzoneConfig(p)
   assert(cfg.port === undefined, 'string port dropped')
-  assert(cfg.runnerTransportPort === undefined, 'string runnerTransportPort dropped')
+  assert(cfg.address === undefined, 'empty address dropped')
+  assert(cfg.publicAddress === undefined, 'non-string publicAddress dropped')
   assert(cfg.publicUrl === undefined, 'empty publicUrl dropped')
   rmSync(dir, { recursive: true, force: true })
 })
@@ -148,10 +155,10 @@ console.log('─'.repeat(40))
 test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
   const dir = tmp()
   const p = join(dir, 'sub', 'config.json')
-  saveSlayzoneConfig({ runnerTransportPort: 8443, port: 9 }, p)
+  saveSlayzoneConfig({ address: '127.0.0.1:8443', publicAddress: 'hub.example' }, p)
   const back = loadSlayzoneConfig(p)
-  assertEq(back.runnerTransportPort, 8443, 'runnerTransportPort round-trip')
-  assertEq(back.port, 9, 'port round-trip')
+  assertEq(back.address, '127.0.0.1:8443', 'address round-trip')
+  assertEq(back.publicAddress, 'hub.example', 'publicAddress round-trip')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file mode 0600')
     assertEq(statSync(join(dir, 'sub')).mode & 0o777, 0o700, 'dir mode 0700')

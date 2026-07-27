@@ -311,8 +311,9 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
             ...opts.env,
             ELECTRON_RUN_AS_NODE: '1',
             SLAYZONE_SUPERVISED: '1',
-            SLAYZONE_HUB_HOST: opts.host,
-            SLAYZONE_HUB_PORT: String(freePort)
+            // The address the sidecar hub BINDS. One var, `host:port` — the
+            // scheme is never carried here (SLAYZONE_MODE decides it).
+            SLAYZONE_HUB_ADDRESS: `${opts.host}:${freePort}`
           },
           stdio: ['pipe', 'pipe', 'pipe']
         })

@@ -173,7 +173,8 @@ function runCli(
       ...(process.env as Record<string, string>),
       SLAYZONE_DB_PATH: dbPath,
       SLAYZONE_DEV: '1',
-      SLAYZONE_HUB_PORT: String(rest.port)
+      // Authority only (host:port) — the http scheme derives from SLAYZONE_MODE.
+      SLAYZONE_HUB_ADDRESS: `127.0.0.1:${rest.port}`
     }
     for (const [k, v] of Object.entries(envOverrides)) {
       if (v === undefined) delete env[k]
@@ -465,18 +466,20 @@ await describe('CLI tasks open → REST /api/open-task', () => {
 
 await describe('CLI app-down path', () => {
   test('apiPost exits with helpful stderr when REST unreachable', async () => {
-    // Reserved port 1 — connection refused immediately
+    // Reserved port 1 — connection refused immediately. An explicit
+    // SLAYZONE_HUB_ADDRESS names a hub, so the failure reads as a hub connect
+    // error (not the local-app one).
     const r = await runCli(['tasks', 'create', 'Lost', '--project', 'CLIREST'], {
-      SLAYZONE_HUB_PORT: '1'
+      SLAYZONE_HUB_ADDRESS: '127.0.0.1:1'
     })
     expect(r.exitCode).toBe(1)
-    expect(r.stderr.includes('not running') || r.stderr.includes('could not connect')).toBe(true)
+    expect(r.stderr.includes('Could not connect to SlayZone hub')).toBe(true)
   })
 
   test('exits when no server port configured at all (env unset, settings empty)', async () => {
     db.prepare("DELETE FROM settings WHERE key = 'server_port'").run()
     const r = await runCli(['tasks', 'create', 'Lost2', '--project', 'CLIREST'], {
-      SLAYZONE_HUB_PORT: undefined
+      SLAYZONE_HUB_ADDRESS: undefined
     })
     expect(r.exitCode).toBe(1)
     expect(r.stderr.includes('server port not found')).toBe(true)

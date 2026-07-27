@@ -18,6 +18,7 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
+import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { z } from 'zod'
 import { assertPathAllowed } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
@@ -56,10 +57,12 @@ export function createProcHandlers(ctx: HandlerContext): ProcHandlers {
   const procs = new Map<string, ChildProcess>()
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {
-    const base: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) {
-      if (typeof v === 'string') base[k] = v
-    }
+    // Sanitize the inherited runner env through the shared manifest: keep the
+    // user env (PATH/HOME) but strip every SlayZone infra/secret/identity var
+    // (and any unmanifested SLAYZONE_*, fail closed) so a runner-hosted process
+    // never inherits the runner's own creds/wiring. Hub-passed `overrides` layer
+    // on top as the authoritative per-spawn values.
+    const base = sanitizeSpawnEnv(process.env)
     return overrides ? { ...base, ...overrides } : base
   }
 
