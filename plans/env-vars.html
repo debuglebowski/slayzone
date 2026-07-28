@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SlayZone Env Vars — Per App</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2230; --border: #30363d;
+    --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --r: #3fb950; --s: #d29922; --rs: #a371f7;
+    --tag-dev: #388bfd; --tag-test: #db6d28; --tag-build: #a371f7;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff; --surface: #f6f8fa; --surface2: #eef1f4; --border: #d0d7de;
+      --fg: #1f2328; --muted: #656d76; --accent: #0969da;
+      --r: #1a7f37; --s: #9a6700; --rs: #8250df;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  header { padding: 20px 24px 12px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 20; }
+  h1 { margin: 0 0 4px; font-size: 18px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .sub code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+  #search {
+    flex: 0 0 320px; max-width: 40vw; padding: 8px 12px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 14px;
+  }
+  #search:focus { outline: none; border-color: var(--accent); }
+  .controls { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: flex-start; }
+  .filtergroup { display: flex; flex-wrap: wrap; gap: 5px; align-items: flex-start; }
+  .filtergroup .lbl { flex-basis: 100%; width: 100%; margin: 0 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; }
+  .filtergroup .lbl:hover { color: var(--fg); }
+  .chip {
+    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted); cursor: pointer; font-size: 12.5px; user-select: none;
+    transition: all .12s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--fg); }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .chip.mod { margin-left: 8px; border-style: dashed; }
+  .chip.mod.active { background: #6f42c1; border-color: #6f42c1; border-style: solid; }
+  .count { color: var(--muted); font-size: 12.5px; margin-left: auto; margin-top: 20px; white-space: nowrap; align-self: flex-start; }
+  .wrap { padding: 0 24px 40px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 14px; }
+  thead th {
+    position: sticky; top: 0; background: var(--surface); text-align: left;
+    padding: 9px 12px; border-bottom: 2px solid var(--border); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  thead th:hover { color: var(--fg); }
+  thead th .arrow { opacity: .4; font-size: 10px; margin-left: 3px; }
+  thead th.sorted .arrow { opacity: 1; color: var(--accent); }
+  tbody td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:hover { background: var(--surface); }
+  td.var { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; font-weight: 600; }
+  td.def { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  td.purpose { min-width: 280px; }
+  /* Class-based, not :nth-child(2) — column visibility is toggleable, so the
+     "Used by" cell is not always the 2nd child. */
+  td.readby { white-space: nowrap; }
+  .none-dash { color: var(--muted); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  /* min-width + radius 999px, not a fixed 20px circle: a 1-letter label stays a
+     circle (content < min-width, width == height), a multi-letter one (CLI)
+     grows into a capsule instead of an ellipse. */
+  .pill.dot {
+    min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; text-align: center;
+    line-height: 20px; font-size: 11px; font-weight: 700; color: #fff; cursor: default;
+  }
+  .app-electron { color: #58a6ff; } .app-chromium { color: #3fb950; }
+  .app-hub { color: #d29922; } .app-runner { color: #f778ba; } .app-agent { color: #a371f7; }
+  .app-cli { color: #39c5cf; }
+  .pill.dot.app-electron { background: #2f6fb3; } .pill.dot.app-chromium { background: #2c7a3d; }
+  .pill.dot.app-hub { background: #9c6f18; } .pill.dot.app-runner { background: #b8497f; }
+  .pill.dot.app-agent { background: #6f42c1; } .pill.dot.app-cli { background: #1f7c85; }
+  .rs { font-weight: 700; font-size: 12px; white-space: nowrap; }
+  .rs-R { color: var(--r); } .rs-S { color: var(--s); } .rs-RS { color: var(--rs); }
+  .scope { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+    font-weight: 700; white-space: nowrap; border: 1px solid transparent; }
+  .scope-global { background: color-mix(in srgb, var(--r) 20%, transparent); color: var(--r); border-color: color-mix(in srgb, var(--r) 45%, transparent); }
+  .scope-infra { background: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--muted); border-color: color-mix(in srgb, var(--muted) 40%, transparent); }
+  .scope-secret { background: color-mix(in srgb, #f85149 20%, transparent); color: #f85149; border-color: color-mix(in srgb, #f85149 45%, transparent); }
+  .scope-identity { background: color-mix(in srgb, var(--rs) 20%, transparent); color: var(--rs); border-color: color-mix(in srgb, var(--rs) 45%, transparent); }
+  .scope-unlisted { background: color-mix(in srgb, var(--s) 18%, transparent); color: var(--s); border-color: color-mix(in srgb, var(--s) 40%, transparent); }
+  .scope-user { background: transparent; color: var(--muted); border-color: var(--border); }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .03em; margin-left: 5px; vertical-align: middle; }
+  .tag-dev { background: color-mix(in srgb, var(--tag-dev) 22%, transparent); color: var(--tag-dev); }
+  .tag-test { background: color-mix(in srgb, var(--tag-test) 22%, transparent); color: var(--tag-test); }
+  .tag-build { background: color-mix(in srgb, var(--tag-build) 22%, transparent); color: var(--tag-build); }
+  #empty { display: none; padding: 40px; text-align: center; color: var(--muted); }
+  mark { background: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; border-radius: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <div>
+      <h1>SlayZone Env Vars — Per App</h1>
+      <p class="sub"><b>Used by</b> = which app(s) consume the variable as input — i.e. where you set it to take effect. <code>Agent</code> = the agent process + its <code>notify.sh</code> hooks; <code>CLI</code> = the <code>slay</code> binary (a sibling reader inside the same PTY, not the agent). Verified at commit <code>8153e9fa1</code>. Anchor model: all on-disk state derives from <code>SLAYZONE_ROOT</code> (→ <code>&lt;ROOT&gt;/storage</code>); standalone hub+runner seed it to <code>cwd()</code>. Hub address is <b>authority-only</b> (<code>host[:port]</code>) — scheme derives from <code>SLAYZONE_MODE</code>. <b>Spawn</b> = scope tag from <code>platform/src/env-manifest.ts</code>; <code>sanitizeSpawnEnv</code> keeps only <code>global</code> at every terminal-spawn boundary and strips everything else (incl. unmanifested <code>SLAYZONE_*</code>, fail closed).</p>
+    </div>
+    <input id="search" type="search" placeholder="Filter…  (press /)" autofocus>
+  </div>
+  <div class="controls">
+    <div class="filtergroup" data-group="app">
+      <span class="lbl" title="Click to toggle all">Used by</span>
+      <span class="chip active" data-val="Hub">Hub</span>
+      <span class="chip active" data-val="Runner">Runner</span>
+      <span class="chip active" data-val="Agent">Agent</span>
+      <span class="chip active" data-val="CLI">CLI</span>
+      <span class="chip mod" id="distinctToggle" title="Distinct: show only vars used by EXACTLY the selected apps (no others)">Distinct</span>
+    </div>
+    <div class="filtergroup" data-group="tag">
+      <span class="lbl" title="Click to toggle all">Scope</span>
+      <span class="chip active" data-val="prod">Runtime</span>
+      <span class="chip" data-val="dev">dev</span>
+      <span class="chip" data-val="test">test</span>
+      <span class="chip" data-val="build">build</span>
+    </div>
+    <div class="filtergroup" data-group="prefix">
+      <span class="lbl" title="Click to toggle all">Prefix</span>
+      <span class="chip active" data-val="slayzone">SLAYZONE_</span>
+      <span class="chip" data-val="other">Other</span>
+    </div>
+    <div class="filtergroup" data-group="scope">
+      <span class="lbl" title="env-manifest.ts scope — what survives sanitizeSpawnEnv. Click to toggle all">Spawn</span>
+      <span class="chip active" data-val="global">kept</span>
+      <span class="chip active" data-val="infra">infra</span>
+      <span class="chip active" data-val="secret">secret</span>
+      <span class="chip active" data-val="identity">identity</span>
+      <span class="chip active" data-val="other">other</span>
+    </div>
+    <div class="filtergroup" id="colgroup">
+      <span class="lbl" title="Which columns the table renders (Variable is always shown). Hidden columns are still searched. Click to toggle all">Columns</span>
+      <span class="chip active" data-col="readby">Used by</span>
+      <span class="chip active" data-col="scope">Spawn</span>
+      <span class="chip" data-col="purpose">Purpose</span>
+      <span class="chip active" data-col="def">Default</span>
+    </div>
+    <span class="count" id="count"></span>
+  </div>
+</header>
+<div class="wrap">
+  <table>
+    <thead id="head"></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="empty">No matching variables.</div>
+</div>
+<script>
+// Ownership = the app(s) whose OWN code reads the var (or whose intrinsic launch
+// role it represents). A pure pass-through setter that only forwards another
+// app's value is NOT an owner — e.g. Electron/Hub compute SLAYZONE_TASK_ID solely
+// so the `slay` CLI in the agent PTY has a default task, so it belongs to CLI,
+// not to them.
+// Row shape: [variable, app, R|S|R+S, purpose, default, tag]
+//   tag: '' = plain runtime, or 'dev'|'test'|'build'
+// Spawn scope comes from SCOPES below (platform/src/env-manifest.ts), not per row.
+const DATA = [
+  // ---- Electron ----
+  ["SLAYZONE_ROOT","Electron","R+S","State anchor for the app's own paths (→ <ROOT>/storage)","~/.slayzone",""],
+  ["SLAYZONE_HUB_ADDRESS","Electron","S","Mints the sidecar's bind authority (127.0.0.1:<free port>) + the local runner's dial authority","127.0.0.1:OS-assign",""],
+  ["SLAYZONE_RELEASE_CHANNEL","Electron","R+S","Release channel (dev/beta/stable) for hook-source attribution in Diagnostics","derived from build",""],
+  ["SLAYZONE_DEV","Electron","S","Tells the sidecar dev-vs-packaged (it has no app.isPackaged) → DB filename","set when unpackaged",""],
+  ["SLAYZONE_DEBUG_BOOT","Electron","R","Boot-timing logs","off","dev"],
+  ["SLAYZONE_REGISTER_DEV_PROTOCOL","Electron","R","Register slayzone:// in dev","off","dev"],
+  ["SLAYZONE_SIDECAR_HOT_RESTART","Electron","R","Relaunch sidecar on build change","off","dev"],
+  ["SLAYZONE_USER_DATA_DIR","Electron","R","Isolate Electron profile; also the read-back mirror of SLAYZONE_ROOT (specs recover the per-worker anchor from it)","—","test"],
+  ["SLAYZONE_BOOT_LOG_PATH","Electron","R","Early-boot log-file sink","—","test"],
+  ["SLAYZONE_E2E_ALLOW_RUNNER","Electron","R","Opt-in: actually spawn local runner under Playwright","off","test"],
+  ["SLAYZONE_E2E_INSTALL_HOOKS","Electron","R","Force hook install, skip binary/version probes","off","test"],
+  ["SLAYZONE_CLAUDE_SETTINGS_PATH","Electron","R","Override Claude settings.json path","~/.claude/settings.json","dev"],
+  ["SLAYZONE_GEMINI_SETTINGS_PATH","Electron","R","Override Gemini settings path","~/.gemini/settings.json","dev"],
+  ["SLAYZONE_CODEX_HOOKS_PATH","Electron","R","Override Codex hooks.json path","~/.codex/hooks.json","dev"],
+  ["SLAYZONE_ANTIGRAVITY_HOOKS_PATH","Electron","R","Override Antigravity hooks path","~/.gemini/config/hooks.json","dev"],
+  ["SLAYZONE_OPENCODE_PLUGIN_PATH","Electron","R","Override OpenCode plugin file path","<config>/opencode/…","dev"],
+  ["SLAYZONE_PROFILE","Electron","R","React profiling build + <Profiler>","off","build"],
+  ["SLAYZONE_REACT_DEV","Electron","R","Real dev-React (opt out of prod-in-dev)","off","build"],
+  ["POSTHOG_API_KEY","Electron","R","Analytics project key baked into renderer","baked-in","build"],
+  ["POSTHOG_HOST","Electron","R","Analytics ingest host","eu.i.posthog.com","build"],
+  ["POSTHOG_DISABLED","Electron","R","Blank the key → disable analytics","off","build"],
+  ["SLAYZONE_DESKTOP_BRIDGE_ADDRESS","Electron","S","Advertises the desktop bridge authority (one loopback listener: WS /cap + REST /api/*) to the sidecar","127.0.0.1:OS-assign",""],
+  ["SLAYZONE_SUPERVISED","Electron","S","Flags the sidecar + local runner as host-owned (skip cwd-seed/prompts)","1",""],
+  ["SLAYZONE_HUB_JOIN_TOKEN","Electron","S","Auto-enrolls the local runner (embeds hub authority + cert pin)","freshly minted",""],
+  ["ELECTRON_RENDERER_URL","Electron","R","Dev renderer URL vs packaged loadFile","—",""],
+  ["ELECTRON_RUN_AS_NODE","Electron","S","Launch mechanism: run Electron bin as plain Node for the sidecar + runner","1",""],
+  ["NODE_PATH","Electron","S","Launch mechanism: unpacked node_modules for the sidecar (packaged only)","—",""],
+  ["NODE_ENV","Electron","R","test / development behavior toggles","—",""],
+  ["PLAYWRIGHT","Electron","R","Master under-Playwright flag","—","test"],
+  ["GITHUB_TEST_PROJECT_ID","Electron","R","GitHub Projects V2 id for the electron-side integrations test; not a hub input","—","test"],
+  ["XDG_STATE_HOME","Electron","R","Linux app-state root (getStateDir → <state>/slayzone) + the XDG migration target","~/.local/state","dev"],
+  // getStateDir()/getCliBinDir() live in platform but have Electron-only callers
+  // (main/index.ts boot + the CLI installer), so these are app inputs, not hub ones.
+  ["APPDATA","Electron","R","Windows app-state root (getStateDir → %APPDATA%/slayzone)","OS home fallback",""],
+  ["LOCALAPPDATA","Electron","R","Windows install dir for the `slay` shim (<local>/SlayZone/bin) + the PATH-registry check","~/AppData/Local",""],
+  ["PATH","Electron","R","Checked for the CLI bin dir before offering a PATH fix on Windows install; also stripped of the slayzone bin dir when probing the real `codex`","—",""],
+
+  // ---- Chromium ----
+  ["SLAYZONE_CHROMIUM_PROD","Chromium","R","1 → bake prod WS :8765, else dev :8766","dev","build"],
+  ["VITE_CONVEX_URL","Chromium","R","Convex URL → leaderboard auth","unset → off","build"],
+  ["SLAYZONE_ROOT","Chromium","S","run.sh anchors all state to the repo root (inherited value wins)","<repo root>",""],
+  ["SLAYZONE_HUB_ADDRESS","Chromium","S","run.sh pins the sidecar bind authority to the renderer's hardcoded URL; inherited value deliberately IGNORED","127.0.0.1:8766",""],
+  ["SLAYZONE_SUPERVISED","Chromium","S","run.sh unsets it (bg sidecar survives stdin close)","unset",""],
+  ["ELECTRON_RUN_AS_NODE","Chromium","S","run.sh runs sidecar as plain Node (ABI)","1",""],
+  ["SLAYZONE_NO_SIDECAR","Chromium","R","run.sh: skip auto-spawning the sidecar","0",""],
+  ["SLAYZONE_REAL_KEYCHAIN","Chromium","R","run.sh: if ≠1, add --use-mock-keychain","0 (mock)",""],
+  ["SLAYZONE_REMOTE_DEBUG","Chromium","R","run.sh: if set, add --remote-debugging-port","unset",""],
+  ["SLAYZONE_SHELL_DEV_SERVER","Chromium","R","run.sh: if set, add HMR dev-server switch","unset",""],
+  ["SLAYZONE_WEBUI_BUNDLE_DIR","Chromium","R","run.sh: WebUI bundle root → --slayzone-webui-bundle-dir","repo path",""],
+  ["SLAYZONE_SHELL_BUNDLE_DIR","Chromium","R","run.sh: shell bundle root → --slayzone-shell-bundle-dir","repo path",""],
+  ["SLAYZONE_DEVELOPER_DIR","Chromium","R","build.sh: override the pinned Xcode toolchain","Xcode-16.3 pin","build"],
+  ["SLAYZONE_SIGN_MODE","Chromium","R","CI signing mode for the fork build","dry-run","build"],
+
+  // ---- Hub ----
+  ["SLAYZONE_SUPERVISED","Hub","R","1 = host-supervised, unset = standalone; gates all standalone logic (config.json, prompts, secret gen)","unset",""],
+  ["SLAYZONE_ROOT","Hub","R","State anchor; standalone seeds to cwd(). DB + logs derive as <ROOT>/storage","cwd()",""],
+  ["SLAYZONE_DEV","Hub","R","Dev vs prod DB filename (slayzone.dev.sqlite / slayzone.sqlite)","prod",""],
+  ["SLAYZONE_HUB_ADDRESS","Hub","R","The address it BINDS — authority only, host[:port]. Bare host = OS-assigned port. One listener (/trpc + /runners, demuxed by path)","127.0.0.1 + OS-assign",""],
+  ["SLAYZONE_MODE","Hub","R","Single transport lever: local = http/ws + loopback-only bind (fails loud on a wider bind), remote = https/wss + client auth","local",""],
+  ["SLAYZONE_HUB_PUBLIC_ADDRESS","Hub","R","External authority baked into join tokens + remote agents' hub base; REQUIRED in remote mode (boot throws without it)","loopback:<bound port>",""],
+  ["SLAYZONE_HUB_AUTH_SECRET","Hub","R","HMAC signing key for ALL hub-auth (better-auth session/cookie signer + runner enroll/api-key creds); standalone generates & persists 256-bit (0600, config.json key stays `runnerTransportSecret`)","gen / dev const (supervised)",""],
+  ["SLAYZONE_DESKTOP_BRIDGE_ADDRESS","Hub","R","Supervised-only desktop bridge authority; ws://…/cap + http://… derive unconditionally (always loopback). Standalone → null/501","none (standalone → null)",""],
+  ["SLAYZONE_NONINTERACTIVE","Hub","R","Disable first-run interactive prompt (public address)","prompt on TTY",""],
+  ["NODE_ENV","Hub","R","test / development toggles (also permits the plaintext-credential fallback)","—",""],
+  ["PLAYWRIGHT","Hub","R","PTY-create capture instrumentation","off","test"],
+  ["XDG_RUNTIME_DIR","Hub","R","Short-path fallback for the sidecar Unix socket when <ROOT>/run/sidecar.sock would exceed the ~104-char limit (deep ROOT ⇒ standalone hub only)","<ROOT>/run",""],
+  // Read HERE, not by the agent: buildMcpEnv (domains/terminal/src/server, hosted
+  // by the hub) calls getSlayzoneReleaseChannel() to PACK the channel into the
+  // opaque ctx blob. notify.sh never reads the var — it only forwards the blob.
+  ["SLAYZONE_RELEASE_CHANNEL","Hub","R","Stamps which release channel a hook came from into the ctx blob at spawn (attribution only, no control flow)","unknown",""],
+  // The anchor's own home fallback (getSlayzoneHomeDir when SLAYZONE_ROOT is
+  // unset) — the same dependency the Runner rows below record. NOT listed:
+  // USER/USERNAME, which pty-manager only READS to re-set verbatim in the child
+  // PTY (pure pass-through, so not an owner per the header rule).
+  ["HOME","Hub","R","Home fallback for anchor","OS home",""],
+  ["USERPROFILE","Hub","R","Windows home fallback for anchor","OS home",""],
+  // Usage-analytics parsers (domains/usage-analytics/src/server) run IN the hub —
+  // mounted at router.ts `usageAnalytics`. They honour each agent CLI's OWN
+  // log-location vars, so these are hub inputs you set to relocate what it scans.
+  ["CLAUDE_CONFIG_DIR","Hub","R","Claude Code config root(s) the usage parser scans for session logs (comma-separated; wins over both defaults)","~/.claude/projects",""],
+  ["XDG_CONFIG_HOME","Hub","R","Second Claude log root the usage parser also scans (<config>/claude/projects)","~/.config",""],
+  ["OPENCODE_DATA_DIR","Hub","R","OpenCode storage root the usage parser reads token counts from","platform data dir",""],
+  ["XDG_DATA_HOME","Hub","R","Linux OpenCode data root when OPENCODE_DATA_DIR is unset","~/.local/share",""],
+  ["QWEN_CONFIG_DIR","Hub","R","Qwen config root the usage parser scans for projects","~/.qwen",""],
+  // Shell resolution + PATH enrichment run in hub-hosted code (terminal/src/server
+  // pty-manager + shell-env), so both are hub inputs even though the effect shows up
+  // in a spawned PTY. NOT listed: USER/USERNAME (read only to re-set verbatim in the
+  // child — pass-through) and PATH itself (the enriched value REPLACES the inherited
+  // one; you set the shell's rc files, not PATH, to change it).
+  ["SHELL","Hub","R","The shell every PTY/process spawn uses (resolveUserShell: SHELL → userInfo().shell → platform default) and the one probed for the enriched PATH","/bin/zsh (macOS)",""],
+  ["COMSPEC","Hub","R","Windows-only last-resort shell when SHELL and userInfo() both fail","cmd.exe",""],
+
+  // ---- Runner ----
+  ["SLAYZONE_HUB_ADDRESS","Runner","R","The address it DIALS — authority only; ws(s)://<addr>/runners is composed from it + MODE. Highest precedence over config.json/join token","from config.json / join token",""],
+  ["SLAYZONE_HUB_JOIN_TOKEN","Runner","R","Enrollment token (embeds hub url + cert pin)","none post-enroll",""],
+  ["SLAYZONE_MODE","Runner","R","remote → force wss:// (reject plaintext ws://)","local",""],
+  ["SLAYZONE_SUPERVISED","Runner","R","1 = host-spawned: skip cwd-seed, config.json prompts; name → local-runner, path-jail → [homedir()]","unset",""],
+  ["SLAYZONE_ROOT","Runner","R+S","Anchor; standalone seeds to cwd(). Creds at <ROOT>/runners, config at <ROOT>/config.json","cwd()",""],
+  ["SLAYZONE_NONINTERACTIVE","Runner","R","Disable first-run setup prompt","prompt on TTY",""],
+  ["SLAYZONE_AGENT_HOOK_URL","Runner","S","Overrides the hub's value with the runner's OWN loopback relay at every agent spawn","runner loopback",""],
+  ["HOME","Runner","R","Home fallback for anchor","OS home",""],
+  ["USERPROFILE","Runner","R","Windows home fallback for anchor","OS home",""],
+  ["WORKTREE_PATH","Runner","S","→ .slay/worktree-setup.sh child: worktree dir","—",""],
+  ["REPO_PATH","Runner","S","→ .slay/worktree-setup.sh child: repo dir","—",""],
+  ["SOURCE_BRANCH","Runner","S","→ .slay/worktree-setup.sh child: source branch","—",""],
+
+  // ---- Agent = the agent process itself + the `notify.sh` hook script it runs
+  //      (shared/hooks/src/notify.sh). Injected into the agent PTY by
+  //      Electron/Hub/Runner; the agent never reads them back. Everything here is
+  //      re-added by the per-spawn overlay AFTER sanitizeSpawnEnv strips the
+  //      inherited copy, so task B never sees task A's. ----
+  ["SLAYZONE_AGENT_HOOK_URL","Agent","R","URL notify.sh POSTs lifecycle hooks to; local = app loopback, remote = runner's relay","—",""],
+  ["SLAYZONE_AGENT_ID","Agent","R","Which agent fired the hook (claude-code/codex/gemini/…); notify.sh exits 0 without it","—",""],
+  ["SLAYZONE_AGENT_HOOK_CONTEXT","Agent","R","Opaque identity JSON blob (taskId/session/project/agentId/releaseChannel) notify.sh forwards verbatim as `ctx`. v4 name; the app writes ONLY this one","—",""],
+  ["SLAYZONE_HOOK_CONTEXT","Agent","R","RETIRED pre-v4 name of the above, still read by notify.sh as `${NEW:-$OLD}` — one shared script serves every release channel, so an older app must keep feeding it. Unmanifested on purpose (stripped; the old-name value rides the old app's own overlay)","—",""],
+  ["SLAYZONE_TASK_ID","Agent","R","Presence gate for the OpenCode plugin (shared/hooks/src/opencode-plugin.js): unset ⇒ the plugin no-ops, so no lifecycle events reach notify.sh at all. The plugin never reads the value","—",""],
+
+  // ---- CLI = the `slay` binary. A SIBLING reader of the same PTY env, not the
+  //      agent: the agent shells out to `slay`, so the two share one env but read
+  //      DIFFERENT halves of it (the agent only needs hook wiring; the CLI needs
+  //      the DB anchor + identity defaults + optional hub target). Split out
+  //      because "where do I set this to take effect" differs — a var the CLI
+  //      alone reads is set for the terminal, not for the hook script. ----
+  ["SLAYZONE_ROOT","CLI","R","State anchor — derives <ROOT>/storage, so `slay` opens the SAME DB as the app that spawned it","~/.slayzone",""],
+  ["SLAYZONE_DEV","CLI","R","Picks the dev vs prod DB filename (equivalent to `slay --dev`, which just sets this)","prod",""],
+  ["SLAYZONE_TASK_ID","CLI","R","Default task for every `slay tasks …` (absent for a pooled/taskless agent)","—",""],
+  ["SLAYZONE_SESSION_ID","CLI","R","Fallback task resolution — looks up the task bound to this session when TASK_ID is unset","—",""],
+  ["SLAYZONE_PROJECT_ID","CLI","R","Default project for project-scoped commands","—",""],
+  ["SLAYZONE_AGENT_ID","CLI","R","Tags CLI-authored writes with the agent that made them (author attribution)","—",""],
+  ["SLAYZONE_HUB_ADDRESS","CLI","R","Hub authority to dial instead of the local app — authority only, http(s) from MODE; invalid = exit 1. NOT inherited (stripped at spawn), so in a task PTY the CLI reads settings.server_port instead","— (DB is the source)",""],
+  ["SLAYZONE_HUB_TOKEN","CLI","R","Bearer sent on every hub request; wins over hub.json's token (set-but-empty = deliberately no token). Now actually ENFORCED — a remote hub verifies it on /trpc + /api/* + /mcp alike. Never injected into a PTY (the runner deletes it)","hub.json token",""],
+  ["SLAYZONE_MODE","CLI","R","Derives the hub scheme for HUB_ADDRESS (local → http, remote → https)","local",""],
+  ["XDG_CONFIG_HOME","CLI","R","Linux legacy DB fallback (<config>/slayzone) when <ROOT>/storage does not exist yet","~/.config",""],
+  // Same anchor fallback the Hub/Runner rows record: the CLI's DB path runs
+  // through getStorageDir → getSlayzoneHomeDir, which falls back to $HOME when
+  // SLAYZONE_ROOT is unset. Listed for all three, since all three derive it.
+  ["HOME","CLI","R","Home fallback for anchor","OS home",""],
+  ["USERPROFILE","CLI","R","Windows home fallback for anchor","OS home",""],
+];
+
+// Spawn scope per variable, straight from platform/src/env-manifest.ts.
+// sanitizeSpawnEnv keeps `global` + the user's own env; it strips infra/secret/
+// identity, every unmanifested SLAYZONE_* (fail closed) and NON_PREFIXED_INFRA.
+const SCOPES = {
+  SLAYZONE_HUB_TOKEN:'secret', SLAYZONE_HUB_AUTH_SECRET:'secret',
+  SLAYZONE_HUB_JOIN_TOKEN:'secret',
+  SLAYZONE_HUB_ADDRESS:'infra', SLAYZONE_HUB_PUBLIC_ADDRESS:'infra',
+  SLAYZONE_DESKTOP_BRIDGE_ADDRESS:'infra', SLAYZONE_MODE:'infra', SLAYZONE_SUPERVISED:'infra',
+  SLAYZONE_USER_DATA_DIR:'infra',
+  SLAYZONE_SIDECAR_HOT_RESTART:'infra', SLAYZONE_BOOT_LOG_PATH:'infra',
+  SLAYZONE_DEBUG_BOOT:'infra', SLAYZONE_REGISTER_DEV_PROTOCOL:'infra',
+  SLAYZONE_NONINTERACTIVE:'infra', SLAYZONE_E2E_ALLOW_RUNNER:'infra',
+  SLAYZONE_E2E_INSTALL_HOOKS:'infra',
+  SLAYZONE_CLAUDE_SETTINGS_PATH:'infra', SLAYZONE_GEMINI_SETTINGS_PATH:'infra',
+  SLAYZONE_CODEX_HOOKS_PATH:'infra', SLAYZONE_ANTIGRAVITY_HOOKS_PATH:'infra',
+  SLAYZONE_OPENCODE_PLUGIN_PATH:'infra',
+  SLAYZONE_TASK_ID:'identity', SLAYZONE_PROJECT_ID:'identity',
+  SLAYZONE_SESSION_ID:'identity', SLAYZONE_AGENT_ID:'identity',
+  SLAYZONE_AGENT_HOOK_URL:'identity', SLAYZONE_AGENT_HOOK_CONTEXT:'identity',
+  // SLAYZONE_HOOK_CONTEXT is deliberately absent → renders as `unlisted`.
+  SLAYZONE_RELEASE_CHANNEL:'global', SLAYZONE_ROOT:'global', SLAYZONE_DEV:'global',
+  // Non-prefixed but still SlayZone infra (NON_PREFIXED_INFRA) — also stripped.
+  ELECTRON_RUN_AS_NODE:'infra', NODE_PATH:'infra', PLAYWRIGHT:'infra'
+};
+
+const APP_CLASS = { Electron:"app-electron", Chromium:"app-chromium", Hub:"app-hub", Runner:"app-runner", Agent:"app-agent", CLI:"app-cli" };
+// Single letters where unambiguous; "CLI" spelled out because C is taken by
+// Chromium and A by Agent (.pill.dot is a capsule, so a 3-char label fits).
+const APP_LETTER = { Electron:"E", Chromium:"C", Hub:"H", Runner:"R", Agent:"A", CLI:"CLI" };
+const rowsEl = document.getElementById('rows');
+const headEl = document.getElementById('head');
+const countEl = document.getElementById('count');
+const searchEl = document.getElementById('search');
+const emptyEl = document.getElementById('empty');
+let sortKey = null, sortDir = 1;
+let distinct = false; // "Distinct": show only vars read by EXACTLY the selected apps
+
+// The single column definition — header AND body cells both derive from it, so a
+// toggled column can never leave a stale <th>/<td> mismatch. `variable` has no
+// chip: hiding it would leave nameless rows, so it is structurally always on.
+// Filtering + search stay over the FULL row (a hidden column still matches), so
+// hiding is purely about what you read, never about what you find.
+const COLUMNS = [
+  { key:'variable', label:'Variable', cls:'var', always:true,
+    cell:(v,q)=>hl(v.variable,q)+tagPill(v.tag) },
+  { key:'readby', label:'Used by', cls:'readby',
+    cell:v=>v.readers.length ? dotPills(v.readers) : '<span class="none-dash">—</span>' },
+  { key:'scope', label:'Spawn', cls:'',
+    title:'env-manifest.ts scope: what survives sanitizeSpawnEnv into a user terminal / agent PTY',
+    cell:v=>scopePill(v.scope) },
+  { key:'purpose', label:'Purpose', cls:'purpose', cell:(v,q)=>hl(v.purpose,q) },
+  { key:'def', label:'Default', cls:'def', cell:(v,q)=>hl(v.def,q) }
+];
+// Visible set seeded from the chips' initial `active` state (Purpose starts off).
+const visibleCols = new Set(
+  COLUMNS.filter(c => c.always ||
+    document.querySelector('#colgroup .chip[data-col="'+c.key+'"]')?.classList.contains('active')
+  ).map(c => c.key)
+);
+
+// Only the processes you configure by injecting env are relevant here — the four
+// things you hand an environment to: the hub, a runner, an agent PTY, and the
+// `slay` CLI inside it. Desktop clients (Electron/Chromium) compute defaults you
+// can override, but you don't "send them" a variable — so they alone are excluded
+// from the "Used by" column, and any var used ONLY by them is dropped entirely.
+const APP_ORDER = ['Hub','Runner','Agent','CLI'];
+// One entry per distinct variable name. Reducing DATA (which is per-var-per-app):
+//   users = the APP_ORDER processes that READ it as input (R/S includes 'R')
+//   purpose/def = merged across rows; tag = first non-empty.
+const VARS = (() => {
+  const byVar = new Map();
+  for(const [variable, app, rs, purpose, def, tag] of DATA){
+    if(!byVar.has(variable)) byVar.set(variable, { variable, users:new Set(), purposes:[], defs:[], tag:'' });
+    const e = byVar.get(variable);
+    if(rs.includes('R') && APP_ORDER.includes(app)) e.users.add(app);
+    // Keep the app with each purpose: one var legitimately means different
+    // things per app (the hub BINDS SLAYZONE_HUB_ADDRESS, the runner DIALS it),
+    // so a merged cell must say which app each sentence belongs to.
+    if(purpose) e.purposes.push([app, purpose]);
+    if(def) e.defs.push(def);
+    if(!e.tag && tag) e.tag = tag;
+  }
+  const uniq = a => [...new Set(a)].join(' · ');
+  // Label each purpose with its app when a var has more than one distinct
+  // purpose; a single-purpose var needs no prefix.
+  const mergePurposes = pairs => {
+    const seen = new Map();
+    for(const [app, purpose] of pairs){
+      if(!seen.has(purpose)) seen.set(purpose, []);
+      seen.get(purpose).push(app);
+    }
+    if(seen.size <= 1) return [...seen.keys()][0] ?? '';
+    return [...seen].map(([purpose, apps]) => apps.join('/')+': '+purpose).join('  ·  ');
+  };
+  return [...byVar.values()]
+    .map(e => ({
+      variable: e.variable,
+      readers: APP_ORDER.filter(a => e.users.has(a)),
+      // Spawn scope: an explicit manifest tag, else 'unlisted' for a SLAYZONE_*
+      // the manifest doesn't name (stripped anyway, fail closed), else 'user'
+      // for a plain non-SlayZone var (inherited verbatim).
+      scope: SCOPES[e.variable] ?? (e.variable.startsWith('SLAYZONE_') ? 'unlisted' : 'user'),
+      purpose: mergePurposes(e.purposes),
+      def: uniq(e.defs),
+      tag: e.tag
+    }))
+    .filter(v => v.readers.length > 0); // drop vars no APP_ORDER process uses
+})();
+// Each group holds a Set of selected values; a value present = included.
+const filters = { app:new Set(), tag:new Set(), prefix:new Set(), scope:new Set() };
+document.querySelectorAll('.filtergroup[data-group]').forEach(g=>{
+  const group = g.dataset.group;
+  g.querySelectorAll('.chip[data-val].active').forEach(c => filters[group].add(c.dataset.val));
+});
+
+function esc(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function hl(s, q){
+  const e = esc(s);
+  if(!q) return e;
+  try { return e.replace(new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>'); }
+  catch(_){ return e; }
+}
+function tagPill(tag){
+  return tag ? '<span class="tag tag-'+tag+'">'+tag+'</span>' : '';
+}
+
+function matches(v){
+  // App filter now means "read by": keep vars read by at least one selected app.
+  const anyReaderSelected = v.readers.some(a => filters.app.has(a));
+  if(!anyReaderSelected) return false;
+  // Distinct: the var's reader-set must EQUAL the selected set (read by exactly those).
+  if(distinct){
+    if(v.readers.length !== filters.app.size) return false;
+    for(const a of v.readers){ if(!filters.app.has(a)) return false; }
+  }
+  const tagKey = v.tag === '' ? 'prod' : v.tag;
+  if(!filters.tag.has(tagKey)) return false;
+  const prefKey = v.variable.startsWith('SLAYZONE_') ? 'slayzone' : 'other';
+  if(!filters.prefix.has(prefKey)) return false;
+  // 'unlisted' + 'user' both fall under the "other" spawn chip.
+  const scopeKey = ['global','infra','secret','identity'].includes(v.scope) ? v.scope : 'other';
+  if(!filters.scope.has(scopeKey)) return false;
+  const q = searchEl.value.trim().toLowerCase();
+  if(q){
+    const hay = (v.variable+' '+v.readers.join(' ')+' '+v.scope+' '+v.purpose+' '+v.def).toLowerCase();
+    if(!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+const dotPills = list => list.map(a=>'<span class="pill dot '+APP_CLASS[a]+'" title="'+a+'">'+APP_LETTER[a]+'</span>').join(' ');
+
+const SCOPE_TITLE = {
+  global: 'global — KEPT verbatim in a spawned terminal / agent PTY',
+  infra: 'infra — STRIPPED: SlayZone wiring a terminal must not reinterpret',
+  secret: 'secret — STRIPPED: credential, never reaches a terminal',
+  identity: 'identity — STRIPPED from the inherited base; the per-spawn overlay re-adds the correct value',
+  unlisted: 'not in the manifest — STRIPPED by the fail-closed default',
+  user: "plain env var, not SlayZone's — inherited verbatim"
+};
+const SCOPE_LABEL = { global:'kept', unlisted:'unlisted', user:'—' };
+const scopePill = s =>
+  '<span class="scope scope-'+s+'" title="'+SCOPE_TITLE[s]+'">'+(SCOPE_LABEL[s] ?? s)+'</span>';
+
+function render(){
+  const q = searchEl.value.trim();
+  const cols = COLUMNS.filter(c => visibleCols.has(c.key));
+  // The sort stays applied even when its column is hidden — toggling visibility
+  // must never silently reorder the rows you were looking at.
+  let display = VARS.filter(matches);
+  if(sortKey !== null){
+    display = display.slice().sort((a,b)=>{
+      const pick = v => sortKey==='readby' ? v.readers.join(',') : v[sortKey];
+      const x=(pick(a)||'').toLowerCase(), y=(pick(b)||'').toLowerCase();
+      return x<y ? -sortDir : x>y ? sortDir : 0;
+    });
+  }
+  headEl.innerHTML = '<tr>' + cols.map(c =>
+    '<th data-key="'+c.key+'"'
+    + (c.title ? ' title="'+c.title+'"' : '')
+    + (sortKey === c.key ? ' class="sorted"' : '') + '>'
+    + c.label
+    + '<span class="arrow">'+(sortKey === c.key ? (sortDir>0 ? '▲' : '▼') : '▲▼')+'</span>'
+    + '</th>'
+  ).join('') + '</tr>';
+  rowsEl.innerHTML = display.map(v =>
+    '<tr>' + cols.map(c =>
+      '<td'+(c.cls ? ' class="'+c.cls+'"' : '')+'>'+c.cell(v,q)+'</td>'
+    ).join('') + '</tr>'
+  ).join('');
+  emptyEl.style.display = display.length ? 'none' : 'block';
+  countEl.textContent = display.length + ' variables';
+}
+
+// Delegated: the <th>s are re-created on every render (column toggles), so a
+// per-element listener would be lost the first time a column is hidden.
+headEl.addEventListener('click', e=>{
+  const th = e.target.closest('th[data-key]');
+  if(!th) return;
+  const key = th.dataset.key;
+  if(sortKey === key){ sortDir *= -1; } else { sortKey = key; sortDir = 1; }
+  render();
+});
+
+document.querySelectorAll('#colgroup .chip[data-col]').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    const key = chip.dataset.col;
+    // Keep at least one toggleable column on: an all-off table is just a list of
+    // names with four dead chips and no way to tell what got hidden.
+    if(visibleCols.has(key)){
+      if(visibleCols.size <= 2) return;
+      visibleCols.delete(key); chip.classList.remove('active');
+    } else {
+      visibleCols.add(key); chip.classList.add('active');
+    }
+    render();
+  });
+});
+// Label click toggles all toggleable columns on / off (off = leave the last one).
+document.querySelector('#colgroup .lbl').addEventListener('click', ()=>{
+  const chips = [...document.querySelectorAll('#colgroup .chip[data-col]')];
+  const allOn = chips.every(c => visibleCols.has(c.dataset.col));
+  chips.forEach((c,i)=>{
+    const on = allOn ? i === 0 : true; // all-off collapses to the first column
+    if(on) visibleCols.add(c.dataset.col); else visibleCols.delete(c.dataset.col);
+    c.classList.toggle('active', on);
+  });
+  render();
+});
+
+document.querySelectorAll('.filtergroup[data-group]').forEach(g=>{
+  const group = g.dataset.group;
+  const chips = [...g.querySelectorAll('.chip[data-val]')];
+  chips.forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const val = chip.dataset.val;
+      if(filters[group].has(val)){ filters[group].delete(val); chip.classList.remove('active'); }
+      else { filters[group].add(val); chip.classList.add('active'); }
+      render();
+    });
+  });
+  // Click the group label to toggle all on / all off.
+  g.querySelector('.lbl').addEventListener('click', ()=>{
+    const allOn = chips.every(c => filters[group].has(c.dataset.val));
+    filters[group].clear();
+    chips.forEach(c=>{
+      if(allOn){ c.classList.remove('active'); }
+      else { filters[group].add(c.dataset.val); c.classList.add('active'); }
+    });
+    render();
+  });
+});
+
+const distinctToggle = document.getElementById('distinctToggle');
+distinctToggle.addEventListener('click', ()=>{
+  distinct = !distinct;
+  distinctToggle.classList.toggle('active', distinct);
+  render();
+});
+
+searchEl.addEventListener('input', render);
+document.addEventListener('keydown', e=>{
+  if(e.key === '/' && document.activeElement !== searchEl){ e.preventDefault(); searchEl.focus(); }
+  if(e.key === 'Escape'){ searchEl.value=''; searchEl.blur(); render(); }
+});
+
+render();
+</script>
+</body>
+</html>
