@@ -91,7 +91,7 @@ Headless SlayZone hub: owns the SQLite DB, tRPC/REST routers, auth, and the
 runner gateway that runners dial into.
 
     SLAYZONE_DB_PATH=~/.slayzone/hub.sqlite \
-      SLAYZONE_RUNNER_TRANSPORT_SECRET=$(openssl rand -hex 32) slayzone-hub
+      SLAYZONE_HUB_AUTH_SECRET=$(openssl rand -hex 32) slayzone-hub
 
 ## ⚠️ Security
 
@@ -149,7 +149,7 @@ SMOKE_SECRET="$(openssl rand -hex 32)"
 # app. HUB_ROOT anchors the hub's config + identity + auth DB in the tmp tree.
 SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
        -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
-       -u SLAYZONE_RUNNER_TRANSPORT_SECRET
+       -u SLAYZONE_HUB_AUTH_SECRET
        -u SLAYZONE_HUB_JOIN_TOKEN -u SLAYZONE_RUNNER_JOIN_TOKEN
        -u SLAYZONE_RUNNER_CREDENTIALS_DIR
        -u ELECTRON_RUN_AS_NODE)
@@ -160,7 +160,7 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
 HUB_PORT=47811
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_ADDRESS="127.0.0.1:$HUB_PORT" \
-  SLAYZONE_RUNNER_TRANSPORT_SECRET="$SMOKE_SECRET" \
+  SLAYZONE_HUB_AUTH_SECRET="$SMOKE_SECRET" \
   node "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
 HPID=$!
 

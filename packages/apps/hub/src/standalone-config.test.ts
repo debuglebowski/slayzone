@@ -1,7 +1,7 @@
 /**
  * Hub standalone-config resolve — applyStandaloneHubConfig folds
  * ~/.slayzone/config.json into process.env with env>file>default precedence, and
- * resolves/persists the runner secret (security fix). Supervised = no-op (no file
+ * resolves/persists the hub-auth secret (security fix). Supervised = no-op (no file
  * read/write).
  *
  * Pure Node (real temp home dir via SLAYZONE_ROOT, no native deps) → runs
@@ -13,7 +13,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  DEV_RUNNER_TRANSPORT_SECRET,
+  DEV_HUB_AUTH_SECRET,
   getSlayzoneConfigPath,
   loadSlayzoneConfig,
   saveSlayzoneConfig
@@ -45,7 +45,7 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 const ENV_KEYS = [
   'SLAYZONE_SUPERVISED',
   'SLAYZONE_ROOT',
-  'SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET',
+  'SLAYZONE_HUB_AUTH_SECRET',
   'SLAYZONE_DB_PATH',
   'SLAYZONE_HUB_ADDRESS',
   'SLAYZONE_HUB_PUBLIC_ADDRESS'
@@ -121,24 +121,24 @@ test('env WINS over config.json (does not overwrite a set env)', () => {
   })
 })
 
-test('no config + no env ⇒ only the generated runner secret is set (defaults elsewhere)', () => {
+test('no config + no env ⇒ only the generated hub-auth secret is set (defaults elsewhere)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
     assert(process.env.SLAYZONE_DB_PATH === undefined, 'no dbPath default here (db.ts handles it)')
     assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'no address default here')
-    assert(!!process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, 'runner secret always resolved')
+    assert(!!process.env.SLAYZONE_HUB_AUTH_SECRET, 'hub-auth secret always resolved')
   })
 })
 
-console.log('\nstandalone-config: runner secret (security fix)')
+console.log('\nstandalone-config: hub-auth secret (security fix)')
 console.log('─'.repeat(40))
 
-test('generates + persists a runner secret into config.json (!= dev constant)', () => {
+test('generates + persists a hub-auth secret into config.json (!= dev constant)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    const secret = process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET
+    const secret = process.env.SLAYZONE_HUB_AUTH_SECRET
     assert(!!secret, 'env set')
-    assert(secret !== DEV_RUNNER_TRANSPORT_SECRET, 'not the shared dev constant')
+    assert(secret !== DEV_HUB_AUTH_SECRET, 'not the shared dev constant')
     assertEq(secret!.length, 64, '256-bit hex')
     // persisted into the temp config.json
     assertEq(loadSlayzoneConfig().runnerTransportSecret, secret, 'persisted')
@@ -148,18 +148,18 @@ test('generates + persists a runner secret into config.json (!= dev constant)', 
 test('second boot reuses the SAME persisted secret (stable)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    const first = process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET
+    const first = process.env.SLAYZONE_HUB_AUTH_SECRET
     // simulate a fresh process: clear the env, keep the file
-    delete process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET
+    delete process.env.SLAYZONE_HUB_AUTH_SECRET
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, first, 'same secret across boots')
+    assertEq(process.env.SLAYZONE_HUB_AUTH_SECRET, first, 'same secret across boots')
   })
 })
 
-test('env SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET wins + no config write', () => {
-  withIsolatedEnv({ SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'ci-pinned-secret' }, () => {
+test('env SLAYZONE_HUB_AUTH_SECRET wins + no config write', () => {
+  withIsolatedEnv({ SLAYZONE_HUB_AUTH_SECRET: 'ci-pinned-secret' }, () => {
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, 'ci-pinned-secret', 'env secret kept')
+    assertEq(process.env.SLAYZONE_HUB_AUTH_SECRET, 'ci-pinned-secret', 'env secret kept')
     // config.json should NOT have been created (no generate/persist path taken)
     assert(!existsSync(getSlayzoneConfigPath()), 'no config file written when env pins the secret')
   })
@@ -169,16 +169,16 @@ test('config.json runnerTransportSecret used (env unset) and NOT regenerated', (
   withIsolatedEnv({}, () => {
     saveSlayzoneConfig({ runnerTransportSecret: 'from-config-file' })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET, 'from-config-file', 'config secret used')
+    assertEq(process.env.SLAYZONE_HUB_AUTH_SECRET, 'from-config-file', 'config secret used')
   })
 })
 
-test('EMPTY env SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET counts as absent ⇒ generates (no misleading throw)', () => {
-  withIsolatedEnv({ SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: '' }, () => {
+test('EMPTY env SLAYZONE_HUB_AUTH_SECRET counts as absent ⇒ generates (no misleading throw)', () => {
+  withIsolatedEnv({ SLAYZONE_HUB_AUTH_SECRET: '' }, () => {
     applyStandaloneHubConfig()
-    const secret = process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET
+    const secret = process.env.SLAYZONE_HUB_AUTH_SECRET
     assert(!!secret, 'a real secret was generated (empty treated as absent)')
-    assert(secret !== DEV_RUNNER_TRANSPORT_SECRET, 'not the dev constant')
+    assert(secret !== DEV_HUB_AUTH_SECRET, 'not the dev constant')
     assertEq(secret!.length, 64, '256-bit hex generated')
     assertEq(loadSlayzoneConfig().runnerTransportSecret, secret, 'persisted')
   })
@@ -190,7 +190,7 @@ console.log('─'.repeat(40))
 test('supervised does NOT read or write config.json (no file created, no env seeded)', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET === undefined, 'no secret seeded when supervised')
+    assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'no secret seeded when supervised')
     assert(!existsSync(getSlayzoneConfigPath()), 'no config file written when supervised')
   })
 })
@@ -200,7 +200,7 @@ test('supervised IGNORES an existing config.json entirely', () => {
     saveSlayzoneConfig({ address: '0.0.0.0:8080', runnerTransportSecret: 'should-be-ignored' })
     applyStandaloneHubConfig()
     assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'ignored address')
-    assert(process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET === undefined, 'ignored runnerTransportSecret')
+    assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'ignored runnerTransportSecret')
   })
 })
 

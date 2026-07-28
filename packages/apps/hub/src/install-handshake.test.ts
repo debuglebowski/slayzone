@@ -193,7 +193,7 @@ async function main(): Promise<void> {
       SLAYZONE_ROOT: hubRootDir,
       // Bind side of the ONE address var. `:0` = let the OS assign the port.
       SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
-      SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: secret
+      SLAYZONE_HUB_AUTH_SECRET: secret
     })
 
     // Parse the hub's listening line: "listening on http://127.0.0.1:PORT (data=… db=…)".

@@ -212,9 +212,9 @@ export function composeServer(opts: {
   // per-task agent-hook bearer is gone — a runner-routed hook posts to the
   // runner's own loopback relay, so no per-task token is minted or verified.)
   //
-  // SECURITY SEAM (runner-secret hardening): a STANDALONE boot resolves this in
-  // bin.ts (applyStandaloneHubConfig → env SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET > config.json
-  // runnerTransportSecret > generated+persisted 256-bit secret) and sets the env BEFORE
+  // SECURITY SEAM (hub-auth-secret hardening): a STANDALONE boot resolves this in
+  // bin.ts (applyStandaloneHubConfig → env SLAYZONE_HUB_AUTH_SECRET > config.json
+  // hubAuthSecret > generated+persisted 256-bit secret) and sets the env BEFORE
   // composeServer runs. So in standalone the env is ALWAYS present and NEVER the
   // shared dev constant — a per-install unique secret means minted per-task
   // tokens can't be forged across installs (the npm-published bug). We assert
@@ -222,17 +222,17 @@ export function composeServer(opts: {
   // (Electron host) keeps the historical env-or-dev-constant default untouched:
   // the host controls the env, config.json is never consulted, and a dev/test
   // boot without the env still works exactly as before.
-  const DEV_RUNNER_TRANSPORT_SECRET = 'slayzone-dev-runner-secret'
-  if (opts.standalone && !process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET) {
+  const DEV_HUB_AUTH_SECRET = 'slayzone-dev-runner-secret'
+  if (opts.standalone && !process.env.SLAYZONE_HUB_AUTH_SECRET) {
     // bin.ts must have seeded this; a standalone boot that reached composeServer
     // without it means the resolve step was skipped — fail loud instead of
     // signing tokens with a shared, forgeable constant.
     throw new Error(
-      '[slayzone-hub] standalone boot reached composeServer without SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET — ' +
+      '[slayzone-hub] standalone boot reached composeServer without SLAYZONE_HUB_AUTH_SECRET — ' +
         'applyStandaloneHubConfig() must run first (bin.ts)'
     )
   }
-  const runnerTransportSecret = process.env.SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET ?? DEV_RUNNER_TRANSPORT_SECRET
+  const hubAuthSecret = process.env.SLAYZONE_HUB_AUTH_SECRET ?? DEV_HUB_AUTH_SECRET
   // Populated by the async runner init (createHubAuth is async — migrations); a
   // later unit reads these after `runnersReady` to mount the gateway in server.ts.
   let runnerGatewayRef: HubRunnerGateway | null = null
@@ -927,7 +927,7 @@ export function composeServer(opts: {
       // never needs an operator override — the SLAYZONE_RUNNER_TRANSPORT_BASE_URL
       // env knob was inlined.
       baseURL: 'http://127.0.0.1:8788',
-      secret: runnerTransportSecret
+      secret: hubAuthSecret
     })
     hubAuthRef = hubAuth
     // Identity-based local-runner dedup (Wave3.5-D5): tell the auth adapters

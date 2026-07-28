@@ -473,7 +473,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
         // at the DERIVED <ROOT>/storage/slayzone.sqlite (same dir the child opens).
         SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
         SLAYZONE_ROOT: dir,
-        SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'seed-only-secret-at-least-32-chars-long'
+        SLAYZONE_HUB_AUTH_SECRET: 'seed-only-secret-at-least-32-chars-long'
       },
       stdio: ['pipe', 'pipe', 'pipe']
     })

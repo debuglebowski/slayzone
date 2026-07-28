@@ -1,6 +1,6 @@
 /**
  * Shared SlayZone config file — loadSlayzoneConfig / save / update /
- * ensureRunnerTransportSecret. Pure Node (real temp files, no native deps) → runs under
+ * ensureHubAuthSecret. Pure Node (real temp files, no native deps) → runs under
  * plain `npx tsx`.
  *
  * Run with: npx tsx packages/shared/platform/src/slayzone-config.test.ts
@@ -9,8 +9,8 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  DEV_RUNNER_TRANSPORT_SECRET,
-  ensureRunnerTransportSecret,
+  DEV_HUB_AUTH_SECRET,
+  ensureHubAuthSecret,
   getSlayzoneConfigPath,
   loadSlayzoneConfig,
   saveSlayzoneConfig,
@@ -191,15 +191,15 @@ test('update ignores undefined patch values (does not erase)', () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-console.log('\nslayzone-config: ensureRunnerTransportSecret')
+console.log('\nslayzone-config: ensureHubAuthSecret')
 console.log('─'.repeat(40))
 
 test('generates + persists a secret when absent (0600, != dev constant)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  const secret = ensureRunnerTransportSecret(p)
+  const secret = ensureHubAuthSecret(p)
   assert(secret.length === 64, '256-bit hex = 64 chars')
-  assert(secret !== DEV_RUNNER_TRANSPORT_SECRET, 'not the shared dev constant')
+  assert(secret !== DEV_HUB_AUTH_SECRET, 'not the shared dev constant')
   assert(/^[0-9a-f]{64}$/.test(secret), 'lowercase hex')
   // persisted
   const onDisk = loadSlayzoneConfig(p)
@@ -213,8 +213,8 @@ test('generates + persists a secret when absent (0600, != dev constant)', () => 
 test('stable across calls (reuses persisted secret, no re-generate)', () => {
   const dir = tmp()
   const p = join(dir, 'config.json')
-  const s1 = ensureRunnerTransportSecret(p)
-  const s2 = ensureRunnerTransportSecret(p)
+  const s1 = ensureHubAuthSecret(p)
+  const s2 = ensureHubAuthSecret(p)
   assertEq(s1, s2, 'same secret on second call')
   rmSync(dir, { recursive: true, force: true })
 })
@@ -223,21 +223,21 @@ test('honors a pre-existing config runnerTransportSecret (does not overwrite)', 
   const dir = tmp()
   const p = join(dir, 'config.json')
   saveSlayzoneConfig({ runnerTransportSecret: 'preset-secret-value' }, p)
-  const secret = ensureRunnerTransportSecret(p)
+  const secret = ensureHubAuthSecret(p)
   assertEq(secret, 'preset-secret-value', 'returned the pre-existing secret')
   rmSync(dir, { recursive: true, force: true })
 })
 
 test('concurrent fresh boots CONVERGE on one secret (atomic create-if-absent)', () => {
   // Simulate two hubs racing against the SAME fresh config.json. Both call
-  // ensureRunnerTransportSecret with no file present; only one wins the `wx` create, the
+  // ensureHubAuthSecret with no file present; only one wins the `wx` create, the
   // other re-reads the winner's secret → both return the SAME value, and the
   // on-disk secret equals it. (Sequential calls here still exercise the create
   // + read-back convergence path; the second call hits the file the first wrote.)
   const dir = tmp()
   const p = join(dir, 'config.json')
-  const a = ensureRunnerTransportSecret(p)
-  const b = ensureRunnerTransportSecret(p)
+  const a = ensureHubAuthSecret(p)
+  const b = ensureHubAuthSecret(p)
   assertEq(a, b, 'both boots converge on ONE secret')
   assertEq(loadSlayzoneConfig(p).runnerTransportSecret, a, 'on-disk secret matches')
   rmSync(dir, { recursive: true, force: true })
@@ -245,11 +245,11 @@ test('concurrent fresh boots CONVERGE on one secret (atomic create-if-absent)', 
 
 test('preserves other keys when adding a secret to a secret-less config', () => {
   // A pre-existing config.json WITH other keys but WITHOUT a secret must keep
-  // those keys after ensureRunnerTransportSecret merges the generated secret in.
+  // those keys after ensureHubAuthSecret merges the generated secret in.
   const dir = tmp()
   const p = join(dir, 'config.json')
   saveSlayzoneConfig({ port: 9, hubUrl: 'wss://a/runners' }, p)
-  const secret = ensureRunnerTransportSecret(p)
+  const secret = ensureHubAuthSecret(p)
   const onDisk = loadSlayzoneConfig(p)
   assertEq(onDisk.runnerTransportSecret, secret, 'secret added')
   assertEq(onDisk.port, 9, 'kept port')

@@ -57,7 +57,7 @@ strip `infra`+`secret`+`identity`+**any unmanifested `SLAYZONE_*`** (fail closed
 
 | Scope | Vars |
 |---|---|
-| **secret** (strip) | `SLAYZONE_HUB_TOKEN`, `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`, `SLAYZONE_HUB_JOIN_TOKEN` (§7 Q1 — replaces `SLAYZONE_RUNNER_JOIN_TOKEN`, which stays manifested as a read-only deprecated alias), `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` |
+| **secret** (strip) | `SLAYZONE_HUB_TOKEN`, `SLAYZONE_HUB_AUTH_SECRET` (§7 Q2 — replaces `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`; the `config.json` key stays `runnerTransportSecret`), `SLAYZONE_HUB_JOIN_TOKEN` (§7 Q1 — replaces `SLAYZONE_RUNNER_JOIN_TOKEN`, which stays manifested as a read-only deprecated alias), `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` |
 | **infra** (strip) | `SLAYZONE_HUB_ADDRESS`* (§5 — replaces `SLAYZONE_HUB_URL` **+ `_HOST` + `_PORT`**), `SLAYZONE_HUB_PUBLIC_ADDRESS` (§5 — replaces `SLAYZONE_HUB_PUBLIC_URL`), `SLAYZONE_DESKTOP_BRIDGE_ADDRESS` (§2+§5 — replaces `SLAYZONE_BRIDGE_URL`), `SLAYZONE_MODE`, `SLAYZONE_SUPERVISED`, `SLAYZONE_DB_PATH`, `SLAYZONE_USER_DATA_DIR`, `SLAYZONE_SIDECAR_HOT_RESTART`, `SLAYZONE_BOOT_LOG_PATH`, `SLAYZONE_DEBUG_BOOT`, `SLAYZONE_*_SETTINGS_PATH`/`*_HOOKS_PATH`/`*_PLUGIN_PATH` (claude/gemini/codex/antigravity/opencode), `SLAYZONE_E2E_ALLOW_RUNNER`, `SLAYZONE_E2E_INSTALL_HOOKS`, `SLAYZONE_REGISTER_DEV_PROTOCOL`, `SLAYZONE_NONINTERACTIVE` + non-prefixed infra: `ELECTRON_RUN_AS_NODE`, `NODE_PATH`, `PLAYWRIGHT` |
 | **identity** (strip base, overlay re-adds) | `SLAYZONE_TASK_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_AGENT_ID`, `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_AGENT_HOOK_CONTEXT` (§3 — replaces `SLAYZONE_HOOK_CONTEXT`; sibling of `_AGENT_HOOK_URL`) |
 | **global** (keep) | `SLAYZONE_RELEASE_CHANNEL`, `SLAYZONE_ROOT`, `SLAYZONE_DEV` |
@@ -288,8 +288,26 @@ var. The old name survives as a READ-ONLY fallback in `runner/config.ts`
 published operator contract; it stays manifested `secret` since it is still a live
 input channel.
 
+Resolved (later round, LANDED): **Q2** — `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` →
+`SLAYZONE_HUB_AUTH_SECRET`. Deciding fact: the secret is the HMAC signing key for
+ALL of hub-auth — better-auth's session/cookie signer AND the runner enroll/
+api-key credentials (`createHubAuth({secret})`) — so `RUNNER_TRANSPORT` named just
+ONE consumer, again the thing rule 2 forbids. `HUB_AUTH` matches the consuming
+package (`@slayzone/hub-auth`); `_SECRET` retained per rule 3 (a key you HOLD and
+sign with, vs `_TOKEN` = a bearer you PRESENT). Rejected: `HUB_SIGNING_SECRET`
+(names the mechanism, not the domain — same class of miss) and `HUB_SECRET` (too
+vague beside `SLAYZONE_HUB_TOKEN`). Scope deliberately limited to the env channel
++ JS identifiers (`DEV_HUB_AUTH_SECRET`, `ensureHubAuthSecret`, `hubAuthSecret`):
+the **`config.json` key stays `runnerTransportSecret`**, because renaming it would
+make every existing standalone install see no secret, generate a fresh one, and
+invalidate the credentials of already-enrolled runners. The dev constant's VALUE
+(`'slayzone-dev-runner-secret'`) is likewise unchanged so a supervised dev boot
+keeps verifying its own existing sessions. No back-compat env alias (unlike Q1):
+the old name's only non-test setters were three STALE refs in
+`publish-hub-runner.sh`, fixed in the same change — one of them had the var in the
+smoke test's `-u` scrub list, so the REAL name was never being scrubbed.
+
 Open (naming, out of this plan's scope — raise separately):
 1. `PLAYWRIGHT` → `SLAYZONE_E2E`? (unprefixed, and it is our own flag)
-2. `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` → `SLAYZONE_HUB_AUTH_SECRET`?
-3. `SLAYZONE_HUB_TOKEN` → `SLAYZONE_HUB_API_TOKEN`? (it is the CLI's bearer for the hub's REST API; sharpening the vaguer name is the cheaper way to de-confuse the `HUB_TOKEN`/`HUB_JOIN_TOKEN` pair)
+2. `SLAYZONE_HUB_TOKEN` → `SLAYZONE_HUB_API_TOKEN`? (it is the CLI's bearer for the hub's REST API; sharpening the vaguer name is the cheaper way to de-confuse the `HUB_TOKEN`/`HUB_JOIN_TOKEN` pair)
 4. Prefixing `WORKTREE_PATH`/`REPO_PATH`/`SOURCE_BRANCH` — ⚠️ breaks the `.slay/worktree-setup.sh` user contract — and `POSTHOG_*`.

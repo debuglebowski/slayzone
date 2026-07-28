@@ -2,7 +2,8 @@
  * Shared SlayZone config file — a SINGLE JSON document at
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
- * the keys it cares about (hub: runnerTransportSecret/address/publicAddress;
+ * the keys it cares about (hub: runnerTransportSecret — the hub-auth secret, see
+ * that key's note on why the file name is frozen — /address/publicAddress;
  * runner: joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256).
  * The runner credential store derives from SLAYZONE_ROOT (`<ROOT>/runners`), and
  * the DB path from SLAYZONE_ROOT (`<ROOT>/storage`), so there is no
@@ -45,8 +46,13 @@ export { getSlayzoneHomeDir } from './dirs'
  */
 export interface SlayzoneConfig {
   // --- hub keys ---
-  /** HMAC secret backing hub-auth + per-task token mint/verify. Auto-generated
-   *  + persisted on first standalone boot if absent (see ensureRunnerTransportSecret). */
+  /** HMAC secret backing hub-auth (better-auth session/cookie signer + runner
+   *  enroll/api-key credentials). Auto-generated + persisted on first standalone
+   *  boot if absent (see ensureHubAuthSecret). The ENV channel is
+   *  `SLAYZONE_HUB_AUTH_SECRET`; this FILE key keeps its historical
+   *  `runnerTransportSecret` name deliberately — renaming it would make every
+   *  existing standalone install see no secret, generate a fresh one, and
+   *  invalidate the credentials of already-enrolled runners. */
   runnerTransportSecret?: string
   /** The address the hub BINDS for ALL transport — `/trpc`, `/runners`,
    *  `/health`, `/mcp`, REST (`SLAYZONE_HUB_ADDRESS`). `host[:port]`, no scheme:
@@ -87,8 +93,10 @@ export interface SlayzoneConfig {
 
 /** The dev fallback secret hard-coded in composition.ts. Standalone boots MUST
  *  resolve to something OTHER than this (env / config / generated). Exported so
- *  callers + tests can assert against it. */
-export const DEV_RUNNER_TRANSPORT_SECRET = 'slayzone-dev-runner-secret'
+ *  callers + tests can assert against it. Its VALUE is deliberately unchanged by
+ *  the `SLAYZONE_HUB_AUTH_SECRET` rename — a supervised dev boot that already
+ *  signed with this constant must keep verifying its own existing sessions. */
+export const DEV_HUB_AUTH_SECRET = 'slayzone-dev-runner-secret'
 
 /**
  * Name of the co-located ("local") auto-spawned runner. SINGLE source of truth
@@ -208,7 +216,7 @@ export function saveSlayzoneConfig(
 /**
  * Merge `patch` over the on-disk config and persist the result (atomic, 0600).
  * Reads the current file first so a focused single-key update (e.g. persisting a
- * freshly generated runnerTransportSecret) never clobbers other keys. Returns the merged
+ * freshly generated hub-auth secret) never clobbers other keys. Returns the merged
  * config. Undefined patch values are ignored (they don't erase existing keys).
  */
 export function updateSlayzoneConfig(
@@ -225,11 +233,11 @@ export function updateSlayzoneConfig(
 }
 
 /**
- * Resolve the runner secret for a STANDALONE boot: config.json `runnerTransportSecret` if
- * present, else generate a fresh 256-bit hex secret and PERSIST it into the
- * config file (0600) so it is stable across reboots. Never returns the shared
- * dev constant. The caller layers env on top (env > this) — see the hub's
- * standalone-config resolve step.
+ * Resolve the hub-auth secret for a STANDALONE boot: config.json
+ * `runnerTransportSecret` if present, else generate a fresh 256-bit hex secret
+ * and PERSIST it into the config file (0600) so it is stable across reboots.
+ * Never returns the shared dev constant. The caller layers env on top
+ * (env > this) — see the hub's standalone-config resolve step.
  *
  * Idempotent + stable: a second call reads back the persisted secret and returns
  * the identical value (no re-generation).
@@ -245,7 +253,7 @@ export function updateSlayzoneConfig(
  * hand-authored partial config raced by two hubs, which is not a real
  * deployment shape (a single hub per host is the norm).
  */
-export function ensureRunnerTransportSecret(configPath: string = getSlayzoneConfigPath()): string {
+export function ensureHubAuthSecret(configPath: string = getSlayzoneConfigPath()): string {
   const existing = loadSlayzoneConfig(configPath)
   if (existing.runnerTransportSecret) return existing.runnerTransportSecret
 

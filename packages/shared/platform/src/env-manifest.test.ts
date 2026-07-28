@@ -92,7 +92,7 @@ const base: NodeJS.ProcessEnv = {
   SLAYZONE_HUB_TOKEN: 'sekret',
   SLAYZONE_HUB_JOIN_TOKEN: 'jointoken',
   SLAYZONE_RUNNER_JOIN_TOKEN: 'jointoken-legacy',
-  SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'hmac',
+  SLAYZONE_HUB_AUTH_SECRET: 'hmac',
   // infra — must be stripped
   SLAYZONE_HUB_ADDRESS: 'hub.example:8443',
   SLAYZONE_HUB_PORT: '51100',
@@ -132,7 +132,7 @@ check(
   'strips secret SLAYZONE_RUNNER_JOIN_TOKEN (deprecated alias)',
   !('SLAYZONE_RUNNER_JOIN_TOKEN' in out)
 )
-check('strips secret SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET', !('SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET' in out))
+check('strips secret SLAYZONE_HUB_AUTH_SECRET', !('SLAYZONE_HUB_AUTH_SECRET' in out))
 
 check('strips infra SLAYZONE_HUB_ADDRESS', !('SLAYZONE_HUB_ADDRESS' in out))
 check('strips infra SLAYZONE_HUB_PORT', !('SLAYZONE_HUB_PORT' in out))
