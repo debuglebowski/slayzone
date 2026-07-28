@@ -46,8 +46,10 @@ export type EnvScope = 'global' | 'infra' | 'secret' | 'identity'
  * and retired/inert/test-only vars (SLAYZONE_HUB_URL, HUB_HOST, HUB_PORT,
  * HUB_PUBLIC_URL — all folded into HUB_ADDRESS/HUB_PUBLIC_ADDRESS; STORE_DIR,
  * DB_DIR, DB_PATH — the DB file DERIVES from SLAYZONE_ROOT + SLAYZONE_DEV and is
- * not overridable; AGENT_MODE, RUNNER_CONFIG, RUNNER_TRANSPORT_BASE_URL,
- * RUNNER_ALLOWED_ROOTS, RUNNER_NAME, RUNNER_CREDENTIALS_DIR, SEED_DEMO). An
+ * not overridable; ALLOW_PLAINTEXT_CREDENTIALS — plaintext fallback now DERIVES
+ * from cipher availability, see integrations/server/credentials.ts; AGENT_MODE,
+ * RUNNER_CONFIG, RUNNER_TRANSPORT_BASE_URL, RUNNER_ALLOWED_ROOTS, RUNNER_NAME,
+ * RUNNER_CREDENTIALS_DIR, SEED_DEMO). An
  * unlisted SLAYZONE_* is stripped by default (fail closed), so omissions are
  * safe, never leaky — which is also why a RETIRED name needs no entry: a stale
  * inherited value is stripped by the same default that covers a brand-new var.
@@ -72,7 +74,6 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // `SLAYZONE_JOIN_TOKEN`), so no operator env carries it and there is nothing to
   // keep working. Unlisted ⇒ the fail-closed default strips it, same as every
   // other retired name in this rename sweep.
-  SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS: 'secret',
 
   // --- infra: SlayZone wiring a terminal must not reinterpret ---
   // The hub's address, host[:port], scheme from MODE. ONE concept whose value

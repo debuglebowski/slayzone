@@ -496,7 +496,8 @@ export function composeServer(opts: {
   // ELECTRON_RUN_AS_NODE process. Supervised: forward encrypt/decrypt to the
   // host's safeStorage over the capability bridge (base64 on the wire).
   // Standalone (no host): leave the cipher unset — the plaintext fallback
-  // (gated by SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS / NODE_ENV=test) applies.
+  // applies, gated purely on cipher availability (no env flag; see
+  // integrations/server/credentials.ts allowPlaintextFallback).
   if (bridge) {
     const hostCipher = bridge.appDeps.credentialCipher
     setCredentialCipher({
