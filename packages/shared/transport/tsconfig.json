@@ -5,5 +5,5 @@
     "lib": ["ESNext", "DOM"]
   },
   "include": ["src/**/*", "../types/src/txn-registry.d.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
