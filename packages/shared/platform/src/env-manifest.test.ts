@@ -59,11 +59,39 @@ check('SLAYZONE_DEV is global (install DB selector)', ENV_MANIFEST.SLAYZONE_DEV 
 check('ELECTRON_RUN_AS_NODE in NON_PREFIXED_INFRA', NON_PREFIXED_INFRA.has('ELECTRON_RUN_AS_NODE'))
 check('PLAYWRIGHT in NON_PREFIXED_INFRA', NON_PREFIXED_INFRA.has('PLAYWRIGHT'))
 
-// ── the AGENT_HOOK pair ──────────────────────────────────────────────────────
-// Same subsystem prefix, same scope: `_HOOK_URL` says WHERE to post a hook,
-// `_HOOK_CONTEXT` says WHO is posting it. Both identity, so both are stripped
-// from the inherited base and re-added per spawn by buildMcpEnv (local) or the
-// runner's overlay (remote).
+// ── `_URL` carve-out (CLAUDE.md § Env Var Naming rule 6) ─────────────────────
+// Rule 5: a var carries AUTHORITY (`host[:port]`), never a full URL, so the
+// scheme derives from SLAYZONE_MODE and a ws-vs-http reader mismatch (the
+// retired SLAYZONE_HUB_URL bug) is unrepresentable. Rule 6 is the ONE carve-out:
+// a loopback-only target has an invariant `http` scheme, so there is no
+// MODE-derived scheme to get wrong and rule 5 protects nothing.
+//
+// SLAYZONE_AGENT_HOOK_URL is that case — local = sidecar loopback, remote = the
+// RUNNER's own loopback (it relays to the hub over its authed ws), never a
+// wss/https hub URL and never a bearer. It must stay a full URL because its only
+// reader is the deliberately logic-free shared `notify.sh`; an `_ADDRESS` form
+// would push scheme+path assembly back into that file, which is exactly the rot
+// the v3 benign-forwarder rewrite removed.
+//
+// This guard is what keeps the carve-out from widening by accident: any SECOND
+// `_URL` var lands here as a hard failure, forcing the author to justify it
+// against rule 6 (loopback-only + invariant scheme) or use `_ADDRESS`.
+const URL_SUFFIXED = Object.keys(ENV_MANIFEST).filter((k) => k.endsWith('_URL'))
+check(
+  'SLAYZONE_AGENT_HOOK_URL is the ONLY `_URL` manifest key (rule 6 carve-out)',
+  URL_SUFFIXED.length === 1 && URL_SUFFIXED[0] === 'SLAYZONE_AGENT_HOOK_URL',
+  `found: ${JSON.stringify(URL_SUFFIXED)} — a new full-URL var must satisfy CLAUDE.md rule 6 (loopback-only, invariant http scheme) or carry authority as \`_ADDRESS\` instead`
+)
+// Identity-scoped, so it is STRIPPED from the inherited base and re-added per
+// spawn by buildMcpEnv (local) or the runner's overlay (remote). Tagging it
+// `global` would let task A's hook URL — and on a runner, a stale port — bleed
+// into task B's terminal.
+check(
+  'SLAYZONE_AGENT_HOOK_URL is identity (stripped; overlay re-adds per spawn)',
+  ENV_MANIFEST.SLAYZONE_AGENT_HOOK_URL === 'identity'
+)
+// Its sibling: same `AGENT_HOOK` subsystem prefix (rule 3 — one says WHERE to
+// post, one says WHO is posting), same identity scope for the same reason.
 check(
   'SLAYZONE_AGENT_HOOK_CONTEXT is identity (sibling of _HOOK_URL)',
   ENV_MANIFEST.SLAYZONE_AGENT_HOOK_CONTEXT === 'identity'
@@ -100,6 +128,7 @@ const base: NodeJS.ProcessEnv = {
   // identity — must be stripped from the inherited base (overlay re-adds)
   SLAYZONE_TASK_ID: 'task-A',
   SLAYZONE_PROJECT_ID: 'proj-A',
+  SLAYZONE_AGENT_HOOK_URL: 'http://127.0.0.1:51100/api/agent-hook',
   SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"task-A"}',
   // retired pre-v4 ctx name — unmanifested, so stripped by the fail-closed default
   SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"task-A"}',
@@ -142,10 +171,14 @@ check('strips infra SLAYZONE_SUPERVISED', !('SLAYZONE_SUPERVISED' in out))
 
 check('strips identity SLAYZONE_TASK_ID', !('SLAYZONE_TASK_ID' in out))
 check('strips identity SLAYZONE_PROJECT_ID', !('SLAYZONE_PROJECT_ID' in out))
-// An inherited ctx blob attributes THIS agent's hooks to the PARENT's task (the
-// clobber class of bug). buildMcpEnv re-adds the right one. Both the current name
-// (manifested identity) and the retired pre-v4 name (unmanifested → fail-closed
-// default) must go.
+// A leaked hook URL is worse than a stale id: on a runner it names a PORT, so an
+// inherited value would POST this agent's lifecycle events at whatever listens
+// there. The runner's per-spawn overlay (handlers/pty.ts) re-adds the right one.
+check('strips identity SLAYZONE_AGENT_HOOK_URL', !('SLAYZONE_AGENT_HOOK_URL' in out))
+// Same reasoning for the ctx blob: an inherited one attributes THIS agent's hooks
+// to the PARENT's task (the clobber class of bug). buildMcpEnv re-adds the right
+// one. Both the current name (manifested identity) and the retired pre-v4 name
+// (unmanifested → fail-closed default) must go.
 check('strips identity SLAYZONE_AGENT_HOOK_CONTEXT', !('SLAYZONE_AGENT_HOOK_CONTEXT' in out))
 check('strips retired SLAYZONE_HOOK_CONTEXT (fail closed)', !('SLAYZONE_HOOK_CONTEXT' in out))
 
