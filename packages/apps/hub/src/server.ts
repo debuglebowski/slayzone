@@ -26,7 +26,7 @@ import {
   openServerDiagnosticsDatabase
 } from './db.js'
 import { composeServer } from './composition.js'
-import { getBridgeRestUrl } from './bridge-url.js'
+import { getDesktopBridgeRestUrl } from './desktop-bridge-address.js'
 import { deriveRunnerHubUrl } from './runner-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
@@ -40,20 +40,25 @@ import type { ServerHandle, StartServerConfig } from './index.js'
 /**
  * REST routes whose handlers need Electron (live WebContents / offscreen
  * renderer) — they can't run in this plain-node side-car. When supervised, the
- * host runs a REST server with those slots wired, and we reverse-proxy these
- * route groups there (the whole handler runs in the host; only the serializable
- * HTTP request/response crosses). `/api/open-task` + `artifacts/:id/open` stay
- * here (they emit menu events on the side-car's bus + bridge the window raise).
+ * desktop app runs a REST server with those slots wired, and we reverse-proxy
+ * these route groups there (the whole handler runs in the desktop; only the
+ * serializable HTTP request/response crosses). `/api/open-task` +
+ * `artifacts/:id/open` stay here (they emit menu events on the side-car's bus +
+ * bridge the window raise).
  */
-function needsHostRest(rawUrl: string | undefined): boolean {
+function needsDesktopRest(rawUrl: string | undefined): boolean {
   if (!rawUrl) return false
   const path = rawUrl.split('?')[0]
   return path.startsWith('/api/browser/') || /^\/api\/artifacts\/[^/]+\/export\//.test(path)
 }
 
-/** Pipe a request to the host REST server and pipe its response back. */
-function proxyToHostRest(hostRestUrl: string, req: IncomingMessage, res: ServerResponse): void {
-  const target = new URL(hostRestUrl)
+/** Pipe a request to the desktop REST server and pipe its response back. */
+function proxyToDesktopRest(
+  desktopRestUrl: string,
+  req: IncomingMessage,
+  res: ServerResponse
+): void {
+  const target = new URL(desktopRestUrl)
   const proxyReq = httpRequest(
     {
       host: target.hostname,
@@ -69,7 +74,7 @@ function proxyToHostRest(hostRestUrl: string, req: IncomingMessage, res: ServerR
   )
   proxyReq.on('error', (err) => {
     if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ error: 'host-rest-proxy-failed', message: String(err) }))
+    res.end(JSON.stringify({ error: 'desktop-rest-proxy-failed', message: String(err) }))
   })
   req.pipe(proxyReq)
 }
@@ -179,8 +184,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Reverse-proxy target for Electron-only REST routes (supervised). Absent when
   // truly standalone → those routes fall through to express + 501 as before.
-  // Derived from the single host bridge URL (same listener serves cap WS + REST).
-  const hostRestUrl = getBridgeRestUrl()
+  // Derived from the single desktop bridge address (same listener serves cap WS
+  // + REST).
+  const desktopRestUrl = getDesktopBridgeRestUrl()
 
   // SLAYZONE_MODE is the SINGLE lever for the whole hub's transport: `local`
   // (default) serves plain http/ws on loopback (dev, e2e, supervised); `remote`
@@ -203,13 +209,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   }
 
   // Single muxed server: /health (pre-express, stays alive even if the express
-  // stack wedges) + Electron-only REST reverse-proxied to the host (when
+  // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
   // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/* + /mcp via express.
   // `/trpc` + `/runners` WS upgrades are demuxed in the `upgrade` handler below.
   const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
     if (handleHealth(state, req, res)) return
-    if (hostRestUrl && needsHostRest(req.url)) {
-      proxyToHostRest(hostRestUrl, req, res)
+    if (desktopRestUrl && needsDesktopRest(req.url)) {
+      proxyToDesktopRest(desktopRestUrl, req, res)
       return
     }
     // Runner transport: `/api/auth/*` goes to the hub-auth express app BEFORE the

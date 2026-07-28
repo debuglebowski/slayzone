@@ -10,39 +10,39 @@ import {
 import type { SlayzoneDb } from '@slayzone/platform'
 
 /**
- * Host-side bridge server (slice 9 local cutover; cap+REST merged).
+ * Desktop-side bridge server (slice 9 local cutover; cap+REST merged).
  *
  * The renderer connects ONLY to the side-car. Electron-only work can only run
- * here in the Electron host, and reaches the host over ONE loopback listener,
- * advertised to the side-car as `SLAYZONE_BRIDGE_URL`:
+ * here in the Electron desktop app, and the side-car reaches it over ONE
+ * loopback listener, advertised as `SLAYZONE_DESKTOP_BRIDGE_ADDRESS`:
  *
  *  • WS `/cap` — the side-car forwards Electron-only capability *method calls*
  *    (browser-WCV, clipboard, dialogs, backup, task-windows, floating-agent,
- *    native menus, …) over `capabilityBridgeRouter`, and host-originated events
- *    (native menus, power-resume, theme) stream back through it.
+ *    native menus, …) over `capabilityBridgeRouter`, and desktop-originated
+ *    events (native menus, power-resume, theme) stream back through it.
  *  • HTTP `/api/*` — the REST routes whose handlers need a live WebContents /
  *    offscreen renderer (browser-automation + artifact export). The side-car
  *    reverse-proxies just those route groups here.
  *
  * The bridge procedures resolve `getAppDeps()`/`getMenuEvents()`/
- * `getPowerResumeEvents()` from the transport registries — the host's REAL
+ * `getPowerResumeEvents()` from the transport registries — the desktop's REAL
  * impls (wired via `setAppDeps()` before this server starts). They ignore the
  * tRPC context, but `createContext` must satisfy the router's context type, so
- * we thread the host db + dataRoot through.
+ * we thread the desktop db + dataRoot through.
  */
-export type HostBridgeServerHandle = {
-  /** OS-assigned bound port. Advertise as `http://127.0.0.1:<port>` (WS on `/cap`). */
+export type DesktopBridgeServerHandle = {
+  /** OS-assigned bound port. Advertise as the authority `127.0.0.1:<port>` (WS on `/cap`). */
   port: number
   stop: () => Promise<void>
 }
 
-export async function startHostBridgeServer(opts: {
+export async function startDesktopBridgeServer(opts: {
   db: SlayzoneDb
   dataRoot: string
   /** REST deps for the Electron-only `/api/*` routes the side-car proxies here. */
   restDeps: RestApiDeps
   host?: string
-}): Promise<HostBridgeServerHandle> {
+}): Promise<DesktopBridgeServerHandle> {
   const host = opts.host ?? '127.0.0.1'
 
   // The REST/MCP express app carries every HTTP request; the capability bridge

@@ -36,7 +36,7 @@ import {
   type FloatingAgentState
 } from '@slayzone/transport/server'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
-import { getBridgeCapUrl } from './bridge-url.js'
+import { getDesktopBridgeCapUrl } from './desktop-bridge-address.js'
 import { getServerBuildInfo } from './build-info.js'
 import {
   taskOps,
@@ -257,16 +257,17 @@ export function composeServer(opts: {
   // connected to THIS side-car, not the host).
   let boundPort = 0
 
-  // --- Host capability bridge (supervised only) ------------------------------
-  // When supervised by the Electron host, Electron-only capabilities (browser-WCV,
-  // clipboard, dialogs, backup, task-windows, floating-agent, native menus, …)
-  // can't run in this plain-node process — they forward to the host over the
-  // bridge, and host-originated events (native menus, power-resume) stream back.
-  // Truly standalone (no host): bridge stays null and the fail-loud stubs apply.
-  const hostCapUrl = getBridgeCapUrl()
+  // --- Desktop capability bridge (supervised only) ---------------------------
+  // When supervised by the Electron desktop app, Electron-only capabilities
+  // (browser-WCV, clipboard, dialogs, backup, task-windows, floating-agent,
+  // native menus, …) can't run in this plain-node process — they forward to the
+  // desktop over the bridge, and desktop-originated events (native menus,
+  // power-resume) stream back. Truly standalone (no desktop): bridge stays null
+  // and the fail-loud stubs apply.
+  const desktopCapUrl = getDesktopBridgeCapUrl()
   const bridge: HostBridge | null =
-    supervised && hostCapUrl
-      ? createHostBridge(hostCapUrl, { getTrpcPort: () => boundPort })
+    supervised && desktopCapUrl
+      ? createHostBridge(desktopCapUrl, { getTrpcPort: () => boundPort })
       : null
 
   // --- Cross-domain event buses (this process's own instances) --------------

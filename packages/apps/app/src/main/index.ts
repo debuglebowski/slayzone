@@ -397,7 +397,7 @@ import { automationsEvents } from './automations-events'
 import { telemetryEvents } from './telemetry-events'
 import { agentLifecycleEvents } from './agent-lifecycle-events'
 import { powerResumeEvents } from './power-resume-events'
-import { startHostBridgeServer } from './host-bridge-server'
+import { startDesktopBridgeServer } from './desktop-bridge-server'
 import { getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
@@ -540,14 +540,14 @@ let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHand
 // Local-runner supervisor — spawns the co-located runner in local mode. Null
 // in remote mode (no local hub to dial) or before the async spawn runs.
 let localRunnerCleanup: (() => void) | null = null
-// Local cutover (slice 9): the side-car must be spawned with the host bridge
-// URL in env, but that server starts on its own async path. This promise lets
-// the sidecar-spawn block await the bound port. One listener now carries both
-// the capability bridge (WS `/cap`) and the reverse-proxied Electron-only REST
-// (`/api/*`), advertised as `SLAYZONE_BRIDGE_URL`.
-let resolveBridgeUrl!: (url: string) => void
-const bridgeUrlPromise = new Promise<string>((r) => {
-  resolveBridgeUrl = r
+// Local cutover (slice 9): the side-car must be spawned with the desktop bridge
+// address in env, but that server starts on its own async path. This promise
+// lets the sidecar-spawn block await the bound port. One listener now carries
+// both the capability bridge (WS `/cap`) and the reverse-proxied Electron-only
+// REST (`/api/*`), advertised as `SLAYZONE_DESKTOP_BRIDGE_ADDRESS`.
+let resolveDesktopBridgeAddress!: (address: string) => void
+const desktopBridgeAddressPromise = new Promise<string>((r) => {
+  resolveDesktopBridgeAddress = r
 })
 // Resolves once the side-car supervisor handle exists, so `app:get-server-url`
 // (called early on renderer boot) can await it before reading the port.
@@ -2210,39 +2210,40 @@ app
             killTask: killTaskProcesses,
             events: processEvents
           })
-          // Cutover: no in-process appRouter server. The host serves ONE bridge
-          // listener (setAppDeps/setMenuEvents/setPowerResumeEvents above back it):
+          // Cutover: no in-process appRouter server. The desktop app serves ONE
+          // bridge listener (setAppDeps/setMenuEvents/setPowerResumeEvents back it):
           //  • WS `/cap` — the side-car forwards its Electron-only AppDeps calls
-          //    here and streams host menu/power events back (startTrpcServer retired).
+          //    here and streams desktop menu/power events back (startTrpcServer retired).
           //  • HTTP `/api/*` — the reverse-proxy target for the Electron-only REST
           //    routes the side-car can't serve itself (browser-automation over live
           //    WebContents + artifact export via offscreen renderer). No discovery
           //    port is written — the side-car owns `server_port` (CLI/agents/MCP).
           const { buildMcpRestDeps } = await import('./mcp-rest-deps')
-          const bridgeServer = await startHostBridgeServer({
+          const bridgeServer = await startDesktopBridgeServer({
             db,
             dataRoot: getTrpcDataRoot(),
             restDeps: buildMcpRestDeps(db, automationEngine)
           })
           bridgeCleanup = () => void bridgeServer.stop()
-          resolveBridgeUrl(`http://127.0.0.1:${bridgeServer.port}`)
-          logBoot(`host bridge server started (port ${bridgeServer.port}, cap WS + REST proxy)`)
+          resolveDesktopBridgeAddress(`127.0.0.1:${bridgeServer.port}`)
+          logBoot(`desktop bridge server started (port ${bridgeServer.port}, cap WS + REST proxy)`)
         })
         .catch((err) => {
-          console.error('[host-bridge] Failed to start bridge server:', err)
+          console.error('[desktop-bridge] Failed to start bridge server:', err)
         })
     })
 
     // Slice 9 LIVE side-car: the renderer now connects here for all data. The
-    // side-car is spawned with the host bridge URL so it can forward Electron-only
-    // work back to the host (capability calls over WS `/cap` + browser/export REST
-    // over HTTP `/api/*`, one listener). We await the bridge port before spawning.
+    // side-car is spawned with the desktop bridge address so it can forward
+    // Electron-only work back to the desktop app (capability calls over WS `/cap`
+    // + browser/export REST over HTTP `/api/*`, one listener). We await the bridge
+    // port before spawning.
     // A permanent failure surfaces via notify.onEmbeddedServerFailed (persistent toast).
     // Remote mode: skipped — the backend runs elsewhere.
     if (!isRemoteMode) setImmediate(() => {
       logBoot('sidecar server supervisor import dispatched')
-      Promise.all([import('./sidecar-server-supervisor'), bridgeUrlPromise])
-        .then(([{ startSidecarServer }, bridgeUrl]) => {
+      Promise.all([import('./sidecar-server-supervisor'), desktopBridgeAddressPromise])
+        .then(([{ startSidecarServer }, desktopBridgeAddress]) => {
           const scriptPath = is.dev
             ? join(app.getAppPath(), '../hub/dist/bin.cjs')
             : join(process.resourcesPath, 'hub', 'bin.cjs')
@@ -2257,10 +2258,11 @@ app
               // is handed over. Pass only the dev-vs-packaged bit it can't infer
               // (it has no Electron `app.isPackaged`), so it derives the right filename.
               SLAYZONE_DEV: app.isPackaged ? undefined : '1',
-              // Host bridge: one listener carrying the capability bridge (renderer
-              // Electron-only calls + host events, WS `/cap`) AND the REST
+              // Desktop bridge: one listener carrying the capability bridge (renderer
+              // Electron-only calls + desktop events, WS `/cap`) AND the REST
               // reverse-proxy target (browser-automation + export, HTTP `/api/*`).
-              SLAYZONE_BRIDGE_URL: bridgeUrl,
+              // Authority only — always loopback, so the side-car derives ws/http.
+              SLAYZONE_DESKTOP_BRIDGE_ADDRESS: desktopBridgeAddress,
               // Packaged resolution: only bin.js is copied to Resources/hub,
               // so createRequire's walk-up never finds node_modules. Point the
               // resolver at the unpacked natives (better-sqlite3, node-pty) the

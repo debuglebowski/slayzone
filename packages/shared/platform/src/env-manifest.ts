@@ -64,7 +64,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // it here is what keeps those two values from ever bleeding into each other.
   SLAYZONE_HUB_ADDRESS: 'infra',
   SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; written into join tokens
-  SLAYZONE_BRIDGE_URL: 'infra', // sidecar→host capability bridge
+  SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_MODE: 'infra', // local vs remote hardening lever
   SLAYZONE_SUPERVISED: 'infra', // "the Electron host owns me" flag
   SLAYZONE_DB_PATH: 'infra', // explicit DB path override (CLI/e2e)
