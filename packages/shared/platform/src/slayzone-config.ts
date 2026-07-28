@@ -51,8 +51,8 @@ export interface SlayzoneConfig {
    *  boot if absent (see ensureHubAuthSecret). The ENV channel is
    *  `SLAYZONE_HUB_AUTH_SECRET`; this FILE key keeps its historical
    *  `runnerTransportSecret` name deliberately — renaming it would make every
-   *  existing standalone install see no secret, generate a fresh one, and
-   *  invalidate the credentials of already-enrolled runners. */
+   *  existing standalone install regenerate a secret, invalidating the
+   *  credentials of already-enrolled runners. */
   runnerTransportSecret?: string
   /** The address the hub BINDS for ALL transport — `/trpc`, `/runners`,
    *  `/health`, `/mcp`, REST (`SLAYZONE_HUB_ADDRESS`). `host[:port]`, no scheme:
@@ -93,9 +93,9 @@ export interface SlayzoneConfig {
 
 /** The dev fallback secret hard-coded in composition.ts. Standalone boots MUST
  *  resolve to something OTHER than this (env / config / generated). Exported so
- *  callers + tests can assert against it. Its VALUE is deliberately unchanged by
- *  the `SLAYZONE_HUB_AUTH_SECRET` rename — a supervised dev boot that already
- *  signed with this constant must keep verifying its own existing sessions. */
+ *  callers + tests can assert against it. Value unchanged by the
+ *  `SLAYZONE_HUB_AUTH_SECRET` rename — a supervised dev boot that already signed
+ *  with this constant must keep verifying its own existing sessions. */
 export const DEV_HUB_AUTH_SECRET = 'slayzone-dev-runner-secret'
 
 /**

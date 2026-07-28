@@ -214,7 +214,7 @@ export function composeServer(opts: {
   //
   // SECURITY SEAM (hub-auth-secret hardening): a STANDALONE boot resolves this in
   // bin.ts (applyStandaloneHubConfig → env SLAYZONE_HUB_AUTH_SECRET > config.json
-  // hubAuthSecret > generated+persisted 256-bit secret) and sets the env BEFORE
+  // runnerTransportSecret > generated+persisted 256-bit secret) and sets the env BEFORE
   // composeServer runs. So in standalone the env is ALWAYS present and NEVER the
   // shared dev constant — a per-install unique secret means minted per-task
   // tokens can't be forged across installs (the npm-published bug). We assert

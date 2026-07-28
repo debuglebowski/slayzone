@@ -300,7 +300,7 @@ Resolved (later round, LANDED): **Q2** — `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET
 `SLAYZONE_HUB_AUTH_SECRET`. Deciding fact: the secret is the HMAC signing key for
 ALL of hub-auth — better-auth's session/cookie signer AND the runner enroll/
 api-key credentials (`createHubAuth({secret})`) — so `RUNNER_TRANSPORT` named just
-ONE consumer, again the thing rule 2 forbids. `HUB_AUTH` matches the consuming
+one consumer, again the thing rule 2 forbids. `HUB_AUTH` matches the consuming
 package (`@slayzone/hub-auth`); `_SECRET` retained per rule 3 (a key you HOLD and
 sign with, vs `_TOKEN` = a bearer you PRESENT). Rejected: `HUB_SIGNING_SECRET`
 (names the mechanism, not the domain — same class of miss) and `HUB_SECRET` (too
@@ -310,10 +310,10 @@ the **`config.json` key stays `runnerTransportSecret`**, because renaming it wou
 make every existing standalone install see no secret, generate a fresh one, and
 invalidate the credentials of already-enrolled runners. The dev constant's VALUE
 (`'slayzone-dev-runner-secret'`) is likewise unchanged so a supervised dev boot
-keeps verifying its own existing sessions. No back-compat env alias (unlike Q1):
-the old name's only non-test setters were three STALE refs in
-`publish-hub-runner.sh`, fixed in the same change — one of them had the var in the
-smoke test's `-u` scrub list, so the REAL name was never being scrubbed.
+keeps verifying its own existing sessions. No back-compat read of the old env name:
+its only non-test setters were three stale refs in `publish-hub-runner.sh` (fixed
+in the same change) — one of which had the var in the smoke test's `-u` scrub list,
+so the REAL name was never scrubbed.
 
 Open (naming, out of this plan's scope — raise separately):
 1. `PLAYWRIGHT` → `SLAYZONE_E2E`? (unprefixed, and it is our own flag)
