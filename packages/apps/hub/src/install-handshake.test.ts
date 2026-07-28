@@ -265,7 +265,7 @@ async function main(): Promise<void> {
       SLAYZONE_ROOT: runnerRootDir,
       // Authority only — runner composes ws(s)://<addr>/runners from SLAYZONE_MODE.
       SLAYZONE_HUB_ADDRESS: new URL(tok.hubUrl).host,
-      SLAYZONE_RUNNER_JOIN_TOKEN: tok.token
+      SLAYZONE_HUB_JOIN_TOKEN: tok.token
     })
 
     // --- assert enrollment via runners.list over tRPC-WS ---------------------

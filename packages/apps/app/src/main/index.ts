@@ -694,7 +694,7 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       // SLAYZONE_SUPERVISED=1 (above) the runner defaults its enroll name to
       // DEFAULT_LOCAL_RUNNER_NAME (matching the hub's localRunnerName so the dedup
       // collapses to one row) and its path-jail to `[homedir()]`.
-      SLAYZONE_RUNNER_JOIN_TOKEN: minted.token
+      SLAYZONE_HUB_JOIN_TOKEN: minted.token
     },
     logger: (line) => logBoot(line),
     onPermanentFailure: (info) => {

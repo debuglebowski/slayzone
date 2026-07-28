@@ -57,7 +57,7 @@ strip `infra`+`secret`+`identity`+**any unmanifested `SLAYZONE_*`** (fail closed
 
 | Scope | Vars |
 |---|---|
-| **secret** (strip) | `SLAYZONE_HUB_TOKEN`, `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`, `SLAYZONE_RUNNER_JOIN_TOKEN`, `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` |
+| **secret** (strip) | `SLAYZONE_HUB_TOKEN`, `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`, `SLAYZONE_HUB_JOIN_TOKEN` (§7 Q1 — replaces `SLAYZONE_RUNNER_JOIN_TOKEN`, which stays manifested as a read-only deprecated alias), `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` |
 | **infra** (strip) | `SLAYZONE_HUB_ADDRESS`* (§5 — replaces `SLAYZONE_HUB_URL` **+ `_HOST` + `_PORT`**), `SLAYZONE_HUB_PUBLIC_ADDRESS` (§5 — replaces `SLAYZONE_HUB_PUBLIC_URL`), `SLAYZONE_DESKTOP_BRIDGE_ADDRESS` (§2+§5 — replaces `SLAYZONE_BRIDGE_URL`), `SLAYZONE_MODE`, `SLAYZONE_SUPERVISED`, `SLAYZONE_DB_PATH`, `SLAYZONE_USER_DATA_DIR`, `SLAYZONE_SIDECAR_HOT_RESTART`, `SLAYZONE_BOOT_LOG_PATH`, `SLAYZONE_DEBUG_BOOT`, `SLAYZONE_*_SETTINGS_PATH`/`*_HOOKS_PATH`/`*_PLUGIN_PATH` (claude/gemini/codex/antigravity/opencode), `SLAYZONE_E2E_ALLOW_RUNNER`, `SLAYZONE_E2E_INSTALL_HOOKS`, `SLAYZONE_REGISTER_DEV_PROTOCOL`, `SLAYZONE_NONINTERACTIVE` + non-prefixed infra: `ELECTRON_RUN_AS_NODE`, `NODE_PATH`, `PLAYWRIGHT` |
 | **identity** (strip base, overlay re-adds) | `SLAYZONE_TASK_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_AGENT_ID`, `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_AGENT_HOOK_CONTEXT` (§3 — replaces `SLAYZONE_HOOK_CONTEXT`; sibling of `_AGENT_HOOK_URL`) |
 | **global** (keep) | `SLAYZONE_RELEASE_CHANNEL`, `SLAYZONE_ROOT`, `SLAYZONE_DEV` |
@@ -273,8 +273,23 @@ Resolved: CLI `hub.json` `url` stays a FULL url — it is operator-written
 (`slay hub set-url`) and points at an external hub, not an env channel, so no
 migration.
 
+Resolved (later round, LANDED): **Q1** — `SLAYZONE_RUNNER_JOIN_TOKEN` →
+`SLAYZONE_HUB_JOIN_TOKEN`. Deciding fact: `mintJoinToken` binds the token to NO
+runner (`runner_id` NULL until redemption) and its payload is entirely hub
+identity (hub url + hub cert fingerprint + a secret verified against the hub's
+`join_tokens` row), so the old name described its CONSUMER — the one thing rule 2
+forbids. `_TOKEN`/`HUB_` per rule 3, matching the domain term used at every other
+layer (`szjt1.`, `join_tokens`, `mintJoinToken`, `POST /api/runners/join-token`);
+`ENROLL` was rejected for drifting from that term. The near-collision with
+`SLAYZONE_HUB_TOKEN` (CLI→hub REST bearer) was accepted: different processes read
+them, both are `secret` scope, and a mix-up fails closed on a missing required
+var. The old name survives as a READ-ONLY fallback in `runner/config.ts`
+(`ENV_VARS.joinTokenLegacy`, canonical wins when both set) because it is a
+published operator contract; it stays manifested `secret` since it is still a live
+input channel.
+
 Open (naming, out of this plan's scope — raise separately):
-1. `SLAYZONE_RUNNER_JOIN_TOKEN` → `SLAYZONE_HUB_JOIN_TOKEN`? (the token is minted BY the hub, held by the runner)
-2. `PLAYWRIGHT` → `SLAYZONE_E2E`? (unprefixed, and it is our own flag)
-3. `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` → `SLAYZONE_HUB_AUTH_SECRET`?
+1. `PLAYWRIGHT` → `SLAYZONE_E2E`? (unprefixed, and it is our own flag)
+2. `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` → `SLAYZONE_HUB_AUTH_SECRET`?
+3. `SLAYZONE_HUB_TOKEN` → `SLAYZONE_HUB_API_TOKEN`? (it is the CLI's bearer for the hub's REST API; sharpening the vaguer name is the cheaper way to de-confuse the `HUB_TOKEN`/`HUB_JOIN_TOKEN` pair)
 4. Prefixing `WORKTREE_PATH`/`REPO_PATH`/`SOURCE_BRANCH` — ⚠️ breaks the `.slay/worktree-setup.sh` user contract — and `POSTHOG_*`.

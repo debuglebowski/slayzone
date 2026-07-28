@@ -37,7 +37,15 @@ check(
 check('SLAYZONE_HUB_URL is retired (absent from manifest)', !('SLAYZONE_HUB_URL' in ENV_MANIFEST))
 check('SLAYZONE_HUB_ADDRESS is infra', ENV_MANIFEST.SLAYZONE_HUB_ADDRESS === 'infra')
 check('SLAYZONE_HUB_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_TOKEN === 'secret')
-check('SLAYZONE_RUNNER_JOIN_TOKEN is secret', ENV_MANIFEST.SLAYZONE_RUNNER_JOIN_TOKEN === 'secret')
+check('SLAYZONE_HUB_JOIN_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_JOIN_TOKEN === 'secret')
+// The pre-rename name. It STAYS manifested (unlike other retired vars, which the
+// fail-closed default covers) because the runner still READS it as a deprecated
+// fallback for hand-set operator envs — a var that is still a live input channel
+// must be explicitly tagged `secret` so its scope is stated, not inferred.
+check(
+  'SLAYZONE_RUNNER_JOIN_TOKEN (deprecated alias) is still secret',
+  ENV_MANIFEST.SLAYZONE_RUNNER_JOIN_TOKEN === 'secret'
+)
 check('SLAYZONE_TASK_ID is identity', ENV_MANIFEST.SLAYZONE_TASK_ID === 'identity')
 check('SLAYZONE_RELEASE_CHANNEL is global', ENV_MANIFEST.SLAYZONE_RELEASE_CHANNEL === 'global')
 // INSTALL-IDENTITY vars: they name WHICH SlayZone install a process belongs to
@@ -82,7 +90,8 @@ const base: NodeJS.ProcessEnv = {
   SLAYZONE_DEV: '1',
   // secret — must be stripped
   SLAYZONE_HUB_TOKEN: 'sekret',
-  SLAYZONE_RUNNER_JOIN_TOKEN: 'jointoken',
+  SLAYZONE_HUB_JOIN_TOKEN: 'jointoken',
+  SLAYZONE_RUNNER_JOIN_TOKEN: 'jointoken-legacy',
   SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'hmac',
   // infra — must be stripped
   SLAYZONE_HUB_ADDRESS: 'hub.example:8443',
@@ -118,7 +127,11 @@ check('keeps install anchor SLAYZONE_ROOT', out.SLAYZONE_ROOT === '/home/dev/.sl
 check('keeps install selector SLAYZONE_DEV', out.SLAYZONE_DEV === '1')
 
 check('strips secret SLAYZONE_HUB_TOKEN', !('SLAYZONE_HUB_TOKEN' in out))
-check('strips secret SLAYZONE_RUNNER_JOIN_TOKEN', !('SLAYZONE_RUNNER_JOIN_TOKEN' in out))
+check('strips secret SLAYZONE_HUB_JOIN_TOKEN', !('SLAYZONE_HUB_JOIN_TOKEN' in out))
+check(
+  'strips secret SLAYZONE_RUNNER_JOIN_TOKEN (deprecated alias)',
+  !('SLAYZONE_RUNNER_JOIN_TOKEN' in out)
+)
 check('strips secret SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET', !('SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET' in out))
 
 check('strips infra SLAYZONE_HUB_ADDRESS', !('SLAYZONE_HUB_ADDRESS' in out))

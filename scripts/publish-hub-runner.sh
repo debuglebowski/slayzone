@@ -108,7 +108,7 @@ cat > packages/apps/runner/README.md <<'EOF'
 A SlayZone execution node. Dials OUT to a hub over pinned `wss://` using a join
 token (mint one on the hub), then runs terminals/agents/git on this machine.
 
-    SLAYZONE_RUNNER_JOIN_TOKEN=<token from the hub> slayzone-runner
+    SLAYZONE_HUB_JOIN_TOKEN=<token from the hub> slayzone-runner
 
 The join token embeds the hub URL + cert fingerprint, so nothing else is
 required. GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
@@ -150,7 +150,8 @@ SMOKE_SECRET="$(openssl rand -hex 32)"
 SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
        -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
        -u SLAYZONE_RUNNER_TRANSPORT_SECRET
-       -u SLAYZONE_RUNNER_JOIN_TOKEN -u SLAYZONE_RUNNER_CREDENTIALS_DIR
+       -u SLAYZONE_HUB_JOIN_TOKEN -u SLAYZONE_RUNNER_JOIN_TOKEN
+       -u SLAYZONE_RUNNER_CREDENTIALS_DIR
        -u ELECTRON_RUN_AS_NODE)
 
 # Fixed loopback port for the hub's ONE listener (tRPC + health + join-token REST +
@@ -205,7 +206,7 @@ echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
 # <ROOT>/config.json `allowedRoots` (or the SLAYZONE_ROOT default in bin.ts).
 echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
-  SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_RUNNER_JOIN_TOKEN="$JOIN_TOKEN" \
+  SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_JOIN_TOKEN="$JOIN_TOKEN" \
   SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
   node "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
 RPID=$!

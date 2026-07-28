@@ -2,8 +2,11 @@
  * slayzone-runner CLI entrypoint.
  *
  *   SLAYZONE_HUB_ADDRESS=hub:8443 \
- *   SLAYZONE_RUNNER_JOIN_TOKEN=... \
+ *   SLAYZONE_HUB_JOIN_TOKEN=... \
  *   slayzone-runner
+ *
+ * (`SLAYZONE_RUNNER_JOIN_TOKEN` is the DEPRECATED pre-rename name for the join
+ * token — still read as a fallback, never written. See config.ts ENV_VARS.)
  *
  * SLAYZONE_HUB_ADDRESS carries the hub AUTHORITY only (host[:port]); the dial
  * scheme (ws/wss) is derived from SLAYZONE_MODE, and `/runners` is appended.
@@ -50,8 +53,16 @@ async function maybeInteractiveSetup(): Promise<{
   if (!canPrompt()) return {}
 
   const cfg = loadSlayzoneConfig()
-  // A join token is self-sufficient (first contact) → nothing to ask.
-  if ((process.env[ENV_VARS.joinToken] ?? cfg.joinToken) !== undefined) return {}
+  // A join token is self-sufficient (first contact) → nothing to ask. Check the
+  // deprecated env name too, or an operator who already exported it would be
+  // prompted for a token they have in fact supplied.
+  if (
+    (process.env[ENV_VARS.joinToken] ??
+      process.env[ENV_VARS.joinTokenLegacy] ??
+      cfg.joinToken) !== undefined
+  ) {
+    return {}
+  }
 
   // Already enrolled? A stored credential for the known hub host means we can
   // reconnect without a token. Skip the prompt in that case. The env channel

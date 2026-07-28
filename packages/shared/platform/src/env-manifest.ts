@@ -55,6 +55,18 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // --- secret: credentials/tokens, never in a terminal ---
   SLAYZONE_HUB_TOKEN: 'secret',
   SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET: 'secret',
+  // Hub-scoped by VALUE: the hub mints it, and it embeds the hub's url, the hub's
+  // TLS cert fingerprint, and a secret verified against the hub's `join_tokens`
+  // row. `mintJoinToken` binds it to NO runner (runner_id stays NULL until
+  // redemption), so any runner can redeem any unused token — there is no runner in
+  // the value to name. Rule 2 (name by what the value IS, not who reads it).
+  SLAYZONE_HUB_JOIN_TOKEN: 'secret',
+  // DEPRECATED alias of the above, kept as a READ-ONLY fallback in the runner's
+  // config resolver (see runner/src/config.ts ENV_VARS.joinTokenLegacy). Unlike
+  // other retired names — which the fail-closed default already strips — this one
+  // stays MANIFESTED because it is still a live input channel: a published
+  // operator contract (runner README + publish-hub-runner.sh one-liner) that
+  // hand-set envs may still use. An input channel gets an explicit scope tag.
   SLAYZONE_RUNNER_JOIN_TOKEN: 'secret',
   SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS: 'secret',
 

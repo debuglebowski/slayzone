@@ -133,7 +133,7 @@ function spawnLoopbackRunner(opts: {
       // Authority only — the runner composes ws(s)://<addr>/runners from
       // SLAYZONE_MODE (local here → ws, matching the loopback hub).
       SLAYZONE_HUB_ADDRESS: new URL(opts.hubUrl).host,
-      SLAYZONE_RUNNER_JOIN_TOKEN: opts.joinToken,
+      SLAYZONE_HUB_JOIN_TOKEN: opts.joinToken,
       SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir
     },
     stdio: ['pipe', 'pipe', 'pipe']

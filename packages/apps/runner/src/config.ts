@@ -47,7 +47,23 @@ export const ENV_VARS = {
   // `hubUrl` + the join token still carry a FULL url (they're not env-inherited
   // into terminals, so outside the collision).
   hubAddress: 'SLAYZONE_HUB_ADDRESS',
-  joinToken: 'SLAYZONE_RUNNER_JOIN_TOKEN'
+  // HUB_-prefixed because the token is hub-scoped BY VALUE, not by reader: the hub
+  // mints it and it embeds the hub's `wss://…/runners` url, the hub's TLS cert
+  // fingerprint, and a secret checked against the hub's `join_tokens` row.
+  // `mintJoinToken` binds it to NO runner (runner_id is NULL until redemption), so
+  // any runner can redeem any unused token — the old `SLAYZONE_RUNNER_JOIN_TOKEN`
+  // named its CONSUMER, which is what CLAUDE.md rule 2 forbids. `_TOKEN` suffix +
+  // `HUB_` family per rule 3, matching the domain term used everywhere else
+  // (`szjt1.`, the `join_tokens` table, mintJoinToken, POST /api/runners/join-token).
+  joinToken: 'SLAYZONE_HUB_JOIN_TOKEN',
+  /**
+   * DEPRECATED pre-rename name, still READ (never written/documented) so a
+   * hand-set operator env keeps working: `SLAYZONE_RUNNER_JOIN_TOKEN=… slayzone-runner`
+   * is a published contract (the runner's npm README + publish-hub-runner.sh). The
+   * canonical name wins when both are set. Remove only after a release that ships
+   * the new name has been out long enough for standalone deployments to migrate.
+   */
+  joinTokenLegacy: 'SLAYZONE_RUNNER_JOIN_TOKEN'
   // allowedRoots has NO env channel: a SUPERVISED runner self-derives its FS
   // path-jail to `[homedir()]` (below), a STANDALONE runner gets it from
   // <ROOT>/config.json `allowedRoots` (+ the ROOT default in bin.ts). The runner
@@ -154,7 +170,7 @@ function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
  *   - `SLAYZONE_SUPERVISED=1` — the app-spawned local runner
  *     (startLocalRunnerWithAutoEnroll passes `{...process.env}`, which carries
  *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
- *     supplies the runner's env in full (SLAYZONE_HUB_ADDRESS / SLAYZONE_RUNNER_JOIN_TOKEN),
+ *     supplies the runner's env in full (SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN),
  *     and the name derives from SUPERVISED (→ DEFAULT_LOCAL_RUNNER_NAME), so the
  *     shared file must not leak into it. Keeps the supervised runner boot
  *     byte-identical to pre-config behavior.
@@ -170,12 +186,17 @@ export function loadRunnerConfig(
 
   // A join token is self-sufficient: it embeds the hub's `wss://…/runners` URL and
   // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
-  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_RUNNER_JOIN_TOKEN=… runner` works
+  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_HUB_JOIN_TOKEN=… runner` works
   // with no other config. An explicit hubUrl / pin (file or env) still wins, so an
   // operator can point a token at a different endpoint or override the pin. A
   // malformed token decodes to null → no fallback (schema then reports the missing
   // hubUrl, exactly as before).
-  const joinToken = env[ENV_VARS.joinToken] ?? fromShared.joinToken
+  //
+  // Env precedence: canonical name > deprecated name > config.json. Resolved ONCE
+  // here so the token-decode fallback and the `joinToken` field can never disagree
+  // about which channel won.
+  const envJoinToken = env[ENV_VARS.joinToken] ?? env[ENV_VARS.joinTokenLegacy]
+  const joinToken = envJoinToken ?? fromShared.joinToken
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 
   // The env channel carries only the hub AUTHORITY (host[:port]); compose the
@@ -205,7 +226,7 @@ export function loadRunnerConfig(
     // <ROOT>/config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
-    ...(env[ENV_VARS.joinToken] !== undefined ? { joinToken: env[ENV_VARS.joinToken] } : {})
+    ...(envJoinToken !== undefined ? { joinToken: envJoinToken } : {})
   }
 
   const result = runnerConfigSchema.safeParse(merged)

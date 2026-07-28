@@ -66,7 +66,9 @@ export interface SlayzoneConfig {
    *  never written for a fresh config. */
   publicUrl?: string
   // --- runner keys ---
-  /** First-contact join token for a standalone runner (`SLAYZONE_RUNNER_JOIN_TOKEN`). */
+  /** First-contact join token for a standalone runner (env: `SLAYZONE_HUB_JOIN_TOKEN`).
+   *  The FILE key keeps its short `joinToken` name — it is already namespaced by
+   *  the config object, so only the env channel needed the `HUB_` qualifier. */
   joinToken?: string
   /** Human-readable runner name (config-only; the standalone rename channel). */
   runnerName?: string
