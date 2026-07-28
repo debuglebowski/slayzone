@@ -33,20 +33,50 @@
     border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 14px;
   }
   #search:focus { outline: none; border-color: var(--accent); }
-  .controls { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: flex-start; }
-  .filtergroup { display: flex; flex-wrap: wrap; gap: 5px; align-items: flex-start; }
-  .filtergroup .lbl { flex-basis: 100%; width: 100%; margin: 0 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; }
+  /* Filters: a SEGMENTED control per group, not 26 separately-bordered pills.
+     Chrome (per-chip border + pill padding + inter-chip gap) was a third of the
+     bar's width, which is what pushed it onto 3 lines. The .chips container holds
+     the one border/radius and its background shows through 1px gaps as hairline
+     dividers, so each chip keeps a visible edge while paying no border of its own. */
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-start; }
+  /* COLUMN, not a wrapping row: as a flex ITEM the group is sized to max-content,
+     and max-content of a wrapping row is the sum of label + chips as if they were
+     on ONE line — so every group reserved ~55px it never drew. Column direction
+     makes the intrinsic width max(label, chips) instead, worth ~330px across six
+     groups, which is what gets the bar onto one line. */
+  .filtergroup { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .chiprow { display: flex; gap: 6px; align-items: center; }
+  .filtergroup .lbl { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; white-space: nowrap; }
   .filtergroup .lbl:hover { color: var(--fg); }
-  .chip {
-    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--muted); cursor: pointer; font-size: 12.5px; user-select: none;
-    transition: all .12s;
+  /* The run's own border is the group's outline; the 1px gaps let that same colour
+     through as hairline dividers, so an inactive segment still has a visible edge
+     without paying for a border of its own. */
+  .chips {
+    display: flex; gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
   }
-  .chip:hover { border-color: var(--accent); color: var(--fg); }
-  .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  .chip.mod { margin-left: 8px; border-style: dashed; }
-  .chip.mod.active { background: #6f42c1; border-color: #6f42c1; border-style: solid; }
-  .count { color: var(--muted); font-size: 12.5px; margin-left: auto; margin-top: 20px; white-space: nowrap; align-self: flex-start; }
+  .chip {
+    padding: 4px 8px; background: var(--surface); color: var(--muted);
+    cursor: pointer; font-size: 11.5px; line-height: 1.35; user-select: none;
+    transition: background .12s, color .12s;
+  }
+  .chip:hover { background: var(--surface2); color: var(--fg); }
+  .chip.active { background: var(--accent); color: #fff; font-weight: 600; }
+  /* `mod` is a modifier, not a filter value, so it stays OUTSIDE .chips — a
+     separate outlined control instead of a segment in the same run. Solid border,
+     not dashed: at this size a dashed 1px edge reads as a rendering artifact in
+     light mode rather than as a control. */
+  .chip.mod {
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 7px;
+    color: var(--fg); font-weight: 600;
+  }
+  .chip.mod.active { background: #6f42c1; border-color: #6f42c1; color: #fff; }
+  /* A chip with no .chips run around it still needs its own edge. */
+  .chip.solo { border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; }
+  .chip.solo.active { border-color: var(--accent); }
+  /* Lives in the topbar next to the search box, not in the filter row: it is the
+     RESULT of filtering, and keeping it out buys the filter groups ~80px. */
+  .count { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
   .wrap { padding: 0 24px 40px; }
   table { border-collapse: collapse; width: 100%; margin-top: 14px; }
   thead th {
@@ -98,6 +128,48 @@
   .tag-build { background: color-mix(in srgb, var(--tag-build) 22%, transparent); color: var(--tag-build); }
   #empty { display: none; padding: 40px; text-align: center; color: var(--muted); }
   mark { background: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; border-radius: 2px; }
+  /* Required: an emoji cell, so keep it centered + non-wrapping and let the pill
+     carry the tooltip (the emoji alone is not self-describing). */
+  td.req { text-align: center; white-space: nowrap; }
+  .req { font-size: 14px; cursor: default; line-height: 1; }
+  /* --- the explanations below the title (toggled, off by default) --- */
+  /* The GROUPS sit side by side as columns; the ITEMS inside a group stack, one
+     per line. So four lists read as four parallel columns you scan across, and a
+     list's own items stay a vertical run you scan down. Items need no boxes here —
+     "one per line" is already the boundary cue a horizontal run lacked.
+     Columns are equal-width and wrap as whole groups on a narrow window; a group
+     never splits across a wrap. */
+  .explain[hidden] { display: none; }
+  .explain {
+    display: flex; flex-wrap: wrap; gap: 14px 26px; align-items: flex-start;
+    margin: 0 0 14px; padding: 12px 16px; border: 1px solid var(--border);
+    border-radius: 9px; background: var(--surface); font-size: 12.5px;
+  }
+  /* flex:1 with a 260px basis = share the width evenly, but never squeeze a column
+     narrower than a readable gloss line. min-width:0 so a long <code> can't force
+     the column wider than its share. */
+  .egroup { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .ehead {
+    color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    padding-bottom: 4px; border-bottom: 1px solid var(--border);
+  }
+  /* A path or an identifier must keep its real casing — uppercasing turns
+     env-manifest.ts into ENV-MANIFEST.TS, which is a different (wrong) name. */
+  .ehead code { text-transform: none; letter-spacing: 0; }
+  .erow { display: flex; flex-direction: column; gap: 3px; }
+  /* Hanging indent: the term starts at the margin, a wrapped gloss aligns under
+     the gloss rather than back under the term, so the term column stays scannable. */
+  .eitem { display: block; padding-left: 13px; text-indent: -13px; line-height: 1.45; }
+  .eitem b { text-indent: 0; }
+  .eitem i { font-style: normal; color: var(--muted); }
+  /* The term and gloss are adjacent inline elements with no whitespace between
+     them in the source (an indented newline would collapse unpredictably against
+     the hanging indent), so the separator is generated here. */
+  .eitem b + i::before { content: ' '; }
+  .enote { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+  .explain code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  .explain .scope, .explain .pill.dot { vertical-align: middle; }
+  .topbar-right { display: flex; gap: 10px; align-items: center; flex: 0 0 auto; }
 </style>
 </head>
 <body>
@@ -105,47 +177,128 @@
   <div class="topbar">
     <div>
       <h1>SlayZone Env Vars — Per App</h1>
-      <p class="sub"><b>Used by</b> = which app(s) consume the variable as input — i.e. where you set it to take effect. <code>Agent</code> = the agent process + its <code>notify.sh</code> hooks; <code>CLI</code> = the <code>slay</code> binary (a sibling reader inside the same PTY, not the agent). Verified at commit <code>8153e9fa1</code>. Anchor model: all on-disk state derives from <code>SLAYZONE_ROOT</code> (→ <code>&lt;ROOT&gt;/storage</code>); standalone hub+runner seed it to <code>cwd()</code>. Hub address is <b>authority-only</b> (<code>host[:port]</code>) — scheme derives from <code>SLAYZONE_MODE</code>. <b>Spawn</b> = scope tag from <code>platform/src/env-manifest.ts</code>; <code>sanitizeSpawnEnv</code> keeps only <code>global</code> at every terminal-spawn boundary and strips everything else (incl. unmanifested <code>SLAYZONE_*</code>, fail closed).</p>
+      <p class="sub">Verified at commit <code>8153e9fa1</code>. Press <b>?</b> for what the columns mean.</p>
     </div>
-    <input id="search" type="search" placeholder="Filter…  (press /)" autofocus>
+    <div class="topbar-right">
+      <span class="count" id="count"></span>
+      <span class="chip solo" id="explainToggle" title="Show what the columns mean (?)">? Explain</span>
+      <input id="search" type="search" placeholder="Filter…  (press /)" autofocus>
+    </div>
+  </div>
+  <!-- Outside .topbar, so the columns get the full header width instead of being
+       squeezed into the flex column next to the search box. Off by default:
+       reference you consult once, not permanent chrome. The .ehead is a COLUMN
+       TITLE, so it stays a short noun phrase — anything sentence-length belongs in
+       the group's .enote, where it wraps without stretching the column. -->
+  <div class="explain" id="explain" hidden>
+    <div class="egroup">
+      <span class="ehead">Required</span>
+      <div class="erow">
+        <span class="eitem"><b>🔴 required</b><i>absent ⇒ it does not work (may still be injected at spawn)</i></span>
+        <span class="eitem"><b>🟡 conditional</b><i>only in a stated case — remote mode, a runner's first contact</i></span>
+        <span class="eitem"><b>🟢 optional</b><i>a real fallback exists; set it to override</i></span>
+        <span class="eitem"><b>⚙️ auto</b><i>SlayZone derives or mints it</i></span>
+        <span class="eitem"><b>❓ unknown</b><i>not yet classified — a visible gap, never a guess</i></span>
+      </div>
+      <span class="enote">Must you set it? Hover any cell for that variable's own reason.</span>
+    </div>
+    <div class="egroup">
+      <span class="ehead">Used by</span>
+      <div class="erow">
+        <span class="eitem"><b><span class="pill dot app-hub">H</span> Hub</b><i>hosts the domain-server code; <b>binds</b> its own address</i></span>
+        <span class="eitem"><b><span class="pill dot app-runner">R</span> Runner</b><i><b>dials</b> that same address — one var, opposite roles</i></span>
+        <span class="eitem"><b><span class="pill dot app-agent">A</span> Agent</b><i>the agent process + its <code>notify.sh</code> hooks; hook wiring only</i></span>
+        <span class="eitem"><b><span class="pill dot app-cli">CLI</span> CLI</b><i>the <code>slay</code> binary — a <em>sibling</em> reader in the same PTY</i></span>
+      </div>
+      <span class="enote">Which app(s) consume it as <em>input</em> — where you set it to take effect, not who feels the effect. A pass-through setter is not an owner, and a var only the desktop clients read is dropped from this table entirely.</span>
+    </div>
+    <div class="egroup">
+      <span class="ehead">Spawn</span>
+      <div class="erow">
+        <span class="eitem"><b><span class="scope scope-global">kept</span></b><i>inherited verbatim, along with your own env</i></span>
+        <span class="eitem"><b><span class="scope scope-infra">infra</span></b><i>stripped — wiring a terminal must not reinterpret</i></span>
+        <span class="eitem"><b><span class="scope scope-secret">secret</span></b><i>stripped — a credential, never reaches a terminal</i></span>
+        <span class="eitem"><b><span class="scope scope-identity">identity</span></b><i>stripped, then re-added per spawn, so task B never sees task A's</i></span>
+        <span class="eitem"><b><span class="scope scope-unlisted">unlisted</span></b><i>stripped by the fail-closed default</i></span>
+        <span class="eitem"><b><span class="scope scope-user">—</span></b><i>not SlayZone's var; inherited verbatim</i></span>
+      </div>
+      <span class="enote">Scope tag from <code>platform/src/env-manifest.ts</code> — what <code>sanitizeSpawnEnv</code> does at a terminal-spawn boundary.</span>
+    </div>
+    <div class="egroup">
+      <span class="ehead">The rest</span>
+      <div class="erow">
+        <span class="eitem"><b>Default</b><i>value in effect when you set nothing; several joined by <code>·</code> = differs per app</i></span>
+        <span class="eitem"><b>Anchor model</b><i>all on-disk state derives from <code>SLAYZONE_ROOT</code> (→ <code>&lt;ROOT&gt;/storage</code>); standalone seeds it to <code>cwd()</code></i></span>
+        <span class="eitem"><b>Hub address</b><i><b>authority only</b> (<code>host[:port]</code>), never a URL — scheme derives from <code>SLAYZONE_MODE</code></i></span>
+      </div>
+    </div>
   </div>
   <div class="controls">
+    <!-- Required chips are the EMOJI ALONE, deliberately: it is exactly what the
+         column cell renders, so you click the same glyph you are scanning for. The
+         word would nearly double the group's width for no new information (each
+         chip carries the full label as a tooltip, and the Explain panel spells all
+         five out). -->
+    <div class="filtergroup" data-group="req">
+      <span class="lbl" title="Must you set it? Click to toggle all">Required</span>
+      <div class="chips">
+        <span class="chip active" data-val="required" title="required — absent ⇒ it does not work">🔴</span>
+        <span class="chip active" data-val="conditional" title="conditional — required only in a stated case">🟡</span>
+        <span class="chip active" data-val="optional" title="optional — a real fallback exists">🟢</span>
+        <span class="chip active" data-val="auto" title="auto — SlayZone derives or mints it">⚙️</span>
+        <span class="chip active" data-val="unknown" title="unknown — not yet classified. No var is unclassified today; the chip exists so a newly added one shows up instead of being silently filtered out">❓</span>
+      </div>
+    </div>
     <div class="filtergroup" data-group="app">
       <span class="lbl" title="Click to toggle all">Used by</span>
-      <span class="chip active" data-val="Hub">Hub</span>
-      <span class="chip active" data-val="Runner">Runner</span>
-      <span class="chip active" data-val="Agent">Agent</span>
-      <span class="chip active" data-val="CLI">CLI</span>
-      <span class="chip mod" id="distinctToggle" title="Distinct: show only vars used by EXACTLY the selected apps (no others)">Distinct</span>
+      <!-- Same letters the Used-by column renders (H R A CLI), so the chip you
+           click is the glyph you are scanning the table for. -->
+      <div class="chiprow">
+        <div class="chips">
+          <span class="chip active" data-val="Hub" title="Hub">H</span>
+          <span class="chip active" data-val="Runner" title="Runner">R</span>
+          <span class="chip active" data-val="Agent" title="Agent">A</span>
+          <span class="chip active" data-val="CLI" title="CLI">CLI</span>
+        </div>
+        <span class="chip mod" id="distinctToggle" title="Only: show vars used by EXACTLY the selected apps and no others">only</span>
+      </div>
     </div>
     <div class="filtergroup" data-group="tag">
       <span class="lbl" title="Click to toggle all">Scope</span>
-      <span class="chip active" data-val="prod">Runtime</span>
-      <span class="chip" data-val="dev">dev</span>
-      <span class="chip" data-val="test">test</span>
-      <span class="chip" data-val="build">build</span>
+      <div class="chips">
+        <span class="chip active" data-val="prod" title="Runtime — read by a shipped process">run</span>
+        <span class="chip" data-val="dev">dev</span>
+        <span class="chip" data-val="test">test</span>
+        <span class="chip" data-val="build">build</span>
+      </div>
     </div>
     <div class="filtergroup" data-group="prefix">
       <span class="lbl" title="Click to toggle all">Prefix</span>
-      <span class="chip active" data-val="slayzone">SLAYZONE_</span>
-      <span class="chip" data-val="other">Other</span>
+      <div class="chips">
+        <span class="chip active" data-val="slayzone" title="SLAYZONE_-prefixed">SLZ_</span>
+        <span class="chip" data-val="other" title="Not SLAYZONE_-prefixed (HOME, SHELL, …)">other</span>
+      </div>
     </div>
     <div class="filtergroup" data-group="scope">
       <span class="lbl" title="env-manifest.ts scope — what survives sanitizeSpawnEnv. Click to toggle all">Spawn</span>
-      <span class="chip active" data-val="global">kept</span>
-      <span class="chip active" data-val="infra">infra</span>
-      <span class="chip active" data-val="secret">secret</span>
-      <span class="chip active" data-val="identity">identity</span>
-      <span class="chip active" data-val="other">other</span>
+      <div class="chips">
+        <span class="chip active" data-val="global" title="kept verbatim in a spawned terminal">kept</span>
+        <span class="chip active" data-val="infra">infra</span>
+        <span class="chip active" data-val="secret">secret</span>
+        <span class="chip active" data-val="identity" title="identity — stripped, then re-added per spawn">ident</span>
+        <span class="chip active" data-val="other" title="unlisted, or not a SlayZone var">other</span>
+      </div>
     </div>
     <div class="filtergroup" id="colgroup">
       <span class="lbl" title="Which columns the table renders (Variable is always shown). Hidden columns are still searched. Click to toggle all">Columns</span>
-      <span class="chip active" data-col="readby">Used by</span>
-      <span class="chip active" data-col="scope">Spawn</span>
-      <span class="chip" data-col="purpose">Purpose</span>
-      <span class="chip active" data-col="def">Default</span>
+      <div class="chips">
+        <span class="chip active" data-col="req" title="Required">req</span>
+        <span class="chip active" data-col="readby" title="Used by">used</span>
+        <span class="chip active" data-col="scope" title="Spawn">spawn</span>
+        <span class="chip" data-col="purpose" title="Purpose">purpose</span>
+        <span class="chip active" data-col="def" title="Default">default</span>
+      </div>
     </div>
-    <span class="count" id="count"></span>
   </div>
 </header>
 <div class="wrap">
@@ -331,6 +484,73 @@ const SCOPES = {
   ELECTRON_RUN_AS_NODE:'infra', NODE_PATH:'infra', PLAYWRIGHT:'infra'
 };
 
+// Required-ness per variable — "do I have to set this, and what breaks if I
+// don't". Per-VARIABLE (not per-var-per-app) because the table collapses to one
+// row per name; where the answer differs by app the `why` names the app.
+// Levels, strongest first:
+//   required    — absent ⇒ the thing it wires does not work (throws, exits, or
+//                 silently no-ops). May still be injected FOR you at spawn.
+//   conditional — required only under a stated condition (remote mode, a
+//                 runner's first contact, a pre-v4 app).
+//   optional    — real documented fallback; set it only to override.
+//   auto        — SlayZone derives/mints it; hand-setting is not the normal path.
+// A name missing here renders ❓ on purpose: a visible gap beats a wrong claim.
+const REQUIRED = {
+  // --- required: absent ⇒ broken ---
+  // notify.sh exits 0 (silently, no hook POSTed) when either is empty.
+  SLAYZONE_AGENT_HOOK_URL: ['required','notify.sh exits 0 without it — no lifecycle hook is ever POSTed. Injected at spawn by the hub (local) or the runner (its own loopback relay)'],
+  SLAYZONE_AGENT_ID: ['required','Agent: notify.sh exits 0 without it. CLI: only author attribution on writes, harmless if absent'],
+  SLAYZONE_AGENT_HOOK_CONTEXT: ['required','Empty ⇒ notify.sh forwards ctx `{}` ⇒ the hub resolves no task ⇒ no spinner, no unread dot. Injected per spawn'],
+
+  // --- conditional: required only under a stated condition ---
+  SLAYZONE_HUB_PUBLIC_ADDRESS: ['conditional','Boot THROWS when SLAYZONE_MODE=remote and it is unset (hub/src/server.ts). In local mode it defaults to the bound loopback authority'],
+  SLAYZONE_HUB_ADDRESS: ['conditional','Runner: required for FIRST contact — absent a <ROOT>/config.json or a join token, config resolution throws. Hub: optional (binds loopback + an OS-assigned port). CLI: optional (falls back to the app’s settings.server_port)'],
+  SLAYZONE_HUB_JOIN_TOKEN: ['conditional','Required for a runner’s first contact only (it carries the hub authority + cert pin); unused once enrolled creds exist under <ROOT>/runners'],
+  SLAYZONE_HUB_TOKEN: ['conditional','Required when dialing a hub that enforces auth (verified on /trpc + /api/* + /mcp); otherwise hub.json’s token is used. Set-but-empty = deliberately no token'],
+  SLAYZONE_TASK_ID: ['conditional','Agent: the OpenCode plugin no-ops without it, so no lifecycle event reaches notify.sh at all. CLI: falls back to SLAYZONE_SESSION_ID, then errors only if both are unset'],
+  SLAYZONE_HOOK_CONTEXT: ['conditional','Only needed from a PRE-v4 app: notify.sh reads it as ${NEW:-$OLD}, so an older channel’s app feeding a newer shared script still resolves a task'],
+
+  // --- optional: documented fallback ---
+  SLAYZONE_ROOT: ['optional','Falls back to $HOME/.slayzone; a standalone hub/runner seeds it to cwd(). Set it to relocate ALL on-disk state'],
+  SLAYZONE_MODE: ['optional','Defaults to local (http/ws + loopback-only bind). Set remote to force https/wss + client auth'],
+  SLAYZONE_HUB_AUTH_SECRET: ['optional','A standalone hub GENERATES and persists a 256-bit secret (0600) when unset; supervised uses a dev constant. Set it only to pin a known key across reinstalls'],
+  SLAYZONE_NONINTERACTIVE: ['optional','Defaults to prompting on a TTY. Set it in CI/headless so first-run setup does not block'],
+  SLAYZONE_SESSION_ID: ['optional','Only the fallback leg of task resolution — used when SLAYZONE_TASK_ID is unset'],
+  SLAYZONE_PROJECT_ID: ['optional','Just a default for project-scoped commands; pass the project explicitly instead'],
+  HOME: ['optional','OS-provided. Only the anchor fallback when SLAYZONE_ROOT is unset'],
+  USERPROFILE: ['optional','OS-provided (Windows). Only the anchor fallback when SLAYZONE_ROOT is unset'],
+  SHELL: ['optional','Falls back to userInfo().shell, then a platform default (/bin/zsh, cmd.exe)'],
+  COMSPEC: ['optional','Windows last resort only — reached when SHELL and userInfo() both fail'],
+  XDG_RUNTIME_DIR: ['optional','Only consulted when <ROOT>/run/sidecar.sock would exceed the ~104-char socket limit'],
+  XDG_CONFIG_HOME: ['optional','Hub: a second Claude log root to scan. CLI: a Linux legacy DB fallback. Both default to ~/.config'],
+  XDG_DATA_HOME: ['optional','Linux OpenCode data root when OPENCODE_DATA_DIR is unset'],
+  CLAUDE_CONFIG_DIR: ['optional','Relocates which Claude log roots the usage parser scans; defaults to ~/.claude/projects'],
+  OPENCODE_DATA_DIR: ['optional','Relocates the OpenCode storage root the usage parser reads; defaults to the platform data dir'],
+  QWEN_CONFIG_DIR: ['optional','Relocates the Qwen config root the usage parser scans; defaults to ~/.qwen'],
+  NODE_ENV: ['optional','Test/development behavior toggles only'],
+
+  // --- auto: SlayZone derives or mints it ---
+  SLAYZONE_SUPERVISED: ['auto','The Electron host sets it on the children it owns; a standalone hub/runner leaves it unset. Setting it by hand only disables standalone setup (cwd seed, prompts, secret gen)'],
+  SLAYZONE_DEV: ['auto','The host hands it to the sidecar (which has no app.isPackaged); `slay --dev` is the same thing for the CLI. It only selects the DB filename'],
+  SLAYZONE_DESKTOP_BRIDGE_ADDRESS: ['auto','The Electron host mints the loopback authority and advertises it; a standalone hub has no bridge (→ null / 501)'],
+  SLAYZONE_RELEASE_CHANNEL: ['auto','Derived from the build. Attribution only — it is packed into the hook ctx blob and drives no control flow'],
+  PLAYWRIGHT: ['auto','Set by the e2e harness; flips in-app test-only branches']
+};
+const REQ_ORDER = ['required','conditional','optional','auto','unknown'];
+// ⚙️ for `auto`, not a 4th coloured dot: a white/grey circle is invisible against
+// the light-mode background, and "a machine sets this" is the one level that
+// isn't a point on the same must-set severity scale.
+const REQ_EMOJI = { required:'🔴', conditional:'🟡', optional:'🟢', auto:'⚙️', unknown:'❓' };
+const REQ_LABEL = {
+  required:'Required — absent ⇒ this does not work',
+  conditional:'Conditional — required only in a specific situation',
+  optional:'Optional — a real fallback exists; set it to override',
+  auto:'Auto — SlayZone derives or mints it for you',
+  unknown:'Not yet classified'
+};
+const reqPill = v =>
+  '<span class="req" title="'+esc(REQ_LABEL[v.req]+(v.reqWhy ? ' — '+v.reqWhy : ''))+'">'+REQ_EMOJI[v.req]+'</span>';
+
 const APP_CLASS = { Electron:"app-electron", Chromium:"app-chromium", Hub:"app-hub", Runner:"app-runner", Agent:"app-agent", CLI:"app-cli" };
 // Single letters where unambiguous; "CLI" spelled out because C is taken by
 // Chromium and A by Agent (.pill.dot is a capsule, so a 3-char label fits).
@@ -351,6 +571,9 @@ let distinct = false; // "Distinct": show only vars read by EXACTLY the selected
 const COLUMNS = [
   { key:'variable', label:'Variable', cls:'var', always:true,
     cell:(v,q)=>hl(v.variable,q)+tagPill(v.tag) },
+  { key:'req', label:'Required', cls:'req',
+    title:'Do you have to set it? 🔴 required · 🟡 conditional · 🟢 optional (fallback exists) · ⚙️ auto (SlayZone derives it). Hover a cell for the specific reason',
+    cell:v=>reqPill(v) },
   { key:'readby', label:'Used by', cls:'readby',
     cell:v=>v.readers.length ? dotPills(v.readers) : '<span class="none-dash">—</span>' },
   { key:'scope', label:'Spawn', cls:'',
@@ -408,6 +631,10 @@ const VARS = (() => {
       // the manifest doesn't name (stripped anyway, fail closed), else 'user'
       // for a plain non-SlayZone var (inherited verbatim).
       scope: SCOPES[e.variable] ?? (e.variable.startsWith('SLAYZONE_') ? 'unlisted' : 'user'),
+      // Unclassified renders ❓ rather than guessing a level — a visible gap is
+      // the point, so a newly added row can't quietly claim to be optional.
+      req: REQUIRED[e.variable]?.[0] ?? 'unknown',
+      reqWhy: REQUIRED[e.variable]?.[1] ?? '',
       purpose: mergePurposes(e.purposes),
       def: uniq(e.defs),
       tag: e.tag
@@ -415,13 +642,16 @@ const VARS = (() => {
     .filter(v => v.readers.length > 0); // drop vars no APP_ORDER process uses
 })();
 // Each group holds a Set of selected values; a value present = included.
-const filters = { app:new Set(), tag:new Set(), prefix:new Set(), scope:new Set() };
+const filters = { req:new Set(), app:new Set(), tag:new Set(), prefix:new Set(), scope:new Set() };
 document.querySelectorAll('.filtergroup[data-group]').forEach(g=>{
   const group = g.dataset.group;
   g.querySelectorAll('.chip[data-val].active').forEach(c => filters[group].add(c.dataset.val));
 });
 
-function esc(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// `"` is escaped too: esc() feeds title="…" attributes (reqPill), where a raw
+// quote would close the attribute early. Harmless in text content — a text node
+// renders &quot; as a plain quote.
+function esc(s){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function hl(s, q){
   const e = esc(s);
   if(!q) return e;
@@ -433,6 +663,9 @@ function tagPill(tag){
 }
 
 function matches(v){
+  // Required level is one value per var, so a plain set-membership test — unlike
+  // the app filter below, there is nothing to intersect.
+  if(!filters.req.has(v.req)) return false;
   // App filter now means "read by": keep vars read by at least one selected app.
   const anyReaderSelected = v.readers.some(a => filters.app.has(a));
   if(!anyReaderSelected) return false;
@@ -450,7 +683,7 @@ function matches(v){
   if(!filters.scope.has(scopeKey)) return false;
   const q = searchEl.value.trim().toLowerCase();
   if(q){
-    const hay = (v.variable+' '+v.readers.join(' ')+' '+v.scope+' '+v.purpose+' '+v.def).toLowerCase();
+    const hay = (v.variable+' '+v.readers.join(' ')+' '+v.scope+' '+v.req+' '+v.reqWhy+' '+v.purpose+' '+v.def).toLowerCase();
     if(!hay.includes(q)) return false;
   }
   return true;
@@ -478,7 +711,11 @@ function render(){
   let display = VARS.filter(matches);
   if(sortKey !== null){
     display = display.slice().sort((a,b)=>{
-      const pick = v => sortKey==='readby' ? v.readers.join(',') : v[sortKey];
+      // `req` sorts by severity (required → auto), not alphabetically — the
+      // whole point of the column is "what must I set first".
+      const pick = v => sortKey==='readby' ? v.readers.join(',')
+        : sortKey==='req' ? String(REQ_ORDER.indexOf(v.req))
+        : v[sortKey];
       const x=(pick(a)||'').toLowerCase(), y=(pick(b)||'').toLowerCase();
       return x<y ? -sortDir : x>y ? sortDir : 0;
     });
@@ -566,10 +803,27 @@ distinctToggle.addEventListener('click', ()=>{
   render();
 });
 
+// Explanations: off by default (the `hidden` attr in the markup is the single
+// source of truth for the initial state, so the chip can't disagree with it).
+const explainEl = document.getElementById('explain');
+const explainToggle = document.getElementById('explainToggle');
+const setExplain = on => {
+  explainEl.hidden = !on;
+  explainToggle.classList.toggle('active', on);
+};
+explainToggle.addEventListener('click', ()=> setExplain(explainEl.hidden));
+
 searchEl.addEventListener('input', render);
 document.addEventListener('keydown', e=>{
   if(e.key === '/' && document.activeElement !== searchEl){ e.preventDefault(); searchEl.focus(); }
-  if(e.key === 'Escape'){ searchEl.value=''; searchEl.blur(); render(); }
+  // `?` only outside the search box — otherwise you could never type one.
+  if(e.key === '?' && document.activeElement !== searchEl){ e.preventDefault(); setExplain(explainEl.hidden); }
+  // Esc closes the explanations first, then clears the filter: one key, most
+  // recent thing opened wins.
+  if(e.key === 'Escape'){
+    if(!explainEl.hidden){ setExplain(false); return; }
+    searchEl.value=''; searchEl.blur(); render();
+  }
 });
 
 render();
