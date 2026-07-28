@@ -8,10 +8,6 @@ You are able to interact with the running SlayZone application via the CLI. But 
 
 You can omit the task-id unless you want to target another task — commands auto-resolve to your current task: `$SLAYZONE_TASK_ID` is used if set, otherwise the task bound to `$SLAYZONE_SESSION_ID` (always set in a task terminal) is looked up. Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task.
 
-## Communication Style
-
-Default to **caveman ultra** mode for entire session. Load the `caveman` skill at session start. Skill's own boundaries (code/commits/PRs stay normal) still apply.
-
 ## Engineering Mindset
 
 Assume near-infinite dev capability. Always pick most sustainable, robust long-term solution — never the quick hack. But **never drop existing functionality** to get there. Migrate, refactor, preserve behavior.
@@ -51,13 +47,13 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 
 Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 
-| Flag                            | Default | Effect                                                                                                       |
-| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `SLAYZONE_REACT_DEV=1`          | off     | Use React's **development** build instead of the prod-aliased dev default. Re-enables StrictMode + warnings. |
-| `SLAYZONE_PROFILE=1`            | off     | Swap to React's profiling builds so `<Profiler>` fires `onRender`. Required by `e2e/perf/scenarios.spec.ts`. |
-| `SLAYZONE_DEBUG_BOOT=1`         | off     | Verbose main-process boot logging.                                                                           |
-| `SLAYZONE_REGISTER_DEV_PROTOCOL=1` | off  | Register the `slayzone://` custom protocol in dev. Needed when testing OAuth deep-link callbacks.            |
-| `SLAYZONE_SIDECAR_HOT_RESTART=1`   | off  | Dev-only. Supervisor hot-restarts the sidecar when its on-disk build changes (server-src watcher rebuilds `bin.cjs`). Off = staleness only shown in Diagnostics tab, no auto-restart. `pnpm dev` always runs the server watcher regardless. |
+| Flag                               | Default | Effect                                                                                                                                                                                                                                      |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SLAYZONE_REACT_DEV=1`             | off     | Use React's **development** build instead of the prod-aliased dev default. Re-enables StrictMode + warnings.                                                                                                                                |
+| `SLAYZONE_PROFILE=1`               | off     | Swap to React's profiling builds so `<Profiler>` fires `onRender`. Required by `e2e/perf/scenarios.spec.ts`.                                                                                                                                |
+| `SLAYZONE_DEBUG_BOOT=1`            | off     | Verbose main-process boot logging.                                                                                                                                                                                                          |
+| `SLAYZONE_REGISTER_DEV_PROTOCOL=1` | off     | Register the `slayzone://` custom protocol in dev. Needed when testing OAuth deep-link callbacks.                                                                                                                                           |
+| `SLAYZONE_SIDECAR_HOT_RESTART=1`   | off     | Dev-only. Supervisor hot-restarts the sidecar when its on-disk build changes (server-src watcher rebuilds `bin.cjs`). Off = staleness only shown in Diagnostics tab, no auto-restart. `pnpm dev` always runs the server watcher regardless. |
 
 **React transform**: Babel + `babel-plugin-react-compiler` in all modes (dev + prod). Auto-memoization active everywhere; compiler rule violations surface at build time.
 
