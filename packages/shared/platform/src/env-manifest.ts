@@ -66,13 +66,11 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // redemption), so any runner can redeem any unused token — there is no runner in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).
   SLAYZONE_HUB_JOIN_TOKEN: 'secret',
-  // DEPRECATED alias of the above, kept as a READ-ONLY fallback in the runner's
-  // config resolver (see runner/src/config.ts ENV_VARS.joinTokenLegacy). Unlike
-  // other retired names — which the fail-closed default already strips — this one
-  // stays MANIFESTED because it is still a live input channel: a published
-  // operator contract (runner README + publish-hub-runner.sh one-liner) that
-  // hand-set envs may still use. An input channel gets an explicit scope tag.
-  SLAYZONE_RUNNER_JOIN_TOKEN: 'secret',
+  // The pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN` is deliberately UNLISTED: it is
+  // retired, not aliased. It never shipped (the published runner betas read
+  // `SLAYZONE_JOIN_TOKEN`), so no operator env carries it and there is nothing to
+  // keep working. Unlisted ⇒ the fail-closed default strips it, same as every
+  // other retired name in this rename sweep.
   SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS: 'secret',
 
   // --- infra: SlayZone wiring a terminal must not reinterpret ---

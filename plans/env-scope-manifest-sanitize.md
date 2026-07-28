@@ -57,7 +57,7 @@ strip `infra`+`secret`+`identity`+**any unmanifested `SLAYZONE_*`** (fail closed
 
 | Scope | Vars |
 |---|---|
-| **secret** (strip) | `SLAYZONE_HUB_TOKEN`, `SLAYZONE_HUB_AUTH_SECRET` (§7 Q2 — replaces `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`; the `config.json` key stays `runnerTransportSecret`), `SLAYZONE_HUB_JOIN_TOKEN` (§7 Q1 — replaces `SLAYZONE_RUNNER_JOIN_TOKEN`, which stays manifested as a read-only deprecated alias), `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` |
+| **secret** (strip) | `SLAYZONE_HUB_TOKEN`, `SLAYZONE_HUB_AUTH_SECRET` (§7 Q2 — replaces `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`; the `config.json` key stays `runnerTransportSecret`), `SLAYZONE_HUB_JOIN_TOKEN` (§7 Q1 — replaces `SLAYZONE_RUNNER_JOIN_TOKEN`, which is retired outright: unmanifested, no alias), `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` |
 | **infra** (strip) | `SLAYZONE_HUB_ADDRESS`* (§5 — replaces `SLAYZONE_HUB_URL` **+ `_HOST` + `_PORT`**), `SLAYZONE_HUB_PUBLIC_ADDRESS` (§5 — replaces `SLAYZONE_HUB_PUBLIC_URL`), `SLAYZONE_DESKTOP_BRIDGE_ADDRESS` (§2+§5 — replaces `SLAYZONE_BRIDGE_URL`), `SLAYZONE_MODE`, `SLAYZONE_SUPERVISED`, `SLAYZONE_DB_PATH`, `SLAYZONE_USER_DATA_DIR`, `SLAYZONE_SIDECAR_HOT_RESTART`, `SLAYZONE_BOOT_LOG_PATH`, `SLAYZONE_DEBUG_BOOT`, `SLAYZONE_*_SETTINGS_PATH`/`*_HOOKS_PATH`/`*_PLUGIN_PATH` (claude/gemini/codex/antigravity/opencode), `SLAYZONE_E2E_ALLOW_RUNNER`, `SLAYZONE_E2E_INSTALL_HOOKS`, `SLAYZONE_REGISTER_DEV_PROTOCOL`, `SLAYZONE_NONINTERACTIVE` + non-prefixed infra: `ELECTRON_RUN_AS_NODE`, `NODE_PATH`, `PLAYWRIGHT` |
 | **identity** (strip base, overlay re-adds) | `SLAYZONE_TASK_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_AGENT_ID`, `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_AGENT_HOOK_CONTEXT` (§3 — replaces `SLAYZONE_HOOK_CONTEXT`; sibling of `_AGENT_HOOK_URL`) |
 | **global** (keep) | `SLAYZONE_RELEASE_CHANNEL`, `SLAYZONE_ROOT`, `SLAYZONE_DEV` |
@@ -283,10 +283,18 @@ layer (`szjt1.`, `join_tokens`, `mintJoinToken`, `POST /api/runners/join-token`)
 `ENROLL` was rejected for drifting from that term. The near-collision with
 `SLAYZONE_HUB_TOKEN` (CLI→hub REST bearer) was accepted: different processes read
 them, both are `secret` scope, and a mix-up fails closed on a missing required
-var. The old name survives as a READ-ONLY fallback in `runner/config.ts`
-(`ENV_VARS.joinTokenLegacy`, canonical wins when both set) because it is a
-published operator contract; it stays manifested `secret` since it is still a live
-input channel.
+var. The old name is RETIRED outright — no read-only alias. The first landing kept
+one on a "published operator contract" premise that was simply false: the
+published runner betas (`@slayzone/runner` 0.36.0-beta.2/3) read
+`SLAYZONE_JOIN_TOKEN`, and `SLAYZONE_RUNNER_JOIN_TOKEN` only ever existed on
+unreleased main (introduced in `0156d82b5`, which no `v0.36.0-beta.*` tag
+contains), so no operator env anywhere carries it. It is therefore unmanifested
+(fail-closed default strips it) and `loadRunnerConfig` ignores it, matching the
+six OTHER names those same betas did ship and that this sweep dropped cold
+(`SLAYZONE_HUB_URL`, `SLAYZONE_HUB_CERT_SHA256`, `SLAYZONE_JOIN_TOKEN`,
+`SLAYZONE_RUNNER_ALLOWED_ROOTS`, `SLAYZONE_RUNNER_CREDENTIALS_DIR`,
+`SLAYZONE_HOME_DIR`). General rule for this pre-1.0 sweep: nothing shipped ⇒ no
+aliases.
 
 Resolved (later round, LANDED): **Q2** — `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` →
 `SLAYZONE_HUB_AUTH_SECRET`. Deciding fact: the secret is the HMAC signing key for

@@ -55,15 +55,13 @@ export const ENV_VARS = {
   // named its CONSUMER, which is what CLAUDE.md rule 2 forbids. `_TOKEN` suffix +
   // `HUB_` family per rule 3, matching the domain term used everywhere else
   // (`szjt1.`, the `join_tokens` table, mintJoinToken, POST /api/runners/join-token).
-  joinToken: 'SLAYZONE_HUB_JOIN_TOKEN',
-  /**
-   * DEPRECATED pre-rename name, still READ (never written/documented) so a
-   * hand-set operator env keeps working: `SLAYZONE_RUNNER_JOIN_TOKEN=… slayzone-runner`
-   * is a published contract (the runner's npm README + publish-hub-runner.sh). The
-   * canonical name wins when both are set. Remove only after a release that ships
-   * the new name has been out long enough for standalone deployments to migrate.
-   */
-  joinTokenLegacy: 'SLAYZONE_RUNNER_JOIN_TOKEN'
+  joinToken: 'SLAYZONE_HUB_JOIN_TOKEN'
+  // No alias for the pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN`: it never shipped.
+  // The published runner betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, and
+  // the name it was renamed FROM only ever existed on unreleased main, so there is
+  // no operator env carrying it. Unmanifested ⇒ sanitizeSpawnEnv strips it, and
+  // loadRunnerConfig ignores it, so setting it fails loudly with the
+  // missing-SLAYZONE_HUB_JOIN_TOKEN error rather than half-working.
   // allowedRoots has NO env channel: a SUPERVISED runner self-derives its FS
   // path-jail to `[homedir()]` (below), a STANDALONE runner gets it from
   // <ROOT>/config.json `allowedRoots` (+ the ROOT default in bin.ts). The runner
@@ -192,10 +190,9 @@ export function loadRunnerConfig(
   // malformed token decodes to null → no fallback (schema then reports the missing
   // hubUrl, exactly as before).
   //
-  // Env precedence: canonical name > deprecated name > config.json. Resolved ONCE
-  // here so the token-decode fallback and the `joinToken` field can never disagree
-  // about which channel won.
-  const envJoinToken = env[ENV_VARS.joinToken] ?? env[ENV_VARS.joinTokenLegacy]
+  // Env precedence: env > config.json. Resolved ONCE here so the token-decode
+  // fallback and the `joinToken` field can never disagree about which channel won.
+  const envJoinToken = env[ENV_VARS.joinToken]
   const joinToken = envJoinToken ?? fromShared.joinToken
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 

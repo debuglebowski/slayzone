@@ -249,11 +249,9 @@ describe('loadRunnerConfig', () => {
     const savedSup = process.env.SLAYZONE_SUPERVISED
     const savedAddr = process.env.SLAYZONE_HUB_ADDRESS
     const savedToken = process.env.SLAYZONE_HUB_JOIN_TOKEN
-    const savedLegacyToken = process.env.SLAYZONE_RUNNER_JOIN_TOKEN
     try {
       delete process.env.SLAYZONE_HUB_ADDRESS
       delete process.env.SLAYZONE_HUB_JOIN_TOKEN
-      delete process.env.SLAYZONE_RUNNER_JOIN_TOKEN
       process.env.SLAYZONE_ROOT = dir
       process.env.SLAYZONE_SUPERVISED = '1'
       writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/runners' }))
@@ -271,18 +269,18 @@ describe('loadRunnerConfig', () => {
       restore('SLAYZONE_SUPERVISED', savedSup)
       restore('SLAYZONE_HUB_ADDRESS', savedAddr)
       restore('SLAYZONE_HUB_JOIN_TOKEN', savedToken)
-      restore('SLAYZONE_RUNNER_JOIN_TOKEN', savedLegacyToken)
     }
   })
 
-  // --- join-token env rename: SLAYZONE_RUNNER_JOIN_TOKEN → SLAYZONE_HUB_JOIN_TOKEN ---
+  // --- join token: ONE env name, no aliases ---
   // The token is minted BY the hub and embeds the hub's url + cert pin + a secret
   // verified against the hub's `join_tokens` row; `mintJoinToken` binds it to NO
   // runner (runner_id is NULL until redemption). So the value is hub-scoped, and
-  // the old name described its consumer — the one thing CLAUDE.md rule 2 forbids.
-  // The old name stays a READ-ONLY deprecated fallback: it is a published operator
-  // contract (packages/apps/runner README + publish-hub-runner.sh), so a hand-set
-  // env from an older install must keep working.
+  // the pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN` described its consumer — the one
+  // thing CLAUDE.md rule 2 forbids. It is RETIRED outright, not aliased: it never
+  // shipped (published runner betas 0.36.0-beta.2/3 read `SLAYZONE_JOIN_TOKEN`),
+  // so no operator env anywhere carries it. Same treatment as the other unshipped
+  // renames in this sweep, which were all dropped cold.
   describe('join-token env name', () => {
     it('reads the canonical SLAYZONE_HUB_JOIN_TOKEN', () => {
       const config = loadRunnerConfig({
@@ -292,33 +290,45 @@ describe('loadRunnerConfig', () => {
       expect(config.joinToken).toBe('jt-new')
     })
 
-    it('still accepts the deprecated SLAYZONE_RUNNER_JOIN_TOKEN', () => {
-      const config = loadRunnerConfig({
-        [ENV_VARS.hubAddress]: 'hub.example',
-        [ENV_VARS.joinTokenLegacy]: 'jt-old'
-      })
-      expect(config.joinToken).toBe('jt-old')
+    it('exposes exactly one join-token env name (no alias in ENV_VARS)', () => {
+      expect(Object.values(ENV_VARS).filter((v) => v.includes('JOIN_TOKEN'))).toEqual([
+        'SLAYZONE_HUB_JOIN_TOKEN'
+      ])
     })
 
-    it('canonical name wins when BOTH are set', () => {
+    it('IGNORES the retired SLAYZONE_RUNNER_JOIN_TOKEN', () => {
+      // A retired name must not stay a silent input channel. `joinToken` is
+      // optional (an enrolled runner reconnects on stored credentials), so the old
+      // name simply yields no token — first contact then fails at enrollment, not
+      // with a half-honoured config.
       const config = loadRunnerConfig({
         [ENV_VARS.hubAddress]: 'hub.example',
-        [ENV_VARS.joinToken]: 'jt-new',
-        [ENV_VARS.joinTokenLegacy]: 'jt-old'
+        SLAYZONE_RUNNER_JOIN_TOKEN: 'jt-old'
       })
-      expect(config.joinToken).toBe('jt-new')
+      expect(config.joinToken).toBeUndefined()
     })
 
-    it('is self-sufficient from a DEPRECATED-name token alone (hubUrl + pin extracted)', () => {
-      // The legacy channel must feed the token-decode fallback too, not just the
-      // joinToken field — otherwise `SLAYZONE_RUNNER_JOIN_TOKEN=… slayzone-runner`
-      // (the exact published one-liner) would fail with a missing-hubUrl error.
+    it('IGNORES a retired-name token for the hubUrl/pin fallback too', () => {
+      // The decode fallback reads the SAME resolved value, so a token supplied only
+      // under the old name cannot smuggle in a hub url either: with no hubAddress
+      // there is no hub source left and the schema reports it.
       const token = mintToken({
         hubUrl: 'wss://hub.example:8443/runners',
         certFingerprint: 'a'.repeat(64),
         secret: 's'
       })
-      const config = loadRunnerConfig({ [ENV_VARS.joinTokenLegacy]: token })
+      expect(() => loadRunnerConfig({ SLAYZONE_RUNNER_JOIN_TOKEN: token })).toThrow(
+        /SLAYZONE_HUB_ADDRESS/
+      )
+    })
+
+    it('is self-sufficient from the token alone (hubUrl + pin extracted)', () => {
+      const token = mintToken({
+        hubUrl: 'wss://hub.example:8443/runners',
+        certFingerprint: 'a'.repeat(64),
+        secret: 's'
+      })
+      const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
       expect(config.hubUrl).toBe('wss://hub.example:8443/runners')
       expect(config.pinnedCertSha256).toBe('a'.repeat(64))
       expect(config.joinToken).toBe(token)
@@ -328,17 +338,12 @@ describe('loadRunnerConfig', () => {
       expect(() => loadRunnerConfig({})).toThrow(/SLAYZONE_HUB_JOIN_TOKEN/)
     })
 
-    it('env (either name) beats a config.json joinToken', () => {
-      const fromNew = loadRunnerConfig(
+    it('env beats a config.json joinToken', () => {
+      const fromEnv = loadRunnerConfig(
         { [ENV_VARS.hubAddress]: 'hub.example', [ENV_VARS.joinToken]: 'jt-env' },
         { joinToken: 'jt-file' }
       )
-      expect(fromNew.joinToken).toBe('jt-env')
-      const fromLegacy = loadRunnerConfig(
-        { [ENV_VARS.hubAddress]: 'hub.example', [ENV_VARS.joinTokenLegacy]: 'jt-env-old' },
-        { joinToken: 'jt-file' }
-      )
-      expect(fromLegacy.joinToken).toBe('jt-env-old')
+      expect(fromEnv.joinToken).toBe('jt-env')
     })
   })
 })
