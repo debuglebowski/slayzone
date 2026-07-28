@@ -63,6 +63,9 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-ex
 run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
 # Client↔hub /trpc connection-context seam — windowId parse + bearer→principal verify (real hub-auth).
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
+# HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, loopback bypass,
+# fail-closed) driven over a real listener with a real better-auth session.
+run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
 # Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/runners.test.ts

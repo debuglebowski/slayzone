@@ -34,6 +34,7 @@ import { getServerBuildInfo } from './build-info.js'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
+import { withRestAuth } from './rest-auth.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
 
@@ -212,8 +213,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
   // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/* + /mcp via express.
   // `/trpc` + `/runners` WS upgrades are demuxed in the `upgrade` handler below.
-  const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
-    if (handleHealth(state, req, res)) return
+  //
+  // Everything past /health rides the same bearer gate as `/trpc` (see
+  // rest-auth.ts). It sits ABOVE the desktop reverse-proxy on purpose: the
+  // proxied routes (`/api/browser/*`, artifact exports) drive live WebContents —
+  // arbitrary JS eval in a real browser view — so they are the LAST thing that
+  // should reach the desktop unauthenticated. Inert when the hub doesn't enforce
+  // auth: `restAuthAction` short-circuits to 'allow' with no verify call.
+  const dispatchRequest = (req: IncomingMessage, res: ServerResponse): void => {
     if (desktopRestUrl && needsDesktopRest(req.url)) {
       proxyToDesktopRest(desktopRestUrl, req, res)
       return
@@ -226,6 +233,17 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       return
     }
     mcpRest.app(req, res)
+  }
+  const gatedDispatch = withRestAuth({
+    getHubAuthRequired: () => hubAuthRequired,
+    getHubAuth: () => hubAuth,
+    next: dispatchRequest
+  })
+  const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
+    // /health answers BEFORE the gate: a liveness probe has no credentials, and
+    // it must keep answering even when auth is misconfigured.
+    if (handleHealth(state, req, res)) return
+    gatedDispatch(req, res)
   }
   const httpServer =
     remote && hubIdentity
