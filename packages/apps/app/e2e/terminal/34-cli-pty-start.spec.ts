@@ -1,4 +1,12 @@
-import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  resetApp,
+  TEST_PROJECT_PATH,
+  cliRoot,
+  cliEnv
+} from '../fixtures/electron'
 import { spawnSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -17,7 +25,7 @@ const SLAY_JS = path.resolve(__dirname, '..', '..', '..', 'cli', 'dist', 'slay.j
  *   - Split-pane misses still 404 (auto-start scoped to main sessionId).
  */
 test.describe('CLI: PTY start + auto-spawn on submit', () => {
-  let dbPath = ''
+  let rootDir = ''
   let projectId = ''
   let mcpPort = 0
 
@@ -27,8 +35,7 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
 
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
-    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
+    rootDir = await cliRoot(electronApp)
 
     mcpPort = await electronApp.evaluate(async () => {
       for (let i = 0; i < 20; i++) {
@@ -52,7 +59,7 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
 
   const runCli = (...args: string[]) =>
     spawnSync('node', [SLAY_JS, ...args], {
-      env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
+      env: cliEnv(rootDir),
       encoding: 'utf8'
     })
 

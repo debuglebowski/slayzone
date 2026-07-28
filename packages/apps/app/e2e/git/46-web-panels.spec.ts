@@ -5,7 +5,9 @@ import {
   clickSettings,
   clickProject,
   goHome,
-  resetApp
+  resetApp,
+  cliRoot,
+  cliEnv
 } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
@@ -20,7 +22,7 @@ const SLAY_JS = path.resolve(__dirname, '..', '..', '..', 'cli', 'dist', 'slay.j
 test.describe('Web panels', () => {
   let projectAbbrev: string
   let figmaPanelName = 'Figma'
-  let dbPath = ''
+  let rootDir = ''
 
   const settingsDialog = (page: import('@playwright/test').Page) =>
     page.locator('[role="dialog"][aria-label="Settings"]').last()
@@ -81,21 +83,18 @@ test.describe('Web panels', () => {
 
   const runCli = (...args: string[]) =>
     spawnSync('node', [SLAY_JS, ...args], {
-      env: {
-        ...process.env,
-        SLAYZONE_DB_PATH: dbPath
-      },
+      env: cliEnv(rootDir),
       encoding: 'utf8'
     })
 
   test.beforeAll(async ({ electronApp, mainWindow }) => {
     await resetApp(mainWindow)
 
-    // CLI setup (same pattern as 60-cli.spec.ts). The CLI resolves the server
-    // port from the DB itself, so only SLAYZONE_DB_PATH is needed.
+    // CLI setup (same pattern as 60-cli.spec.ts). The CLI derives its DB from the
+    // install ROOT and resolves the server port out of that DB, so ROOT is the
+    // only thing it needs.
     if (fs.existsSync(SLAY_JS)) {
-      const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
-      dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
+      rootDir = await cliRoot(electronApp)
     }
 
     const s = seed(mainWindow)

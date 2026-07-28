@@ -12,8 +12,8 @@
  *
  * ISOLATION (must never touch the real dev/prod stores):
  *   - The child env is SCRUBBED of every `SLAYZONE_*` / `ELECTRON_*` var (a
- *     supervised parent leaks SLAYZONE_SUPERVISED=1 + SLAYZONE_DB_PATH → real dev
- *     DB, and ELECTRON_RUN_AS_NODE), mirroring e2e/fixtures/electron.ts. Only the
+ *     supervised parent leaks SLAYZONE_SUPERVISED=1 + SLAYZONE_ROOT → real dev
+ *     store, and ELECTRON_RUN_AS_NODE), mirroring e2e/fixtures/electron.ts. Only the
  *     explicit isolation vars below are re-added.
  *   - SLAYZONE_ROOT (hub + runner, separate dirs) points under one throwaway
  *     mkdtemp dir (the runner's creds derive at <ROOT>/runners); ports are 0

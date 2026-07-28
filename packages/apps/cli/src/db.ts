@@ -3,7 +3,13 @@ import http from 'node:http'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { getStorageDir, DB_PRAGMAS, LOOPBACK_HOSTS, parseHubAddress } from '@slayzone/platform'
+import {
+  getStorageDir,
+  getDbName,
+  DB_PRAGMAS,
+  LOOPBACK_HOSTS,
+  parseHubAddress
+} from '@slayzone/platform'
 import { resolveHubTarget, type HubTarget } from './hub-config'
 export { resolveProject, resolveProjectArg, resolveProjectByPath } from './db-helpers.mjs'
 export type { SlayDb } from './db-helpers.mjs'
@@ -24,12 +30,18 @@ function defaultDir(): string {
   return dir
 }
 
+/**
+ * The DB file for this install — fully DERIVED, never overridable. `<ROOT>/storage`
+ * from SLAYZONE_ROOT (defaultDir) + the dev-vs-packaged filename from the shared
+ * `getDbName`, so the CLI, the app, and the hub cannot drift on either half.
+ *
+ * There is deliberately no path-pointing env var: an inherited one would let a
+ * `slay` invocation open a DIFFERENT DB than the app it then notifies (the whole
+ * two-DB-split class of bug). ROOT is the single knob, and it is `global`-scoped in
+ * the env manifest precisely so a child resolves the same install as its parent.
+ */
 function getDbPath(dev: boolean): string {
-  // Full path override — used by e2e tests to share the running app's DB
-  if (process.env.SLAYZONE_DB_PATH) return process.env.SLAYZONE_DB_PATH
-  const dir = defaultDir()
-  const name = dev ? 'slayzone.dev.sqlite' : 'slayzone.sqlite'
-  return path.join(dir, name)
+  return path.join(defaultDir(), getDbName(!dev))
 }
 
 type SqlParams = Record<string, string | number | bigint | null | Uint8Array>
@@ -71,9 +83,9 @@ export function getServerPort(): number | null {
 }
 
 function getAlternateServerPort(): number | null {
-  // Both env pins mean "you were told which target to use" — probing the OTHER
-  // DB's port would contradict an explicit instruction.
-  if (process.env.SLAYZONE_DB_PATH || loopbackHubPort()) return null
+  // An explicit loopback hub address means "you were told which target to use" —
+  // probing the OTHER DB's port would contradict that instruction.
+  if (loopbackHubPort()) return null
   const dev = process.env.SLAYZONE_DEV === '1'
   const altPath = getDbPath(!dev)
   if (!fs.existsSync(altPath)) return null
@@ -174,8 +186,8 @@ export function openDb(): SlayDb {
 
   if (!fs.existsSync(dbPath)) {
     console.error(`Database not found: ${dbPath}`)
-    const altPath = !process.env.SLAYZONE_DB_PATH ? getDbPath(!dev) : null
-    if (altPath && fs.existsSync(altPath)) {
+    const altPath = getDbPath(!dev)
+    if (fs.existsSync(altPath)) {
       const hint = dev ? 'without --dev' : 'with --dev'
       console.error(`Found other database at: ${altPath}`)
       console.error(`Re-run ${hint} to target that database.`)

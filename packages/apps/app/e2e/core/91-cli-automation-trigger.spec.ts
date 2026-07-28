@@ -1,4 +1,13 @@
-import { test, expect, seed, TEST_PROJECT_PATH, resetApp } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  TEST_PROJECT_PATH,
+  resetApp,
+  cliRoot,
+  cliDbPath,
+  cliEnv
+} from '../fixtures/electron'
 import { spawnSync } from 'child_process'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -11,6 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SLAY_JS = path.resolve(__dirname, '..', '..', '..', 'cli', 'dist', 'slay.js')
 
 test.describe('CLI: automation triggers (end-to-end)', () => {
+  let rootDir = ''
   let dbPath = ''
   let projectId = ''
   let mcpPort = 0
@@ -21,8 +31,10 @@ test.describe('CLI: automation triggers (end-to-end)', () => {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
 
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
-    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
+    rootDir = await cliRoot(electronApp)
+    // Same derivation the CLI performs from ROOT — this spec also opens the DB
+    // directly to read settings.server_port + seed automations.
+    dbPath = cliDbPath(rootDir)
 
     // Slice 9 cutover: the SIDE-CAR is the discoverable backend (it owns the
     // AutomationEngine + writes settings.server_port). The CLI hits the
@@ -50,7 +62,7 @@ test.describe('CLI: automation triggers (end-to-end)', () => {
 
   const runCli = (...args: string[]) =>
     spawnSync('node', [SLAY_JS, ...args], {
-      env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
+      env: cliEnv(rootDir),
       encoding: 'utf8'
     })
 

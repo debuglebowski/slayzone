@@ -5,8 +5,9 @@ import { ensureStorageDir } from './storage-migration'
  * The app's storage dir = `<SLAYZONE_ROOT>/storage` (platform-derived), migrated
  * once out of the legacy Electron userData location. `SLAYZONE_ROOT` is the ONLY
  * env var in this chain — the app, the sidecar it spawns, and the hub all derive
- * the same `<ROOT>/storage` from it, so there is no `SLAYZONE_STORE_DIR` /
- * `SLAYZONE_DB_PATH` handoff to thread across the process boundary.
+ * the same `<ROOT>/storage` from it. There is deliberately no dir- or file-pointing
+ * var to thread across the process boundary: one would let two processes in the
+ * same tree open different stores.
  *
  * `getStorageDir()` (platform) resolves the same path in any process; this module
  * only adds the boot-time one-shot migration of legacy data into it.

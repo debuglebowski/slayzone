@@ -9,8 +9,8 @@ let warnedHost: string | null = null
  * The single storage dir for all SlayZone state (DB, artifacts, backups, logs,
  * diagnostics). DERIVED from `SLAYZONE_ROOT` as `<ROOT>/storage` — one anchor,
  * one on-disk shape on every machine. `SLAYZONE_ROOT` is the ONLY env var in
- * this chain; there is no separate `SLAYZONE_STORE_DIR`/`SLAYZONE_DB_PATH` to
- * thread across processes — each process derives the same path from ROOT.
+ * this chain; there is deliberately no dir- or file-pointing override to thread
+ * across processes — each process derives the same path from ROOT.
  *
  * getSlayzoneHomeDir resolves ROOT (`SLAYZONE_ROOT` > platform home); the
  * standalone entrypoints seed `SLAYZONE_ROOT=cwd`, the desktop app seeds it to

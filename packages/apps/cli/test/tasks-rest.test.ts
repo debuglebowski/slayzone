@@ -41,10 +41,14 @@ if (!fs.existsSync(SLAY_BIN)) {
   process.exit(0)
 }
 
+// tmpDir is the install ROOT handed to the CLI; it DERIVES
+// `<ROOT>/storage/slayzone.dev.sqlite` from it (SLAYZONE_DEV=1 below picks the
+// `.dev` filename), so the fixture DB has to live exactly there.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-rest-test-'))
-const dbPath = path.join(tmpDir, 'slayzone.dev.sqlite')
+const storageDir = path.join(tmpDir, 'storage')
+fs.mkdirSync(storageDir, { recursive: true })
 
-const db = new Database(dbPath)
+const db = new Database(path.join(storageDir, 'slayzone.dev.sqlite'))
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,
@@ -171,7 +175,7 @@ function runCli(
   return new Promise((resolve) => {
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
-      SLAYZONE_DB_PATH: dbPath,
+      SLAYZONE_ROOT: tmpDir,
       SLAYZONE_DEV: '1',
       // Authority only (host:port) — the http scheme derives from SLAYZONE_MODE.
       SLAYZONE_HUB_ADDRESS: `127.0.0.1:${rest.port}`

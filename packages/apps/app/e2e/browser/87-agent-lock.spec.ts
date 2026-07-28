@@ -4,7 +4,15 @@
  * silences OS-origin input via CDP Input.setIgnoreInputEvents while leaving
  * `executeJavaScript`/`loadURL` (the agent path) working.
  */
-import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  resetApp,
+  TEST_PROJECT_PATH,
+  cliRoot,
+  cliEnv
+} from '../fixtures/electron'
 import {
   ensureBrowserPanelVisible,
   openTaskViaSearch,
@@ -44,7 +52,7 @@ interface CliResult {
 
 test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () => {
   let taskId = ''
-  let dbPath = ''
+  let rootDir = ''
   let mcpPort = 0
 
   test.beforeAll(async ({ electronApp, mainWindow }) => {
@@ -52,8 +60,7 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
     if (!fs.existsSync(SLAY_JS)) {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
-    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
+    rootDir = await cliRoot(electronApp)
     mcpPort = await electronApp.evaluate(async () => {
       for (let i = 0; i < 20; i++) {
         const p = (globalThis as Record<string, unknown>).__serverPort
@@ -87,8 +94,7 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
   function runCli(...args: string[]): CliResult {
     const r = spawnSync('node', [SLAY_JS, ...args], {
       env: {
-        ...process.env,
-        SLAYZONE_DB_PATH: dbPath,
+        ...cliEnv(rootDir),
         SLAYZONE_TASK_ID: taskId
       },
       encoding: 'utf8'

@@ -222,8 +222,8 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
 // <SLAYZONE_ROOT>/storage — the same layout on every machine — migrating it once
 // out of the legacy Electron userData dir (Electron keeps its own profile there).
 // Every process (this app, the sidecar it spawns, the hub) derives the SAME
-// <ROOT>/storage from SLAYZONE_ROOT via platform.getStorageDir() — no
-// SLAYZONE_STORE_DIR / SLAYZONE_DB_PATH is threaded across the boundary. Uses the
+// <ROOT>/storage from SLAYZONE_ROOT via platform.getStorageDir() — no dir- or
+// file-pointing var is threaded across the boundary, by design. Uses the
 // pre-swap userData as the migration SOURCE so the dev profile-swap above doesn't
 // hide the legacy data.
 initStorageDir(legacyStateDir, app.isPackaged)
@@ -252,7 +252,12 @@ function getTrpcDataRoot(): string {
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
-import { initDatabases, closeDatabase, closeDiagnosticsDatabase } from './db'
+import {
+  initDatabases,
+  closeDatabase,
+  closeDiagnosticsDatabase,
+  getDatabasePath
+} from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { buildBackupOps, startAutoBackup, stopAutoBackup } from './backup'
 import { startProactiveGc } from './proactive-gc'
@@ -2251,12 +2256,17 @@ app
             execPath: process.execPath,
             scriptPath,
             host: '127.0.0.1',
+            // Diagnostics only — the SAME derivation the sidecar performs from the
+            // inherited SLAYZONE_ROOT + the SLAYZONE_DEV bit below, computed here so
+            // the Diagnostics "Database" row can name the file. NOT a handoff: there
+            // is no path-pointing env var, by design.
+            dbPath: getDatabasePath(),
             env: {
               ...process.env,
               // The sidecar derives <ROOT>/storage + DB path from SLAYZONE_ROOT itself
-              // (inherited $HOME → same getSlayzoneHomeDir()), so no STORE_DIR/DB_PATH
-              // is handed over. Pass only the dev-vs-packaged bit it can't infer
-              // (it has no Electron `app.isPackaged`), so it derives the right filename.
+              // (inherited $HOME → same getSlayzoneHomeDir()), so no path is handed
+              // over. Pass only the dev-vs-packaged bit it can't infer (it has no
+              // Electron `app.isPackaged`), so it derives the right filename.
               SLAYZONE_DEV: app.isPackaged ? undefined : '1',
               // Desktop bridge: one listener carrying the capability bridge (renderer
               // Electron-only calls + desktop events, WS `/cap`) AND the REST

@@ -90,8 +90,12 @@ cat > packages/apps/hub/README.md <<'EOF'
 Headless SlayZone hub: owns the SQLite DB, tRPC/REST routers, auth, and the
 runner gateway that runners dial into.
 
-    SLAYZONE_DB_PATH=~/.slayzone/hub.sqlite \
+    SLAYZONE_ROOT=~/slayzone-hub \
       SLAYZONE_HUB_AUTH_SECRET=$(openssl rand -hex 32) slayzone-hub
+
+`SLAYZONE_ROOT` is the install anchor: all state (DB, artifacts, identity, logs)
+lives under `<ROOT>/storage`, and the DB filename is derived — not overridable.
+Omit it and the hub anchors to its launch directory.
 
 ## ⚠️ Security
 
@@ -141,13 +145,13 @@ mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
 SMOKE_SECRET="$(openssl rand -hex 32)"
 
 # Scrub any inherited SlayZone env before booting. Running this script from
-# INSIDE a SlayZone session (dogfooding) leaks SLAYZONE_SUPERVISED=1 +
-# SLAYZONE_DB_PATH (pointing at the real dev DB) + ELECTRON_RUN_AS_NODE into a
+# INSIDE a SlayZone session (supervised mode) leaks SLAYZONE_SUPERVISED=1 +
+# SLAYZONE_ROOT (pointing at the real dev install) + ELECTRON_RUN_AS_NODE into a
 # child — which would (a) skip schema bootstrap (supervised ⇒ "no such table:
 # tasks") giving a FALSE failure, and (b) risk touching the real store. Scrub the
 # full set via `-u`; ports are 0 (OS-assigned) so nothing collides with a running
 # app. HUB_ROOT anchors the hub's config + identity + auth DB in the tmp tree.
-SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_DB_PATH -u SLAYZONE_ROOT
+SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_ROOT
        -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
        -u SLAYZONE_HUB_AUTH_SECRET
        -u SLAYZONE_HUB_JOIN_TOKEN

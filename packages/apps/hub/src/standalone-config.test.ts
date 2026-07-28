@@ -46,7 +46,6 @@ const ENV_KEYS = [
   'SLAYZONE_SUPERVISED',
   'SLAYZONE_ROOT',
   'SLAYZONE_HUB_AUTH_SECRET',
-  'SLAYZONE_DB_PATH',
   'SLAYZONE_HUB_ADDRESS',
   'SLAYZONE_HUB_PUBLIC_ADDRESS'
 ] as const
@@ -82,9 +81,8 @@ test('config.json fills unset env (address, publicAddress)', () => {
       publicAddress: 'hub.example:8443'
     })
     applyStandaloneHubConfig()
-    // dbPath is NOT seeded — the DB path DERIVES from SLAYZONE_ROOT (<ROOT>/storage)
-    // via platform.getStorageDir(); there is no SLAYZONE_DB_PATH env in this chain.
-    assert(process.env.SLAYZONE_DB_PATH === undefined, 'dbPath NOT seeded (derives from ROOT)')
+    // No DB path is seeded anywhere in this chain: it DERIVES from SLAYZONE_ROOT
+    // (<ROOT>/storage) via platform.getStorageDir() and is not overridable.
     assertEq(process.env.SLAYZONE_HUB_ADDRESS, '0.0.0.0:8080', 'address')
     assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example:8443', 'publicAddress')
   })
@@ -124,7 +122,6 @@ test('env WINS over config.json (does not overwrite a set env)', () => {
 test('no config + no env ⇒ only the generated hub-auth secret is set (defaults elsewhere)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_DB_PATH === undefined, 'no dbPath default here (db.ts handles it)')
     assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'no address default here')
     assert(!!process.env.SLAYZONE_HUB_AUTH_SECRET, 'hub-auth secret always resolved')
   })

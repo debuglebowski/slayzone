@@ -5,7 +5,9 @@ import {
   clickProject,
   goHome,
   TEST_PROJECT_PATH,
-  resetApp
+  resetApp,
+  cliRoot,
+  cliEnv
 } from '../fixtures/electron'
 import { spawnSync } from 'child_process'
 import { DatabaseSync } from 'node:sqlite'
@@ -18,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SLAY_JS = path.resolve(__dirname, '..', '..', '..', 'cli', 'dist', 'slay.js')
 
 test.describe('CLI: slay', () => {
-  let dbPath = ''
+  let rootDir = ''
   let projectId = ''
   let mcpPort = 0
   const PROJECT_ABBREV = 'CL'
@@ -29,10 +31,9 @@ test.describe('CLI: slay', () => {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
 
-    // Get the exact DB path the running app is using
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
-    // Tests always run non-packaged, so DB name is always slayzone.dev.sqlite
-    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
+    // The install ROOT the running app was launched with — the CLI derives the
+    // same <ROOT>/storage/slayzone.dev.sqlite from it (tests are never packaged).
+    rootDir = await cliRoot(electronApp)
 
     // Discover dynamic MCP port
     mcpPort = await electronApp.evaluate(async () => {
@@ -59,10 +60,7 @@ test.describe('CLI: slay', () => {
   })
 
   const runCli = (...args: string[]) => {
-    const env: Record<string, string> = {
-      ...process.env,
-      SLAYZONE_DB_PATH: dbPath
-    }
+    const env: Record<string, string> = cliEnv(rootDir)
     // Strip inherited task-context env so CLI tests exercise default-project
     // logic instead of falling back to the parent shell's project/task.
     delete env.SLAYZONE_PROJECT_ID
@@ -157,9 +155,9 @@ test.describe('CLI: slay', () => {
     test('UI updates when CLI discovers port from DB (production path)', async ({ mainWindow }) => {
       const title = `CLI prod-path ${Date.now()}`
       // No SLAYZONE_HUB_ADDRESS — CLI must read port from settings table (like production)
-      const { SLAYZONE_HUB_ADDRESS: _, ...envWithoutPort } = process.env
+      const { SLAYZONE_HUB_ADDRESS: _, ...envWithoutPort } = cliEnv(rootDir)
       const r = spawnSync('node', [SLAY_JS, 'tasks', 'create', title, '--project', 'cli test'], {
-        env: { ...envWithoutPort, SLAYZONE_DB_PATH: dbPath },
+        env: envWithoutPort,
         encoding: 'utf8'
       })
       expect(r.status).toBe(0)
@@ -488,7 +486,7 @@ test.describe('CLI: slay', () => {
 
     const runProcessesCli = (...args: string[]) =>
       spawnSync('node', [SLAY_JS, ...args], {
-        env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
+        env: cliEnv(rootDir),
         encoding: 'utf8'
       })
 
@@ -519,28 +517,30 @@ test.describe('CLI: slay', () => {
     })
 
     test('exits non-zero when app is not running', () => {
-      // Fake a down server via the DB: a throwaway sqlite whose
-      // settings.server_port points at a dead port. The CLI resolves it, fails to
+      // Fake a down server via the DB: a throwaway install ROOT whose
+      // <ROOT>/storage/slayzone.dev.sqlite has settings.server_port pointing at a
+      // dead port. The CLI derives that path from ROOT, resolves the port, fails to
       // connect, and reports "not running". Unset SLAYZONE_HUB_ADDRESS so the env
       // fast-path can't shadow the seeded dead port.
-      const deadDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-deadport-'))
-      const deadDbPath = path.join(deadDbDir, 'slayzone.dev.sqlite')
-      const seedDb = new DatabaseSync(deadDbPath)
+      const deadRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-deadport-'))
+      const deadStorage = path.join(deadRoot, 'storage')
+      fs.mkdirSync(deadStorage, { recursive: true })
+      const seedDb = new DatabaseSync(path.join(deadStorage, 'slayzone.dev.sqlite'))
       seedDb.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
       seedDb
         .prepare("INSERT INTO settings (key, value) VALUES ('server_port', '1')")
         .run()
       seedDb.close()
-      const { SLAYZONE_HUB_ADDRESS: _drop, ...envNoPort } = process.env
+      const { SLAYZONE_HUB_ADDRESS: _drop, ...envNoPort } = cliEnv(deadRoot)
       try {
         const r = spawnSync('node', [SLAY_JS, 'processes', 'list'], {
-          env: { ...envNoPort, SLAYZONE_DB_PATH: deadDbPath },
+          env: envNoPort,
           encoding: 'utf8'
         })
         expect(r.status).not.toBe(0)
         expect(r.stderr).toContain('not running')
       } finally {
-        fs.rmSync(deadDbDir, { recursive: true, force: true })
+        fs.rmSync(deadRoot, { recursive: true, force: true })
       }
     })
 
@@ -700,8 +700,7 @@ test.describe('CLI: slay', () => {
       const title = `CLI env-default subtask ${Date.now()}`
       const r = spawnSync('node', [SLAY_JS, 'tasks', 'subtask-add', title], {
         env: {
-          ...process.env,
-          SLAYZONE_DB_PATH: dbPath,
+          ...cliEnv(rootDir),
           SLAYZONE_TASK_ID: parentTaskId
         },
         encoding: 'utf8'
@@ -829,10 +828,7 @@ test.describe('CLI: slay', () => {
         [SLAY_JS, 'tasks', 'artifacts', 'create', 'notes.md', '--task', artifactTaskId, '--json'],
         {
           env: (() => {
-            const env: Record<string, string> = {
-              ...process.env,
-              SLAYZONE_DB_PATH: dbPath
-            }
+            const env: Record<string, string> = cliEnv(rootDir)
             delete env.SLAYZONE_PROJECT_ID
             delete env.SLAYZONE_TASK_ID
             return env

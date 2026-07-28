@@ -287,7 +287,7 @@ async function launchElectronWithRetry(args: {
       //     it rejects Playwright's --remote-debugging-port=0 ("bad option") and
       //     every spec fails at (0ms) with "Process failed to launch!".
       //   • ELECTRON_RENDERER_URL → points the renderer at the host dev-server.
-      //   • SLAYZONE_ROOT / SLAYZONE_DB_PATH → getTrpcDataRoot() resolves to
+      //   • SLAYZONE_ROOT → getTrpcDataRoot() resolves to
       //     the REAL dev data root instead of the worker dir, so specs read/write
       //     the real boot-config.json + data dir (e.g. 100-server-settings-toggle
       //     flips the real app to remote mode → 102-sidecar-crash-recovery + the
@@ -442,6 +442,38 @@ export async function launchIsolatedElectron(opts: {
     close: async () => {
       await launched.app.close().catch(() => {})
     }
+  }
+}
+
+/**
+ * The per-worker `SLAYZONE_ROOT` the app under test was launched with. Its DB
+ * lives at `<root>/storage/slayzone.dev.sqlite` (e2e always runs unpackaged).
+ *
+ * Read back through the `SLAYZONE_USER_DATA_DIR` passthrough rather than
+ * `SLAYZONE_ROOT` itself, which the app's own env reads consume.
+ */
+export async function cliRoot(app: ElectronApplication): Promise<string> {
+  return app.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
+}
+
+/** `<root>/storage/slayzone.dev.sqlite` — for specs that open the DB directly. */
+export function cliDbPath(root: string): string {
+  return path.join(root, 'storage', 'slayzone.dev.sqlite')
+}
+
+/**
+ * Base env for spawning the built `slay` CLI against a given install ROOT.
+ *
+ * ROOT is the ONLY channel: the CLI derives `<ROOT>/storage/slayzone{.dev}.sqlite`
+ * itself and there is no path-pointing override to hand it. `SLAYZONE_DEV=1` is
+ * required, not decorative — it picks the `.dev` filename, and the Playwright
+ * runner's own env may not carry it. Callers overlay task/project identity on top.
+ */
+export function cliEnv(root: string): Record<string, string> {
+  return {
+    ...(process.env as Record<string, string>),
+    SLAYZONE_ROOT: root,
+    SLAYZONE_DEV: '1'
   }
 }
 

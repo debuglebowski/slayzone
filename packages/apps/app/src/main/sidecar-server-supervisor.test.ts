@@ -197,6 +197,9 @@ function makeHarness(
     scriptPath,
     host: '127.0.0.1',
     env: { ...process.env, ...fakeEnv } as NodeJS.ProcessEnv,
+    // Diagnostics-only echo, DERIVED by the caller in production (there is no
+    // path-pointing env var). Overridable per-test through `extra`.
+    dbPath: path.join(dir, 'slayzone.dev.sqlite'),
     logger: (line) => {
       const entry = { t: Date.now(), line }
       ctx.logs.push(entry)
@@ -246,11 +249,7 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
 test('/health probe drives the child to ready + exposes status', async () => {
   const dir = mkTmp()
   const dbSentinel = path.join(dir, 'sentinel.sqlite')
-  const { handle } = makeHarness(
-    dir,
-    { SLAYZONE_DB_PATH: dbSentinel },
-    { healthPollIntervalMs: 40 }
-  )
+  const { handle } = makeHarness(dir, {}, { healthPollIntervalMs: 40 }, { dbPath: dbSentinel })
   try {
     await handle.waitForReady()
     assertEq(handle.getHealth(), 'ready', 'health after waitForReady')
@@ -263,7 +262,7 @@ test('/health probe drives the child to ready + exposes status', async () => {
     assert(typeof status.pid === 'number' && status.pid! > 0, 'status.pid set')
     assertEq(status.restarts, 0, 'status.restarts is 0 on clean start')
     assertEq(status.totalRespawns, 0, 'status.totalRespawns is 0 on clean start')
-    assertEq(status.dbPath, dbSentinel, 'status.dbPath echoes SLAYZONE_DB_PATH')
+    assertEq(status.dbPath, dbSentinel, 'status.dbPath echoes the caller-derived path')
     assert(typeof status.uptimeMs === 'number' && status.uptimeMs! >= 0, 'uptimeMs set')
 
     // The supervisor reported ready only because /health answered 200.
@@ -433,9 +432,9 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   }
   const dir = mkTmp()
   // Single ROOT for BOTH the seeder and the supervised child: the DB path is
-  // now DERIVED (`<ROOT>/storage/slayzone.sqlite`), not handed via
-  // SLAYZONE_DB_PATH, so both processes must point at the SAME ROOT to open
-  // the same file.
+  // DERIVED (`<ROOT>/storage/slayzone.sqlite`) and there is no path-pointing env
+  // var to hand over, so both processes must point at the SAME ROOT to open the
+  // same file.
   //
   // Migrate the DB before the supervised spawn. SLAYZONE_SUPERVISED=1 tells the
   // sidecar the host already owns + migrated this DB (openServerDatabase skips
@@ -454,8 +453,8 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   // matched — the closest thing to what the host actually does.
   await new Promise<void>((resolve, reject) => {
     // Scrub inherited SLAYZONE_* so the seeder boots genuinely STANDALONE. When
-    // this test runs inside a dogfooding session the parent leaks
-    // SLAYZONE_SUPERVISED=1 (+ SLAYZONE_DB_PATH → the real dev DB) — which would
+    // this test runs inside a supervised session the parent leaks
+    // SLAYZONE_SUPERVISED=1 (+ SLAYZONE_ROOT → the real dev install) — which would
     // put the seeder in supervised mode (skips schema bootstrap → the seed does
     // nothing) and point it at the real store. Strip them, then set only the
     // explicit standalone knobs below.
@@ -499,7 +498,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_SUPERVISED: '1',
       SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
-      // DB path DERIVES from ROOT now (no SLAYZONE_DB_PATH handoff); the seeder
+      // DB path DERIVES from ROOT (there is no path handoff var); the seeder
       // above bootstrapped <dir>/storage/slayzone.sqlite, which this child opens.
       SLAYZONE_ROOT: dir
     },

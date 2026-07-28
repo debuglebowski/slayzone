@@ -19,8 +19,8 @@ import { bootstrapSchema } from '@slayzone/transport/db-bootstrap'
  * Resolves the SQLite path the side-car should open — DERIVED from the storage
  * dir, identically in every mode. `getStorageDir()` returns `<ROOT>/storage`
  * (from SLAYZONE_ROOT), the SAME dir the Electron host + standalone entrypoint
- * derive; the filename is dev-vs-packaged (`SLAYZONE_DEV`). No `SLAYZONE_DB_PATH`
- * is threaded across the process boundary — supervised and standalone both
+ * derive; the filename is dev-vs-packaged (`SLAYZONE_DEV`). No file-pointing var
+ * exists to thread across the process boundary — supervised and standalone both
  * compute the same path from ROOT, so there is no two-DB-split risk to guard.
  */
 export function getDatabasePathFromEnv(): string {

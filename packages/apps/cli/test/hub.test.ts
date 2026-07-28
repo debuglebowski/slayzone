@@ -30,7 +30,6 @@ const ENV_KEYS = [
   'SLAYZONE_MODE',
   'SLAYZONE_HUB_TOKEN',
   'SLAYZONE_ROOT',
-  'SLAYZONE_DB_PATH',
   'SLAYZONE_DEV'
 ] as const
 type EnvKey = (typeof ENV_KEYS)[number]
@@ -91,15 +90,21 @@ function startServer(): Promise<{
 /**
  * A minimal DB holding just `settings.server_port` — the durable channel the
  * running server publishes its bound port to, and the ONLY way the CLI finds the
- * local app when no hub is configured. Returns the path (for SLAYZONE_DB_PATH).
+ * local app when no hub is configured.
+ *
+ * Written where the CLI DERIVES it from the install root: `<ROOT>/storage/` +
+ * `slayzone.sqlite` (no SLAYZONE_DEV in these tests ⇒ the packaged filename).
+ * Returns the ROOT, which is the only thing the caller can hand the CLI.
  */
 function seedServerPortDb(port: number): string {
-  const dbPath = path.join(freshStateDir(), 'slayzone.sqlite')
-  const db = new DatabaseSync(dbPath)
+  const root = freshStateDir()
+  const storage = path.join(root, 'storage')
+  fs.mkdirSync(storage, { recursive: true })
+  const db = new DatabaseSync(path.join(storage, 'slayzone.sqlite'))
   db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('server_port', String(port))
   db.close()
-  return dbPath
+  return root
 }
 
 /** A port that is guaranteed refused: bind, grab the port, close. */
@@ -321,10 +326,7 @@ await describe('api Authorization header', () => {
     // so the port comes from the DB the server publishes it to at boot.
     const srv = await startServer()
     try {
-      setEnv({
-        SLAYZONE_ROOT: freshStateDir(),
-        SLAYZONE_DB_PATH: seedServerPortDb(srv.port)
-      })
+      setEnv({ SLAYZONE_ROOT: seedServerPortDb(srv.port) })
       const res = await apiGet<{ ok: boolean }>('/api/ping')
       expect(res.ok).toBe(true)
       expect(srv.seen[0].url).toBe('/api/ping')

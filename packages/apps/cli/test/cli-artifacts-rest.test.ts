@@ -82,7 +82,6 @@ function runCli(
   return new Promise((resolve) => {
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
-      SLAYZONE_DB_PATH: dbPath,
       SLAYZONE_ROOT: tmpDir,
       SLAYZONE_DEV: '1',
       SLAYZONE_HUB_ADDRESS: `127.0.0.1:${rest.port}`

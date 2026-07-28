@@ -113,7 +113,8 @@ The 4-day orphan proves the supervisor's death-detection has a gap (see RC3).
 
 ### Goal C — Sidecar diagnostics persisted & queryable
 - Already implemented in source (RC4). Deliverables: (a) verify the sidecar's derived diag path
-  equals the host's (`SLAYZONE_DB_PATH` → replace `.sqlite`→`.diagnostics.sqlite`), (b) the
+  equals the host's (both derive `<ROOT>/storage` + the dev-vs-packaged filename, then replace
+  `.sqlite`→`.diagnostics.sqlite`), (b) the
   `sidecar.boot` event from Goal B is the canary that persistence works, (c) add the warm-pool
   reconcile decisions (enabled/disabled, adopt/spawn/skip) as diagnostic events if not already
   covered, so warm-pool staleness is diagnosable without guessing.

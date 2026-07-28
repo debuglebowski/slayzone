@@ -53,6 +53,15 @@ export type SidecarServerOpts = {
   scriptPath: string
   /** Base env for the child (ELECTRON_RUN_AS_NODE + SLAYZONE_* are merged in). */
   env: NodeJS.ProcessEnv
+  /**
+   * The DB file the side-car will open, DERIVED by the caller (getDatabasePath()
+   * — `<ROOT>/storage` + the dev-vs-packaged filename). Diagnostics-only: it is
+   * surfaced through {@link SidecarStatus.dbPath}, never handed to the child,
+   * which derives the identical path from the inherited SLAYZONE_ROOT/_DEV. Passed
+   * explicitly rather than read back out of `env` so the value can't silently go
+   * null when no path-pointing var exists.
+   */
+  dbPath: string
   /** Host the side-car binds to. */
   host: string
   /** Receives the side-car's stdout/stderr lines + supervisor notices. */
@@ -96,7 +105,7 @@ export type SidecarStatus = {
    * doesn't consume a backoff attempt. Crash-recovery tests assert on this.
    */
   totalRespawns: number
-  /** Absolute DB path the side-car was told to open. */
+  /** Absolute DB path the side-car opens (host-derived). Null before the first spawn. */
   dbPath: string | null
   /** Milliseconds the side-car has been continuously healthy, or null. */
   uptimeMs: number | null
@@ -447,7 +456,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         pid: child?.pid ?? null,
         restarts: attempt,
         totalRespawns: Math.max(0, spawnCount - 1),
-        dbPath: opts.env.SLAYZONE_DB_PATH ?? null,
+        dbPath: opts.dbPath,
         uptimeMs: readySince === null ? null : Date.now() - readySince,
         runningBuildId,
         diskBuildId,

@@ -5,7 +5,9 @@ import {
   goHome,
   clickProject,
   resetApp,
-  TEST_PROJECT_PATH
+  TEST_PROJECT_PATH,
+  cliRoot,
+  cliEnv
 } from '../fixtures/electron'
 import { spawnSync } from 'child_process'
 import path from 'path'
@@ -22,7 +24,7 @@ test.describe('Task progress', () => {
   let openTaskId = ''
   let cliTaskId = ''
   let doneTaskId = ''
-  let dbPath = ''
+  let rootDir = ''
   let mcpPort = 0
 
   test.beforeAll(async ({ electronApp, mainWindow }) => {
@@ -31,8 +33,7 @@ test.describe('Task progress', () => {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
 
-    const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
-    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
+    rootDir = await cliRoot(electronApp)
     mcpPort = await electronApp.evaluate(async () => {
       for (let i = 0; i < 20; i++) {
         const p = (globalThis as Record<string, unknown>).__serverPort
@@ -66,7 +67,7 @@ test.describe('Task progress', () => {
 
   const runCli = (...args: string[]) =>
     spawnSync('node', [SLAY_JS, ...args], {
-      env: { ...process.env, SLAYZONE_DB_PATH: dbPath },
+      env: cliEnv(rootDir),
       encoding: 'utf8'
     })
 

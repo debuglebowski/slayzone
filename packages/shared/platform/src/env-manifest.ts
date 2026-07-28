@@ -45,7 +45,8 @@ export type EnvScope = 'global' | 'infra' | 'secret' | 'identity'
  * time), JS const names, script-only comment markers (SLAYZONE_NOTIFY_VERSION),
  * and retired/inert/test-only vars (SLAYZONE_HUB_URL, HUB_HOST, HUB_PORT,
  * HUB_PUBLIC_URL — all folded into HUB_ADDRESS/HUB_PUBLIC_ADDRESS; STORE_DIR,
- * DB_DIR, AGENT_MODE, RUNNER_CONFIG, RUNNER_TRANSPORT_BASE_URL,
+ * DB_DIR, DB_PATH — the DB file DERIVES from SLAYZONE_ROOT + SLAYZONE_DEV and is
+ * not overridable; AGENT_MODE, RUNNER_CONFIG, RUNNER_TRANSPORT_BASE_URL,
  * RUNNER_ALLOWED_ROOTS, RUNNER_NAME, RUNNER_CREDENTIALS_DIR, SEED_DEMO). An
  * unlisted SLAYZONE_* is stripped by default (fail closed), so omissions are
  * safe, never leaky — which is also why a RETIRED name needs no entry: a stale
@@ -82,7 +83,6 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_MODE: 'infra', // local vs remote hardening lever
   SLAYZONE_SUPERVISED: 'infra', // "the Electron host owns me" flag
-  SLAYZONE_DB_PATH: 'infra', // explicit DB path override (CLI/e2e)
   SLAYZONE_USER_DATA_DIR: 'infra', // Playwright Electron userData redirect
   SLAYZONE_SIDECAR_HOT_RESTART: 'infra',
   SLAYZONE_BOOT_LOG_PATH: 'infra',

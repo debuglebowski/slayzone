@@ -78,8 +78,8 @@ export function applyStandaloneHubConfig(): void {
   }
   const cfg = loadSlayzoneConfig()
 
-  // No SLAYZONE_STORE_DIR / SLAYZONE_DB_PATH seeding: the DB + state dir DERIVE
-  // from SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
+  // No dir- or file-pointing var is seeded: the DB + state dir DERIVE from
+  // SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
   // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so
   // there is nothing to thread through env here.
   // The hub's own address. `address` is the current key; the legacy `port` key is
