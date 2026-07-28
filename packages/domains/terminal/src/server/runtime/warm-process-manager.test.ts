@@ -239,6 +239,39 @@ await test('captures shell prompt into seedBuffer', async () => {
   expect(claim?.seedBuffer).toBe('user@host % ')
 })
 
+await test('seedBuffer never carries cursor-position queries into the adopted buffer', async () => {
+  // The warm shell `exec`s the real agent, so a pre-warmed claude polls DECXCPR
+  // (`?6n`) every 200ms with NOBODY answering — this drain runs outside
+  // pty-manager, so no `interceptSyncQueries`, no `filterBufferData`. At adopt,
+  // seedBuffer is appended verbatim to the fresh RingBuffer, so every unanswered
+  // query becomes replayable: a later replay makes xterm.js answer it, and a
+  // row=1 answer is what Claude Code reads as "screen externally wiped" →
+  // `/clear` → new session. Strip at the accumulation point so the poison can
+  // never build up (a 5-min-old warm handle would otherwise seed ~1500 copies).
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  const poll = '\x1b[?6n'.repeat(50)
+  lastSpawned!.dataCbs.forEach((cb) => cb(`user@host % ${poll}READY`))
+  // node-pty splits on read-buffer boundaries, so a query arrives torn in half
+  // often enough to matter over thousands of polls. A per-chunk regex sees
+  // neither half, but seedBuffer concatenates them — so the query reassembles in
+  // the very buffer this strip exists to keep clean.
+  lastSpawned!.dataCbs.forEach((cb) => cb('torn\x1b[?6'))
+  lastSpawned!.dataCbs.forEach((cb) => cb('nEND'))
+  const claim = claimWarmShell({
+    projectId: 'p1',
+    mode: 'claude-code',
+    cwd: PROJECT_ROOT,
+    resuming: false,
+    flags: '--dangerously'
+  })
+  expect(claim!.seedBuffer.includes('\x1b[?6n')).toBe(false)
+  // Real boot output still seeds — only the queries are dropped, including the
+  // one torn across the chunk boundary (`torn` + `END` survive, `?6n` does not).
+  expect(claim!.seedBuffer).toBe('user@host % READYtornEND')
+})
+
 await test('adopt matches: claude-code + project-root cwd + fresh', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })

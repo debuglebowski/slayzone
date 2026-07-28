@@ -98,6 +98,50 @@ describe('createPtyHandlers', () => {
     pty.disposeAll()
   })
 
+  it('live frame N and buffered frame N are byte-identical (hub mixes the two sources per seq)', async () => {
+    // The hub's `ingest` keeps whichever copy of a seq ARRIVES FIRST and drops
+    // the other (`if (seq <= entry.lastSeq) return`), so a stream can be assembled
+    // from live frame 3 + backfilled frame 4 + live frame 5. That makes the two
+    // sources interchangeable BY CONTRACT: any per-seq divergence corrupts the
+    // assembled stream — dropping bytes in one ordering and stranding a torn
+    // escape prefix in the other. So the runner must never emit a frame whose
+    // buffered bytes differ from its live bytes.
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'sess-parity'
+
+    // Emit output torn mid-query across two pty reads, then stay alive so the
+    // buffer is still queryable.
+    await pty.handlers['pty.spawn']({
+      sessionId,
+      command: 'sh',
+      args: [
+        '-c',
+        'printf "one\\n"; sleep 0.3; printf "two\\033[?6"; sleep 0.3; printf "nthree\\n"; exec tail -f /dev/null'
+      ],
+      cwd: process.cwd()
+    })
+    await waitFor(() =>
+      dataParams(notifies)
+        .map((f) => f.data)
+        .join('')
+        .includes('three')
+    )
+
+    const replay = (await pty.handlers['pty.getBufferSince']({ sessionId, seq: 0 })) as {
+      frames: Array<{ seq: number; data: string }>
+    }
+    const bufferedBySeq = new Map(replay.frames.map((f) => [f.seq, f.data]))
+    for (const frame of dataParams(notifies)) {
+      if (!bufferedBySeq.has(frame.seq)) continue // evicted, not divergent
+      expect(bufferedBySeq.get(frame.seq)).toBe(frame.data)
+    }
+
+    await pty.handlers['pty.kill']({ sessionId })
+    await waitFor(() => notifies.some((n) => n.method === 'pty.exit'))
+    pty.disposeAll()
+  })
+
   it('emits pty.exit with exitCode 0 for a short-lived command', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)

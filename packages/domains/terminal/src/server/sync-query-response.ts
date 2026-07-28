@@ -123,7 +123,15 @@ export function computeSyncQueryResponse(input: string, theme: TerminalTheme): S
   // Trailing incomplete OSC or CSI sequence that may complete in the next chunk.
   // OSC: ESC ] <body> — body ends with BEL or ST (ESC \). Trailing ESC alone could be ST start.
   // CSI: ESC [ <params> — ends with a letter in range @–~.
-  const partial = forwarded.match(/\x1b(?:\][^\x07\x1b]*\x1b?|\[[0-9;:>]*)?$/)
+  //
+  // The CSI param class MUST include `?` (DEC private introducer) alongside `>`
+  // and `<`. Without it, a chunk ending `ESC [ ? 6` is forwarded verbatim and its
+  // `n` arrives orphaned next chunk: the split query is invisible to the answerer
+  // here AND to the per-chunk `filterBufferData` strip, so it reaches the replay
+  // buffer, where a later replay makes xterm.js answer it — the row=1 answer Claude
+  // Code reads as "screen externally wiped" → `/clear`. Any private-mode sequence
+  // split on that boundary had the same corruption risk; this covers the class.
+  const partial = forwarded.match(/\x1b(?:\][^\x07\x1b]*\x1b?|\[[?<>0-9;:]*)?$/)
   let pendingPartial = ''
   if (partial?.[0]) {
     pendingPartial = partial[0]

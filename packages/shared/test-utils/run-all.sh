@@ -116,6 +116,9 @@ run_test packages/apps/app/src/main/storage-migration.test.ts
 run_test packages/shared/platform/src/slayzone-mode.test.ts
 # Env scope manifest + sanitizeSpawnEnv — spawn-boundary denylist (fail closed).
 run_test packages/shared/platform/src/env-manifest.test.ts
+# Cursor-position/status query+response stripping — shared by pty-manager and the
+# runner (spontaneous-/clear regression guard; scope must stay narrow).
+run_test packages/shared/platform/src/device-status-queries.test.ts
 # hubUrlFromAddr — authority-only SLAYZONE_HUB_ADDRESS + scheme from SLAYZONE_MODE.
 run_test packages/shared/platform/src/hub-addr.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.

@@ -29,6 +29,11 @@ export {
   type EnvScope
 } from './env-manifest'
 export {
+  createDeviceStatusQueryStripper,
+  stripDeviceStatusQueries,
+  stripDeviceStatusResponses
+} from './device-status-queries'
+export {
   hubUrlFromAddr,
   isBareAuthority,
   parseHubAddress,

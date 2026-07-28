@@ -100,6 +100,23 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     proc.onData((data) => {
       // Ignore output from a session that has since been superseded/disposed.
       if (sessions.get(params.sessionId) !== session) return
+      // Output is buffered and streamed BYTE-IDENTICALLY, deliberately. The two
+      // are interchangeable by contract, not redundant: the hub's demux keeps
+      // whichever copy of a seq arrives first and drops the other, then emits that
+      // seq exactly once, so a stream can be assembled from live frame 3 +
+      // backfilled frame 4 + live frame 5. Any per-seq divergence corrupts the
+      // result — and a filter that holds a torn escape tail diverges by
+      // construction (`two` vs `two ESC [ ? 6`), losing bytes in one interleaving
+      // and stranding a half-sequence in the other.
+      //
+      // So device-status filtering does NOT belong here. It belongs where the
+      // stream is consumed, and it already lives there: every remote frame —
+      // live or backfilled — re-enters the hub's own pty onData
+      // (`attachPtyHandlers` wraps remote handles too), which answers what it
+      // answers via `interceptSyncQueries` and strips cursor-status queries via
+      // `filterBufferData` before anything is buffered or rendered. Stripping on
+      // the runner would only risk starving a remote program of an answer the hub
+      // would otherwise have given it.
       const seq = buffer.append(data)
       ctx.dialer.notify(RunnerNotificationMethods.ptyData, {
         sessionId: params.sessionId,

@@ -13,6 +13,7 @@
     "./slayzone-config": "./src/slayzone-config.ts",
     "./config-prompt": "./src/config-prompt.ts",
     "./env-manifest": "./src/env-manifest.ts",
+    "./device-status-queries": "./src/device-status-queries.ts",
     "./hub-addr": "./src/hub-addr.ts"
   },
   "scripts": {

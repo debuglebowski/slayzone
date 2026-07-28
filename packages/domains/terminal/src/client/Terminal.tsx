@@ -65,6 +65,7 @@ import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import { stripUnderlineCodes, KITTY_SHIFT_ENTER, DETECTION_ENGINES } from '@slayzone/terminal/shared'
+import { stripDeviceStatusResponses } from '@slayzone/platform/device-status-queries'
 import { track } from '@slayzone/telemetry/client'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
@@ -815,10 +816,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }
 
         // Handle terminal input - pass through to PTY.
-        // Filter out OSC sequences (\x1b]...\x07 or \x1b]...\x1b\\) that xterm.js
-        // generates as responses to color queries. These would inject stale escape
-        // bytes into the process stdin, breaking interactive prompts (e.g. gh CLI).
-        // User keystrokes and paste data never contain OSC sequences.
+        //
+        // Two classes of xterm.js-generated query responses are dropped here.
+        // Both are ANSWERS to queries, never user input, and the server is the
+        // sole authority for answering (synchronously, see
+        // `computeSyncQueryResponse`) — a renderer-side answer is stale by
+        // construction and injects escape bytes into the process's stdin.
+        //   1. OSC (\x1b]...\x07 or \x1b]...\x1b\\) — color-query replies; these
+        //      broke interactive prompts (e.g. gh CLI).
+        //   2. CSI device-status (CPR / DECXCPR / DSR / DECRPM) — cursor-position
+        //      replies. A replayed buffer makes xterm answer thousands of stored
+        //      queries at once; Claude Code reads a row=1 reply as "screen
+        //      externally wiped" and submits `/clear`, minting a new session.
+        // User keystrokes and paste data never contain either class.
         terminal.onData((data) => {
           // Mark user activity so the next batcher flush paints at 60fps
           // (echo round-trip has zero added latency from the throttle).
@@ -827,7 +837,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             hasCalledFirstInputRef.current = true
             onFirstInputRef.current?.()
           }
-          const filtered = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+          const filtered = stripDeviceStatusResponses(
+            data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+          )
           if (filtered) void trpcClient.pty.write.mutate({ sessionId, data: filtered })
         })
 

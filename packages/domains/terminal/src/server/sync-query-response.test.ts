@@ -190,6 +190,34 @@ test('lone trailing ESC held (possible ST start)', () => {
   eq(r.pendingPartial, '\x1b')
 })
 
+// DEC PRIVATE sequences split across a chunk boundary. The `?` intermediate must
+// be part of the held prefix, or a chunk ending `ESC [ ? 6` is forwarded verbatim
+// and its `n` arrives orphaned in the next chunk — the query then slips past both
+// the answerer here AND the per-chunk strip in filterBufferData, landing in the
+// replay buffer where xterm.js later answers it (the /clear-loop trigger).
+test('trailing partial DEC private CSI held for next chunk', () => {
+  const r = computeSyncQueryResponse('data\x1b[?6', theme)
+  eq(r.response, '')
+  eq(r.forwarded, 'data')
+  eq(r.pendingPartial, '\x1b[?6')
+})
+
+test('lone trailing ESC [ ? held (private-mode introducer)', () => {
+  const r = computeSyncQueryResponse('data\x1b[?', theme)
+  eq(r.forwarded, 'data')
+  eq(r.pendingPartial, '\x1b[?')
+})
+
+test('DECXCPR split across two chunks reassembles into one whole sequence', () => {
+  const r1 = computeSyncQueryResponse('pre\x1b[?6', theme)
+  eq(r1.forwarded, 'pre')
+  eq(r1.pendingPartial, '\x1b[?6')
+  const r2 = computeSyncQueryResponse(r1.pendingPartial + 'npost', theme)
+  // Unanswered by design (strip-only), but it MUST emerge intact so the
+  // downstream per-chunk filter can recognise and drop it.
+  eq(r2.forwarded, '\x1b[?6npost')
+})
+
 test('answers query assembled across two chunks', () => {
   const r1 = computeSyncQueryResponse('pre\x1b]4;0;?', theme)
   eq(r1.pendingPartial, '\x1b]4;0;?')

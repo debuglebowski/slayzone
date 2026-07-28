@@ -187,6 +187,43 @@ test('preserves colon-form extended color with index 4', () => {
   assert(filterBufferData('\x1b[38:5:4m'), '\x1b[38:5:4m')
 })
 
+// Device-status queries must NEVER reach the replayable buffer. A stored query
+// is re-answered by xterm.js on every replay, and those answers are forwarded to
+// the live process as if typed. Claude Code polls DECXCPR (`?6n`) every 200ms and
+// reads a row=1 answer as "screen externally wiped" → submits `/clear` → new
+// session. Buffers on live tasks held 24k–35k copies before this filter.
+test('strips DECXCPR ?6n — the spontaneous-/clear trigger', () => {
+  assert(filterBufferData('\x1b[?6n'), '')
+})
+
+test('strips an accumulated ?6n poll burst but keeps surrounding output', () => {
+  const burst = '\x1b[?6n'.repeat(200)
+  assert(filterBufferData(`\x1b[1;31mhello\x1b[0m${burst}world`), '\x1b[1;31mhello\x1b[0mworld')
+})
+
+test('strips plain CPR 6n and DSR 5n from the buffer', () => {
+  assert(filterBufferData('\x1b[6n'), '')
+  assert(filterBufferData('\x1b[5n'), '')
+})
+
+test('preserves alt-screen + cursor-visibility private modes (not queries)', () => {
+  assert(filterBufferData('\x1b[?1049h'), '\x1b[?1049h')
+  assert(filterBufferData('\x1b[?1049l'), '\x1b[?1049l')
+  assert(filterBufferData('\x1b[?25l'), '\x1b[?25l')
+})
+
+// filterBufferData's output is ALSO what streams live to the renderer, so the
+// strip set must stay narrow: queries the renderer legitimately answers have to
+// survive, or capability detection breaks.
+test('preserves renderer-answered queries (DECRQM / XTVERSION)', () => {
+  assert(filterBufferData('\x1b[?2026$p'), '\x1b[?2026$p')
+  assert(filterBufferData('\x1b[>0q'), '\x1b[>0q')
+})
+
+test('preserves cursor movement adjacent to stripped queries', () => {
+  assert(filterBufferData('\x1b[10;20H\x1b[?6n\x1b[2J'), '\x1b[10;20H\x1b[2J')
+})
+
 console.log('─'.repeat(40))
 console.log(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

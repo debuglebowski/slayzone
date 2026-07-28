@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'fs'
 import type { IPty, IDisposable } from 'node-pty'
-import type { SlayzoneDb } from '@slayzone/platform'
+import { createDeviceStatusQueryStripper, type SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { recordSessionSpawn, markSessionDead } from '@slayzone/task/server'
 import { spawnLoginShell, maybeReinstallHooksForSpawn } from './pty-manager'
@@ -316,8 +316,29 @@ async function spawnWarm(projectId: string): Promise<void> {
     }
     // Drain the agent's boot output into seedBuffer so it replays on adopt and
     // RingBuffer history stays consistent once the session is registered.
+    //
+    // Cursor-position/status queries are stripped HERE, at the accumulation point.
+    // This drain is the one output path that bypasses pty-manager's onData, so it
+    // gets neither `interceptSyncQueries` (nobody answers) nor `filterBufferData`
+    // (nothing strips) — yet at adopt the seed is appended verbatim to the fresh
+    // RingBuffer, making every query replayable. A pre-booted agent polling
+    // DECXCPR at 200ms seeds ~1500 copies in five warm minutes; on replay xterm.js
+    // answers them all, and a row=1 answer is what Claude Code reads as "screen
+    // externally wiped" → submits `/clear` → new session. Stripping at
+    // accumulation (not at adopt) also stops the queries from consuming the
+    // MAX_SEED_BYTES window and evicting the real boot output the seed exists for.
+    //
+    // The stripper is STATEFUL (one per warm handle) because node-pty splits on
+    // read-buffer boundaries: `ESC [ ? 6` and `n` routinely land in different
+    // chunks. A per-chunk regex matches neither half, both survive, and they
+    // reassemble contiguously in seedBuffer — poison again. Safe to hold a torn
+    // tail here (unlike the runner, where buffered and live bytes must stay
+    // byte-identical per seq): seedBuffer has exactly one consumer, the adopt-time
+    // RingBuffer append, and nothing is lost — a held tail is emitted as soon as
+    // the next chunk resolves it.
+    const stripSeed = createDeviceStatusQueryStripper()
     handle.dataDisposable = result.pty.onData((d) => {
-      handle.seedBuffer = (handle.seedBuffer + d).slice(-MAX_SEED_BYTES)
+      handle.seedBuffer = (handle.seedBuffer + stripSeed(d)).slice(-MAX_SEED_BYTES)
     })
     handle.exitDisposable = result.pty.onExit(() => {
       if (warm.get(projectId) === handle) warm.delete(projectId)
