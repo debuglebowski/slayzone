@@ -1,7 +1,7 @@
 #!/bin/sh
 # SlayZone agent lifecycle hook — BENIGN DUMB FORWARDER.
 #
-# SLAYZONE_NOTIFY_VERSION=3
+# SLAYZONE_NOTIFY_VERSION=4
 # ^ Bump on EVERY change to this file. The installer (notify-script-installer.ts)
 #   refuses to overwrite an on-disk script with a strictly-lower version, so a
 #   stale/older release channel can never downgrade a newer script on the
@@ -19,9 +19,16 @@
 #   so warm-pool sessions became invisible (no task resolution → no running
 #   spinner, no unread dot). This version forwards THREE opaque channels and lets
 #   the SERVER do all field extraction:
-#     - ctx : $SLAYZONE_HOOK_CONTEXT — an opaque JSON blob the app packs at spawn
-#             with every identity field (taskId/slaySessionId/projectId/agentId/
-#             releaseChannel). Forwarded VERBATIM; this script never parses it.
+#     - ctx : $SLAYZONE_AGENT_HOOK_CONTEXT — an opaque JSON blob the app packs at
+#             spawn with every identity field (taskId/slaySessionId/projectId/
+#             agentId/releaseChannel). Forwarded VERBATIM; never parsed here.
+#             v4 renamed it from $SLAYZONE_HOOK_CONTEXT (pairs with
+#             $SLAYZONE_AGENT_HOOK_URL); the old name is still read as a FALLBACK
+#             because this file is shared newest-wins across release channels, so
+#             an OLDER channel's app spawns agents that only set the old name.
+#             Dropping the fallback before every channel ships the new name would
+#             reproduce the v2→v3 clobber (empty ctx → no task resolution → no
+#             running spinner, no unread dot).
 #     - raw : the hook payload piped on stdin (Claude/Codex/Gemini/Antigravity).
 #     - arg : argv $1 — Antigravity passes the EVENT NAME here (its payload omits
 #             it); the OpenCode plugin passes the whole JSON payload here (no
@@ -37,7 +44,8 @@
 #                              (a remote runner overlays its OWN loopback URL)
 #   SLAYZONE_AGENT_ID        - claude-code | codex | gemini | antigravity | opencode
 # Optional:
-#   SLAYZONE_HOOK_CONTEXT    - opaque identity blob (see above); forwarded as `ctx`
+#   SLAYZONE_AGENT_HOOK_CONTEXT - opaque identity blob (see above); sent as `ctx`
+#   SLAYZONE_HOOK_CONTEXT       - retired pre-v4 name; read only as a fallback
 #
 # Contract: ALWAYS exit 0. Hook failures must NOT bubble into the agent TUI
 # (Claude renders red error walls otherwise). Silent on any failure.
@@ -97,7 +105,10 @@ json_encode_string() {
 }
 
 # ctx: forwarded VERBATIM (already valid JSON from the app), or `{}` when unset.
-CTX="$SLAYZONE_HOOK_CONTEXT"
+# New name wins; the retired pre-v4 name is the fallback for an older release
+# channel's app spawning against this newer shared script (see header). Still NO
+# parsing — a name choice, not field-picking logic.
+CTX="${SLAYZONE_AGENT_HOOK_CONTEXT:-$SLAYZONE_HOOK_CONTEXT}"
 [ -z "$CTX" ] && CTX='{}'
 
 # raw: the stdin payload verbatim if it is present AND looks like JSON (starts

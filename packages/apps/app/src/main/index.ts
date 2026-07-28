@@ -230,7 +230,7 @@ initStorageDir(legacyStateDir, app.isPackaged)
 
 // Release channel → env, BEFORE the sidecar/pty env is built. `buildMcpEnv` (in
 // the electron-free terminal domain) reads this via getSlayzoneReleaseChannel()
-// and packs it into the opaque SLAYZONE_HOOK_CONTEXT blob, so the server can log
+// and packs it into the opaque SLAYZONE_AGENT_HOOK_CONTEXT blob, so the server logs
 // which release channel a hook came from. The shared ~/.slayzone/hooks/notify.sh
 // is NOT release-channel-scoped (prod + dev share one file); recording the
 // release channel makes a future cross-release-channel clobber visible in

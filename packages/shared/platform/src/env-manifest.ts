@@ -89,7 +89,13 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_SESSION_ID: 'identity',
   SLAYZONE_AGENT_ID: 'identity',
   SLAYZONE_AGENT_HOOK_URL: 'identity',
-  SLAYZONE_HOOK_CONTEXT: 'identity',
+  // Pairs with _HOOK_URL (where to post / who is posting). The pre-v4 name
+  // `SLAYZONE_HOOK_CONTEXT` is RETIRED and deliberately unlisted: unlisted =
+  // stripped (fail closed), and the old-name value an older release channel's app
+  // supplies rides its OWN per-spawn overlay (applied after sanitizeSpawnEnv), so
+  // notify.sh v4's fallback read still sees it. A manifest entry would only let a
+  // stale inherited value survive.
+  SLAYZONE_AGENT_HOOK_CONTEXT: 'identity',
 
   // --- global: same app-wide, safe to inherit verbatim ---
   SLAYZONE_RELEASE_CHANNEL: 'global', // attribution-only (hook envelope channel)

@@ -52,7 +52,7 @@ export function getSlayzoneHomeDir(): string {
  *
  * Why it exists: the shared `~/.slayzone/hooks/notify.sh` is NOT
  * release-channel-scoped, so two release channels (e.g. prod v0.35 + dev v0.36)
- * share one file. This value is packed into the opaque `SLAYZONE_HOOK_CONTEXT`
+ * share one file. This value is packed into the opaque `SLAYZONE_AGENT_HOOK_CONTEXT`
  * blob so the server can log which release channel a hook actually came from —
  * making a future cross-release-channel clobber visible in Diagnostics instead
  * of silent. It is attribution/diagnostic only; no control flow keys off it.

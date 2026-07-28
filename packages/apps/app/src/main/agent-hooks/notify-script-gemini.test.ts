@@ -113,7 +113,7 @@ describe('notify.sh under Gemini', () => {
           SLAYZONE_AGENT_HOOK_URL: 'http://127.0.0.1:1/api/agent-hook',
           SLAYZONE_AGENT_ID: 'gemini',
           // The app packs identity into ctx; the benign forwarder ships it verbatim.
-          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"task-1","agentId":"gemini"}'
+          SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"task-1","agentId":"gemini"}'
         }
       })
       expect(res.status).toBe(0)

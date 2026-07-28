@@ -59,12 +59,16 @@ strip `infra`+`secret`+`identity`+**any unmanifested `SLAYZONE_*`** (fail closed
 |---|---|
 | **secret** (strip) | `SLAYZONE_HUB_TOKEN`, `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`, `SLAYZONE_RUNNER_JOIN_TOKEN`, `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` |
 | **infra** (strip) | `SLAYZONE_HUB_ADDRESS`* (§5 — replaces `SLAYZONE_HUB_URL` **+ `_HOST` + `_PORT`**), `SLAYZONE_HUB_PUBLIC_ADDRESS` (§5 — replaces `SLAYZONE_HUB_PUBLIC_URL`), `SLAYZONE_DESKTOP_BRIDGE_ADDRESS` (§2+§5 — replaces `SLAYZONE_BRIDGE_URL`), `SLAYZONE_MODE`, `SLAYZONE_SUPERVISED`, `SLAYZONE_DB_PATH`, `SLAYZONE_USER_DATA_DIR`, `SLAYZONE_SIDECAR_HOT_RESTART`, `SLAYZONE_BOOT_LOG_PATH`, `SLAYZONE_DEBUG_BOOT`, `SLAYZONE_*_SETTINGS_PATH`/`*_HOOKS_PATH`/`*_PLUGIN_PATH` (claude/gemini/codex/antigravity/opencode), `SLAYZONE_E2E_ALLOW_RUNNER`, `SLAYZONE_E2E_INSTALL_HOOKS`, `SLAYZONE_REGISTER_DEV_PROTOCOL`, `SLAYZONE_NONINTERACTIVE` + non-prefixed infra: `ELECTRON_RUN_AS_NODE`, `NODE_PATH`, `PLAYWRIGHT` |
-| **identity** (strip base, overlay re-adds) | `SLAYZONE_TASK_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_AGENT_ID`, `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_HOOK_CONTEXT` |
+| **identity** (strip base, overlay re-adds) | `SLAYZONE_TASK_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_AGENT_ID`, `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_AGENT_HOOK_CONTEXT` (§3 — replaces `SLAYZONE_HOOK_CONTEXT`; sibling of `_AGENT_HOOK_URL`) |
 | **global** (keep) | `SLAYZONE_RELEASE_CHANNEL`, `SLAYZONE_ROOT`, `SLAYZONE_DEV` |
 
-Retired names (`SLAYZONE_HUB_URL`, `_HUB_HOST`, `_HUB_PORT`, `_HUB_PUBLIC_URL`)
-are deliberately NOT listed: unmanifested `SLAYZONE_*` fails closed, so a stale
-value in an ambient env is stripped at every spawn without an entry. The only
+Retired names (`SLAYZONE_HUB_URL`, `_HUB_HOST`, `_HUB_PORT`, `_HUB_PUBLIC_URL`,
+`SLAYZONE_HOOK_CONTEXT`) are deliberately NOT listed: unmanifested `SLAYZONE_*`
+fails closed, so a stale value in an ambient env is stripped at every spawn
+without an entry. `SLAYZONE_HOOK_CONTEXT` is still READ by `notify.sh` v4 as a
+back-compat fallback, but that value always arrives via an older release
+channel's app's own per-spawn overlay (applied AFTER sanitize) — never by
+inheritance, so it needs no manifest entry either. The only
 place they still appear by name is `mcp-env.test.ts`'s `HUB_ENV_KEYS`, which pins
 them ON PURPOSE so a future rename can't silently disarm the "no hub var reaches
 a terminal" guard.

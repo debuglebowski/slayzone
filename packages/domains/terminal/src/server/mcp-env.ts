@@ -90,14 +90,21 @@ export async function resolveRemoteMcpEnv(
  *   SLAYZONE_AGENT_ID        - the mode itself (passed back in the hook envelope)
  *   SLAYZONE_ROOT            - resolved on-disk anchor; the `slay` CLI inside the
  *                              agent derives `<ROOT>/storage` (same DB the app uses)
- *   SLAYZONE_HOOK_CONTEXT    - an OPAQUE JSON blob carrying every identity field
+ *   SLAYZONE_AGENT_HOOK_CONTEXT
+ *                            - an OPAQUE JSON blob carrying every identity field
  *                              the server needs to attribute a hook (taskId,
  *                              slaySessionId, projectId, agentId, channel). The
  *                              benign `notify.sh` forwards it VERBATIM without
  *                              naming any field — so adding a new identity field
  *                              later touches only this function + the server,
  *                              never the shared shell script (the file that rots
- *                              when an older channel clobbers it).
+ *                              when an older channel clobbers it). Pairs with
+ *                              `SLAYZONE_AGENT_HOOK_URL`: same subsystem prefix,
+ *                              one says WHERE to post, one says WHO is posting.
+ *                              (Renamed from `SLAYZONE_HOOK_CONTEXT`; notify.sh
+ *                              still reads the old name as a fallback so an
+ *                              older release channel's app can feed a newer
+ *                              shared script — see notify.sh v4.)
  *
  * `remote` (a task's pty routed to a runner) only suppresses the loopback hook
  * URL (the runner supplies it). It injects NO hub URL and NO bearer: the hook
@@ -164,7 +171,7 @@ export async function buildMcpEnv(
     if (taskId) ctx.taskId = taskId
     if (sessionId) ctx.slaySessionId = sessionId
     if (resolvedProjectId) ctx.projectId = resolvedProjectId
-    env.SLAYZONE_HOOK_CONTEXT = JSON.stringify(ctx)
+    env.SLAYZONE_AGENT_HOOK_CONTEXT = JSON.stringify(ctx)
   }
 
   if (remote) {

@@ -169,7 +169,7 @@ describe('notify.sh → processAgentHook round-trip (real bash bytes)', () => {
         stdin: '{"hook_event_name":"UserPromptSubmit"}',
         env: {
           SLAYZONE_AGENT_ID: 'claude-code',
-          SLAYZONE_HOOK_CONTEXT:
+          SLAYZONE_AGENT_HOOK_CONTEXT:
             '{"v":1,"taskId":"task-rt","agentId":"claude-code","releaseChannel":"dev"}'
         }
       })
@@ -188,7 +188,7 @@ describe('notify.sh → processAgentHook round-trip (real bash bytes)', () => {
         stdin: '{"conversationId":"c1"}',
         env: {
           SLAYZONE_AGENT_ID: 'antigravity',
-          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"ag-rt","agentId":"antigravity"}'
+          SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"ag-rt","agentId":"antigravity"}'
         }
       })
       expect(cap.transitions[0]).toEqual({
@@ -205,7 +205,7 @@ describe('notify.sh → processAgentHook round-trip (real bash bytes)', () => {
         stdin: '{"hook_event_name":"Stop"}',
         env: {
           SLAYZONE_AGENT_ID: 'claude-code',
-          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"task-stop","agentId":"claude-code"}'
+          SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"task-stop","agentId":"claude-code"}'
         }
       })
       expect(cap.transitions[0]).toMatchObject({ state: 'idle', event: 'Stop' })

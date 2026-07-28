@@ -75,8 +75,17 @@ const REMOTE: RemoteMcpEnv = {
   assert(env.SLAYZONE_TASK_ID === 'task-1', 'task id present')
   // The opaque context blob the benign notify.sh forwards verbatim. All identity
   // fields the server needs to attribute a hook live HERE — never named in the script.
-  assert('SLAYZONE_HOOK_CONTEXT' in env, 'local hook-capable must set SLAYZONE_HOOK_CONTEXT')
-  const ctx = JSON.parse(env.SLAYZONE_HOOK_CONTEXT!)
+  assert(
+    'SLAYZONE_AGENT_HOOK_CONTEXT' in env,
+    'local hook-capable must set SLAYZONE_AGENT_HOOK_CONTEXT'
+  )
+  // The pre-rename name is NEVER written: notify.sh reads it only as a fallback so
+  // an OLDER release channel's app can still feed a NEWER shared script.
+  assert(
+    !('SLAYZONE_HOOK_CONTEXT' in env),
+    'the retired SLAYZONE_HOOK_CONTEXT must NOT be written'
+  )
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
   assert(ctx.v === 1, `ctx envelope version must be 1, got ${ctx.v}`)
   assert(ctx.taskId === 'task-1', 'ctx carries taskId')
   assert(ctx.agentId === 'claude-code', 'ctx carries agentId')
@@ -91,8 +100,11 @@ const REMOTE: RemoteMcpEnv = {
 // 1b. Pooled (taskless) spawn → ctx carries slaySessionId + projectId, no taskId.
 {
   const env = await buildMcpEnv(null, undefined, 'claude-code', 'sess-123', 'proj-9')
-  assert('SLAYZONE_HOOK_CONTEXT' in env, 'pooled spawn still sets SLAYZONE_HOOK_CONTEXT')
-  const ctx = JSON.parse(env.SLAYZONE_HOOK_CONTEXT!)
+  assert(
+    'SLAYZONE_AGENT_HOOK_CONTEXT' in env,
+    'pooled spawn still sets SLAYZONE_AGENT_HOOK_CONTEXT'
+  )
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
   assert(ctx.slaySessionId === 'sess-123', 'ctx carries slaySessionId for a pooled agent')
   assert(ctx.projectId === 'proj-9', 'ctx carries projectId')
   assert(ctx.taskId === undefined, 'ctx has no taskId for a taskless pooled spawn')
@@ -101,7 +113,10 @@ const REMOTE: RemoteMcpEnv = {
 // 1c. Non-hook-capable mode → NO ctx blob (the blob only rides the hook env).
 {
   const env = await buildMcpEnv(null, 'task-x', 'some-unknown-mode' as never)
-  assert(!('SLAYZONE_HOOK_CONTEXT' in env), 'non-hook mode must NOT set SLAYZONE_HOOK_CONTEXT')
+  assert(
+    !('SLAYZONE_AGENT_HOOK_CONTEXT' in env),
+    'non-hook mode must NOT set SLAYZONE_AGENT_HOOK_CONTEXT'
+  )
 }
 
 // 2. Local, explicit `remote = null` → identical to omitting it entirely.
@@ -137,8 +152,8 @@ const REMOTE: RemoteMcpEnv = {
   )
   assert(env.SLAYZONE_AGENT_ID === 'claude-code', 'remote still sets SLAYZONE_AGENT_ID')
   assert('SLAYZONE_ROOT' in env, 'remote hook-capable still sets SLAYZONE_ROOT')
-  assert('SLAYZONE_HOOK_CONTEXT' in env, 'remote hook-capable still sets the ctx blob')
-  const ctx = JSON.parse(env.SLAYZONE_HOOK_CONTEXT!)
+  assert('SLAYZONE_AGENT_HOOK_CONTEXT' in env, 'remote hook-capable still sets the ctx blob')
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
   assert(ctx.taskId === 'task-r1', 'remote ctx carries taskId')
 }
 
@@ -149,7 +164,10 @@ const REMOTE: RemoteMcpEnv = {
   // Same identity blob + agent id; the only difference is the hook URL (local has
   // the loopback one, remote defers to the runner overlay).
   assert(remote.SLAYZONE_AGENT_ID === local.SLAYZONE_AGENT_ID, 'agent id identical local vs remote')
-  assert(remote.SLAYZONE_HOOK_CONTEXT === local.SLAYZONE_HOOK_CONTEXT, 'ctx blob identical local vs remote')
+  assert(
+    remote.SLAYZONE_AGENT_HOOK_CONTEXT === local.SLAYZONE_AGENT_HOOK_CONTEXT,
+    'ctx blob identical local vs remote'
+  )
   assert('SLAYZONE_AGENT_HOOK_URL' in local, 'local sets the loopback hook URL')
   assert(!('SLAYZONE_AGENT_HOOK_URL' in remote), 'remote leaves the hook URL to the runner')
 }
@@ -159,7 +177,7 @@ const REMOTE: RemoteMcpEnv = {
   const env = await buildMcpEnv(null, 'task-r3', 'some-unknown-mode' as never, undefined, undefined, REMOTE)
   assertNoHubEnv(env, 'non-hook remote')
   assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'no hook URL for non-hook remote mode')
-  assert(!('SLAYZONE_HOOK_CONTEXT' in env), 'no ctx blob for non-hook remote mode')
+  assert(!('SLAYZONE_AGENT_HOOK_CONTEXT' in env), 'no ctx blob for non-hook remote mode')
 }
 
 // ── resolveRemoteMcpEnv: the seam that gates remote vs local ─────────────────

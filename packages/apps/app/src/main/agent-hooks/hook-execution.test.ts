@@ -78,14 +78,14 @@ describe('hook execution (issue #88)', () => {
 
       // Run the hook the way Claude Code / Gemini do: `bash -c <command>`,
       // event JSON on stdin. The app packs its identity blob into
-      // SLAYZONE_HOOK_CONTEXT; the benign forwarder ships it VERBATIM as `ctx`.
+      // SLAYZONE_AGENT_HOOK_CONTEXT; the benign forwarder ships it VERBATIM as `ctx`.
       execFileSync('bash', ['-c', command], {
         input: '{"hook_event_name":"SessionStart","session_id":"sess-xyz"}',
         env: {
           ...process.env,
           SLAYZONE_AGENT_HOOK_URL: hookUrl,
           SLAYZONE_AGENT_ID: 'claude-code',
-          SLAYZONE_HOOK_CONTEXT:
+          SLAYZONE_AGENT_HOOK_CONTEXT:
             '{"v":1,"taskId":"task-abc","agentId":"claude-code","releaseChannel":"dev"}'
         }
       })
@@ -134,13 +134,71 @@ describe('hook execution (issue #88)', () => {
           ...process.env,
           SLAYZONE_AGENT_HOOK_URL: hookUrl,
           SLAYZONE_AGENT_ID: 'antigravity',
-          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"ag-task","agentId":"antigravity"}'
+          SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"ag-task","agentId":"antigravity"}'
         }
       })
 
       const body = (await server.received) as { agentId?: string; arg?: string | null }
       expect(body.agentId).toBe('antigravity')
       expect(body.arg).toBe('PreInvocation')
+    } finally {
+      server.close()
+    }
+  }, 20_000)
+
+  // CROSS-RELEASE-CHANNEL COMPAT (the notify.sh rename guard): ~/.slayzone/hooks/
+  // notify.sh is ONE file shared by every release channel, newest-wins. After the
+  // SLAYZONE_HOOK_CONTEXT → SLAYZONE_AGENT_HOOK_CONTEXT rename, an OLDER channel's
+  // app still spawns agents with only the OLD var while this NEWER script is on
+  // disk. Without the fallback read, ctx would arrive `{}` → no task resolution →
+  // no spinner, no unread dot (the exact clobber regression this file guards).
+  test('falls back to the retired SLAYZONE_HOOK_CONTEXT when the new var is unset', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-ctx-fallback-'))
+    tmpDirs.push(root)
+    const { path: installedAt } = await installNotifyScript({
+      targetPath: path.join(root, 'hooks', 'notify.sh')
+    })
+    const server = captureOnePost()
+    try {
+      execFileSync('bash', ['-c', formatHookCommand(installedAt)], {
+        input: '{"hook_event_name":"Stop"}',
+        env: {
+          ...process.env,
+          SLAYZONE_AGENT_HOOK_URL: await server.url,
+          SLAYZONE_AGENT_ID: 'claude-code',
+          SLAYZONE_AGENT_HOOK_CONTEXT: '',
+          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"old-channel","agentId":"claude-code"}'
+        }
+      })
+      const body = (await server.received) as { ctx?: { taskId?: string } }
+      expect(body.ctx).toMatchObject({ taskId: 'old-channel' })
+    } finally {
+      server.close()
+    }
+  }, 20_000)
+
+  // The NEW var WINS when both are present: a newer app's value must never be
+  // shadowed by a stale old-name value leaking through an inherited env.
+  test('prefers SLAYZONE_AGENT_HOOK_CONTEXT when both vars are set', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-ctx-precedence-'))
+    tmpDirs.push(root)
+    const { path: installedAt } = await installNotifyScript({
+      targetPath: path.join(root, 'hooks', 'notify.sh')
+    })
+    const server = captureOnePost()
+    try {
+      execFileSync('bash', ['-c', formatHookCommand(installedAt)], {
+        input: '{"hook_event_name":"Stop"}',
+        env: {
+          ...process.env,
+          SLAYZONE_AGENT_HOOK_URL: await server.url,
+          SLAYZONE_AGENT_ID: 'claude-code',
+          SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"new-name","agentId":"claude-code"}',
+          SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"stale-old-name","agentId":"claude-code"}'
+        }
+      })
+      const body = (await server.received) as { ctx?: { taskId?: string } }
+      expect(body.ctx).toMatchObject({ taskId: 'new-name' })
     } finally {
       server.close()
     }

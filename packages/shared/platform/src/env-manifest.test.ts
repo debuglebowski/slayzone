@@ -51,6 +51,24 @@ check('SLAYZONE_DEV is global (install DB selector)', ENV_MANIFEST.SLAYZONE_DEV 
 check('ELECTRON_RUN_AS_NODE in NON_PREFIXED_INFRA', NON_PREFIXED_INFRA.has('ELECTRON_RUN_AS_NODE'))
 check('PLAYWRIGHT in NON_PREFIXED_INFRA', NON_PREFIXED_INFRA.has('PLAYWRIGHT'))
 
+// ── the AGENT_HOOK pair ──────────────────────────────────────────────────────
+// Same subsystem prefix, same scope: `_HOOK_URL` says WHERE to post a hook,
+// `_HOOK_CONTEXT` says WHO is posting it. Both identity, so both are stripped
+// from the inherited base and re-added per spawn by buildMcpEnv (local) or the
+// runner's overlay (remote).
+check(
+  'SLAYZONE_AGENT_HOOK_CONTEXT is identity (sibling of _HOOK_URL)',
+  ENV_MANIFEST.SLAYZONE_AGENT_HOOK_CONTEXT === 'identity'
+)
+// The pre-v4 name stays OUT of the manifest. notify.sh v4 reads it as a fallback
+// so an older release channel's app can feed the newer shared script, but that
+// value arrives via that app's per-spawn overlay — listing it here would instead
+// let a STALE inherited blob (task A's identity) survive into task B's terminal.
+check(
+  'SLAYZONE_HOOK_CONTEXT is retired (absent from manifest → stripped)',
+  !('SLAYZONE_HOOK_CONTEXT' in ENV_MANIFEST)
+)
+
 // ── sanitizeSpawnEnv behavior ────────────────────────────────────────────────
 const base: NodeJS.ProcessEnv = {
   // user env — must survive
@@ -74,6 +92,9 @@ const base: NodeJS.ProcessEnv = {
   // identity — must be stripped from the inherited base (overlay re-adds)
   SLAYZONE_TASK_ID: 'task-A',
   SLAYZONE_PROJECT_ID: 'proj-A',
+  SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"task-A"}',
+  // retired pre-v4 ctx name — unmanifested, so stripped by the fail-closed default
+  SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"task-A"}',
   // unmanifested SLAYZONE_* — must be stripped (fail closed)
   SLAYZONE_FUTURE_SECRET: 'oops',
   // non-prefixed infra — must be stripped
@@ -107,6 +128,12 @@ check('strips infra SLAYZONE_SUPERVISED', !('SLAYZONE_SUPERVISED' in out))
 
 check('strips identity SLAYZONE_TASK_ID', !('SLAYZONE_TASK_ID' in out))
 check('strips identity SLAYZONE_PROJECT_ID', !('SLAYZONE_PROJECT_ID' in out))
+// An inherited ctx blob attributes THIS agent's hooks to the PARENT's task (the
+// clobber class of bug). buildMcpEnv re-adds the right one. Both the current name
+// (manifested identity) and the retired pre-v4 name (unmanifested → fail-closed
+// default) must go.
+check('strips identity SLAYZONE_AGENT_HOOK_CONTEXT', !('SLAYZONE_AGENT_HOOK_CONTEXT' in out))
+check('strips retired SLAYZONE_HOOK_CONTEXT (fail closed)', !('SLAYZONE_HOOK_CONTEXT' in out))
 
 check('FAIL CLOSED: strips unmanifested SLAYZONE_FUTURE_SECRET', !('SLAYZONE_FUTURE_SECRET' in out))
 

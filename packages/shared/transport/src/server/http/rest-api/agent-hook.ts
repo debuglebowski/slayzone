@@ -268,7 +268,8 @@ function isAgentId(v: unknown): v is HookAgentId {
  *
  *   NEW (benign notify.sh v2+): `{ ctx, raw, arg, agentId }` — three OPAQUE
  *     channels the script forwards without naming any field:
- *       - ctx : the app-packed identity blob (`SLAYZONE_HOOK_CONTEXT`) —
+ *       - ctx : the app-packed identity blob (`SLAYZONE_AGENT_HOOK_CONTEXT`, or the
+ *               retired `SLAYZONE_HOOK_CONTEXT` from a pre-rename app) —
  *               `{ v, taskId, slaySessionId, projectId, agentId, releaseChannel }`.
  *       - raw : the stdin hook payload (Claude/Codex/Gemini/Antigravity), or null.
  *       - arg : argv $1 (Antigravity's event NAME, or the OpenCode plugin's whole

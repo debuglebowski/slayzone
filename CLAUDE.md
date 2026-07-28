@@ -69,9 +69,10 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 
 1. Prefix `SLAYZONE_`.
 2. Name by what the value IS, not who reads it. App-specific → include the app (`SLAYZONE_HUB_ADDRESS`). Universal → don't (`SLAYZONE_MODE`, `SLAYZONE_TASK_ID`).
-3. Same concept → same suffix: `_ADDRESS` `_TOKEN` `_DIR` `_PATH` `_ID`.
+3. Same concept → same suffix: `_ADDRESS` `_TOKEN` `_DIR` `_PATH` `_ID`. Same *subsystem* → same prefix: `SLAYZONE_AGENT_HOOK_URL` (where to post) + `SLAYZONE_AGENT_HOOK_CONTEXT` (who is posting).
 4. One concept = one var, even when its value differs per role (the hub BINDS `SLAYZONE_HUB_ADDRESS`, the runner/CLI DIAL it). Safe because `sanitizeSpawnEnv` strips non-`global` vars at every terminal-spawn boundary.
 5. Carry authority (`host[:port]`), never a full URL — the scheme derives from `SLAYZONE_MODE` (local → `ws`/`http`, remote → `wss`/`https`), so a scheme/reader mismatch is unrepresentable.
+7. Renaming a var read by the shared `~/.slayzone/hooks/notify.sh` requires a FALLBACK read of the old name (`${NEW:-$OLD}`) plus a `SLAYZONE_NOTIFY_VERSION` bump. That file is ONE copy shared by every release channel, newest-wins — so an older channel's app keeps spawning agents with the old name against the newer script. No fallback = empty ctx = no task resolution = no spinner, no unread dot. Drop the fallback only once every channel ships the new name. Retired names stay OUT of `ENV_MANIFEST` (unmanifested = stripped, fail closed).
 
 ## Theming
 
