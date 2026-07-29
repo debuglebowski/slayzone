@@ -141,6 +141,23 @@ mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
   && ( cd hub && npm init -y >/dev/null && npm install "$HUB_TGZ" >/dev/null 2>&1 ) \
   && ( cd runner && npm init -y >/dev/null && npm install "$RUN_TGZ" >/dev/null 2>&1 ) )
 
+# Both bins MUST carry a `#!/usr/bin/env node` shebang: npm/npx exec the bin
+# DIRECTLY (no `node` prefix), so a shebang-less bundle is handed to /bin/sh,
+# which runs the JS as a shell script (`use strict: not found`, `var: not
+# found`, `Syntax error: "(" unexpected`). Assert it on the INSTALLED bins —
+# the same files npx runs — before anything else, so the failure names the
+# cause instead of surfacing as a confusing boot error further down.
+for b in "$SMOKE/hub/node_modules/.bin/slayzone-hub" \
+         "$SMOKE/runner/node_modules/.bin/slayzone-runner"; do
+  # `.bin` entries are symlinks on posix and shim scripts on Windows; resolve so
+  # we read the bundle itself.
+  target="$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$b")"
+  head -1 "$target" | grep -q '^#!.*node' \
+    || { echo "   SMOKE FAIL — $b has no node shebang (npx would run it via /bin/sh)"
+         rm -rf "$SMOKE"; echo "Aborting before publish."; exit 1; }
+done
+echo "   ✓ both published bins carry a node shebang"
+
 # Shared HMAC secret so the hub's runner-auth verifies the runner it enrolls.
 SMOKE_SECRET="$(openssl rand -hex 32)"
 
@@ -165,7 +182,7 @@ HUB_PORT=47811
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_ADDRESS="127.0.0.1:$HUB_PORT" \
   SLAYZONE_HUB_AUTH_SECRET="$SMOKE_SECRET" \
-  node "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
+  "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
 HPID=$!
 
 smoke_fail() {
@@ -212,7 +229,7 @@ echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_JOIN_TOKEN="$JOIN_TOKEN" \
   SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
-  node "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
+  "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
 RPID=$!
 
 # Assert enrollment via the RUNNER's stdout: on a fresh runner the dialer logs

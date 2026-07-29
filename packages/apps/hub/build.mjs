@@ -49,6 +49,13 @@ async function buildOnce() {
     format: 'cjs',
     target: 'node20',
     external: ['better-sqlite3', 'bufferutil', 'utf-8-validate', 'node-pty'],
+    // Shebang: this bundle is ALSO the `slayzone-hub` bin of the published
+    // @slayzone/hub package, so npm/npx exec it directly (no `node` prefix).
+    // Without it the kernel has no interpreter and /bin/sh runs the JS as a
+    // shell script → `use strict: not found`. In-app spawns pass an explicit
+    // node/electron argv[0] and are unaffected, which is why the omission only
+    // broke `npx @slayzone/hub`.
+    banner: { js: '#!/usr/bin/env node' },
     // Textual substitution consumed by src/build-info.ts. Declared `string |
     // undefined` there so running the un-bundled TS source resolves to sentinels.
     define: {
