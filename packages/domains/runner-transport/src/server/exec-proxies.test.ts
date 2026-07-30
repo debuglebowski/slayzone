@@ -129,9 +129,9 @@ describe('createRoutingPtyBackend', () => {
     gateway.onMethod('pty.spawn', () => ({ pid: 4242 }))
     gateway.onMethod('pty.getBufferSince', () => ({
       frames: [
-        { seq: 3, data: 'c' },
-        { seq: 4, data: 'd' },
-        { seq: 5, data: 'e' }
+        { seq: 2, data: 'c' },
+        { seq: 3, data: 'd' },
+        { seq: 4, data: 'e' }
       ]
     }))
     const backend = createRoutingPtyBackend({
@@ -148,26 +148,114 @@ describe('createRoutingPtyBackend', () => {
       exit = e
     })
 
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 1, data: 'a' })
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 2, data: 'b' })
-    // Gap: seq 5 arrives before 3 & 4 → backfill from lastSeq (2).
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 5, data: 'e' })
+    // Sequences start at 0 — that is what the runner's RingBuffer emits.
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 0, data: 'a' })
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 1, data: 'b' })
+    // Gap: seq 4 arrives before 2 & 3 → backfill from lastSeq (1).
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 4, data: 'e' })
 
     await vi.waitFor(() => expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e']))
     await vi.waitFor(() => expect(handle.pid).toBe(4242))
 
-    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({ sessionId: 'sess-1', seq: 2 })
+    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({ sessionId: 'sess-1', seq: 1 })
 
     // Duplicate / stale frame is ignored (no double delivery).
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 3, data: 'DUP' })
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 2, data: 'DUP' })
     expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e'])
 
     gateway.emit('pty.exit', { runnerId: 'runner-1', sessionId: 'sess-1', exitCode: 0, signal: null })
     expect(exit).toEqual({ exitCode: 0, signal: undefined })
 
     // Post-exit frames are dropped (session disposed).
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 6, data: 'zzz' })
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 5, data: 'zzz' })
     expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+
+  it('skips forward instead of stalling when a gap is unrecoverable', async () => {
+    // Starting delivery at seq -1 makes an unfillable seq 0 reachable: a session
+    // whose opening chunk already aged out of the runner's ring buffer can never
+    // produce it. Waiting for it would stall the pty forever — strictly worse
+    // than the single dropped chunk this fix removes. So after a backfill has
+    // run at a position and left the gap open, delivery advances.
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 9 }))
+    // Runner no longer holds the missing frames.
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      local: throwingPty,
+      resolveRunnerId: (spec) => spec.runnerId ?? null
+    })
+
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
+    const chunks: string[] = []
+    handle.onData((d) => chunks.push(d))
+
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 7, data: 'late' })
+
+    await vi.waitFor(() => expect(chunks).toEqual(['late']))
+
+    // And delivery continues normally from there.
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 8, data: 'next' })
+    expect(chunks).toEqual(['late', 'next'])
+  })
+
+  it('delivers seq 0 — the runner numbers its FIRST chunk 0, not 1', async () => {
+    // The runner's RingBuffer starts at `nextSeq = 0` (ring-buffer.ts), so the
+    // very first chunk of every remote pty session carries seq 0. The hub used
+    // to initialise `lastSeq: 0`, and `ingest` drops `seq <= lastSeq` — so that
+    // first chunk was silently discarded on every session. Session start is
+    // exactly where a shell's banner/prompt lives.
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 7 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      local: throwingPty,
+      resolveRunnerId: (spec) => spec.runnerId ?? null
+    })
+
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
+    const chunks: string[] = []
+    handle.onData((d) => chunks.push(d))
+
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 0, data: 'FIRST' })
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 1, data: 'second' })
+
+    expect(chunks).toEqual(['FIRST', 'second'])
+  })
+
+  it('backfills a gap that starts at seq 0 (never-backfilled sentinel is distinct from lastSeq)', async () => {
+    // `backfilledAt` guards against re-issuing a backfill at the same position.
+    // With `lastSeq` now starting at -1, a `-1` sentinel would compare equal on
+    // the first gap and suppress the only backfill that could recover seq 0 —
+    // hence the sentinel is `null`, not a number.
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 7 }))
+    gateway.onMethod('pty.getBufferSince', () => ({
+      frames: [
+        { seq: 0, data: 'zero' },
+        { seq: 1, data: 'one' }
+      ]
+    }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      local: throwingPty,
+      resolveRunnerId: (spec) => spec.runnerId ?? null
+    })
+
+    const handle = (await backend.spawn(ptySpec())) as PtyHandle
+    const chunks: string[] = []
+    handle.onData((d) => chunks.push(d))
+
+    // seq 2 first: gap at 0 and 1 → backfill must ask from BEFORE seq 0.
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 2, data: 'two' })
+
+    await vi.waitFor(() => expect(chunks).toEqual(['zero', 'one', 'two']))
+    // `getBufferSince` returns `seq > params.seq`, so -1 is what includes seq 0.
+    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({
+      sessionId: 'sess-1',
+      seq: -1
+    })
   })
 
   it('maps the spawn spec to a pty.spawn frame and issues write/resize/kill frames', async () => {
@@ -226,7 +314,7 @@ describe('createRoutingPtyBackend', () => {
       exit = e
     })
 
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 1, data: 'a' })
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 0, data: 'a' })
     gateway.emit('runner-lost', { runnerId: 'runner-1', reason: 'heartbeat-timeout' })
 
     // The terminal PtyHandle.onExit seam can't carry a null exitCode or a string

@@ -130,12 +130,24 @@ interface PtyEntry {
   key: string
   runnerId: string
   sessionId: string
-  /** Highest contiguously-delivered seq (delivery starts at seq 1). */
+  /**
+   * Highest contiguously-delivered seq. Starts at **-1**, not 0: the runner's
+   * `RingBuffer` numbers its FIRST chunk seq 0 (`nextSeq = 0`), and `ingest`
+   * drops `seq <= lastSeq` — so a 0 here silently discarded the opening chunk of
+   * every remote pty session, which is where a shell's banner and first prompt
+   * live. -1 also makes `getBufferSince(seq: -1)` include seq 0, since that
+   * endpoint returns frames with `seq > params.seq`.
+   */
   lastSeq: number
   /** Out-of-order frames awaiting a gap fill (seq → data). */
   pending: Map<number, string>
-  /** `lastSeq` value the in-flight/last backfill was issued for (`-1` = none). */
-  backfilledAt: number
+  /**
+   * `lastSeq` value the in-flight/last backfill was issued for; `null` = never
+   * backfilled. Deliberately NOT a numeric sentinel — `lastSeq` now starts at
+   * -1, so a `-1` sentinel would compare equal on the very first gap and
+   * suppress the one backfill that could recover seq 0.
+   */
+  backfilledAt: number | null
   disposed: boolean
   dataEmitter: BufferingEmitter<string>
   exitEmitter: BufferingEmitter<PtyExitEvent>
@@ -161,7 +173,21 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     }
     if (entry.disposed || entry.pending.size === 0) return
     if (entry.pending.has(entry.lastSeq + 1)) return // filled by the loop above
-    if (entry.backfilledAt === entry.lastSeq) return // already tried at this position
+    if (entry.backfilledAt === entry.lastSeq) {
+      // A backfill already ran at this position and the gap is STILL unfilled, so
+      // the missing seq is unrecoverable — evicted from the runner's ring buffer,
+      // or never sent. Skip forward to the lowest pending seq and deliver rather
+      // than waiting for a frame that will never arrive: holding the line would
+      // stall the session permanently, which is strictly worse than a visible
+      // gap. (Reachable in normal operation now that delivery starts at seq -1:
+      // a session whose opening chunk aged out cannot produce seq 0.)
+      const lowest = Math.min(...entry.pending.keys())
+      if (lowest > entry.lastSeq + 1) {
+        entry.lastSeq = lowest - 1
+        drain(entry)
+      }
+      return
+    }
     entry.backfilledAt = entry.lastSeq
     void backfill(entry)
   }
@@ -230,9 +256,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         key,
         runnerId,
         sessionId: spec.sessionId,
-        lastSeq: 0,
+        lastSeq: -1,
         pending: new Map(),
-        backfilledAt: -1,
+        backfilledAt: null,
         disposed: false,
         dataEmitter,
         exitEmitter

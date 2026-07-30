@@ -22,6 +22,19 @@ export interface BufferChunk {
  * Ring buffer for terminal output with a fixed maximum size. Drops the oldest
  * content when capacity is exceeded. Each chunk carries a monotonic sequence
  * number for gap detection / ordering.
+ *
+ * **Chunks are immutable once appended.** `handlers/pty.ts` states that live and
+ * backfilled frames "are interchangeable by contract", and the hub's demux keeps
+ * whichever copy of a seq lands first (`exec-proxies.ts`) — so a buffered copy
+ * that differs from the bytes streamed live under the same seq makes the rendered
+ * output depend on delivery timing.
+ *
+ * This buffer therefore does NOT do eviction-boundary resync (it used to prepend
+ * `ESC[0m` to the surviving head chunk, and truncate an oversized single chunk in
+ * place). Neither is meaningful here: this buffer exists solely for short-range
+ * gap backfill via `getChunksSince`, and the HUB's own RingBuffer
+ * (`@slayzone/terminal` server/ring-buffer.ts) owns replay-prelude resync, which
+ * is where a real terminal is being repopulated from scratch.
  */
 export class RingBuffer {
   private chunks: BufferChunk[] = []
@@ -43,26 +56,18 @@ export class RingBuffer {
     this.totalSize += data.length
 
     // Drop oldest chunks until under max size.
-    let droppedAny = false
     while (this.totalSize > this.maxSize && this.chunks.length > 1) {
       const dropped = this.chunks.shift()!
       this.totalSize -= dropped.data.length
-      droppedAny = true
     }
 
-    // Prepend ANSI reset if chunks were dropped (reset codes may have been lost).
-    if (droppedAny && this.chunks.length > 0) {
-      this.chunks[0] = { seq: this.chunks[0].seq, data: '\x1b[0m' + this.chunks[0].data }
-      this.totalSize += 4
-    }
-
-    // If a single chunk still exceeds max, truncate it.
+    // A single chunk over the cap is DROPPED, not truncated — see the immutability
+    // note below. Its seq is not reused, so the hub sees an honest gap, fails to
+    // backfill it, and skips forward; truncating would instead hand back different
+    // bytes under a seq it may already have delivered verbatim.
     if (this.totalSize > this.maxSize && this.chunks.length === 1) {
-      this.chunks[0] = {
-        seq: this.chunks[0].seq,
-        data: '\x1b[0m' + this.chunks[0].data.slice(-this.maxSize)
-      }
-      this.totalSize = this.chunks[0].data.length
+      this.chunks = []
+      this.totalSize = 0
     }
 
     return seq
