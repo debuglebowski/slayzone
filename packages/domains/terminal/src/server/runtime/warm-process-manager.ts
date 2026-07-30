@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'fs'
 import type { IPty, IDisposable } from 'node-pty'
-import { createDeviceStatusQueryStripper, type SlayzoneDb } from '@slayzone/platform'
+import {
+  createDeviceStatusQueryStripper,
+  type DeviceStatusQueryStripper,
+  type SlayzoneDb
+} from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { recordSessionSpawn, markSessionDead } from '@slayzone/task/server'
 import { spawnLoginShell, maybeReinstallHooksForSpawn } from './pty-manager'
@@ -47,6 +51,13 @@ interface WarmHandle {
   flags: string | null
   dataDisposable?: IDisposable
   exitDisposable?: IDisposable
+  /**
+   * The stateful query stripper feeding `seedBuffer`. Held on the handle so the
+   * adopt path can `flush()` its carry into the seed — disposing
+   * `dataDisposable` retires the stripper, and any tail still in its closure
+   * would otherwise be dropped while its continuation arrives on the live path.
+   */
+  stripSeed?: DeviceStatusQueryStripper
 }
 
 /**
@@ -171,6 +182,14 @@ export function claimWarmShell(criteria: {
   handle.state = 'adopting'
   handle.dataDisposable?.dispose()
   handle.exitDisposable?.dispose()
+  // Retiring the drain retires the stripper, so drain its held tail into the seed
+  // now. The live path that takes over is the STATELESS `filterBufferData`, which
+  // has no carry to rejoin a torn sequence with — an unflushed tail would be lost
+  // and its continuation would arrive orphaned.
+  const heldTail = handle.stripSeed?.flush() ?? ''
+  if (heldTail) {
+    handle.seedBuffer = (handle.seedBuffer + heldTail).slice(-MAX_SEED_BYTES)
+  }
   warm.delete(criteria.projectId)
   recordDiagnosticEvent({
     level: 'info',
@@ -335,8 +354,10 @@ async function spawnWarm(projectId: string): Promise<void> {
     // tail here (unlike the runner, where buffered and live bytes must stay
     // byte-identical per seq): seedBuffer has exactly one consumer, the adopt-time
     // RingBuffer append, and nothing is lost — a held tail is emitted as soon as
-    // the next chunk resolves it.
+    // the next chunk resolves it, or flushed into the seed at adopt time (the
+    // drain stops there, so the tail has no later chunk to ride out on).
     const stripSeed = createDeviceStatusQueryStripper()
+    handle.stripSeed = stripSeed
     handle.dataDisposable = result.pty.onData((d) => {
       handle.seedBuffer = (handle.seedBuffer + stripSeed(d)).slice(-MAX_SEED_BYTES)
     })

@@ -31,7 +31,8 @@ export {
 export {
   createDeviceStatusQueryStripper,
   stripDeviceStatusQueries,
-  stripDeviceStatusResponses
+  stripDeviceStatusResponses,
+  type DeviceStatusQueryStripper
 } from './device-status-queries'
 export {
   hubUrlFromAddr,

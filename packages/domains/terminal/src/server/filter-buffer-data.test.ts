@@ -224,6 +224,74 @@ test('preserves cursor movement adjacent to stripped queries', () => {
   assert(filterBufferData('\x1b[10;20H\x1b[?6n\x1b[2J'), '\x1b[10;20H\x1b[2J')
 })
 
+// ---------------------------------------------------------------------------
+// D3 — an implicit SGR reset must survive underline stripping
+//
+// `ESC[;4m` is "reset, then underline": the empty first parameter defaults to 0.
+// Dropping the `4` left `kept = ['']`, which joins to `''` and hit the falsy
+// branch — emitting nothing and destroying the reset, so whatever colour/bold was
+// active bled into the following text. `ESC[m` (bare = reset) is the correct
+// remainder. Contrast `ESC[0;4m`, whose explicit 0 survives and already worked.
+// ---------------------------------------------------------------------------
+
+test('implicit reset survives when the underline is stripped (ESC[;4m → ESC[m)', () => {
+  assert(filterBufferData('\x1b[;4munderlined'), '\x1b[munderlined')
+})
+
+test('explicit reset + underline keeps the reset (regression guard)', () => {
+  assert(filterBufferData('\x1b[0;4mtext'), '\x1b[0mtext')
+})
+
+test('a bare underline with no other params still strips to nothing', () => {
+  assert(filterBufferData('\x1b[4mtext'), 'text')
+})
+
+test('multiple empty params are preserved', () => {
+  // `ESC[;;4m` is reset;reset;underline — the two implicit resets remain.
+  assert(filterBufferData('\x1b[;;4mtext'), '\x1b[;mtext')
+})
+
+// ---------------------------------------------------------------------------
+// D4 — full ITU T.416 colour-selector set
+//
+// The extended-colour walk only understood selector `5` (indexed) and `2` (RGB).
+// Selector `4` is CMYK, and it fell through to the generic token loop, where its
+// FIRST COMPONENT — a literal `4` — was mistaken for SGR 4 underline and eaten,
+// shifting every following component and mangling the colour.
+// ---------------------------------------------------------------------------
+
+test('CMYK extended colour (selector 4) survives intact', () => {
+  assert(filterBufferData('\x1b[38;4;10;20;30;40mtext'), '\x1b[38;4;10;20;30;40mtext')
+})
+
+test('CMY extended colour (selector 3) survives intact', () => {
+  assert(filterBufferData('\x1b[38;3;10;20;30mtext'), '\x1b[38;3;10;20;30mtext')
+})
+
+test('transparent / implementation-defined selectors 0 and 1 survive', () => {
+  assert(filterBufferData('\x1b[38;0mtext'), '\x1b[38;0mtext')
+  assert(filterBufferData('\x1b[38;1mtext'), '\x1b[38;1mtext')
+})
+
+test('a CMYK component that is literally 4 is not treated as underline', () => {
+  // Every component set to 4 — the pathological case for the old walk.
+  assert(filterBufferData('\x1b[48;4;4;4;4;4mtext'), '\x1b[48;4;4;4;4;4mtext')
+})
+
+test('underline after a CMYK spec is still stripped', () => {
+  // The walk must resume filtering once the colour spec is consumed.
+  assert(filterBufferData('\x1b[38;4;1;2;3;4;4mtext'), '\x1b[38;4;1;2;3;4mtext')
+})
+
+test('indexed and RGB colours still survive (regression guard)', () => {
+  assert(filterBufferData('\x1b[38;5;4mtext'), '\x1b[38;5;4mtext')
+  assert(filterBufferData('\x1b[38;2;4;4;4mtext'), '\x1b[38;2;4;4;4mtext')
+})
+
+test('underline color 58 with CMYK survives', () => {
+  assert(filterBufferData('\x1b[58;4;9;8;7;6mtext'), '\x1b[58;4;9;8;7;6mtext')
+})
+
 console.log('─'.repeat(40))
 console.log(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

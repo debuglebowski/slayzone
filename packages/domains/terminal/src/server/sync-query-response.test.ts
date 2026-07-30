@@ -227,6 +227,123 @@ test('answers query assembled across two chunks', () => {
   eq(r2.forwarded, 'post')
 })
 
+// ---------------------------------------------------------------------------
+// Bounded OSC hold
+//
+// The CSI branch of the partial-hold pattern self-bounds: its param class
+// [?<>0-9;:] breaks on any text byte, so the hold releases. The OSC branch's
+// [^\x07\x1b]* matches everything that is not BEL or ESC — so once a chunk ends
+// inside an OSC body, the hold grows without limit and NOTHING is forwarded.
+// Symptom is a FROZEN terminal, not a scrambled one: output stops appearing
+// until some ESC finally arrives (which a resize supplies via SIGWINCH redraw —
+// the same "resize fixes it" signature as the atlas scramble, different cause).
+//
+// Every query we answer is <= ~14 bytes (`ESC]4;255;?BEL`), so a 32-byte cap
+// covers the hold's entire purpose. Past the cap we forward verbatim: bytes stay
+// contiguous, the terminal's own parser reassembles them, and the only thing
+// given up is answering a query torn past 32 bytes — which cannot happen.
+// ---------------------------------------------------------------------------
+
+test('does not hold an unbounded OSC body — output keeps flowing', () => {
+  // A title-ish OSC that never terminates in this chunk. Pre-fix this returned
+  // forwarded:'' and held the whole thing, so three plain lines produced ZERO
+  // output.
+  const long = '\x1b]0;' + 'a'.repeat(200)
+  const r = computeSyncQueryResponse(long, theme)
+  eq(r.pendingPartial, '', 'nothing held past the cap')
+  eq(r.forwarded, long, 'forwarded verbatim instead of swallowed')
+})
+
+test('plain text after an OSC-open chunk is emitted, not swallowed', () => {
+  const r1 = computeSyncQueryResponse('\x1b]0;some title text that runs on and on and on', theme)
+  const r2 = computeSyncQueryResponse('line one\nline two\nline three\n', theme)
+  // The second chunk contains no ESC at all — it must never be held.
+  eq(r2.pendingPartial, '')
+  eq(r2.forwarded, 'line one\nline two\nline three\n')
+  // And the first chunk was not silently eaten either.
+  eq(r1.forwarded + r2.forwarded !== '', true, 'output was produced')
+})
+
+test('a SHORT partial OSC is still held (the split-query case the hold exists for)', () => {
+  // Regression guard on the fix: capping must not break answering a genuine
+  // query torn across chunks.
+  const r1 = computeSyncQueryResponse('pre\x1b]11;?', theme)
+  eq(r1.pendingPartial, '\x1b]11;?', 'short partial still held')
+  eq(r1.forwarded, 'pre')
+  const r2 = computeSyncQueryResponse(r1.pendingPartial + '\x07post', theme)
+  eq(r2.response, '\x1b]11;rgb:1212/3434/5656\x07', 'reassembled query still answered')
+  eq(r2.forwarded, 'post')
+})
+
+test('an OSC body exactly at the cap is held; one byte over is forwarded', () => {
+  // Boundary check so the cap cannot silently drift.
+  const atCap = '\x1b]0;' + 'x'.repeat(32 - 4)
+  eq(atCap.length, 32)
+  eq(computeSyncQueryResponse(atCap, theme).pendingPartial, atCap, 'exactly 32 held')
+  const overCap = atCap + 'y'
+  eq(computeSyncQueryResponse(overCap, theme).pendingPartial, '', '33 forwarded')
+})
+
+test('nothing is lost across the cap boundary', () => {
+  // The module-wide invariant: forwarded + pendingPartial must reconstruct the
+  // input minus whatever was answered.
+  for (const body of ['', 'a', 'a'.repeat(28), 'a'.repeat(29), 'a'.repeat(100)]) {
+    const input = '\x1b]0;' + body
+    const r = computeSyncQueryResponse(input, theme)
+    eq(r.forwarded + r.pendingPartial, input, `body length ${body.length}`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The OSC catch-all must not eat titles
+//
+// The catch-all answers "any remaining OSC query" so Bun-compiled CLIs don't hang
+// waiting on a reply. But it keys off the body merely ENDING in `?`, and a window
+// title is free text — `ESC]0;build ok?BEL` matches. Two things then go wrong at
+// once: the title sequence is deleted from the output, AND a bogus `ESC]0;BEL`
+// reply is injected into the program's stdin as if the user typed it.
+//
+// OSC 0/1/2 are title-setting and are never queries, so they are excluded. OSC 52
+// stays in: `ESC]52;c;?BEL` is a genuine clipboard READ and the empty reply is a
+// valid "clipboard unavailable" answer.
+// ---------------------------------------------------------------------------
+
+test('a window title ending in ? is neither deleted nor answered', () => {
+  const title = '\x1b]0;build ok?\x07'
+  const r = computeSyncQueryResponse(title, theme)
+  eq(r.forwarded, title, 'title forwarded intact')
+  eq(r.response, '', 'no reply injected into stdin')
+})
+
+test('OSC 1 and OSC 2 titles ending in ? are left alone too', () => {
+  for (const n of ['1', '2']) {
+    const title = `\x1b]${n};done?\x07`
+    const r = computeSyncQueryResponse(title, theme)
+    eq(r.forwarded, title, `OSC ${n} forwarded`)
+    eq(r.response, '', `OSC ${n} unanswered`)
+  }
+})
+
+test('OSC 2 title with a ? mid-string is untouched', () => {
+  const title = '\x1b]2;what? now\x07'
+  const r = computeSyncQueryResponse(title, theme)
+  eq(r.forwarded, title)
+  eq(r.response, '')
+})
+
+test('OSC 52 clipboard read is still answered (catch-all keeps its purpose)', () => {
+  const r = computeSyncQueryResponse('\x1b]52;c;?\x07', theme)
+  eq(r.response, '\x1b]52;\x07', 'empty clipboard reply so the program does not hang')
+  eq(r.forwarded, '')
+})
+
+test('an unknown OSC query still gets an empty reply', () => {
+  // The reason the catch-all exists — do not regress it while fixing titles.
+  const r = computeSyncQueryResponse('\x1b]777;something;?\x07', theme)
+  eq(r.response, '\x1b]777;\x07')
+  eq(r.forwarded, '')
+})
+
 console.log('\n' + '─'.repeat(40))
 console.log(`${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

@@ -164,6 +164,22 @@ run_test packages/domains/terminal/src/client/webgl-loader.test.ts
 # shared-texture-atlas fix (#6042/#6055). Without it, correcting the atlas on one
 # pane scrambles every pane sharing it (CharAtlasCache is module-level).
 run_test packages/domains/terminal/src/client/xterm-atlas-fix.test.ts
+# Terminal — scramble detection signals + paint throttle. Both suites existed and
+# passed but were never registered here, so nothing ran them.
+run_test packages/domains/terminal/src/client/scramble-detector.test.ts
+run_test packages/domains/terminal/src/client/paint-throttle.test.ts
+# Terminal — CPR suppression at the parser. Guards the modified-F3 regression: a
+# reply and a Shift/Ctrl/Alt+F3 keystroke are byte-identical, so the reply must
+# never be generated rather than filtered afterwards. Uses @xterm/headless.
+run_test packages/domains/terminal/src/client/suppress-device-status.test.ts
+# Terminal — hub replay buffer: eviction prelude + chunk immutability.
+run_test packages/domains/terminal/src/server/ring-buffer.test.ts
+# Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
+# bounded partial-sequence hold, and the OSC catch-all's title exclusion.
+run_test packages/domains/terminal/src/server/sync-query-response.test.ts
+# Diagnostics — payload blob offload. Screenshots were silently truncated to 4096
+# chars by the redactor, making every recorded scramble event unprovable.
+run_test packages/domains/diagnostics/src/server/payload-blobs.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
 run_test packages/domains/terminal/src/server/state-machine.test.ts
@@ -314,7 +330,9 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/task/src/client/RunnerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/hub-auth/src/server/task-tokens.test.ts \
-  packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts; then
+  packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
+  packages/domains/runner-transport/src/server/exec-proxies.test.ts \
+  packages/apps/runner/src/ring-buffer.test.ts; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))

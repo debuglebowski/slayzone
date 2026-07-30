@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { offloadPayloadBlobs, type BlobWriter } from './payload-blobs'
 import type {
   ClientDiagnosticEventInput,
   ClientErrorEventInput,
@@ -240,10 +241,38 @@ export function redactValue(value: unknown): unknown {
   return String(value)
 }
 
+/**
+ * Writes an oversized payload blob to `<storage>/diagnostics/` and returns its
+ * absolute path. Node built-ins are imported lazily so this module stays loadable
+ * in environments without them (the redactor half is used from tests and, via the
+ * shared graph, from bundles that never record events).
+ */
+const filesystemBlobWriter: BlobWriter = {
+  write(bytes, extension) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { join } = require('node:path') as typeof import('node:path')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getStorageDir } = require('@slayzone/platform') as typeof import('@slayzone/platform')
+    const dir = join(getStorageDir(), 'diagnostics')
+    mkdirSync(dir, { recursive: true })
+    // Content-addressed-ish: timestamp + size keeps names unique without a
+    // counter that would reset across processes.
+    const name = `blob-${Date.now()}-${bytes.length}.${extension}`
+    const path = join(dir, name)
+    writeFileSync(path, bytes)
+    return path
+  }
+}
+
 export function buildPayloadJson(payload: unknown): string | null {
   if (payload == null) return null
   try {
-    return JSON.stringify(redactValue(payload))
+    // Offload BEFORE redacting: a data URL that reaches `redactString` is trimmed
+    // to 4096 chars, which destroyed ~99% of every recorded canary screenshot. The
+    // path this leaves behind is short enough that the trim never touches it.
+    return JSON.stringify(redactValue(offloadPayloadBlobs(payload, filesystemBlobWriter)))
   } catch {
     return JSON.stringify({ value: '[UNSERIALIZABLE_PAYLOAD]' })
   }

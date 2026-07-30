@@ -276,6 +276,46 @@ test('keeps typed text while dropping an embedded response', () => {
   assert(stripDeviceStatusResponses('foo\x1b[?1;1Rbar'), 'foobar')
 })
 
+console.log('\ncreateDeviceStatusQueryStripper — flush()')
+console.log('─'.repeat(40))
+
+// The module's contract is "NOTHING is ever lost — the concatenation of all
+// return values is the input minus queries only". A held tail breaks that at the
+// moment the stripper is retired: the warm-pool handoff disposes the pty listener
+// and hands `seedBuffer` to the live path (a *stateless* filter), so a tail still
+// sitting in the closure is dropped and its continuation arrives orphaned.
+test('flush() returns a held tail so a retired stripper loses nothing', () => {
+  const strip = createDeviceStatusQueryStripper()
+  assert(strip('hello\x1b[2'), 'hello', 'incomplete CSI held back')
+  assert(strip.flush(), '\x1b[2', 'flush returns the held bytes')
+})
+
+test('flush() is idempotent — a second call returns nothing', () => {
+  const strip = createDeviceStatusQueryStripper()
+  strip('x\x1b[?6')
+  assert(strip.flush(), '\x1b[?6', 'first flush drains')
+  assert(strip.flush(), '', 'second flush is empty')
+})
+
+test('flush() returns empty when no tail is held', () => {
+  const strip = createDeviceStatusQueryStripper()
+  assert(strip('plain output\n'), 'plain output\n')
+  assert(strip.flush(), '', 'nothing held, nothing to flush')
+})
+
+test('flush() does not resurrect an already-stripped query', () => {
+  const strip = createDeviceStatusQueryStripper()
+  assert(strip('a\x1b[?6nb'), 'ab', 'complete query stripped inline')
+  assert(strip.flush(), '', 'no leftover')
+})
+
+test('stream + flush concatenates to the input minus queries', () => {
+  // The documented invariant, asserted end to end over a torn tail.
+  const strip = createDeviceStatusQueryStripper()
+  const out = strip('one\x1b[?6ntwo\x1b[3') + strip.flush()
+  assert(out, 'onetwo\x1b[3', 'query gone, torn tail preserved verbatim')
+})
+
 console.log('─'.repeat(40))
 console.log(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

@@ -272,6 +272,30 @@ await test('seedBuffer never carries cursor-position queries into the adopted bu
   expect(claim!.seedBuffer).toBe('user@host % READYtornEND')
 })
 
+await test('adopt flushes the stripper carry into seedBuffer (torn tail not lost)', async () => {
+  // The drain's stripper holds an incomplete trailing sequence so a query torn by
+  // a read-buffer boundary can be stripped once the next chunk completes it. But
+  // adopt DISPOSES that drain — so if the last chunk before adoption ended mid
+  // sequence, the held bytes have no next chunk to ride out on. The live path that
+  // takes over is the stateless `filterBufferData`, which has no carry to rejoin
+  // them with, so an unflushed tail is simply lost and its continuation reaches
+  // the terminal orphaned (a bare `J` printing instead of `ESC[2J` clearing).
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  lastSpawned!.dataCbs.forEach((cb) => cb('hello\x1b[2'))
+  const claim = claimWarmShell({
+    projectId: 'p1',
+    mode: 'claude-code',
+    cwd: PROJECT_ROOT,
+    resuming: false,
+    flags: '--dangerously'
+  })
+  // `ESC[2` is NOT a query (it could still become `ESC[2J` erase or `ESC[2n`
+  // status), so it must survive verbatim rather than be dropped or stripped.
+  expect(claim!.seedBuffer).toBe('hello\x1b[2')
+})
+
 await test('adopt matches: claude-code + project-root cwd + fresh', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })

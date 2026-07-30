@@ -96,6 +96,24 @@ const INCOMPLETE_CSI_TAIL = /\x1b(?:\[[?<>0-9;:]*)?$/
 const MAX_HELD_TAIL = 32
 
 /**
+ * A stateful stripper plus a `flush()` to drain whatever tail it is still
+ * holding. `flush` exists because the held tail is otherwise invisible: the
+ * instance is a closure, so retiring it (disposing the pty listener that feeds
+ * it) silently discards those bytes.
+ */
+export interface DeviceStatusQueryStripper {
+  (data: string): string
+  /**
+   * Return and clear any incomplete trailing sequence still held back. Call this
+   * when the stripper is retired and its output handed to another consumer —
+   * without it the tail is dropped and its continuation reaches that consumer
+   * orphaned, which is the corruption the split-safe logic exists to prevent.
+   * Idempotent: a second call returns `''`.
+   */
+  flush(): string
+}
+
+/**
  * Split-safe stripper: same removal set as {@link stripDeviceStatusQueries}, but
  * stateful across chunks.
  *
@@ -107,14 +125,15 @@ const MAX_HELD_TAIL = 32
  *
  * Contract: returns the strippable-complete prefix of `carry + data` and retains
  * any incomplete trailing sequence for the next call. NOTHING is ever lost — a
- * held tail is emitted verbatim as soon as it is resolved or the cap is hit — so
- * the concatenation of all return values is the input minus queries only.
+ * held tail is emitted verbatim as soon as it is resolved, the cap is hit, or
+ * {@link DeviceStatusQueryStripper.flush} is called — so the concatenation of all
+ * return values (plus a final `flush()`) is the input minus queries only.
  *
  * One stripper instance per pty session (it carries per-stream state).
  */
-export function createDeviceStatusQueryStripper(): (data: string) => string {
+export function createDeviceStatusQueryStripper(): DeviceStatusQueryStripper {
   let carry = ''
-  return (data: string): string => {
+  const strip = (data: string): string => {
     const input = carry + data
     carry = ''
     const tail = input.match(INCOMPLETE_CSI_TAIL)?.[0] ?? ''
@@ -124,4 +143,10 @@ export function createDeviceStatusQueryStripper(): (data: string) => string {
     }
     return stripDeviceStatusQueries(input)
   }
+  strip.flush = (): string => {
+    const held = carry
+    carry = ''
+    return held
+  }
+  return strip
 }

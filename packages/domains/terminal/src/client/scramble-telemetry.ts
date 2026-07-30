@@ -47,6 +47,18 @@ export interface DowngradeSnapshot {
   }
   /** Time since last `atlas-correct` event for this session, in ms. -1 if none. */
   msSinceLastAtlasCorrect: number
+  /**
+   * How many terminals were rendering via WebGL when this fired.
+   *
+   * xterm's `CharAtlasCache` is module-level, so panes with matching
+   * font/size/DPR/theme SHARE one `TextureAtlas` — repacking it invalidates every
+   * sharer's vertex data, and a pane that does not repaint keeps painting stale
+   * texcoords. That made pane count the single most useful correlate of a scramble
+   * report, and it previously had to be reconstructed by hand from other records.
+   * Counted from the DOM (a `.xterm` holding a live WebGL canvas), so it needs no
+   * cross-module registry and works for panes this component does not own.
+   */
+  webglPaneCount: number | null
 }
 
 /**
@@ -55,6 +67,31 @@ export interface DowngradeSnapshot {
  * expose the canvas directly, but only the renderer's own canvas matches
  * this filter — DOM-renderer overlays / link layers are 2D or absent.
  */
+/**
+ * Number of mounted `.xterm` panes currently holding a live (non-context-lost)
+ * WebGL canvas. See `DowngradeSnapshot.webglPaneCount` for why this is recorded.
+ * Returns null if the DOM is unavailable.
+ */
+function countWebglPanes(): number | null {
+  if (typeof document === 'undefined') return null
+  let count = 0
+  for (const root of Array.from(document.querySelectorAll('.xterm'))) {
+    for (const c of Array.from(root.querySelectorAll('canvas'))) {
+      try {
+        const gl = (c as HTMLCanvasElement).getContext('webgl2') ??
+          (c as HTMLCanvasElement).getContext('webgl')
+        if (gl && !gl.isContextLost()) {
+          count++
+          break
+        }
+      } catch {
+        /* getContext can throw on context-type confusion; try the next canvas */
+      }
+    }
+  }
+  return count
+}
+
 function findWebglCanvas(terminal: Pick<XTerm, 'element'>): HTMLCanvasElement | null {
   const root = terminal.element
   if (!root) return null
@@ -158,7 +195,8 @@ export function captureDowngradeSnapshot(
       canvasWidth: canvas?.width ?? null,
       canvasHeight: canvas?.height ?? null
     },
-    msSinceLastAtlasCorrect
+    msSinceLastAtlasCorrect,
+    webglPaneCount: countWebglPanes()
   }
 }
 

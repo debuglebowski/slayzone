@@ -68,7 +68,7 @@ import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import { stripUnderlineCodes, KITTY_SHIFT_ENTER, DETECTION_ENGINES } from '@slayzone/terminal/shared'
-import { stripDeviceStatusResponses } from '@slayzone/platform/device-status-queries'
+import { suppressDeviceStatusReplies } from './suppress-device-status'
 import { track } from '@slayzone/telemetry/client'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
@@ -694,6 +694,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         searchAddonRef.current = searchAddon
         registerActiveAddon(sessionId, serializeAddon)
         registerActiveTerminal(sessionId, terminal)
+        // Stop xterm answering cursor-position/status queries — the server is the
+        // sole authority, and its replies are indistinguishable from modified-F3
+        // keystrokes so they cannot be filtered downstream. Disposed with the
+        // terminal.
+        suppressDeviceStatusReplies(terminal)
 
         terminal.open(containerRef.current)
         onAttachedRef.current?.({ sessionId, focus: () => terminal.focus() })
@@ -831,18 +836,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
         // Handle terminal input - pass through to PTY.
         //
-        // Two classes of xterm.js-generated query responses are dropped here.
-        // Both are ANSWERS to queries, never user input, and the server is the
-        // sole authority for answering (synchronously, see
-        // `computeSyncQueryResponse`) — a renderer-side answer is stale by
-        // construction and injects escape bytes into the process's stdin.
-        //   1. OSC (\x1b]...\x07 or \x1b]...\x1b\\) — color-query replies; these
-        //      broke interactive prompts (e.g. gh CLI).
-        //   2. CSI device-status (CPR / DECXCPR / DSR / DECRPM) — cursor-position
-        //      replies. A replayed buffer makes xterm answer thousands of stored
-        //      queries at once; Claude Code reads a row=1 reply as "screen
-        //      externally wiped" and submits `/clear`, minting a new session.
-        // User keystrokes and paste data never contain either class.
+        // OSC replies (\x1b]...\x07 or \x1b]...\x1b\\) are dropped here: they are
+        // ANSWERS to color queries, never user input, and the server is the sole
+        // authority for answering (synchronously, see `computeSyncQueryResponse`)
+        // — a renderer-side answer is stale by construction and injects escape
+        // bytes into the process's stdin. These broke interactive prompts (gh CLI).
+        //
+        // CSI device-status (CPR / DECXCPR / DSR) is NOT filtered here. It is
+        // suppressed at the source instead, via `suppressDeviceStatusReplies` on
+        // the parser, because filtering it after the fact is impossible: xterm
+        // encodes modified F3 as `ESC[1;<mod>R`, byte-identical to a row-1 cursor
+        // report, so a pattern that removes the reply also eats Shift/Ctrl/Alt+F3.
+        // Stopping the reply from being generated leaves keystrokes untouched.
         terminal.onData((data) => {
           // Mark user activity so the next batcher flush paints at 60fps
           // (echo round-trip has zero added latency from the throttle).
@@ -851,9 +856,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             hasCalledFirstInputRef.current = true
             onFirstInputRef.current?.()
           }
-          const filtered = stripDeviceStatusResponses(
-            data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-          )
+          const filtered = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
           if (filtered) void trpcClient.pty.write.mutate({ sessionId, data: filtered })
         })
 

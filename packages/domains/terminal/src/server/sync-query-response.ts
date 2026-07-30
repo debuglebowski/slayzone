@@ -59,6 +59,27 @@ export interface SyncQueryResult {
   pendingPartial: string
 }
 
+/**
+ * Longest trailing partial sequence worth holding for the next chunk.
+ *
+ * The CSI branch of the hold pattern self-bounds — its parameter class breaks on
+ * any text byte — but the OSC branch's `[^\x07\x1b]*` matches everything that is
+ * not BEL or ESC. Without a cap, a chunk that happens to end inside an OSC body
+ * holds unboundedly and NOTHING is forwarded: the terminal appears frozen (not
+ * scrambled) until some later ESC releases it, which a resize supplies via the
+ * SIGWINCH redraw.
+ *
+ * 32 covers every query we answer — the longest is `ESC]4;255;?BEL` at 14 bytes —
+ * so capping costs nothing. Past the cap we forward verbatim, which is already
+ * the behaviour for unrecognised sequences: the bytes stay contiguous and the
+ * terminal's own parser reassembles them. The only capability given up is
+ * answering a query torn open past 32 bytes, which cannot occur.
+ *
+ * Mirrors `MAX_HELD_TAIL` in `@slayzone/platform`'s device-status stripper, which
+ * has always capped its equivalent hold.
+ */
+const MAX_HELD_PARTIAL = 32
+
 export function computeSyncQueryResponse(input: string, theme: TerminalTheme): SyncQueryResult {
   let response = ''
   let forwarded = input
@@ -115,7 +136,17 @@ export function computeSyncQueryResponse(input: string, theme: TerminalTheme): S
   // Catch-all — any remaining OSC query ESC ] N ; <body> ? <ST> gets an empty
   // reply ESC ] N ; <ST> so the program stops waiting. Previously these were
   // silently stripped, which hung Bun-compiled CLIs and some Node TUIs.
-  forwarded = forwarded.replace(/\x1b\](\d+);[^\x07\x1b]*\?(?:\x07|\x1b\\)/g, (_, n) => {
+  //
+  // OSC 0/1/2 are EXCLUDED: they set the window/icon title, whose body is free
+  // text, so a title merely ending in `?` ("build ok?") matched this pattern —
+  // deleting the title from the output AND injecting a bogus `ESC]0;BEL` into the
+  // program's stdin as though the user had typed it. They are never queries, and
+  // `filterBufferData` already strips them from the replay buffer.
+  //
+  // OSC 52 deliberately stays in scope: `ESC]52;c;?BEL` is a real clipboard READ
+  // and an empty reply is the valid "nothing available" answer.
+  forwarded = forwarded.replace(/\x1b\](\d+);[^\x07\x1b]*\?(?:\x07|\x1b\\)/g, (match, n) => {
+    if (n === '0' || n === '1' || n === '2') return match
     response += `\x1b]${n};\x07`
     return ''
   })
@@ -133,7 +164,7 @@ export function computeSyncQueryResponse(input: string, theme: TerminalTheme): S
   // split on that boundary had the same corruption risk; this covers the class.
   const partial = forwarded.match(/\x1b(?:\][^\x07\x1b]*\x1b?|\[[?<>0-9;:]*)?$/)
   let pendingPartial = ''
-  if (partial?.[0]) {
+  if (partial?.[0] && partial[0].length <= MAX_HELD_PARTIAL) {
     pendingPartial = partial[0]
     forwarded = forwarded.slice(0, -partial[0].length)
   }
