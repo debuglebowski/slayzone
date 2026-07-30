@@ -81,6 +81,10 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // it here is what keeps those two values from ever bleeding into each other.
   SLAYZONE_HUB_ADDRESS: 'infra',
   SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; written into join tokens
+  // Operator-facing hub name (`slay hub ls`/`stop` address a hub by it). Infra,
+  // not global: it identifies THIS hub process, so inheriting it into a task
+  // terminal — which may target a different hub entirely — would mislabel.
+  SLAYZONE_HUB_NAME: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_MODE: 'infra', // local vs remote hardening lever
   SLAYZONE_SUPERVISED: 'infra', // "the Electron host owns me" flag

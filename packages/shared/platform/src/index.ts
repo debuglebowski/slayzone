@@ -13,6 +13,9 @@ export {
   getStorageDir,
   getTrpcPort,
   getServerHost,
+  bindInHubPortBlock,
+  HUB_PORT_BLOCK,
+  HUB_DYNAMIC_PORT_RANGE,
   SIDECAR_FIXED_PORT
 } from './paths'
 export {
@@ -22,6 +25,9 @@ export {
   assertModeHostConsistency,
   type SlayzoneMode
 } from './slayzone-mode'
+// Multi-hub discovery. Also available as the lean `@slayzone/platform/hub-discovery`
+// subpath — prefer that from a bundle that must not pull this barrel.
+export { discoverHubs, findHub, type DiscoveredHub, type DiscoverOptions } from './hub-discovery'
 export {
   ENV_MANIFEST,
   NON_PREFIXED_INFRA,

@@ -13,13 +13,16 @@ import {
 import { createAuthExpressApp } from '@slayzone/hub-auth/server'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import {
+  bindInHubPortBlock,
   ensureDataRoot,
   getServerHost,
+  getSlayzoneHomeDir,
   getTrpcPort,
   getSlayzoneMode,
   isRemoteMode,
   assertModeHostConsistency
 } from '@slayzone/platform'
+import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import {
   getDatabasePathFromEnv,
   openServerDatabase,
@@ -181,7 +184,23 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     })
   }
 
-  const state: HealthState = { ready: false, port: 0, startedAt: Date.now(), dbPath }
+  // /health doubles as the multi-hub discovery channel: `slay hub ls` probes the
+  // hub port block and builds its table from these fields, so a hub is only
+  // findable/addressable if it reports them. Identity fields are served to
+  // loopback callers only (see handleHealth). `runnersConnected` is a getter so it
+  // tracks the live gateway rather than freezing at boot.
+  const state: HealthState = {
+    ready: false,
+    port: 0,
+    startedAt: Date.now(),
+    dbPath,
+    name: resolveHubName(),
+    root: getSlayzoneHomeDir(),
+    pid: process.pid,
+    mode: getSlayzoneMode(),
+    supervised,
+    runnersConnected: () => runnerGateway?.listRunners().length ?? 0
+  }
 
   // Reverse-proxy target for Electron-only REST routes (supervised). Absent when
   // truly standalone → those routes fall through to express + 501 as before.
@@ -345,21 +364,32 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   }
   const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext: createTrpcContext })
 
-  const port = cfg.port ?? getTrpcPort() ?? 0
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: unknown): void => {
-      httpServer.off('error', onError)
-      reject(err)
-    }
-    httpServer.once('error', onError)
-    httpServer.listen(port, host, () => {
-      httpServer.off('error', onError)
-      resolve()
+  // PORT RESOLUTION. An explicit port (cfg / SLAYZONE_HUB_ADDRESS) binds verbatim
+  // and fails loud on collision — that loudness is the point of the fixed
+  // supervised ports. With NO port named, walk the hub port block instead of
+  // taking an OS-assigned ephemeral one: `slay hub ls` discovers hubs by probing
+  // that block, so an out-of-block hub is invisible to it. An explicit `:0` still
+  // means "OS-assigned" per the SLAYZONE_HUB_ADDRESS grammar (hub-addr.ts) and is
+  // honored — such a hub is deliberately un-discoverable.
+  const requestedPort = cfg.port ?? getTrpcPort()
+  let actualPort: number
+  if (requestedPort === undefined) {
+    actualPort = await bindInHubPortBlock(httpServer, host)
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: unknown): void => {
+        httpServer.off('error', onError)
+        reject(err)
+      }
+      httpServer.once('error', onError)
+      httpServer.listen(requestedPort, host, () => {
+        httpServer.off('error', onError)
+        resolve()
+      })
     })
-  })
-
-  const addr = httpServer.address()
-  const actualPort = typeof addr === 'object' && addr ? addr.port : port
+    const addr = httpServer.address()
+    actualPort = typeof addr === 'object' && addr ? addr.port : requestedPort
+  }
   state.port = actualPort
   state.ready = true
   composition.setBoundPort(actualPort)

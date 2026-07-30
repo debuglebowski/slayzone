@@ -14,7 +14,9 @@
     "./config-prompt": "./src/config-prompt.ts",
     "./env-manifest": "./src/env-manifest.ts",
     "./device-status-queries": "./src/device-status-queries.ts",
-    "./hub-addr": "./src/hub-addr.ts"
+    "./hub-addr": "./src/hub-addr.ts",
+    "./hub-discovery": "./src/hub-discovery.ts",
+    "./hub-service": "./src/hub-service.ts"
   },
   "scripts": {
     "test": "vitest run",

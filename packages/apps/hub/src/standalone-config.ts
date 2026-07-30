@@ -28,7 +28,11 @@
  * @module hub/standalone-config
  */
 
-import { ensureHubAuthSecret, loadSlayzoneConfig } from '@slayzone/platform/slayzone-config'
+import {
+  ensureHubAuthSecret,
+  loadSlayzoneConfig,
+  resolveHubName
+} from '@slayzone/platform/slayzone-config'
 
 /** True when the hub is running under the Electron host supervisor. */
 function isSupervised(): boolean {
@@ -92,6 +96,15 @@ export function applyStandaloneHubConfig(): void {
   // still honored by extracting its authority — the scheme it carried is
   // deliberately discarded (SLAYZONE_MODE decides the scheme now).
   setIfUnset('SLAYZONE_HUB_PUBLIC_ADDRESS', cfg.publicAddress ?? authorityOf(cfg.publicUrl))
+
+  // Operator-facing hub name, reported over /health so `slay hub ls` can label +
+  // address this hub. resolveHubName applies env > config > basename(ROOT); seed
+  // the env so every later reader (health state, logs) sees one settled value.
+  // A blank env value is treated as unset by resolveHubName, so overwrite it
+  // rather than using setIfUnset — a nameless hub could never be addressed.
+  if (!process.env.SLAYZONE_HUB_NAME?.trim()) {
+    process.env.SLAYZONE_HUB_NAME = resolveHubName()
+  }
 
   // Hub-auth secret — security fix. Resolve env > config > generate+persist and set
   // the env so composition.ts never reaches the shared dev constant in standalone.

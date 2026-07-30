@@ -3,7 +3,7 @@
  * `~/.slayzone/config.json` (`join(getSlayzoneHomeDir(), 'config.json')`) read
  * by BOTH the standalone hub and the standalone runner. Each binary reads only
  * the keys it cares about (hub: runnerTransportSecret — the hub-auth secret, see
- * that key's note on why the file name is frozen — /address/publicAddress;
+ * that key's note on why the file name is frozen — /address/publicAddress/hubName;
  * runner: joinToken/runnerName/hubUrl/allowedRoots/pinnedCertSha256).
  * The runner credential store derives from SLAYZONE_ROOT (`<ROOT>/runners`), and
  * the DB path from SLAYZONE_ROOT (`<ROOT>/storage`), so there is no
@@ -32,7 +32,7 @@
 
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { getSlayzoneHomeDir } from './dirs'
 
 // Re-exported on this lean subpath so the runner bundle can resolve the ROOT
@@ -63,6 +63,11 @@ export interface SlayzoneConfig {
    *  scheme. Written into the join tokens remote runners dial back on. Needed
    *  alongside `address` only when the two differ (reverse proxy / NAT). */
   publicAddress?: string
+  /** Operator-facing hub name (env: `SLAYZONE_HUB_NAME`). How `slay hub ls` labels
+   *  this hub and how `slay hub stop|restart|logs|--hub` address it. Defaults to
+   *  the ROOT directory's name, so a hub in `~/hubs/staging` is `staging` with no
+   *  configuration at all. Reported over `/health` (loopback only). */
+  hubName?: string
   /** @deprecated Legacy bind port, superseded by `address`. Still READ (an
    *  existing config.json must keep booting) — `address` wins when both are set;
    *  never written for a fresh config. */
@@ -115,6 +120,34 @@ export const DEV_HUB_AUTH_SECRET = 'slayzone-dev-runner-secret'
  */
 export const DEFAULT_LOCAL_RUNNER_NAME = 'local-runner'
 
+/** Name reported by the desktop app's supervised sidecar. Fixed rather than
+ *  ROOT-derived: the app's ROOT is a platform state dir whose basename is
+ *  meaningless to an operator, and `slay hub ls` needs one predictable label for
+ *  "the hub inside the app". */
+export const SUPERVISED_HUB_NAME = 'app'
+
+/**
+ * Resolve this hub's operator-facing name: `SLAYZONE_HUB_NAME` env >
+ * config.json `hubName` > `basename(ROOT)` — or the fixed
+ * {@link SUPERVISED_HUB_NAME} when supervised (the app's ROOT basename is a
+ * platform state-dir name, not a hub name).
+ *
+ * A blank/whitespace env value counts as UNSET, so a stray `SLAYZONE_HUB_NAME=`
+ * cannot produce a nameless hub that `slay hub stop` could never address.
+ *
+ * Reads the config file only when it needs to (env unset, not supervised), so a
+ * supervised boot still never touches it.
+ */
+export function resolveHubName(): string {
+  const fromEnv = process.env.SLAYZONE_HUB_NAME?.trim()
+  if (fromEnv) return fromEnv
+  if (process.env.SLAYZONE_SUPERVISED === '1') return SUPERVISED_HUB_NAME
+  const fromFile = loadSlayzoneConfig().hubName?.trim()
+  if (fromFile) return fromFile
+  // basename('/') is '' on posix — fall back rather than return a nameless hub.
+  return basename(getSlayzoneHomeDir()) || 'hub'
+}
+
 /** Absolute path to the shared config file (`<home>/config.json`). Honors
  *  SLAYZONE_ROOT via getSlayzoneHomeDir. */
 export function getSlayzoneConfigPath(): string {
@@ -130,6 +163,8 @@ function coerce(raw: Record<string, unknown>): SlayzoneConfig {
   if (typeof raw.address === 'string' && raw.address.length > 0) cfg.address = raw.address
   if (typeof raw.publicAddress === 'string' && raw.publicAddress.length > 0)
     cfg.publicAddress = raw.publicAddress
+  if (typeof raw.hubName === 'string' && raw.hubName.trim().length > 0)
+    cfg.hubName = raw.hubName.trim()
   // Legacy keys, still read so an existing config.json keeps booting.
   if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
   if (typeof raw.publicUrl === 'string' && raw.publicUrl.length > 0) cfg.publicUrl = raw.publicUrl

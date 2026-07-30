@@ -11,7 +11,7 @@
  */
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   DEV_HUB_AUTH_SECRET,
   getSlayzoneConfigPath,
@@ -47,7 +47,8 @@ const ENV_KEYS = [
   'SLAYZONE_ROOT',
   'SLAYZONE_HUB_AUTH_SECRET',
   'SLAYZONE_HUB_ADDRESS',
-  'SLAYZONE_HUB_PUBLIC_ADDRESS'
+  'SLAYZONE_HUB_PUBLIC_ADDRESS',
+  'SLAYZONE_HUB_NAME'
 ] as const
 
 /** Run `fn` with a clean env + isolated temp home dir; restore env after. */
@@ -178,6 +179,39 @@ test('EMPTY env SLAYZONE_HUB_AUTH_SECRET counts as absent ⇒ generates (no misl
     assert(secret !== DEV_HUB_AUTH_SECRET, 'not the dev constant')
     assertEq(secret!.length, 64, '256-bit hex generated')
     assertEq(loadSlayzoneConfig().runnerTransportSecret, secret, 'persisted')
+  })
+})
+
+console.log('\nstandalone-config: hub name (env > config > basename(ROOT))')
+console.log('─'.repeat(40))
+
+test('defaults to the ROOT directory name — no config, no env', () => {
+  withIsolatedEnv({}, (home) => {
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_HUB_NAME, basename(home), 'name = basename(ROOT)')
+  })
+})
+
+test('config.json hubName beats the ROOT-name default', () => {
+  withIsolatedEnv({}, () => {
+    saveSlayzoneConfig({ hubName: 'staging' })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_HUB_NAME, 'staging', 'config hubName')
+  })
+})
+
+test('env SLAYZONE_HUB_NAME beats config.json', () => {
+  withIsolatedEnv({ SLAYZONE_HUB_NAME: 'from-env' }, () => {
+    saveSlayzoneConfig({ hubName: 'from-file' })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_HUB_NAME, 'from-env', 'env wins')
+  })
+})
+
+test('a blank env name falls through to the default (not an empty hub name)', () => {
+  withIsolatedEnv({ SLAYZONE_HUB_NAME: '   ' }, (home) => {
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_HUB_NAME, basename(home), 'blank treated as unset')
   })
 })
 

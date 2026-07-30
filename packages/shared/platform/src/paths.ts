@@ -50,6 +50,75 @@ export const SIDECAR_FIXED_PORT = {
 } as const
 
 /**
+ * The port range every SlayZone hub binds within
+ * (plans/hub-lifecycle-and-discovery.md, Phase 3).
+ *
+ * Multi-hub discovery (`slay hub ls`) works by probing loopback ports for a
+ * `/health` answer — no pidfile, no registry, nothing that can go stale. That
+ * only works if a hub is FINDABLE, so hubs draw from this known block instead of
+ * letting the OS assign an arbitrary ephemeral port. Still inside IANA's
+ * dynamic/private range (49152–65535).
+ */
+export const HUB_PORT_BLOCK = { start: 51100, end: 51199 } as const
+
+/**
+ * The sub-range a hub picks from when no port was configured.
+ *
+ * Starts ABOVE {@link SIDECAR_FIXED_PORT} so a standalone hub can never squat
+ * the port a supervised sidecar expects to bind — the supervised ports are fixed
+ * precisely so a bind failure is loud and unambiguous, which a squatter would
+ * turn back into a mystery. 51103–51109 stay spare for future fixed roles.
+ */
+export const HUB_DYNAMIC_PORT_RANGE = { start: 51110, end: 51199 } as const
+
+/**
+ * Bind `server` to the first free port in the hub block, returning that port.
+ *
+ * Walks the range sequentially, treating `EADDRINUSE` as "taken, try the next"
+ * and anything else as a real failure to propagate (a bad bind host would
+ * otherwise burn ~90 pointless retries). Exhausting the range throws, naming the
+ * range — with no free port there is no correct fallback: an OS-assigned port
+ * would boot a hub that discovery can never find.
+ *
+ * Sequential rather than parallel-probe-then-bind on purpose: probing and binding
+ * as one step leaves no window for another process to take the port in between.
+ *
+ * @param server any `net`/`http`/`https` server (only listen/close/error used).
+ * @param host   the bind host, as resolved by {@link getServerHost}.
+ * @param range  defaults to {@link HUB_DYNAMIC_PORT_RANGE}.
+ */
+export async function bindInHubPortBlock(
+  server: {
+    listen: (port: number, host: string, cb: () => void) => unknown
+    once: (event: string, cb: (err: Error) => void) => unknown
+    off: (event: string, cb: (err: Error) => void) => unknown
+  },
+  host: string,
+  range: { start: number; end: number } = HUB_DYNAMIC_PORT_RANGE
+): Promise<number> {
+  for (let port = range.start; port <= range.end; port++) {
+    const bound = await new Promise<boolean>((resolve, reject) => {
+      const onError = (err: Error): void => {
+        server.off('error', onError)
+        if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') resolve(false)
+        else reject(err)
+      }
+      server.once('error', onError)
+      server.listen(port, host, () => {
+        server.off('error', onError)
+        resolve(true)
+      })
+    })
+    if (bound) return port
+  }
+  throw new Error(
+    `[slayzone] no free port in the hub block ${range.start}-${range.end} on ${host} — ` +
+      `every port is taken. Stop an unused hub (\`slay hub ls\`) or set ` +
+      `SLAYZONE_HUB_ADDRESS to a specific port.`
+  )
+}
+
+/**
  * The port the hub should BIND, from `SLAYZONE_HUB_ADDRESS` (`host[:port]`), or
  * undefined when the var is unset/malformed or names no port. Callers fall back
  * to a stored or OS-assigned port when undefined.
