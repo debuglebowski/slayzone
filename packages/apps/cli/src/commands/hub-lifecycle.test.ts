@@ -673,6 +673,15 @@ async function main(): Promise<void> {
       )
     })
 
+    await test('rm on a name that is neither running nor registered says so', async () => {
+      // The other half of rm's contract; the registered-but-stopped path (the
+      // regression) is covered in platform/src/hub-service.test.ts, which can point
+      // the unit dir at a temp path — the CLI always reads the real one.
+      const res = slay(['hub', 'rm', `${NAME_PREFIX}never-existed`], { root: rootA })
+      assert(res.status !== 0, 'non-zero exit')
+      assert(/No hub named or listening on/.test(res.stderr), `clear message: ${res.stderr}`)
+    })
+
     await test('registered reports no units — nothing here installed a service', async () => {
       // Proves the suite left no launchd/systemd unit behind, which is the thing
       // that must never be a test side effect.

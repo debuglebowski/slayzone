@@ -30,6 +30,7 @@ import {
   writeHubUnit,
   removeHubUnit,
   listRegisteredHubs,
+  readHubUnitRoot,
   type HubServiceSpec
 } from './hub-service'
 
@@ -291,6 +292,32 @@ test('remove is idempotent and reports whether a file was there', () => {
     assertEq(removeHubUnit('staging', backend, dir), true, 'first remove reports removal')
     assertEq(removeHubUnit('staging', backend, dir), false, 'second remove is a no-op')
     assertEq(listRegisteredHubs(backend, dir).length, 0, 'nothing left')
+  })
+})
+
+test('a stopped hub is still discoverable through its unit — root + removal', () => {
+  // REGRESSION (`slay hub rm` on a VPS): rm resolved its target through /health,
+  // which only finds RUNNING hubs, so a hub that failed to boot could not be
+  // removed — while `create` kept refusing the name. rm now falls back to the unit
+  // file, which requires reading the root back out of it and deleting it.
+  withTempDir((dir) => {
+    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
+    writeHubUnit(SPEC, backend, dir)
+    // The root must round-trip: `rm`/`start` report and reuse it for a hub that is
+    // not running, so /health cannot supply it.
+    assertEq(readHubUnitRoot('staging', backend, dir), SPEC.root, 'root read back')
+    assertEq(removeHubUnit('staging', backend, dir), true, 'removable while stopped')
+    assertEq(listRegisteredHubs(backend, dir).length, 0, 'gone')
+    assertEq(readHubUnitRoot('staging', backend, dir), null, 'no root after removal')
+  })
+})
+
+test('root round-trips even when the path needs XML escaping', () => {
+  withTempDir((dir) => {
+    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
+    const root = '/tmp/a&b dir'
+    writeHubUnit({ ...SPEC, root }, backend, dir)
+    assertEq(readHubUnitRoot('staging', backend, dir), root, 'escaping undone on read')
   })
 })
 

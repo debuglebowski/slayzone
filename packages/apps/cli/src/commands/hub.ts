@@ -594,6 +594,21 @@ function supervisorStart(
   }
 }
 
+/**
+ * Ask the supervisor to stop a unit, ignoring every failure.
+ *
+ * For `rm` on a hub that is NOT running: the unit may be unloaded already, or the
+ * bus may be unreachable entirely (the case that leaves a stale unit behind in the
+ * first place). Neither must block removing the file.
+ */
+function supervisorStopQuiet(backend: Exclude<ServiceBackend, 'none'>, name: string): void {
+  try {
+    supervisorStop(backend, name)
+  } catch {
+    /* the file removal below is what matters */
+  }
+}
+
 /** Stop + deregister from the OS supervisor. Best-effort per step. */
 function supervisorStop(backend: Exclude<ServiceBackend, 'none'>, name: string): void {
   if (backend === 'launchd') {
@@ -773,9 +788,30 @@ export function hubCommand(): Command {
     .command('rm <name|port>')
     .description('Stop a hub and remove its registration')
     .action(async (nameOrPort: string) => {
-      const hub = await requireHub(nameOrPort)
-      refuseSupervised(hub, 'remove')
       const backend = resolveBackend()
+      const hub = await findAnyHub(nameOrPort)
+
+      // NOT running, but registered? That is the main thing `rm` is for — a hub
+      // that failed to boot, or was stopped and is no longer wanted. Requiring a
+      // LIVE hub here left the operator with a unit file they could only delete by
+      // hand, and `create` refusing the name because of it.
+      if (!hub) {
+        if (backend !== 'none' && existsSync(hubUnitPath(nameOrPort, backend))) {
+          const root = readHubUnitRoot(nameOrPort, backend)
+          supervisorStopQuiet(backend, nameOrPort)
+          removeHubUnit(nameOrPort, backend)
+          console.log(
+            `Removed "${nameOrPort}" (it was not running).` +
+              (root ? ` Its data is still in ${shortenPath(root)}.` : '')
+          )
+          return
+        }
+        // Neither running nor registered — reuse the standard not-found message.
+        await requireHub(nameOrPort)
+        return
+      }
+
+      refuseSupervised(hub, 'remove')
       await haltHub(hub, backend, { unregister: true })
       // The hub's ROOT (db, artifacts, logs) is deliberately left on disk: it is the
       // operator's data, and `rm` was asked to remove a hub's registration, not to
