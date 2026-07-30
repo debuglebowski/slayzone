@@ -9,9 +9,13 @@ complete -c slay -n '__fish_use_subcommand' -a 'tags' -d 'Manage tags'
 complete -c slay -n '__fish_use_subcommand' -a 'templates' -d 'Manage task templates'
 complete -c slay -n '__fish_use_subcommand' -a 'automations' -d 'Manage automations'
 complete -c slay -n '__fish_use_subcommand' -a 'processes' -d 'Manage processes'
+complete -c slay -n '__fish_use_subcommand' -a 'hub' -d 'Run, list and target SlayZone hubs'
+complete -c slay -n '__fish_use_subcommand' -a 'runner' -d 'Run and manage SlayZone runners'
 complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell completions'
 complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
 complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
+complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use current forget'
+complete -c slay -n '__fish_seen_subcommand_from runner' -a 'ls create start stop rm restart logs'
 complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create update'
 complete -c slay -n '__fish_seen_subcommand_from tags' -a 'list create delete'
 complete -c slay -n '__fish_seen_subcommand_from templates' -a 'list view create update delete'
@@ -31,6 +35,8 @@ _slay() {
     'templates:Manage task templates'
     'automations:Manage automations'
     'processes:Manage processes'
+    'hub:Run, list and target SlayZone hubs'
+    'runner:Run and manage SlayZone runners'
     'completions:Print shell completions'
   )
   local -a task_commands
@@ -80,6 +86,30 @@ _slay() {
     'run:Run automation manually'
     'runs:View execution history'
   )
+  local -a hub_commands
+  hub_commands=(
+    'ls:List running hubs'
+    'create:Create a hub here and keep it running'
+    'start:Start a stopped hub'
+    'stop:Stop a hub, keeping it registered'
+    'rm:Stop a hub and remove its registration'
+    'restart:Restart a hub'
+    'logs:Show a hub log'
+    'registered:List hubs registered with the OS service manager'
+    'use:Point this CLI at a hub'
+    'current:Show which hub this CLI targets'
+    'forget:Drop the stored hub target'
+  )
+  local -a runner_commands
+  runner_commands=(
+    'ls:List installed runners'
+    'create:Install a runner here and keep it running'
+    'start:Start a stopped runner'
+    'stop:Stop a runner, keeping it registered'
+    'rm:Stop a runner and remove its registration'
+    'restart:Restart a runner'
+    'logs:Show a runner log'
+  )
   case $words[2] in
     tasks)
       _describe 'task commands' task_commands
@@ -98,6 +128,12 @@ _slay() {
       ;;
     automations)
       _describe 'automation commands' automation_commands
+      ;;
+    hub)
+      _describe 'hub commands' hub_commands
+      ;;
+    runner)
+      _describe 'runner commands' runner_commands
       ;;
     completions)
       _arguments ':shell:(fish zsh bash)'
@@ -118,7 +154,7 @@ _slay_completions() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
   if [ $COMP_CWORD -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "tasks projects tags templates automations processes completions" -- "$cur") )
+    COMPREPLY=( $(compgen -W "tasks projects tags templates automations processes hub runner completions" -- "$cur") )
   elif [ $COMP_CWORD -eq 2 ]; then
     case "$prev" in
       tasks)
@@ -138,6 +174,12 @@ _slay_completions() {
         ;;
       automations)
         COMPREPLY=( $(compgen -W "list view create update delete toggle run runs" -- "$cur") )
+        ;;
+      hub)
+        COMPREPLY=( $(compgen -W "ls create start stop rm restart logs registered use current forget" -- "$cur") )
+        ;;
+      runner)
+        COMPREPLY=( $(compgen -W "ls create start stop rm restart logs" -- "$cur") )
         ;;
       completions)
         COMPREPLY=( $(compgen -W "fish zsh bash" -- "$cur") )

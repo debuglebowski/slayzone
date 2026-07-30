@@ -1,38 +1,43 @@
 /**
- * OS-supervisor registration for hubs (plans/hub-lifecycle-and-discovery.md,
- * Phase 5).
+ * OS-supervisor registration for hubs AND runners (plans/hub-lifecycle-and-discovery.md
+ * Phase 5 for the hub; the `slay runner` group for the runner).
  *
- * `slay hub start` hands the hub to launchd (macOS) or systemd --user (Linux) so
- * it restarts on crash and comes back at login. This suite asserts the GENERATED
- * FILE CONTENT and the path/name derivation — never real `launchctl bootstrap` /
- * `systemctl enable`, which would leave units behind on whatever machine runs the
- * suite. Every case writes into a temp dir via the injected `unitDir`.
+ * `slay hub create` / `slay runner create` hand the process to launchd (macOS) or
+ * systemd --user (Linux) so it restarts on crash and comes back at login. This suite
+ * asserts the GENERATED FILE CONTENT and the path/name derivation — never real
+ * `launchctl bootstrap` / `systemctl enable`, which would leave units behind on
+ * whatever machine runs the suite. Every case writes into a temp dir via the injected
+ * `unitDir`.
  *
  * The properties that matter:
- *   - a crash restarts the hub, a clean `hub stop` does NOT resurrect it;
+ *   - a crash restarts the process, a clean `stop` does NOT resurrect it;
  *   - the unit pins SLAYZONE_ROOT + an absolute command (no `npx` at boot);
- *   - one hub name ⇒ one unit path, so start/stop agree on which file to touch;
- *   - a hostile name can't escape the unit dir or inject unit syntax.
+ *   - one (kind, name) pair ⇒ one unit path, so start/stop agree on which file to touch;
+ *   - a hostile name can't escape the unit dir or inject unit syntax;
+ *   - the two KINDS never see each other's units, and a runner unit carries NO
+ *     hub env (its name/token/path-jail have no env channel — see runner/src/config.ts).
  *
  * Pure Node (temp dirs, no native deps, no supervisor calls) → runs under plain
  * `npx tsx`.
  *
- * Run with: npx tsx packages/shared/platform/src/hub-service.test.ts
+ * Run with: npx tsx packages/shared/platform/src/service-unit.test.ts
  */
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   detectBackend,
-  hubUnitPath,
+  launchdLabel,
+  listRegisteredUnits,
+  readUnitRoot,
+  removeUnit,
   renderLaunchdPlist,
   renderSystemdUnit,
-  writeHubUnit,
-  removeHubUnit,
-  listRegisteredHubs,
-  readHubUnitRoot,
-  type HubServiceSpec
-} from './hub-service'
+  systemdUnitName,
+  unitPath,
+  writeUnit,
+  type ServiceUnitSpec
+} from './service-unit'
 
 let passed = 0
 let failed = 0
@@ -74,7 +79,10 @@ function withTempDir(fn: (dir: string) => void): void {
   }
 }
 
-const SPEC: HubServiceSpec = {
+const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
+
+const SPEC: ServiceUnitSpec = {
+  kind: 'hub',
   name: 'staging',
   root: '/Users/x/hubs/staging',
   command: '/usr/local/bin/node',
@@ -82,14 +90,23 @@ const SPEC: HubServiceSpec = {
   logDir: '/Users/x/hubs/staging/storage/logs'
 }
 
-console.log('\nhub-service: backend detection')
+const RUNNER_SPEC: ServiceUnitSpec = {
+  kind: 'runner',
+  name: 'builder',
+  root: '/srv/runners/builder',
+  command: '/usr/local/bin/node',
+  args: ['/opt/runner/dist/bin.cjs'],
+  logDir: '/srv/runners/builder/logs'
+}
+
+console.log('\nservice-unit: backend detection')
 console.log('─'.repeat(40))
 
 test('detects a backend appropriate to the platform', () => {
-  const backend = detectBackend()
-  if (process.platform === 'darwin') assertEq(backend, 'launchd', 'macOS → launchd')
-  else if (process.platform === 'win32') assertEq(backend, 'none', 'Windows → no user supervisor yet')
-  else assert(backend === 'systemd' || backend === 'none', `linux → systemd or none, got ${backend}`)
+  const detected = detectBackend()
+  if (process.platform === 'darwin') assertEq(detected, 'launchd', 'macOS → launchd')
+  else if (process.platform === 'win32') assertEq(detected, 'none', 'Windows → no user supervisor yet')
+  else assert(detected === 'systemd' || detected === 'none', `linux → systemd or none, got ${detected}`)
 })
 
 test('systemd requires a reachable USER BUS, not just the binary', () => {
@@ -118,7 +135,7 @@ test('systemd requires a reachable USER BUS, not just the binary', () => {
   assertEq(decide('offline\n', true), 'none', 'offline ⇒ not usable')
 })
 
-console.log('\nhub-service: launchd plist content')
+console.log('\nservice-unit: launchd plist content (hub)')
 console.log('─'.repeat(40))
 
 test('plist carries label, absolute command, cwd, env and log paths', () => {
@@ -168,7 +185,7 @@ test('plist escapes XML metacharacters in paths', () => {
   assert(xml.includes('&lt;c&gt;'), 'angle brackets escaped')
 })
 
-console.log('\nhub-service: systemd unit content')
+console.log('\nservice-unit: systemd unit content (hub)')
 console.log('─'.repeat(40))
 
 test('unit carries ExecStart, WorkingDirectory, Environment and install target', () => {
@@ -225,49 +242,140 @@ test('spec.env reaches the unit — an Electron-ABI hub needs ELECTRON_RUN_AS_NO
   assert(plist.includes('SLAYZONE_HUB_NAME'), 'name still pinned')
 })
 
-console.log('\nhub-service: unit paths + name validation')
+console.log('\nservice-unit: runner kind')
+console.log('─'.repeat(40))
+
+test('runner identity is namespaced apart from the hub', () => {
+  assertEq(launchdLabel('runner', 'builder'), 'com.slayzone.runner.builder', 'launchd label')
+  assertEq(systemdUnitName('runner', 'builder'), 'slayzone-runner-builder.service', 'systemd unit')
+  // Same NAME under the two kinds must never resolve to the same file, or
+  // `runner rm dev` would delete a hub named dev.
+  assert(
+    unitPath('runner', 'dev', backend, '/units') !== unitPath('hub', 'dev', backend, '/units'),
+    'a name shared across kinds does not collide'
+  )
+})
+
+test('runner plist/unit identify the runner and use runner log names', () => {
+  const plist = renderLaunchdPlist(RUNNER_SPEC)
+  assert(plist.includes('<string>com.slayzone.runner.builder</string>'), `label: ${plist}`)
+  assert(plist.includes('/srv/runners/builder/logs/runner.out.log'), 'stdout log')
+  assert(plist.includes('/srv/runners/builder/logs/runner.err.log'), 'stderr log')
+  assert(!plist.includes('hub.out.log'), 'no hub log name leaked')
+  const unit = renderSystemdUnit(RUNNER_SPEC)
+  assert(unit.includes('Description=SlayZone runner (builder)'), `description: ${unit}`)
+  assert(unit.includes('slay runner logs builder'), 'log hint names the runner command')
+})
+
+test('a runner unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
+  // The runner's name, path-jail, join token and cert pin deliberately have NO env
+  // channel (runner/src/config.ts) — they come from <ROOT>/config.json, which is
+  // 0600. A unit file is 0644, so a token must never reach it.
+  const unit = renderSystemdUnit(RUNNER_SPEC)
+  assert(unit.includes('Environment=SLAYZONE_ROOT=/srv/runners/builder'), 'root pinned')
+  assert(!unit.includes('SLAYZONE_HUB_NAME'), 'no hub name var')
+  assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no hub address var')
+  assert(!unit.includes('SLAYZONE_HUB_JOIN_TOKEN'), 'never a join token in a 0644 unit')
+  const envLines = unit.split('\n').filter((l) => l.startsWith('Environment='))
+  assertEq(envLines.length, 1, `exactly one env line, got ${envLines.join(' | ')}`)
+})
+
+test('a runner spec ignores port (only a hub binds one)', () => {
+  const unit = renderSystemdUnit({ ...RUNNER_SPEC, port: 51234 })
+  assert(!unit.includes('51234'), 'port not emitted for a runner')
+  assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var')
+})
+
+test('spec.env reaches a runner unit too — node-pty is Electron-ABI in a dev tree', () => {
+  const unit = renderSystemdUnit({ ...RUNNER_SPEC, env: { ELECTRON_RUN_AS_NODE: '1' } })
+  assert(unit.includes('Environment=ELECTRON_RUN_AS_NODE=1'), `systemd: ${unit}`)
+  assert(unit.includes('Environment=SLAYZONE_ROOT='), 'root still pinned')
+})
+
+test('the two kinds never list each other, even in one unit dir', () => {
+  withTempDir((dir) => {
+    writeUnit(SPEC, backend, dir)
+    writeUnit(RUNNER_SPEC, backend, dir)
+    const hubs = listRegisteredUnits('hub', backend, dir)
+    assertEq(hubs.length, 1, `one hub, got ${hubs.map((h) => h.name).join(',')}`)
+    assertEq(hubs[0]?.name, 'staging', 'the hub')
+    const runners = listRegisteredUnits('runner', backend, dir)
+    assertEq(runners.length, 1, `one runner, got ${runners.map((r) => r.name).join(',')}`)
+    assertEq(runners[0]?.name, 'builder', 'the runner')
+  })
+})
+
+test('a hub named like a runner prefix is not mistaken for a runner', () => {
+  // `slayzone-hub-runner-x.service` must not parse as runner `x`: the runner listing
+  // only accepts its own prefix, which the hub filename does not carry.
+  withTempDir((dir) => {
+    writeUnit({ ...SPEC, name: 'runner-x' }, backend, dir)
+    assertEq(listRegisteredUnits('runner', backend, dir).length, 0, 'no runner found')
+    assertEq(listRegisteredUnits('hub', backend, dir)[0]?.name, 'runner-x', 'listed as a hub')
+  })
+})
+
+test('a runner root round-trips through its unit while stopped', () => {
+  withTempDir((dir) => {
+    writeUnit(RUNNER_SPEC, backend, dir)
+    assertEq(readUnitRoot('runner', 'builder', backend, dir), RUNNER_SPEC.root, 'root read back')
+    assertEq(readUnitRoot('hub', 'builder', backend, dir), null, 'not visible as a hub')
+    assertEq(removeUnit('runner', 'builder', backend, dir), true, 'removable while stopped')
+    assertEq(readUnitRoot('runner', 'builder', backend, dir), null, 'gone')
+  })
+})
+
+console.log('\nservice-unit: unit paths + name validation')
 console.log('─'.repeat(40))
 
 test('one name maps to one deterministic path per backend', () => {
-  const a = hubUnitPath('staging', 'launchd', '/units')
-  assertEq(a, hubUnitPath('staging', 'launchd', '/units'), 'stable across calls')
+  const a = unitPath('hub', 'staging', 'launchd', '/units')
+  assertEq(a, unitPath('hub', 'staging', 'launchd', '/units'), 'stable across calls')
   assert(a.endsWith('.plist'), `plist extension: ${a}`)
-  const b = hubUnitPath('staging', 'systemd', '/units')
+  const b = unitPath('hub', 'staging', 'systemd', '/units')
   assert(b.endsWith('.service'), `service extension: ${b}`)
   assert(a !== b, 'backends do not collide')
 })
 
 test('rejects a name that would escape the unit dir', () => {
-  // Path traversal via the name would let `hub start` write anywhere the user can.
-  assertThrows(() => hubUnitPath('../../evil', 'systemd', '/units'), 'name', 'traversal')
-  assertThrows(() => hubUnitPath('a/b', 'systemd', '/units'), 'name', 'slash')
-  assertThrows(() => hubUnitPath('', 'systemd', '/units'), 'name', 'empty')
+  // Path traversal via the name would let `create` write anywhere the user can.
+  assertThrows(() => unitPath('hub', '../../evil', 'systemd', '/units'), 'name', 'traversal')
+  assertThrows(() => unitPath('hub', 'a/b', 'systemd', '/units'), 'name', 'slash')
+  assertThrows(() => unitPath('hub', '', 'systemd', '/units'), 'name', 'empty')
+  // The runner path validates identically — the guard is not hub-specific.
+  assertThrows(() => unitPath('runner', '../../evil', 'systemd', '/units'), 'name', 'runner traversal')
 })
 
 test('rejects a name carrying unit/plist syntax or whitespace', () => {
   // A newline in the name would inject arbitrary directives into the unit file.
-  assertThrows(() => hubUnitPath('a\nRestart=always', 'systemd', '/units'), 'name', 'newline')
-  assertThrows(() => hubUnitPath('a b', 'systemd', '/units'), 'name', 'space')
-  assertThrows(() => hubUnitPath('a<b', 'launchd', '/units'), 'name', 'angle bracket')
+  assertThrows(() => unitPath('hub', 'a\nRestart=always', 'systemd', '/units'), 'name', 'newline')
+  assertThrows(() => unitPath('hub', 'a b', 'systemd', '/units'), 'name', 'space')
+  assertThrows(() => unitPath('hub', 'a<b', 'launchd', '/units'), 'name', 'angle bracket')
+})
+
+test('the invalid-name error names the kind it is talking about', () => {
+  // The hub error points at the config.json `hubName` key; a runner operator has no
+  // such key, so a hub-worded message would misdirect them.
+  assertThrows(() => unitPath('hub', 'a b', 'systemd', '/units'), 'hub name', 'hub wording')
+  assertThrows(() => unitPath('runner', 'a b', 'systemd', '/units'), 'runner name', 'runner wording')
 })
 
 test('accepts the names a hub actually gets (dirname-derived)', () => {
   for (const name of ['staging', 'my-hub', 'hub_2', 'Hub.2', 'a']) {
-    const p = hubUnitPath(name, 'systemd', '/units')
+    const p = unitPath('hub', name, 'systemd', '/units')
     assert(p.includes(name), `${name} accepted`)
   }
 })
 
-console.log('\nhub-service: write / remove / list')
+console.log('\nservice-unit: write / remove / list')
 console.log('─'.repeat(40))
 
 test('writes the unit and lists it back', () => {
   withTempDir((dir) => {
-    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
-    const path = writeHubUnit(SPEC, backend, dir)
+    const path = writeUnit(SPEC, backend, dir)
     assert(existsSync(path), 'unit file exists')
     assert(readFileSync(path, 'utf8').length > 0, 'non-empty')
-    const listed = listRegisteredHubs(backend, dir)
+    const listed = listRegisteredUnits('hub', backend, dir)
     assertEq(listed.length, 1, 'one registered hub')
     assertEq(listed[0]?.name, 'staging', 'name recovered from the filename')
     assertEq(listed[0]?.unitPath, path, 'path matches')
@@ -276,10 +384,9 @@ test('writes the unit and lists it back', () => {
 
 test('rewriting the same hub replaces its unit (no duplicates)', () => {
   withTempDir((dir) => {
-    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
-    writeHubUnit(SPEC, backend, dir)
-    writeHubUnit({ ...SPEC, port: 51999 }, backend, dir)
-    const listed = listRegisteredHubs(backend, dir)
+    writeUnit(SPEC, backend, dir)
+    writeUnit({ ...SPEC, port: 51999 }, backend, dir)
+    const listed = listRegisteredUnits('hub', backend, dir)
     assertEq(listed.length, 1, 'still one unit')
     assert(readFileSync(listed[0]!.unitPath, 'utf8').includes('51999'), 'content updated')
   })
@@ -287,11 +394,10 @@ test('rewriting the same hub replaces its unit (no duplicates)', () => {
 
 test('remove is idempotent and reports whether a file was there', () => {
   withTempDir((dir) => {
-    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
-    writeHubUnit(SPEC, backend, dir)
-    assertEq(removeHubUnit('staging', backend, dir), true, 'first remove reports removal')
-    assertEq(removeHubUnit('staging', backend, dir), false, 'second remove is a no-op')
-    assertEq(listRegisteredHubs(backend, dir).length, 0, 'nothing left')
+    writeUnit(SPEC, backend, dir)
+    assertEq(removeUnit('hub', 'staging', backend, dir), true, 'first remove reports removal')
+    assertEq(removeUnit('hub', 'staging', backend, dir), false, 'second remove is a no-op')
+    assertEq(listRegisteredUnits('hub', backend, dir).length, 0, 'nothing left')
   })
 })
 
@@ -301,42 +407,38 @@ test('a stopped hub is still discoverable through its unit — root + removal', 
   // removed — while `create` kept refusing the name. rm now falls back to the unit
   // file, which requires reading the root back out of it and deleting it.
   withTempDir((dir) => {
-    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
-    writeHubUnit(SPEC, backend, dir)
+    writeUnit(SPEC, backend, dir)
     // The root must round-trip: `rm`/`start` report and reuse it for a hub that is
     // not running, so /health cannot supply it.
-    assertEq(readHubUnitRoot('staging', backend, dir), SPEC.root, 'root read back')
-    assertEq(removeHubUnit('staging', backend, dir), true, 'removable while stopped')
-    assertEq(listRegisteredHubs(backend, dir).length, 0, 'gone')
-    assertEq(readHubUnitRoot('staging', backend, dir), null, 'no root after removal')
+    assertEq(readUnitRoot('hub', 'staging', backend, dir), SPEC.root, 'root read back')
+    assertEq(removeUnit('hub', 'staging', backend, dir), true, 'removable while stopped')
+    assertEq(listRegisteredUnits('hub', backend, dir).length, 0, 'gone')
+    assertEq(readUnitRoot('hub', 'staging', backend, dir), null, 'no root after removal')
   })
 })
 
 test('root round-trips even when the path needs XML escaping', () => {
   withTempDir((dir) => {
-    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
     const root = '/tmp/a&b dir'
-    writeHubUnit({ ...SPEC, root }, backend, dir)
-    assertEq(readHubUnitRoot('staging', backend, dir), root, 'escaping undone on read')
+    writeUnit({ ...SPEC, root }, backend, dir)
+    assertEq(readUnitRoot('hub', 'staging', backend, dir), root, 'escaping undone on read')
   })
 })
 
 test('listing a directory that does not exist is empty, not an error', () => {
-  const listed = listRegisteredHubs('systemd', join(tmpdir(), 'slz-does-not-exist-ever'))
+  const listed = listRegisteredUnits('hub', 'systemd', join(tmpdir(), 'slz-does-not-exist-ever'))
   assertEq(listed.length, 0, 'empty list')
 })
 
 test('listing ignores unrelated files in the unit dir', () => {
   withTempDir((dir) => {
-    const backend = process.platform === 'darwin' ? 'launchd' : 'systemd'
-    writeHubUnit(SPEC, backend, dir)
+    writeUnit(SPEC, backend, dir)
+    writeUnit({ ...SPEC, name: 'other' }, backend, dir)
     // A real LaunchAgents / systemd user dir is full of other people's units.
-    const foreign = join(dir, backend === 'launchd' ? 'com.other.app.plist' : 'other.service')
-    writeHubUnit({ ...SPEC, name: 'other' }, backend, dir)
-    rmSync(foreign, { force: true })
-    const listed = listRegisteredHubs(backend, dir)
+    writeFileSync(join(dir, backend === 'launchd' ? 'com.other.app.plist' : 'other.service'), 'x')
+    const listed = listRegisteredUnits('hub', backend, dir)
     assert(
-      listed.every((l) => l.name === 'staging' || l.name === 'other'),
+      listed.length === 2 && listed.every((l) => l.name === 'staging' || l.name === 'other'),
       `only slayzone hubs listed, got ${listed.map((l) => l.name).join(',')}`
     )
   })

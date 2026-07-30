@@ -1,19 +1,27 @@
 /**
- * Stateless join-token decode (runner side).
+ * Stateless join-token decode — the CONSUMER side of the szjt1 grammar.
  *
  * A join token is `szjt1.<base64url(JSON{hubUrl,certFingerprint,secret})>` — the
  * exact format minted by the hub in `@slayzone/runners/server` (join-tokens.ts).
- * The runner needs the embedded `hubUrl` + `certFingerprint` to dial + pin the
- * hub before sending any runner frame.
+ *
+ * TWO CONSUMERS, ONE DECODER:
+ *   - the RUNNER reads the embedded `hubUrl` + `certFingerprint` to dial + pin the
+ *     hub before sending any runner frame;
+ *   - `slay runner create` validates a `--token` locally (fail fast on a typo rather
+ *     than installing a unit that crash-loops against an undialable hub) and reads
+ *     the `hubUrl` out of it for `slay runner ls`.
  *
  * This is a dependency-free re-implementation of the hub-side `decodeJoinToken`.
- * The runner package only depends on `@slayzone/runner-transport`; importing the hub decoder
- * from `@slayzone/runners/server` would drag its `./store` module (and thus
- * `@slayzone/platform` + better-sqlite3) into the runner bundle. The token grammar
- * is trivial and stable (`szjt1.` prefix), so decoding it locally is the smallest
- * sustainable option — kept byte-compatible with the minter.
+ * Importing the hub decoder from `@slayzone/runners/server` would drag its `./store`
+ * module (and thus better-sqlite3) into both the runner and the CLI bundle. The token
+ * grammar is trivial and stable (`szjt1.` prefix), so decoding it here is the
+ * smallest sustainable option — kept byte-compatible with the minter, which
+ * `runner/src/join-token.test.ts` pins by round-tripping a REAL minted token.
  *
- * @module runner/join-token
+ * Lives on the lean `@slayzone/platform/join-token` subpath (node builtins only, no
+ * local imports) so neither consumer pulls the platform barrel.
+ *
+ * @module platform/join-token
  */
 
 /** Prefix of a v1 join token — must match `@slayzone/runners/server`. */

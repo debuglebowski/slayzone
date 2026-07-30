@@ -1,10 +1,13 @@
 import type { RunResult, SlayzoneDb } from '@slayzone/platform'
-// The runner re-implements decodeJoinToken locally (no @slayzone/runners runtime
-// dep — that would drag better-sqlite3 into the bundle). This test-only import of
-// the HUB minter guards the two szjt1 codecs against silent drift.
+// The decoder under test lives on the lean `@slayzone/platform/join-token` subpath —
+// no @slayzone/runners RUNTIME dep, which would drag better-sqlite3 into both the
+// runner and CLI bundles. This test-only import of the HUB minter is what guards the
+// two szjt1 codecs against silent drift, and it stays HERE (not in platform) because
+// @slayzone/runners already depends on @slayzone/platform — devDep'ing it back would
+// close a cycle.
 import { mintJoinToken } from '@slayzone/runners/server'
 import { describe, expect, it } from 'vitest'
-import { decodeJoinToken, JOIN_TOKEN_PREFIX, type JoinTokenPayload } from './join-token'
+import { decodeJoinToken, JOIN_TOKEN_PREFIX, type JoinTokenPayload } from '@slayzone/platform/join-token'
 
 /** Mint a token the same way the hub does (szjt1.<base64url(JSON)>). */
 function encode(payload: JoinTokenPayload): string {

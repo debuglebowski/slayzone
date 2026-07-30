@@ -4,7 +4,7 @@
  *
  * Drives the BUILT `slay` bundle against actual hub processes: two hubs in two
  * throwaway roots, then `hub ls` → `--hub` targeting → `hub stop`. The library
- * pieces are unit-tested elsewhere (platform/src/hub-discovery + hub-service);
+ * pieces are unit-tested elsewhere (platform/src/hub-discovery + service-unit);
  * what only an end-to-end run can catch is the wiring — whether the CLI resolves,
  * prints and signals the right hub, and whether it works on a machine that has no
  * SlayZone database at all (the hub-only deployment, which is the primary one).
@@ -15,7 +15,7 @@
  * name, occupied root, missing argument), which are all decided before anything is
  * registered. Hubs here are spawned directly instead, so `hub stop` exercises its
  * SIGTERM fallback path. Unit-file CONTENT is covered by
- * platform/src/hub-service.test.ts; the register-and-start path is a documented
+ * platform/src/service-unit.test.ts; the register-and-start path is a documented
  * manual check (see the plan).
  *
  * ISOLATION — must never touch the real dev/prod stores:
@@ -675,7 +675,7 @@ async function main(): Promise<void> {
 
     await test('rm on a name that is neither running nor registered says so', async () => {
       // The other half of rm's contract; the registered-but-stopped path (the
-      // regression) is covered in platform/src/hub-service.test.ts, which can point
+      // regression) is covered in platform/src/service-unit.test.ts, which can point
       // the unit dir at a temp path — the CLI always reads the real one.
       const res = slay(['hub', 'rm', `${NAME_PREFIX}never-existed`], { root: rootA })
       assert(res.status !== 0, 'non-zero exit')

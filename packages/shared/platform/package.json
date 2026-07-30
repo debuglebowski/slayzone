@@ -16,7 +16,8 @@
     "./device-status-queries": "./src/device-status-queries.ts",
     "./hub-addr": "./src/hub-addr.ts",
     "./hub-discovery": "./src/hub-discovery.ts",
-    "./hub-service": "./src/hub-service.ts"
+    "./service-unit": "./src/service-unit.ts",
+    "./join-token": "./src/join-token.ts"
   },
   "scripts": {
     "test": "vitest run",

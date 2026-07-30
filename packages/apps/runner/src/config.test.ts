@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/slayzone-config'
 import { assertPathAllowed, ENV_VARS, loadRunnerConfig } from './config'
-import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from './join-token'
+import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from '@slayzone/platform/join-token'
 
 function mintToken(payload: JoinTokenPayload): string {
   return `${JOIN_TOKEN_PREFIX}.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`

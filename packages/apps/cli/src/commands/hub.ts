@@ -14,23 +14,20 @@
  * about. Foreground use is `npx @slayzone/hub` — the hub binary's only mode — so
  * no passthrough flag exists here.
  */
-import { execFileSync, spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { basename, dirname, join, resolve as resolvePath } from 'node:path'
+import { spawn } from 'node:child_process'
+import { existsSync, openSync } from 'node:fs'
+import { resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { discoverHubs, findHub, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
 import {
   detectBackend,
-  hubUnitPath,
-  launchdLabel,
-  listRegisteredHubs,
-  readHubUnitRoot,
-  removeHubUnit,
-  systemdUnitName,
-  writeHubUnit,
+  listRegisteredUnits,
+  readUnitRoot,
+  removeUnit,
+  unitPath,
+  writeUnit,
   type ServiceBackend
-} from '@slayzone/platform/hub-service'
+} from '@slayzone/platform/service-unit'
 import {
   getHubConfigPath,
   normalizeHubUrl,
@@ -38,21 +35,26 @@ import {
   resolveHubTarget,
   writeHubConfig
 } from '../hub-config'
-import { getDataDir, getServerPort, hasLocalDatabase } from '../db'
+import { getServerPort, hasLocalDatabase } from '../db'
+import {
+  ensureLogDir,
+  fail,
+  failWithLog,
+  followServiceLog,
+  resolveBackend,
+  resolveServiceBin,
+  servicePackage,
+  serviceLogPaths,
+  shortenPath,
+  SupervisorError,
+  supervisorStart,
+  supervisorStop,
+  supervisorStopQuiet
+} from '../service'
 
 /** npm package providing the hub binary — resolved, never run through npx at
- *  supervisor-restart time (see hub-service's module note). */
-const HUB_PACKAGE = '@slayzone/hub'
-
-/** This CLI's version, substituted by build.mjs. The hub is released from the same
- *  repo at the same version, so it is what we install (see resolveHubBin). */
-declare const __APP_VERSION__: string
-const CLI_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''
-
-function fail(message: string): never {
-  console.error(message)
-  process.exit(1)
-}
+ *  supervisor-restart time (see service-unit's module note). */
+const HUB_PACKAGE = servicePackage('hub')
 
 /**
  * Ports worth probing beyond the hub block.
@@ -99,12 +101,6 @@ function formatUptime(ms: number): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`
 }
 
-/** Collapse `$HOME` to `~` so the root column stays readable. */
-function shortenPath(path: string): string {
-  const home = process.env.HOME ?? ''
-  return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path
-}
-
 /**
  * Resolve a hub by name/port, exiting with a useful message when absent — every
  * command that takes a `<name|port>` needs the identical failure text.
@@ -136,179 +132,6 @@ function refuseSupervised(hub: DiscoveredHub, verb: string): void {
   }
 }
 
-/** How to invoke a resolved hub bundle. */
-interface HubBin {
-  command: string
-  args: string[]
-  version: string
-  /** Extra env the interpreter needs (Electron-ABI dev tree). */
-  env?: Record<string, string>
-}
-
-/** Read `{version, bin}` out of a package.json, or null when it isn't usable. */
-function readHubPkg(pkgJsonPath: string): { binPath: string; version: string } | null {
-  let pkg: { version?: string; bin?: Record<string, string> | string }
-  try {
-    pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) as typeof pkg
-  } catch {
-    return null
-  }
-  const binRel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.['slayzone-hub']
-  if (!binRel) return null
-  const binPath = join(dirname(pkgJsonPath), binRel)
-  if (!existsSync(binPath)) return null
-  return { binPath, version: pkg.version ?? 'unknown' }
-}
-
-/**
- * Pick the interpreter a given hub bundle can actually run under.
- *
- * A monorepo checkout's `better-sqlite3` is compiled for ELECTRON's ABI
- * (NODE_MODULE_VERSION 145 vs plain node's 137), so a dev-tree hub launched with
- * `node` dies instantly on `require('better-sqlite3')` — and under a supervisor
- * that means an invisible crash-loop. Such a bundle must run as
- * `ELECTRON_RUN_AS_NODE=1 <electron>`, which is exactly how the desktop app spawns
- * its own sidecar.
- *
- * An npm-INSTALLED hub rebuilds its natives for the consumer's node at install
- * time, so it runs under plain node. Detection is by locating an electron binary
- * in the same tree as the bundle: present ⇒ dev checkout, absent ⇒ installed
- * package.
- */
-function interpreterFor(binPath: string, version: string): HubBin {
-  // Walk up from the bundle looking for a sibling electron install. A published
-  // package has no electron anywhere above it.
-  let dir = dirname(binPath)
-  for (let i = 0; i < 6; i++) {
-    const pathTxt = join(dir, 'node_modules', 'electron', 'path.txt')
-    if (existsSync(pathTxt)) {
-      try {
-        const rel = readFileSync(pathTxt, 'utf8').trim()
-        const electron = join(dir, 'node_modules', 'electron', 'dist', rel)
-        if (existsSync(electron)) {
-          return {
-            command: electron,
-            args: [binPath],
-            version,
-            // Runs Electron as a plain node with its own ABI — the natives match.
-            env: { ELECTRON_RUN_AS_NODE: '1' }
-          }
-        }
-      } catch {
-        /* fall through to plain node */
-      }
-    }
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  // Published package: natives were rebuilt for this node at install time.
-  return { command: process.execPath, args: [binPath], version }
-}
-
-/**
- * Absolute path to the hub bin — installing `@slayzone/hub` on demand if needed.
- *
- * The unit file must name a CONCRETE path: the supervisor re-executes this command
- * on every crash and every login, so an `npx` in there would mean a registry
- * round-trip (and possible silent version drift) per restart.
- *
- * Resolution order, each step deterministic:
- *   1. Node's own resolver (a global install, or a workspace checkout that lists
- *      the hub as a dependency).
- *   2. The dev tree — a sibling `packages/apps/hub/dist/bin.cjs` next to this
- *      CLI. The monorepo CLI does NOT depend on the hub package, so step 1 misses
- *      it, yet this is the build a developer means.
- *   3. `npm install` into a private prefix under the CLI's own state dir, then
- *      resolve inside it. NOT `npx --package … node -p require.resolve(…)`: npx
- *      exposes the package's BIN on PATH but does not add its cache to Node's
- *      module resolution paths, so that require.resolve fails even though the
- *      download succeeded.
- */
-function resolveHubBin(): HubBin {
-  // Test-only override: point `hub start` at a specific bundle so the failed-boot
-  // rollback path can be exercised without a real hub. Never set in normal use.
-  const override = process.env.SLZ_HUB_BIN
-  if (override) return { command: process.execPath, args: [override], version: 'override' }
-
-  const candidates: Array<() => string | null> = [
-    // (1) Anchored on argv[1] (the slay script) — `import.meta` does not exist in
-    // this package's CJS bundle.
-    () => {
-      try {
-        return createRequire(process.argv[1] ?? join(process.cwd(), 'x')).resolve(
-          `${HUB_PACKAGE}/package.json`
-        )
-      } catch {
-        return null
-      }
-    },
-    // (2) Dev tree: <cli>/dist/slay.js → ../../hub/package.json
-    () => {
-      const self = process.argv[1]
-      if (!self) return null
-      const sibling = join(dirname(self), '..', '..', 'hub', 'package.json')
-      return existsSync(sibling) ? sibling : null
-    }
-  ]
-
-  for (const find of candidates) {
-    const path = find()
-    if (!path) continue
-    const found = readHubPkg(path)
-    if (found) return interpreterFor(found.binPath, found.version)
-  }
-
-  // (3) Install into our own prefix so the result is resolvable by absolute path
-  // — and stays put, since the unit file will reference it for every restart.
-  //
-  // PIN THE VERSION TO THIS CLI'S OWN. A bare `npm install @slayzone/hub` follows
-  // the `latest` dist-tag, which for a pre-release line lags behind (npm refuses
-  // `latest` for a prerelease, so beta versions are published under `beta` and
-  // `latest` keeps pointing at whatever stable/older version was tagged last).
-  // That silently paired a current CLI with a much older hub. The two are released
-  // from one repo at one version, so requesting that exact version is both correct
-  // and reproducible.
-  const prefix = join(getDataDir(), 'hub-runtime')
-  const installed = join(prefix, 'node_modules', HUB_PACKAGE, 'package.json')
-  // Fall back to the `beta` tag rather than a bare name if the version define is
-  // somehow missing: `latest` is the one thing that must never be followed here.
-  const wanted = CLI_VERSION ? `${HUB_PACKAGE}@${CLI_VERSION}` : `${HUB_PACKAGE}@beta`
-  if (!existsSync(installed) || (CLI_VERSION && readHubPkg(installed)?.version !== CLI_VERSION)) {
-    console.log(`Installing ${wanted}…`)
-    mkdirSync(prefix, { recursive: true })
-    try {
-      execFileSync(
-        'npm',
-        ['install', '--prefix', prefix, '--no-save', '--no-fund', '--no-audit', wanted],
-        { stdio: ['ignore', 'ignore', 'inherit'] }
-      )
-    } catch {
-      fail(
-        `Could not install ${wanted} into ${prefix}. Install it yourself and retry:\n` +
-          `  npm install -g ${wanted}`
-      )
-    }
-  }
-  const found = readHubPkg(installed)
-  if (!found) {
-    fail(
-      `Installed ${HUB_PACKAGE} but found no usable bin at ${installed}. ` +
-        `Install it globally and retry:\n  npm install -g ${HUB_PACKAGE}`
-    )
-  }
-  // Invoke through an explicit interpreter rather than the bin's shebang: the
-  // supervisor starts the unit with almost no PATH to find one on.
-  return interpreterFor(found.binPath, found.version)
-}
-
-/** `<root>/storage/logs`, created so the supervisor can open its log files. */
-function ensureLogDir(root: string): string {
-  const dir = join(root, 'storage', 'logs')
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
-
 /** Poll `/health` until the hub answers, or give up. Returns the hub or null. */
 async function waitForHub(
   predicate: () => Promise<DiscoveredHub | null>,
@@ -334,15 +157,6 @@ async function waitForHubGone(port: number, timeoutMs: number): Promise<boolean>
 }
 
 /**
- * Which service backend to use. `SLZ_FORCE_NO_SERVICE` is a test-only escape hatch
- * that forces the unsupervised path, so a test can exercise start/boot-failure
- * WITHOUT installing a launchd/systemd unit on the machine running it.
- */
-function resolveBackend(): ServiceBackend {
-  return process.env.SLZ_FORCE_NO_SERVICE === '1' ? 'none' : detectBackend()
-}
-
-/**
  * Bring a hub up: resolve its binary, write/refresh its unit, hand it to the
  * supervisor, and wait for `/health`.
  *
@@ -359,15 +173,16 @@ async function launchHub(args: {
   creating: boolean
 }): Promise<void> {
   const { name, root, port, backend, creating } = args
-  const bin = resolveHubBin()
-  const logDir = ensureLogDir(root)
+  const bin = resolveServiceBin('hub')
+  const logDir = ensureLogDir('hub', root)
+  const logs = serviceLogPaths('hub', root)
   const findIt = (): Promise<DiscoveredHub | null> =>
     port === undefined ? findAnyHub(name) : findHub(String(port))
 
   if (backend === 'none') {
     // No user-level supervisor (Windows today). Background it anyway, but never let
     // the operator believe it is supervised.
-    const out = openSync(join(logDir, 'hub.out.log'), 'a')
+    const out = openSync(logs.out, 'a')
     const child = spawn(bin.command, bin.args, {
       cwd: root,
       detached: true,
@@ -384,7 +199,7 @@ async function launchHub(args: {
     })
     child.unref()
     const started = await waitForHub(findIt, 20_000)
-    if (!started) failWithLog(name, join(logDir, 'hub.out.log'), 'did not come up within 20s')
+    if (!started) failWithLog('hub', name, logs.out, 'did not come up within 20s')
     console.log(`Hub "${started.name}" started on port ${started.port} (pid ${started.pid}).`)
     console.log(`  Root:  ${shortenPath(root)}`)
     console.log(`  Logs:  ${shortenPath(logDir)}`)
@@ -395,8 +210,9 @@ async function launchHub(args: {
     return
   }
 
-  const unitPath = writeHubUnit(
+  const writtenUnitPath = writeUnit(
     {
+      kind: 'hub',
       name,
       root,
       command: bin.command,
@@ -410,14 +226,14 @@ async function launchHub(args: {
   // Say what is happening BEFORE the wait: registration is a real side effect, and
   // the wait can take seconds. Silence here reads as "nothing happened" while the
   // supervisor may already be crash-looping the hub.
-  if (creating) console.log(`Registered ${unitPath}`)
+  if (creating) console.log(`Registered ${writtenUnitPath}`)
   console.log(`Starting hub "${name}" (${HUB_PACKAGE}@${bin.version})…`)
   try {
-    supervisorStart(backend, name, unitPath)
+    supervisorStart('hub', backend, name, writtenUnitPath)
   } catch (e) {
     // The supervisor refused. Never leave a unit file behind for a hub that was
     // never started — `registered` would list a hub that does not exist.
-    if (creating) removeHubUnit(name, backend)
+    if (creating) removeUnit('hub', name, backend)
     if (!(e instanceof SupervisorError)) throw e
     // A systemd USER manager needs a login session bus. On a VPS/container there
     // often is none, and every `--user` call fails this way. Name the actual fix
@@ -445,14 +261,15 @@ async function launchHub(args: {
       // the supervisor would retry it forever, invisibly, and the operator was given
       // no working hub. An existing hub's unit is left alone — the operator may want
       // to fix its root and `start` again.
-      supervisorStop(backend, name)
-      removeHubUnit(name, backend)
+      supervisorStop('hub', backend, name)
+      removeUnit('hub', name, backend)
     } else {
-      supervisorStop(backend, name)
+      supervisorStop('hub', backend, name)
     }
     failWithLog(
+      'hub',
       name,
-      join(logDir, 'hub.err.log'),
+      logs.err,
       creating
         ? 'failed to start, so it was unregistered again'
         : 'failed to start (its registration was left in place)'
@@ -461,7 +278,7 @@ async function launchHub(args: {
   console.log(`Hub "${started.name}" running on port ${started.port} (pid ${started.pid}).`)
   console.log(`  Root:  ${shortenPath(root)}`)
   console.log(`  Logs:  ${shortenPath(logDir)}`)
-  console.log(`  Unit:  ${unitPath}`)
+  console.log(`  Unit:  ${writtenUnitPath}`)
   console.log(`  Hub:   ${HUB_PACKAGE}@${bin.version}`)
   // State exactly what the supervisor guarantees. A user agent starts at LOGIN, not
   // at boot — claiming "survives reboot" would be wrong.
@@ -485,9 +302,9 @@ async function haltHub(
   backend: ServiceBackend,
   opts: { unregister: boolean }
 ): Promise<void> {
-  if (backend !== 'none' && existsSync(hubUnitPath(hub.name, backend))) {
-    supervisorStop(backend, hub.name)
-    if (opts.unregister) removeHubUnit(hub.name, backend)
+  if (backend !== 'none' && existsSync(unitPath('hub', hub.name, backend))) {
+    supervisorStop('hub', backend, hub.name)
+    if (opts.unregister) removeUnit('hub', hub.name, backend)
   } else {
     try {
       process.kill(hub.pid, 'SIGTERM')
@@ -501,131 +318,6 @@ async function haltHub(
       `Hub "${hub.name}" is still answering on port ${hub.port} after 15s. ` +
         `It may be managed elsewhere (docker, a system unit).`
     )
-  }
-}
-
-/** A supervisor command failed. Carries its stderr so the caller can explain. */
-class SupervisorError extends Error {
-  constructor(
-    readonly command: string,
-    readonly output: string
-  ) {
-    super(`${command} failed`)
-  }
-}
-
-/**
- * Run a supervisor command, capturing stderr so a failure can be reported in
- * context rather than surfacing as a bare `Command failed: …`.
- */
-function run(file: string, args: string[]): void {
-  try {
-    execFileSync(file, args, { stdio: ['ignore', 'inherit', 'pipe'] })
-  } catch (e) {
-    const stderr = (e as { stderr?: Buffer | string }).stderr
-    throw new SupervisorError(
-      `${file} ${args.join(' ')}`,
-      (typeof stderr === 'string' ? stderr : stderr?.toString() ?? '').trim()
-    )
-  }
-}
-
-/**
- * Fail, quoting the tail of the hub's own output. Pointing at a log file and making
- * the operator go read it is a worse experience than just showing the reason.
- */
-function failWithLog(name: string, logPath: string, what: string): never {
-  let detail = ''
-  try {
-    detail = readFileSync(logPath, 'utf8').trim().split('\n').slice(-12).join('\n')
-  } catch {
-    /* nothing captured */
-  }
-  fail(
-    `Hub "${name}" ${what}.\n` +
-      (detail
-        ? `\nLast output (${shortenPath(logPath)}):\n${detail}\n`
-        : `\nNo output was captured in ${shortenPath(logPath)}.\n`)
-  )
-}
-
-/**
- * Register + start via the OS supervisor.
- *
- * Throws {@link SupervisorError} on failure so the caller can roll the
- * registration back and report properly — an uncaught execFileSync error would
- * dump `Command failed: systemctl --user daemon-reload` and leave a unit file
- * behind with nothing running.
- */
-function supervisorStart(
-  backend: Exclude<ServiceBackend, 'none'>,
-  name: string,
-  unitPath: string
-): void {
-  if (backend === 'launchd') {
-    const label = launchdLabel(name)
-    const domain = `gui/${process.getuid?.() ?? ''}`
-    // `bootout` first so a re-start picks up a rewritten plist instead of the
-    // already-loaded old one. Failure is expected when nothing is loaded yet.
-    try {
-      execFileSync('launchctl', ['bootout', `${domain}/${label}`], { stdio: 'ignore' })
-    } catch {
-      /* not loaded — fine */
-    }
-    // `bootstrap` loads the plist AND starts it (RunAtLoad), so that is the whole
-    // start. A `kickstart -k` after it would SIGTERM the process it just started
-    // and boot a second one — visible as a `-15` last-exit-status on a job that is
-    // otherwise healthy, plus two boot sequences in the log.
-    run('launchctl', ['bootstrap', domain, unitPath])
-    return
-  }
-  const unit = systemdUnitName(name)
-  run('systemctl', ['--user', 'daemon-reload'])
-  run('systemctl', ['--user', 'enable', '--now', unit])
-  // Without lingering, the user manager (and the hub) dies at logout — the exact
-  // failure "it stays up" is supposed to prevent. Best-effort: on some systems
-  // this needs privileges we don't have, in which case the hub still survives
-  // crashes but not a logout.
-  try {
-    execFileSync('loginctl', ['enable-linger', process.env.USER ?? ''], { stdio: 'ignore' })
-  } catch {
-    console.log('Note: could not enable systemd lingering — the hub will stop when you log out.')
-    console.log(`  Fix with: sudo loginctl enable-linger ${process.env.USER ?? '<user>'}`)
-  }
-}
-
-/**
- * Ask the supervisor to stop a unit, ignoring every failure.
- *
- * For `rm` on a hub that is NOT running: the unit may be unloaded already, or the
- * bus may be unreachable entirely (the case that leaves a stale unit behind in the
- * first place). Neither must block removing the file.
- */
-function supervisorStopQuiet(backend: Exclude<ServiceBackend, 'none'>, name: string): void {
-  try {
-    supervisorStop(backend, name)
-  } catch {
-    /* the file removal below is what matters */
-  }
-}
-
-/** Stop + deregister from the OS supervisor. Best-effort per step. */
-function supervisorStop(backend: Exclude<ServiceBackend, 'none'>, name: string): void {
-  if (backend === 'launchd') {
-    const domain = `gui/${process.getuid?.() ?? ''}`
-    try {
-      execFileSync('launchctl', ['bootout', `${domain}/${launchdLabel(name)}`], { stdio: 'ignore' })
-    } catch {
-      /* already gone */
-    }
-    return
-  }
-  try {
-    execFileSync('systemctl', ['--user', 'disable', '--now', systemdUnitName(name)], {
-      stdio: 'ignore'
-    })
-  } catch {
-    /* already gone */
   }
 }
 
@@ -695,8 +387,8 @@ export function hubCommand(): Command {
       // and "unique" has to include a hub that is REGISTERED BUT NOT RUNNING
       // (stopped, or crashed). Checking only running hubs would let `create`
       // silently overwrite an existing hub's unit.
-      if (backend !== 'none' && existsSync(hubUnitPath(name, backend))) {
-        const existingRoot = readHubUnitRoot(name, backend)
+      if (backend !== 'none' && existsSync(unitPath('hub', name, backend))) {
+        const existingRoot = readUnitRoot('hub', name, backend)
         fail(
           `A hub named "${name}" already exists${
             existingRoot ? ` (root ${shortenPath(existingRoot)})` : ''
@@ -750,13 +442,13 @@ export function hubCommand(): Command {
             `and \`start\` has nothing to act on. Use \`slay hub create ${name}\`.`
         )
       }
-      if (!existsSync(hubUnitPath(name, backend))) {
+      if (!existsSync(unitPath('hub', name, backend))) {
         fail(
           `No hub named "${name}". Create it with \`slay hub create ${name}\`, ` +
             `or list what exists with \`slay hub registered\`.`
         )
       }
-      const root = readHubUnitRoot(name, backend)
+      const root = readUnitRoot('hub', name, backend)
       if (!root) {
         fail(
           `The unit for "${name}" does not record a root — it may be hand-edited. ` +
@@ -774,7 +466,7 @@ export function hubCommand(): Command {
       const hub = await requireHub(nameOrPort)
       refuseSupervised(hub, 'stop')
       const backend = resolveBackend()
-      const registered = backend !== 'none' && existsSync(hubUnitPath(hub.name, backend))
+      const registered = backend !== 'none' && existsSync(unitPath('hub', hub.name, backend))
       await haltHub(hub, backend, { unregister: false })
       console.log(
         registered
@@ -796,10 +488,10 @@ export function hubCommand(): Command {
       // LIVE hub here left the operator with a unit file they could only delete by
       // hand, and `create` refusing the name because of it.
       if (!hub) {
-        if (backend !== 'none' && existsSync(hubUnitPath(nameOrPort, backend))) {
-          const root = readHubUnitRoot(nameOrPort, backend)
-          supervisorStopQuiet(backend, nameOrPort)
-          removeHubUnit(nameOrPort, backend)
+        if (backend !== 'none' && existsSync(unitPath('hub', nameOrPort, backend))) {
+          const root = readUnitRoot('hub', nameOrPort, backend)
+          supervisorStopQuiet('hub', backend, nameOrPort)
+          removeUnit('hub', nameOrPort, backend)
           console.log(
             `Removed "${nameOrPort}" (it was not running).` +
               (root ? ` Its data is still in ${shortenPath(root)}.` : '')
@@ -828,7 +520,7 @@ export function hubCommand(): Command {
       const hub = await requireHub(nameOrPort)
       refuseSupervised(hub, 'restart')
       const backend = resolveBackend()
-      if (backend === 'none' || !existsSync(hubUnitPath(hub.name, backend))) {
+      if (backend === 'none' || !existsSync(unitPath('hub', hub.name, backend))) {
         fail(
           `"${hub.name}" is not managed by slay, so it cannot be restarted from here. ` +
             `Stop it where it was started, then \`slay hub create ${hub.name}\`.`
@@ -836,13 +528,14 @@ export function hubCommand(): Command {
       }
 
       const { name, root } = hub
-      const logDir = ensureLogDir(root)
+      const logDir = ensureLogDir('hub', root)
       // --upgrade re-resolves the package so the unit points at the new version;
       // without it the existing unit is reused verbatim.
       if (opts.upgrade) {
-        const bin = resolveHubBin()
-        writeHubUnit(
+        const bin = resolveServiceBin('hub')
+        writeUnit(
           {
+            kind: 'hub',
             name,
             root,
             command: bin.command,
@@ -856,9 +549,9 @@ export function hubCommand(): Command {
         )
         console.log(`Unit updated to ${HUB_PACKAGE}@${bin.version}.`)
       }
-      supervisorStop(backend, name)
+      supervisorStop('hub', backend, name)
       await waitForHubGone(hub.port, 15_000)
-      supervisorStart(backend, name, hubUnitPath(name, backend))
+      supervisorStart('hub', backend, name, unitPath('hub', name, backend))
       const back = await waitForHub(() => findHub(name), 20_000)
       if (!back) fail(`Hub "${name}" did not come back within 20s. Check ${shortenPath(logDir)}.`)
       console.log(`Hub "${back.name}" restarted on port ${back.port} (pid ${back.pid}).`)
@@ -878,28 +571,14 @@ export function hubCommand(): Command {
       // systemd captures stdout into journald rather than a file, so the unit's
       // own output is only readable there.
       const backend = detectBackend()
-      if (backend === 'systemd' && existsSync(hubUnitPath(hub.name, backend))) {
-        const args = ['--user', '-u', systemdUnitName(hub.name), '-n', String(lines)]
-        if (opts.follow) args.push('-f')
-        const child = spawn('journalctl', args, { stdio: 'inherit' })
-        child.on('exit', (code) => process.exit(code ?? 0))
-        return
-      }
-
-      const logDir = join(hub.root, 'storage', 'logs')
-      if (!existsSync(logDir)) fail(`No log directory at ${shortenPath(logDir)}.`)
-      // Newest first: the supervisor's capture files sit beside the hub's own
-      // rotating log, and which one carries the interesting output depends on how
-      // the hub was started.
-      const candidates = readdirSync(logDir)
-        .filter((f) => f.endsWith('.log'))
-        .map((f) => ({ f, path: join(logDir, f), mtime: statSync(join(logDir, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime)
-      if (candidates.length === 0) fail(`No log files in ${shortenPath(logDir)}.`)
-      const target = candidates[0]!.path
-      const args = opts.follow ? ['-f', '-n', String(lines), target] : ['-n', String(lines), target]
-      const child = spawn('tail', args, { stdio: 'inherit' })
-      child.on('exit', (code) => process.exit(code ?? 0))
+      followServiceLog({
+        kind: 'hub',
+        name: hub.name,
+        root: hub.root,
+        lines,
+        follow: opts.follow === true,
+        systemdUnit: backend === 'systemd' && existsSync(unitPath('hub', hub.name, backend))
+      })
     })
 
   // ----------------------------------------------------------------- client view
@@ -985,7 +664,7 @@ export function hubCommand(): Command {
         console.log('This platform has no user service manager — no hubs can be registered.')
         return
       }
-      const units = listRegisteredHubs(backend)
+      const units = listRegisteredUnits('hub', backend)
       if (units.length === 0) {
         console.log('No registered hubs.')
         return
@@ -997,7 +676,7 @@ export function hubCommand(): Command {
         const running = live.has(u.name)
         console.log(`${u.name}${running ? '  (running)' : '  (stopped)'}`)
         console.log(`  ${u.unitPath}`)
-        const root = readHubUnitRoot(u.name, backend)
+        const root = readUnitRoot('hub', u.name, backend)
         if (root) console.log(`  root: ${shortenPath(root)}`)
         if (!running) console.log(`  start: slay hub start ${u.name}`)
       }

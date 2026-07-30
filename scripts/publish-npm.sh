@@ -132,7 +132,15 @@ token (mint one on the hub), then runs terminals/agents/git on this machine.
     SLAYZONE_HUB_JOIN_TOKEN=<token from the hub> slayzone-runner
 
 The join token embeds the hub URL + cert fingerprint, so nothing else is
-required. GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
+required.
+
+This runs the runner in the FOREGROUND: it will not come back after a crash or a
+logout. To install it as a supervised service instead, use the CLI:
+
+    npm install -g @slayzone/cli
+    slay runner create <name> --token <token from the hub>
+
+GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
 cat > packages/apps/cli/README.md <<'EOF'
 # @slayzone/cli (`slay`)
@@ -154,6 +162,29 @@ Command-line control for SlayZone hubs, plus tasks, terminals and projects.
 systemd --user on Linux), so it restarts if it crashes and starts again when you
 log in. Names are unique per machine — `create` fails if one already exists. To
 run a hub in the foreground instead, use `npx @slayzone/hub`.
+
+## Runners on this machine
+
+A runner is an execution node: it dials out to a hub and runs terminals, agents
+and git there. Mint a join token on the hub, then:
+
+    slay runner create <name> --token <szjt1…>   # install it here and keep it running
+    slay runner ls              # every runner installed on this machine
+    slay runner logs <name>
+    slay runner stop <name>     # stop it, keep it registered
+    slay runner start <name>    # bring a stopped runner back
+    slay runner rm <name>       # stop it and remove its registration
+
+The token embeds the hub URL and its cert fingerprint, so `--token` is the only
+configuration needed. It is stored in `<root>/config.json` (owner-only) — never in
+the service unit. `--root <dir>` picks where the runner's config, credentials and
+logs live (default: the current directory), and `--allow <dir>` (repeatable) sets
+the filesystem roots it may touch. One runner per root.
+
+`create` waits until the runner has actually reached its hub, and unregisters
+itself again if it cannot — so a bad token fails loudly instead of leaving a
+service that retries forever. `rm` leaves the runner's data on disk and does NOT
+revoke it on the hub; revoke it there if the machine is going away.
 
 ## Targeting a hub
 
@@ -307,7 +338,7 @@ echo "   ✓ runner enrolled into the hub over the pinned wss link"
 #
 # Deliberately NOT `slay hub create`: that REGISTERS a launchd/systemd unit, and a
 # publish smoke must not install a service on the CI runner or a developer's
-# machine. Unit-file content is covered by platform/src/hub-service.test.ts.
+# machine. Unit-file content is covered by platform/src/service-unit.test.ts.
 SLAY="$SMOKE/cli/node_modules/.bin/slay"
 CLI_ENV=(env "${SCRUB[@]}" SLAYZONE_ROOT="$HUB_ROOT")
 

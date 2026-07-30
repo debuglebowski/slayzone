@@ -21,7 +21,7 @@ import {
   type SlayzoneConfig
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr, type SlayzoneMode } from '@slayzone/platform/hub-addr'
-import { decodeJoinToken } from './join-token'
+import { decodeJoinToken } from '@slayzone/platform/join-token'
 
 export const runnerConfigSchema = z.object({
   /** `ws://` or `wss://` hub runner endpoint. */
