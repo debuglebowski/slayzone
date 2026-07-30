@@ -50,8 +50,33 @@ function fakeHealthResponse(): {
       return res
     }
   } as unknown as ServerResponse
-  const req = { url: '/health', method: 'GET' } as IncomingMessage
+  // `socket.remoteAddress` must be present: handleHealth serves the identity
+  // fields (dbPath included) to loopback callers only, and fails CLOSED when the
+  // peer address is unknown. See health.test.ts for the gating itself.
+  const req = {
+    url: '/health',
+    method: 'GET',
+    socket: { remoteAddress: '127.0.0.1' }
+  } as IncomingMessage
   return { req, res, read: () => ({ status, body: body ? JSON.parse(body) : undefined }) }
+}
+
+/** Health state with the identity fields filled in — this suite only asserts the
+ *  build fields, so the values are placeholders. */
+function healthState(overrides: Partial<HealthState>): HealthState {
+  return {
+    ready: true,
+    port: 1234,
+    startedAt: Date.now(),
+    dbPath: '/tmp/x.sqlite',
+    name: 'test-hub',
+    root: '/tmp/test-root',
+    pid: process.pid,
+    mode: 'local',
+    supervised: false,
+    runnersConnected: () => 0,
+    ...overrides
+  }
 }
 
 console.log('\nbuild-info + /health')
@@ -73,7 +98,7 @@ test('getServerBuildInfo() falls back to dev sentinels when defines absent', () 
 })
 
 test('GET /health (ready) advertises the running build identity', () => {
-  const state: HealthState = { ready: true, port: 1234, startedAt: Date.now(), dbPath: '/tmp/x.sqlite' }
+  const state = healthState({ ready: true })
   const { req, res, read } = fakeHealthResponse()
   const handled = handleHealth(state, req, res)
   assert(handled, 'handleHealth handled the /health request')
@@ -90,7 +115,7 @@ test('GET /health (ready) advertises the running build identity', () => {
 })
 
 test('GET /health (not ready) still 503s without build fields', () => {
-  const state: HealthState = { ready: false, port: 0, startedAt: Date.now(), dbPath: '/tmp/x.sqlite' }
+  const state = healthState({ ready: false, port: 0 })
   const { req, res, read } = fakeHealthResponse()
   handleHealth(state, req, res)
   const { status, body } = read()
