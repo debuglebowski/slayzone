@@ -62,9 +62,12 @@ pnpm --filter @slayzone/cli build
 # publish_manifest <pkgdir> <pubname> <bin> <entry> <desc> [native-dep...]
 #   entry — the bundle the bin points at, relative to the package root. The hub
 #           and runner emit dist/bin.cjs; the CLI emits dist/slay.js.
+#   native-dep... — may be EMPTY (the CLI has no native deps). Under `set -u`,
+#           bash 3.2 (which macOS still ships) treats `"${arr[@]}"` on an empty
+#           array as an unbound variable, so the args are passed through "$@"
+#           directly rather than via an intermediate array.
 publish_manifest() {
   local pkgdir="$1" pubname="$2" bin="$3" entry="$4" desc="$5"; shift 5
-  local natives=("$@")
   node -e '
     const fs=require("fs"), path=require("path");
     const [dir,name,bin,entry,version,desc,...natives]=process.argv.slice(1);
@@ -81,7 +84,7 @@ publish_manifest() {
     fs.writeFileSync(path.join(dir,"package.json"), JSON.stringify(out,null,2)+"\n");
     console.log("   manifest:", name+"@"+version, "bin:", entry,
       "deps:", Object.keys(deps).join(", ") || "(none)");
-  ' "$pkgdir" "$pubname" "$bin" "$entry" "$VERSION" "$desc" "${natives[@]}"
+  ' "$pkgdir" "$pubname" "$bin" "$entry" "$VERSION" "$desc" "$@"
 }
 
 echo "==> Rewriting publish manifests"
