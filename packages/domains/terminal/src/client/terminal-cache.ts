@@ -23,6 +23,11 @@ const cache = new Map<string, CachedTerminal>()
 // Active (mounted) terminal serialize addons — terminals in the DOM aren't in the cache
 const activeAddons = new Map<string, SerializeAddon>()
 
+// Active (mounted) xterm instances. Mounted terminals are NOT in `cache` (that
+// holds unmounted ones), so neither map alone sees every live terminal —
+// `getLiveTerminals` unions them.
+const activeTerminals = new Map<string, XTerm>()
+
 // Track sessionIds that shouldn't be re-cached (e.g., during restart/mode-change)
 const skipCacheSet = new Set<string>()
 // Track pending timeouts for skipCache cleanup
@@ -108,6 +113,36 @@ export function registerActiveAddon(sessionId: string, addon: SerializeAddon): v
 
 export function unregisterActiveAddon(sessionId: string): void {
   activeAddons.delete(sessionId)
+}
+
+/** Track a mounted xterm instance. Paired with {@link unregisterActiveTerminal}. */
+export function registerActiveTerminal(sessionId: string, terminal: XTerm): void {
+  activeTerminals.set(sessionId, terminal)
+}
+
+export function unregisterActiveTerminal(sessionId: string): void {
+  activeTerminals.delete(sessionId)
+}
+
+/**
+ * Every live xterm instance — mounted plus cached-but-unmounted.
+ *
+ * Exists for the shared-WebGL-atlas broadcast in `correctAtlas`: xterm's
+ * `CharAtlasCache` is module-level, so terminals with matching font / size / DPR
+ * / theme share ONE `TextureAtlas`. Repacking it invalidates every sharing
+ * renderer's vertex data, but each renderer only rebuilds on its own next FRAME
+ * — so a repack must be followed by a repaint of all of them, and that needs a
+ * list of who is live. See `webgl-loader.ts#correctAtlas`.
+ *
+ * A session present in both maps (mid-handoff) yields one entry: keyed by
+ * sessionId, mounted wins. `correctAtlas` also de-dupes by object identity, so a
+ * duplicate would be harmless anyway.
+ */
+export function getLiveTerminals(): XTerm[] {
+  const bySession = new Map<string, XTerm>()
+  for (const [sessionId, entry] of cache) bySession.set(sessionId, entry.terminal)
+  for (const [sessionId, terminal] of activeTerminals) bySession.set(sessionId, terminal)
+  return Array.from(bySession.values())
 }
 
 export function serializeTerminalHistory(sessionId: string): string {

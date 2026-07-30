@@ -55,7 +55,10 @@ import {
   disposeTerminal,
   updateAllThemes,
   registerActiveAddon,
-  unregisterActiveAddon
+  unregisterActiveAddon,
+  registerActiveTerminal,
+  unregisterActiveTerminal,
+  getLiveTerminals
 } from './terminal-cache'
 import { usePty } from './PtyContext'
 import { useSessionState } from './useTerminalStateStore'
@@ -226,7 +229,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // stale metrics and the screen scrambles. rAF-debounced so a resize drag (many
   // fits per second) coalesces to one correction on the settled frame. No-op when
   // the DOM renderer is active (no addon).
-  const scheduleAtlasCorrection = useCallback((): void => {
+  const scheduleAtlasCorrection = useCallback((site = 'fit'): void => {
     if (atlasCorrectionRafRef.current !== null) {
       cancelAnimationFrame(atlasCorrectionRafRef.current)
     }
@@ -235,7 +238,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       const addon = webglAddonRef.current
       const terminal = terminalRef.current
       if (addon && terminal) {
-        correctAtlas(addon, terminal, sessionId)
+        // getLiveTerminals: the atlas is SHARED across panes, so the repack
+        // invalidates every one of them — each needs a frame or it keeps
+        // painting stale texcoords. See correctAtlas.
+        correctAtlas(addon, terminal, sessionId, site, getLiveTerminals)
         // The atlas was just intentionally re-rasterized — the scramble probe's
         // current baseline points at the *old* atlas pixels and would now flag
         // every cell as drift. Re-baseline so the probe tracks the new atlas.
@@ -260,7 +266,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (proposed.cols === terminal.cols && proposed.rows === terminal.rows) return false
     fitAddon.fit()
     diag(sessionId, 'fit', { site, terminal })
-    scheduleAtlasCorrection()
+    scheduleAtlasCorrection(`fit:${site}`)
     return true
   }, [sessionId, scheduleAtlasCorrection])
 
@@ -512,7 +518,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               requestFrame: (cb) => requestAnimationFrame(cb),
               requestTimeout: (cb, ms) => window.setTimeout(cb, ms),
               onDowngrade: handleDowngrade,
-              sessionId
+              sessionId,
+              // The startup-window corrections repack the SHARED atlas, so a
+              // terminal coming up scrambles panes that are already running
+              // unless they also get a frame. See correctAtlas.
+              getLiveTerminals
             })
             const addon = webglAddonRef.current
             if (addon) {
@@ -553,6 +563,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             searchAddonRef.current = cached.searchAddon
             webglAddonRef.current = cached.webglAddon ?? null
             registerActiveAddon(sessionId, cached.serializeAddon)
+            registerActiveTerminal(sessionId, cached.terminal)
             if (cached.lastRenderedSeq !== undefined) {
               lastRenderedSeqRef.current = cached.lastRenderedSeq
             }
@@ -598,16 +609,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
                 }
                 downgradedSessions.add(sessionId)
               } else {
-                try {
-                  cached.webglAddon.clearTextureAtlas()
-                  cached.terminal.refresh(0, cached.terminal.rows - 1)
-                  diag(sessionId, 'atlas-correct', {
-                    site: 'reattach',
-                    terminal: cached.terminal
-                  })
-                } catch {
-                  /* terminal disposed */
-                }
+                // Routed through correctAtlas (not an inline clearTextureAtlas)
+                // so every atlas mutation goes through one entry point — the
+                // atlas is SHARED across terminals via the module-level
+                // CharAtlasCache, so each mutation repacks it for every sharing
+                // pane and must stay observable in one place.
+                correctAtlas(
+                  cached.webglAddon,
+                  cached.terminal,
+                  sessionId,
+                  'reattach',
+                  getLiveTerminals
+                )
                 // Install scramble-detector against the re-adopted addon. The
                 // previous component's monitors were disposed on unmount; without
                 // re-installing here, Signals B+C would be silent for the rest
@@ -680,6 +693,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         serializeAddonRef.current = serializeAddon
         searchAddonRef.current = searchAddon
         registerActiveAddon(sessionId, serializeAddon)
+        registerActiveTerminal(sessionId, terminal)
 
         terminal.open(containerRef.current)
         onAttachedRef.current?.({ sessionId, focus: () => terminal.focus() })
@@ -705,7 +719,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           if (proposed.cols === terminal.cols && proposed.rows === terminal.rows) return
           fitAddon.fit()
           diag(sessionId, 'fit', { site: 'init-fonts-ready', terminal })
-          scheduleAtlasCorrection()
+          scheduleAtlasCorrection('fit:init-fonts-ready')
         })
 
         // WebGL renderer — 5-10x faster than the DOM renderer.
@@ -966,6 +980,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       scrambleProbeRef.current = null
       fakeDowngradeRegistry.delete(sessionId)
       unregisterActiveAddon(sessionId)
+      // Drop the mounted-terminal registration. The instance stays reachable for
+      // the atlas broadcast via the module cache below (setTerminal) when it is
+      // cached; if it is disposed instead, it must not be broadcast to at all.
+      unregisterActiveTerminal(sessionId)
       // Serialize state before caching
       let serializedState: string | undefined
       if (serializeAddonRef.current && terminalRef.current) {
@@ -1205,7 +1223,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
         fitAddonRef.current.fit()
         diag(sessionId, 'fit', { site: 'resize-needed', terminal: terminalRef.current })
-        scheduleAtlasCorrection()
+        scheduleAtlasCorrection('fit:resize-needed')
         void trpcClient.pty.resize.mutate({
           sessionId,
           cols: terminalRef.current.cols,
@@ -1396,29 +1414,35 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // active tab + visible document + WebGL addon present so hidden / DOM-renderer
   // terminals cost nothing. See working-notes/terminal-webgl-scramble.md.
   useEffect(() => {
-    const tryCorrect = (): void => {
+    // `site` distinguishes the three triggers in the diag ring — the heartbeat
+    // is the one that repacks a SHARED atlas on a pane the user never touched,
+    // so telling it apart from a genuine return-to-foreground matters when
+    // reading a scramble timeline.
+    const tryCorrect = (site: string) => (): void => {
       if (!webglAddonRef.current) return
       if (!isActiveRef.current) return
       if (document.visibilityState !== 'visible') return
-      scheduleAtlasCorrection()
+      scheduleAtlasCorrection(site)
       // Also nudge the scramble probe — return-to-foreground is the moment
       // a silently-evicted atlas first becomes user-visible, and waiting for
       // the next 5s probe tick leaves a window of visible scramble.
       scrambleProbeRef.current?.probe()
     }
+    const onVisibility = tryCorrect('visibilitychange')
+    const onFocus = tryCorrect('focus')
 
     // Callback has its own `visibilityState !== 'visible'` early-return; the
     // timer also acts as a heartbeat that must coexist with focus +
     // visibilitychange listeners.
     // eslint-disable-next-line no-restricted-syntax
-    const interval = window.setInterval(tryCorrect, 30_000)
-    document.addEventListener('visibilitychange', tryCorrect)
-    window.addEventListener('focus', tryCorrect)
+    const interval = window.setInterval(tryCorrect('heartbeat'), 30_000)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onFocus)
 
     return () => {
       window.clearInterval(interval)
-      document.removeEventListener('visibilitychange', tryCorrect)
-      window.removeEventListener('focus', tryCorrect)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onFocus)
     }
   }, [scheduleAtlasCorrection])
 

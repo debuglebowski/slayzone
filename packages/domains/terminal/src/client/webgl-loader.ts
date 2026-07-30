@@ -50,6 +50,13 @@ export interface LoadWebglOptions {
   onDowngrade?: (reason: DowngradeReason) => void
   /** Session id — diagnostics only (TEMPORARY, see terminal-webgl-diag.ts). */
   sessionId?: string
+  /**
+   * Every live terminal that may share this one's glyph atlas, forwarded to
+   * {@link correctAtlas} for the startup-window corrections. The atlas is shared
+   * process-wide, so a cold-start repack invalidates panes that are already
+   * running — see `correctAtlas`.
+   */
+  getLiveTerminals?: () => Iterable<Pick<XTerm, 'refresh' | 'rows'>>
 }
 
 /** Delays (ms after load) of the straggler atlas corrections — see {@link loadWebglRenderer}. */
@@ -124,19 +131,86 @@ export function downgradeToDom(
  * Render-only: `clearTextureAtlas()` + `refresh()`, no resize, so the PTY never
  * sees a SIGWINCH. Safe to call when the atlas is already correct (the next paint
  * simply re-rasterizes identical tiles). Swallows the post-dispose throw.
+ *
+ * THE single atlas-mutation entry point. `CharAtlasCache` is module-level, so
+ * every terminal with matching font/size/DPR/theme shares ONE `TextureAtlas` —
+ * clearing it here repacks the atlas for every sharing terminal, not just this
+ * one. Routing all mutations through this function keeps that blast radius
+ * observable in one place (one `atlas-correct` diag event per mutation, tagged
+ * with its call site). Do not call `addon.clearTextureAtlas()` directly; add a
+ * `site` label and call this instead.
+ *
+ * Because the repack is shared, the repaint must be too — see `getLiveTerminals`.
+ *
+ * @param site Optional call-site label recorded on the diag event, so a
+ * correction's origin (startup window, resize, heartbeat, reattach) is
+ * distinguishable when reading the ring buffer.
+ * @param getLiveTerminals Every live terminal that may share this atlas. xterm
+ * rebuilds a renderer's vertex data only on that renderer's next FRAME
+ * (`GlyphRenderer.beginFrame()` is reached solely from
+ * `WebglRenderer.renderRows`), so a pane that is not painting keeps texcoords
+ * pointing into the pre-repack atlas and renders garbage glyphs over a correct
+ * layout until something makes it paint. Repainting only the mutating pane
+ * therefore *causes* sibling scramble. Measured live (7 panes, 1 shared atlas):
+ * siblings sat 52 repacks behind at 0% correct glyphs and did NOT recover across
+ * multiple 30s heartbeat ticks — the heartbeat is gated on `isActive`, so it
+ * repacks the shared atlas while skipping the panes it invalidates. One
+ * `refresh()` each took all seven back to 100%.
+ *
+ * Broadcast to every live terminal rather than only same-atlas owners: the atlas
+ * cache is module-private in `@xterm/addon-webgl` (`CharAtlasCache` exports no
+ * reader), so "who shares this atlas" is not answerable through public API, and
+ * a non-sharing pane is a genuine no-op — xterm's per-renderer
+ * `_lastSeenPageLayoutVersion` compare means an already-current renderer just
+ * re-runs `_updateModel` over unchanged rows. Measured cost for a whole 7-pane
+ * fleet at 185x95, two rAFs included: 9-14ms, against a 30s heartbeat.
+ *
+ * Omitting it preserves the old single-pane behaviour (used by call sites that
+ * have no registry, and by the unit tests).
  */
 export function correctAtlas(
   addon: WebglAddon,
   terminal: Pick<XTerm, 'refresh' | 'rows'>,
-  sessionId = 'unknown'
+  sessionId = 'unknown',
+  site?: string,
+  getLiveTerminals?: () => Iterable<Pick<XTerm, 'refresh' | 'rows'>>
 ): void {
   try {
     addon.clearTextureAtlas()
-    terminal.refresh(0, terminal.rows - 1)
-    diag(sessionId, 'atlas-correct', { terminal })
   } catch {
-    /* terminal disposed */
+    // Addon disposed — the atlas was never repacked, so nothing went stale and
+    // there is nothing to broadcast.
+    return
   }
+
+  // Repaint every pane that could be sharing the repacked atlas. Tracked by
+  // identity so the mutating terminal is painted exactly once whether or not it
+  // is in the registry (a pane mid-mount is not registered yet, but its atlas
+  // was still just repacked).
+  const painted = new Set<unknown>()
+  const paint = (t: Pick<XTerm, 'refresh' | 'rows'>): void => {
+    if (painted.has(t)) return
+    painted.add(t)
+    try {
+      t.refresh(0, t.rows - 1)
+    } catch {
+      // Terminal disposed between registration and this frame. Swallow per
+      // terminal, never per broadcast — one stale registry entry must not
+      // strand the panes after it in iteration order.
+    }
+  }
+
+  paint(terminal)
+
+  if (getLiveTerminals) {
+    try {
+      for (const t of getLiveTerminals()) paint(t)
+    } catch {
+      /* registry unavailable — the mutating pane is already repainted */
+    }
+  }
+
+  diag(sessionId, 'atlas-correct', { terminal, site })
 }
 
 /**
@@ -210,7 +284,7 @@ export function loadWebglRenderer(opts: LoadWebglOptions): void {
     if (opts.isAborted() || !opts.isCurrentTerminal() || opts.getActiveAddon() !== addon) {
       return
     }
-    correctAtlas(addon, opts.terminal, sid)
+    correctAtlas(addon, opts.terminal, sid, 'startup', opts.getLiveTerminals)
   }
   opts.requestFrame(correct)
   for (const ms of CORRECTION_DELAYS_MS) opts.requestTimeout(correct, ms)

@@ -342,6 +342,137 @@ function run(): void {
     ok(termCalls.refresh === 0, 'refresh not reached after the throw')
   })
 
+  test('correctAtlas: the optional site label does not alter render behavior', () => {
+    // `site` is diagnostics-only — it tags the `atlas-correct` diag event so a
+    // correction's origin (startup / fit / heartbeat / reattach) is readable in
+    // the ring buffer. It must never change what is painted. The label itself is
+    // asserted live over CDP (`window.__slayzone_terminalDiag.dump()`): the diag
+    // ring is module-level with a window-only reader, and this file's hoisted
+    // static import loads that module before a stub `window` could be installed.
+    const withSite = makeStubAddon()
+    const withSiteTerm = makeStubTerminal()
+    correctAtlas(withSite.addon, withSiteTerm.terminal, 'sess-1', 'heartbeat')
+    ok(withSite.calls.clearedAtlas === 1, 'atlas re-rasterized once with a site label')
+    ok(withSiteTerm.calls.refresh === 1, 'screen repainted once with a site label')
+
+    const noSite = makeStubAddon()
+    const noSiteTerm = makeStubTerminal()
+    correctAtlas(noSite.addon, noSiteTerm.terminal, 'sess-1')
+    ok(
+      noSite.calls.clearedAtlas === withSite.calls.clearedAtlas &&
+        noSiteTerm.calls.refresh === withSiteTerm.calls.refresh,
+      'labelled and unlabelled corrections produce identical render calls'
+    )
+  })
+
+  // ---------------------------------------------------------------------------
+  // Shared-atlas sibling repair (P0c)
+  //
+  // `CharAtlasCache` is module-level: every terminal with matching font / size /
+  // DPR / theme shares ONE `TextureAtlas`. Clearing it repacks the atlas for all
+  // of them, but xterm only rebuilds a renderer's vertex data on that renderer's
+  // next FRAME (`GlyphRenderer.beginFrame()` is reached only from
+  // `WebglRenderer.renderRows`). So the repack must be followed by a frame on
+  // EVERY sharing pane, not just the mutating one.
+  //
+  // Measured live (7 panes, 1 shared atlas, xterm 6.1.0-beta.292 /
+  // addon-webgl 0.20.0-beta.291): after a single-pane correction, siblings sat
+  // 52 repacks behind (`_lastSeenPageLayoutVersion` 94 vs `_pageLayoutVersion`
+  // 146) painting 0% correct glyphs, and stayed there across multiple 30s
+  // heartbeat ticks — the heartbeat is gated on `isActive`, so it repacks the
+  // shared atlas while skipping the very panes it invalidates. One `refresh()`
+  // per pane took all seven back to 100%.
+  // ---------------------------------------------------------------------------
+  console.log('\ncorrectAtlas — shared-atlas sibling repair')
+  console.log('─'.repeat(40))
+
+  test('broadcasts a frame to every sharing terminal, not just the mutating one', () => {
+    const { addon, calls: addonCalls } = makeStubAddon()
+    const mutating = makeStubTerminal()
+    const siblingA = makeStubTerminal()
+    const siblingB = makeStubTerminal()
+    correctAtlas(addon, mutating.terminal, 'sess-1', 'heartbeat', () => [
+      mutating.terminal,
+      siblingA.terminal,
+      siblingB.terminal
+    ])
+    ok(addonCalls.clearedAtlas === 1, 'atlas repacked exactly once')
+    ok(siblingA.calls.refresh === 1, 'sibling A got a frame')
+    ok(siblingB.calls.refresh === 1, 'sibling B got a frame')
+    // The mutating pane must be painted exactly once even though it appears in
+    // the registry — a double refresh would be wasted GPU work every heartbeat.
+    ok(
+      mutating.calls.refresh === 1,
+      `mutating pane painted once, got ${mutating.calls.refresh}`
+    )
+  })
+
+  test('repaints the mutating terminal when it is absent from the registry', () => {
+    // A pane mid-mount (or mid-unmount) is not registered yet. It must still be
+    // repainted — it is the one whose atlas was just repacked.
+    const { addon } = makeStubAddon()
+    const mutating = makeStubTerminal()
+    const other = makeStubTerminal()
+    correctAtlas(addon, mutating.terminal, 'sess-1', 'startup', () => [other.terminal])
+    ok(mutating.calls.refresh === 1, 'unregistered mutating pane still repainted')
+    ok(other.calls.refresh === 1, 'registered pane repainted')
+  })
+
+  test('one throwing sibling does not block the remaining panes', () => {
+    // Terminals are disposed asynchronously; a stale registry entry must not
+    // strand the panes after it in iteration order still scrambled.
+    const { addon } = makeStubAddon()
+    const mutating = makeStubTerminal()
+    const throwing = {
+      rows: 24,
+      refresh() {
+        throw new Error('terminal disposed')
+      }
+    } as unknown as ReturnType<typeof makeStubTerminal>['terminal']
+    const after = makeStubTerminal()
+    correctAtlas(addon, mutating.terminal, 'sess-1', 'heartbeat', () => [
+      throwing,
+      after.terminal
+    ])
+    ok(after.calls.refresh === 1, 'pane after the throwing one still repainted')
+  })
+
+  test('a throwing registry getter still repaints the mutating terminal', () => {
+    const { addon, calls: addonCalls } = makeStubAddon()
+    const mutating = makeStubTerminal()
+    correctAtlas(addon, mutating.terminal, 'sess-1', 'heartbeat', () => {
+      throw new Error('registry unavailable')
+    })
+    ok(addonCalls.clearedAtlas === 1, 'atlas still repacked')
+    ok(mutating.calls.refresh === 1, 'mutating pane still repainted')
+  })
+
+  test('no registry supplied: behaves exactly as before (mutating pane only)', () => {
+    // Back-compat — every existing call site omits the registry.
+    const { addon, calls: addonCalls } = makeStubAddon()
+    const mutating = makeStubTerminal()
+    correctAtlas(addon, mutating.terminal, 'sess-1', 'heartbeat')
+    ok(addonCalls.clearedAtlas === 1, 'atlas repacked once')
+    ok(mutating.calls.refresh === 1, 'mutating pane repainted once')
+  })
+
+  test('atlas repack throwing skips the broadcast entirely', () => {
+    // If `clearTextureAtlas()` threw, the atlas was not repacked, so no sibling
+    // is stale — broadcasting would be pure wasted work on every pane.
+    const mutating = makeStubTerminal()
+    const sibling = makeStubTerminal()
+    const throwingAddon = {
+      clearTextureAtlas() {
+        throw new Error('addon disposed')
+      }
+    } as unknown as WebglAddon
+    correctAtlas(throwingAddon, mutating.terminal, 'sess-1', 'heartbeat', () => [
+      sibling.terminal
+    ])
+    ok(mutating.calls.refresh === 0, 'mutating pane not repainted')
+    ok(sibling.calls.refresh === 0, 'sibling not repainted')
+  })
+
   console.log('─'.repeat(40))
   console.log(`\n${passed} passed, ${failed} failed\n`)
   process.exit(failed > 0 ? 1 : 0)

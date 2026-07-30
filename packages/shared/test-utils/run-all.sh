@@ -160,6 +160,10 @@ run_test packages/domains/terminal/src/server/filter-buffer-data.test.ts
 # Wave-3 remote-runner per-PTY env (loopback vs hub URL + scoped token).
 run_test packages/domains/terminal/src/server/mcp-env.test.ts
 run_test packages/domains/terminal/src/client/webgl-loader.test.ts
+# Terminal — downgrade guard: the pinned @xterm/addon-webgl build must carry the
+# shared-texture-atlas fix (#6042/#6055). Without it, correcting the atlas on one
+# pane scrambles every pane sharing it (CharAtlasCache is module-level).
+run_test packages/domains/terminal/src/client/xterm-atlas-fix.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
 run_test packages/domains/terminal/src/server/state-machine.test.ts
