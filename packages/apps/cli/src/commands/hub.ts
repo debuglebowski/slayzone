@@ -44,6 +44,11 @@ import { getDataDir, getServerPort, hasLocalDatabase } from '../db'
  *  supervisor-restart time (see hub-service's module note). */
 const HUB_PACKAGE = '@slayzone/hub'
 
+/** This CLI's version, substituted by build.mjs. The hub is released from the same
+ *  repo at the same version, so it is what we install (see resolveHubBin). */
+declare const __APP_VERSION__: string
+const CLI_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''
+
 function fail(message: string): never {
   console.error(message)
   process.exit(1)
@@ -256,21 +261,32 @@ function resolveHubBin(): HubBin {
 
   // (3) Install into our own prefix so the result is resolvable by absolute path
   // — and stays put, since the unit file will reference it for every restart.
+  //
+  // PIN THE VERSION TO THIS CLI'S OWN. A bare `npm install @slayzone/hub` follows
+  // the `latest` dist-tag, which for a pre-release line lags behind (npm refuses
+  // `latest` for a prerelease, so beta versions are published under `beta` and
+  // `latest` keeps pointing at whatever stable/older version was tagged last).
+  // That silently paired a current CLI with a much older hub. The two are released
+  // from one repo at one version, so requesting that exact version is both correct
+  // and reproducible.
   const prefix = join(getDataDir(), 'hub-runtime')
   const installed = join(prefix, 'node_modules', HUB_PACKAGE, 'package.json')
-  if (!existsSync(installed)) {
-    console.log(`Installing ${HUB_PACKAGE}…`)
+  // Fall back to the `beta` tag rather than a bare name if the version define is
+  // somehow missing: `latest` is the one thing that must never be followed here.
+  const wanted = CLI_VERSION ? `${HUB_PACKAGE}@${CLI_VERSION}` : `${HUB_PACKAGE}@beta`
+  if (!existsSync(installed) || (CLI_VERSION && readHubPkg(installed)?.version !== CLI_VERSION)) {
+    console.log(`Installing ${wanted}…`)
     mkdirSync(prefix, { recursive: true })
     try {
       execFileSync(
         'npm',
-        ['install', '--prefix', prefix, '--no-save', '--no-fund', '--no-audit', HUB_PACKAGE],
+        ['install', '--prefix', prefix, '--no-save', '--no-fund', '--no-audit', wanted],
         { stdio: ['ignore', 'ignore', 'inherit'] }
       )
     } catch {
       fail(
-        `Could not install ${HUB_PACKAGE} into ${prefix}. Install it yourself and retry:\n` +
-          `  npm install -g ${HUB_PACKAGE}`
+        `Could not install ${wanted} into ${prefix}. Install it yourself and retry:\n` +
+          `  npm install -g ${wanted}`
       )
     }
   }
@@ -396,7 +412,31 @@ async function launchHub(args: {
   // supervisor may already be crash-looping the hub.
   if (creating) console.log(`Registered ${unitPath}`)
   console.log(`Starting hub "${name}" (${HUB_PACKAGE}@${bin.version})…`)
-  supervisorStart(backend, name, unitPath)
+  try {
+    supervisorStart(backend, name, unitPath)
+  } catch (e) {
+    // The supervisor refused. Never leave a unit file behind for a hub that was
+    // never started — `registered` would list a hub that does not exist.
+    if (creating) removeHubUnit(name, backend)
+    if (!(e instanceof SupervisorError)) throw e
+    // A systemd USER manager needs a login session bus. On a VPS/container there
+    // often is none, and every `--user` call fails this way. Name the actual fix
+    // rather than echoing "Command failed".
+    const noBus = /Failed to connect to bus|No medium found/i.test(e.output)
+    fail(
+      `Could not register hub "${name}" with ${backend}.\n\n` +
+        `  ${e.command}\n  ${e.output || '(no output)'}\n\n` +
+        (noBus
+          ? `systemd has no user session bus for this account, so \`systemctl --user\` ` +
+            `cannot work. Enable a persistent user manager:\n` +
+            `  sudo loginctl enable-linger ${process.env.USER ?? '<user>'}\n` +
+            `then log out and back in, and retry. If this account is not meant to have ` +
+            `one (a container, or a root-only box), run the hub under the system ` +
+            `manager or in the foreground instead:\n` +
+            `  npx ${HUB_PACKAGE}\n`
+          : '')
+    )
+  }
 
   const started = await waitForHub(findIt, 20_000)
   if (!started) {
@@ -464,6 +504,32 @@ async function haltHub(
   }
 }
 
+/** A supervisor command failed. Carries its stderr so the caller can explain. */
+class SupervisorError extends Error {
+  constructor(
+    readonly command: string,
+    readonly output: string
+  ) {
+    super(`${command} failed`)
+  }
+}
+
+/**
+ * Run a supervisor command, capturing stderr so a failure can be reported in
+ * context rather than surfacing as a bare `Command failed: …`.
+ */
+function run(file: string, args: string[]): void {
+  try {
+    execFileSync(file, args, { stdio: ['ignore', 'inherit', 'pipe'] })
+  } catch (e) {
+    const stderr = (e as { stderr?: Buffer | string }).stderr
+    throw new SupervisorError(
+      `${file} ${args.join(' ')}`,
+      (typeof stderr === 'string' ? stderr : stderr?.toString() ?? '').trim()
+    )
+  }
+}
+
 /**
  * Fail, quoting the tail of the hub's own output. Pointing at a log file and making
  * the operator go read it is a worse experience than just showing the reason.
@@ -483,7 +549,14 @@ function failWithLog(name: string, logPath: string, what: string): never {
   )
 }
 
-/** Register + start via the OS supervisor. */
+/**
+ * Register + start via the OS supervisor.
+ *
+ * Throws {@link SupervisorError} on failure so the caller can roll the
+ * registration back and report properly — an uncaught execFileSync error would
+ * dump `Command failed: systemctl --user daemon-reload` and leave a unit file
+ * behind with nothing running.
+ */
 function supervisorStart(
   backend: Exclude<ServiceBackend, 'none'>,
   name: string,
@@ -503,12 +576,12 @@ function supervisorStart(
     // start. A `kickstart -k` after it would SIGTERM the process it just started
     // and boot a second one — visible as a `-15` last-exit-status on a job that is
     // otherwise healthy, plus two boot sequences in the log.
-    execFileSync('launchctl', ['bootstrap', domain, unitPath], { stdio: 'inherit' })
+    run('launchctl', ['bootstrap', domain, unitPath])
     return
   }
   const unit = systemdUnitName(name)
-  execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' })
-  execFileSync('systemctl', ['--user', 'enable', '--now', unit], { stdio: 'inherit' })
+  run('systemctl', ['--user', 'daemon-reload'])
+  run('systemctl', ['--user', 'enable', '--now', unit])
   // Without lingering, the user manager (and the hub) dies at logout — the exact
   // failure "it stays up" is supposed to prevent. Best-effort: on some systems
   // this needs privileges we don't have, in which case the hub still survives

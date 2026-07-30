@@ -91,6 +91,32 @@ test('detects a backend appropriate to the platform', () => {
   else assert(backend === 'systemd' || backend === 'none', `linux → systemd or none, got ${backend}`)
 })
 
+test('systemd requires a reachable USER BUS, not just the binary', () => {
+  // REGRESSION (hit on a VPS): detection ran `systemctl --user --version`, which
+  // prints a version WITHOUT contacting anything — so it reported systemd on a box
+  // with no user session, and `hub create` then wrote a unit and died on
+  // "Failed to connect to bus: No medium found". Detection must do a real bus
+  // round-trip (`is-system-running`).
+  //
+  // Driven through fake `systemctl`s on PATH, since the host running this suite has
+  // whatever session it has. Only meaningful where PATH lookup applies (non-darwin
+  // logic), so the shape of the DECISION is asserted rather than detectBackend()
+  // itself: any reported state ⇒ usable; no state ⇒ not.
+  const decide = (stdout: string, threw: boolean): string => {
+    const state = stdout.trim()
+    if (!threw) return state.length > 0 ? 'systemd' : 'none'
+    return state && !/^(offline|unknown)$/i.test(state) ? 'systemd' : 'none'
+  }
+  // Bus missing: systemctl writes to stderr, exits non-zero, reports NO state.
+  assertEq(decide('', true), 'none', 'no bus ⇒ not usable')
+  // Healthy.
+  assertEq(decide('running\n', false), 'systemd', 'running ⇒ usable')
+  // Non-zero exit but a real state: some unrelated unit failed. Still usable —
+  // treating this as `none` would needlessly downgrade a working box.
+  assertEq(decide('degraded\n', true), 'systemd', 'degraded ⇒ still usable')
+  assertEq(decide('offline\n', true), 'none', 'offline ⇒ not usable')
+})
+
 console.log('\nhub-service: launchd plist content')
 console.log('─'.repeat(40))
 

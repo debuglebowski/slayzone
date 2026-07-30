@@ -110,10 +110,26 @@ export function defaultUnitDir(backend: ServiceBackend): string {
 export function detectBackend(): ServiceBackend {
   if (process.platform === 'darwin') return 'launchd'
   if (process.platform === 'win32') return 'none'
+  // Must exercise the USER BUS, not merely find the binary. `systemctl --user
+  // --version` prints a version without contacting anything, so it succeeds on a
+  // VPS or container that has no user session — and then every real `--user` call
+  // fails with "Failed to connect to bus: No medium found", after we have already
+  // written a unit file. `is-system-running` performs a real bus round-trip.
+  //
+  // Its exit code is non-zero for states that are perfectly usable (`degraded`
+  // when some unrelated unit failed), so the STDOUT state is what decides:
+  // any state at all ⇒ the bus answered ⇒ systemd is usable.
   try {
-    execFileSync('systemctl', ['--user', '--version'], { stdio: 'ignore' })
-    return 'systemd'
-  } catch {
+    const out = execFileSync('systemctl', ['--user', 'is-system-running'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    return out.trim().length > 0 ? 'systemd' : 'none'
+  } catch (e) {
+    const err = e as { stdout?: string | Buffer; status?: number | null }
+    // A non-zero exit that still reported a state means the bus is there.
+    const state = (typeof err.stdout === 'string' ? err.stdout : err.stdout?.toString() ?? '').trim()
+    if (state && !/^(offline|unknown)$/i.test(state)) return 'systemd'
     return 'none'
   }
 }
