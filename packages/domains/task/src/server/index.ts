@@ -54,6 +54,7 @@ export {
   listTaskSessions,
   recordPendingSpawn,
   findPendingSpawn,
+  findOwnedSpawnForConversation,
   prunePendingSpawns,
   recordSessionSpawn,
   confirmSessionConversation,

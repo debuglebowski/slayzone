@@ -54,6 +54,11 @@ run_test_electron_strict_loader packages/domains/task/src/server/artifact-watche
 run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessions.test.ts
 # Entity-model B — one-row-per-spawn session lifecycle (spawn→confirm→dead→bind).
 run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessions-lifecycle.test.ts
+# v151 `in-band-clear` origin — CHECK-widening table rebuild. Guards the data copy
+# (both tables are DROPped and recreated) + enum↔CHECK sync.
+run_test_electron_strict_loader packages/domains/task/src/server/ops/in-band-clear-migration.test.ts
+# listTaskSessions — sessions-sidebar grouping + reset cutoff (was unregistered).
+run_test_electron_strict_loader packages/domains/task/src/server/ops/list-task-sessions.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts
 # Wave-1 hub/runner split — exec-domain DB access moved behind injectable ops seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts

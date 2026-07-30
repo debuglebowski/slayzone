@@ -40,6 +40,7 @@ raw.exec(`
     CHECK (origin IN (
       'slay-spawned-fresh',
       'slay-spawned-resume',
+      'in-band-clear',
       'cas-repoint-heal',
       'legacy-migration',
       'foreign-observed',
@@ -61,7 +62,7 @@ raw.exec(`
     created_at      INTEGER NOT NULL,
     bound_at        INTEGER,
     CHECK (origin IN (
-      'slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal',
+      'slay-spawned-fresh','slay-spawned-resume','in-band-clear','cas-repoint-heal',
       'legacy-migration','foreign-observed','pending-spawn'
     )),
     CHECK (status IN ('pooled','bound','dead'))

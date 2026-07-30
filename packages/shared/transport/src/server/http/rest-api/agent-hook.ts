@@ -7,6 +7,8 @@ import { isHookDrivenMode } from '@slayzone/terminal/server'
 import {
   recordConversation,
   findPendingSpawn,
+  findOwnedSpawnForConversation,
+  getCurrentConversationId,
   confirmSessionConversation,
   getBoundTaskId
 } from '@slayzone/task/server'
@@ -306,6 +308,14 @@ interface ResolvedHook {
   slaySessionId?: string
   /** CLI session UUID (claude/codex `session_id`, antigravity `conversationId`). */
   sessionId?: string
+  /**
+   * `SessionStart.source` — WHY the agent started this session. Claude Code
+   * emits: `startup` | `resume` | `clear` | `compact` | `fork`. Load-bearing for
+   * exactly one case: `clear` is the agent rotating its own session id in place,
+   * which the id-match provenance gate would otherwise read as a hijack (see
+   * `persistConversationId`). Absent on every other hook event.
+   */
+  source?: string
   cwd?: string
   raw?: unknown
   /** Attribution only — which release channel fired the hook (from the blob). */
@@ -371,6 +381,7 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
   return {
     agentId: agentIdRaw,
     hookEvent,
+    source: typeof effRaw?.source === 'string' ? effRaw.source : undefined,
     taskId: body.taskId ?? (typeof ctx?.taskId === 'string' ? ctx.taskId : undefined),
     slaySessionId:
       body.slaySessionId ?? (typeof ctx?.slaySessionId === 'string' ? ctx.slaySessionId : undefined),
@@ -419,9 +430,60 @@ async function persistConversationId(
   deps: RestApiDeps,
   agentId: string,
   taskId: string,
-  sessionId: string
+  sessionId: string,
+  /** `SessionStart.source` — see `ResolvedHook.source`. Only `'clear'` alters
+   *  the decision below; every other value falls through to the id-match gate. */
+  source?: string
 ): Promise<void> {
   try {
+    // ── In-band id rotation (`/clear`) ────────────────────────────────────────
+    // The agent dropped its conversation and minted a NEW session id without
+    // restarting its process. The id-match gate below cannot classify this: the
+    // reported id necessarily differs from the one slay pre-minted, which reads
+    // identically to a hijack (`claude --resume <foreign>`), so a `/clear` was
+    // recorded `foreign-observed` — audit-only. The user-visible damage was that
+    // the task kept resuming the PRE-clear conversation and the cleared session
+    // never appeared in the sessions sidebar.
+    //
+    // What makes honoring it safe is that `source` and ownership are checked
+    // TOGETHER. `source === 'clear'` is self-reported by the agent, so on its own
+    // it would let any process claiming `clear` rebind the task; ownership alone
+    // is too weak because a manual `--resume` typed in the same terminal inherits
+    // the same environment. So we additionally require that slay recorded a spawn
+    // for this (task, mode) whose id is the conversation being REPLACED — a
+    // pre-minted id only slay's own command line could have introduced. A hijack
+    // fails on `source` (`resume`/`startup`), and a `clear` from an unrelated
+    // terminal fails on ownership.
+    //
+    // Scoped to `clear` on purpose: `compact` and `fork` also fire SessionStart,
+    // but `compact` keeps the same id (already honored, nothing to fix) and
+    // `fork`'s id semantics are unverified — left on the existing gate.
+    if (source === 'clear') {
+      const outgoing = await getCurrentConversationId(deps.db, taskId, agentId)
+      // Idempotence: a repeated SessionStart for a clear we already recorded
+      // makes the new id the current one, so `outgoing === sessionId`. Nothing to
+      // do — falling through would record a duplicate row every replay.
+      if (outgoing === sessionId) return
+      // No outgoing conversation (a task that never bound an id) → there is
+      // nothing to claim ownership OF, so skip the lookup and let the standard
+      // gate handle it as an ordinary first spawn.
+      const ownedSpawn = outgoing
+        ? await findOwnedSpawnForConversation(deps.db, taskId, agentId, outgoing)
+        : null
+      if (ownedSpawn) {
+        await recordConversation(deps.db, {
+          taskId,
+          mode: agentId,
+          conversationId: sessionId,
+          origin: 'in-band-clear'
+        })
+        deps.notifyRenderer()
+        return
+      }
+      // No ownership claim → fall through to the standard gate, which will
+      // classify it `foreign-observed` exactly as before.
+    }
+
     // Provenance gate: look up the `pending-spawn` row slay wrote when it
     // launched the agent. If the CLI session id matches that row's expected
     // id, record it as honored (`slay-spawned-*`). If it doesn't — or no
@@ -553,7 +615,7 @@ export async function processAgentHook(
       // Awaited: a single indexed SELECT + UPDATE on local SQLite is sub-ms,
       // and the capture event is low-frequency (repeats short-circuit in the
       // helper) — keeping it deterministic beats a fire-and-forget race.
-      await persistConversationId(deps, hook.agentId, hook.taskId, cliSessionId)
+      await persistConversationId(deps, hook.agentId, hook.taskId, cliSessionId, hook.source)
       // Mirror onto the live PTY session for the idle-close gate.
       const ptySessionId = bridge?.findSession(hook.taskId, hook.agentId as TerminalMode)
       if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)

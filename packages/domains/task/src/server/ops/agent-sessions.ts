@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ConversationOrigin } from '@slayzone/task/shared'
+import { type ConversationOrigin, HONORED_ORIGINS_SQL } from '@slayzone/task/shared'
 import { agentSessionsEvents } from '../events'
 
 /**
@@ -43,7 +43,7 @@ export async function getCurrentConversationId(
        FROM agent_sessions
        WHERE task_id = ? AND mode = ?
          AND conversation_id IS NOT NULL
-         AND origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+         AND origin IN (${HONORED_ORIGINS_SQL})
          AND created_at > coalesce((SELECT at FROM reset), 0)
        ORDER BY created_at DESC
        LIMIT 1`,
@@ -112,7 +112,8 @@ export interface TaskSessionSummary {
  * fresh start / reset mints a new conversation → a new entry.
  *
  * Only HONORED origins count as sessions the user actually started
- * (`slay-spawned-fresh|resume`, `cas-repoint-heal`, `legacy-migration`).
+ * (`HONORED_ORIGINS` — slay-spawned fresh/resume, an in-band `/clear`, a
+ * conversation-id heal, and legacy backfill).
  * `pending-spawn` rows are excluded even though they carry the pre-minted
  * expected id — many belong to spawns that died before the agent confirmed a
  * SessionStart, so surfacing them would show phantom sessions. `foreign-observed`
@@ -144,7 +145,7 @@ export async function listTaskSessions(
        (SELECT o.origin FROM agent_sessions o
           WHERE o.task_id = s.task_id AND o.mode = s.mode
             AND o.conversation_id = s.conversation_id
-            AND o.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+            AND o.origin IN (${HONORED_ORIGINS_SQL})
           ORDER BY o.created_at ASC, o.rowid ASC LIMIT 1) AS origin,
        min(s.created_at)                         AS started_at,
        max(s.created_at)                         AS last_active_at,
@@ -155,7 +156,7 @@ export async function listTaskSessions(
           ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1) AS first_prompt
      FROM agent_sessions s
      WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
-       AND s.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+       AND s.origin IN (${HONORED_ORIGINS_SQL})
      GROUP BY s.conversation_id
      ORDER BY started_at DESC`,
     [taskId, mode]
@@ -229,6 +230,55 @@ export async function findPendingSpawn(
   } catch {
     return null
   }
+}
+
+/**
+ * Does slay own the agent process that just reported `observedConversationId`
+ * for (taskId, mode)? Answers the ONE question the `/clear` path needs and
+ * nothing more.
+ *
+ * WHY THIS EXISTS ALONGSIDE `findPendingSpawn` — the two are not
+ * interchangeable, and using the wrong one is the bug this closes:
+ *
+ *   `findPendingSpawn` answers "is a spawn IN FLIGHT right now?", so it applies a
+ *   10-minute TTL. An agent's `/clear` happens whenever the user decides to —
+ *   hours into a session is normal — and by then the TTL has long since hidden
+ *   the row. The spawn-intent row itself is NOT deleted at the TTL (only
+ *   `prunePendingSpawns` deletes, on PTY exit or sweep), so the ownership
+ *   evidence is still on disk; only that reader refuses to see it.
+ *
+ *   This function asks the durable question instead: did slay record a spawn for
+ *   this (task, mode) whose pre-minted id is the conversation the agent is
+ *   REPLACING? A pre-minted id is passed to the provider on slay's own command
+ *   line, so only a process slay launched can echo it back — matching it is
+ *   proof of ownership that survives the id rotation.
+ *
+ * Deliberately NOT a general-purpose "was this ever ours" helper: it requires
+ * the caller to name the outgoing conversation id, so a caller cannot use it to
+ * launder an arbitrary foreign id into an honored one.
+ *
+ * Returns the runtime session id of the owning spawn row, or null.
+ */
+export async function findOwnedSpawnForConversation(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  /** The conversation the agent is rotating AWAY from (slay's current honored
+   *  id for this task+mode). Null/empty → no ownership claim is possible. */
+  outgoingConversationId: string | null
+): Promise<string | null> {
+  if (!outgoingConversationId) return null
+  const row = await db.get<{ id: string }>(
+    `SELECT id
+       FROM agent_sessions
+       WHERE task_id = ? AND mode = ?
+         AND conversation_id = ?
+         AND origin IN ('pending-spawn', ${HONORED_ORIGINS_SQL})
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    [taskId, mode, outgoingConversationId]
+  )
+  return row?.id ?? null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
 import {
   HONORED_ORIGINS,
+  HONORED_ORIGINS_SQL,
   type ConversationOrigin
 } from '@slayzone/task/shared'
 import { agentSessionsEvents } from '../events'
@@ -191,7 +192,7 @@ export async function getCurrentConversationId(
      SELECT conversation_id
        FROM task_conversations
        WHERE task_id = ? AND mode = ?
-         AND origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+         AND origin IN (${HONORED_ORIGINS_SQL})
          AND created_at > coalesce((SELECT at FROM reset), 0)
        ORDER BY created_at DESC
        LIMIT 1`,

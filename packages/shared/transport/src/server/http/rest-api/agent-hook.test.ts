@@ -44,10 +44,28 @@ const findPendingSpawnSpy =
 const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(
   () => Promise.resolve(null)
 )
+// In-band `/clear` path: the current honored conversation (the id being rotated
+// away from) + the ownership lookup that proves slay spawned the process holding
+// it. Both default to "nothing known", so every pre-existing test keeps taking
+// the standard id-match gate untouched.
+const getCurrentConversationIdSpy = vi.fn<
+  (db: unknown, taskId: string, mode: string) => Promise<string | null>
+>(() => Promise.resolve(null))
+const findOwnedSpawnForConversationSpy = vi.fn<
+  (db: unknown, taskId: string, mode: string, outgoing: string | null) => Promise<string | null>
+>(() => Promise.resolve(null))
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: (...args: unknown[]) => recordConversationSpy(...args),
   findPendingSpawn: (db: unknown, taskId: string, mode: string) =>
     findPendingSpawnSpy(db, taskId, mode),
+  findOwnedSpawnForConversation: (
+    db: unknown,
+    taskId: string,
+    mode: string,
+    outgoing: string | null
+  ) => findOwnedSpawnForConversationSpy(db, taskId, mode, outgoing),
+  getCurrentConversationId: (db: unknown, taskId: string, mode: string) =>
+    getCurrentConversationIdSpy(db, taskId, mode),
   confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
   getBoundTaskId: (db: unknown, sessionId: string) => getBoundTaskIdSpy(db, sessionId)
 }))
@@ -132,6 +150,12 @@ describe('POST /api/agent-hook', () => {
     confirmSessionConversationSpy.mockReset()
     findPendingSpawnSpy.mockReset()
     getBoundTaskIdSpy.mockReset()
+    getCurrentConversationIdSpy.mockReset()
+    findOwnedSpawnForConversationSpy.mockReset()
+    // Default: no known current conversation and no ownership claim → the
+    // in-band-clear branch can never fire unless a test sets both up.
+    getCurrentConversationIdSpy.mockResolvedValue(null)
+    findOwnedSpawnForConversationSpy.mockResolvedValue(null)
     findSessionSpy.mockReturnValue(null)
     transitionSpy.mockReturnValue(true)
     markActiveSpy.mockReturnValue(true)
@@ -896,6 +920,187 @@ describe('POST /api/agent-hook', () => {
       expect(recordConversationSpy).toHaveBeenCalledTimes(1)
       const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
       expect(data.conversationId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // --- In-band `/clear` (agent rotates its own session id) ------------------
+  //
+  // `/clear` keeps the agent's process but mints a NEW session id, so the id it
+  // reports can never match the one slay pre-minted — the plain id-match gate
+  // reads it exactly like a hijack and files it `foreign-observed` (audit-only).
+  // The consequence was silent: the task kept resuming the PRE-clear
+  // conversation and the cleared session never showed in the sessions sidebar.
+  //
+  // Honoring it requires BOTH signals, so these tests pin each half failing
+  // independently — that pairing is the entire security argument.
+  const CLEAR_OLD = 'e9a303db-042b-4bf9-97b7-7759b6f859e2'
+  const CLEAR_NEW = 'de675b93-6ec1-4596-a01e-260e5c7a1861'
+
+  /** A Claude `SessionStart` carrying `source`, shaped like the real payload. */
+  function clearHook(
+    port: number,
+    source: string,
+    sessionId: string = CLEAR_NEW
+  ): Promise<{ status: number; body: string }> {
+    return postJson(port, {
+      agentId: 'claude-code',
+      taskId: 'cc-clear',
+      raw: {
+        session_id: sessionId,
+        hook_event_name: 'SessionStart',
+        source,
+        cwd: '/w'
+      }
+    })
+  }
+
+  test("source 'clear' + owned outgoing conversation → honored as in-band-clear", async () => {
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      const res = await clearHook(srv.port, 'clear')
+      expect(res.status).toBe(200)
+      // Ownership is asked about the OUTGOING id — the conversation being
+      // replaced — not the newly minted one.
+      expect(findOwnedSpawnForConversationSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        'cc-clear',
+        'claude-code',
+        CLEAR_OLD
+      )
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toEqual({
+        taskId: 'cc-clear',
+        mode: 'claude-code',
+        conversationId: CLEAR_NEW,
+        origin: 'in-band-clear'
+      })
+      // Honored → the renderer must refresh so the sidebar shows the new session.
+      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+      // The standard gate must be bypassed entirely, not merely overruled.
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'clear' but NO ownership claim → still foreign-observed", async () => {
+    // A `/clear` fired from a process slay never spawned for this task (or whose
+    // outgoing conversation isn't slay's). `source` alone must not be trusted —
+    // it's self-reported by the agent.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue(null)
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await clearHook(srv.port, 'clear')
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'resume' with a matching owned conversation → NOT honored as clear", async () => {
+    // The hijack the gate exists for: `claude --resume <foreign>` typed inside a
+    // slay PTY inherits the same env and can satisfy ownership, so `source` is
+    // what has to reject it.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const srv = await startServer()
+    try {
+      await clearHook(srv.port, 'resume')
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+      expect(findOwnedSpawnForConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'startup' with a matching owned conversation → NOT honored as clear", async () => {
+    // A bare `claude` relaunched in the terminal. Same reasoning as 'resume'.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const srv = await startServer()
+    try {
+      await clearHook(srv.port, 'startup')
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("repeated 'clear' SessionStart for an already-recorded clear → no duplicate row", async () => {
+    // After the first clear is honored, the new id IS the current conversation.
+    // A replayed SessionStart (Claude re-fires it on compact, and the hook can be
+    // redelivered) must be a no-op rather than appending a row per replay.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_NEW)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      const res = await clearHook(srv.port, 'clear', CLEAR_NEW)
+      expect(res.status).toBe(200)
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'clear' with no prior conversation → falls through to the standard gate", async () => {
+    // Nothing to rotate away from (a fresh task that has never bound an id), so
+    // no ownership claim is possible. The pre-minted-id gate still applies and
+    // can legitimately honor it as a fresh spawn.
+    getCurrentConversationIdSpy.mockResolvedValue(null)
+    findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
+    const srv = await startServer()
+    try {
+      await clearHook(srv.port, 'clear')
+      // Ownership is never even asked — there is no outgoing id to claim.
+      expect(findOwnedSpawnForConversationSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-fresh'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('SessionStart without source → unchanged id-match gate', async () => {
+    // Codex/older payloads carry no `source`. Must behave exactly as before.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    findPendingSpawnSpy.mockResolvedValue({
+      expectedSessionId: CLEAR_NEW,
+      usedResume: true
+    })
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-clear',
+        sessionId: CLEAR_NEW
+      })
+      expect(getCurrentConversationIdSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-resume'
+      })
     } finally {
       await srv.close()
     }

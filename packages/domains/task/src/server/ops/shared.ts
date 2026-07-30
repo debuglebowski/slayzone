@@ -1,6 +1,11 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
-import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
+import {
+  validateReparent,
+  reparentErrorMessage,
+  HONORED_ORIGINS_SQL,
+  type ReparentTaskRow
+} from '@slayzone/task/shared'
 import { recordConversation } from './task-conversations.js'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { buildTaskUpdatedEvents } from '../history.js'
@@ -299,7 +304,7 @@ async function attachCurrentConversationByMode(
        LEFT JOIN reset r ON r.task_id = s.task_id AND r.mode = s.mode
        WHERE s.task_id IN (${placeholders})
          AND s.conversation_id IS NOT NULL
-         AND s.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+         AND s.origin IN (${HONORED_ORIGINS_SQL})
          AND s.created_at > coalesce(r.at, 0)
      )
      SELECT task_id, mode, conversation_id FROM ranked WHERE rn = 1`,
