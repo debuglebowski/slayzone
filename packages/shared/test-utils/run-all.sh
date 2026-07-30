@@ -99,6 +99,22 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/fil
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
 run_test packages/apps/hub/src/build-info.test.ts
+# /health identity + loopback gating — the multi-hub discovery channel
+# (plans/hub-lifecycle-and-discovery.md P1).
+run_test packages/apps/hub/src/health.test.ts
+# Hub port block — hubs bind a KNOWN range so `slay hub ls` can find them (P3).
+run_test packages/shared/platform/src/hub-port-block.test.ts
+# Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
+run_test packages/shared/platform/src/hub-discovery.test.ts
+# OS-supervisor units (launchd/systemd) behind `slay hub start` — generated file
+# CONTENT only; never registers with the real supervisor (P5).
+run_test packages/shared/platform/src/hub-service.test.ts
+# `slay hub` end-to-end: boots two REAL hubs in temp roots, then drives ls /
+# --hub targeting / stop through the built CLI bundle, and asserts the
+# supervised-hub refusal. Spawns hubs directly (never `hub start`), so no
+# launchd/systemd unit is ever installed by the suite. Electron ABI (the hub
+# bundle needs better-sqlite3) → strict loader.
+run_test_electron_strict_loader packages/apps/cli/src/commands/hub-lifecycle.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).

@@ -3,6 +3,10 @@
  * of the local app's HTTP server.
  *
  * Precedence:
+ *   0. `--hub <name|port>` on the command line — resolved via hub-discovery in
+ *      the root `preAction` hook, which calls {@link setHubOverride}. An explicit
+ *      per-invocation flag has to beat the ambient env/config, or `slay --hub
+ *      staging …` would silently hit whatever hub the shell was pointed at.
  *   1. `SLAYZONE_HUB_ADDRESS` (+ `SLAYZONE_HUB_TOKEN`) environment variables —
  *      authority only (`host[:port]`); the http(s) scheme is DERIVED from
  *      SLAYZONE_MODE (local → http, remote → https). The env channel never
@@ -31,6 +35,20 @@ interface HubFileConfig {
 }
 
 const HUB_CONFIG_FILENAME = 'hub.json'
+
+/**
+ * Target set by `--hub <name|port>` for THIS invocation only. Never persisted —
+ * the flag is a one-shot redirect, unlike `slay hub use`.
+ */
+let hubOverride: HubTarget | null = null
+
+/**
+ * Point every subsequent API call at `target`. Called from the root command's
+ * `preAction` hook once `--hub` has been resolved to a live hub.
+ */
+export function setHubOverride(target: HubTarget): void {
+  hubOverride = target
+}
 
 export function getHubConfigPath(): string {
   return path.join(getDataDir(), HUB_CONFIG_FILENAME)
@@ -88,8 +106,13 @@ function readHubFile(): HubFileConfig | null {
  * behavior). An invalid `SLAYZONE_HUB_ADDRESS` is a hard error (exit 1) — the user
  * explicitly asked for a hub, silently falling back to the local app would be
  * surprising. A corrupt hub.json only warns and falls back.
+ *
+ * `--hub` (see {@link setHubOverride}) wins over both.
  */
 export function resolveHubTarget(): HubTarget | null {
+  // `--hub` outranks everything: it names a hub for this one command.
+  if (hubOverride) return hubOverride
+
   const envAddress = process.env.SLAYZONE_HUB_ADDRESS
   // SLAYZONE_HUB_TOKEN semantics: unset → the file token may apply; set →
   // it wins, and set-but-empty means "explicitly no token" (never falls

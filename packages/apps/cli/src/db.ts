@@ -61,6 +61,19 @@ function loopbackHubPort(): number | null {
   return LOOPBACK_HOSTS.has(parsed.host) ? parsed.port : null
 }
 
+/**
+ * True when a SlayZone database exists for this install.
+ *
+ * `openDb()` deliberately `process.exit(1)`s when the file is absent — right for
+ * a task/project command (they cannot work without it), fatal for the hub
+ * commands: a hub-only box has NO database and must still be able to run
+ * `slay hub ls`. Callers that merely CONSULT the DB opportunistically probe with
+ * this first. A try/catch around openDb() does NOT work — exit is not throw.
+ */
+export function hasLocalDatabase(): boolean {
+  return fs.existsSync(getDbPath(process.env.SLAYZONE_DEV === '1'))
+}
+
 export function getServerPort(): number | null {
   // The running server binds SLAYZONE_HUB_ADDRESS and publishes its actually-bound
   // port to `settings.server_port` at boot (hub/src/server.ts). Fast-path a
