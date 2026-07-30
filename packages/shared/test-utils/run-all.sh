@@ -180,6 +180,13 @@ run_test packages/domains/terminal/src/server/sync-query-response.test.ts
 # Diagnostics — payload blob offload. Screenshots were silently truncated to 4096
 # chars by the redactor, making every recorded scramble event unprovable.
 run_test packages/domains/diagnostics/src/server/payload-blobs.test.ts
+# Diagnostics — blob retention. Offloading to disk means row deletion reclaims
+# nothing, so blobs need their own age + size bound or they grow forever.
+run_test packages/domains/diagnostics/src/server/blob-retention.test.ts
+# Diagnostics — event-row retention (needs better-sqlite3 → electron ABI). Was
+# never registered, which hid every assertion silently reading `undefined` from an
+# un-awaited async call.
+run_test_electron_strict_loader packages/domains/diagnostics/src/server/retention.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
 run_test packages/domains/terminal/src/server/state-machine.test.ts

@@ -1,5 +1,11 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '../shared'
+import {
+  createFilesystemBlobFs,
+  DEFAULT_MAX_BLOB_BYTES,
+  pruneBlobs,
+  type BlobFileSystem
+} from './blob-retention'
 
 const HARD_EVENT_CAP = 200_000
 const CHUNK_LIMIT = 10_000
@@ -10,6 +16,12 @@ export interface RetentionDeps {
   getDb: () => SlayzoneDb | null
   getConfig: () => DiagnosticsConfig
   now?: () => number
+  /**
+   * Filesystem for payload-blob pruning. Injected for tests; production resolves
+   * `<storage>/diagnostics/` lazily on first tick (so a scheduler started before
+   * the storage dir exists does not throw).
+   */
+  blobFs?: BlobFileSystem
 }
 
 // Cheap row-count proxy. `SELECT COUNT(*)` scans an index over the entire
@@ -59,6 +71,40 @@ export async function runRetentionChunk(
   const deleted = Number(res.changes)
   if (deleted > 0) await reclaimFreePages(db)
   return { deleted, moreWork: deleted === CHUNK_LIMIT }
+}
+
+/**
+ * Prune payload blobs alongside the event rows.
+ *
+ * Deleting event ROWS reclaims nothing on disk, so offloading canary screenshots to
+ * `<storage>/diagnostics/` (see `payload-blobs.ts`) leaked without this: ~10 MB/week
+ * measured, unbounded. Bounded by the same `retentionDays` as the rows — past which
+ * a blob is unreferenced by construction — plus a hard size ceiling for the burst
+ * case, where a driver fault fires the canary hundreds of times and every blob is
+ * still "recent".
+ *
+ * Never throws: diagnostics housekeeping must not break the retention tick.
+ */
+export function runBlobRetention(
+  config: DiagnosticsConfig,
+  nowMs: number,
+  blobFs?: BlobFileSystem
+): { deleted: number; freedBytes: number; failed: number } {
+  try {
+    const fs = blobFs ?? createFilesystemBlobFs()
+    const result = pruneBlobs(fs, {
+      cutoffMs: nowMs - config.retentionDays * 24 * 60 * 60 * 1000,
+      maxTotalBytes: DEFAULT_MAX_BLOB_BYTES
+    })
+    if (result.failed > 0) {
+      console.warn(`[diagnostics retention] ${result.failed} blob(s) could not be deleted`)
+    }
+    return result
+  } catch (err) {
+    // e.g. storage dir unresolvable in a graph that never writes blobs.
+    console.error('[diagnostics retention] blob prune failed:', err)
+    return { deleted: 0, freedBytes: 0, failed: 0 }
+  }
 }
 
 // Free disk pages back to the filesystem. No-op unless the DB was created
@@ -112,6 +158,9 @@ async function tick(deps: RetentionDeps): Promise<void> {
     // Don't recordDiagnosticEvent — same DB would recurse on DB-level failure
     console.error('[diagnostics retention] chunk failed:', err)
   }
+
+  runBlobRetention(config, now(), deps.blobFs)
+
   if (isStopped) return
   scheduleNext(deps, moreWork ? TICK_WORK_MS : TICK_IDLE_MS)
 }
