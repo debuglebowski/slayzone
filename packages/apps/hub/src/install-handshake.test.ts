@@ -8,7 +8,7 @@
  * `connected: true` in `runners.list`). This is the deploy path the desktop app's
  * local-runner-supervisor + the published npm packages both exercise — here over
  * the dev-tree bundles under Electron's node ABI (no native rebuild; Tier 1 in
- * scripts/publish-hub-runner.sh covers the `npm install` ABI-rebuild path).
+ * scripts/publish-npm.sh covers the `npm install` ABI-rebuild path).
  *
  * ISOLATION (must never touch the real dev/prod stores):
  *   - The child env is SCRUBBED of every `SLAYZONE_*` / `ELECTRON_*` var (a

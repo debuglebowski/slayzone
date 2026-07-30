@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 #
-# publish-hub-runner.sh — build, verify, and publish @slayzone/hub +
-# @slayzone/runner to npm as install-time-rebuild packages.
+# publish-npm.sh — build, verify, and publish @slayzone/hub, @slayzone/runner and
+# @slayzone/cli to npm.
+#
+# hub + runner are install-time-rebuild packages (native addons); the CLI has no
+# native deps and publishes as a plain self-contained bundle.
 #
 # WHY THIS SCRIPT EXISTS / HOW TO RUN:
 #   npm publish is an outward-facing, effectively-irreversible action that needs
 #   YOUR npm auth (@slayzone org + 2FA). Run this yourself in your own terminal:
-#       bash scripts/publish-hub-runner.sh            # dry run: build + pack + smoke, NO publish
-#       bash scripts/publish-hub-runner.sh --publish  # also runs `npm publish --access public`
+#       bash scripts/publish-npm.sh            # dry run: build + pack + smoke, NO publish
+#       bash scripts/publish-npm.sh --publish  # also runs `npm publish --access public`
 #
 # It builds from a CLEAN git HEAD worktree (so any uncommitted work in your main
 # tree is NOT baked into the published bundle). The esbuild build inlines all
@@ -51,37 +54,48 @@ cd "$WT"
 pnpm install --frozen-lockfile
 pnpm --filter @slayzone/hub build
 pnpm --filter @slayzone/runner build
+pnpm --filter @slayzone/cli build
 
 # --- rewrite each package.json into a publishable, install-time-rebuild manifest ---
 # The bundle already inlines workspace deps; published deps = ONLY native externals.
+#
+# publish_manifest <pkgdir> <pubname> <bin> <entry> <desc> [native-dep...]
+#   entry — the bundle the bin points at, relative to the package root. The hub
+#           and runner emit dist/bin.cjs; the CLI emits dist/slay.js.
 publish_manifest() {
-  local pkgdir="$1" pubname="$2" bin="$3" desc="$4"; shift 4
+  local pkgdir="$1" pubname="$2" bin="$3" entry="$4" desc="$5"; shift 5
   local natives=("$@")
   node -e '
     const fs=require("fs"), path=require("path");
-    const [dir,name,bin,version,desc,...natives]=process.argv.slice(1);
+    const [dir,name,bin,entry,version,desc,...natives]=process.argv.slice(1);
     const src=JSON.parse(fs.readFileSync(path.join(dir,"package.json"),"utf8"));
     const deps={};
     for(const n of natives) deps[n]=src.dependencies[n];
     const out={
       name, version, description: desc, license:"GPL-3.0-only", private:false,
-      type:"module", bin:{[bin]:"./dist/bin.cjs"}, main:"./dist/bin.cjs",
+      type:"module", bin:{[bin]:entry}, main:entry,
       files:["dist/","README.md"], engines:{node:">=24"},
       repository:{type:"git",url:"git+https://github.com/debuglebowski/slayzone.git"},
       dependencies: deps
     };
     fs.writeFileSync(path.join(dir,"package.json"), JSON.stringify(out,null,2)+"\n");
-    console.log("   manifest:", name+"@"+version, "deps:", Object.keys(deps).join(", "));
-  ' "$pkgdir" "$pubname" "$bin" "$VERSION" "$desc" "${natives[@]}"
+    console.log("   manifest:", name+"@"+version, "bin:", entry,
+      "deps:", Object.keys(deps).join(", ") || "(none)");
+  ' "$pkgdir" "$pubname" "$bin" "$entry" "$VERSION" "$desc" "${natives[@]}"
 }
 
 echo "==> Rewriting publish manifests"
-publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub \
+publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub ./dist/bin.cjs \
   "SlayZone hub — headless server (DB, routers, auth, runner gateway)" \
   better-sqlite3 node-pty bufferutil utf-8-validate
-publish_manifest packages/apps/runner "@slayzone/runner" slayzone-runner \
+publish_manifest packages/apps/runner "@slayzone/runner" slayzone-runner ./dist/bin.cjs \
   "SlayZone runner — remote execution node (pty, git, fs, processes)" \
   node-pty bufferutil utf-8-validate
+# The CLI has NO native deps: build.mjs inlines every workspace dep and leaves only
+# the `node:sqlite` builtin external, so there is nothing to rebuild at install
+# time (unlike hub/runner). Zero dependencies is therefore correct, not an omission.
+publish_manifest packages/apps/cli "@slayzone/cli" slay ./dist/slay.js \
+  "SlayZone CLI — run, list and target SlayZone hubs; drive tasks, ptys and projects"
 
 # --- security-warning README into each package ---
 cat > packages/apps/hub/README.md <<'EOF'
@@ -117,15 +131,47 @@ token (mint one on the hub), then runs terminals/agents/git on this machine.
 The join token embeds the hub URL + cert fingerprint, so nothing else is
 required. GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
+cat > packages/apps/cli/README.md <<'EOF'
+# @slayzone/cli (`slay`)
 
-# --- pack both ---
+Command-line control for SlayZone hubs, plus tasks, terminals and projects.
+
+    npm install -g @slayzone/cli
+
+## Hubs on this machine
+
+    slay hub create <name>  # create a hub in this directory and keep it running
+    slay hub ls             # every hub running on this machine
+    slay hub logs <name>
+    slay hub stop <name>    # stop it, keep it registered
+    slay hub start <name>   # bring a stopped hub back
+    slay hub rm <name>      # stop it and remove its registration
+
+`hub create` registers the hub with your OS service manager (launchd on macOS,
+systemd --user on Linux), so it restarts if it crashes and starts again when you
+log in. Names are unique per machine — `create` fails if one already exists. To
+run a hub in the foreground instead, use `npx @slayzone/hub`.
+
+## Targeting a hub
+
+    slay hub use <name|url>     # point this CLI at a hub
+    slay hub current            # which hub am I pointed at?
+    slay --hub staging tasks list   # one-off override
+
+GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
+EOF
+
+# --- pack all three ---
 echo "==> npm pack"
 ( cd packages/apps/hub && npm pack --silent )
 ( cd packages/apps/runner && npm pack --silent )
+( cd packages/apps/cli && npm pack --silent )
 HUB_TGZ="$WT/packages/apps/hub/$(ls packages/apps/hub/*.tgz | xargs -n1 basename | tail -1)"
 RUN_TGZ="$WT/packages/apps/runner/$(ls packages/apps/runner/*.tgz | xargs -n1 basename | tail -1)"
+CLI_TGZ="$WT/packages/apps/cli/$(ls packages/apps/cli/*.tgz | xargs -n1 basename | tail -1)"
 echo "   $HUB_TGZ"
 echo "   $RUN_TGZ"
+echo "   $CLI_TGZ"
 
 # --- SMOKE: install BOTH tarballs under PLAIN NODE (proves the ABI rebuild) and
 #     drive the full deploy handshake: boot hub → mint join token → boot runner →
@@ -137,9 +183,10 @@ SMOKE="$(mktemp -d /tmp/slz-pub-smoke.XXXXXX)"
 HUB_ROOT="$SMOKE/hub-root"; RUN_ROOT="$SMOKE/runner-root"
 RUN_CREDS="$SMOKE/runner-creds"; RUN_WORK="$SMOKE/work"
 mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
-( cd "$SMOKE" && mkdir hub runner \
+( cd "$SMOKE" && mkdir hub runner cli \
   && ( cd hub && npm init -y >/dev/null && npm install "$HUB_TGZ" >/dev/null 2>&1 ) \
-  && ( cd runner && npm init -y >/dev/null && npm install "$RUN_TGZ" >/dev/null 2>&1 ) )
+  && ( cd runner && npm init -y >/dev/null && npm install "$RUN_TGZ" >/dev/null 2>&1 ) \
+  && ( cd cli && npm init -y >/dev/null && npm install "$CLI_TGZ" >/dev/null 2>&1 ) )
 
 # Both bins MUST carry a `#!/usr/bin/env node` shebang: npm/npx exec the bin
 # DIRECTLY (no `node` prefix), so a shebang-less bundle is handed to /bin/sh,
@@ -148,7 +195,8 @@ mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
 # the same files npx runs — before anything else, so the failure names the
 # cause instead of surfacing as a confusing boot error further down.
 for b in "$SMOKE/hub/node_modules/.bin/slayzone-hub" \
-         "$SMOKE/runner/node_modules/.bin/slayzone-runner"; do
+         "$SMOKE/runner/node_modules/.bin/slayzone-runner" \
+         "$SMOKE/cli/node_modules/.bin/slay"; do
   # `.bin` entries are symlinks on posix and shim scripts on Windows; resolve so
   # we read the bundle itself.
   target="$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$b")"
@@ -156,7 +204,7 @@ for b in "$SMOKE/hub/node_modules/.bin/slayzone-hub" \
     || { echo "   SMOKE FAIL — $b has no node shebang (npx would run it via /bin/sh)"
          rm -rf "$SMOKE"; echo "Aborting before publish."; exit 1; }
 done
-echo "   ✓ both published bins carry a node shebang"
+echo "   ✓ all three published bins carry a node shebang"
 
 # Shared HMAC secret so the hub's runner-auth verifies the runner it enrolls.
 SMOKE_SECRET="$(openssl rand -hex 32)"
@@ -245,7 +293,50 @@ for i in $(seq 1 20); do
   sleep 1
 done
 echo "   ✓ runner enrolled into the hub over the pinned wss link"
-echo "   SMOKE PASS — installed hub + runner completed the enroll handshake under plain node"
+
+# --- CLI smoke: the published `slay` must DISCOVER the running hub and STOP it.
+# Discovery probes the hub port block, but this smoke hub binds a fixed loopback
+# port ($HUB_PORT) outside that block, so point the CLI straight at it with
+# `--hub <port>` (a direct probe — see hub-discovery's findHub). That covers the
+# whole chain on published artifacts: bundle boots under plain node → /health
+# identity fields present → hub resolved → SIGTERM path (this hub has no service
+# unit) terminates it.
+#
+# Deliberately NOT `slay hub create`: that REGISTERS a launchd/systemd unit, and a
+# publish smoke must not install a service on the CI runner or a developer's
+# machine. Unit-file content is covered by platform/src/hub-service.test.ts.
+SLAY="$SMOKE/cli/node_modules/.bin/slay"
+CLI_ENV=(env "${SCRUB[@]}" SLAYZONE_ROOT="$HUB_ROOT")
+
+# (a) The bundle executes at all under plain node. `--version` needs no hub and no
+#     database, so a failure here is unambiguously a broken bundle.
+CLI_VERSION="$("${CLI_ENV[@]}" "$SLAY" --version 2>&1)" \
+  || smoke_fail "published slay failed to run: $CLI_VERSION"
+[ "$CLI_VERSION" = "$VERSION" ] \
+  || smoke_fail "published slay reports version '$CLI_VERSION', expected '$VERSION'"
+echo "   ✓ published slay runs under plain node (v$CLI_VERSION)"
+
+# (b) Discovery resolves the live hub and reports its identity. `--hub <port>`
+#     probes directly, which is what reaches this fixed out-of-block port.
+HUB_JSON="$("${CLI_ENV[@]}" "$SLAY" --hub "$HUB_PORT" hub current 2>&1)" \
+  || smoke_fail "slay could not reach the hub on $HUB_PORT: $HUB_JSON"
+echo "$HUB_JSON" | grep -q "Health: ok" \
+  || smoke_fail "slay hub current did not report a healthy hub: $HUB_JSON"
+echo "   ✓ slay resolved the running hub and probed it healthy"
+
+# (c) Stop the smoke hub THROUGH the CLI — the real end-to-end assertion. This
+#     exercises resolve-by-port → /health identity (pid) → SIGTERM fallback (this
+#     hub has no service unit) → confirm-it-stopped.
+STOP_OUT="$("${CLI_ENV[@]}" "$SLAY" hub stop "$HUB_PORT" 2>&1)" \
+  || smoke_fail "slay hub stop failed: $STOP_OUT"
+for i in $(seq 1 15); do
+  kill -0 "$HPID" 2>/dev/null || break
+  [ "$i" = "15" ] && smoke_fail "hub still alive after slay hub stop: $STOP_OUT"
+  sleep 1
+done
+echo "   ✓ slay hub stop terminated the hub (discovery + SIGTERM path)"
+
+echo "   SMOKE PASS — hub + runner enrolled, and the published CLI drove the hub, under plain node"
 kill "$HPID" "$RPID" 2>/dev/null || true
 rm -rf "$SMOKE"
 
@@ -283,4 +374,5 @@ publish_one() {
 }
 publish_one packages/apps/hub "@slayzone/hub"
 publish_one packages/apps/runner "@slayzone/runner"
-echo "==> Done — @slayzone/hub@$VERSION + @slayzone/runner@$VERSION at tag: $NPM_TAG"
+publish_one packages/apps/cli "@slayzone/cli"
+echo "==> Done — @slayzone/hub + @slayzone/runner + @slayzone/cli @$VERSION at tag: $NPM_TAG"

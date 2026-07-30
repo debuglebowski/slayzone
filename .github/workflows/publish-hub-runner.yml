@@ -1,14 +1,26 @@
-name: Publish hub + runner (npm)
+name: Publish hub + runner + cli (npm)
 
-# Publishes @slayzone/hub and @slayzone/runner to npm as install-time-rebuild
-# packages (bin.cjs bundles workspace deps; native addons rebuild on the
-# consumer's machine at `npm install`).
+# Publishes @slayzone/hub, @slayzone/runner and @slayzone/cli to npm.
+#
+# hub + runner are install-time-rebuild packages (bin.cjs bundles workspace deps;
+# native addons rebuild on the consumer's machine at `npm install`). The CLI has
+# no native deps — its bundle is self-contained, so it publishes with zero
+# dependencies and nothing to rebuild.
 #
 # AUTH: npm Trusted Publishing (OIDC) — no NPM_TOKEN. GitHub mints a short-lived
 # OIDC token (needs `id-token: write`); npm (>=11.5.1) exchanges it for a scoped
 # publish credential. The @slayzone npm org must have a Trusted Publisher
-# configured for BOTH packages pointing at debuglebowski/slayzone +
+# configured for ALL THREE packages pointing at debuglebowski/slayzone +
 # this workflow filename, else publish fails.
+#
+# ⚠️ DO NOT RENAME THIS FILE. The Trusted Publisher config on npm pins this exact
+# workflow FILENAME; renaming it revokes publish auth for every package until the
+# npm-side config is updated to match.
+#
+# NOTE for @slayzone/cli: it is newly published, so it needs its own Trusted
+# Publisher entry on npm before the first `--publish` run — otherwise hub and
+# runner publish and the CLI fails. The script is idempotent per package, so a
+# re-dispatch after adding the entry skips what already landed.
 #
 # SAFE TO COMMIT / INERT UNTIL ENABLED: live `npm publish` only runs when the
 # OIDC token endpoint is available (i.e. `id-token: write` granted, real repo).
@@ -48,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0 # publish-hub-runner.sh builds from a clean-HEAD worktree
+          fetch-depth: 0 # publish-npm.sh builds from a clean-HEAD worktree
 
       - uses: pnpm/action-setup@v4
 
@@ -102,10 +114,10 @@ jobs:
 
       - name: Build + pack + smoke (dry run)
         if: steps.mode.outputs.effective == 'dry-run'
-        run: bash scripts/publish-hub-runner.sh
+        run: bash scripts/publish-npm.sh
 
       # No NODE_AUTH_TOKEN: npm (>=11.5.1) auto-detects OIDC and exchanges it for
       # a scoped publish credential via the org's Trusted Publisher config.
       - name: Build + pack + smoke + publish
         if: steps.mode.outputs.effective == 'publish'
-        run: bash scripts/publish-hub-runner.sh --publish
+        run: bash scripts/publish-npm.sh --publish
