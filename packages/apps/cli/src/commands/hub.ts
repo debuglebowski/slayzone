@@ -5,8 +5,9 @@
  *   - MACHINE view: which hubs are running here (`ls`, `start`, `stop`,
  *     `restart`, `logs`). Answered by probing the hub port block — see
  *     `@slayzone/platform/hub-discovery` for why a probe beats a pidfile.
- *   - CLIENT view: which hub THIS CLI talks to (`use`, `current`, `forget`).
- *     Answered from `hub.json` / `SLAYZONE_HUB_ADDRESS`.
+ *   - CLIENT view: which hub THIS CLI talks to (`use`, `login`, `current`,
+ *     `forget`). Answered from `hub.json` / `SLAYZONE_HUB_ADDRESS`. `use` points at
+ *     a hub; `login` additionally OBTAINS the bearer an auth-enforcing hub needs.
  *   - ACCOUNTS on a hub (`users add|ls|rm`). Reaches the hub's loopback-only
  *     `/api/hub/users` — see {@link hubUsersCommand}.
  *
@@ -18,9 +19,11 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, openSync } from 'node:fs'
-import { resolve as resolvePath } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { discoverHubs, findHub, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
+import { isBareAuthority, parseHubAddress } from '@slayzone/platform/hub-addr'
+import { updateSlayzoneConfig } from '@slayzone/platform/slayzone-config'
 import {
   detectBackend,
   listRegisteredUnits,
@@ -37,6 +40,7 @@ import {
   resolveHubTarget,
   writeHubConfig
 } from '../hub-config'
+import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import { getServerPort, hasLocalDatabase } from '../db'
 import {
   ensureLogDir,
@@ -171,15 +175,23 @@ async function launchHub(args: {
   name: string
   root: string
   port?: number
+  /** Full bind authority (`host[:port]`), from `--bind` / a remote `create`. Wins
+   *  over `port`, which can only ever mean loopback. */
+  address?: string
   backend: ServiceBackend
   creating: boolean
 }): Promise<void> {
-  const { name, root, port, backend, creating } = args
+  const { name, root, port, address, backend, creating } = args
   const bin = resolveServiceBin('hub')
   const logDir = ensureLogDir('hub', root)
   const logs = serviceLogPaths('hub', root)
+  // Which port to probe for. Discovery only ever dials 127.0.0.1, which still
+  // reaches a wildcard bind (0.0.0.0 includes loopback) — so an explicit `--bind`
+  // is discoverable exactly like a loopback one. A host-only authority names no
+  // port, so fall back to finding the hub by name.
+  const probePort = address !== undefined ? parseHubAddress(address)?.port : port
   const findIt = (): Promise<DiscoveredHub | null> =>
-    port === undefined ? findAnyHub(name) : findHub(String(port))
+    probePort === undefined ? findAnyHub(name) : findHub(String(probePort))
 
   if (backend === 'none') {
     // No user-level supervisor (Windows today). Background it anyway, but never let
@@ -193,7 +205,13 @@ async function launchHub(args: {
         ...process.env,
         SLAYZONE_ROOT: root,
         SLAYZONE_HUB_NAME: name,
-        ...(port === undefined ? {} : { SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}` }),
+        // Same precedence as the unit path (see unitEnv): an explicit authority
+        // wins, else the legacy loopback-from-port form.
+        ...(address !== undefined
+          ? { SLAYZONE_HUB_ADDRESS: address }
+          : port === undefined
+            ? {}
+            : { SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}` }),
         // Same interpreter requirement as the unit path: a dev-tree hub needs
         // ELECTRON_RUN_AS_NODE or its Electron-ABI natives fail to load.
         ...(bin.env ?? {})
@@ -221,6 +239,7 @@ async function launchHub(args: {
       args: bin.args,
       logDir,
       ...(port ? { port } : {}),
+      ...(address !== undefined ? { address } : {}),
       ...(bin.env ? { env: bin.env } : {})
     },
     backend
@@ -349,81 +368,78 @@ interface HubUserRow {
 }
 
 /**
- * Resolve which hub the `users` commands act on, as a base URL.
- *
- * Deliberately NOT `../api.ts`: its `resolveTarget()` falls through to
- * `getServerPort()` → `openDb()`, which `process.exit(1)`s when there is no local
- * SlayZone database — the normal state of a hub-only VPS, and impossible to catch.
- * (Same reason `outOfBlockPorts()` above gates on `hasLocalDatabase()`.)
- *
- * Precedence:
- *   1. Whatever `resolveHubTarget()` says — which already covers the root `--hub`
- *      flag, `SLAYZONE_HUB_ADDRESS`/`_TOKEN`, and `hub.json`. Reusing it means
- *      `slay --hub staging hub users ls` works with no new surface.
- *   2. Auto-discovery, when exactly ONE hub is running here. Refusing to guess
- *      between several is the point: creating an account on the wrong hub is
- *      invisible until someone can't sign in.
+ * Read a password from stdin when it was not passed as a flag. Returns '' when
+ * stdin is a TTY (nothing piped) so the caller can print the usage hint — the CLI
+ * never renders an interactive prompt here, so a bare invocation must not hang
+ * waiting on a keystroke that will never come in a script.
  */
-async function resolveHubForUsers(): Promise<{ baseUrl: string; token: string | null }> {
-  const configured = resolveHubTarget()
-  if (configured) return configured
+async function readPasswordFromStdin(): Promise<string> {
+  if (process.stdin.isTTY) return ''
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+  // Strip the trailing newline `echo` adds — a password is never meant to carry it.
+  return Buffer.concat(chunks)
+    .toString('utf8')
+    .replace(/\r?\n$/, '')
+}
 
-  const running = await discoverAllHubs()
-  if (running.length === 0) {
+/**
+ * Exchange an email + password for a hub bearer token via better-auth.
+ *
+ * Mirrors the desktop app's `hubLogin` (main/boot-config.ts): POST
+ * `/api/auth/sign-in/email`, take the token from the `set-auth-token` response
+ * header the bearer plugin sets, falling back to a `token` field in the body. That
+ * route is deliberately gate-exempt (`AUTH_BOOTSTRAP_PREFIX`) — it has to be
+ * reachable without a credential, or a hub could never be authenticated at all.
+ */
+async function hubSignIn(baseUrl: string, email: string, password: string): Promise<string> {
+  let res: Response
+  try {
+    res = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      signal: AbortSignal.timeout(10_000)
+    })
+  } catch {
+    fail(`Could not reach the hub at ${baseUrl}.`)
+  }
+  if (!res.ok) {
+    // better-auth answers 401 for both a wrong password and an unknown email, and
+    // deliberately does not distinguish them. Name the likely fixes instead of
+    // guessing which one it was.
     fail(
-      'No hub is running on this machine.\n' +
-        'Start one with `slay hub start <name>`, or name a remote hub with ' +
-        '`slay --hub <name|port>` / `slay hub use <url>`.'
+      `Sign-in failed (HTTP ${res.status}).\n` +
+        `Check the email and password. List the accounts on the hub box with ` +
+        `\`slay hub users ls\`, or create one with \`slay hub users add <email>\`.`
     )
   }
-  if (running.length > 1) {
-    fail(
-      `Several hubs are running here, so which one to act on is ambiguous: ` +
-        `${running.map((h) => `${h.name} (${h.port})`).join(', ')}.\n` +
-        `Name one with \`slay --hub <name|port> hub users …\`.`
-    )
-  }
-  // Discovery only reaches loopback, so the scheme is always plain http.
-  return { baseUrl: `http://127.0.0.1:${running[0]!.port}`, token: null }
+  const header = res.headers.get('set-auth-token')
+  if (header) return header
+  const body = (await res.json().catch(() => ({}))) as { token?: unknown }
+  if (typeof body.token === 'string' && body.token) return body.token
+  fail('The hub accepted the sign-in but returned no token.')
 }
 
 /**
  * Call `/api/hub/users` and return the parsed `data`, or exit with the hub's own
- * error text.
+ * error text. Resolution + error surfacing live in `../hub-request` — shared with
+ * `slay runner mint`, which needs the identical "which hub, what credential"
+ * answer (see that module's note).
  *
- * The hub's messages are deliberately surfaced verbatim: they explain the refusals
- * (last remaining account, the protected runner service identity) far better than
- * anything reconstructible from a status code.
+ * `discoverAllHubs` is passed in so the sweep also sees the desktop app's
+ * out-of-block sidecar port.
  */
-async function hubUsersRequest<T>(method: string, body?: Record<string, unknown>): Promise<T> {
-  const target = await resolveHubForUsers()
-  const url = `${target.baseUrl}/api/hub/users`
-  let res: Response
-  try {
-    res = await fetch(url, {
+function hubUsersRequest<T>(method: string, body?: Record<string, unknown>): Promise<T> {
+  return resolveHubRequestTarget('hub users …', discoverAllHubs).then((target) =>
+    hubRequest<T>({
+      target,
+      path: '/api/hub/users',
       method,
-      headers: {
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(target.token ? { Authorization: `Bearer ${target.token}` } : {})
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000)
+      ...(body === undefined ? {} : { body }),
+      unwrap: 'data'
     })
-  } catch {
-    fail(`Could not reach the hub at ${target.baseUrl}.`)
-  }
-  const text = await res.text().catch(() => '')
-  let parsed: { ok?: boolean; data?: T; error?: string; message?: string } = {}
-  try {
-    parsed = text ? (JSON.parse(text) as typeof parsed) : {}
-  } catch {
-    /* fall through to the status-based message below */
-  }
-  if (!res.ok) {
-    const detail = parsed.message ? ` (${parsed.message})` : ''
-    fail(`${parsed.error ?? `HTTP ${res.status}`}${detail}`)
-  }
-  return parsed.data as T
+  )
 }
 
 /** `slay hub users` — accounts on a hub. */
@@ -490,7 +506,9 @@ function hubUsersCommand(): Command {
       // No confirmation prompt: the operator typed an exact email, the hub refuses
       // the two dangerous cases itself (last remaining account, runner service
       // identity), and an account is re-creatable with `add`.
-      const removed = await hubUsersRequest<{ email: string }>('DELETE', { email })
+      const removed = await hubUsersRequest<{ email: string }>('DELETE', {
+        email
+      })
       console.log(`Removed account: ${removed.email}`)
     })
 
@@ -551,48 +569,159 @@ export function hubCommand(): Command {
     .description('Create a hub here and keep it running (crash-restart + start at login)')
     .option('--root <dir>', 'Hub root — its config, storage and logs (default: cwd)')
     .option('--port <port>', 'Bind a specific port (default: first free hub port)')
-    .action(async (name: string, opts: { root?: string; port?: string }) => {
-      const root = resolvePath(opts.root ?? process.cwd())
-      const port = opts.port === undefined ? undefined : Number(opts.port)
-      if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
-        fail(`Invalid --port ${opts.port} — expected an integer 1-65535.`)
-      }
-      const backend = resolveBackend()
+    .option(
+      '--public-address <host[:port]>',
+      'Externally-reachable address of this hub — makes it a REMOTE hub (auth + TLS + wss join tokens)'
+    )
+    .option('--bind <host[:port]>', 'Address to bind (default: loopback, or 0.0.0.0 when remote)')
+    .action(
+      async (
+        name: string,
+        opts: {
+          root?: string
+          port?: string
+          publicAddress?: string
+          bind?: string
+        }
+      ) => {
+        const root = resolvePath(opts.root ?? process.cwd())
+        const port = opts.port === undefined ? undefined : Number(opts.port)
+        if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+          fail(`Invalid --port ${opts.port} — expected an integer 1-65535.`)
+        }
 
-      // A name identifies a hub for every other command, so it must be unique —
-      // and "unique" has to include a hub that is REGISTERED BUT NOT RUNNING
-      // (stopped, or crashed). Checking only running hubs would let `create`
-      // silently overwrite an existing hub's unit.
-      if (backend !== 'none' && existsSync(unitPath('hub', name, backend))) {
-        const existingRoot = readUnitRoot('hub', name, backend)
-        fail(
-          `A hub named "${name}" already exists${
-            existingRoot ? ` (root ${shortenPath(existingRoot)})` : ''
-          }.\n` +
-            `Start it with \`slay hub start ${name}\`, or remove it with ` +
-            `\`slay hub rm ${name}\`.`
-        )
-      }
-      // Pre-flight against reality too: a hub may occupy this root or name having
-      // been started some other way entirely (docker, a hand-written unit).
-      const running = await discoverAllHubs()
-      const sameRoot = running.find((h) => h.root === root)
-      if (sameRoot) {
-        fail(
-          `A hub is already running in ${shortenPath(root)} — "${sameRoot.name}" on port ` +
-            `${sameRoot.port} (pid ${sameRoot.pid}).`
-        )
-      }
-      const sameName = running.find((h) => h.name === name)
-      if (sameName) {
-        fail(
-          `A hub named "${name}" is already running (root ${shortenPath(sameName.root)}). ` +
-            `Choose another name.`
-        )
-      }
+        // --- remote-hub setup ---------------------------------------------------
+        //
+        // WHY THIS EXISTS. Without a public address a hub boots in LOCAL mode, and
+        // `deriveRunnerHubUrl` then embeds `ws://127.0.0.1:<port>/runners` in every
+        // join token it mints. Minting still succeeds — so the failure is silent: a
+        // runner on another machine dials its OWN loopback and never connects.
+        // `--public-address` is what turns that into a usable deployment.
+        //
+        // Both values are bare AUTHORITIES (`host[:port]`, no scheme): the scheme
+        // follows SLAYZONE_MODE, so carrying one here would let the two disagree.
+        const publicAddress = opts.publicAddress?.trim()
+        if (publicAddress !== undefined && !isBareAuthority(publicAddress)) {
+          fail(
+            `Invalid --public-address "${opts.publicAddress}" — expected host[:port] with no ` +
+              `scheme and no path (e.g. hub.example.com:8443). The scheme is decided by the ` +
+              `hub's mode, not by this value. IPv6 must be bracketed: [2001:db8::1]:8443`
+          )
+        }
+        const bind = opts.bind?.trim()
+        if (bind !== undefined && !isBareAuthority(bind)) {
+          fail(
+            `Invalid --bind "${opts.bind}" — expected host[:port] with no scheme and no path ` +
+              `(e.g. 0.0.0.0:51100). IPv6 must be bracketed: [::]:51100`
+          )
+        }
+        if (bind !== undefined && port !== undefined && parseHubAddress(bind)?.port !== port) {
+          // Two different answers to "which port" is never what anyone means, and
+          // whichever silently won would be a surprise.
+          fail(
+            `--bind ${bind} and --port ${port} disagree about the port. ` +
+              `Give just one — \`--bind\` can carry the port itself.`
+          )
+        }
+        // An explicit --bind always wins: `remote` + a loopback bind is a legitimate
+        // and common shape (the hub sits behind a reverse proxy / tunnel that
+        // terminates the public address), and assertModeHostConsistency permits it.
+        // Only when the operator said nothing do we widen — a remote hub bound to
+        // loopback with nothing in front of it would be unreachable.
+        const address =
+          bind ?? (publicAddress !== undefined ? (port ? `0.0.0.0:${port}` : '0.0.0.0') : undefined)
 
-      await launchHub({ name, root, port, backend, creating: true })
-    })
+        const backend = resolveBackend()
+
+        // A name identifies a hub for every other command, so it must be unique —
+        // and "unique" has to include a hub that is REGISTERED BUT NOT RUNNING
+        // (stopped, or crashed). Checking only running hubs would let `create`
+        // silently overwrite an existing hub's unit.
+        if (backend !== 'none' && existsSync(unitPath('hub', name, backend))) {
+          const existingRoot = readUnitRoot('hub', name, backend)
+          fail(
+            `A hub named "${name}" already exists${
+              existingRoot ? ` (root ${shortenPath(existingRoot)})` : ''
+            }.\n` +
+              `Start it with \`slay hub start ${name}\`, or remove it with ` +
+              `\`slay hub rm ${name}\`.`
+          )
+        }
+        // Pre-flight against reality too: a hub may occupy this root or name having
+        // been started some other way entirely (docker, a hand-written unit).
+        const running = await discoverAllHubs()
+        const sameRoot = running.find((h) => h.root === root)
+        if (sameRoot) {
+          fail(
+            `A hub is already running in ${shortenPath(root)} — "${sameRoot.name}" on port ` +
+              `${sameRoot.port} (pid ${sameRoot.pid}).`
+          )
+        }
+        const sameName = running.find((h) => h.name === name)
+        if (sameName) {
+          fail(
+            `A hub named "${name}" is already running (root ${shortenPath(sameName.root)}). ` +
+              `Choose another name.`
+          )
+        }
+
+        // Persist the deployment shape BEFORE launching, so the very first boot reads
+        // it. `<ROOT>/config.json` is the single channel for these (the unit carries
+        // only the bind address) — a `mode` env var pinned in the unit would be a
+        // second home for the same value that `hub restart --upgrade` then rewrites
+        // away. Merges + 0600, so an existing config in this root keeps its keys.
+        if (publicAddress !== undefined) {
+          updateSlayzoneConfig(
+            {
+              mode: 'remote',
+              publicAddress,
+              ...(address !== undefined ? { address } : {})
+            },
+            join(root, 'config.json')
+          )
+          console.log('Mode:   remote (client auth + TLS enforced)')
+          console.log(`Bind:   ${address ?? '(hub block default)'}`)
+          console.log(`Public: ${publicAddress}`)
+          console.log(`Join tokens will point runners at wss://${publicAddress}/runners.`)
+          // Printed BEFORE the boot wait, not after: remote mode enforces auth AND
+          // closes public signup, so a hub with no account is permanently
+          // unauthenticatable — and a first boot that fails (a missing cert chain, a
+          // taken port) must not swallow the one step that makes the deployment
+          // usable. The config is already on disk at this point, so the instruction
+          // is valid whether or not the hub comes up.
+          console.log('')
+          console.log('This hub requires sign-in and public signup is closed, so create the')
+          console.log('first account on THIS machine — there is no other way in:')
+          console.log(`  slay hub users add <email> --hub ${name}`)
+          console.log('Then, from another machine:')
+          console.log(`  slay hub login https://${publicAddress} --email <email>`)
+          console.log('')
+        }
+
+        await launchHub({
+          name,
+          root,
+          port,
+          ...(address !== undefined ? { address } : {}),
+          backend,
+          creating: true
+        })
+
+        if (publicAddress === undefined) {
+          // Loopback is the RIGHT default (a personal hub, dev, the desktop app), so
+          // this informs rather than warns. Silence, though, is how an operator mints a
+          // token on a VPS, pastes it into a runner elsewhere, and gets no explanation
+          // for why it never connects. Safe to print after the wait: a hub that failed
+          // to boot has already exited non-zero with its own log excerpt.
+          console.log('')
+          console.log(
+            `This hub is local-only: it binds loopback, so join tokens it mints point at\n` +
+              `127.0.0.1 and only a runner on THIS machine can use them. For a hub other\n` +
+              `machines dial, recreate it with \`--public-address <host:port>\`.`
+          )
+        }
+      }
+    )
 
   // slay hub start <name>
   cmd
@@ -607,9 +736,7 @@ export function hubCommand(): Command {
       // not what someone typing `start` on a running hub wants. Use `restart`.
       const live = await findAnyHub(name)
       if (live) {
-        console.log(
-          `Hub "${live.name}" is already running on port ${live.port} (pid ${live.pid}).`
-        )
+        console.log(`Hub "${live.name}" is already running on port ${live.port} (pid ${live.pid}).`)
         return
       }
       if (backend === 'none') {
@@ -778,6 +905,42 @@ export function hubCommand(): Command {
       console.log(`Config written: ${configPath}`)
       if (process.env.SLAYZONE_HUB_ADDRESS) {
         console.error('Note: SLAYZONE_HUB_ADDRESS is set and takes precedence over this config.')
+      }
+    })
+
+  // slay hub login <url>
+  //
+  // `use --token` can only STORE a bearer somebody already had. On a hub that
+  // enforces auth, every off-box command (`runner mint`, the whole REST surface)
+  // needs one — so without this the only way to get a token was to read it out of
+  // the desktop app's encrypted store by hand. This exchanges an account for one,
+  // then stores it exactly as `use` does (0600 hub.json).
+  cmd
+    .command('login <url>')
+    .description('Sign in to a hub and store its bearer token for this CLI')
+    .requiredOption('--email <email>', 'Account email (see `slay hub users ls`)')
+    .option('--password <password>', 'Account password (omit to read from stdin)')
+    .action(async (rawUrl: string, opts: { email: string; password?: string }) => {
+      const url = normalizeHubUrl(rawUrl)
+      if (!url) fail(`Invalid hub URL (expected an http(s) URL): ${rawUrl}`)
+      // Prefer a piped password over an argv one: argv lands in the shell history
+      // and in `ps` output. Named `--password` still exists for scripts that
+      // already hold the secret in an env var.
+      const password = opts.password ?? (await readPasswordFromStdin())
+      if (!password) {
+        fail(
+          'No password given. Pass --password, or pipe it:\n' +
+            `  echo '<password>' | slay hub login ${rawUrl} --email ${opts.email}`
+        )
+      }
+      const token = await hubSignIn(url, opts.email, password)
+      const configPath = writeHubConfig(url, token)
+      console.log(`Signed in to ${url} as ${opts.email}.`)
+      console.log(`Token stored: ${configPath}`)
+      if (process.env.SLAYZONE_HUB_TOKEN) {
+        console.error(
+          'Note: SLAYZONE_HUB_TOKEN is set in the environment and takes precedence over this config.'
+        )
       }
     })
 

@@ -64,6 +64,12 @@ export const runnersRouter = router({
    * Mint a single-use enrollment token. The token embeds the hub's runner WS URL
    * and TLS cert fingerprint (both sourced from the injected deps), so it can
    * only be minted once the hub listener has bound.
+   *
+   * `hubUrl` is returned alongside the token so a client can tell whether the
+   * token is usable off-box (see `isLoopbackRunnerUrl`) WITHOUT decoding it —
+   * `decodeJoinToken` needs `Buffer`, which the renderer does not have. It is not
+   * a secret: it is embedded in the token the caller already receives in full.
+   * The REST twin has always returned it; this closes that shape gap.
    */
   mintJoinToken: publicProcedure
     .input(
@@ -92,7 +98,8 @@ export const runnersRouter = router({
         token: minted.token,
         label: minted.label,
         createdAt: minted.created_at,
-        expiresAt: minted.expires_at
+        expiresAt: minted.expires_at,
+        hubUrl
       }
     }),
 

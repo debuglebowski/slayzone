@@ -82,6 +82,12 @@ export function applyStandaloneHubConfig(): void {
   }
   const cfg = loadSlayzoneConfig()
 
+  // Deployment hardening intent. Seeded FIRST because everything below is read in
+  // light of it: the scheme of the join-token URL, whether client auth is enforced,
+  // whether TLS terminates here. Only the two known literals reach here (coerce
+  // drops anything else), and env wins as always — so a hub with no `mode` key
+  // stays byte-identical, defaulting to `local` inside getSlayzoneMode().
+  setIfUnset('SLAYZONE_MODE', cfg.mode)
   // No dir- or file-pointing var is seeded: the DB + state dir DERIVE from
   // SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
   // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so

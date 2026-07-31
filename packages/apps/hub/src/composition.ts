@@ -7,7 +7,7 @@ import {
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { checkCliInstalled } from '@slayzone/platform'
+import { checkCliInstalled, isRemoteMode } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   setTaskDeps,
@@ -129,6 +129,7 @@ import {
   removeHubUser,
   type HubAuth
 } from '@slayzone/hub-auth/server'
+import { verifyRestBearer } from './rest-auth.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
 import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runners/server'
 import { createRunnerAuthAdapters } from './runner-auth.js'
@@ -889,6 +890,22 @@ export function composeServer(opts: {
       },
       list: async () => (hubAuthRef ? listHubUsers(hubAuthRef) : []),
       remove: async (email) => (hubAuthRef ? removeHubUser(hubAuthRef, email) : 'not-found')
+    },
+    // Bearer authority for routes that admit an authenticated OFF-BOX caller —
+    // today only `POST /api/runners/join-token`, so `slay runner mint` can target a
+    // hub on another machine (see that route's WHO MAY CALL IT note).
+    //
+    // Deliberately the SAME two pieces the outer gate uses — `isRemoteMode() &&
+    // hubAuthRef != null` and `verifyRestBearer` — so a route-level decision can
+    // never disagree with the gate about whether this hub authenticates at all, or
+    // about which sessions count. Getter-shaped for the usual reason: hub-auth is
+    // built inside the async `runnersReady` IIFE, long after this literal exists.
+    //
+    // False on every local / supervised / e2e hub, which keeps the consuming route
+    // loopback-only exactly as before.
+    restAuth: {
+      required: () => isRemoteMode() && hubAuthRef !== null,
+      verifyBearer: (headers) => verifyRestBearer(hubAuthRef, headers)
     },
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's

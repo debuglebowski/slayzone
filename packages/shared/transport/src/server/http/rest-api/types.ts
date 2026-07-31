@@ -1,3 +1,4 @@
+import type { IncomingHttpHeaders } from 'node:http'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal/shared'
@@ -163,6 +164,26 @@ export interface RestApiDeps {
     >
     list: () => Promise<Array<{ id: string; email: string; name: string; createdAt: string }>>
     remove: (email: string) => Promise<'ok' | 'not-found' | 'protected' | 'last-user'>
+  }
+  /**
+   * The hub's bearer-auth authority, for routes that accept an OFF-BOX caller who
+   * proves a session. Wired ONLY by the hub composition root, from the same
+   * late-bound hub-auth ref + `verifyRestBearer` the outer gate
+   * (`apps/hub/src/rest-auth.ts`) uses — one authority, reached two ways.
+   *
+   * A METHOD OBJECT for the same reason as `hubUsers`: this package has no
+   * `@slayzone/hub-auth` dependency and must not gain one (`lint:server-boundary`).
+   *
+   * `required()` mirrors the gate's own derived flag (`isRemoteMode() && hubAuth
+   * != null`), so it is FALSE on every local / supervised / e2e hub. An absent slot
+   * (the Electron host) reads as "no bearer authority", which collapses the
+   * consuming route to loopback-only — i.e. exactly today's behavior.
+   */
+  restAuth?: {
+    /** Whether THIS hub enforces bearer auth on its HTTP surface. */
+    required: () => boolean
+    /** Verify an `Authorization: Bearer …` header against the hub's sessions. */
+    verifyBearer: (headers: IncomingHttpHeaders) => Promise<boolean>
   }
 }
 

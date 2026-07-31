@@ -100,6 +100,43 @@ export function isBareAuthority(addr: string): boolean {
   }
 }
 
+/**
+ * True when a `ws(s)://…/runners` URL names THIS machine — so a join token
+ * carrying it is only usable by a runner on the SAME box.
+ *
+ * WHY THIS EXISTS: a hub in local mode derives its runner URL as
+ * `ws://<loopback>:<hubPort>/runners` unconditionally (see the hub's
+ * `deriveRunnerHubUrl`). That is right for the co-located runner the desktop app
+ * auto-enrolls, and useless for any other machine — an off-box runner handed such
+ * a token dials its own loopback and silently never connects. Minting cannot
+ * refuse (the loopback case is legitimate and common), so the surfaces that hand a
+ * token to a human — the UI's mint dialog, `slay runner mint`, `slay runner
+ * create` — use this to SAY so.
+ *
+ * Reuses {@link LOOPBACK_HOSTS}, the single source of truth for "names this
+ * machine", so this predicate can never drift from the bind-side checks.
+ *
+ * A wildcard bind (`0.0.0.0` / `::`) is deliberately NOT loopback: such a token is
+ * broken for every runner including a local one, so reporting it as a
+ * same-machine URL would send the operator to the wrong fix.
+ *
+ * Returns false for anything unparseable — never claim loopback without knowing.
+ */
+export function isLoopbackRunnerUrl(url: string): boolean {
+  let host: string
+  try {
+    // `hostname` never carries the port, but DOES keep IPv6 brackets — strip them
+    // to match LOOPBACK_HOSTS, which holds unbracketed literals (same convention
+    // as parseHubAddress).
+    host = new URL(url).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return false
+  }
+  // The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1 — a hub bound to
+  // e.g. 127.0.0.53 is every bit as unreachable from another machine.
+  return LOOPBACK_HOSTS.has(host) || host.startsWith('127.')
+}
+
 /** A hub address split for the BIND side. `port === undefined` = OS-assigned. */
 export interface HubBindAddress {
   /** Bare host literal, IPv6 UNBRACKETED (what `server.listen(host)` wants). */

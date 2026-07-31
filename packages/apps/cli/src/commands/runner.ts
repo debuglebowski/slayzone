@@ -28,6 +28,9 @@ import { existsSync, openSync, readdirSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
+import { isLoopbackRunnerUrl } from '@slayzone/platform/hub-addr'
+import { discoverHubs } from '@slayzone/platform/hub-discovery'
+import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import {
   DEFAULT_LOCAL_RUNNER_NAME,
   loadSlayzoneConfig,
@@ -79,6 +82,29 @@ const CONNECTED_RE = /"mode":"(enroll|hello)"/
 /** `<ROOT>/config.json` for a runner rooted at `root`. */
 function configPathFor(root: string): string {
   return join(root, 'config.json')
+}
+
+/**
+ * Say so when a token's dial target names the hub's OWN machine.
+ *
+ * A hub in local mode embeds `ws://<loopback>:<port>/runners` in every token it
+ * mints. That is correct for a co-located runner — the desktop app's auto-enrolled
+ * one, or a `create` run on the hub box — and useless anywhere else: the runner
+ * dials its own loopback and silently never connects.
+ *
+ * Deliberately a WARNING, not a failure, and phrased conditionally: this command
+ * cannot know whether the operator is on the hub's machine, and the co-located case
+ * is both legitimate and the common one. Failing would break it.
+ */
+function warnIfLoopbackHub(hubUrl: string): void {
+  if (!isLoopbackRunnerUrl(hubUrl)) return
+  console.log('')
+  console.log(
+    `Note: ${hubUrl} is a loopback address, so this token only works for a runner on the\n` +
+      `hub's OWN machine. On any other machine it would dial that machine's loopback and\n` +
+      `never connect. For a hub other machines can reach, recreate it with\n` +
+      `\`slay hub create <name> --public-address <host:port>\`.`
+  )
 }
 
 /**
@@ -182,7 +208,12 @@ async function launchRunner(args: {
     })
     child.unref()
     if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS))) {
-      failWithLog('runner', name, logs.out, `did not reach its hub within ${ENROLL_TIMEOUT_MS / 1000}s`)
+      failWithLog(
+        'runner',
+        name,
+        logs.out,
+        `did not reach its hub within ${ENROLL_TIMEOUT_MS / 1000}s`
+      )
     }
     console.log(`Runner "${name}" started (pid ${child.pid ?? '?'}) and reached its hub.`)
     console.log(`  Root:  ${shortenPath(root)}`)
@@ -295,6 +326,65 @@ export function runnerCommand(): Command {
     .showSuggestionAfterError(true)
     .showHelpAfterError(true)
 
+  // slay runner mint [label] — ask a HUB for an enrollment token.
+  //
+  // The only verb here whose subject is a hub rather than this machine, and that is
+  // unavoidable: a join token can only be minted by the hub it points at (it embeds
+  // that hub's dial URL + cert fingerprint), so WHICH HUB A RUNNER CONNECTS TO is
+  // decided here, not by `create`. It lives under `runner` because the thing being
+  // created is a runner's credential; addressing follows the ambient hub target
+  // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `hub.json`), so `slay --hub staging runner
+  // mint` reads the same as every other hub-targeted command.
+  cmd
+    .command('mint [label]')
+    .description('Mint a runner enrollment token on a hub (see `slay hub current`)')
+    .option('--ttl <minutes>', 'Token lifetime in minutes', '15')
+    .option('--json', 'Output as JSON')
+    .action(async (label: string | undefined, opts: { ttl: string; json?: boolean }) => {
+      const ttlMinutes = Number(opts.ttl)
+      if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) {
+        fail(`Invalid --ttl ${opts.ttl} — expected a positive number of minutes.`)
+      }
+      const target = await resolveHubRequestTarget('runner mint', discoverHubs)
+      const minted = await hubRequest<{ token: string; hubUrl: string }>({
+        target,
+        path: '/api/runners/join-token',
+        method: 'POST',
+        body: {
+          label: label ?? 'runner',
+          ttlMs: Math.round(ttlMinutes * 60_000)
+        },
+        unwrap: 'raw',
+        hints: {
+          // The hub cannot know which command the operator should run to get a
+          // credential, so name it here rather than leaving a bare 401.
+          401:
+            `Sign in to this hub first:\n` +
+            `  slay hub login ${target.baseUrl} --email <email>\n` +
+            `No account yet? Create one ON the hub machine: slay hub users add <email>`,
+          403:
+            `This hub only mints join tokens for callers on its own machine.\n` +
+            `Run \`slay runner mint\` there, or put the hub in remote mode (` +
+            `\`slay hub create --public-address <host:port>\`) so it can authenticate you.`
+        }
+      })
+
+      if (opts.json) {
+        console.log(JSON.stringify({ token: minted.token, hubUrl: minted.hubUrl }, null, 2))
+        return
+      }
+      console.log(`Hub:   ${minted.hubUrl}`)
+      console.log(`Token: ${minted.token}`)
+      console.log('')
+      console.log(`Expires in ${ttlMinutes} minute${ttlMinutes === 1 ? '' : 's'}, single use.`)
+      console.log('Install a runner with it:')
+      console.log(`  slay runner create ${label ?? '<name>'} --token ${minted.token}`)
+      // Say this at the EARLIEST point a loopback token exists. Waiting until
+      // `runner create` means the operator has already carried a dead token to
+      // another machine before anything mentions it.
+      warnIfLoopbackHub(minted.hubUrl)
+    })
+
   // slay runner ls — unit files + supervisor state. This is also the `hub
   // registered` equivalent: with no port to sweep, enumeration IS the listing.
   cmd
@@ -372,7 +462,7 @@ export function runnerCommand(): Command {
     .command('create <name>')
     .description('Install a runner here and keep it running (crash-restart + start at login)')
     .requiredOption('--token <token>', 'Join token minted on the hub (szjt1.…)')
-    .option('--root <dir>', "Runner root — its config, credentials and logs (default: cwd)")
+    .option('--root <dir>', 'Runner root — its config, credentials and logs (default: cwd)')
     .option(
       '--allow <dir>',
       'Filesystem root the runner may operate under (repeatable; default: the runner root)',
@@ -391,8 +481,8 @@ export function runnerCommand(): Command {
         fail(
           `--token is not a valid SlayZone join token (expected \`szjt1.<payload>\`).\n` +
             `Mint one on the hub:\n` +
-            `  curl -X POST http://127.0.0.1:<hub-port>/api/runners/join-token \\\n` +
-            `    -H 'content-type: application/json' -d '{"label":"${name}"}'`
+            `  slay runner mint ${name}\n` +
+            `(or on this machine against a specific hub: \`slay --hub <name|port> runner mint ${name}\`)`
         )
       }
 
@@ -446,7 +536,8 @@ export function runnerCommand(): Command {
       // none has an env channel (by design — see runner/src/config.ts), and a 0644
       // unit file must never carry a credential. updateSlayzoneConfig writes 0600 and
       // merges, so an existing config in this root keeps its other keys.
-      const allowedRoots = opts.allow && opts.allow.length > 0 ? opts.allow.map((d) => resolvePath(d)) : [root]
+      const allowedRoots =
+        opts.allow && opts.allow.length > 0 ? opts.allow.map((d) => resolvePath(d)) : [root]
       updateSlayzoneConfig(
         {
           joinToken: opts.token,
@@ -458,6 +549,10 @@ export function runnerCommand(): Command {
       )
       console.log(`Hub:   ${decoded.hubUrl}`)
       console.log(`Allow: ${allowedRoots.map((d) => shortenPath(d)).join(', ')}`)
+      // Second warn site (the first is `mint`): a token can be carried here from
+      // anywhere, including out of the desktop app's mint dialog, so this is the
+      // last chance to say it before the enroll wait times out with no explanation.
+      warnIfLoopbackHub(decoded.hubUrl)
 
       await launchRunner({ name, root, backend, creating: true })
     })
@@ -516,7 +611,9 @@ export function runnerCommand(): Command {
       // deliberately left on disk: it is the operator's data, and `rm` was asked to
       // remove a registration, not to delete their state. NOTE this does not revoke
       // the runner on the HUB — it will show there as disconnected until revoked.
-      console.log(`Removed "${name}". Its config and credentials are still in ${shortenPath(root)}.`)
+      console.log(
+        `Removed "${name}". Its config and credentials are still in ${shortenPath(root)}.`
+      )
       console.log(
         `It is still enrolled on its hub — revoke it there if this machine is going away.`
       )

@@ -18,6 +18,9 @@ import { launchIsolatedElectron, projectBlob, clickSettings } from '../fixtures/
  *      (the union is a client-side merge, not cross-hub data bleed).
  *   3. ROUTING — a routed task write (via the federated useTasksData path the UI
  *      uses) on a remote-hub task lands on the REMOTE hub's DB, not local.
+ *   4. RUNNER ENROLLMENT — the Runners tab merges every hub's runners into one
+ *      table and mints a join token on the hub the operator PICKS (a runner belongs
+ *      to exactly one hub, decided at mint time).
  *
  * The "second hub" is the sidecar bin run unsupervised on its own port + store
  * (a full hub owns a SQLite DB + all routers). Plain ws:// loopback — auth/TLS
@@ -356,6 +359,92 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           >
       )
       expect(onLocal).toBe(false)
+    } finally {
+      if (launched) await launched.close()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
+  base('Runners tab merges both hubs and mints the join token on the CHOSEN hub', async () => {
+    base.setTimeout(180_000)
+
+    // A runner belongs to exactly ONE hub, and which hub is decided when the token is
+    // MINTED (it embeds that hub's dial url + cert fingerprint). So on a federated
+    // client the mint has to be routable — otherwise a remote hub's runners are
+    // invisible and un-enrollable, which is what this asserts end-to-end.
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+    let hub: SecondHub | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const remotePort = hub.port
+      const remoteHubUrl = hub.url
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-runners',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+          fs.writeFileSync(
+            path.join(userDataDir, 'storage', 'boot-config.json'),
+            JSON.stringify(
+              {
+                server_mode: 'local',
+                multi_hub: true,
+                hubs: [{ id: 'remote-b', kind: 'remote', label: 'Hub B', url: remoteHubUrl }],
+                default_hub_id: 'local'
+              },
+              null,
+              2
+            )
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+
+      await clickSettings(page)
+      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      await expect(dialog).toBeVisible({ timeout: 10_000 })
+      await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+
+      // ONE merged table, not a section per hub (mirrors the flat merged rail).
+      await expect(page.locator('[data-testid="runners-table"]')).toHaveCount(1, {
+        timeout: 10_000
+      })
+
+      // The hub picker only exists when >1 hub is connected — its presence IS the
+      // federated affordance under test.
+      await page.locator('[data-testid="runner-add-open"]').click()
+      const hubPicker = page.locator('[data-testid="runner-add-hub"]')
+      await expect(hubPicker).toBeVisible({ timeout: 10_000 })
+
+      // Choose the REMOTE hub, then mint.
+      await hubPicker.click()
+      await page.getByRole('option', { name: /Hub B/ }).click()
+      await page.locator('[data-testid="runner-add"]').click()
+
+      // The dialog must name the hub the token belongs to: with several connected, a
+      // token pasted onto the wrong machine is indistinguishable from a broken one.
+      const mintedHub = page.locator('[data-testid="runner-minted-hub"]')
+      await expect(mintedHub).toBeVisible({ timeout: 20_000 })
+      await expect(mintedHub).toContainText('Hub B')
+      // The dial target must be the REMOTE hub's own port — the proof the mint was
+      // routed rather than served by the default hub.
+      await expect(mintedHub).toContainText(`:${remotePort}/runners`)
+
+      // A mint creates a join_tokens row, NOT a runner row, so the remote hub's
+      // runner list is still empty — assert the token instead, via the hub that
+      // issued it.
+      const tokenText = await page.locator('[data-testid="runner-minted-token"] code').innerText()
+      expect(tokenText.startsWith('szjt1.')).toBe(true)
+      const payload = JSON.parse(
+        Buffer.from(tokenText.slice('szjt1.'.length), 'base64url').toString('utf8')
+      ) as { hubUrl: string }
+      expect(payload.hubUrl).toBe(`ws://127.0.0.1:${remotePort}/runners`)
     } finally {
       if (launched) await launched.close()
       if (hub) await hub.stop()

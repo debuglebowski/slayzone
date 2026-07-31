@@ -48,7 +48,8 @@ const ENV_KEYS = [
   'SLAYZONE_HUB_AUTH_SECRET',
   'SLAYZONE_HUB_ADDRESS',
   'SLAYZONE_HUB_PUBLIC_ADDRESS',
-  'SLAYZONE_HUB_NAME'
+  'SLAYZONE_HUB_NAME',
+  'SLAYZONE_MODE'
 ] as const
 
 /** Run `fn` with a clean env + isolated temp home dir; restore env after. */
@@ -117,6 +118,36 @@ test('env WINS over config.json (does not overwrite a set env)', () => {
     saveSlayzoneConfig({ address: '0.0.0.0:8080' })
     applyStandaloneHubConfig()
     assertEq(process.env.SLAYZONE_HUB_ADDRESS, '127.0.0.1:9999', 'env address kept')
+  })
+})
+
+// `mode` is what makes `slay hub create --public-address` actually work: without it
+// the hub boots local, and `deriveRunnerHubUrl` hands out `ws://127.0.0.1:<port>`
+// tokens no other machine can use.
+test('config.json mode seeds SLAYZONE_MODE', () => {
+  withIsolatedEnv({}, () => {
+    saveSlayzoneConfig({ mode: 'remote', publicAddress: 'hub.example:8443' })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_MODE, 'remote', 'mode seeded from config')
+  })
+})
+
+test('env SLAYZONE_MODE wins over config.json mode', () => {
+  withIsolatedEnv({ SLAYZONE_MODE: 'local' }, () => {
+    saveSlayzoneConfig({ mode: 'remote' })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_MODE, 'local', 'env mode kept')
+  })
+})
+
+test('no mode key leaves SLAYZONE_MODE unset (getSlayzoneMode defaults to local)', () => {
+  withIsolatedEnv({}, () => {
+    saveSlayzoneConfig({ address: '127.0.0.1:8080' })
+    applyStandaloneHubConfig()
+    // Deliberately UNSET rather than an explicit 'local': every existing standalone
+    // boot must stay byte-identical, and the default already lives in
+    // getSlayzoneMode().
+    assert(process.env.SLAYZONE_MODE === undefined, 'not seeded when absent')
   })
 })
 

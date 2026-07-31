@@ -66,9 +66,24 @@ export interface ServiceUnitSpec {
   /** Directory for the supervisor's stdout/stderr capture (launchd only; systemd
    *  uses journald). */
   logDir: string
-  /** Explicit bind port. HUB ONLY — a runner binds nothing (it dials out), so this
-   *  is ignored for `kind: 'runner'`. Omitted on a hub ⇒ the hub picks a free port
-   *  from the hub block itself, which is the normal case. */
+  /**
+   * Explicit bind AUTHORITY (`host[:port]`) — HUB ONLY, ignored for a runner.
+   *
+   * Supersedes {@link port}, which can only ever mean loopback. A REMOTE hub has to
+   * bind wider than `127.0.0.1` to be reachable at all, and that is not
+   * expressible as a port number. Emitted verbatim as `SLAYZONE_HUB_ADDRESS`, so
+   * the value is exactly what the operator asked for. Wins when both are set.
+   */
+  address?: string
+  /**
+   * Explicit bind port. HUB ONLY — a runner binds nothing (it dials out), so this
+   * is ignored for `kind: 'runner'`. Omitted on a hub ⇒ the hub picks a free port
+   * from the hub block itself, which is the normal case.
+   *
+   * @deprecated Prefer {@link address}. Kept because it renders the historical
+   * `127.0.0.1:<port>` form that existing callers and their specs depend on —
+   * a loopback bind is still the right default for a local hub.
+   */
   port?: number
   /** Extra environment for the unit, on top of the SlayZone vars below. Needed when
    *  the interpreter itself requires configuring — e.g. a dev-tree hub or runner
@@ -230,7 +245,12 @@ function unitEnv(spec: ServiceUnitSpec): Array<[string, string]> {
     merged.SLAYZONE_HUB_NAME = spec.name
     // Only when explicitly requested: with no address the hub takes the first free
     // port in the hub block, which is what makes several hubs coexist unattended.
-    if (spec.port !== undefined) merged.SLAYZONE_HUB_ADDRESS = `127.0.0.1:${spec.port}`
+    //
+    // `address` wins over `port`: it is the only one that can name a non-loopback
+    // bind, so letting `port` win would silently pin a remote hub to loopback and
+    // make it unreachable. `port` keeps rendering the historical loopback form.
+    if (spec.address !== undefined) merged.SLAYZONE_HUB_ADDRESS = spec.address
+    else if (spec.port !== undefined) merged.SLAYZONE_HUB_ADDRESS = `127.0.0.1:${spec.port}`
   }
   // Caller-supplied last so it can set interpreter-level vars (ELECTRON_RUN_AS_NODE)
   // and, deliberately, override a default if it must.

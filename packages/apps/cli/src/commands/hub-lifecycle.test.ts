@@ -737,6 +737,134 @@ async function main(): Promise<void> {
       )
     })
 
+    // --- remote hub setup ---------------------------------------------------
+    //
+    // A hub with no public address mints `ws://127.0.0.1:<port>/runners` tokens, which
+    // no other machine can use — and mint SUCCEEDS, so the failure is silent.
+    // `--public-address` is what makes a reachable deployment; these cases assert the
+    // config it persists (the boot itself needs TLS + public DNS, so it is not booted
+    // here — the mode/address plumbing is unit-covered in standalone-config.test.ts).
+
+    await test('create --public-address persists remote mode + addresses to config.json', async () => {
+      const remoteRoot = join(TMP, 'remote-cfg')
+      mkdirSync(remoteRoot, { recursive: true })
+      // `--bind 127.0.0.1:0` keeps this from binding a real interface: the point is
+      // the FILE it writes, and a remote+loopback bind is a legitimate shape anyway
+      // (a hub behind a reverse proxy). It will fail to come up (remote mode needs a
+      // real cert chain), which is fine — config.json is written BEFORE launch, so
+      // the boot outcome is irrelevant to what we assert.
+      slay(
+        [
+          'hub',
+          'create',
+          `${NAME_PREFIX}remote`,
+          '--root',
+          remoteRoot,
+          '--public-address',
+          'hub.example.com:8443',
+          '--bind',
+          '127.0.0.1:0'
+        ],
+        { root: remoteRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      )
+      const cfg = JSON.parse(readFileSync(join(remoteRoot, 'config.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >
+      // mode is the lever: without it the hub boots local and mints loopback tokens
+      // no matter what public address is on file.
+      assertEq(cfg.mode, 'remote', 'mode persisted')
+      assertEq(cfg.publicAddress, 'hub.example.com:8443', 'public address persisted')
+      assertEq(cfg.address, '127.0.0.1:0', 'explicit --bind persisted verbatim')
+    })
+
+    await test('create --public-address defaults the bind to 0.0.0.0 (reachable)', async () => {
+      const wideRoot = join(TMP, 'remote-wide')
+      mkdirSync(wideRoot, { recursive: true })
+      slay(
+        [
+          'hub',
+          'create',
+          `${NAME_PREFIX}wide`,
+          '--root',
+          wideRoot,
+          '--public-address',
+          'hub.example.com:8443',
+          '--port',
+          '51987'
+        ],
+        { root: wideRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      )
+      const cfg = JSON.parse(readFileSync(join(wideRoot, 'config.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >
+      // A remote hub bound to loopback with nothing in front of it is unreachable, so
+      // the default has to widen — while --bind above still overrides it.
+      assertEq(cfg.address, '0.0.0.0:51987', 'widened to the wildcard, keeping --port')
+    })
+
+    await test('create tells the operator to make the first account on a remote hub', async () => {
+      const acctRoot = join(TMP, 'remote-acct')
+      mkdirSync(acctRoot, { recursive: true })
+      const res = slay(
+        [
+          'hub',
+          'create',
+          `${NAME_PREFIX}acct`,
+          '--root',
+          acctRoot,
+          '--public-address',
+          'hub.example.com:8443',
+          '--bind',
+          '127.0.0.1:0'
+        ],
+        { root: acctRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      )
+      // Remote mode enforces auth AND closes public signup, so a hub with no account
+      // is permanently unauthenticatable. This instruction is the difference between
+      // a working deployment and a dead one, so it must be unconditional.
+      const out = res.stdout + res.stderr
+      assert(/hub users add/.test(out), `names the account step: ${out}`)
+      assert(/remote/.test(out), `states the mode: ${out}`)
+    })
+
+    await test('create rejects a public address carrying a scheme or path', async () => {
+      const badRoot = join(TMP, 'remote-bad')
+      mkdirSync(badRoot, { recursive: true })
+      for (const bad of ['https://hub.example.com', 'hub.example.com/trpc']) {
+        const res = slay(
+          ['hub', 'create', `${NAME_PREFIX}bad`, '--root', badRoot, '--public-address', bad],
+          { root: badRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+        )
+        assert(res.status !== 0, `refused ${bad}`)
+        assert(/host\[:port\]/.test(res.stderr), `explains the grammar: ${res.stderr}`)
+        // Failing fast means nothing was written — no half-configured hub root.
+        assert(!existsSync(join(badRoot, 'config.json')), `no config.json written for ${bad}`)
+      }
+    })
+
+    await test('create refuses a --bind and --port that disagree', async () => {
+      const clashRoot = join(TMP, 'remote-clash')
+      mkdirSync(clashRoot, { recursive: true })
+      const res = slay(
+        [
+          'hub',
+          'create',
+          `${NAME_PREFIX}clash`,
+          '--root',
+          clashRoot,
+          '--bind',
+          '0.0.0.0:51001',
+          '--port',
+          '51002'
+        ],
+        { root: clashRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      )
+      assert(res.status !== 0, 'refused two answers for one port')
+      assert(/disagree/.test(res.stderr), `says why: ${res.stderr}`)
+    })
+
     await test('start on an unknown name points at create', async () => {
       const res = slay(['hub', 'start', `${NAME_PREFIX}ghost`], { root: rootA })
       assert(res.status !== 0, 'non-zero exit')

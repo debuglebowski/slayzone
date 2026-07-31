@@ -149,6 +149,45 @@ test('wrong-typed values are dropped (port as string, empty address/publicUrl)',
   rmSync(dir, { recursive: true, force: true })
 })
 
+// `mode` is the FILE channel for SLAYZONE_MODE — the hardening lever that decides
+// whether a hub authenticates clients, terminates TLS, and mints `wss://` join
+// tokens. It lives here so `slay hub create --public-address` can persist an
+// operator's intent once, next to the address it belongs with, rather than needing
+// a second home in the service unit (which `restart --upgrade` rewrites).
+test('mode: only the two known literals survive', () => {
+  const dir = tmp()
+  const remote = join(dir, 'remote.json')
+  writeFileSync(remote, JSON.stringify({ mode: 'remote' }))
+  assertEq(loadSlayzoneConfig(remote).mode, 'remote', 'remote parses')
+
+  const local = join(dir, 'local.json')
+  writeFileSync(local, JSON.stringify({ mode: 'local' }))
+  assertEq(loadSlayzoneConfig(local).mode, 'local', 'local parses')
+
+  // Anything else is DROPPED rather than passed through: an unrecognized value
+  // reaching SLAYZONE_MODE would silently resolve to `local` (getSlayzoneMode's
+  // safe default), so a typo like `Remote` must read as "unset" — which lets the
+  // env channel or the default answer instead of half-applying.
+  for (const bad of ['Remote', 'REMOTE', 'prod', '', 42, null, { mode: 'remote' }]) {
+    const p = join(dir, 'bad.json')
+    writeFileSync(p, JSON.stringify({ mode: bad }))
+    assert(loadSlayzoneConfig(p).mode === undefined, `dropped: ${JSON.stringify(bad)}`)
+  }
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('mode round-trips through update without clobbering the address keys', () => {
+  const dir = tmp()
+  const p = join(dir, 'config.json')
+  saveSlayzoneConfig({ address: '0.0.0.0:8443', publicAddress: 'hub.example:8443' }, p)
+  updateSlayzoneConfig({ mode: 'remote' }, p)
+  const back = loadSlayzoneConfig(p)
+  assertEq(back.mode, 'remote', 'mode written')
+  assertEq(back.address, '0.0.0.0:8443', 'address preserved')
+  assertEq(back.publicAddress, 'hub.example:8443', 'publicAddress preserved')
+  rmSync(dir, { recursive: true, force: true })
+})
+
 console.log('\nslayzone-config: save / update round-trip')
 console.log('─'.repeat(40))
 

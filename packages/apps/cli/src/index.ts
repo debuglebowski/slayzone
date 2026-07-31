@@ -79,7 +79,17 @@ async function applyHubOverride(nameOrPort: string): Promise<void> {
     process.exit(1)
   }
   // Discovery only reaches loopback hubs, so the scheme is always plain http.
-  setHubOverride({ baseUrl: `http://127.0.0.1:${hub.port}`, token: null })
+  //
+  // The token comes from the env channel, which is address-agnostic and only ever
+  // set deliberately. Dropping it here (as this did) meant `--hub` silently
+  // downgraded to an unauthenticated request — invisible on a loopback hub, which
+  // allows every co-located caller before it even looks at the header, and a flat
+  // 401 the moment a hub enforces auth. `hub.json`'s token is NOT used: it belongs
+  // to whichever hub `hub use`/`hub login` targeted, which need not be this one.
+  setHubOverride({
+    baseUrl: `http://127.0.0.1:${hub.port}`,
+    token: process.env.SLAYZONE_HUB_TOKEN || null
+  })
 }
 
 program.addCommand(tasksCommand())

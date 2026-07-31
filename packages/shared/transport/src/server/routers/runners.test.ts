@@ -72,6 +72,12 @@ test('runners.mintJoinToken: returns a decodable szjt1 token embedding hub URL +
   expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/runners')
   expect(payload!.certFingerprint).toBe('abcdef0123456789')
   expect(minted.expiresAt).toBeGreaterThan(minted.createdAt)
+  // The dial target is returned ALONGSIDE the token so a client can tell whether
+  // the token is usable off-box without decoding it — `decodeJoinToken` needs
+  // `Buffer`, which the renderer does not have. Not a secret: it is embedded in
+  // the token the mint dialog already displays in full. Also brings this proc's
+  // shape in line with the REST route, which has always returned it.
+  expect(minted.hubUrl).toBe('ws://127.0.0.1:8788/runners')
 })
 
 test('runners.setProjectDefaultRunner + setTaskRunner + resolveTaskRunner', async () => {

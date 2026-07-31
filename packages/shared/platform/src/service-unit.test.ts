@@ -227,6 +227,35 @@ test('no port ⇒ no address var (hub picks a free block port itself)', () => {
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'absent when unspecified')
 })
 
+// `address` carries a full authority so a REMOTE hub can bind wider than loopback.
+// `port` cannot express that — it hardcodes `127.0.0.1:<port>` — but it stays as the
+// deprecated alias, because every existing caller passes it and the two specs above
+// pin its exact output.
+test('an explicit address reaches the unit verbatim (a remote hub binds wider)', () => {
+  const unit = renderSystemdUnit({ ...SPEC, address: '0.0.0.0:51234' })
+  assert(
+    unit.includes('Environment=SLAYZONE_HUB_ADDRESS=0.0.0.0:51234'),
+    `wildcard bind preserved: ${unit}`
+  )
+  const plist = renderLaunchdPlist({ ...SPEC, address: '0.0.0.0:51234' })
+  assert(plist.includes('0.0.0.0:51234'), 'same in the plist')
+})
+
+test('address WINS over the legacy port (no silent loopback downgrade)', () => {
+  // Both given is the shape `hub create --port X --public-address Y` produces. If
+  // `port` won, a remote hub would bind loopback and be unreachable — the exact bug
+  // the address field exists to prevent.
+  const unit = renderSystemdUnit({ ...SPEC, port: 51234, address: '0.0.0.0:51234' })
+  assert(unit.includes('SLAYZONE_HUB_ADDRESS=0.0.0.0:51234'), `address used: ${unit}`)
+  assert(!unit.includes('127.0.0.1'), 'no loopback address emitted')
+})
+
+test('a runner spec ignores address too (a runner binds nothing)', () => {
+  const unit = renderSystemdUnit({ ...RUNNER_SPEC, address: '0.0.0.0:51234' })
+  assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var for a runner')
+  assert(!unit.includes('0.0.0.0'), 'address not emitted')
+})
+
 test('spec.env reaches the unit — an Electron-ABI hub needs ELECTRON_RUN_AS_NODE', () => {
   // A dev-tree hub's better-sqlite3 is compiled for Electron's ABI, so it must run
   // as `ELECTRON_RUN_AS_NODE=1 <electron>`; without this the supervisor crash-loops

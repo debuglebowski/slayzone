@@ -9,7 +9,12 @@
  *
  * Run with: npx tsx packages/shared/platform/src/hub-addr.test.ts
  */
-import { hubUrlFromAddr, isBareAuthority, parseHubAddress } from './hub-addr'
+import {
+  hubUrlFromAddr,
+  isBareAuthority,
+  isLoopbackRunnerUrl,
+  parseHubAddress
+} from './hub-addr'
 
 let passed = 0
 let failed = 0
@@ -109,6 +114,27 @@ check('parse: reject out-of-range port', parseHubAddress('127.0.0.1:70000') === 
 check('parse: reject non-numeric port', parseHubAddress('127.0.0.1:abc') === null)
 check('parse: reject empty', parseHubAddress('') === null)
 check('parse: reject undefined', parseHubAddress(undefined) === null)
+
+// --- isLoopbackRunnerUrl: is a minted join token usable OFF the hub's box? ---
+// A hub in local mode always derives `ws://<loopback>:<port>/runners` for the URL
+// it embeds in join tokens. That is correct for a co-located runner and useless
+// for any other machine — the runner would dial its OWN loopback. This predicate
+// is what lets the UI and the CLI say so instead of handing over a dead token.
+check('loopback: 127.0.0.1', isLoopbackRunnerUrl('ws://127.0.0.1:51100/runners'))
+check('loopback: other 127.x', isLoopbackRunnerUrl('ws://127.0.0.53:8080/runners'))
+check('loopback: localhost', isLoopbackRunnerUrl('ws://localhost:51100/runners'))
+check('loopback: bracketed ipv6 ::1', isLoopbackRunnerUrl('ws://[::1]:51100/runners'))
+check('loopback: wss loopback still loopback', isLoopbackRunnerUrl('wss://127.0.0.1/runners'))
+// Off-box targets — the whole point of `--public-address`.
+check('off-box: public dns name', !isLoopbackRunnerUrl('wss://hub.example.com:8443/runners'))
+check('off-box: private LAN ip', !isLoopbackRunnerUrl('ws://10.0.0.5:51100/runners'))
+check('off-box: public ip', !isLoopbackRunnerUrl('wss://203.0.113.9/runners'))
+// A wildcard BIND is not a dialable loopback target: a token carrying it is
+// broken for everyone, so calling it "loopback" would misdirect the operator.
+check('off-box: wildcard 0.0.0.0 is not loopback', !isLoopbackRunnerUrl('ws://0.0.0.0:51100/runners'))
+// Unparseable → false: never claim a URL is loopback when we cannot tell.
+check('unparseable: garbage → false', !isLoopbackRunnerUrl('not a url'))
+check('unparseable: empty → false', !isLoopbackRunnerUrl(''))
 
 console.log(`\n${passed} passed, ${failed} failed\n`)
 if (failed > 0) process.exit(1)

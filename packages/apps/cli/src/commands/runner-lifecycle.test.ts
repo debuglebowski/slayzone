@@ -2,11 +2,17 @@
  * `slay runner` end-to-end against a REAL hub.
  *
  * Drives the BUILT `slay` bundle: boots a real hub in a throwaway root, mints a join
- * token over its loopback REST channel, then runs `slay runner create` and asserts the
- * runner actually ENROLLS — token decode → config.json write → spawn → pinned dial →
- * `mode:"enroll"`. The library pieces are unit-tested elsewhere
- * (platform/src/service-unit.test.ts for unit CONTENT, runner/src/join-token.test.ts
- * for the token codec); what only an end-to-end run can catch is the wiring.
+ * token, then runs `slay runner create` and asserts the runner actually ENROLLS —
+ * token decode → config.json write → spawn → pinned dial → `mode:"enroll"`. The
+ * library pieces are unit-tested elsewhere (platform/src/service-unit.test.ts for
+ * unit CONTENT, runner/src/join-token.test.ts for the token codec); what only an
+ * end-to-end run can catch is the wiring.
+ *
+ * The happy path's token is minted by `slay runner mint` rather than by this file's
+ * raw `fetch` — the two channels must agree about what a token contains, and making
+ * the enroll depend on the CLI one is what proves it. `mintToken()` (raw fetch)
+ * stays, as the independent reference the mint cases compare against and to absorb
+ * the listener-bind wait once.
  *
  * DELIBERATELY NEVER REGISTERS A SERVICE. Every case runs with
  * `SLZ_FORCE_NO_SERVICE=1` (⇒ the unsupervised detached-spawn branch) or fails before
@@ -58,6 +64,7 @@ import {
   writeUnit,
   type ServiceBackend
 } from '@slayzone/platform/service-unit'
+import { decodeJoinToken } from '@slayzone/platform/join-token'
 
 // Package roots are derived from the REPO root rather than this file's own URL: the
 // CLI package typechecks as CommonJS (see its tsconfig `module`), where `import.meta`
@@ -397,7 +404,62 @@ async function main(): Promise<void> {
     // enroll — while installing no service unit.
 
     const hub = await startHub()
-    const token = await mintToken(hub.port, `${NAME_PREFIX}e2e`)
+
+    // ------------------------------------------------------------------- mint
+    // `runner mint` is the ONLY place a runner's hub is chosen — the token embeds
+    // that hub's dial url + cert fingerprint, and `create` merely decodes it. These
+    // cases run before the happy path on purpose: the token `create` then uses is
+    // the one MINT produced, so a divergence between the CLI channel and the raw
+    // REST one shows up as a failed enroll rather than passing unnoticed.
+
+    // Wait out the listener bind once, so the mint cases below aren't racing it.
+    await mintToken(hub.port, `${NAME_PREFIX}warmup`)
+
+    await test('mint --json prints a decodable token for the addressed hub', async () => {
+      const res = slay(['--hub', String(hub.port), 'runner', 'mint', '--json'], {
+        root: rejectRoot
+      })
+      assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
+      const out = JSON.parse(res.stdout) as { token: string; hubUrl: string }
+      assert(out.token.startsWith('szjt1.'), `szjt1 token, got ${out.token.slice(0, 12)}…`)
+      assertEq(out.hubUrl, `ws://127.0.0.1:${hub.port}/runners`, 'names the hub it minted on')
+      // The decoded payload must agree with the reported hubUrl — that equality is
+      // what makes `runner ls`'s HUB column and `create`'s decode trustworthy.
+      const decoded = decodeJoinToken(out.token)
+      assert(decoded !== null, 'token decodes')
+      assertEq(decoded!.hubUrl, out.hubUrl, 'embedded url matches the reported one')
+    })
+
+    await test('mint warns that a loopback hub token is same-machine only', async () => {
+      const res = slay(['--hub', String(hub.port), 'runner', 'mint', `${NAME_PREFIX}warn`], {
+        root: rejectRoot
+      })
+      assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
+      // A local-mode hub always embeds loopback. Silence here is how an operator
+      // carries a dead token to another machine and gets no explanation.
+      assert(
+        /loopback address/.test(res.stdout) && /public-address/.test(res.stdout),
+        `warns + names the fix: ${res.stdout}`
+      )
+    })
+
+    await test('mint rejects a non-positive --ttl before calling the hub', async () => {
+      const res = slay(['--hub', String(hub.port), 'runner', 'mint', '--ttl', '0'], {
+        root: rejectRoot
+      })
+      assert(res.status !== 0, 'exited non-zero')
+      assert(/Invalid --ttl/.test(res.stderr), `names the bad flag: ${res.stderr}`)
+    })
+
+    // The token the happy path uses comes from the CLI, closing the loop: if
+    // `runner mint` and the raw REST mint ever disagree, the enroll below fails.
+    const token = await (async () => {
+      const res = slay(['--hub', String(hub.port), 'runner', 'mint', '--json'], {
+        root: rejectRoot
+      })
+      assertEq(res.status, 0, `mint for the happy path exited 0 (stderr: ${res.stderr})`)
+      return (JSON.parse(res.stdout) as { token: string }).token
+    })()
     const runnerRoot = join(TMP, 'runner-root')
     const workDir = join(TMP, 'work')
     mkdirSync(runnerRoot, { recursive: true })

@@ -7,14 +7,18 @@
  *      the root `preAction` hook, which calls {@link setHubOverride}. An explicit
  *      per-invocation flag has to beat the ambient env/config, or `slay --hub
  *      staging …` would silently hit whatever hub the shell was pointed at.
+ *      Names a LOOPBACK hub only (discovery sweeps 127.0.0.1), and carries
+ *      `SLAYZONE_HUB_TOKEN` if set — never `hub.json`'s token, which belongs to
+ *      whichever hub `hub use`/`hub login` targeted and need not be this one.
  *   1. `SLAYZONE_HUB_ADDRESS` (+ `SLAYZONE_HUB_TOKEN`) environment variables —
  *      authority only (`host[:port]`); the http(s) scheme is DERIVED from
  *      SLAYZONE_MODE (local → http, remote → https). The env channel never
  *      carries a scheme, so it can't collide with the runner's ws(s):// reading
  *      of the same deployment (the retired `SLAYZONE_HUB_URL` bug).
- *   2. `hub.json` in the CLI state dir (written by `slay hub set-url`) — a FULL
- *      http(s) url (an operator pointing at an external hub gives a complete
- *      url; not the env channel, so no scheme derivation).
+ *   2. `hub.json` in the CLI state dir (written by `slay hub use` / `slay hub
+ *      login`) — a FULL http(s) url (an operator pointing at an external hub gives
+ *      a complete url; not the env channel, so no scheme derivation). This is the
+ *      channel that reaches a REMOTE hub, since `--hub` cannot.
  *   3. null — legacy behavior (local port discovery in db.ts, untouched)
  *
  * With no env vars and no hub.json the CLI behaves exactly as before.

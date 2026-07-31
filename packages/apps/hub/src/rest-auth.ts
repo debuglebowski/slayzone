@@ -58,8 +58,13 @@ const NOT_BOOTSTRAP = new Set<string>(['/api/auth/deep-link'])
  * `/api/runners/join-token`: the Electron MAIN process mints a token over
  * loopback at boot to auto-enroll the co-located runner, and main has no session
  * (no tRPC client, no credentials) — requiring a bearer would break local-runner
- * auto-enroll on an otherwise-enforcing hub. The route itself already 403s any
- * non-loopback peer, which is a strictly tighter check than a bearer.
+ * auto-enroll on an otherwise-enforcing hub. The route self-guards on loopback OR
+ * a verified bearer (see its `joinTokenAuthDecision`), which is still at least as
+ * tight as this gate: an off-box caller is admitted only on the same authority
+ * `/trpc` already accepts for the identical `runners.mintJoinToken` operation.
+ * Keeping the exemption is what preserves that route's own status codes — gating
+ * here would 401 an off-box request before it could report the 503 (listener not
+ * yet bound) or the 403 that says "wrong machine" rather than "no credential".
  *
  * `/api/hub/users`: backs `slay hub users add|ls|rm`, which an operator runs ON the
  * hub box (typically over SSH) and which holds no session. Requiring a bearer would

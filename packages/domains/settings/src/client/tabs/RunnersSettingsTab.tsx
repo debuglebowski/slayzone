@@ -1,7 +1,12 @@
 import { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
-import { Copy, Loader2, Plus, Trash2, X } from 'lucide-react'
+import {
+  useTRPCClient,
+  useFederationOrNull,
+  getHubClient,
+  HubScope
+} from '@slayzone/transport/client'
+import { isLoopbackRunnerUrl } from '@slayzone/platform/hub-addr'
+import { AlertTriangle, Copy, Loader2, Plus, X } from 'lucide-react'
 import {
   Button,
   Input,
@@ -20,61 +25,113 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   toast
 } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
+import { RunnersHubRows } from './RunnersHubRows'
 
 /**
- * Runner settings — enroll + manage the machines this hub runs work on.
+ * Runner settings — enroll + manage the machines that run this client's work.
  *
  * A hub ALWAYS accepts runners (the gateway + auth + listener come up at boot
  * unconditionally), so there is no mode to enable: enrollment and the runners
  * table are always live. Enrolling is a row inside the table ("＋ Add new runner")
  * that expands into the label form inline; minting yields a one-time token shown
- * in a modal (forces a copy before dismiss — it can't be retrieved later). Both
- * talk to the `runners` tRPC router — `runners.mintJoinToken` mints the token
- * embedding the hub's runner URL + TLS fingerprint; `runners.list` merges live
- * connection status. To actually run a task's work on a runner, bind the
- * project/task to it (task metadata) — until then everything executes in-process.
+ * in a modal (forces a copy before dismiss — it can't be retrieved later). To
+ * actually run a task's work on a runner, bind the project/task to it (task
+ * metadata) — until then everything executes in-process.
+ *
+ * MULTI-HUB. A runner belongs to exactly ONE hub, and which hub is decided when
+ * the token is MINTED (the token embeds that hub's dial URL + cert fingerprint).
+ * So a federated client needs to choose a hub at mint time, and needs to see every
+ * hub's runners — otherwise a remote hub's runners are invisible and
+ * un-enrollable. Both are handled here:
+ *
+ *  - ONE merged table with a HUB column (mirroring the flat merged task rail), not
+ *    a section per hub. Rows come from a `<RunnersHubRows>` child mounted once per
+ *    hub inside that hub's `<HubScope>`, which is what makes per-row revoke
+ *    hub-correct by construction — see that module's note.
+ *  - the add row gains a hub picker, shown ONLY when >1 hub is connected. Mint is a
+ *    VANILLA client call (`getHubClient`), because the chosen hub is dynamic and
+ *    the shell is not inside its scope — the same idiom as CreateProjectDialog.
+ *
+ * Single hub (and the Chromium fork, which renders with no federation at all) is
+ * unchanged: no Hub column, no picker, mint through the ambient client.
  */
 
-function formatLastSeen(row: { connected: boolean; lastSeenAt: number | null }): string {
-  if (row.connected) return 'Connected'
-  if (row.lastSeenAt == null) return 'Never'
-  return new Date(row.lastSeenAt).toLocaleString()
+/** The shell's own view of a revoke target — `revoke` is the child's hub-bound thunk. */
+type RevokeTarget = { id: string; name: string; revoke: () => Promise<void> }
+
+/** A minted token plus where it points, so the dialog can warn about loopback. */
+type MintedToken = {
+  token: string
+  hubLabel: string
+  hubUrl: string | undefined
 }
 
 export function RunnersSettingsTab() {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
+  const trpcClient = useTRPCClient()
+  // OrNull: the Chromium fork renders this surface outside a FederationProvider.
+  const fed = useFederationOrNull()
+  // A listed hub may have no url (an offline remote the registry still knows), and
+  // an unresolvable hub cannot answer a query — filter before rendering scopes.
+  const hubs = fed ? fed.hubs.filter((h) => !!h.url) : []
+  const multiHub = hubs.length > 1
+  const defaultHubId = fed?.defaultHubId ?? 'local'
 
   const [addingRunner, setAddingRunner] = useState(false)
   const [label, setLabel] = useState('')
+  const [targetHubId, setTargetHubId] = useState(defaultHubId)
   const [minting, setMinting] = useState(false)
-  const [mintedToken, setMintedToken] = useState<string | null>(null)
-  const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null)
+  const [minted, setMinted] = useState<MintedToken | null>(null)
+  const [revokeTarget, setRevokeTarget] = useState<RevokeTarget | null>(null)
+  // Per-hub row counts, so the header total is the UNION rather than one hub's.
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  // Bumped after a mint so every hub's child refetches its own list.
+  const [revision, setRevision] = useState(0)
 
-  // A hub always accepts runners, so the list + enrollment are always available
-  // (no mode to enable). `list` merges live connection status when a runner is
-  // connected; it's a plain DB read otherwise.
-  const runnersQuery = useQuery(trpc.runners.list.queryOptions())
-  const runners = runnersQuery.data ?? []
+  const onCount = useCallback((hubId: string, count: number) => {
+    setCounts((prev) => (prev[hubId] === count ? prev : { ...prev, [hubId]: count }))
+  }, [])
 
-  const mintMutation = useMutation(trpc.runners.mintJoinToken.mutationOptions())
-  const revokeMutation = useMutation(trpc.runners.revokeRunner.mutationOptions())
+  const onRevokeRequest = useCallback((target: RevokeTarget) => {
+    setRevokeTarget(target)
+  }, [])
 
-  const reloadRunners = useCallback(() => {
-    void queryClient.invalidateQueries(trpc.runners.list.queryFilter())
-  }, [queryClient, trpc])
+  const total = multiHub
+    ? hubs.reduce((sum, h) => sum + (counts[h.id] ?? 0), 0)
+    : (counts[defaultHubId] ?? 0)
+
+  const hubLabelFor = (hubId: string): string =>
+    hubs.find((h) => h.id === hubId)?.label ?? 'this hub'
 
   const addRunner = async (): Promise<void> => {
     setMinting(true)
-    setMintedToken(null)
+    setMinted(null)
     try {
-      const res = await mintMutation.mutateAsync({ label: label.trim() || 'runner' })
-      setMintedToken(res.token)
+      // Route the mint to the chosen hub's client — the token belongs to whichever
+      // hub minted it. Default/local resolves to the ambient client, so a
+      // single-hub client takes the exact same path as before.
+      const client =
+        targetHubId && targetHubId !== defaultHubId
+          ? (getHubClient(targetHubId)?.client ?? trpcClient)
+          : trpcClient
+      const res = await client.runners.mintJoinToken.mutate({
+        label: label.trim() || 'runner'
+      })
+      setMinted({
+        token: res.token,
+        hubLabel: hubLabelFor(targetHubId),
+        hubUrl: res.hubUrl
+      })
       setLabel('')
       setAddingRunner(false)
+      setRevision((r) => r + 1)
       toast.success('Enrollment token created')
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -86,10 +143,10 @@ export function RunnersSettingsTab() {
 
   const revoke = async (): Promise<void> => {
     if (!revokeTarget) return
+    const { name, revoke: run } = revokeTarget
     try {
-      await revokeMutation.mutateAsync({ runnerId: revokeTarget.id })
-      toast.success(`Revoked ${revokeTarget.name}`)
-      reloadRunners()
+      await run()
+      toast.success(`Revoked ${name}`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       toast.error(`Revoke failed: ${msg}`)
@@ -106,26 +163,47 @@ export function RunnersSettingsTab() {
     }
   }
 
+  // A loopback dial target means the token only works for a runner on the hub's OWN
+  // machine. Legitimate (that is the co-located case), so this informs rather than
+  // blocks — but silence here is how an operator ends up with a runner that never
+  // connects and no clue why.
+  const mintedIsLoopback = minted?.hubUrl !== undefined && isLoopbackRunnerUrl(minted.hubUrl)
+
+  const rowsFor = (hubId: string, hubLabel: string) => (
+    <RunnersHubRows
+      hubId={hubId}
+      hubLabel={hubLabel}
+      showHubColumn={multiHub}
+      onCount={onCount}
+      onRevokeRequest={onRevokeRequest}
+      revision={revision}
+    />
+  )
+
   return (
     <div className="space-y-6">
       <SettingsTabIntro
         title="Runners"
-        description="Run terminals and agents on other machines. This app is a hub that runners dial into over an authenticated connection; enroll a runner below, then bind a project or task to it to execute its work there instead of locally."
+        description="Run terminals and agents on other machines. A hub is what runners dial into over an authenticated connection; enroll a runner below, then bind a project or task to it to execute its work there instead of locally."
       />
 
       <div className="space-y-3">
         <div className="flex items-baseline justify-between">
           <Label className="text-base font-semibold">Runners</Label>
           <span className="text-muted-foreground text-xs">
-            {runners.length === 0
+            {total === 0
               ? 'No runners enrolled yet.'
-              : `${runners.length} runner${runners.length === 1 ? '' : 's'} enrolled`}
+              : `${total} runner${total === 1 ? '' : 's'} enrolled`}
           </span>
         </div>
         <table className="w-full text-sm" data-testid="runners-table">
           <thead>
             <tr className="text-muted-foreground border-border border-b text-left text-xs">
               <th className="py-2 pr-3 font-medium">Name</th>
+              {/* Hub sits next to Name: "which runner, on which hub" reads as one
+                  fact. Only rendered when federated, so the single-hub table is
+                  byte-identical to before. */}
+              {multiHub && <th className="py-2 pr-3 font-medium">Hub</th>}
               <th className="py-2 pr-3 font-medium">Platform</th>
               <th className="py-2 pr-3 font-medium">Capabilities</th>
               <th className="py-2 pr-3 font-medium">Status</th>
@@ -134,49 +212,20 @@ export function RunnersSettingsTab() {
             </tr>
           </thead>
           <tbody>
-            {runners.map((runner) => (
-              <tr
-                key={runner.id}
-                className="border-border/60 border-b"
-                data-testid="runner-row"
-              >
-                <td className="py-2 pr-3 font-medium">{runner.name}</td>
-                <td className="text-muted-foreground py-2 pr-3 font-mono text-xs">
-                  {runner.platform}
-                </td>
-                <td className="text-muted-foreground py-2 pr-3 text-xs">
-                  {runner.capabilities.length > 0 ? runner.capabilities.join(', ') : '—'}
-                </td>
-                <td className="py-2 pr-3">
-                  <span
-                    className={
-                      runner.connected
-                        ? 'text-green-500 text-xs font-medium'
-                        : 'text-muted-foreground text-xs'
-                    }
-                  >
-                    {runner.connected ? '● Connected' : 'Disconnected'}
-                  </span>
-                </td>
-                <td className="text-muted-foreground py-2 pr-3 text-xs">
-                  {formatLastSeen(runner)}
-                </td>
-                <td className="py-2 text-right">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setRevokeTarget({ id: runner.id, name: runner.name })}
-                    data-testid="runner-revoke"
-                  >
-                    <Trash2 className="size-3.5 text-destructive" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
+            {/* One child per hub, each in its own scope so its hooks resolve to that
+                hub. Without federation (fork) there is no scope to enter — the
+                ambient client is the only hub there is. */}
+            {fed
+              ? hubs.map((h) => (
+                  <HubScope key={h.id} hubId={h.id}>
+                    {rowsFor(h.id, h.label)}
+                  </HubScope>
+                ))
+              : rowsFor(defaultHubId, '')}
             {/* Add-runner row — collapsed to a button, expands into the label form. */}
             <tr className="border-border/60 border-b last:border-0" data-testid="runner-add-row">
               {addingRunner ? (
-                <td colSpan={6} className="py-2">
+                <td colSpan={multiHub ? 7 : 6} className="py-2">
                   <div className="flex items-center gap-2">
                     <Input
                       value={label}
@@ -186,6 +235,21 @@ export function RunnersSettingsTab() {
                       className="max-w-xs"
                       data-testid="runner-enroll-label"
                     />
+                    {multiHub && (
+                      <Select value={targetHubId} onValueChange={setTargetHubId}>
+                        <SelectTrigger className="max-w-[12rem]" data-testid="runner-add-hub">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {hubs.map((h) => (
+                            <SelectItem key={h.id} value={h.id}>
+                              {h.label}
+                              {h.id === defaultHubId ? ' (default)' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                     <Button
                       variant="outline"
                       disabled={minting}
@@ -211,13 +275,13 @@ export function RunnersSettingsTab() {
                     </Button>
                   </div>
                   <p className="text-muted-foreground mt-2 text-xs">
-                    Mint a one-time enrollment token and paste it into the runner machine&apos;s
-                    config. The token embeds this hub&apos;s address and TLS fingerprint, and expires
-                    after 15 minutes.
+                    {multiHub
+                      ? 'Mint a one-time enrollment token on the chosen hub and paste it into the runner machine’s config. The runner connects to that hub — the token embeds its address and TLS fingerprint — and expires after 15 minutes.'
+                      : 'Mint a one-time enrollment token and paste it into the runner machine’s config. The token embeds this hub’s address and TLS fingerprint, and expires after 15 minutes.'}
                   </p>
                 </td>
               ) : (
-                <td colSpan={6} className="py-2">
+                <td colSpan={multiHub ? 7 : 6} className="py-2">
                   <button
                     type="button"
                     onClick={() => setAddingRunner(true)}
@@ -235,7 +299,7 @@ export function RunnersSettingsTab() {
       </div>
 
       {/* Enrollment token — one-time secret; modal forces a copy before dismiss. */}
-      <Dialog open={!!mintedToken} onOpenChange={(open) => !open && setMintedToken(null)}>
+      <Dialog open={!!minted} onOpenChange={(open) => !open && setMinted(null)}>
         <DialogContent data-testid="runner-minted-token">
           <DialogHeader>
             <DialogTitle>Enrollment token</DialogTitle>
@@ -244,20 +308,40 @@ export function RunnersSettingsTab() {
               later.
             </DialogDescription>
           </DialogHeader>
+          {/* Name the hub: with several connected, a token pasted onto the wrong
+              machine is indistinguishable from a broken one. */}
+          <p className="text-muted-foreground text-xs" data-testid="runner-minted-hub">
+            This runner will connect to <span className="text-foreground">{minted?.hubLabel}</span>
+            {minted?.hubUrl ? <span className="font-mono"> ({minted.hubUrl})</span> : null}
+          </p>
           <code className="text-muted-foreground border-border block max-w-full overflow-x-auto rounded-md border p-3 font-mono text-xs break-all">
-            {mintedToken}
+            {minted?.token}
           </code>
+          {mintedIsLoopback && (
+            <p
+              className="text-muted-foreground flex gap-2 text-xs"
+              data-testid="runner-token-loopback-warning"
+            >
+              <AlertTriangle className="text-destructive mt-0.5 size-3.5 shrink-0" />
+              <span>
+                This hub&apos;s address is loopback, so only a runner on the SAME machine can use
+                this token — anywhere else it would dial its own loopback and never connect. For a
+                hub other machines reach, recreate it with{' '}
+                <span className="font-mono">slay hub create --public-address</span>.
+              </span>
+            </p>
+          )}
           <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
-                if (mintedToken) void copyToken(mintedToken)
+                if (minted) void copyToken(minted.token)
               }}
             >
               <Copy className="mr-1 size-3.5" />
               Copy
             </Button>
-            <Button onClick={() => setMintedToken(null)} data-testid="runner-token-dismiss">
+            <Button onClick={() => setMinted(null)} data-testid="runner-token-dismiss">
               Done
             </Button>
           </DialogFooter>
@@ -270,7 +354,7 @@ export function RunnersSettingsTab() {
             <AlertDialogTitle>Revoke Runner</AlertDialogTitle>
             <AlertDialogDescription>
               Revoke <strong>{revokeTarget?.name}</strong>? It will no longer be able to connect to
-              this hub, and any task pinned to it falls back to the project default. This cannot be
+              its hub, and any task pinned to it falls back to the project default. This cannot be
               undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

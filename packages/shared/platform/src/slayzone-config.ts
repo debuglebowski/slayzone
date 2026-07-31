@@ -63,6 +63,22 @@ export interface SlayzoneConfig {
    *  scheme. Written into the join tokens remote runners dial back on. Needed
    *  alongside `address` only when the two differ (reverse proxy / NAT). */
   publicAddress?: string
+  /**
+   * Deployment hardening intent — the FILE channel for `SLAYZONE_MODE`.
+   *
+   * `remote` makes the hub enforce client auth, terminate TLS, and mint `wss://`
+   * join tokens; `local` (the default when unset) is the loopback/dev shape. It
+   * lives here, beside the `address`/`publicAddress` it belongs with, so
+   * `slay hub create --public-address` can persist an operator's intent ONCE —
+   * a service-unit env var would be a second home for the same value, and
+   * `slay hub restart --upgrade` rewrites the unit (silently dropping it).
+   *
+   * Env still wins (`applyStandaloneHubConfig` seeds with `setIfUnset`), and an
+   * unrecognized value is dropped on read rather than passed through: it would
+   * otherwise reach `getSlayzoneMode()` and resolve to `local` anyway, so a typo
+   * must read as "unset" instead of half-applying.
+   */
+  mode?: 'local' | 'remote'
   /** Operator-facing hub name (env: `SLAYZONE_HUB_NAME`). How `slay hub ls` labels
    *  this hub and how `slay hub stop|restart|logs|--hub` address it. Defaults to
    *  the ROOT directory's name, so a hub in `~/hubs/staging` is `staging` with no
@@ -165,6 +181,8 @@ function coerce(raw: Record<string, unknown>): SlayzoneConfig {
     cfg.publicAddress = raw.publicAddress
   if (typeof raw.hubName === 'string' && raw.hubName.trim().length > 0)
     cfg.hubName = raw.hubName.trim()
+  // Exact literals only — see the `mode` doc: a near-miss must read as unset.
+  if (raw.mode === 'local' || raw.mode === 'remote') cfg.mode = raw.mode
   // Legacy keys, still read so an existing config.json keeps booting.
   if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
   if (typeof raw.publicUrl === 'string' && raw.publicUrl.length > 0) cfg.publicUrl = raw.publicUrl
