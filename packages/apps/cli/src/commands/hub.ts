@@ -7,6 +7,8 @@
  *     `@slayzone/platform/hub-discovery` for why a probe beats a pidfile.
  *   - CLIENT view: which hub THIS CLI talks to (`use`, `current`, `forget`).
  *     Answered from `hub.json` / `SLAYZONE_HUB_ADDRESS`.
+ *   - ACCOUNTS on a hub (`users add|ls|rm`). Reaches the hub's loopback-only
+ *     `/api/hub/users` — see {@link hubUsersCommand}.
  *
  * `start` REGISTERS the hub with the OS supervisor (launchd/systemd) rather than
  * merely backgrounding it, so a crash or a logout doesn't silently end the hub;
@@ -283,6 +285,15 @@ async function launchHub(args: {
   // State exactly what the supervisor guarantees. A user agent starts at LOGIN, not
   // at boot — claiming "survives reboot" would be wrong.
   console.log('Restarts automatically if it crashes, and starts again when you log in.')
+  // A brand-new hub has NO accounts, and public signup is closed — so on a remote
+  // deployment nobody can sign in until the operator creates one here, on the box.
+  // A loopback-only hub needs no account at all, hence "if this hub is reachable
+  // from other machines" rather than an unconditional instruction.
+  if (creating) {
+    console.log('')
+    console.log('If this hub is reachable from other machines, create an account for it:')
+    console.log(`  slay hub users add <email> --hub ${name}`)
+  }
 }
 
 /**
@@ -319,6 +330,171 @@ async function haltHub(
         `It may be managed elsewhere (docker, a system unit).`
     )
   }
+}
+
+// ------------------------------------------------------------------- accounts
+//
+// `slay hub users` talks to the hub's loopback-only `/api/hub/users`. That route is
+// the ONLY way to create an account: public signup is closed on the hub
+// (`disableSignUp`), because the sign-up endpoint has to stay reachable without a
+// bearer and therefore made any reachable hub self-registerable. Being on the box —
+// typically SSH'd into the VPS — is the authority here.
+
+/** Shape the routes return on success. */
+interface HubUserRow {
+  id: string
+  email: string
+  name: string
+  createdAt: string
+}
+
+/**
+ * Resolve which hub the `users` commands act on, as a base URL.
+ *
+ * Deliberately NOT `../api.ts`: its `resolveTarget()` falls through to
+ * `getServerPort()` → `openDb()`, which `process.exit(1)`s when there is no local
+ * SlayZone database — the normal state of a hub-only VPS, and impossible to catch.
+ * (Same reason `outOfBlockPorts()` above gates on `hasLocalDatabase()`.)
+ *
+ * Precedence:
+ *   1. Whatever `resolveHubTarget()` says — which already covers the root `--hub`
+ *      flag, `SLAYZONE_HUB_ADDRESS`/`_TOKEN`, and `hub.json`. Reusing it means
+ *      `slay --hub staging hub users ls` works with no new surface.
+ *   2. Auto-discovery, when exactly ONE hub is running here. Refusing to guess
+ *      between several is the point: creating an account on the wrong hub is
+ *      invisible until someone can't sign in.
+ */
+async function resolveHubForUsers(): Promise<{ baseUrl: string; token: string | null }> {
+  const configured = resolveHubTarget()
+  if (configured) return configured
+
+  const running = await discoverAllHubs()
+  if (running.length === 0) {
+    fail(
+      'No hub is running on this machine.\n' +
+        'Start one with `slay hub start <name>`, or name a remote hub with ' +
+        '`slay --hub <name|port>` / `slay hub use <url>`.'
+    )
+  }
+  if (running.length > 1) {
+    fail(
+      `Several hubs are running here, so which one to act on is ambiguous: ` +
+        `${running.map((h) => `${h.name} (${h.port})`).join(', ')}.\n` +
+        `Name one with \`slay --hub <name|port> hub users …\`.`
+    )
+  }
+  // Discovery only reaches loopback, so the scheme is always plain http.
+  return { baseUrl: `http://127.0.0.1:${running[0]!.port}`, token: null }
+}
+
+/**
+ * Call `/api/hub/users` and return the parsed `data`, or exit with the hub's own
+ * error text.
+ *
+ * The hub's messages are deliberately surfaced verbatim: they explain the refusals
+ * (last remaining account, the protected runner service identity) far better than
+ * anything reconstructible from a status code.
+ */
+async function hubUsersRequest<T>(method: string, body?: Record<string, unknown>): Promise<T> {
+  const target = await resolveHubForUsers()
+  const url = `${target.baseUrl}/api/hub/users`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(target.token ? { Authorization: `Bearer ${target.token}` } : {})
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000)
+    })
+  } catch {
+    fail(`Could not reach the hub at ${target.baseUrl}.`)
+  }
+  const text = await res.text().catch(() => '')
+  let parsed: { ok?: boolean; data?: T; error?: string; message?: string } = {}
+  try {
+    parsed = text ? (JSON.parse(text) as typeof parsed) : {}
+  } catch {
+    /* fall through to the status-based message below */
+  }
+  if (!res.ok) {
+    const detail = parsed.message ? ` (${parsed.message})` : ''
+    fail(`${parsed.error ?? `HTTP ${res.status}`}${detail}`)
+  }
+  return parsed.data as T
+}
+
+/** `slay hub users` — accounts on a hub. */
+function hubUsersCommand(): Command {
+  // Plural: `slay hub use` already exists, and a singular `user` would sit one
+  // character from it in help output.
+  const users = new Command('users')
+    .description('Manage the accounts that can sign in to a hub')
+    .showSuggestionAfterError(true)
+    .showHelpAfterError(true)
+
+  users
+    .command('add <email>')
+    .description('Create an account and print its generated password once')
+    .option('--name <name>', 'Display name (default: the email local part)')
+    .option('--json', 'Output as JSON')
+    .action(async (email: string, opts: { name?: string; json?: boolean }) => {
+      const created = await hubUsersRequest<HubUserRow & { password: string }>('POST', {
+        email,
+        ...(opts.name ? { name: opts.name } : {})
+      })
+      if (opts.json) {
+        console.log(JSON.stringify({ email: created.email, password: created.password }, null, 2))
+        return
+      }
+      console.log(`Created account: ${created.email}`)
+      console.log(`Password:        ${created.password}`)
+      console.log('')
+      // Only the hash is stored, so this really is the one and only chance.
+      console.log('This password is shown ONCE and cannot be recovered — save it now.')
+      console.log('Sign in from the app: Settings → Hubs → Sign in.')
+    })
+
+  users
+    .command('ls')
+    .description('List the accounts on a hub')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const rows = await hubUsersRequest<HubUserRow[]>('GET')
+      if (opts.json) {
+        console.log(JSON.stringify(rows, null, 2))
+        return
+      }
+      if (rows.length === 0) {
+        // An accountless remote hub is unusable, so name the fix rather than
+        // printing a bare "none".
+        console.log('No accounts yet. Create one with `slay hub users add <email>`.')
+        return
+      }
+      const emailW = Math.max(5, ...rows.map((r) => r.email.length))
+      const nameW = Math.max(4, ...rows.map((r) => r.name.length))
+      console.log(`${'EMAIL'.padEnd(emailW)}  ${'NAME'.padEnd(nameW)}  CREATED`)
+      console.log(`${'-'.repeat(emailW)}  ${'-'.repeat(nameW)}  ${'-'.repeat(10)}`)
+      for (const r of rows) {
+        const created = r.createdAt.slice(0, 10)
+        console.log(`${r.email.padEnd(emailW)}  ${r.name.padEnd(nameW)}  ${created}`)
+      }
+    })
+
+  users
+    .command('rm <email>')
+    .description('Remove an account and revoke its sessions')
+    .action(async (email: string) => {
+      // No confirmation prompt: the operator typed an exact email, the hub refuses
+      // the two dangerous cases itself (last remaining account, runner service
+      // identity), and an account is re-creatable with `add`.
+      const removed = await hubUsersRequest<{ email: string }>('DELETE', { email })
+      console.log(`Removed account: ${removed.email}`)
+    })
+
+  return users
 }
 
 export function hubCommand(): Command {
@@ -681,6 +857,9 @@ export function hubCommand(): Command {
         if (!running) console.log(`  start: slay hub start ${u.name}`)
       }
     })
+
+  // slay hub users add|ls|rm
+  cmd.addCommand(hubUsersCommand())
 
   return cmd
 }

@@ -34,7 +34,20 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // better-sqlite3 against Electron's ABI, which breaks plain-node
     // consumers (vitest, CI); node:sqlite is ABI-proof in both runtimes.
     database,
-    emailAndPassword: { enabled: true },
+    // Public signup is CLOSED. `/api/auth/sign-up/email` is necessarily exempt
+    // from the hub's bearer gate (see rest-auth.ts — a client holding no token has
+    // to reach it to obtain one), so leaving it open meant anyone who could reach
+    // an internet-facing hub could self-register into full access: pty spawn,
+    // browser eval, file ops. better-auth enforces this flag inside the route
+    // itself (`if (!enabled || disableSignUp) throw BAD_REQUEST`), so the route now
+    // refuses at the source and the gate exemption is harmless. Sign-in and
+    // get-session are unaffected.
+    //
+    // Accounts therefore come from `createHubUser` (./users.ts), reached over the
+    // loopback-only `/api/hub/users` route that backs `slay hub users add` — a
+    // shell on the hub box is the credential, exactly as for
+    // `POST /api/runners/join-token`.
+    emailAndPassword: { enabled: true, disableSignUp: true },
     // Hard guarantee: never phone home (better-auth telemetry is opt-in, we
     // still pin it off).
     telemetry: { enabled: false },

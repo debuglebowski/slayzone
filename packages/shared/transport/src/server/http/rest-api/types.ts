@@ -136,6 +136,34 @@ export interface RestApiDeps {
     /** Hub TLS leaf sha256 (lowercase hex) the token pins. Null until loaded. */
     getCertFingerprint: () => string | null
   }
+  /**
+   * Operator account management, powering the loopback-only `/api/hub/users` routes
+   * behind `slay hub users add|ls|rm`. Wired ONLY by the hub composition root.
+   *
+   * A METHOD OBJECT, not the `HubAuth` instance: this package has no
+   * `@slayzone/hub-auth` dependency and must not gain one, so better-auth stays
+   * behind this seam (`@slayzone/hub-auth`'s users.ts holds the real logic).
+   *
+   * GETTER-SHAPED for `ready`, because hub-auth is created ASYNCHRONOUSLY (its
+   * better-auth migrations run off the main boot path) long after `restDeps` is
+   * built synchronously — same reason as the `runners` slot above. `ready()` false
+   * means either init has not finished or it FAILED permanently; the routes 503
+   * either way. Absent slot (the Electron host) → 503 as well, so a host without
+   * hub-auth degrades instead of throwing.
+   */
+  hubUsers?: {
+    /** False until hub-auth has loaded; stays false forever if its init threw. */
+    ready: () => boolean
+    create: (input: {
+      email: string
+      name?: string
+    }) => Promise<
+      | { ok: true; user: { id: string; email: string; name: string; password: string } }
+      | { ok: false; reason: 'exists' }
+    >
+    list: () => Promise<Array<{ id: string; email: string; name: string; createdAt: string }>>
+    remove: (email: string) => Promise<'ok' | 'not-found' | 'protected' | 'last-user'>
+  }
 }
 
 /** Uniform 501 payload for routes whose capability slot is absent in this host. */

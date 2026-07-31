@@ -25,7 +25,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
 
 let passed = 0
@@ -53,7 +53,6 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 }
 
 const EMAIL = 'client@example.com'
-const PASSWORD = 'super-secret-password-1'
 
 async function main(): Promise<void> {
   console.log('\nhub /trpc connection-context seam (real hub-auth)')
@@ -86,9 +85,12 @@ async function main(): Promise<void> {
   })
 
   try {
-    // Mint a genuine session token the way a real client would obtain one.
-    await auth.api.signUpEmail({ body: { email: EMAIL, password: PASSWORD, name: 'Client' } })
-    const signIn = await auth.api.signInEmail({ body: { email: EMAIL, password: PASSWORD } })
+    // Mint a genuine session token the way a real client would obtain one. Public
+    // signup is closed (`disableSignUp`), so the account comes from createHubUser,
+    // which generates the password and returns it once.
+    const created = await createHubUser(auth, { email: EMAIL, name: 'Client' })
+    assert(!('error' in created), 'created the fixture account')
+    const signIn = await auth.api.signInEmail({ body: { email: EMAIL, password: created.password } })
     const validToken = signIn.token
     assert(typeof validToken === 'string' && validToken.length > 0, 'got a real session token')
 

@@ -44,6 +44,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 
@@ -284,6 +285,57 @@ function slay(
 }
 
 /**
+ * POST JSON to a hub's better-auth endpoint, the way a REAL client does.
+ *
+ * MUST be `node:http`, NOT `fetch`. Node's fetch (undici) attaches `Sec-Fetch-*`
+ * headers, and better-auth's CSRF middleware treats their presence as a browser
+ * form post — it then demands an `Origin` matching its own `baseURL` (a fixed
+ * `http://127.0.0.1:8788` loopback constant; runners authenticate by api-key, so
+ * nothing else depends on it). A plain fetch therefore 403s
+ * `MISSING_OR_NULL_ORIGIN` before the route ever runs, which looks exactly like a
+ * broken auth config while actually testing nothing.
+ *
+ * `http.request` sends no `Sec-Fetch-*`, so the CSRF path is skipped — matching the
+ * desktop app's `hubLogin`, which is also `http(s).request` for its own reasons
+ * (CSP + cert pinning). So this helper exercises the real login path, not an
+ * artefact of the test client.
+ */
+function postJson(
+  port: number,
+  path: string,
+  body: unknown
+): Promise<{ status: number; body: string; headers: Record<string, string | string[] | undefined> }> {
+  const payload = JSON.stringify(body)
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      `http://127.0.0.1:${port}${path}`,
+      {
+        method: 'POST',
+        timeout: 10_000,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
+      },
+      (res) => {
+        let text = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => (text += chunk))
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? -1, body: text, headers: res.headers })
+        )
+      }
+    )
+    req.on('error', reject)
+    req.on('timeout', () => {
+      req.destroy()
+      reject(new Error(`POST ${path} timed out`))
+    })
+    req.end(payload)
+  })
+}
+
+/**
  * `hub ls --json`, narrowed to THIS test's hubs by name prefix. The sweep also
  * finds a developer's or CI's real hubs — filtering keeps them out of every
  * assertion (and out of anything this test would ever stop).
@@ -434,6 +486,109 @@ async function main(): Promise<void> {
       assert(res.status !== 0, 'non-zero exit')
       assert(/No hub named or listening on/.test(res.stderr), `named the problem: ${res.stderr}`)
       assert(/Running hubs:/.test(res.stderr), `listed the alternatives: ${res.stderr}`)
+    })
+
+    // ── accounts (`hub users`) ────────────────────────────────────────────────
+    // The only end-to-end coverage of the composition wiring: the `hubUsers` REST
+    // capability is closed over a LATE-BOUND hub-auth ref (built async, after
+    // restDeps), so a wiring mistake there is invisible to every unit test and shows
+    // up only against a really-booted hub.
+    await test('hub users: add prints a one-time password, ls lists the account', async () => {
+      const email = `op-${process.pid}@example.com`
+      const add = slay(['--hub', NAME_A, 'hub', 'users', 'add', email, '--json'], { root: rootA })
+      assertEq(add.status, 0, `add exited 0 (stderr: ${add.stderr})`)
+      const created = JSON.parse(add.stdout) as { email: string; password: string }
+      assertEq(created.email, email, 'echoed the created email')
+      assert(created.password.length > 0, 'returned a generated password')
+
+      const ls = slay(['--hub', NAME_A, 'hub', 'users', 'ls'], { root: rootA })
+      assertEq(ls.status, 0, `ls exited 0 (stderr: ${ls.stderr})`)
+      assert(ls.stdout.includes(email), `lists the account: ${ls.stdout}`)
+      // The internal runner-key owner is a user row, but not an operator account.
+      assert(!ls.stdout.includes('runners@slayzone.internal'), 'hides the service identity')
+    })
+
+    await test('hub users: the created password actually authenticates', async () => {
+      // The point of the whole feature — a created account must be able to SIGN IN.
+      // A user row without its linked `credential` account would pass `ls` and fail
+      // here, which is the failure mode this asserts against.
+      const a = hubs.find((h) => basename(h.root) === NAME_A)!
+      const email = `signin-${process.pid}@example.com`
+      const add = slay(['--hub', NAME_A, 'hub', 'users', 'add', email, '--json'], { root: rootA })
+      assertEq(add.status, 0, `add exited 0 (stderr: ${add.stderr})`)
+      const { password } = JSON.parse(add.stdout) as { password: string }
+
+      const res = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
+      assertEq(res.status, 200, `sign-in succeeded with the generated password: ${res.body}`)
+      const token = res.headers['set-auth-token']
+      assert(typeof token === 'string' && token.length > 0, 'got a bearer token back')
+    })
+
+    await test('hub users: public sign-up is refused on a real booted hub', async () => {
+      // The security half of this feature, asserted against the actual HTTP surface
+      // rather than the auth config: the route stays gate-exempt (a token-less client
+      // must reach sign-in), so `disableSignUp` inside better-auth is what closes it.
+      const a = hubs.find((h) => basename(h.root) === NAME_A)!
+      const res = await postJson(a.port, '/api/auth/sign-up/email', {
+        email: `intruder-${process.pid}@example.com`,
+        password: 'a-perfectly-valid-password',
+        name: 'Intruder'
+      })
+      assertEq(res.status, 400, `sign-up rejected: ${res.body}`)
+      // Assert the REASON, not just the status: a 400 from schema validation would
+      // pass a status-only check while signup was in fact wide open.
+      assert(
+        res.body.includes('EMAIL_PASSWORD_SIGN_UP_DISABLED'),
+        `refused because signup is disabled: ${res.body}`
+      )
+    })
+
+    await test('hub users: rm removes an account, and refuses the last one', async () => {
+      const listed = () => {
+        const res = slay(['--hub', NAME_A, 'hub', 'users', 'ls', '--json'], { root: rootA })
+        assertEq(res.status, 0, `ls --json exited 0 (stderr: ${res.stderr})`)
+        return JSON.parse(res.stdout) as Array<{ email: string }>
+      }
+      const before = listed()
+      assert(before.length >= 2, `earlier cases left ≥2 accounts: ${before.length}`)
+
+      const rm = slay(['--hub', NAME_A, 'hub', 'users', 'rm', before[0]!.email], { root: rootA })
+      assertEq(rm.status, 0, `rm exited 0 (stderr: ${rm.stderr})`)
+      assert(!listed().some((u) => u.email === before[0]!.email), 'account is gone')
+
+      // Drain to exactly one, then prove the refusal: with signup closed, removing
+      // the final account would leave the hub unauthenticatable.
+      for (const u of listed().slice(1)) {
+        assertEq(
+          slay(['--hub', NAME_A, 'hub', 'users', 'rm', u.email], { root: rootA }).status,
+          0,
+          `drained ${u.email}`
+        )
+      }
+      const remaining = listed()
+      assertEq(remaining.length, 1, 'one account left')
+      const refused = slay(['--hub', NAME_A, 'hub', 'users', 'rm', remaining[0]!.email], {
+        root: rootA
+      })
+      assert(refused.status !== 0, 'refused with a non-zero exit')
+      assert(/last remaining account/.test(refused.stderr), `explained why: ${refused.stderr}`)
+      assertEq(listed().length, 1, 'and the account survived')
+    })
+
+    await test('hub users: rm of an unknown account fails loudly', async () => {
+      const res = slay(['--hub', NAME_A, 'hub', 'users', 'rm', 'nobody@example.com'], {
+        root: rootA
+      })
+      assert(res.status !== 0, 'non-zero exit')
+      assert(/no user with email/.test(res.stderr), `named the problem: ${res.stderr}`)
+    })
+
+    await test('hub users: several hubs running and no --hub is a refusal, not a guess', async () => {
+      // Creating an account on the wrong hub is invisible until someone cannot sign
+      // in, so ambiguity must fail rather than pick.
+      const res = slay(['hub', 'users', 'ls'], { root: rootA })
+      assert(res.status !== 0, 'non-zero exit')
+      assert(/ambiguous/.test(res.stderr), `explained the ambiguity: ${res.stderr}`)
     })
 
     await test('hub stop terminates an unregistered hub via SIGTERM, and discloses it', async () => {

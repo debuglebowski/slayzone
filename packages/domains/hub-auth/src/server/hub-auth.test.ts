@@ -5,14 +5,21 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHubAuth, type HubAuth, RUNNER_KEY_PREFIX } from './auth'
 import { mintRunnerApiKey, revokeRunnerApiKey, RUNNER_SERVICE_USER_EMAIL } from './runner-keys'
+import { createHubUser } from './users'
 import { requireApiKey, requireSession, verifyRunnerApiKey, verifySession } from './verify'
 
 const EMAIL = 'alice@example.com'
-const PASSWORD = 'super-secret-password-1'
 
 let tmpDir: string
 let dbPath: string
 let auth: HubAuth
+/**
+ * Password of the primary test account. Not a constant: public signup is closed
+ * (`disableSignUp`), so accounts come from `createHubUser`, which GENERATES the
+ * password and returns it once. Captured here in `beforeAll` so every suite below
+ * can sign in without depending on another suite having run first.
+ */
+let password: string
 
 beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'hub-auth-test-'))
@@ -22,6 +29,9 @@ beforeAll(async () => {
     baseURL: 'http://127.0.0.1:9999',
     secret: 'hub-auth-test-secret-at-least-32-chars-long'
   })
+  const created = await createHubUser(auth, { email: EMAIL, name: 'Alice' })
+  if ('error' in created) throw new Error(`test setup: could not create ${EMAIL}`)
+  password = created.password
 })
 
 afterAll(() => {
@@ -91,19 +101,9 @@ describe('migrations', () => {
   })
 })
 
-describe('sign-up / sign-in (in-process auth.api)', () => {
-  it('signs up a user with email + password', async () => {
-    const result = await auth.api.signUpEmail({
-      body: { email: EMAIL, password: PASSWORD, name: 'Alice' }
-    })
-    expect(result.user.email).toBe(EMAIL)
-    expect(result.token).toBeTruthy()
-  })
-
-  it('signs in the user and returns a session token', async () => {
-    const result = await auth.api.signInEmail({
-      body: { email: EMAIL, password: PASSWORD }
-    })
+describe('sign-in (in-process auth.api)', () => {
+  it('signs in the account and returns a session token', async () => {
+    const result = await auth.api.signInEmail({ body: { email: EMAIL, password } })
     expect(result.user.email).toBe(EMAIL)
     expect(result.token).toBeTruthy()
   })
@@ -113,13 +113,28 @@ describe('sign-up / sign-in (in-process auth.api)', () => {
       auth.api.signInEmail({ body: { email: EMAIL, password: 'wrong-password-123' } })
     ).rejects.toMatchObject({ status: 'UNAUTHORIZED' })
   })
+
+  /**
+   * THE regression guard for the whole closed-signup feature. `/api/auth/sign-up/
+   * email` is exempt from the hub's bearer gate by necessity (rest-auth.ts), so if
+   * `disableSignUp` is ever dropped from auth.ts, an internet-facing hub silently
+   * becomes self-registerable by anyone who can reach it. This test is what catches
+   * that.
+   */
+  it('refuses public sign-up — accounts come from createHubUser only', async () => {
+    await expect(
+      auth.api.signUpEmail({
+        body: { email: 'intruder@example.com', password: 'a-perfectly-valid-password', name: 'X' }
+      })
+    ).rejects.toMatchObject({ status: 'BAD_REQUEST' })
+  })
 })
 
 describe('bearer-token verification', () => {
   let token: string
 
   beforeAll(async () => {
-    const result = await auth.api.signInEmail({ body: { email: EMAIL, password: PASSWORD } })
+    const result = await auth.api.signInEmail({ body: { email: EMAIL, password } })
     token = result.token
   })
 
@@ -222,23 +237,21 @@ describe('runner API keys (create / verify / revoke)', () => {
 
 describe('organization create + member add', () => {
   it('creates an organization and adds a second member (server-side)', async () => {
-    const owner = await auth.api.signUpEmail({
-      body: { email: 'owner@example.com', password: PASSWORD, name: 'Owner' }
-    })
+    const owner = await createHubUser(auth, { email: 'owner@example.com', name: 'Owner' })
+    if ('error' in owner) throw new Error('could not create the org owner')
     const org = await auth.api.createOrganization({
-      body: { name: 'SlayZone Hub', slug: 'slayzone-hub', userId: owner.user.id }
+      body: { name: 'SlayZone Hub', slug: 'slayzone-hub', userId: owner.id }
     })
     expect(org?.id).toBeTruthy()
     expect(org?.slug).toBe('slayzone-hub')
 
-    const invitee = await auth.api.signUpEmail({
-      body: { email: 'member@example.com', password: PASSWORD, name: 'Member' }
-    })
+    const invitee = await createHubUser(auth, { email: 'member@example.com', name: 'Member' })
+    if ('error' in invitee) throw new Error('could not create the invitee')
     const member = await auth.api.addMember({
-      body: { userId: invitee.user.id, organizationId: org!.id, role: 'member' }
+      body: { userId: invitee.id, organizationId: org!.id, role: 'member' }
     })
     expect(member?.organizationId).toBe(org!.id)
-    expect(member?.userId).toBe(invitee.user.id)
+    expect(member?.userId).toBe(invitee.id)
     expect(member?.role).toBe('member')
   })
 })

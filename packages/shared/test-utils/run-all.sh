@@ -155,6 +155,9 @@ run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/runner-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/runners/join-token.test.ts
+# Loopback operator account routes (`slay hub users`). no_loader: the routes never
+# touch the DB (the hubUsers capability is stubbed), so no Electron-ABI harness.
+run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/users.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
@@ -347,6 +350,12 @@ fi
 # under the tsx/electron runners above — they need the vitest runner. The app
 # vitest config wires @vitejs/plugin-react. Explicit file paths override vitest's
 # default include glob so only these run (no sweep of the tsx-harness *.test.ts).
+#
+# A few non-jsdom node suites ride along here because they need vitest's runner for
+# other reasons — the hub-auth ones use `vi`-free vitest globals plus node:sqlite,
+# which the tsx/electron runners above don't provide. (Their own
+# `pnpm --filter @slayzone/hub-auth test` also covers them; listing them here is
+# what puts them in the aggregate run.)
 echo ""
 echo "=== vitest (jsdom client suites) ==="
 if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**' \
@@ -364,7 +373,8 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/settings/src/client/tabs/RunnersSettingsTab.test.tsx \
   packages/domains/task/src/client/RunnerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
-  packages/domains/hub-auth/src/server/task-tokens.test.ts \
+  packages/domains/hub-auth/src/server/hub-auth.test.ts \
+  packages/domains/hub-auth/src/server/users.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/domains/runner-transport/src/server/exec-proxies.test.ts \
   packages/apps/runner/src/ring-buffer.test.ts; then

@@ -31,7 +31,7 @@ import { createServer, type Server } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
 import { restAuthAction, verifyRestBearer, withRestAuth } from './rest-auth.js'
 
 let passed = 0
@@ -59,7 +59,6 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 }
 
 const EMAIL = 'rest-client@example.com'
-const PASSWORD = 'super-secret-password-1'
 
 /** A non-loopback peer — what an internet client's socket reports. */
 const WAN = '203.0.113.7'
@@ -183,6 +182,10 @@ async function main(): Promise<void> {
   await test('better-auth own routes stay open (else no token can ever be obtained)', () => {
     for (const url of [
       '/api/auth/sign-in/email',
+      // Still GATE-exempt, and that is fine: better-auth itself now 400s this route
+      // (`emailAndPassword.disableSignUp` in hub-auth's auth.ts), so an open gate no
+      // longer means an open hub. Accounts come from the loopback-only
+      // /api/hub/users route below. The BAD_REQUEST is asserted in hub-auth.test.ts.
       '/api/auth/sign-up/email',
       '/api/auth/get-session',
       '/api/auth/sign-out'
@@ -196,6 +199,17 @@ async function main(): Promise<void> {
     // bearer requirement here would break local-runner auto-enroll on a remote
     // hub. The route itself 403s a non-loopback peer.
     assertEq(remoteWan('/api/runners/join-token'), 'allow', 'join-token exempt')
+  })
+
+  await test('hub user management stays open (its own loopback guard is the protection)', () => {
+    // `slay hub users add|ls|rm` runs on the hub box and holds no session — a
+    // bearer requirement would make it impossible to create the FIRST account on a
+    // remote hub, which is the whole reason the route exists. Its own 403 for a
+    // non-loopback peer is strictly tighter than a bearer.
+    assertEq(remoteWan('/api/hub/users'), 'allow', 'hub users exempt')
+    // Exact-path, not prefix: a nested path must NOT inherit the exemption.
+    assertEq(remoteWan('/api/hub/users/extra'), 'verify', 'nested path is not exempt')
+    assertEq(remoteWan('/api/hub/users?x=1'), 'allow', 'query string does not defeat the match')
   })
 
   await test('loopback callers bypass the gate (co-located processes, byte-identical)', () => {
@@ -252,8 +266,11 @@ async function main(): Promise<void> {
   })
 
   try {
-    await auth.api.signUpEmail({ body: { email: EMAIL, password: PASSWORD, name: 'Client' } })
-    const signIn = await auth.api.signInEmail({ body: { email: EMAIL, password: PASSWORD } })
+    // Public signup is closed (`disableSignUp`), so the fixture account comes from
+    // createHubUser, which generates the password and returns it once.
+    const created = await createHubUser(auth, { email: EMAIL, name: 'Client' })
+    assert(!('error' in created), 'created the fixture account')
+    const signIn = await auth.api.signInEmail({ body: { email: EMAIL, password: created.password } })
     const validToken = signIn.token
     assert(typeof validToken === 'string' && validToken.length > 0, 'got a real session token')
 

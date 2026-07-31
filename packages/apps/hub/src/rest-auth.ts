@@ -60,8 +60,21 @@ const NOT_BOOTSTRAP = new Set<string>(['/api/auth/deep-link'])
  * (no tRPC client, no credentials) — requiring a bearer would break local-runner
  * auto-enroll on an otherwise-enforcing hub. The route itself already 403s any
  * non-loopback peer, which is a strictly tighter check than a bearer.
+ *
+ * `/api/hub/users`: backs `slay hub users add|ls|rm`, which an operator runs ON the
+ * hub box (typically over SSH) and which holds no session. Requiring a bearer would
+ * make it impossible to create the FIRST account on a remote hub — and since
+ * `emailAndPassword.disableSignUp` closes public signup, that hub would be
+ * permanently unauthenticatable. Same protection as above: the route 403s every
+ * non-loopback peer, so a shell on the box is the credential.
+ *
+ * EXACT-PATH matching is load-bearing for both: `restAuthAction` compares the
+ * pathname verbatim, so a nested path (`/api/hub/users/extra`) does NOT inherit the
+ * exemption. Any future route needing this must be listed here in full — which is
+ * also why the user routes put the target email in the request body rather than in
+ * a `/:email` path segment.
  */
-const SELF_GUARDED = new Set<string>(['/api/runners/join-token'])
+const SELF_GUARDED = new Set<string>(['/api/runners/join-token', '/api/hub/users'])
 
 /** The MCP tool endpoint — same power as the tRPC router, so same gating. */
 const MCP_PATH = '/mcp'

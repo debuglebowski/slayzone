@@ -122,7 +122,13 @@ import {
   createRemoteWorktreeAdapters,
   type HubRunnerGateway
 } from '@slayzone/runner-transport/server'
-import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import {
+  createHubAuth,
+  createHubUser,
+  listHubUsers,
+  removeHubUser,
+  type HubAuth
+} from '@slayzone/hub-auth/server'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
 import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runners/server'
 import { createRunnerAuthAdapters } from './runner-auth.js'
@@ -858,6 +864,31 @@ export function composeServer(opts: {
     runners: {
       getHubUrl: () => runnerHubUrl,
       getCertFingerprint: () => runnerCertFingerprint
+    },
+    // Operator account management for the loopback-only `/api/hub/users` routes
+    // (`slay hub users add|ls|rm`) — the ONLY way to create an account now that
+    // public signup is closed (hub-auth auth.ts `disableSignUp`).
+    //
+    // Closed over the SAME late-bound `hubAuthRef` that `get hubAuth()` below reads,
+    // for the same reason the `runners` slot above is getter-shaped: hub-auth is
+    // built inside the async `runnersReady` IIFE, long after this literal is
+    // constructed. `ready` is therefore a function, never a captured value — and it
+    // stays false permanently if `createHubAuth` threw (that failure is swallowed
+    // into a diagnostic), which the route surfaces as a 503 naming
+    // `runner.init_failed`.
+    hubUsers: {
+      ready: () => hubAuthRef !== null,
+      create: async (input) => {
+        // Unreachable in practice — the route checks `ready()` first — but the
+        // closure must not silently no-op if that order ever changes.
+        if (!hubAuthRef) throw new Error('hub-auth is not ready')
+        const created = await createHubUser(hubAuthRef, input)
+        return 'error' in created
+          ? { ok: false as const, reason: created.error }
+          : { ok: true as const, user: created }
+      },
+      list: async () => (hubAuthRef ? listHubUsers(hubAuthRef) : []),
+      remove: async (email) => (hubAuthRef ? removeHubUser(hubAuthRef, email) : 'not-found')
     },
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's

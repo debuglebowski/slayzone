@@ -14,7 +14,7 @@ complete -c slay -n '__fish_use_subcommand' -a 'runner' -d 'Run and manage SlayZ
 complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell completions'
 complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
 complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
-complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use current forget'
+complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use current forget users'
 complete -c slay -n '__fish_seen_subcommand_from runner' -a 'ls create start stop rm restart logs'
 complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create update'
 complete -c slay -n '__fish_seen_subcommand_from tags' -a 'list create delete'
@@ -99,6 +99,7 @@ _slay() {
     'use:Point this CLI at a hub'
     'current:Show which hub this CLI targets'
     'forget:Drop the stored hub target'
+    'users:Manage the accounts that can sign in to a hub'
   )
   local -a runner_commands
   runner_commands=(
@@ -176,7 +177,7 @@ _slay_completions() {
         COMPREPLY=( $(compgen -W "list view create update delete toggle run runs" -- "$cur") )
         ;;
       hub)
-        COMPREPLY=( $(compgen -W "ls create start stop rm restart logs registered use current forget" -- "$cur") )
+        COMPREPLY=( $(compgen -W "ls create start stop rm restart logs registered use current forget users" -- "$cur") )
         ;;
       runner)
         COMPREPLY=( $(compgen -W "ls create start stop rm restart logs" -- "$cur") )
