@@ -150,13 +150,21 @@ export const checkoutStatusParamsSchema = z.object({
 export type CheckoutStatusParams = z.infer<typeof checkoutStatusParamsSchema>
 
 /**
- * Child-process output chunk (proc.spawn stream). Unlike `pty.data`, process
- * output is not sequenced/replayable — there is no `proc.getBufferSince` — so
- * the hub delivers these in arrival order. `stream` distinguishes stdout from
- * stderr; absent means stdout.
+ * Child-process output chunk (proc.spawn stream).
+ *
+ * SEQUENCED, like `pty.data`: `seq` is a per-session monotonic counter assigned
+ * by the runner at emission, and the hub detects gaps + replays them via
+ * `proc.getBufferSince`. This is not symmetry for its own sake — a chat agent's
+ * stdout is an NDJSON protocol stream, so a single dropped or reordered chunk
+ * desynchronizes the driver's request correlation irrecoverably (a torn line is
+ * not recoverable by the reader). `stream` distinguishes stdout from stderr;
+ * absent means stdout. Only the stdout stream is buffered/replayable — stderr is
+ * diagnostic and delivered in arrival order.
  */
 export const procDataParamsSchema = z.object({
   sessionId: z.string().min(1),
+  /** Monotonic per-session sequence number for `stdout`. Absent on stderr. */
+  seq: z.number().int().nonnegative().optional(),
   data: z.string(),
   stream: z.enum(['stdout', 'stderr']).optional()
 })
@@ -200,9 +208,11 @@ export const HubToRunnerMethods = {
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
   fsPathExists: 'fs.pathExists',
   fsRemoveDir: 'fs.removeDir',
-  // child-process ops (routed ProcessBackend)
+  // child-process ops (routed ProcessBackend + routed chat agents)
   procSpawn: 'proc.spawn',
   procKill: 'proc.kill',
+  procWrite: 'proc.write',
+  procGetBufferSince: 'proc.getBufferSince',
   ping: 'ping',
   runnerShutdown: 'runner.shutdown'
 } as const
@@ -376,6 +386,17 @@ export const procSpawnParamsSchema = z.object({
   sessionId: z.string().min(1),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
+  /**
+   * Run `command` through the RUNNER's own login shell (its `$SHELL`) instead of
+   * spawning it as a literal file+argv. Set by the process domain, whose
+   * `command` is a shell string (`pnpm dev`); NOT set for an agent spawn, which
+   * passes a resolved binary + argv that a shell would re-parse (splitting any
+   * arg containing spaces).
+   *
+   * The shell is resolved runner-side deliberately: the hub's `$SHELL` is a path
+   * that need not exist on the runner's machine.
+   */
+  shell: z.boolean().optional(),
   cwd: z.string().min(1).optional(),
   env: z.record(z.string(), z.string()).optional()
 })
@@ -391,3 +412,29 @@ export const procKillParamsSchema = z.object({
   signal: z.string().optional()
 })
 export type ProcKillParams = z.infer<typeof procKillParamsSchema>
+
+/** Write to a routed child's stdin. Mirrors `pty.write`; this is what makes the
+ *  channel duplex, and it is what a JSON-RPC/NDJSON chat agent requires. */
+export const procWriteParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  data: z.string()
+})
+export type ProcWriteParams = z.infer<typeof procWriteParamsSchema>
+
+/** Replay buffered stdout with `seq > since.seq` (gap recovery). Mirrors
+ *  `pty.getBufferSince`. */
+export const procGetBufferSinceParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  seq: z.number().int()
+})
+export type ProcGetBufferSinceParams = z.infer<typeof procGetBufferSinceParamsSchema>
+
+export const procGetBufferSinceResultSchema = z.object({
+  frames: z.array(
+    z.object({
+      seq: z.number().int().nonnegative(),
+      data: z.string()
+    })
+  )
+})
+export type ProcGetBufferSinceResult = z.infer<typeof procGetBufferSinceResultSchema>

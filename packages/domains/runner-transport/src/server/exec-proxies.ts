@@ -38,6 +38,7 @@ import {
   gitRemoveWorktreeResultSchema,
   gitRunWorktreeSetupScriptResultSchema,
   HubToRunnerMethods,
+  procGetBufferSinceResultSchema,
   procSpawnResultSchema,
   ptyGetBufferSinceResultSchema,
   ptySpawnResultSchema
@@ -345,17 +346,34 @@ interface ProcEntry {
   key: string
   runnerId: string
   sessionId: string
+  /** Highest contiguously-delivered stdout seq. Starts at **-1** for the same
+   *  reason as {@link PtyEntry.lastSeq}: the runner's RingBuffer numbers its
+   *  FIRST chunk 0, and `ingest` drops `seq <= lastSeq`, so a 0 here would
+   *  silently discard the opening chunk of every routed session — which for a
+   *  chat agent is its protocol handshake. */
+  lastSeq: number
+  /** Out-of-order stdout frames awaiting a gap fill (seq → data). */
+  pending: Map<number, string>
+  /** `lastSeq` the in-flight/last backfill was issued for; `null` = never. */
+  backfilledAt: number | null
   disposed: boolean
   dataEmitter: BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>
   exitEmitter: BufferingEmitter<{ code: number | null; signal: string | null }>
 }
 
 /**
- * A `ProcessBackend` analogous to {@link createRoutingPtyBackend}. Child-process
- * output is not sequenced (no `proc.getBufferSince`), so `proc.data` is
- * delivered in arrival order — no gap detection/backfill. The process manager's
- * `ProcSpawnSpec` keys by `id` (the session id here) and carries a single
- * `command` string; the routing spawn forwards those to the `proc.spawn` frame.
+ * A `ProcessBackend` analogous to {@link createRoutingPtyBackend}, including the
+ * same ordering guarantees: stdout carries a monotonic per-session `seq`, gaps
+ * trigger a `proc.getBufferSince` backfill, and delivery to the consumer stays
+ * contiguous. That matters because this backend now also carries routed CHAT
+ * agents, whose stdout is an NDJSON protocol stream — a dropped or reordered
+ * chunk desynchronizes the driver's request correlation irrecoverably.
+ *
+ * stderr is diagnostic, unsequenced, and passed through in arrival order.
+ *
+ * The process manager's `ProcSpawnSpec` keys by `id` (the session id here) and
+ * carries a single `command` string; the routing spawn forwards those to the
+ * `proc.spawn` frame.
  */
 export function createRoutingProcessBackend(options: RoutingProcessBackendOptions): ProcessBackend {
   const { gateway, local, resolveRunnerId } = options
@@ -374,11 +392,65 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     }
   }
 
+  function drain(entry: ProcEntry): void {
+    while (!entry.disposed && entry.pending.has(entry.lastSeq + 1)) {
+      const next = entry.lastSeq + 1
+      const data = entry.pending.get(next)!
+      entry.pending.delete(next)
+      entry.lastSeq = next
+      entry.dataEmitter.emit({ chunk: data, stream: 'stdout' })
+    }
+    if (entry.disposed || entry.pending.size === 0) return
+    if (entry.pending.has(entry.lastSeq + 1)) return // filled by the loop above
+    if (entry.backfilledAt === entry.lastSeq) {
+      // A backfill already ran at this position and the gap is STILL unfilled, so
+      // the missing seq is unrecoverable (evicted from the runner's ring buffer,
+      // or never sent). Skip to the lowest pending seq rather than stalling the
+      // session forever — a visible gap beats a permanent hang.
+      const lowest = Math.min(...entry.pending.keys())
+      if (lowest > entry.lastSeq + 1) {
+        entry.lastSeq = lowest - 1
+        drain(entry)
+      }
+      return
+    }
+    entry.backfilledAt = entry.lastSeq
+    void backfill(entry)
+  }
+
+  async function backfill(entry: ProcEntry): Promise<void> {
+    try {
+      const res = await gateway.request(entry.runnerId, HubToRunnerMethods.procGetBufferSince, {
+        sessionId: entry.sessionId,
+        seq: entry.lastSeq
+      })
+      if (entry.disposed) return
+      const parsed = procGetBufferSinceResultSchema.safeParse(res)
+      if (parsed.success) {
+        for (const frame of parsed.data.frames) {
+          if (frame.seq > entry.lastSeq && !entry.pending.has(frame.seq)) {
+            entry.pending.set(frame.seq, frame.data)
+          }
+        }
+      }
+    } catch {
+      // Best-effort: a later frame re-triggers backfill once lastSeq advances.
+    }
+    if (!entry.disposed) drain(entry)
+  }
+
   gateway.events.on('proc.data', (payload) => {
     const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
-    if (entry && !entry.disposed) {
-      entry.dataEmitter.emit({ chunk: payload.data, stream: payload.stream ?? 'stdout' })
+    if (!entry || entry.disposed) return
+    const stream = payload.stream ?? 'stdout'
+    // stderr (and any legacy unsequenced frame) bypasses the ordering machinery.
+    if (stream === 'stderr' || typeof payload.seq !== 'number') {
+      entry.dataEmitter.emit({ chunk: payload.data, stream })
+      return
     }
+    if (payload.seq <= entry.lastSeq) return // duplicate / already delivered
+    entry.pending.set(payload.seq, payload.data)
+    drain(entry)
   })
   gateway.events.on('proc.exit', (payload) => {
     const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
@@ -395,7 +467,17 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
       const key = sessionKey(runnerId, spec.id)
       const dataEmitter = new BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>()
       const exitEmitter = new BufferingEmitter<{ code: number | null; signal: string | null }>()
-      const entry: ProcEntry = { key, runnerId, sessionId: spec.id, disposed: false, dataEmitter, exitEmitter }
+      const entry: ProcEntry = {
+        key,
+        runnerId,
+        sessionId: spec.id,
+        lastSeq: -1,
+        pending: new Map(),
+        backfilledAt: null,
+        disposed: false,
+        dataEmitter,
+        exitEmitter
+      }
       sessions.set(key, entry)
 
       let pid: number | undefined
@@ -409,6 +491,17 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         onExit: (
           cb: (e: { code: number | null; signal: string | null }) => void
         ): ExecDisposable => exitEmitter.on(cb),
+        /**
+         * Write to the routed child's stdin. Beyond the `ProcessBackend` seam
+         * (background processes never needed stdin), but the routed CHAT backend
+         * built on this channel does — so the capability lives on the handle
+         * rather than forcing callers to reach for the gateway directly.
+         */
+        write: (data: string): void => {
+          void gateway
+            .request(runnerId, HubToRunnerMethods.procWrite, { sessionId: spec.id, data })
+            .catch(noop)
+        },
         kill: (signal?: string): void => {
           void gateway
             .request(runnerId, HubToRunnerMethods.procKill, {
@@ -419,10 +512,17 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         }
       }
 
+      // `ProcSpawnSpec.command` is a shell command STRING (e.g. `pnpm dev`), so
+      // ask the runner to run it through a shell. `shell: true` — NOT a
+      // hub-side `buildShellInvocation` — because that helper resolves the
+      // HUB's `$SHELL`, a path that need not exist on the runner's machine
+      // (the same hub-local assumption that makes `whichBinary` wrong for a
+      // routed spawn). The runner wraps with ITS own shell.
       void gateway
         .request(runnerId, HubToRunnerMethods.procSpawn, {
           sessionId: spec.id,
           command: spec.command,
+          shell: true,
           cwd: spec.cwd,
           env: spec.env
         })
