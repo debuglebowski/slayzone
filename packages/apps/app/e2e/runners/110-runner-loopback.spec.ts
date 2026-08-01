@@ -203,9 +203,12 @@ base.describe('Runner loopback (runner ON)', () => {
         )
       },
       // Pin the sidecar store to the isolated dir (identity + hub-auth.sqlite land
-      // here, NOT the real dev store). We do NOT set SLAYZONE_E2E_ALLOW_RUNNER in
-      // THIS test (the auto-enroll test below does) — here the assertions ride our
-      // explicitly-spawned loopback runner whose token we mint post-bind.
+      // here, NOT the real dev store).
+      //
+      // e2e is runner-ON by default, so the in-app supervisor ALSO auto-enrolls a
+      // 'local-runner' here. Harmless: every assertion below resolves our own
+      // runner BY NAME ('e2e-loopback-runner') and binds the task to that id
+      // explicitly, so a second connected runner is never mistaken for ours.
       extraEnv: (userDataDir) => ({
         SLAYZONE_ROOT: userDataDir
       })
@@ -373,10 +376,11 @@ base.describe('Runner loopback (runner ON)', () => {
     base.setTimeout(180_000)
     ensureRunnerBuilt()
 
-    // The in-app supervisor (index.ts, runs in local mode + SLAYZONE_E2E_ALLOW_RUNNER
-    // under Playwright) waits for the sidecar ready, mints a join token over
-    // loopback REST, and spawns + auto-enrolls the co-located runner — no manual
-    // mint/spawn here.
+    // The in-app supervisor (index.ts, runs in local mode — and under Playwright by
+    // default now) waits for the sidecar ready, mints a join token over loopback
+    // REST, and spawns + auto-enrolls the co-located runner — no manual mint/spawn
+    // here. This test asserts that chain explicitly rather than relying on the
+    // suite-wide default, which is why it still pins the flag below.
     const launched = await launchIsolatedElectron({
       name: 'runner-auto-enroll',
       seedUserData: (userDataDir) => {
@@ -388,7 +392,10 @@ base.describe('Runner loopback (runner ON)', () => {
       },
       extraEnv: (userDataDir) => ({
         SLAYZONE_ROOT: userDataDir,
-        // Opt the runner supervisor back in despite PLAYWRIGHT (default skips it).
+        // Documents intent: this spec's subject IS the auto-enroll chain, so it
+        // must not silently depend on the suite-wide runner-ON default. The boot
+        // gate no longer reads this key (only SLAYZONE_E2E_NO_RUNNER changes
+        // behavior); it stays as a declaration of what the test requires.
         SLAYZONE_E2E_ALLOW_RUNNER: '1',
         // The supervised runner self-derives its path-jail to `[homedir()]` (no
         // env channel). userDataDir lives under `.e2e-runtime` → under the repo →
@@ -428,11 +435,12 @@ base.describe('Runner loopback (runner ON)', () => {
   base('a hub always accepts runners: mintJoinToken works with no flag, no supervisor', async () => {
     base.setTimeout(120_000)
 
-    // DEFAULT boot: just `server_mode: local`, no runner flag, and (deliberately)
-    // NO SLAYZONE_E2E_ALLOW_RUNNER — so the in-app supervisor does NOT auto-spawn a
-    // local runner. This proves the always-on contract: the hub still builds the
-    // gateway + binds the /runners listener at boot, so mintJoinToken succeeds and
-    // a runner COULD connect — there just isn't one spawned in this test.
+    // Boot with the supervisor explicitly OPTED OUT (`SLAYZONE_E2E_NO_RUNNER=1`)
+    // — e2e is otherwise runner-ON by default, which would auto-spawn a local
+    // runner and invalidate the zero-connected assertion below. This proves the
+    // always-on contract: the hub still builds the gateway + binds the /runners
+    // listener at boot, so mintJoinToken succeeds and a runner COULD connect —
+    // there just isn't one spawned in this test.
     const launched = await launchIsolatedElectron({
       name: 'runner-always-on',
       seedUserData: (userDataDir) => {
@@ -443,7 +451,8 @@ base.describe('Runner loopback (runner ON)', () => {
         )
       },
       extraEnv: (userDataDir) => ({
-        SLAYZONE_ROOT: userDataDir
+        SLAYZONE_ROOT: userDataDir,
+        SLAYZONE_E2E_NO_RUNNER: '1'
       })
     })
 
@@ -451,7 +460,7 @@ base.describe('Runner loopback (runner ON)', () => {
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
 
-      // No supervisor opt-in → no runner auto-spawns, so nothing is connected.
+      // Supervisor opted out → no runner auto-spawns, so nothing is connected.
       await page.waitForTimeout(3_000)
       const rows = await listRunners(page)
       expect(rows.filter((r) => r.connected).length).toBe(0)

@@ -252,10 +252,10 @@ async function launchElectronWithRetry(args: {
   workerArtifactsDir: string
   executablePath: string
   /** Extra env merged LAST into the launch literal — lets an isolated spec pass
-   *  otherwise-stripped SLAYZONE_* vars (e.g.
-   *  SLAYZONE_E2E_ALLOW_RUNNER / SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN) through
-   *  the strip below. Wins over the fixed keys, so a spec may also override an
-   *  isolation default intentionally. */
+   *  otherwise-stripped SLAYZONE_* vars (e.g. SLAYZONE_E2E_NO_RUNNER /
+   *  SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN) through the strip below.
+   *  Wins over the fixed keys, so a spec may also override an isolation default
+   *  intentionally. */
   extraEnv?: Record<string, string>
 }): Promise<{ app: ElectronApplication; page: Page; attempts: LaunchAttemptRecord[] }> {
   const attempts: LaunchAttemptRecord[] = []
@@ -347,9 +347,9 @@ async function launchElectronWithRetry(args: {
           ),
           XDG_CONFIG_HOME: path.join(args.userDataDir, '.config'),
           // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
-          // isolated spec needs (runner-loopback:
-          // SLAYZONE_E2E_ALLOW_RUNNER, SLAYZONE_ROOT, SLAYZONE_HUB_ADDRESS,
-          // SLAYZONE_HUB_JOIN_TOKEN). Merged LAST so a spec can also override an
+          // isolated spec needs (runner-loopback: SLAYZONE_ROOT,
+          // SLAYZONE_HUB_ADDRESS, SLAYZONE_HUB_JOIN_TOKEN; runner-less specs:
+          // SLAYZONE_E2E_NO_RUNNER). Merged LAST so a spec can also override an
           // isolation default on purpose. Undefined for every default launch
           // (shared worker app + 103) → byte-identical there.
           ...(args.extraEnv ?? {})
@@ -446,6 +446,43 @@ export async function launchIsolatedElectron(opts: {
 }
 
 /**
+ * Block until the app's auto-enrolled local runner reports `connected`.
+ *
+ * e2e boots runner-ON (see index.ts's local-runner supervisor gate), but the
+ * auto-enroll chain is deliberately OFF the boot critical path: main waits for
+ * the sidecar to be ready, mints a join token over loopback REST (retrying up to
+ * ~40s while the /runners listener binds), spawns the runner, and only then does
+ * it dial + enroll. `#root` is present long before any of that finishes.
+ *
+ * Every agent spawn routes through a runner, so a spec that starts a terminal or
+ * chat before enrollment completes would race it. Gating once per worker — after
+ * launch, before any test body — removes that race for the whole suite.
+ *
+ * Returns false (rather than throwing) when no runner appears: a suite-wide throw
+ * here would convert an infrastructure hiccup into ~70 confusing failures, and
+ * specs that legitimately boot runner-less (SLAYZONE_E2E_NO_RUNNER=1) call this
+ * too. The individual spec still fails loudly on its own assertion.
+ */
+async function waitForConnectedRunner(page: Page, timeoutMs = 120_000): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const connected = await page.evaluate(async () => {
+        const rows = (await window.getTrpcVanillaClient().runners.list.query()) as Array<{
+          connected?: boolean
+        }>
+        return rows.some((r) => r.connected === true)
+      })
+      if (connected) return true
+    } catch {
+      // Renderer mid-reload / tRPC not ready yet — keep polling.
+    }
+    await wait(1_000)
+  }
+  return false
+}
+
+/**
  * The per-worker `SLAYZONE_ROOT` the app under test was launched with. Its DB
  * lives at `<root>/storage/slayzone.dev.sqlite` (e2e always runs unpackaged).
  *
@@ -507,12 +544,27 @@ export const test = base.extend<ElectronFixtures>({
         sharedPage = launched.page
         sharedWorkerArtifactsDir = workerArtifactsDir
 
+        // Runner-ready gate: agents only run on runners, so no spec may start
+        // before the auto-enrolled local runner is connected. Recorded in the
+        // worker artifacts so a suite-wide agent failure is diagnosable from the
+        // run output instead of looking like N unrelated spec failures.
+        const runnerReadyStartedAt = Date.now()
+        const runnerReady = await waitForConnectedRunner(launched.page)
+        if (!runnerReady) {
+          console.warn(
+            `[e2e] no connected runner after ${Date.now() - runnerReadyStartedAt}ms — ` +
+              `agent-spawning specs in worker ${workerInfo.workerIndex} will fail`
+          )
+        }
+
         writeJson(path.join(workerArtifactsDir, 'launch-attempts-summary.json'), {
           workerIndex: workerInfo.workerIndex,
           createdAt: new Date().toISOString(),
           userDataDir,
           testProjectPath: TEST_PROJECT_PATH,
-          attempts: launched.attempts
+          attempts: launched.attempts,
+          runnerReady,
+          runnerReadyMs: Date.now() - runnerReadyStartedAt
         })
 
         attachSessionLogCapture(sharedApp, workerArtifactsDir)

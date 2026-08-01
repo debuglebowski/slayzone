@@ -2,6 +2,7 @@ import { execSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { ensureRunnerBuilt } from './fixtures/runner-build'
 
 /** Kill processes whose full command line matches `pattern`. */
 function killStale(pattern: string, label: string): void {
@@ -59,4 +60,9 @@ export default function globalSetup(): void {
     fs.symlinkSync(path.join('..', '..', 'runner'), runnerLinkPath)
     console.log('[global-setup] Created out/runner symlink for the local runner')
   }
+
+  // e2e is runner-ON by default (every worker app auto-enrolls a co-located
+  // runner), so the bundle must exist before the first launch — not just for the
+  // runner specs. Idempotent + no-ops when already fresh.
+  ensureRunnerBuilt()
 }

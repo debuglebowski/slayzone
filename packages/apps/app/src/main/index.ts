@@ -2333,9 +2333,14 @@ app
     // THIS machine can host runner work, pointed at the local hub's runner URL —
     // and AUTO-ENROLLS it with zero manual token. Always runs in local mode (a
     // hub always accepts runners; there is no mode to enable). Gated only on
-    // local mode (remote mode has no local hub to dial). Skipped under Playwright
-    // so e2e never launches a runner — UNLESS a runner-loopback spec explicitly
-    // opts in via `SLAYZONE_E2E_ALLOW_RUNNER=1` (mirrors `SLAYZONE_E2E_INSTALL_HOOKS`).
+    // local mode (remote mode has no local hub to dial).
+    //
+    // Runs under Playwright TOO. e2e is runner-ON by default because runners are
+    // what run the agents — an e2e suite that boots runner-less exercises a
+    // configuration the product does not have. A spec that genuinely needs a
+    // runner-less hub (remote-mode, sidecar-crash, the "hub accepts runners with
+    // no runner spawned" contract) opts OUT via `SLAYZONE_E2E_NO_RUNNER=1`.
+    // The former opt-in `SLAYZONE_E2E_ALLOW_RUNNER` is no longer read here.
     // Off the boot critical path (setImmediate); failure is log-only.
     //
     // The auto-enroll resolves the ordering the wave-2 skeleton deferred: main has
@@ -2348,7 +2353,7 @@ app
     // fingerprint → dials wss with pinning → enrolls. If minting fails after
     // retries the runner is left UNSPAWNED — boot never crashes; the user can
     // still enroll remote runners via the UI.
-    if (!isRemoteMode && (!process.env.PLAYWRIGHT || process.env.SLAYZONE_E2E_ALLOW_RUNNER === '1')) {
+    if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_RUNNER !== '1') {
       setImmediate(() => {
         void startLocalRunnerWithAutoEnroll().catch((err) => {
           console.error('[local-runner] auto-enroll failed (local runner, non-fatal):', err)

@@ -94,7 +94,15 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_DEBUG_BOOT: 'infra',
   SLAYZONE_REGISTER_DEV_PROTOCOL: 'infra',
   SLAYZONE_NONINTERACTIVE: 'infra',
+  // Historical opt-IN, now a NO-OP: e2e runs runner-ON by default, so the boot
+  // gate no longer reads this. Kept manifested because specs still set it to
+  // document "this spec wants a runner" (an unmanifested var would be stripped
+  // by sanitizeSpawnEnv, fail-closed, and read as a silent typo).
   SLAYZONE_E2E_ALLOW_RUNNER: 'infra',
+  // Opt-OUT, and the only lever that changes behavior now: set by the specs that
+  // must boot runner-less (remote-mode, sidecar-crash, and the "hub accepts
+  // runners with none spawned" contract test).
+  SLAYZONE_E2E_NO_RUNNER: 'infra',
   SLAYZONE_E2E_INSTALL_HOOKS: 'infra',
   // per-provider config/hook/plugin path overrides (test/sandbox redirects)
   SLAYZONE_CLAUDE_SETTINGS_PATH: 'infra',
