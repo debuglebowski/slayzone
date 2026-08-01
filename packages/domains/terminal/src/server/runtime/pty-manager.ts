@@ -129,6 +129,15 @@ export function setRemoteMcpEnvProvider(provider: RemoteMcpEnvProvider | null): 
 }
 
 /**
+ * Read the injected provider. Exposed so the CHAT data ops resolve the same
+ * remote target the pty path does — one provider, injected once by the
+ * composition root, rather than a second seam that could drift from it.
+ */
+export function getRemoteMcpEnvProvider(): RemoteMcpEnvProvider | null {
+  return remoteMcpEnvProvider
+}
+
+/**
  * Injected by composition root (apps/app) so we can flip the per-tab
  * `was_spawned` flag in `terminal_tabs` without pty-manager importing the
  * task-terminals package directly (would cycle: task-terminals depends on

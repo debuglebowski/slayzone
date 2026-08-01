@@ -8,7 +8,9 @@ import {
   type BufferedEvent
 } from '../chat-events-store'
 import { clearChatQueue } from '../chat-queue-store'
-import { buildMcpEnv } from '../mcp-env'
+import { buildMcpEnv, resolveRemoteMcpEnv } from '../mcp-env'
+import { getRemoteMcpEnvProvider } from './pty-manager'
+import type { TerminalMode } from '../../shared'
 import {
   bumpAutocompleteUsage,
   getAutocompleteUsage,
@@ -81,11 +83,14 @@ export interface ChatDataOps {
   /** Drop all queued messages for a tab. Returns the number removed. */
   clearChatQueue(tabId: string): Promise<number>
   /** MCP env vars for the chat subprocess (task/project ids, hook URL, …).
-   *  Intentionally local-only (no `remote` param): chat is SDK-spawned in THIS
-   *  process, never routed to a runner, so it always gets the loopback env. If
-   *  chat ever spawns on a runner, thread a `remote` arg here mirroring the pty
-   *  ledger's buildMcpEnv (hub/runner split, wave 3). */
-  buildMcpEnv(taskId: string, mode: string): Promise<Record<string, string>>
+   *  Runner-aware: when the task resolves to a runner, the env is built for a
+   *  REMOTE spawn (no loopback agent-hook URL — the runner overlays its own and
+   *  relays over its authed ws), exactly as the pty ledger does. `runnerId` null
+   *  keeps today's loopback env. */
+  buildMcpEnv(taskId: string, mode: string, runnerId?: string | null): Promise<Record<string, string>>
+  /** Effective runner for this task, or null for the hub. Mirrors the pty spawn
+   *  lookups' `resolveRunnerId`; the default impl reads the tasks/projects rows. */
+  resolveRunnerId(taskId: string): Promise<string | null>
   bumpAutocompleteUsage(source: string, name: string): Promise<void>
   getAutocompleteUsage(): Promise<UsageMap>
 }
@@ -260,7 +265,29 @@ export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
 
     clearChatQueue: (tabId) => clearChatQueue(db, tabId),
 
-    buildMcpEnv: (taskId, mode) => buildMcpEnv(db, taskId, mode),
+    buildMcpEnv: async (taskId, mode, runnerId) => {
+      // Mirrors the pty spawn path: a runner-routed session resolves a remote
+      // target so the agent env omits the hub-loopback hook URL (the runner
+      // overlays its own and relays over its authed ws). `runnerId` null →
+      // `resolveRemoteMcpEnv` short-circuits to null → today's loopback env.
+      const remote = await resolveRemoteMcpEnv(getRemoteMcpEnvProvider(), {
+        taskId,
+        runnerId: runnerId ?? null,
+        mode: mode as TerminalMode
+      })
+      return buildMcpEnv(db, taskId, mode as TerminalMode, undefined, undefined, remote)
+    },
+
+    resolveRunnerId: async (taskId) => {
+      const row = await db.get<{ runner_id: string | null }>(
+        `SELECT COALESCE(t.runner_id, p.default_runner_id) AS runner_id
+           FROM tasks t
+           LEFT JOIN projects p ON p.id = t.project_id
+          WHERE t.id = ?`,
+        [taskId]
+      )
+      return row?.runner_id ?? null
+    },
 
     bumpAutocompleteUsage: (source, name) => bumpAutocompleteUsage(db, source, name),
 

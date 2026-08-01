@@ -327,9 +327,18 @@ async function buildHydrateOpts(
   const initialBuffer = fresh ? [] : await data.loadChatEvents(opts.tabId)
   const initialNextSeq = fresh ? 0 : await data.getNextSeqForTab(opts.tabId)
 
-  const enrichedPath = getEnrichedPath()
+  // Which machine will run this agent. Resolved BEFORE the env is built: a
+  // runner-routed spawn needs a remote-shaped env (no hub loopback hook URL).
+  const runnerId = await data.resolveRunnerId(opts.taskId)
+
+  // PATH enrichment is HUB-local by construction — `getEnrichedPath()` probes
+  // THIS machine's login shell, so injecting it into a routed spawn would send
+  // hub paths to a runner whose toolchains live elsewhere (and could mask the
+  // runner's own PATH entirely). The runner supplies its own sanitized base env
+  // (see runner handlers/proc.ts buildEnv), so remote spawns omit it.
+  const enrichedPath = runnerId == null ? getEnrichedPath() : null
   const subprocessEnv: Record<string, string> = {
-    ...(await data.buildMcpEnv(opts.taskId, opts.mode)),
+    ...(await data.buildMcpEnv(opts.taskId, opts.mode, runnerId)),
     ...(enrichedPath ? { PATH: enrichedPath } : {})
   }
 
@@ -340,6 +349,7 @@ async function buildHydrateOpts(
     cwd: opts.cwd,
     conversationId: fresh ? null : (providerCfg.chatConversationId ?? null),
     providerFlags,
+    runnerId,
     env: subprocessEnv,
     initialBuffer,
     initialNextSeq,

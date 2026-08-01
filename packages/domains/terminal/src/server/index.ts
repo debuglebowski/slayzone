@@ -62,6 +62,18 @@ export {
   type PtySessionLedger,
   type PtySpawnLookups
 } from './runtime/pty-data-ops'
+// The CHAT spawn seam — the exact counterpart of `PtyBackend` above, so a chat
+// agent can run on a runner like a terminal agent already can. Injected via
+// `configureTransport({ backend })`; unset = in-process spawn.
+export {
+  childProcessToHandle,
+  createLineSplitter,
+  createLocalChatBackend,
+  type ChatBackend,
+  type ChatDisposable,
+  type ChatProcHandle,
+  type ChatSpawnSpec
+} from './runtime/chat-proc-handle'
 // Wave-3 remote-MCP-env contracts: the composition root builds a provider of
 // this shape and injects it via `setRemoteMcpEnvProvider`.
 export {
@@ -133,4 +145,9 @@ export {
   type ChatQueueOps,
   type ChatQueueEventMap
 } from './runtime/chat-queue-handlers'
-export { chatEvents, type ChatEventMap } from './runtime/chat-transport-manager'
+export {
+  chatEvents,
+  configureTransport,
+  type ChatEventMap,
+  type TransportDeps
+} from './runtime/chat-transport-manager'

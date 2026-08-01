@@ -86,6 +86,9 @@ import {
   initWarmProcessManager,
   onGlobalStateChange,
   hasSessionUserInput,
+  configureTransport,
+  createLocalChatBackend,
+  whichBinary,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import {
@@ -117,6 +120,7 @@ import {
 // unconditionally at boot (a hub always accepts runners).
 import {
   createHubRunnerGateway,
+  createRoutingChatBackend,
   createRoutingPtyBackend,
   createRoutingProcessBackend,
   createRemoteWorktreeAdapters,
@@ -1017,6 +1021,17 @@ export function composeServer(opts: {
         resolveRunnerId: (spec) => spec.runnerId ?? null
       })
     )
+    // Chat agents route the same way terminal agents do (the runnerId is baked
+    // into the spec by chat-handlers' resolveRunnerId). Before this, chat was the
+    // one agent kind the hub always ran in its OWN process, so a chat session
+    // could never reach a remote workspace.
+    configureTransport({
+      backend: createRoutingChatBackend({
+        gateway: runnerGateway,
+        local: createLocalChatBackend({ whichBinary }),
+        resolveRunnerId: (spec) => spec.runnerId ?? null
+      })
+    })
     // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
     // every base field so nothing is dropped, plus the routing worktree adapter.
     configureTaskRuntimeAdapters({

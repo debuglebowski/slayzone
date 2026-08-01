@@ -1,6 +1,5 @@
 import { spawn as realSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import readline from 'node:readline'
 import type { AgentEvent } from '../../shared/agent-events'
 import type { ChatSessionStateEntry } from '../../shared/types'
 import type {
@@ -26,6 +25,12 @@ import type { BufferedEvent } from '../chat-events-store'
 import type { ChatEffort } from '../../shared/chat-effort'
 import type { ChatCollaborationMode } from '../../shared/chat-collaboration'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
+import {
+  childProcessToHandle,
+  createLineSplitter,
+  type ChatBackend,
+  type ChatProcHandle
+} from './chat-proc-handle'
 
 export { markSessionUserInput }
 export type { BufferedEvent } from '../chat-events-store'
@@ -41,7 +46,20 @@ export type ChatTerminalState = 'not-spawned' | 'starting' | 'running' | 'idle' 
 
 /** Dependency-injection seam for tests AND for production wiring (event persistence). */
 export interface TransportDeps {
+  /**
+   * LOCAL spawn primitive. Still `ChildProcess`-shaped: it is what the in-process
+   * path uses and what ~30 transport tests inject a fake child through. Ignored
+   * when `backend` is set (a routed spawn has no local ChildProcess).
+   */
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess
+  /**
+   * Optional routed spawn seam. When set, ALL spawns go through it and it decides
+   * per-spec whether the process runs on the hub or on a runner — the same shape
+   * `PtyBackend` has for terminal mode. When unset (tests, and any composition
+   * root that never wires it) the local `spawn` above is used directly, so
+   * behavior is byte-identical to before this seam existed.
+   */
+  backend?: ChatBackend
   whichBinary: (name: string) => Promise<string | null>
   broadcastEvent: (tabId: string, event: AgentEvent, seq: number) => void
   /**
@@ -247,7 +265,22 @@ interface Session {
    * state) — buffer + metadata exist, but no child has been started. Set by
    * `ensureSpawned`; cleared by `respawnFresh` between kill and spawn.
    */
-  child: ChildProcess | null
+  child: ChatProcHandle | null
+  /**
+   * The RAW local `ChildProcess`, when this spawn was in-process. Kept solely for
+   * `__getSessionChildForTests` (the transport tests drive a fake child's `spawn`
+   * / `exit` events directly) and for the watchdog's synthesized-exit reap, which
+   * needs to re-enter the real emitter. `null` for a routed spawn — nothing in the
+   * live code path may depend on it.
+   */
+  rawChild: ChildProcess | null
+  /**
+   * Invoke the canonical exit teardown directly. Set by `spawnSubprocess` to the
+   * same closure `handle.onExit` runs, so the watchdog can reap a missed exit
+   * without synthesizing an emitter event (a routed handle has no emitter to fire
+   * one on). Idempotent by the same `session.ended` guard as a real exit.
+   */
+  reapExit: ((code: number | null, signal: string | null) => void) | null
   buffer: BufferedEvent[]
   nextSeq: number
   ended: boolean
@@ -470,15 +503,22 @@ function fireWatchdog(session: Session): void {
     clearWatchdog(session)
     return
   }
+  // Liveness probe is LOCAL-ONLY. `deps.isProcessAlive` is `process.kill(pid, 0)`
+  // on THIS machine, so probing a routed session's pid would interrogate whatever
+  // hub-local process happens to share that number — a false "alive" (or a false
+  // "dead" that reaps a healthy remote turn). For a routed spawn we cannot observe
+  // liveness from here, so skip straight to kill escalation, whose frames the
+  // runner answers authoritatively.
   const pid = child.pid
-  const alive = typeof pid === 'number' ? deps.isProcessAlive(pid) : false
+  const canProbe = session.rawChild !== null && pid > 0
+  const alive = canProbe ? deps.isProcessAlive(pid) : true
   if (!alive) {
     // Subprocess is dead but its `exit` event never arrived (missed-exit race)
     // — reap it through the canonical exit handler, no teardown duplication.
     recordWatchdogFire(session, vector, 'missed-exit', session.watchdogKillStage)
     clearWatchdog(session)
     try {
-      child.emit('exit', null, 'SIGKILL')
+      session.reapExit?.(null, 'SIGKILL')
     } catch (err) {
       console.error('[chat-transport] watchdog: synthesized exit threw:', err)
     }
@@ -738,8 +778,9 @@ async function respawnFresh(session: Session): Promise<void> {
       child.kill('SIGTERM')
       await new Promise<void>((resolve) => {
         const t = setTimeout(resolve, 2000)
-        child.once('exit', () => {
+        const sub = child.onExit(() => {
           clearTimeout(t)
+          sub.dispose()
           resolve()
         })
       })
@@ -794,6 +835,12 @@ export interface CreateChatOpts {
   conversationId: string | null
   /** Shell-parsed flags (e.g. ['--allow-dangerously-skip-permissions']). */
   providerFlags: string[]
+  /**
+   * Runner this session's agent process should spawn on. `null`/absent = the hub.
+   * Mirrors `PtySpawnSpec.runnerId` — the routing backend reads it to dispatch,
+   * and a non-routing (test/default) setup ignores it entirely.
+   */
+  runnerId?: string | null
   /** Extra env overrides (PATH enrichment already applied by caller or inherited). */
   env?: NodeJS.ProcessEnv
   /**
@@ -915,6 +962,8 @@ export function hydrateSession(opts: CreateChatOpts): ChatSessionInfo {
     backend,
     driver: null,
     child: null,
+    rawChild: null,
+    reapExit: null,
     buffer: seededBuffer,
     nextSeq: seededNextSeq,
     ended: false,
@@ -1019,13 +1068,6 @@ async function spawnSubprocess(session: Session): Promise<void> {
   const opts = session.respawnOpts
   const backend = session.backend
 
-  const binary = await deps.whichBinary(backend.binaryName)
-  if (!binary) {
-    throw new ChatTransportError(
-      `Binary "${backend.binaryName}" not found on PATH. Install it or fix your shell's PATH.`
-    )
-  }
-
   // sessionId carried from hydrate (preserves resume id when set). Fresh
   // spawn-id per OS process so the renderer can scope bg shells to this run.
   const sessionId = session.sessionId
@@ -1037,17 +1079,54 @@ async function spawnSubprocess(session: Session): Promise<void> {
     providerFlags: opts.providerFlags
   })
 
-  const child = deps.spawn(binary, args, {
-    cwd: opts.cwd,
-    // Sanitized base (user env survives; SlayZone infra/secret/identity stripped,
-    // fail closed on unmanifested SLAYZONE_*) + the per-spawn overlay `opts.env`
-    // (the mcpEnv identity the caller built for this chat agent) applied on top.
-    env: { ...sanitizeSpawnEnv(process.env), ...opts.env },
-    stdio: ['pipe', 'pipe', 'pipe'],
-    shell: false
-  })
+  let handle: ChatProcHandle
+  if (deps.backend) {
+    // Routed (or routing-capable) spawn. Binary resolution is NOT done here:
+    // `whichBinary` runs a LOCAL login shell, so a hub-resolved absolute path is
+    // meaningless on a runner's filesystem. The spec carries the binary NAME and
+    // whoever executes it resolves it against its own PATH. Likewise no
+    // `sanitizeSpawnEnv(process.env)` base — that would ship the HUB's
+    // environment; the executor merges its own sanitized base under `env`.
+    handle = await deps.backend.spawn({
+      sessionId: `${session.taskId}:${session.tabId}`,
+      taskId: session.taskId,
+      runnerId: opts.runnerId ?? null,
+      binaryName: backend.binaryName,
+      args,
+      cwd: opts.cwd,
+      // `opts.env` is `NodeJS.ProcessEnv` (values may be undefined); the wire
+      // contract is `Record<string, string>`, so drop unset keys rather than
+      // shipping `undefined` values a zod record would reject.
+      env: Object.fromEntries(
+        Object.entries(opts.env ?? {}).filter((e): e is [string, string] => e[1] !== undefined)
+      )
+    })
+    // Routed (or backend-owned) spawn: no local ChildProcess exists. Cleared
+    // explicitly so a prior in-process spawn on this session can't leave a stale
+    // handle behind that the watchdog would then probe as if it were ours.
+    session.rawChild = null
+  } else {
+    // In-process path, unchanged: resolve on this machine's PATH and spawn.
+    const binary = await deps.whichBinary(backend.binaryName)
+    if (!binary) {
+      throw new ChatTransportError(
+        `Binary "${backend.binaryName}" not found on PATH. Install it or fix your shell's PATH.`
+      )
+    }
+    const rawChild = deps.spawn(binary, args, {
+      cwd: opts.cwd,
+      // Sanitized base (user env survives; SlayZone infra/secret/identity
+      // stripped, fail closed on unmanifested SLAYZONE_*) + the per-spawn
+      // overlay `opts.env` (the mcpEnv identity for this chat agent) on top.
+      env: { ...sanitizeSpawnEnv(process.env), ...opts.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false
+    })
+    session.rawChild = rawChild
+    handle = childProcessToHandle(rawChild)
+  }
 
-  session.child = child
+  session.child = handle
   session.ended = false
   session.usedResume = Boolean(opts.conversationId)
   session.sawHealthyTurn = false
@@ -1073,11 +1152,9 @@ async function spawnSubprocess(session: Session): Promise<void> {
   session.driver = driver
   const driverCtx: ChatDriverContext = {
     write: (line) => {
-      try {
-        session.child?.stdin?.write(line + '\n')
-      } catch {
-        /* best-effort; a dead pipe surfaces via process exit */
-      }
+      // The handle owns the write's failure mode (dead local pipe, or a rejected
+      // remote request) — both surface as a process exit, never as a throw here.
+      session.child?.write(line + '\n')
     },
     emit: (event) => handleEvent(session, event),
     cwd: opts.cwd,
@@ -1104,7 +1181,7 @@ async function spawnSubprocess(session: Session): Promise<void> {
   // process-children resources (bg shells) from any prior subprocess on the
   // same tab. Persisted alongside other events so replay rebuilds the same
   // scoping deterministically.
-  child.on('spawn', () => {
+  handle.onSpawn(() => {
     handleEvent(session, { kind: 'session-spawn', spawnId: session.spawnId })
     if (session.terminalState === 'starting') {
       transitionState(session, 'idle')
@@ -1122,15 +1199,19 @@ async function spawnSubprocess(session: Session): Promise<void> {
     })
   })
 
-  // --- stdout: readline buffers partial lines; driver owns parsing ---
-  const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity })
-  rl.on('line', (line) => {
+  // --- stdout: line framing stays HUB-side; driver owns parsing ---
+  // `createLineSplitter` replaces `readline.createInterface` (which needs a real
+  // stream a routed handle cannot supply) with the same contract: emit on \n or
+  // \r\n, never emit a partial line, hold an unterminated tail. Framing here — not
+  // on the runner — keeps the driver's protocol state entirely on the hub.
+  const feedStdout = createLineSplitter((line) => {
     try {
       driver.handleLine(line)
     } catch (err) {
       console.error('[chat-transport] driver.handleLine threw:', err)
     }
   })
+  handle.onStdout(feedStdout)
 
   // --- stderr: debounced buffer, emit as kind:'stderr' ---
   let stderrBuf = ''
@@ -1142,15 +1223,15 @@ async function spawnSubprocess(session: Session): Promise<void> {
     stderrBuf = ''
     handleEvent(session, { kind: 'stderr', text })
   }
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderrBuf += chunk.toString()
+  handle.onStderr((chunk) => {
+    stderrBuf += chunk
     if (!stderrTimer) stderrTimer = setTimeout(flushStderr, STDERR_FLUSH_INTERVAL_MS)
   })
 
   // --- exit ---
-  child.on('exit', (code, signal) => {
-    // Idempotent: the watchdog can synthesize an `exit` to reap a missed-exit
-    // race, and a late real `exit` may follow — process the teardown once.
+  const onExit = (code: number | null, signal: string | null): void => {
+    // Idempotent: the watchdog can reap a missed-exit race via `session.reapExit`,
+    // and a late real `exit` may follow — process the teardown once.
     if (session.ended) return
     clearWatchdog(session)
     if (stderrTimer) {
@@ -1184,9 +1265,11 @@ async function spawnSubprocess(session: Session): Promise<void> {
     deps.broadcastExit(opts.tabId, session.sessionId, code, signal)
     clearSessionUserInputMark(`${session.taskId}:${session.tabId}`)
     // Leave session in map so reattach can read buffer; consumer deletes on tab close.
-  })
+  }
+  session.reapExit = onExit
+  handle.onExit(({ code, signal }) => onExit(code, signal))
 
-  child.on('error', (err) => {
+  handle.onError((err) => {
     transitionState(session, 'error')
     handleEvent(session, {
       kind: 'error',
@@ -1540,7 +1623,7 @@ function shutdownSession(
     const cleanup = (): void => {
       if (termTimer) clearTimeout(termTimer)
       if (hardTimer) clearTimeout(hardTimer)
-      child.off('exit', onExit)
+      exitSub?.dispose()
     }
     const settle = (timedOut: boolean): void => {
       if (settled) return
@@ -1552,9 +1635,9 @@ function shutdownSession(
     const recordError = (phase: string, err: unknown): void => {
       errors.push({ id, phase, message: toErrorMessage(err) })
     }
-    const onExit = (): void => settle(false)
-
-    child.once('exit', onExit)
+    // `onExit` fires once per process by contract, so a subscription is
+    // equivalent to the former `child.once('exit', …)`; `cleanup` disposes it.
+    const exitSub = child.onExit(() => settle(false))
     clearWatchdog(session)
     try {
       child.kill('SIGTERM')
@@ -1656,5 +1739,5 @@ export function __resetForTests(): void {
  * handle to fire `spawn` themselves (which is what triggers `driver.start`).
  */
 export function __getSessionChildForTests(tabId: string): ChildProcess | null {
-  return sessions.get(tabId)?.child ?? null
+  return sessions.get(tabId)?.rawChild ?? null
 }

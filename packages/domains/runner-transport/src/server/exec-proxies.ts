@@ -30,7 +30,14 @@
 
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
-import type { PtyBackend, PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
+import type {
+  ChatBackend,
+  ChatProcHandle,
+  ChatSpawnSpec,
+  PtyBackend,
+  PtyHandle,
+  PtySpawnSpec
+} from '@slayzone/terminal/server'
 import {
   fsPathExistsResultSchema,
   gitGetCurrentBranchResultSchema,
@@ -340,6 +347,17 @@ export interface RoutingProcessBackendOptions {
   gateway: RoutingGateway
   local: ProcessBackend
   resolveRunnerId: (spec: ProcSpawnSpec) => string | null
+  /**
+   * Override how a spec becomes `proc.spawn` params. Default: treat
+   * `spec.command` as a shell STRING (`shell: true`, no argv) — correct for the
+   * process domain, whose commands are `pnpm dev`-style lines.
+   *
+   * The routed CHAT backend supplies its own: an agent spawn is a resolved
+   * binary + argv that must reach execve UNSPLIT, so it passes `args` and leaves
+   * `shell` unset. Without this seam the chat spawn inherited the shell-string
+   * behavior and its argv was silently dropped.
+   */
+  buildSpawnParams?: (spec: ProcSpawnSpec) => Record<string, unknown>
 }
 
 interface ProcEntry {
@@ -512,20 +530,25 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         }
       }
 
-      // `ProcSpawnSpec.command` is a shell command STRING (e.g. `pnpm dev`), so
-      // ask the runner to run it through a shell. `shell: true` — NOT a
-      // hub-side `buildShellInvocation` — because that helper resolves the
-      // HUB's `$SHELL`, a path that need not exist on the runner's machine
-      // (the same hub-local assumption that makes `whichBinary` wrong for a
-      // routed spawn). The runner wraps with ITS own shell.
+      // Default: `ProcSpawnSpec.command` is a shell command STRING (e.g.
+      // `pnpm dev`), so ask the runner to run it through a shell. `shell: true` —
+      // NOT a hub-side `buildShellInvocation` — because that helper resolves the
+      // HUB's `$SHELL`, a path that need not exist on the runner's machine (the
+      // same hub-local assumption that makes `whichBinary` wrong for a routed
+      // spawn). The runner wraps with ITS own shell. Overridable via
+      // `buildSpawnParams` (the chat backend needs literal argv).
       void gateway
-        .request(runnerId, HubToRunnerMethods.procSpawn, {
-          sessionId: spec.id,
-          command: spec.command,
-          shell: true,
-          cwd: spec.cwd,
-          env: spec.env
-        })
+        .request(
+          runnerId,
+          HubToRunnerMethods.procSpawn,
+          options.buildSpawnParams?.(spec) ?? {
+            sessionId: spec.id,
+            command: spec.command,
+            shell: true,
+            cwd: spec.cwd,
+            env: spec.env
+          }
+        )
         .then(
           (res) => {
             const parsed = procSpawnResultSchema.safeParse(res)
@@ -535,6 +558,150 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         )
 
       return handle
+    }
+  }
+}
+
+// ===========================================================================
+// Routing chat backend
+// ===========================================================================
+
+export interface RoutingChatBackendOptions {
+  gateway: RoutingGateway
+  /** In-process backend used when `resolveRunnerId` returns null. */
+  local: ChatBackend
+  /** Route a spawn to a runnerId, or null to run on the hub. */
+  resolveRunnerId: (spec: ChatSpawnSpec) => string | null
+}
+
+/**
+ * A `ChatBackend` that forwards remote spawns over the gateway, so a chat-mode
+ * agent runs on a runner exactly as a terminal-mode agent already does.
+ *
+ * Rides the SAME sequenced duplex `proc.*` channel as
+ * {@link createRoutingProcessBackend} — no `chat.*` namespace. A chat agent is
+ * just a child process whose stdout happens to be NDJSON; giving it a private
+ * namespace would mean two wire contracts to keep ordered and duplex-correct.
+ *
+ * Line framing is NOT done here: raw chunks are handed to the transport, which
+ * reassembles lines hub-side (`createLineSplitter`) and feeds its
+ * `ChatSessionDriver`. So the runner stays a byte pipe and all protocol state —
+ * handshake, request correlation — remains on the hub.
+ */
+export function createRoutingChatBackend(options: RoutingChatBackendOptions): ChatBackend {
+  const { gateway, local, resolveRunnerId } = options
+
+  return {
+    async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
+      const runnerId = resolveRunnerId(spec)
+      if (runnerId == null) return local.spawn(spec)
+
+      const backend = createRoutingProcessBackend({
+        gateway,
+        // Unreachable: `resolveRunnerId` below is a constant non-null. Present
+        // only to satisfy the ProcessBackend contract.
+        local: {
+          spawn: () => {
+            throw new Error('routing chat backend: local proc spawn is unreachable')
+          }
+        },
+        resolveRunnerId: () => runnerId,
+        // An agent spawn is a resolved binary + argv, NOT a shell string: `sh
+        // <script>` must stay two argv entries. The default sender would set
+        // `shell: true` and drop `args`, so the runner would hand the binary to a
+        // shell and the agent would never receive its arguments.
+        buildSpawnParams: (procSpec) => ({
+          sessionId: procSpec.id,
+          command: spec.binaryName,
+          args: spec.args,
+          cwd: spec.cwd,
+          env: spec.env
+        })
+      })
+
+      const spawnCbs: Array<() => void> = []
+      const errorCbs: Array<(err: Error) => void> = []
+      // Latched: `spawn()` is async, so the readiness signal can fire before the
+      // caller has had a chance to subscribe. A late `onSpawn` must still see it,
+      // or the session sits in `starting` until the watchdog reaps it.
+      let didSpawn = false
+
+      const procHandle = backend.spawn({
+        id: spec.sessionId,
+        taskId: spec.taskId,
+        projectId: null,
+        runnerId,
+        // The binary NAME, resolved against the RUNNER's PATH — never a
+        // hub-resolved absolute path, which would not exist there. `shell` is
+        // deliberately unset: argv must reach execve unsplit.
+        command: spec.binaryName,
+        args: spec.args,
+        cwd: spec.cwd,
+        env: spec.env
+      } as never)
+
+      // A routed spawn has no kernel `'spawn'` event. The remote `proc.spawn`
+      // reply is the equivalent readiness signal — it means the runner has a pid
+      // — so surface it as `onSpawn`, which is what promotes the session out of
+      // `starting` and starts the protocol driver. Deferred a tick so a caller
+      // that subscribes right after `spawn()` resolves still sees it.
+      setImmediate(() => {
+        didSpawn = true
+        for (const cb of [...spawnCbs]) {
+          try {
+            cb()
+          } catch (err) {
+            console.error('[routing-chat] onSpawn listener threw:', err)
+          }
+        }
+      })
+
+      return {
+        get pid(): number {
+          return procHandle.pid ?? 0
+        },
+        onSpawn: (cb) => {
+          // Already fired → replay to this late subscriber instead of dropping it.
+          if (didSpawn) {
+            setImmediate(() => {
+              try {
+                cb()
+              } catch (err) {
+                console.error('[routing-chat] onSpawn listener threw:', err)
+              }
+            })
+            return { dispose: () => {} }
+          }
+          spawnCbs.push(cb)
+          return {
+            dispose: () => {
+              const i = spawnCbs.indexOf(cb)
+              if (i >= 0) spawnCbs.splice(i, 1)
+            }
+          }
+        },
+        onStdout: (cb) =>
+          procHandle.onData((chunk, stream) => {
+            if (stream !== 'stderr') cb(chunk)
+          }),
+        onStderr: (cb) =>
+          procHandle.onData((chunk, stream) => {
+            if (stream === 'stderr') cb(chunk)
+          }),
+        onExit: (cb) => procHandle.onExit((e) => cb({ code: e.code, signal: e.signal })),
+        onError: (cb) => {
+          errorCbs.push(cb)
+          return {
+            dispose: () => {
+              const i = errorCbs.indexOf(cb)
+              if (i >= 0) errorCbs.splice(i, 1)
+            }
+          }
+        },
+        write: (data) =>
+          (procHandle as unknown as { write?: (d: string) => void }).write?.(data),
+        kill: (signal) => procHandle.kill(signal)
+      }
     }
   }
 }
