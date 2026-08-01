@@ -12,11 +12,17 @@ import type {
 } from '@slayzone/task/shared'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import type {
+  AuthorContext,
   VersionRef,
   ArtifactVersion,
   DiffResult,
   PruneReport
 } from '@slayzone/task-artifacts/shared'
+import type { ArtifactSearchOptions, ArtifactSearchReport } from '@slayzone/task-artifacts/server'
+// Pure node:fs/crypto path math — the blob PATH for a content hash, so a caller
+// can stream a version's bytes off disk instead of hauling them through the
+// worker boundary as a utf-8 string.
+import { BlobStore } from '@slayzone/task-artifacts/server'
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker
@@ -133,7 +139,16 @@ export function createArtifactStore(dataDir: string) {
       return parseArtifact(await getRow(db, id))
     },
 
-    async createArtifact(db: SlayzoneDb, data: CreateArtifactInput): Promise<TaskArtifact | null> {
+    /**
+     * `sourcePath` is the binary-safe alternative to `content`: the initial bytes
+     * are copied from that file rather than utf-8-encoded from a string, so a
+     * PNG/PDF created through this path is not corrupted. Used by the REST create
+     * route, which stages a streamed request body to a temp file.
+     */
+    async createArtifact(
+      db: SlayzoneDb,
+      data: CreateArtifactInput & { sourcePath?: string }
+    ): Promise<TaskArtifact | null> {
       const row = await db.namedTxn('task-artifacts:create', {
         dataDir,
         taskId: data.taskId,
@@ -141,7 +156,8 @@ export function createArtifactStore(dataDir: string) {
         title: data.title,
         renderMode: data.renderMode ?? null,
         language: data.language ?? null,
-        content: data.content ?? ''
+        content: data.content ?? '',
+        sourcePath: data.sourcePath
       })
       return parseArtifact(row)
     },
@@ -342,15 +358,88 @@ export function createArtifactStore(dataDir: string) {
       }) as Promise<string>
     },
 
+    /**
+     * Resolve a version REF to its row WITHOUT reading bytes, and the on-disk
+     * path of its blob.
+     *
+     * The binary-safe counterpart to `readArtifactVersion`, which returns a
+     * utf-8 STRING (right for the renderer's text editor, corrupting for an
+     * image/pdf version). A caller needing exact bytes streams `blobPath` — the
+     * bytes never enter the process. Used by the REST version-content route
+     * behind `slay tasks artifacts versions read`.
+     */
+    async resolveArtifactVersion(
+      db: SlayzoneDb,
+      data: { artifactId: string; versionRef: VersionRef }
+    ): Promise<{ version: ArtifactVersion; blobPath: string }> {
+      const version = (await db.namedTxn('task-artifacts:versions:resolve', {
+        artifactId: data.artifactId,
+        versionRef: data.versionRef
+      })) as ArtifactVersion
+      return { version, blobPath: new BlobStore(dataDir).blobPath(version.content_hash) }
+    },
+
+    /** The current (HEAD) version row, or null when the artifact has none. */
+    getCurrentArtifactVersion(
+      db: SlayzoneDb,
+      data: { artifactId: string }
+    ): Promise<ArtifactVersion | null> {
+      return db.namedTxn('task-artifacts:versions:current', {
+        artifactId: data.artifactId
+      }) as Promise<ArtifactVersion | null>
+    },
+
     createArtifactVersion(
       db: SlayzoneDb,
-      data: { artifactId: string; name?: string | null }
+      data: { artifactId: string; name?: string | null; author?: AuthorContext }
     ): Promise<ArtifactVersion> {
       return db.namedTxn('task-artifacts:versions:create', {
         dataDir,
         artifactId: data.artifactId,
-        name: data.name ?? null
+        name: data.name ?? null,
+        author: data.author
       }) as Promise<ArtifactVersion>
+    },
+
+    /**
+     * Replace / append the working copy from a staged FILE and record the result
+     * in version history, atomically. Backs `slay tasks artifacts write|append`.
+     *
+     * `sourcePath`, not a string, for the same reason `createArtifact` grew one:
+     * piped stdin can be arbitrary bytes, and a JS string is utf-8.
+     */
+    async writeArtifactContent(
+      db: SlayzoneDb,
+      data: {
+        artifactId: string
+        sourcePath: string
+        append?: boolean
+        mutateCurrent?: boolean
+        mutateRef?: VersionRef
+        author?: AuthorContext
+      }
+    ): Promise<{ artifact: TaskArtifact | null; version: ArtifactVersion }> {
+      const result = (await db.namedTxn('task-artifacts:versions:write', {
+        dataDir,
+        artifactId: data.artifactId,
+        sourcePath: data.sourcePath,
+        append: data.append,
+        mutateCurrent: data.mutateCurrent,
+        mutateRef: data.mutateRef,
+        author: data.author
+      })) as { artifact: Record<string, unknown> | undefined; version: ArtifactVersion }
+      return { artifact: parseArtifact(result.artifact), version: result.version }
+    },
+
+    /** Title + current-version-content search. Backs `slay tasks artifacts search`. */
+    searchArtifacts(
+      db: SlayzoneDb,
+      data: ArtifactSearchOptions
+    ): Promise<ArtifactSearchReport> {
+      return db.namedTxn('task-artifacts:search', {
+        dataDir,
+        ...data
+      }) as Promise<ArtifactSearchReport>
     },
 
     renameArtifactVersion(

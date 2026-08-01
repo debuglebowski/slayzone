@@ -5,6 +5,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
+import { createArtifactFromStream } from './content'
 
 /**
  * Artifact + folder metadata CRUD. Mirrors the metadata half of `slay tasks
@@ -12,6 +13,7 @@ import { getArtifactsDataRoot } from './shared'
  * store (@slayzone/task/server) — the exact ops behind the app's own artifact
  * flows (worker `namedTxn`s that also place/version the file on disk):
  *
+ * - GET    /api/artifacts/:id           single-artifact metadata by id prefix
  * - POST   /api/artifacts               { taskId, title, folderId?, renderMode?, content? }
  * - PATCH  /api/artifacts/:id           { title?, renderMode?, folderId? }  → echoes `folderName`
  * - DELETE /api/artifacts/:id
@@ -25,10 +27,17 @@ import { getArtifactsDataRoot } from './shared'
  * level, and the target's name is echoed (`folderName` / `parentName`, null for
  * "root") so the CLI can print `-> <name>` without a second round-trip.
  *
- * The content-transfer + version-history subcommands (read/write/append/
- * download/path, versions:*) stay CLI-local: they stream blob-store bytes off
- * disk and have no metadata-only mapping. Content upload has its own streaming
- * route (artifacts/content.ts POST /api/tasks/:id/artifacts).
+ * `POST /api/artifacts` carries TWO body encodings on one path. JSON (below)
+ * takes an inline `content` STRING, which is fine for text but corrupts binary —
+ * a JS string is utf-8, so a PNG's invalid sequences become U+FFFD. Any other
+ * content type means "the body is the raw bytes" and is delegated to
+ * `createArtifactFromStream` (artifacts/content.ts), which streams it to a temp
+ * file. That is the path `slay tasks artifacts create` uses, so `--copy-from
+ * <binary>` and piped binary stdin survive byte-exact.
+ *
+ * The version-history subcommands (write/append, versions:*) stay CLI-local:
+ * they mutate blob-store history with no metadata-only mapping. `path` stays
+ * CLI-local by design — it prints a LOCAL filesystem path, meaningless remotely.
  */
 
 function store() {
@@ -56,7 +65,46 @@ async function resolveFolderPrefix(
 }
 
 export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): void {
+  // GET /api/artifacts/:id — single-artifact metadata by id prefix.
+  //
+  // Added for `slay tasks artifacts download`: choosing the default output
+  // filename and checking export capability both need `title` + `render_mode`
+  // for ONE artifact addressed by prefix, and every other route either needed
+  // the task id (the by-task listing) or mutated (PATCH). Without this the
+  // command had to read the hub's SQLite file, which is exactly what broke
+  // against a hub on another machine.
+  app.get('/api/artifacts/:id', async (req, res) => {
+    try {
+      const resolved = await resolveByIdPrefix<Record<string, unknown> & { id: string }>(
+        deps.db,
+        'task_artifacts',
+        req.params.id,
+        'Artifact',
+        '*',
+        // CLI resolveArtifact wording: `Ambiguous artifact id "<prefix>"`.
+        { ambiguousLabel: 'artifact id' }
+      )
+      if (isResolveFailure(resolved)) {
+        res.status(resolved.status).json({ ok: false, error: resolved.error })
+        return
+      }
+      // Raw row (SELECT *) — same shape the by-task listing returns, so a caller
+      // can treat both interchangeably.
+      res.json({ ok: true, data: resolved.row })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
   app.post('/api/artifacts', async (req, res) => {
+    // Two encodings share this path. A NON-JSON content type means "the body is
+    // the raw bytes" — hand it to the streaming create in content.ts, which
+    // stages to a temp file so binary input is never utf-8-decoded. JSON keeps
+    // the inline-`content`-string form below, unchanged.
+    if (!req.is('application/json')) {
+      await createArtifactFromStream(req, res, deps)
+      return
+    }
     const body = (req.body ?? {}) as {
       taskId?: unknown
       title?: unknown
@@ -155,7 +203,16 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         return
       }
       deps.notifyRenderer()
-      res.json({ ok: true, data: { ...artifact, folderName } })
+      // Echo the RAW row, not the parsed `TaskArtifact`. `slay tasks artifacts
+      // update --json` printed its own `SELECT *` verbatim, and `parseArtifact`
+      // drops any column it does not model (today: the vestigial pre-render_mode
+      // `type`), which would silently shrink that output. Falls back to the
+      // parsed row only if the re-read somehow misses.
+      const raw = await db.get<Record<string, unknown>>(
+        'SELECT * FROM task_artifacts WHERE id = ?',
+        [resolved.row.id]
+      )
+      res.json({ ok: true, data: { ...(raw ?? artifact), folderName } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
@@ -169,7 +226,9 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         'task_artifacts',
         req.params.id,
         'Artifact',
-        'id, title'
+        'id, title',
+        // CLI resolveArtifact wording: `Ambiguous artifact id "<prefix>"`.
+        { ambiguousLabel: 'artifact id' }
       )
       if (isResolveFailure(resolved)) {
         res.status(resolved.status).json({ ok: false, error: resolved.error })

@@ -1,64 +1,90 @@
 import { Command } from 'commander'
 import archiver from 'archiver'
-import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import {
-  openDb,
-  notifyApp,
-  postJson,
-  getArtifactsDir,
-  getDataDir,
-  getServerPort,
-  type SlayDb
-} from '../../db'
-import {
-  BlobStore,
-  createVersion,
-  saveCurrent,
-  mutateVersion,
-  setCurrentVersion,
-  getCurrentVersion,
-  listVersions,
-  resolveVersionRef,
-  readVersionContent,
-  renameVersion,
-  diffVersions,
-  pruneVersions,
-  nodeSqliteTxn,
-  isVersionError
-} from '@slayzone/task-artifacts/server'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { ReadableStream as StreamWebReadable } from 'node:stream/web'
+import { openDb, getArtifactsDir, type SlayDb } from '../../db'
+import type { ArtifactVersion, DiffResult, PruneReport } from '@slayzone/task-artifacts/shared'
 import {
   getExtensionFromTitle,
   getEffectiveRenderMode,
-  isBinaryRenderMode,
   canExportAsPdf,
   canExportAsPng,
   canExportAsHtml,
   type RenderMode
 } from '@slayzone/task/shared/types'
-import { apiGet, apiPost, apiPatch, apiDelete } from '../../api'
+import {
+  apiGet,
+  apiPost,
+  apiPatch,
+  apiDelete,
+  apiFetch,
+  apiGetStream,
+  apiPostStream,
+  apiPutStream
+} from '../../api'
 import { cliAuthor, resolveId } from './_shared'
 
 /*
- * Hub/runner split (Wave 3.5): the METADATA-ONLY subcommands below route through
- * api.ts — the hub when configured, else the local app's REST — matching the
- * wave-3 read/CRUD cutover:
- *   list  → GET    /api/tasks/:id/artifacts
- *   mkdir → POST   /api/artifact-folders
- *   rmdir → DELETE /api/artifact-folders/:id
- *   mvdir → PATCH  /api/artifact-folders/:id
- *   mv    → PATCH  /api/artifacts/:id
+ * Hub/runner split (Wave 3.5): the subcommands below route through api.ts — the
+ * hub when configured, else the local app's REST — so they work against a hub on
+ * another machine, where the SQLite file simply does not exist:
+ *   list        → GET    /api/tasks/:id/artifacts
+ *   mkdir       → POST   /api/artifact-folders
+ *   rmdir       → DELETE /api/artifact-folders/:id
+ *   mvdir       → PATCH  /api/artifact-folders/:id
+ *   mv / update → PATCH  /api/artifacts/:id
+ *   read        → GET    /api/artifacts/:id/content
+ *   create      → POST   /api/artifacts?taskId&title[&folderId&renderMode]  (raw body)
+ *   upload      → POST   /api/tasks/:id/artifacts?title=                    (raw body)
+ *   delete      → DELETE /api/artifacts/:id
+ *   download    → GET    /api/artifacts/:id (metadata) + /api/artifacts/:id/content
+ *                 POST   /api/artifacts/:id/export/{pdf,png,html}
+ *   search      → GET    /api/artifacts/search?q=…
+ *   write       → PUT    /api/artifacts/:id/content   (raw body)
+ *   append      → POST   /api/artifacts/:id/content   (raw body)
+ *   versions list        → GET    /api/artifacts/:id/versions
+ *   versions read        → GET    /api/artifacts/:id/versions/content?ref=
+ *   versions diff        → GET    /api/artifacts/:id/versions/diff?a=[&b=]
+ *   versions current     → GET    /api/artifacts/:id/versions/current
+ *   versions set-current → POST   /api/artifacts/:id/versions/current
+ *   versions create      → POST   /api/artifacts/:id/versions
+ *   versions rename      → PATCH  /api/artifacts/:id/versions
+ *   versions prune       → POST   /api/artifacts/:id/versions/prune
  *
- * Everything else stays DISK-LOCAL (still `openDb()` + BlobStore) because it
- * reads or writes artifact *content* / *version history* — blob bytes and the
- * on-disk file live next to the DB and have no metadata-only REST mapping:
- *   read/write/append/create/upload/delete/path/download, all `versions:*`.
- * `update` is MIXED (metadata db.run + a disk file rename when the extension
- * changes) and its `--json` echoes the full artifact row incl. version/view
- * columns the PATCH route's parseArtifact reshapes — kept disk-local to preserve
- * that exact output. When no hub is configured and the local app is running, the
- * converted commands behave exactly as before (same DB, via the app's REST).
+ * CONTENT crosses the wire as a STREAM in both directions, never as a JSON
+ * string: an artifact can be a PNG or a PDF, and a JS string is utf-8, so any
+ * such hop would replace every invalid byte sequence with U+FFFD. See
+ * api.ts's apiGetStream / apiPostStream / apiPutStream.
+ *
+ * VERSION HISTORY is content-addressed and immutable, and nothing about it is
+ * re-implemented here: the routes expose the SAME `task-artifacts:*` domain ops
+ * the app uses, including the one shared ref resolver (int / hash prefix / name /
+ * `-N` / `HEAD~N`) and the lock/branch rules. What stays client-side is
+ * PRESENTATION only — the table header, the `Error [CODE]: …` line, and the
+ * TTY-gated diff colors (the hub cannot know whether OUR stdout is a terminal).
+ *
+ * `--mutate-version` is two query params rather than one, because commander's
+ * `[ref]` optional argument is "boolean OR string" and a query string cannot
+ * express that unambiguously: bare ⇒ `mutateVersion=1` (autosave onto current),
+ * with a ref ⇒ `mutateVersionRef=<ref>` (rewrite that version in place).
+ *
+ * AUTHORSHIP rides the request. `cliAuthor()` reads the CLI's own
+ * `SLAYZONE_AGENT_ID`, which the hub cannot see, so a version written from an
+ * agent's terminal would otherwise be attributed to "user".
+ *
+ * `download --type zip` still ASSEMBLES the archive locally (streaming each
+ * member's bytes in over the content route) — a hub-side zip endpoint would be a
+ * new capability, not a wiring change. `--type pdf|png|html` post to the existing
+ * export routes; the CAPABILITY check stays client-side so its wording and its
+ * "available types for <mode>" hint survive (an export route only knows its own
+ * single type).
+ *
+ * Still DISK-LOCAL, deliberately — and now the ONLY one:
+ *   - `path` — prints a LOCAL filesystem path; meaningless for a remote hub, so
+ *     there is nothing to route. It is the last `openDb()` caller in this file.
  */
 
 interface ArtifactRow extends Record<string, unknown> {
@@ -82,6 +108,12 @@ interface ArtifactFolderRow extends Record<string, unknown> {
   created_at: string
 }
 
+/**
+ * Expand an artifact id prefix against the LOCAL database. The last user is
+ * `path`, which prints a local filesystem path and therefore has no remote
+ * meaning — every other subcommand sends the prefix to the hub, which expands it
+ * with the shared `resolveByIdPrefix` (identical 404/ambiguous wording).
+ */
 function resolveArtifact(db: SlayDb, prefix: string): ArtifactRow {
   const rows = db.query<ArtifactRow>(
     `SELECT * FROM task_artifacts WHERE id LIKE :prefix || '%' LIMIT 2`,
@@ -94,46 +126,6 @@ function resolveArtifact(db: SlayDb, prefix: string): ArtifactRow {
   if (rows.length > 1) {
     console.error(
       `Ambiguous artifact id "${prefix}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-  return rows[0]
-}
-
-async function resolveTaskForArtifact(
-  db: SlayDb,
-  taskOpt?: string
-): Promise<{ id: string; title: string }> {
-  const ref = await resolveId(taskOpt)
-  const rows = db.query<{ id: string; title: string }>(
-    `SELECT id, title FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': ref }
-  )
-  if (rows.length === 0) {
-    console.error(`Task not found: "${ref}"`)
-    process.exit(1)
-  }
-  if (rows.length > 1) {
-    console.error(
-      `Ambiguous task id "${ref}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-  return rows[0]
-}
-
-function resolveFolder(db: SlayDb, prefix: string): ArtifactFolderRow {
-  const rows = db.query<ArtifactFolderRow>(
-    `SELECT * FROM artifact_folders WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': prefix }
-  )
-  if (rows.length === 0) {
-    console.error(`Folder not found: "${prefix}"`)
-    process.exit(1)
-  }
-  if (rows.length > 1) {
-    console.error(
-      `Ambiguous folder id "${prefix}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
     )
     process.exit(1)
   }
@@ -220,14 +212,112 @@ function printArtifactTree(artifacts: ArtifactRow[], folders: ArtifactFolderRow[
   printLevel(null, '')
 }
 
-async function readStdin(): Promise<Buffer> {
+/**
+ * The route's `code` for "artifact row exists, its working copy does not". `read`
+ * and `download --type zip` both treat that as a non-error (print nothing / skip
+ * the member) — behavior they had when they checked `fs.existsSync` themselves.
+ */
+const ARTIFACT_FILE_MISSING = 'ARTIFACT_FILE_MISSING'
+
+/**
+ * stdin as a web stream, for a streamed request body.
+ *
+ * The TTY guard is the same one the former buffering `readStdin` had: `create`,
+ * `write` and `append` all require piped content, and a bare invocation in a
+ * terminal would otherwise hang waiting on a keyboard.
+ */
+function stdinStream(): ReadableStream<Uint8Array> {
   if (process.stdin.isTTY) {
     console.error('No content provided. Pipe content via stdin.')
     process.exit(1)
   }
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(chunk)
-  return Buffer.concat(chunks)
+  return Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>
+}
+
+/**
+ * `--mutate-version` as query params for the content routes.
+ *
+ * commander gives `[ref]` three values — absent, `true` (bare flag), or a string
+ * — and a single query param cannot round-trip that: `mutateVersion=true` is
+ * indistinguishable from a version literally NAMED "true". So the two modes are
+ * two params, and the route reads them as the distinct operations they are:
+ *   bare      → `mutateVersion=1`         autosave onto current (auto-branches if locked)
+ *   with ref  → `mutateVersionRef=<ref>`  rewrite that version in place (lock bypass)
+ *
+ * `authorType`/`authorId` carry `cliAuthor()`, which reads OUR
+ * `SLAYZONE_AGENT_ID` — invisible to the hub, so without this every
+ * agent-authored version would be recorded as user-authored.
+ */
+function versionWriteQuery(mutateVersion: boolean | string | undefined): URLSearchParams {
+  const query = new URLSearchParams()
+  if (typeof mutateVersion === 'string') query.set('mutateVersionRef', mutateVersion)
+  else if (mutateVersion === true) query.set('mutateVersion', '1')
+  return withAuthorParams(query)
+}
+
+/** Add the CLI's author context to a query string (see versionWriteQuery). */
+function withAuthorParams(query: URLSearchParams): URLSearchParams {
+  const author = cliAuthor()
+  if (author.type) query.set('authorType', author.type)
+  if (author.id) query.set('authorId', author.id)
+  return query
+}
+
+/**
+ * The CLI's author context as a JSON body fragment (for the versions routes).
+ * Same reason as {@link withAuthorParams}, different encoding.
+ */
+function authorBody(): { authorType?: string; authorId?: string } {
+  const author = cliAuthor()
+  if (!author.type) return {}
+  return { authorType: author.type, ...(author.id ? { authorId: author.id } : {}) }
+}
+
+/*
+ * Version-operation FAILURES need no per-call handling any more. Each route
+ * answers 400 with `error` already formatted as `Error [CODE]: message` — the
+ * exact line this file printed from its local `isVersionError(err)` branch — and
+ * api.ts's failure path prints `error` verbatim then exits 1. So the wording and
+ * the exit code survive without a single try/catch here.
+ */
+
+/** A file as a web stream, for a streamed request body (constant memory). */
+function fileStream(filePath: string): ReadableStream<Uint8Array> {
+  return Readable.toWeb(fs.createReadStream(filePath)) as ReadableStream<Uint8Array>
+}
+
+/**
+ * Pipe a response body to stdout.
+ *
+ * `end: false` keeps the pipeline from closing the shared stdout handle.
+ *
+ * EPIPE is swallowed: `slay … read <big-artifact> | head` closes the pipe early,
+ * which is normal use, not an error — `cat` exits quietly there too. (The old
+ * single `process.stdout.write(buffer)` crashed with an unhandled 'error' event
+ * and a full stack trace, so this is strictly quieter than before.)
+ */
+async function streamToStdout(body: ReadableStream<Uint8Array>): Promise<void> {
+  try {
+    await pipeline(Readable.fromWeb(body as StreamWebReadable), process.stdout, { end: false })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'EPIPE') throw err
+  }
+}
+
+/**
+ * Focus the freshly-created artifact in a running app — best-effort, as before.
+ *
+ * Replaces a direct `postJson(getServerPort(), …)`: that read the port out of the
+ * DB, which is exactly what a remote hub cannot offer. `apiFetch` reuses the
+ * resolved hub/app target and, unlike `apiPost`, does not exit on a non-2xx — so
+ * a host that cannot focus anything still leaves the created artifact alone.
+ *
+ * No separate `notifyApp()`: the create/upload routes already call
+ * `notifyRenderer()` themselves (as does this one), which is why the other
+ * converted commands dropped it too.
+ */
+async function openArtifactInApp(artifactId: string): Promise<void> {
+  await apiFetch(`/api/open-artifact/${encodeURIComponent(artifactId)}`, { method: 'POST' })
 }
 
 function getAvailableExportTypes(mode: RenderMode): string[] {
@@ -238,10 +328,13 @@ function getAvailableExportTypes(mode: RenderMode): string[] {
   return types
 }
 
-interface SearchMatcher {
-  test: (s: string) => boolean
-}
-
+/**
+ * The search RESULT shape, unchanged from when this command scanned sqlite +
+ * the blob store itself — `--json` prints this array verbatim, so it is a
+ * contract. The scan now happens on the hub (GET /api/artifacts/search), which
+ * is the only host that can read the blob store; what stays here is the
+ * PRESENTATION of the results.
+ */
 interface SearchMatch {
   type: 'title' | 'content'
   line?: number
@@ -257,78 +350,12 @@ interface SearchResult {
   matches: SearchMatch[]
 }
 
-const MAX_SCAN_BYTES = 5_000_000
-const SNIPPET_MAX = 200
-
-function compileMatcher(
-  query: string,
-  opts: { regex?: boolean; caseSensitive?: boolean }
-): SearchMatcher {
-  if (opts.regex) {
-    try {
-      const re = new RegExp(query, opts.caseSensitive ? '' : 'i')
-      return { test: (s) => re.test(s) }
-    } catch (e) {
-      console.error(`Invalid regex: ${(e as Error).message}`)
-      process.exit(1)
-    }
-  }
-  if (opts.caseSensitive) {
-    return { test: (s) => s.includes(query) }
-  }
-  const q = query.toLowerCase()
-  return { test: (s) => s.toLowerCase().includes(q) }
-}
-
-function sanitizeSnippet(s: string): string {
-  // Replace tabs/control chars with spaces, truncate
-  // eslint-disable-next-line no-control-regex
-  const cleaned = s.replace(/[\t\x00-\x08\x0b-\x1f\x7f]/g, ' ')
-  return cleaned.length > SNIPPET_MAX ? cleaned.slice(0, SNIPPET_MAX) + '…' : cleaned
-}
-
-function scanContentForMatches(
-  content: string,
-  matcher: SearchMatcher,
-  maxMatches: number
-): SearchMatch[] {
-  const lines = content.split('\n')
-  const out: SearchMatch[] = []
-  for (let i = 0; i < lines.length; i++) {
-    if (matcher.test(lines[i])) {
-      out.push({
-        type: 'content',
-        line: i + 1,
-        snippet: sanitizeSnippet(lines[i]),
-        contextBefore: i > 0 ? sanitizeSnippet(lines[i - 1]) : null,
-        contextAfter: i + 1 < lines.length ? sanitizeSnippet(lines[i + 1]) : null
-      })
-      if (out.length >= maxMatches) break
-    }
-  }
-  return out
-}
-
-function loadArtifactContent(
-  raw: ReturnType<SlayDb['raw']>,
-  blobStore: BlobStore,
-  artifactId: string,
-  artifactLabel: string
-): string | null {
-  const version = getCurrentVersion(raw, artifactId)
-  if (!version) return null
-  if (version.size > MAX_SCAN_BYTES) {
-    process.stderr.write(
-      `[skipped large artifact] ${artifactLabel} (${(version.size / 1_000_000).toFixed(1)}MB)\n`
-    )
-    return null
-  }
-  try {
-    const buf = readVersionContent(blobStore, version)
-    return buf.toString('utf-8')
-  } catch {
-    return null
-  }
+/** What the route reports alongside the results, feeding the human footer. */
+interface SearchReport {
+  results: SearchResult[]
+  scannedCount: number
+  truncated: boolean
+  skippedLarge: { label: string; size: number }[]
 }
 
 function printSearchResultsHuman(
@@ -406,18 +433,21 @@ export function artifactsSubcommand(): Command {
     .command('read <artifactId>')
     .description('Output artifact content to stdout')
     .action(async (artifactId: string) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      db.close()
-      const dir = getArtifactsDir()
-      const fp = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-      if (!fs.existsSync(fp)) return
-      const mode = getEffectiveRenderMode(artifact.title, artifact.render_mode as RenderMode | null)
-      if (isBinaryRenderMode(mode)) {
-        process.stdout.write(fs.readFileSync(fp))
-      } else {
-        process.stdout.write(fs.readFileSync(fp, 'utf-8'))
-      }
+      // GET /api/artifacts/:id/content resolves the id prefix and streams the
+      // working-copy file. Bytes go to stdout through a pipeline — never through
+      // a string — so an image/pdf artifact is emitted byte-exact, exactly as the
+      // old `readFileSync(fp)` branch did. (The former utf-8 branch for text was
+      // a no-op round-trip: writing a decoded string re-encodes to the same bytes.)
+      //
+      // ARTIFACT_FILE_MISSING is passed through rather than treated as an error:
+      // a row whose working copy is absent has always printed NOTHING and exited
+      // 0 here (the old `if (!fs.existsSync(fp)) return`).
+      const { body } = await apiGetStream(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/content`,
+        [ARTIFACT_FILE_MISSING]
+      )
+      if (!body) return
+      await streamToStdout(body)
     })
 
   // slay tasks artifacts search <query>
@@ -448,64 +478,42 @@ export function artifactsSubcommand(): Command {
         process.exit(1)
       }
 
-      const matcher = compileMatcher(query, opts)
-
-      const db = openDb()
-      let scopeTaskId: string | null = null
-      if (!opts.allTasks) {
-        scopeTaskId = (await resolveTaskForArtifact(db, opts.task)).id
+      // GET /api/artifacts/search runs the whole scan on the host that owns the
+      // blob store — titles AND every in-scope artifact's current-version
+      // content, with the same matcher/snippet/limit semantics (the code moved
+      // to @slayzone/task-artifacts verbatim). The three contradiction checks
+      // above stay here so they still fail BEFORE any request, and the route
+      // re-asserts them with identical wording for direct callers.
+      const query$ = new URLSearchParams({ q: query })
+      if (opts.allTasks) {
+        query$.set('allTasks', '1')
+      } else {
+        query$.set('taskId', await resolveId(opts.task))
       }
-      const folderId = opts.folder ? resolveFolder(db, opts.folder).id : null
+      if (opts.folder) query$.set('folderId', opts.folder)
+      if (opts.titlesOnly) query$.set('titlesOnly', '1')
+      if (opts.contentOnly) query$.set('contentOnly', '1')
+      if (opts.regex) query$.set('regex', '1')
+      if (opts.caseSensitive) query$.set('caseSensitive', '1')
+      query$.set('limit', opts.limit ?? '50')
+      query$.set('maxMatches', opts.maxMatches ?? '20')
 
-      const sqlParts = ['SELECT * FROM task_artifacts WHERE 1=1']
-      const params: Record<string, string> = {}
-      if (scopeTaskId) {
-        sqlParts.push('AND task_id = :tid')
-        params[':tid'] = scopeTaskId
+      const { data } = await apiGet<{ ok: true; data: SearchReport }>(
+        `/api/artifacts/search?${query$}`
+      )
+
+      // The oversized-artifact notice stayed on stderr, interleaved with results
+      // before; it is now emitted up front (the whole scan finished server-side).
+      for (const skipped of data.skippedLarge) {
+        process.stderr.write(
+          `[skipped large artifact] ${skipped.label} (${(skipped.size / 1_000_000).toFixed(1)}MB)\n`
+        )
       }
-      if (folderId) {
-        sqlParts.push('AND folder_id = :fid')
-        params[':fid'] = folderId
-      }
-      sqlParts.push('ORDER BY updated_at DESC')
-      const artifacts = db.query<ArtifactRow>(sqlParts.join(' '), params)
-      const raw = db.raw()
-      const blobStore = new BlobStore(getDataDir())
-
-      const limit = parseInt(opts.limit ?? '50', 10)
-      const maxMatches = parseInt(opts.maxMatches ?? '20', 10)
-      const results: SearchResult[] = []
-      let truncated = false
-
-      for (const a of artifacts) {
-        const matches: SearchMatch[] = []
-        if (!opts.contentOnly && matcher.test(a.title)) {
-          matches.push({ type: 'title', snippet: sanitizeSnippet(a.title) })
-        }
-        if (!opts.titlesOnly) {
-          const mode = getEffectiveRenderMode(a.title, a.render_mode as RenderMode | null)
-          if (!isBinaryRenderMode(mode)) {
-            const content = loadArtifactContent(raw, blobStore, a.id, a.title)
-            if (content != null) {
-              matches.push(...scanContentForMatches(content, matcher, maxMatches))
-            }
-          }
-        }
-        if (matches.length > 0) {
-          results.push({ artifactId: a.id, taskId: a.task_id, title: a.title, matches })
-          if (results.length >= limit) {
-            truncated = artifacts.length > results.length
-            break
-          }
-        }
-      }
-
-      db.close()
 
       if (opts.json) {
-        printSearchResultsJson(results)
+        printSearchResultsJson(data.results)
       } else {
-        printSearchResultsHuman(results, artifacts.length, truncated)
+        printSearchResultsHuman(data.results, data.scannedCount, data.truncated)
       }
     })
 
@@ -519,83 +527,42 @@ export function artifactsSubcommand(): Command {
     .option('--render-mode <mode>', 'Override render mode')
     .option('--json', 'Output as JSON')
     .action(async (title: string, opts) => {
-      const db = openDb()
-      const task = await resolveTaskForArtifact(db, opts.task)
-      const folderId = opts.folder ? resolveFolder(db, opts.folder).id : null
-      const id = crypto.randomUUID()
-      const now = new Date().toISOString()
-      const maxOrder =
-        db.query<{ m: number | null }>(
-          folderId
-            ? `SELECT MAX("order") as m FROM task_artifacts WHERE task_id = :taskId AND folder_id = :folderId`
-            : `SELECT MAX("order") as m FROM task_artifacts WHERE task_id = :taskId AND folder_id IS NULL`,
-          folderId ? { ':taskId': task.id, ':folderId': folderId } : { ':taskId': task.id }
-        )[0]?.m ?? -1
+      // POST /api/artifacts with a RAW body: the artifact's bytes ARE the request
+      // body (streamed, constant memory), and taskId/title/folderId/renderMode
+      // ride the query string — see api.ts apiPostStream for why bytes must never
+      // become a JSON string. The route resolves task + folder by id prefix,
+      // allocates the folder-scoped "order", writes the file and seeds v1 through
+      // the shared artifact store, then pings the renderer.
+      //
+      // `--copy-from` still short-circuits on a missing file BEFORE any request,
+      // so its wording/exit code are unchanged; without it, stdin is required and
+      // is now piped straight through rather than buffered.
+      const taskRef = await resolveId(opts.task)
+      const query = new URLSearchParams({ taskId: taskRef, title })
+      if (opts.folder) query.set('folderId', opts.folder)
+      if (opts.renderMode) query.set('renderMode', opts.renderMode)
 
-      db.run(
-        `INSERT INTO task_artifacts (id, task_id, folder_id, title, render_mode, "order", created_at, updated_at)
-         VALUES (:id, :taskId, :folderId, :title, :renderMode, :order, :now, :now)`,
-        {
-          ':id': id,
-          ':taskId': task.id,
-          ':folderId': folderId,
-          ':title': title,
-          ':renderMode': opts.renderMode ?? null,
-          ':order': maxOrder + 1,
-          ':now': now
-        }
-      )
-
-      const dir = getArtifactsDir()
-      const fp = artifactFilePath(dir, task.id, id, title)
-      fs.mkdirSync(path.dirname(fp), { recursive: true })
-
-      let bytes: Buffer
+      let source: ReadableStream<Uint8Array>
       if (opts.copyFrom) {
         if (!fs.existsSync(opts.copyFrom)) {
           console.error(`File not found: ${opts.copyFrom}`)
           process.exit(1)
         }
-        bytes = fs.readFileSync(opts.copyFrom)
-        fs.writeFileSync(fp, bytes)
+        source = fileStream(opts.copyFrom)
       } else {
-        const content = await readStdin()
-        bytes = Buffer.from(content)
-        fs.writeFileSync(fp, bytes)
+        source = stdinStream()
       }
 
-      // Create v1 version row.
-      const blobStore = new BlobStore(getDataDir())
-      const raw = db.raw()
-      createVersion(raw, nodeSqliteTxn(raw), blobStore, {
-        artifactId: id,
-        bytes,
-        author: cliAuthor()
-      })
-
-      db.close()
-      await notifyApp()
-      const openPort = getServerPort()
-      if (openPort) await postJson(openPort, `/api/open-artifact/${id}`)
+      const { data: artifact } = await apiPostStream<{ ok: true; data: ArtifactRow }>(
+        `/api/artifacts?${query}`,
+        source
+      )
+      await openArtifactInApp(artifact.id)
 
       if (opts.json) {
-        console.log(
-          JSON.stringify(
-            {
-              id,
-              task_id: task.id,
-              title,
-              render_mode: opts.renderMode ?? null,
-              order: maxOrder + 1,
-              created_at: now,
-              updated_at: now
-            },
-            null,
-            2
-          )
-        )
+        console.log(JSON.stringify(artifact, null, 2))
       } else {
-        console.log(`Created: ${id.slice(0, 8)}  ${title}`)
+        console.log(`Created: ${artifact.id.slice(0, 8)}  ${artifact.title}`)
       }
     })
 
@@ -607,56 +574,26 @@ export function artifactsSubcommand(): Command {
     .option('--title <name>', 'Artifact title (defaults to filename)')
     .option('--json', 'Output as JSON')
     .action(async (sourcePath: string, opts) => {
+      // POST /api/tasks/:id/artifacts?title= streams the file as the request body
+      // (constant memory) into the shared store's upload op — the same op behind
+      // the app's own upload flow, so the row/file/v1-seed are identical. The
+      // task-wide "order" allocation matches what this command always did.
       if (!fs.existsSync(sourcePath)) {
         console.error(`File not found: ${sourcePath}`)
         process.exit(1)
       }
-      const db = openDb()
-      const task = await resolveTaskForArtifact(db, opts.task)
-      const id = crypto.randomUUID()
+      const taskRef = await resolveId(opts.task)
       const title = opts.title ?? path.basename(sourcePath)
-      const now = new Date().toISOString()
-      const maxOrder =
-        db.query<{ m: number | null }>(
-          `SELECT MAX("order") as m FROM task_artifacts WHERE task_id = :taskId`,
-          { ':taskId': task.id }
-        )[0]?.m ?? -1
-
-      db.run(
-        `INSERT INTO task_artifacts (id, task_id, title, "order", created_at, updated_at)
-         VALUES (:id, :taskId, :title, :order, :now, :now)`,
-        { ':id': id, ':taskId': task.id, ':title': title, ':order': maxOrder + 1, ':now': now }
+      const { data: artifact } = await apiPostStream<{ ok: true; data: ArtifactRow }>(
+        `/api/tasks/${encodeURIComponent(taskRef)}/artifacts?title=${encodeURIComponent(title)}`,
+        fileStream(sourcePath)
       )
-
-      const dir = getArtifactsDir()
-      const fp = artifactFilePath(dir, task.id, id, title)
-      fs.mkdirSync(path.dirname(fp), { recursive: true })
-      fs.copyFileSync(sourcePath, fp)
-
-      // Seed v1 version row from uploaded bytes.
-      const blobStore = new BlobStore(getDataDir())
-      const raw = db.raw()
-      createVersion(raw, nodeSqliteTxn(raw), blobStore, {
-        artifactId: id,
-        bytes: fs.readFileSync(fp),
-        author: cliAuthor()
-      })
-
-      db.close()
-      await notifyApp()
-      const openPort = getServerPort()
-      if (openPort) await postJson(openPort, `/api/open-artifact/${id}`)
+      await openArtifactInApp(artifact.id)
 
       if (opts.json) {
-        console.log(
-          JSON.stringify(
-            { id, task_id: task.id, title, order: maxOrder + 1, created_at: now, updated_at: now },
-            null,
-            2
-          )
-        )
+        console.log(JSON.stringify(artifact, null, 2))
       } else {
-        console.log(`Uploaded: ${id.slice(0, 8)}  ${title}`)
+        console.log(`Uploaded: ${artifact.id.slice(0, 8)}  ${artifact.title}`)
       }
     })
 
@@ -668,61 +605,38 @@ export function artifactsSubcommand(): Command {
     .option('--render-mode <mode>', 'New render mode')
     .option('--json', 'Output as JSON')
     .action(async (artifactId: string, opts) => {
+      // PATCH /api/artifacts/:id resolves the id prefix, writes title/render_mode
+      // through the shared artifact store, and — because the on-disk filename
+      // derives from the title's extension — performs the working-copy RENAME on
+      // the host that owns the file. That is the same store op the app's own
+      // rename uses, so a local hub renames exactly as before and a remote one
+      // renames its own file instead of this machine's (which has none).
+      //
+      // The rename is a `renameSync`, not read-as-utf8 + write-as-utf8: the file
+      // being moved may be a PNG or a PDF, and a JS string is utf-8.
+      //
+      // The response echoes the RAW row (`SELECT *`), which is what `--json`
+      // always printed — including the version/view columns a parsed shape drops.
       if (!opts.title && !opts.renderMode) {
         console.error('Provide at least one of --title, --render-mode.')
         process.exit(1)
       }
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
+      const body: Record<string, unknown> = {}
+      if (opts.title !== undefined) body.title = opts.title
+      if (opts.renderMode !== undefined) body.renderMode = opts.renderMode
 
-      const sets: string[] = []
-      const params: Record<string, string | number | bigint | null | Uint8Array> = {
-        ':id': artifact.id
-      }
+      const { data } = await apiPatch<{
+        ok: true
+        data: ArtifactRow & { folderName: string | null }
+      }>(`/api/artifacts/${encodeURIComponent(artifactId)}`, body)
 
-      if (opts.title !== undefined) {
-        sets.push('title = :title')
-        params[':title'] = opts.title
-      }
-      if (opts.renderMode !== undefined) {
-        sets.push('render_mode = :renderMode')
-        params[':renderMode'] = opts.renderMode
-      }
-      sets.push('updated_at = :now')
-      params[':now'] = new Date().toISOString()
-
-      db.run(`UPDATE task_artifacts SET ${sets.join(', ')} WHERE id = :id`, params)
-
-      // Rename file on disk if extension changed
-      if (opts.title) {
-        const dir = getArtifactsDir()
-        const oldExt = getExtensionFromTitle(artifact.title) || '.txt'
-        const newExt = getExtensionFromTitle(opts.title) || '.txt'
-        if (oldExt !== newExt) {
-          const oldPath = path.join(dir, artifact.task_id, `${artifact.id}${oldExt}`)
-          const newPath = path.join(dir, artifact.task_id, `${artifact.id}${newExt}`)
-          if (fs.existsSync(oldPath)) {
-            const content = fs.readFileSync(oldPath)
-            fs.writeFileSync(newPath, content)
-            fs.unlinkSync(oldPath)
-          }
-        }
-      }
-
-      db.close()
-      await notifyApp()
-
-      const newTitle = opts.title ?? artifact.title
       if (opts.json) {
-        const updated = {
-          ...artifact,
-          title: newTitle,
-          render_mode: opts.renderMode ?? artifact.render_mode,
-          updated_at: params[':now']
-        }
-        console.log(JSON.stringify(updated, null, 2))
+        // `folderName` is the move route's echo, not a stored column — strip it
+        // so `--json` stays exactly the artifact row.
+        const { folderName: _folderName, ...row } = data
+        console.log(JSON.stringify(row, null, 2))
       } else {
-        console.log(`Updated: ${artifact.id.slice(0, 8)}  ${newTitle}`)
+        console.log(`Updated: ${data.id.slice(0, 8)}  ${data.title}`)
       }
     })
 
@@ -735,55 +649,22 @@ export function artifactsSubcommand(): Command {
       'Bare: autosave to current (auto-branches if locked). With ref: bypass lock and mutate the target version in place'
     )
     .action(async (artifactId: string, opts: { mutateVersion?: boolean | string }) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-
-      const content = await readStdin()
-      const bytes = Buffer.from(content)
-
-      const dir = getArtifactsDir()
-      const fp = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-      fs.mkdirSync(path.dirname(fp), { recursive: true })
-      fs.writeFileSync(fp, bytes)
-
-      const blobStore = new BlobStore(getDataDir())
-      const raw = db.raw()
-      const txn = nodeSqliteTxn(raw)
-      try {
-        const v =
-          typeof opts.mutateVersion === 'string'
-            ? mutateVersion(raw, txn, blobStore, {
-                artifactId: artifact.id,
-                ref: opts.mutateVersion,
-                bytes,
-                author: cliAuthor()
-              })
-            : opts.mutateVersion === true
-              ? saveCurrent(raw, txn, blobStore, {
-                  artifactId: artifact.id,
-                  bytes,
-                  author: cliAuthor()
-                })
-              : createVersion(raw, txn, blobStore, {
-                  artifactId: artifact.id,
-                  bytes,
-                  author: cliAuthor()
-                })
-        db.run(`UPDATE task_artifacts SET updated_at = :now WHERE id = :id`, {
-          ':id': artifact.id,
-          ':now': new Date().toISOString()
-        })
-        db.close()
-        await notifyApp()
-        console.log(`Written: ${artifact.id.slice(0, 8)}  ${artifact.title}  v${v.version_num}`)
-      } catch (err) {
-        db.close()
-        if (isVersionError(err)) {
-          console.error(`Error [${err.code}]: ${err.message}`)
-          process.exit(1)
-        }
-        throw err
-      }
+      // PUT /api/artifacts/:id/content with a RAW streamed body: stdin goes
+      // straight to the wire, so content that is not valid utf-8 (a piped PNG)
+      // stays byte-exact. The route stages the body to a temp file and hands the
+      // shared store a `sourcePath`, which writes the working copy AND records
+      // the version in ONE transaction — the CLI's own write-then-version pair
+      // could previously leave the file ahead of history if it died between them.
+      const { data } = await apiPutStream<{
+        ok: true
+        data: { id: string; title: string; version: ArtifactVersion }
+      }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/content?${versionWriteQuery(opts.mutateVersion)}`,
+        stdinStream()
+      )
+      console.log(
+        `Written: ${data.id.slice(0, 8)}  ${data.title}  v${data.version.version_num}`
+      )
     })
 
   // slay tasks artifacts append <artifactId>
@@ -795,55 +676,20 @@ export function artifactsSubcommand(): Command {
       'Bare: autosave to current (auto-branches if locked). With ref: bypass lock and mutate the target version in place'
     )
     .action(async (artifactId: string, opts: { mutateVersion?: boolean | string }) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-
-      const content = await readStdin()
-
-      const dir = getArtifactsDir()
-      const fp = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-      fs.mkdirSync(path.dirname(fp), { recursive: true })
-      fs.appendFileSync(fp, content)
-      const fullBytes = fs.readFileSync(fp)
-
-      const blobStore = new BlobStore(getDataDir())
-      const raw = db.raw()
-      const txn = nodeSqliteTxn(raw)
-      try {
-        const v =
-          typeof opts.mutateVersion === 'string'
-            ? mutateVersion(raw, txn, blobStore, {
-                artifactId: artifact.id,
-                ref: opts.mutateVersion,
-                bytes: fullBytes,
-                author: cliAuthor()
-              })
-            : opts.mutateVersion === true
-              ? saveCurrent(raw, txn, blobStore, {
-                  artifactId: artifact.id,
-                  bytes: fullBytes,
-                  author: cliAuthor()
-                })
-              : createVersion(raw, txn, blobStore, {
-                  artifactId: artifact.id,
-                  bytes: fullBytes,
-                  author: cliAuthor()
-                })
-        db.run(`UPDATE task_artifacts SET updated_at = :now WHERE id = :id`, {
-          ':id': artifact.id,
-          ':now': new Date().toISOString()
-        })
-        db.close()
-        await notifyApp()
-        console.log(`Appended: ${artifact.id.slice(0, 8)}  ${artifact.title}  v${v.version_num}`)
-      } catch (err) {
-        db.close()
-        if (isVersionError(err)) {
-          console.error(`Error [${err.code}]: ${err.message}`)
-          process.exit(1)
-        }
-        throw err
-      }
+      // POST (not PUT) on the same path means APPEND. The route appends the
+      // streamed bytes to the working copy and versions the resulting WHOLE file
+      // — the same two steps this command did locally, now atomic and on the host
+      // that owns the file. Streamed for the same binary-safety reason as `write`.
+      const { data } = await apiPostStream<{
+        ok: true
+        data: { id: string; title: string; version: ArtifactVersion }
+      }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/content?${versionWriteQuery(opts.mutateVersion)}`,
+        stdinStream()
+      )
+      console.log(
+        `Appended: ${data.id.slice(0, 8)}  ${data.title}  v${data.version.version_num}`
+      )
     })
 
   // slay tasks artifacts delete <artifactId>
@@ -851,16 +697,14 @@ export function artifactsSubcommand(): Command {
     .command('delete <artifactId>')
     .description('Delete an artifact')
     .action(async (artifactId: string) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-
-      const dir = getArtifactsDir()
-      const fp = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-      if (fs.existsSync(fp)) fs.unlinkSync(fp)
-
-      db.run(`DELETE FROM task_artifacts WHERE id = :id`, { ':id': artifact.id })
-      db.close()
-      await notifyApp()
+      // DELETE /api/artifacts/:id resolves the id prefix (404/400 parity, same
+      // `Ambiguous artifact id` wording), unlinks the working file, deletes the
+      // row, and pings the renderer. It echoes `{ id, title }` so the human line
+      // is unchanged without a second lookup.
+      const { data: artifact } = await apiDelete<{
+        ok: true
+        data: { id: string; title: string }
+      }>(`/api/artifacts/${encodeURIComponent(artifactId)}`)
       console.log(`Deleted: ${artifact.id.slice(0, 8)}  ${artifact.title}`)
     })
 
@@ -993,24 +837,24 @@ pdf/png/html require the SlayZone app to be running.
 
       // --- ZIP: task-level ---
       if (opts.type === 'zip') {
-        const db = openDb()
-        const task = await resolveTaskForArtifact(db, opts.task)
-        const artifacts = db.query<ArtifactRow>(
-          `SELECT * FROM task_artifacts WHERE task_id = :taskId ORDER BY "order" ASC`,
-          { ':taskId': task.id }
-        )
-        const folders = db.query<ArtifactFolderRow>(
-          `SELECT * FROM artifact_folders WHERE task_id = :taskId`,
-          { ':taskId': task.id }
-        )
-        db.close()
+        // The task's artifact + folder lists come from GET /api/tasks/:id/artifacts
+        // (same rows the direct SELECTs returned, ordered by "order"), and each
+        // file's BYTES stream in from GET /api/artifacts/:id/content. The archive
+        // is still assembled locally — a hub-side zip route would be a new
+        // capability, out of this slice's scope — but nothing reads the hub's disk
+        // or DB any more, so a remote hub works.
+        const taskRef = await resolveId(opts.task)
+        const { data } = await apiGet<{
+          ok: true
+          data: { folders: ArtifactFolderRow[]; artifacts: ArtifactRow[] }
+        }>(`/api/tasks/${encodeURIComponent(taskRef)}/artifacts`)
+        const { artifacts, folders } = data
 
         if (artifacts.length === 0) {
           console.error('No artifacts to download.')
           process.exit(1)
         }
 
-        const dir = getArtifactsDir()
         const outputPath = opts.output ? path.resolve(opts.output) : path.resolve('artifacts.zip')
         fs.mkdirSync(path.dirname(outputPath), { recursive: true })
 
@@ -1026,12 +870,18 @@ pdf/png/html require the SlayZone app to be running.
         archive.pipe(output)
 
         for (const artifact of artifacts) {
-          const fp = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-          if (!fs.existsSync(fp)) continue
+          // A row whose working copy is absent was SKIPPED before (`if
+          // (!fs.existsSync(fp)) continue`) — the pass-through code preserves that
+          // rather than failing the whole archive.
+          const { body } = await apiGetStream(
+            `/api/artifacts/${encodeURIComponent(artifact.id)}/content`,
+            [ARTIFACT_FILE_MISSING]
+          )
+          if (!body) continue
           const rel = artifact.folder_id
             ? path.join(folderPath(artifact.folder_id), artifact.title)
             : artifact.title
-          archive.file(fp, { name: rel })
+          archive.append(Readable.fromWeb(body as StreamWebReadable), { name: rel })
         }
 
         await archive.finalize()
@@ -1041,7 +891,7 @@ pdf/png/html require the SlayZone app to be running.
         })
 
         if (opts.json) {
-          console.log(JSON.stringify({ path: outputPath, type: 'zip', taskId: task.id }))
+          console.log(JSON.stringify({ path: outputPath, type: 'zip', taskId: artifacts[0].task_id }))
         } else {
           console.log(outputPath)
         }
@@ -1056,24 +906,28 @@ pdf/png/html require the SlayZone app to be running.
         process.exit(1)
       }
 
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      db.close()
+      // The artifact row (title + render_mode) drives both the default output
+      // filename and the export-capability check. GET /api/artifacts/:id resolves
+      // the id prefix and returns the raw row — added for exactly this, since the
+      // capability check has to stay client-side to keep its wording + the
+      // "available types" hint (the export routes only know their own one type).
+      const { data: artifact } = await apiGet<{ ok: true; data: ArtifactRow }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}`
+      )
 
       const mode = getEffectiveRenderMode(artifact.title, artifact.render_mode as RenderMode | null)
       const baseName = artifact.title.replace(/\.[^.]+$/, '') || artifact.title
 
       // --- RAW ---
       if (opts.type === 'raw') {
-        const dir = getArtifactsDir()
-        const srcPath = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-        if (!fs.existsSync(srcPath)) {
-          console.error('Artifact file not found on disk.')
-          process.exit(1)
-        }
+        // Stream GET /api/artifacts/:id/content straight to the output file —
+        // byte-exact and constant-memory, replacing the local `copyFileSync`.
+        const { body } = await apiGetStream(
+          `/api/artifacts/${encodeURIComponent(artifact.id)}/content`
+        )
         const outputPath = opts.output ? path.resolve(opts.output) : path.resolve(artifact.title)
         fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-        fs.copyFileSync(srcPath, outputPath)
+        await pipeline(Readable.fromWeb(body as StreamWebReadable), fs.createWriteStream(outputPath))
 
         if (opts.json) {
           console.log(JSON.stringify({ path: outputPath, type: 'raw', artifactId: artifact.id }))
@@ -1115,13 +969,12 @@ pdf/png/html require the SlayZone app to be running.
     .option('--offset <n>', 'Skip N rows', (v) => parseInt(v, 10), 0)
     .option('--json', 'Output as JSON')
     .action(async (artifactId: string, opts: { limit: number; offset: number; json?: boolean }) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      const blobStore = new BlobStore(getDataDir())
-      void blobStore
-      const raw = db.raw()
-      const rows = listVersions(raw, artifact.id, { limit: opts.limit, offset: opts.offset })
-      db.close()
+      // GET /api/artifacts/:id/versions resolves the id prefix and returns the
+      // rows newest-first, straight from the shared `listVersions` op — same
+      // shape/order, so `--json` and the table below are unchanged.
+      const { data: rows } = await apiGet<{ ok: true; data: ArtifactVersion[] }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/versions?limit=${opts.limit}&offset=${opts.offset}`
+      )
       if (opts.json) {
         console.log(JSON.stringify(rows, null, 2))
         return
@@ -1146,23 +999,15 @@ pdf/png/html require the SlayZone app to be running.
     .command('read <artifactId> <version>')
     .description('Print content of a specific version (int, hash prefix, name, -N, HEAD~N)')
     .action(async (artifactId: string, versionRef: string) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      const blobStore = new BlobStore(getDataDir())
-      const raw = db.raw()
-      try {
-        const v = resolveVersionRef(raw, artifact.id, versionRef)
-        const buf = readVersionContent(blobStore, v)
-        db.close()
-        process.stdout.write(buf)
-      } catch (err) {
-        db.close()
-        if (isVersionError(err)) {
-          console.error(`Error [${err.code}]: ${err.message}`)
-          process.exit(1)
-        }
-        throw err
-      }
+      // GET /api/artifacts/:id/versions/content?ref= resolves the ref through the
+      // ONE shared resolver (int / hash prefix / name / -N / HEAD~N) and streams
+      // the version's BLOB. Bytes reach stdout through a pipeline, never a string,
+      // so a binary version is emitted byte-exact — the same guarantee `read` has.
+      const { body } = await apiGetStream(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/versions/content?ref=${encodeURIComponent(versionRef)}`
+      )
+      if (!body) return
+      await streamToStdout(body)
     })
 
   versions
@@ -1177,41 +1022,35 @@ pdf/png/html require the SlayZone app to be running.
         b: string | undefined,
         opts: { color: boolean; json?: boolean }
       ) => {
-        const db = openDb()
-        const artifact = resolveArtifact(db, artifactId)
-        const blobStore = new BlobStore(getDataDir())
-        const raw = db.raw()
-        try {
-          const result = diffVersions(raw, blobStore, { artifactId: artifact.id, a, b })
-          db.close()
-          if (opts.json) {
-            console.log(JSON.stringify(result, null, 2))
-            return
+        // GET /api/artifacts/:id/versions/diff?a=[&b=] returns the structured
+        // DiffResult from the shared `diffVersions` op (b omitted = latest).
+        // RENDERING stays here: colors are gated on OUR stdout being a TTY, which
+        // the hub cannot know.
+        const query = new URLSearchParams({ a })
+        if (b !== undefined) query.set('b', b)
+        const { data: result } = await apiGet<{ ok: true; data: DiffResult }>(
+          `/api/artifacts/${encodeURIComponent(artifactId)}/versions/diff?${query}`
+        )
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2))
+          return
+        }
+        if (result.kind === 'binary') {
+          console.log(`(binary)`)
+          console.log(`  a: ${result.a.hash.slice(0, 8)}  ${result.a.size} bytes`)
+          console.log(`  b: ${result.b.hash.slice(0, 8)}  ${result.b.size} bytes`)
+          return
+        }
+        const useColor = opts.color !== false && process.stdout.isTTY
+        const RED = useColor ? '\x1b[31m' : ''
+        const GREEN = useColor ? '\x1b[32m' : ''
+        const RESET = useColor ? '\x1b[0m' : ''
+        for (const hunk of result.hunks) {
+          for (const line of hunk.lines) {
+            if (line.kind === 'add') process.stdout.write(`${GREEN}+${line.text}${RESET}\n`)
+            else if (line.kind === 'del') process.stdout.write(`${RED}-${line.text}${RESET}\n`)
+            else process.stdout.write(` ${line.text}\n`)
           }
-          if (result.kind === 'binary') {
-            console.log(`(binary)`)
-            console.log(`  a: ${result.a.hash.slice(0, 8)}  ${result.a.size} bytes`)
-            console.log(`  b: ${result.b.hash.slice(0, 8)}  ${result.b.size} bytes`)
-            return
-          }
-          const useColor = opts.color !== false && process.stdout.isTTY
-          const RED = useColor ? '\x1b[31m' : ''
-          const GREEN = useColor ? '\x1b[32m' : ''
-          const RESET = useColor ? '\x1b[0m' : ''
-          for (const hunk of result.hunks) {
-            for (const line of hunk.lines) {
-              if (line.kind === 'add') process.stdout.write(`${GREEN}+${line.text}${RESET}\n`)
-              else if (line.kind === 'del') process.stdout.write(`${RED}-${line.text}${RESET}\n`)
-              else process.stdout.write(` ${line.text}\n`)
-            }
-          }
-        } catch (err) {
-          db.close()
-          if (isVersionError(err)) {
-            console.error(`Error [${err.code}]: ${err.message}`)
-            process.exit(1)
-          }
-          throw err
         }
       }
     )
@@ -1223,35 +1062,20 @@ pdf/png/html require the SlayZone app to be running.
     )
     .option('--json', 'Output as JSON')
     .action(async (artifactId: string, version: string, opts: { json?: boolean }) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      const raw = db.raw()
-      const txn = nodeSqliteTxn(raw)
-      try {
-        const v = setCurrentVersion(raw, txn, artifact.id, version)
-        const blobStore = new BlobStore(getDataDir())
-        // Flush the selected version's bytes to disk so editors pick up on next read.
-        const bytes = readVersionContent(blobStore, v)
-        const dir = getArtifactsDir()
-        const fp = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-        fs.mkdirSync(path.dirname(fp), { recursive: true })
-        fs.writeFileSync(fp, bytes)
-        db.close()
-        await notifyApp()
-        if (opts.json) {
-          console.log(JSON.stringify(v, null, 2))
-        } else {
-          console.log(
-            `Current: v${v.version_num}${v.name ? ` (${v.name})` : ''}  ${v.content_hash.slice(0, 8)}`
-          )
-        }
-      } catch (err) {
-        db.close()
-        if (isVersionError(err)) {
-          console.error(`Error [${err.code}]: ${err.message}`)
-          process.exit(1)
-        }
-        throw err
+      // POST /api/artifacts/:id/versions/current switches the pointer AND flushes
+      // the selected version's bytes to the working copy (the store op does both,
+      // in one txn) — so an editor re-reading the file still sees the right
+      // content, which is why this command wrote the file itself before.
+      const { data: v } = await apiPost<{ ok: true; data: ArtifactVersion }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/versions/current`,
+        { ref: version }
+      )
+      if (opts.json) {
+        console.log(JSON.stringify(v, null, 2))
+      } else {
+        console.log(
+          `Current: v${v.version_num}${v.name ? ` (${v.name})` : ''}  ${v.content_hash.slice(0, 8)}`
+        )
       }
     })
 
@@ -1259,16 +1083,13 @@ pdf/png/html require the SlayZone app to be running.
     .command('current <artifactId>')
     .description('Print the current (HEAD) version')
     .option('--json', 'Output as JSON')
-    .action((artifactId: string, opts: { json?: boolean }) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      const raw = db.raw()
-      const v = getCurrentVersion(raw, artifact.id)
-      db.close()
-      if (!v) {
-        console.error('No versions for this artifact')
-        process.exit(1)
-      }
+    .action(async (artifactId: string, opts: { json?: boolean }) => {
+      // GET /api/artifacts/:id/versions/current 404s with the exact wording this
+      // command printed for a version-less artifact ("No versions for this
+      // artifact"), and api.ts prints that + exits 1 — same behavior, no branch.
+      const { data: v } = await apiGet<{ ok: true; data: ArtifactVersion }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/versions/current`
+      )
       if (opts.json) {
         console.log(JSON.stringify(v, null, 2))
       } else {
@@ -1284,35 +1105,18 @@ pdf/png/html require the SlayZone app to be running.
     .option('--name <name>', 'Optional name for the version')
     .option('--json', 'Output as JSON')
     .action(async (artifactId: string, opts: { name?: string; json?: boolean }) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      const blobStore = new BlobStore(getDataDir())
-      const raw = db.raw()
-      const txn = nodeSqliteTxn(raw)
-      try {
-        const dir = getArtifactsDir()
-        const fp = artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title)
-        const bytes = fs.existsSync(fp) ? fs.readFileSync(fp) : Buffer.alloc(0)
-        const v = createVersion(raw, txn, blobStore, {
-          artifactId: artifact.id,
-          bytes,
-          name: opts.name ?? null,
-          honorUnchanged: true,
-          author: cliAuthor()
-        })
-        db.close()
-        if (opts.json) {
-          console.log(JSON.stringify(v, null, 2))
-        } else {
-          console.log(`Created: v${v.version_num}${v.name ? ` (${v.name})` : ''}`)
-        }
-      } catch (err) {
-        db.close()
-        if (isVersionError(err)) {
-          console.error(`Error [${err.code}]: ${err.message}`)
-          process.exit(1)
-        }
-        throw err
+      // POST /api/artifacts/:id/versions reads the WORKING COPY on the host that
+      // owns it and versions it with honorUnchanged — so an unchanged file still
+      // gets a row, as this command always did. The author rides the body because
+      // `cliAuthor()` reads OUR env, which the hub cannot see.
+      const { data: v } = await apiPost<{ ok: true; data: ArtifactVersion }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}/versions`,
+        { name: opts.name ?? null, ...authorBody() }
+      )
+      if (opts.json) {
+        console.log(JSON.stringify(v, null, 2))
+      } else {
+        console.log(`Created: v${v.version_num}${v.name ? ` (${v.name})` : ''}`)
       }
     })
 
@@ -1328,26 +1132,19 @@ pdf/png/html require the SlayZone app to be running.
         newName: string | undefined,
         opts: { clear?: boolean; json?: boolean }
       ) => {
-        const db = openDb()
-        const artifact = resolveArtifact(db, artifactId)
-        const raw = db.raw()
-        const txn = nodeSqliteTxn(raw)
-        try {
-          const target = opts.clear ? null : (newName ?? null)
-          const v = renameVersion(raw, txn, artifact.id, versionRef, target)
-          db.close()
-          if (opts.json) {
-            console.log(JSON.stringify(v, null, 2))
-          } else {
-            console.log(`Renamed v${v.version_num}: ${target ?? '(no name)'}`)
-          }
-        } catch (err) {
-          db.close()
-          if (isVersionError(err)) {
-            console.error(`Error [${err.code}]: ${err.message}`)
-            process.exit(1)
-          }
-          throw err
+        // PATCH /api/artifacts/:id/versions with { ref, name }. The ref is in the
+        // BODY, not the path: it can be `HEAD~2` or a name, neither of which
+        // survives a path segment cleanly. `null` clears, which is what both an
+        // omitted newName and --clear mean.
+        const target = opts.clear ? null : (newName ?? null)
+        const { data: v } = await apiPatch<{ ok: true; data: ArtifactVersion }>(
+          `/api/artifacts/${encodeURIComponent(artifactId)}/versions`,
+          { ref: versionRef, name: target }
+        )
+        if (opts.json) {
+          console.log(JSON.stringify(v, null, 2))
+        } else {
+          console.log(`Renamed v${v.version_num}: ${target ?? '(no name)'}`)
         }
       }
     )
@@ -1371,34 +1168,25 @@ pdf/png/html require the SlayZone app to be running.
           json?: boolean
         }
       ) => {
-        const db = openDb()
-        const artifact = resolveArtifact(db, artifactId)
-        const blobStore = new BlobStore(getDataDir())
-        const raw = db.raw()
-        const txn = nodeSqliteTxn(raw)
-        try {
-          const report = pruneVersions(raw, txn, blobStore, artifact.id, {
+        // POST /api/artifacts/:id/versions/prune runs the shared `pruneVersions`
+        // op, which also GCs blobs no version references any more — that deletion
+        // has to happen where the blob store lives.
+        const { data: report } = await apiPost<{ ok: true; data: PruneReport }>(
+          `/api/artifacts/${encodeURIComponent(artifactId)}/versions/prune`,
+          {
             keepLast: opts.keepLast,
             keepNamed: opts.keepNamed,
             keepCurrent: opts.keepCurrent,
-            dryRun: opts.dryRun
-          })
-          db.close()
-          if (opts.json) {
-            console.log(JSON.stringify(report, null, 2))
-          } else {
-            const verb = opts.dryRun ? 'would delete' : 'deleted'
-            console.log(
-              `${verb} ${report.deletedVersions} versions, ${report.deletedBlobs} blobs (kept ${report.keptNamed} named)`
-            )
+            dryRun: opts.dryRun ?? false
           }
-        } catch (err) {
-          db.close()
-          if (isVersionError(err)) {
-            console.error(`Error [${err.code}]: ${err.message}`)
-            process.exit(1)
-          }
-          throw err
+        )
+        if (opts.json) {
+          console.log(JSON.stringify(report, null, 2))
+        } else {
+          const verb = opts.dryRun ? 'would delete' : 'deleted'
+          console.log(
+            `${verb} ${report.deletedVersions} versions, ${report.deletedBlobs} blobs (kept ${report.keptNamed} named)`
+          )
         }
       }
     )

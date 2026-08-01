@@ -34,12 +34,15 @@ import { registerTagsCrudRoutes } from './tags/crud'
 import { registerProjectsListRoute } from './projects/list'
 import { registerProjectsResolveByPathRoute } from './projects/resolve-by-path'
 import { registerProjectsCrudRoutes } from './projects/crud'
+import { registerProjectSkillsRoute } from './projects/skills'
 import { registerTemplatesCrudRoutes } from './templates/crud'
 import { registerPanelsCrudRoutes } from './panels/crud'
 import { registerAutomationsCrudRoutes } from './automations/crud'
 import { registerArtifactsListRoute } from './artifacts/list'
 import { registerArtifactsContentRoutes } from './artifacts/content'
 import { registerArtifactsCrudRoutes } from './artifacts/crud'
+import { registerArtifactsSearchRoute } from './artifacts/search'
+import { registerArtifactsVersionsRoutes } from './artifacts/versions'
 import { registerOpenArtifactRoute } from './artifacts/open'
 import { registerArtifactsExportPdfRoute } from './artifacts/export-pdf'
 import { registerArtifactsExportPngRoute } from './artifacts/export-png'
@@ -134,10 +137,14 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // Panels
   registerPanelsCrudRoutes(app, deps)
 
-  // Artifacts
+  // Artifacts. ORDER MATTERS: the fixed /api/artifacts/search path must register
+  // before the /api/artifacts/:id matcher in crud.ts, or `search` reads as an
+  // artifact id prefix.
   registerOpenArtifactRoute(app, deps)
   registerArtifactsListRoute(app, deps)
+  registerArtifactsSearchRoute(app, deps)
   registerArtifactsContentRoutes(app, deps)
+  registerArtifactsVersionsRoutes(app, deps)
   registerArtifactsCrudRoutes(app, deps)
   registerArtifactsExportPdfRoute(app, deps)
   registerArtifactsExportPngRoute(app, deps)

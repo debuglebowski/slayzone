@@ -309,11 +309,23 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tags
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/projects/list.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/projects/resolve-by-path.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/projects/crud.test.ts
+# `slay init` hub-state half: skill rows + the installedVersion content-hash compare.
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/projects/skills.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/templates/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/panels/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/automations/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/list.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/crud.test.ts
+# Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read
+# paths (fixtures are deliberately not valid utf-8, so any string hop shows up).
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/content.test.ts
+# Artifact VERSION HISTORY routes (write/append + versions *). Byte-exactness of
+# the streamed write/append bodies and the blob-streamed version read, plus the
+# `Error [CODE]: …` 400 contract the CLI prints verbatim.
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/versions.test.ts
+# Artifact title+content search — the scan reads the blob store, so it can only
+# run host-side; asserts the CLI's exact result shape + flag semantics.
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/search.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
 # Pool: session → bound task resolution (slay CLI fallback for pre-warmed agents).
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/sessions/resolve-task.test.ts
@@ -339,8 +351,16 @@ run_test_electron_loader packages/apps/cli/test/tasks-ext.test.ts
 run_test_electron_loader packages/apps/cli/test/projects-update.test.ts
 # Wave-3 CLI read commands routed through REST (hub-aware cutover).
 run_test_electron_loader packages/apps/cli/test/cli-read-rest.test.ts
-# Wave-3.5 CLI artifact metadata commands routed through REST.
+# Wave-3.5 CLI artifact commands routed through REST — metadata AND content
+# (read/create/upload/delete/download), incl. a no-local-database suite.
 run_test_electron_loader packages/apps/cli/test/cli-artifacts-rest.test.ts
+# The rest of that cutover: search / update / write / append / versions *. Runs
+# entirely with SLAYZONE_ROOT on an EMPTY dir — the hub owns the DB, the blobs and
+# the artifact files; the CLI owns none of them. `path` is the one command left
+# that opens the DB, and this suite asserts that too.
+run_test_electron_loader packages/apps/cli/test/cli-artifacts-versions-rest.test.ts
+# `slay tasks done` (incl. --close) + `slay init` against a hub, with NO local DB.
+run_test_electron_loader packages/apps/cli/test/done-init-rest.test.ts
 
 if [ -n "$LINEAR_API_KEY" ]; then
   run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.linear.test.ts

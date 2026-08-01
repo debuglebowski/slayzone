@@ -44,15 +44,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     connectError(target)
   }
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    let msg = `HTTP ${res.status}`
-    try {
-      msg = (JSON.parse(body) as { error?: string }).error ?? msg
-    } catch {
-      if (body) msg = body
-    }
-    console.error(msg)
-    process.exit(1)
+    await failFromResponse(res)
   }
   return res.json() as Promise<T>
 }
@@ -94,4 +86,110 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   } catch {
     connectError(target)
   }
+}
+
+/**
+ * GET whose response BODY is raw bytes, not JSON — artifact content.
+ *
+ * Kept apart from {@link apiGet} because the two failure shapes differ: a
+ * non-2xx here still carries a JSON `{ error }`, but a SUCCESS must not be
+ * parsed or stringified at all. `read` writes these bytes straight to stdout and
+ * `download` to a file, and an artifact can be a PNG or a PDF — routing them
+ * through a JS string would utf-8-decode every invalid sequence into U+FFFD.
+ * The returned stream is consumed by the caller (pipeline → stdout / file), so
+ * nothing buffers the whole artifact in memory.
+ */
+export async function apiGetStream(
+  path: string,
+  /**
+   * Machine-readable `code` values in the route's error payload that the caller
+   * handles itself instead of exiting. Returns `{ code }` (no body) for those, so
+   * a caller can fork on the CONDITION rather than on the human message text.
+   */
+  passThroughCodes: string[] = []
+): Promise<{ body: ReadableStream<Uint8Array> | null; code?: string }> {
+  const target = resolveTarget()
+  let res: Response
+  try {
+    res = await fetch(`${target.baseUrl}${path}`, withAuth(undefined, target.token))
+  } catch {
+    connectError(target)
+  }
+  if (!res.ok) {
+    if (passThroughCodes.length > 0) {
+      const body = await res.text().catch(() => '')
+      let code: string | undefined
+      try {
+        code = (JSON.parse(body) as { code?: string }).code
+      } catch {
+        /* not JSON — fall through to the normal failure path */
+      }
+      if (code && passThroughCodes.includes(code)) return { body: null, code }
+      await failFromText(body, res.status)
+    }
+    await failFromResponse(res)
+  }
+  return { body: res.body }
+}
+
+/**
+ * POST/PUT whose request BODY is raw bytes — artifact create / upload / write /
+ * append. Parameters ride the query string precisely because the body is the
+ * content (same binary-safety reason as {@link apiGetStream}, in the other
+ * direction).
+ *
+ * `duplex: 'half'` is mandatory for a streaming request body in undici.
+ */
+async function requestStream<T>(
+  method: 'POST' | 'PUT',
+  path: string,
+  body: ReadableStream<Uint8Array>
+): Promise<T> {
+  const target = resolveTarget()
+  let res: Response
+  try {
+    res = await fetch(`${target.baseUrl}${path}`, {
+      ...withAuth(
+        {
+          method,
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body
+        },
+        target.token
+      ),
+      // Not in the DOM RequestInit type; required by undici for a stream body.
+      duplex: 'half'
+    } as RequestInit)
+  } catch {
+    connectError(target)
+  }
+  if (!res.ok) {
+    await failFromResponse(res)
+  }
+  return res.json() as Promise<T>
+}
+
+export function apiPostStream<T>(path: string, body: ReadableStream<Uint8Array>): Promise<T> {
+  return requestStream<T>('POST', path, body)
+}
+
+/** PUT counterpart of {@link apiPostStream} — `artifacts write` replaces content. */
+export function apiPutStream<T>(path: string, body: ReadableStream<Uint8Array>): Promise<T> {
+  return requestStream<T>('PUT', path, body)
+}
+
+/** Print a failed response's `{ error }` (or body/status) and exit 1. */
+async function failFromResponse(res: Response): Promise<never> {
+  return failFromText(await res.text().catch(() => ''), res.status)
+}
+
+function failFromText(body: string, status: number): never {
+  let msg = `HTTP ${status}`
+  try {
+    msg = (JSON.parse(body) as { error?: string }).error ?? msg
+  } catch {
+    if (body) msg = body
+  }
+  console.error(msg)
+  process.exit(1)
 }

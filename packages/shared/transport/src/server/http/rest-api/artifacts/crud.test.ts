@@ -117,6 +117,51 @@ await describe('/api/artifacts + /api/artifact-folders CRUD', () => {
     expect(res.status).toBe(404)
   })
 
+  test('GET /api/artifacts/:id: raw row by full id', async () => {
+    const res = await rest.request<ArtResp>('GET', `/api/artifacts/${artifactId}`)
+    expect(res.status).toBe(200)
+    expect(res.body.data.id).toBe(artifactId)
+    expect(res.body.data.title).toBe('notes.md')
+    // SELECT * — the same shape the by-task listing returns, so `download` can
+    // read `render_mode` off it for the export-capability check.
+    expect(res.body.data.task_id).toBe(taskId)
+  })
+
+  test('GET /api/artifacts/:id: resolves an id prefix', async () => {
+    const res = await rest.request<ArtResp>('GET', `/api/artifacts/${artifactId.slice(0, 8)}`)
+    expect(res.status).toBe(200)
+    expect(res.body.data.id).toBe(artifactId)
+  })
+
+  test('GET /api/artifacts/:id 404: unknown', async () => {
+    const res = await rest.request<ArtResp>('GET', '/api/artifacts/ffffffff')
+    expect(res.status).toBe(404)
+    expect((res.body.error ?? '').includes('Artifact not found: ffffffff')).toBe(true)
+  })
+
+  test('GET /api/artifacts/:id 400: ambiguous prefix uses the CLI wording', async () => {
+    const idA = `7c7c7c7c-${crypto.randomUUID().slice(9)}`
+    const idB = `7c7c7c7c-${crypto.randomUUID().slice(9)}`
+    const ins = h.db.prepare(
+      'INSERT INTO task_artifacts (id, task_id, title, "order") VALUES (?, ?, ?, ?)'
+    )
+    ins.run(idA, taskId, 'amb-1.md', 60)
+    ins.run(idB, taskId, 'amb-2.md', 61)
+    const res = await rest.request<ArtResp>('GET', '/api/artifacts/7c7c7c7c')
+    expect(res.status).toBe(400)
+    expect((res.body.error ?? '').startsWith('Ambiguous artifact id "7c7c7c7c". Matches: ')).toBe(
+      true
+    )
+  })
+
+  test('DELETE /api/artifacts/:id 400: ambiguous prefix uses the CLI wording', async () => {
+    const res = await rest.request<DelResp>('DELETE', '/api/artifacts/7c7c7c7c')
+    expect(res.status).toBe(400)
+    expect(
+      ((res.body as { error?: string }).error ?? '').startsWith('Ambiguous artifact id "7c7c7c7c"')
+    ).toBe(true)
+  })
+
   test('PATCH /api/artifacts/:id: moves artifact into a folder (id prefix + echoes folderName)', async () => {
     // Target folder addressed by an 8-char prefix — the CLI `mv` path.
     const res = await rest.request<ArtResp>('PATCH', `/api/artifacts/${artifactId.slice(0, 8)}`, {

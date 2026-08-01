@@ -1,10 +1,12 @@
 import type { Database } from 'better-sqlite3'
 import path from 'path'
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   writeFileSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   copyFileSync,
   readdirSync,
@@ -19,15 +21,20 @@ import {
   createVersion,
   saveCurrent,
   setCurrentVersion,
+  mutateVersion,
   listVersions,
   resolveVersionRef,
+  getCurrentVersion,
   readVersionContent,
   renameVersion,
   pruneVersions,
   diffVersions,
-  isVersionError
+  searchArtifacts,
+  isVersionError,
+  InvalidSearchRegexError
 } from '@slayzone/task-artifacts/server'
-import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
+import type { ArtifactSearchOptions, ArtifactSearchReport } from '@slayzone/task-artifacts/server'
+import type { ArtifactVersion, AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
 
 /**
  * Named-transaction adapters for task artifacts + their version history.
@@ -62,12 +69,21 @@ type Row = Record<string, unknown> | undefined
 // `VersionError` thrown in the worker loses its class identity once its message
 // crosses the thread boundary (only `err.message` is forwarded). Format the
 // renderer-facing `[CODE] message` string here so the contract is preserved.
+//
+// `InvalidSearchRegexError` rides the same envelope under a synthetic
+// `INVALID_REGEX` code: it is likewise a CALLER mistake (a bad `--regex`
+// pattern), so the consuming REST route must be able to answer 400 rather than
+// 500, and it has no other way to tell the two apart after the message crosses
+// the worker boundary.
 function wrapVersionError<T>(fn: () => T): T {
   try {
     return fn()
   } catch (err: unknown) {
     if (isVersionError(err)) {
       throw new Error(`[${err.code}] ${err.message}`)
+    }
+    if (err instanceof InvalidSearchRegexError) {
+      throw new Error(`[INVALID_REGEX] ${err.message}`)
     }
     throw err
   }
@@ -98,6 +114,17 @@ export interface CreateArtifactTxnParams {
   renderMode: string | null
   language: string | null
   content: string
+  /**
+   * Initial bytes as a FILE on disk, instead of the utf-8 `content` string.
+   *
+   * `content` cannot carry arbitrary bytes: a PNG or a PDF routed through a
+   * JS string is utf-8-decoded, and every invalid sequence becomes U+FFFD. The
+   * `slay tasks artifacts create` CLI accepts exactly such input (`--copy-from
+   * <binary file>`, piped binary stdin), so its REST route stages the request
+   * body to a temp file and names it here. Same row/order/v1-seed logic either
+   * way — only the byte source differs. Takes precedence over `content`.
+   */
+  sourcePath?: string
 }
 
 export interface UpdateArtifactTxnParams {
@@ -162,12 +189,26 @@ export interface VersionsCreateTxnParams {
   dataDir: string
   artifactId: string
   name?: string | null
+  /**
+   * Who authored this version. Absent → the UI author (`{ type: 'user', id: null
+   * }`), which is what every in-app call means. The REST route forwards the
+   * CLI's own `cliAuthor()` here, so a version created by `slay tasks artifacts
+   * versions create` inside an agent terminal is still attributed to that agent
+   * — the hub cannot read the caller's `SLAYZONE_AGENT_ID`.
+   */
+  author?: AuthorContext
 }
 
 export interface VersionsRenameTxnParams {
   artifactId: string
   versionRef: VersionRef
   newName: string | null
+}
+
+/** Resolve a version REF to its row, without reading its bytes. */
+export interface VersionsResolveTxnParams {
+  artifactId: string
+  versionRef: VersionRef
 }
 
 export interface VersionsDiffTxnParams {
@@ -190,6 +231,40 @@ export interface VersionsSetCurrentTxnParams {
   dataDir: string
   artifactId: string
   versionRef: VersionRef
+}
+
+/**
+ * Replace / append the artifact's working copy AND record the result in version
+ * history, atomically, from a FILE on disk.
+ *
+ * `sourcePath`, never a `content` string: `slay tasks artifacts write|append`
+ * pipes arbitrary stdin, which can be a PNG or a tarball. Bytes that are not
+ * valid utf-8 survive a file copy and do not survive a JS string (every invalid
+ * sequence becomes U+FFFD), so the REST route stages the request body to a temp
+ * file and names it here — the same shape the streamed create/upload routes use.
+ *
+ * The three version modes mirror the CLI's `--mutate-version` flag exactly:
+ *   - absent          → `createVersion`  (new row, dedup on unchanged content)
+ *   - bare (`true`)   → `saveCurrent`    (autosave; auto-branches when locked)
+ *   - with a ref      → `mutateVersion`  (lock bypass, target rewritten in place)
+ */
+export interface VersionsWriteTxnParams {
+  dataDir: string
+  artifactId: string
+  /** Staged file holding the bytes to write (or, for append, to add). */
+  sourcePath: string
+  /** Append to the existing working copy instead of replacing it. */
+  append?: boolean
+  /** Bare `--mutate-version`: autosave onto current. */
+  mutateCurrent?: boolean
+  /** `--mutate-version <ref>`: rewrite that version in place. */
+  mutateRef?: VersionRef
+  author?: AuthorContext
+}
+
+export interface VersionsSearchTxnParams extends Omit<ArtifactSearchOptions, 'query'> {
+  dataDir: string
+  query: string
 }
 
 export interface FolderCreateTxnParams {
@@ -225,11 +300,16 @@ export const artifactsTxns = {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, p.taskId, folderId, p.title, p.renderMode ?? null, p.language ?? null, maxOrder + 1)
 
-    // Write content to disk
+    // Write content to disk. `sourcePath` (binary-safe staging file) wins over
+    // the utf-8 `content` string when present — see CreateArtifactTxnParams.
     const filePath = artifactFilePath(p.dataDir, p.taskId, id, p.title)
     mkdirSync(path.dirname(filePath), { recursive: true })
-    const initialBytes = Buffer.from(p.content ?? '', 'utf-8')
-    writeFileSync(filePath, initialBytes)
+    if (p.sourcePath) {
+      copyFileSync(p.sourcePath, filePath)
+    } else {
+      writeFileSync(filePath, Buffer.from(p.content ?? '', 'utf-8'))
+    }
+    const initialBytes = readFileSync(filePath)
 
     // Seed v1 for the new artifact.
     createVersion(db, versionTxn, blobStore, {
@@ -285,7 +365,15 @@ export const artifactsTxns = {
       db.prepare(`UPDATE task_artifacts SET ${sets.join(', ')} WHERE id = ?`).run(...values)
     }
 
-    // If title changed and extension changed, rename file on disk
+    // If title changed and extension changed, rename file on disk.
+    //
+    // `renameSync`, NOT read-as-utf8 + write-as-utf8: the on-disk name derives
+    // from the title's extension, so renaming `blob.bin` → `blob.dat` moves the
+    // working copy of what may be a PNG/PDF. Decoding those bytes to a JS string
+    // replaces every invalid sequence with U+FFFD, silently corrupting the file
+    // that the title change was not supposed to touch at all. Same directory, so
+    // the rename is atomic; the copy+unlink fallback covers the (theoretical)
+    // cross-device EXDEV.
     const taskId = existing.task_id as string
     const oldTitle = existing.title as string
     const newTitle = has('title') ? (p.title as string) : oldTitle
@@ -297,9 +385,12 @@ export const artifactsTxns = {
         const oldPath = path.join(artifactsDir, taskId, `${p.id}${oldExt}`)
         const newPath = path.join(artifactsDir, taskId, `${p.id}${newExt}`)
         if (existsSync(oldPath)) {
-          const content = readFileSync(oldPath, 'utf-8')
-          writeFileSync(newPath, content, 'utf-8')
-          unlinkSync(oldPath)
+          try {
+            renameSync(oldPath, newPath)
+          } catch {
+            copyFileSync(oldPath, newPath)
+            unlinkSync(oldPath)
+          }
         }
       }
     }
@@ -586,9 +677,27 @@ export const artifactsTxns = {
         bytes,
         name: p.name ?? null,
         honorUnchanged: true,
-        author: uiAuthor
+        author: p.author ?? uiAuthor
       })
     }),
+
+  /**
+   * Resolve a version REF (int / hash prefix / name / `-N` / `HEAD~N`) to its
+   * row, WITHOUT reading its bytes.
+   *
+   * The row carries `content_hash`, which is the blob's address — so a caller
+   * that wants the bytes streams the blob file itself rather than hauling them
+   * through this boundary. That is the whole point: `versions:read` below
+   * stringifies to utf-8 (fine for the renderer's text editor, corrupting for a
+   * binary artifact), and `slay tasks artifacts versions read` must be
+   * byte-exact.
+   */
+  'task-artifacts:versions:resolve': (db: Database, p: VersionsResolveTxnParams): unknown =>
+    wrapVersionError(() => resolveVersionRef(db, p.artifactId, p.versionRef)),
+
+  /** The current (HEAD) version row, or null when the artifact has none yet. */
+  'task-artifacts:versions:current': (db: Database, p: { artifactId: string }): unknown =>
+    getCurrentVersion(db, p.artifactId),
 
   'task-artifacts:versions:rename': (db: Database, p: VersionsRenameTxnParams): unknown =>
     wrapVersionError(() => {
@@ -640,6 +749,91 @@ export const artifactsTxns = {
       writeFileSync(filePath, bytes)
       return { version: v, filePath, bytes }
     }),
+
+  /**
+   * `slay tasks artifacts write|append` — replace / extend the working copy from
+   * a staged FILE and record the result in version history, in one txn.
+   *
+   * Returns `{ artifact, version }`: the caller needs the fresh row (its
+   * `updated_at` moved) and the resulting version's number for its output line.
+   */
+  'task-artifacts:versions:write': (
+    db: Database,
+    p: VersionsWriteTxnParams
+  ): { artifact: Row; version: ArtifactVersion } =>
+    wrapVersionError(() => {
+      const blobStore = new BlobStore(p.dataDir)
+      const versionTxn = betterSqliteTxn(db)
+      const existing = selectArtifact(db, p.artifactId)
+      if (!existing) throw new Error('Artifact not found')
+
+      const filePath = artifactFilePath(
+        p.dataDir,
+        existing.task_id as string,
+        p.artifactId,
+        existing.title as string
+      )
+      mkdirSync(path.dirname(filePath), { recursive: true })
+      // Copy/append the STAGED FILE rather than a string, so bytes that are not
+      // valid utf-8 land unchanged (see VersionsWriteTxnParams).
+      if (p.append) {
+        appendFileSync(filePath, readFileSync(p.sourcePath))
+      } else {
+        copyFileSync(p.sourcePath, filePath)
+      }
+      // Version the WHOLE file, which for append is prior content + the addition
+      // — the same "read the file back" the CLI did after its appendFileSync.
+      const bytes = readFileSync(filePath)
+
+      const author = p.author ?? uiAuthor
+      const version =
+        p.mutateRef !== undefined
+          ? mutateVersion(db, versionTxn, blobStore, {
+              artifactId: p.artifactId,
+              ref: p.mutateRef,
+              bytes,
+              author
+            })
+          : p.mutateCurrent
+            ? saveCurrent(db, versionTxn, blobStore, { artifactId: p.artifactId, bytes, author })
+            : createVersion(db, versionTxn, blobStore, {
+                artifactId: p.artifactId,
+                bytes,
+                author
+              })
+
+      db.prepare(`UPDATE task_artifacts SET updated_at = ? WHERE id = ?`).run(
+        new Date().toISOString(),
+        p.artifactId
+      )
+      return { artifact: selectArtifact(db, p.artifactId), version }
+    }),
+
+  /**
+   * `slay tasks artifacts search` — title + current-version-content scan.
+   *
+   * Runs as ONE named txn because the scan reads each in-scope artifact's
+   * current version through the blob store; doing that from outside the worker
+   * would be N round trips per artifact. `taskId`/`folderId` arrive already
+   * expanded from id prefixes by the route.
+   */
+  'task-artifacts:search': (
+    db: Database,
+    p: VersionsSearchTxnParams
+  ): ArtifactSearchReport =>
+    wrapVersionError(() =>
+      searchArtifacts(db, new BlobStore(p.dataDir), {
+        query: p.query,
+        taskId: p.taskId,
+        folderId: p.folderId,
+        titlesOnly: p.titlesOnly,
+        contentOnly: p.contentOnly,
+        regex: p.regex,
+        caseSensitive: p.caseSensitive,
+        limit: p.limit,
+        maxMatches: p.maxMatches
+      })
+    ),
 
   'task-artifacts:folders:create': (db: Database, p: FolderCreateTxnParams): Row => {
     const id = randomUUID()
