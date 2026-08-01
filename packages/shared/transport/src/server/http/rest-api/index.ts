@@ -19,6 +19,7 @@ import { registerCreateTaskRoute } from './tasks/create'
 import { registerDeleteTaskRoute } from './tasks/delete'
 import { registerUnarchiveTaskRoute } from './tasks/unarchive'
 import { registerUpdateTaskRoute } from './tasks/update'
+import { registerDoneTaskRoute } from './tasks/done'
 import { registerListTasksRoute } from './tasks/list'
 import { registerSearchTasksRoute } from './tasks/search'
 import { registerGetTaskRoute } from './tasks/get'
@@ -96,6 +97,10 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerArchiveTaskRoute(app, deps)
   registerArchiveManyTaskRoute(app, deps)
   registerUnarchiveTaskRoute(app, deps)
+  // `slay tasks done [--close]`. Separate from PATCH's status ALIAS resolution:
+  // done is an intent the hub answers from the project's column CATEGORIES, not a
+  // status name the caller supplies (see tasks/done.ts).
+  registerDoneTaskRoute(app, deps)
 
   // Tasks — CLI-parity read/CRUD surface (hub/runner split wave 1; dark until
   // the slay CLI cuts over from direct sqlite reads). ORDER MATTERS: the fixed
@@ -118,6 +123,10 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerProjectsListRoute(app, deps)
   registerProjectsResolveByPathRoute(app, deps)
   registerProjectsCrudRoutes(app, deps)
+  // `slay init` / `slay init skills` — the hub-state half (skill rows + the
+  // installedVersion content-hash comparison). The CLI keeps only its local
+  // file writing.
+  registerProjectSkillsRoute(app, deps)
 
   // Templates
   registerTemplatesCrudRoutes(app, deps)

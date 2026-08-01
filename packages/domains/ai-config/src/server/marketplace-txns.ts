@@ -201,6 +201,156 @@ function seedBuiltinEntries(db: Database): void {
   })()
 }
 
+/** One built-in skill that this run actually wrote (installed or updated). */
+export interface SyncedBuiltinSkill {
+  slug: string
+  /** Display name — what the CLI echoes per skill ("Installed Slay Tasks"). */
+  name: string
+  content: string
+  /**
+   * Which write happened. Reported per skill rather than inferred from the
+   * counts: installs and updates interleave in registry order, so a caller
+   * echoing a line per skill cannot attribute one from `installed`/`updated`
+   * totals alone.
+   */
+  action: 'installed' | 'updated'
+}
+
+export interface InstallBuiltinProjectSkillsResult {
+  installed: number
+  updated: number
+  skipped: number
+  /**
+   * The skills whose content this run wrote. Returned because the caller mirrors
+   * them to a provider's on-disk `skills/<slug>/SKILL.md` when it happens to be
+   * the machine that owns the project checkout — it must learn WHICH skills
+   * changed without reading the database itself.
+   */
+  synced: SyncedBuiltinSkill[]
+}
+
+/**
+ * Install/refresh the built-in skills as PROJECT-scoped `ai_config_items` rows —
+ * the hub-side half of `slay init` / `slay init skills`.
+ *
+ * The `installedVersion` content-hash comparison lives HERE, next to the rows it
+ * compares against. It used to run inside the CLI, which meant `slay init`
+ * could only work on a machine that could open the hub's SQLite file; a CLI
+ * pointed at a hub elsewhere would have been hashing against rows it cannot read.
+ *
+ * Conditional read-modify-write (read each slug's existing row + its stored hash,
+ * THEN insert / update / skip on that value), so it is a named txn rather than a
+ * static op list. Atomic per invocation — the CLI's sequential writes were not,
+ * so a mid-run failure could leave half the skills stamped.
+ *
+ * Deliberately does NOT run `normalizeSkillForPersistence`: `slay init` seeds the
+ * registry content verbatim (a built-in skill's frontmatter is already canonical),
+ * and normalizing here would rewrite content the hash was computed from, making
+ * every subsequent run report an update.
+ */
+function installBuiltinProjectSkills(
+  db: Database,
+  projectId: string
+): InstallBuiltinProjectSkillsResult {
+  const registryId = 'builtin-slayzone'
+  const result: InstallBuiltinProjectSkillsResult = {
+    installed: 0,
+    updated: 0,
+    skipped: 0,
+    synced: []
+  }
+
+  const findExisting = db.prepare(
+    `SELECT id, metadata_json FROM ai_config_items
+     WHERE type = 'skill' AND slug = ? AND scope = 'project' AND project_id = ?`
+  )
+  const updateItem = db.prepare(
+    `UPDATE ai_config_items SET content = ?, metadata_json = ?, updated_at = ? WHERE id = ?`
+  )
+  const insertItem = db.prepare(
+    `INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
+     VALUES (?, 'skill', 'project', ?, ?, ?, ?, ?, ?, ?)`
+  )
+
+  db.transaction(() => {
+    for (const skill of BUILTIN_SKILLS) {
+      const entryId = `builtin-${skill.slug}`
+      const hash = contentHash(skill.content)
+      const now = new Date().toISOString()
+
+      const existing = findExisting.get(skill.slug, projectId) as
+        | { id: string; metadata_json: string }
+        | undefined
+
+      if (existing) {
+        let existingMeta: {
+          marketplace?: { installedVersion?: string; [key: string]: unknown }
+          [key: string]: unknown
+        }
+        try {
+          existingMeta = JSON.parse(existing.metadata_json || '{}')
+        } catch {
+          existingMeta = {}
+        }
+        if (existingMeta.marketplace?.installedVersion === hash) {
+          result.skipped++
+          continue
+        }
+
+        const metadata = {
+          ...existingMeta,
+          marketplace: {
+            ...(existingMeta.marketplace ?? {}),
+            registryId,
+            registryName: 'SlayZone Built-in',
+            entryId,
+            installedVersion: hash,
+            installedAt: now
+          }
+        }
+        updateItem.run(skill.content, JSON.stringify(metadata), now, existing.id)
+        result.synced.push({
+          slug: skill.slug,
+          name: skill.name,
+          content: skill.content,
+          action: 'updated'
+        })
+        result.updated++
+        continue
+      }
+
+      const metadata = {
+        marketplace: {
+          registryId,
+          registryName: 'SlayZone Built-in',
+          entryId,
+          installedVersion: hash,
+          installedAt: now
+        }
+      }
+      insertItem.run(
+        crypto.randomUUID(),
+        projectId,
+        skill.name,
+        skill.slug,
+        skill.content,
+        JSON.stringify(metadata),
+        now,
+        now
+      )
+      result.synced.push({
+        slug: skill.slug,
+        name: skill.name,
+        content: skill.content,
+        action: 'installed'
+      })
+      result.installed++
+    }
+  })()
+
+  return result
+}
+
 export const marketplaceTxns = {
   'ai-config:marketplace:refresh-registry-entries': (
     db: Database,
@@ -212,5 +362,9 @@ export const marketplaceTxns = {
   'ai-config:marketplace:seed-builtin-entries': (db: Database, _p: Record<string, never>) => {
     seedBuiltinEntries(db)
     return null
-  }
+  },
+  'ai-config:marketplace:install-builtin-project-skills': (
+    db: Database,
+    p: { projectId: string }
+  ): InstallBuiltinProjectSkillsResult => installBuiltinProjectSkills(db, p.projectId)
 }

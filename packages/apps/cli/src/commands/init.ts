@@ -1,11 +1,10 @@
 import { Command } from 'commander'
-import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { BUILTIN_SKILLS, PROVIDER_PATHS, defaultProviderFromMode } from '@slayzone/ai-config/shared'
+import { PROVIDER_PATHS } from '@slayzone/ai-config/shared'
 import type { CliProvider } from '@slayzone/ai-config/shared'
-import { openDb, notifyApp, resolveProject, resolveProjectByPath } from '../db'
-import type { SlayDb } from '../db'
+import { apiGet, apiPost } from '../api'
+import { notifyApp } from '../db'
 
 const INSTRUCTIONS = `\
 # SlayZone Environment
@@ -25,23 +24,18 @@ The toolbox is the \`slay\` CLI. When you omit the task-id, most \`slay\` comman
 
 type SkillStats = { installed: number; updated: number; skipped: number }
 
-function loadProviders(db: SlayDb, projectId: string): CliProvider[] {
-  const row = db.query<{ value: string }>(`SELECT value FROM settings WHERE key = :key`, {
-    ':key': `ai_providers:${projectId}`
-  })
-  if (row.length > 0) {
-    try {
-      const parsed = JSON.parse(row[0].value)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed as CliProvider[]
-    } catch {
-      /* fall through */
-    }
-  }
+interface SyncedSkill {
+  slug: string
+  name: string
+  content: string
+  action: 'installed' | 'updated'
+}
 
-  const modeRow = db.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'default_terminal_mode'`
-  )
-  return [defaultProviderFromMode(modeRow[0]?.value)]
+interface InstallSkillsResponse {
+  project: { id: string; name: string; path: string | null }
+  providers: CliProvider[]
+  stats: SkillStats
+  skills: SyncedSkill[]
 }
 
 function writeInstructionsToDisk(projectPath: string, providers: CliProvider[]): string[] {
@@ -61,106 +55,28 @@ function writeInstructionsToDisk(projectPath: string, providers: CliProvider[]):
   return written
 }
 
-function installSkills(
-  db: SlayDb,
-  projectId: string,
-  projectPath: string | null,
-  providers: CliProvider[]
-): SkillStats {
-  const registryId = 'builtin-slayzone'
-  const syncedSkills: { slug: string; content: string }[] = []
-  const stats: SkillStats = { installed: 0, updated: 0, skipped: 0 }
-
-  for (const skill of BUILTIN_SKILLS) {
-    const entryId = `builtin-${skill.slug}`
-    const hash = createHash('sha256').update(skill.content).digest('hex')
-    const now = new Date().toISOString()
-
-    const existing = db.query<{ id: string; metadata_json: string }>(
-      `SELECT id, metadata_json FROM ai_config_items WHERE type = 'skill' AND slug = :slug AND scope = 'project' AND project_id = :projectId`,
-      { ':slug': skill.slug, ':projectId': projectId }
-    )
-
-    if (existing.length > 0) {
-      const existingMeta = JSON.parse(existing[0].metadata_json || '{}') as {
-        marketplace?: { installedVersion?: string; [key: string]: unknown }
-        [key: string]: unknown
-      }
-      if (existingMeta.marketplace?.installedVersion === hash) {
-        stats.skipped++
-        continue
-      }
-
-      const metadata = {
-        ...existingMeta,
-        marketplace: {
-          ...(existingMeta.marketplace ?? {}),
-          registryId,
-          registryName: 'SlayZone Built-in',
-          entryId,
-          installedVersion: hash,
-          installedAt: now
-        }
-      }
-
-      db.run(
-        `UPDATE ai_config_items SET content = :content, metadata_json = :metadata, updated_at = :now WHERE id = :id`,
-        {
-          ':content': skill.content,
-          ':metadata': JSON.stringify(metadata),
-          ':now': now,
-          ':id': existing[0].id
-        }
-      )
-      syncedSkills.push({ slug: skill.slug, content: skill.content })
-      stats.updated++
-      console.log(`  Updated ${skill.name}`)
-      continue
-    }
-
-    const id = crypto.randomUUID()
-
-    const metadata = {
-      marketplace: {
-        registryId,
-        registryName: 'SlayZone Built-in',
-        entryId,
-        installedVersion: hash,
-        installedAt: now
-      }
-    }
-
-    db.run(
-      `INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
-       VALUES (:id, 'skill', 'project', :projectId, :name, :slug, :content, :metadata, :now, :now)`,
-      {
-        ':id': id,
-        ':projectId': projectId,
-        ':name': skill.name,
-        ':slug': skill.slug,
-        ':content': skill.content,
-        ':metadata': JSON.stringify(metadata),
-        ':now': now
-      }
-    )
-    syncedSkills.push({ slug: skill.slug, content: skill.content })
-    stats.installed++
-    console.log(`  Installed ${skill.name}`)
-  }
-
-  if (projectPath && syncedSkills.length > 0) {
-    for (const provider of providers) {
-      const mapping = PROVIDER_PATHS[provider]
-      if (!mapping?.skillsDir) continue
-      for (const skill of syncedSkills) {
-        const filePath = path.join(projectPath, mapping.skillsDir, skill.slug, 'SKILL.md')
-        fs.mkdirSync(path.dirname(filePath), { recursive: true })
-        fs.writeFileSync(filePath, skill.content, 'utf-8')
-      }
+/**
+ * Mirror the skills the hub just wrote into each provider's on-disk skills dir.
+ *
+ * Only meaningful on the machine that owns the project checkout, so it is gated
+ * on `projectPath` existing HERE — a CLI talking to a hub elsewhere has no
+ * checkout to write into, and the skills are read from the hub's database anyway.
+ * The gate is the natural one: it was already conditional on `projectPath`.
+ */
+function writeSkillsToDisk(
+  projectPath: string,
+  providers: CliProvider[],
+  skills: SyncedSkill[]
+): void {
+  for (const provider of providers) {
+    const mapping = PROVIDER_PATHS[provider]
+    if (!mapping?.skillsDir) continue
+    for (const skill of skills) {
+      const filePath = path.join(projectPath, mapping.skillsDir, skill.slug, 'SKILL.md')
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, skill.content, 'utf-8')
     }
   }
-
-  return stats
 }
 
 function logSkillStats(stats: SkillStats, projectName: string): void {
@@ -175,23 +91,83 @@ function logSkillStats(stats: SkillStats, projectName: string): void {
   }
 }
 
-async function runInstall(opts: { writeInstructions: boolean; project?: string }): Promise<void> {
-  const db = openDb()
-  const project = opts.project
-    ? resolveProject(db, opts.project)
-    : resolveProjectByPath(db, process.cwd())
-  const providers = loadProviders(db, project.id)
+/**
+ * The project this invocation targets: `--project <name|id>` resolved by the hub
+ * (`resolveProjectRef`), else inferred from $PWD by the hub
+ * (`resolveProjectByPath`). Both replace direct reads of the `projects` table.
+ *
+ * The cwd path is sent to the hub deliberately even though the hub may be another
+ * machine: `projects.path` is what the operator configured, and inference only
+ * succeeds when it happens to match — which is exactly the local case. A remote
+ * hub simply 404s, with the same "No project found for directory" wording, so
+ * `--project` is the answer there just as it always was for a pathless project.
+ */
+async function resolveTargetProjectRef(explicit?: string): Promise<string> {
+  if (explicit) return explicit
+  const { data } = await apiGet<{ ok: true; data: { id: string; name: string; path: string } }>(
+    `/api/projects/resolve-by-path?path=${encodeURIComponent(process.cwd())}`
+  )
+  return data.id
+}
 
-  if (opts.writeInstructions && project.path) {
-    const written = writeInstructionsToDisk(project.path, providers)
+/**
+ * `slay init` / `slay init skills`.
+ *
+ * Split by ownership:
+ *  - HUB STATE (project resolution, provider set, the `ai_config_items` skill rows
+ *    and their `installedVersion` content-hash comparison) → POST
+ *    /api/projects/:id/skills. All of it used to run here against the hub's SQLite
+ *    file, which made `slay init` local-only. The hash comparison moved WITH the
+ *    write on purpose — left here it would be hashing against rows a remote CLI
+ *    can no longer read.
+ *  - LOCAL FILES (root instructions + `<skillsDir>/<slug>/SKILL.md`) stay here,
+ *    gated on the project's configured path existing on THIS machine. Against a
+ *    remote hub those branches simply don't fire; the skill records are still
+ *    installed, and they are what the hub reads from anyway.
+ */
+async function runInstall(opts: { writeInstructions: boolean; project?: string }): Promise<void> {
+  const projectRef = await resolveTargetProjectRef(opts.project)
+
+  const { data } = await apiPost<{ ok: true; data: InstallSkillsResponse }>(
+    `/api/projects/${encodeURIComponent(projectRef)}/skills`,
+    {}
+  )
+  const { project, providers, stats, skills } = data
+
+  // A path only means something if it exists HERE. A hub on another machine
+  // reports ITS project path, which is not a directory on this box.
+  const localPath = project.path && fs.existsSync(project.path) ? project.path : null
+
+  if (opts.writeInstructions && localPath) {
+    const written = writeInstructionsToDisk(localPath, providers)
     for (const f of written) console.log(`  Appended instructions to ${f}`)
   }
 
-  const stats = installSkills(db, project.id, project.path, providers)
-  db.close()
+  // Per-skill lines are the CLI's own output; the hub supplies which skills
+  // changed and how (`action`), since installs and updates interleave in registry
+  // order and the counts alone can't attribute a line to a skill.
+  for (const skill of skills) {
+    console.log(`  ${skill.action === 'installed' ? 'Installed' : 'Updated'} ${skill.name}`)
+  }
+
+  if (localPath && skills.length > 0) writeSkillsToDisk(localPath, providers, skills)
 
   if (stats.installed + stats.updated > 0) await notifyApp()
   logSkillStats(stats, project.name)
+}
+
+/**
+ * `--project` as commander actually delivers it.
+ *
+ * `init` and `init skills` BOTH declare `-p, --project` (so it shows in each
+ * one's `--help`). Commander parses the parent's options first, so in
+ * `slay init skills --project X` the PARENT consumes the flag and the
+ * subcommand's own `opts()` comes back empty — `slay init skills --project X`
+ * silently ignored the project and fell back to cwd inference. `optsWithGlobals()`
+ * merges the ancestor values in, so the flag resolves wherever it was captured.
+ */
+function projectOpt(command: Command): string | undefined {
+  return command.optsWithGlobals<{ project?: string }>().project
 }
 
 export function initCommand(): Command {
@@ -200,7 +176,9 @@ export function initCommand(): Command {
     .option('-p, --project <name|id>', 'Project name or ID (defaults to project resolved from cwd)')
     .showSuggestionAfterError(true)
     .showHelpAfterError(true)
-    .action((opts) => runInstall({ writeInstructions: true, project: opts.project }))
+    .action((_opts, command: Command) =>
+      runInstall({ writeInstructions: true, project: projectOpt(command) })
+    )
 
   cmd
     .command('instructions')
@@ -213,7 +191,9 @@ export function initCommand(): Command {
     .command('skills')
     .description('Install all built-in slay skills for the current project')
     .option('-p, --project <name|id>', 'Project name or ID (defaults to project resolved from cwd)')
-    .action((opts) => runInstall({ writeInstructions: false, project: opts.project }))
+    .action((_opts, command: Command) =>
+      runInstall({ writeInstructions: false, project: projectOpt(command) })
+    )
 
   return cmd
 }

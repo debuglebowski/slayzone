@@ -291,6 +291,9 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/task
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/delete.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/unarchive.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/update.test.ts
+# `slay tasks done [--close]`: the done INTENT (project completed column) — not
+# PATCH's status-alias resolution. See tasks/done.ts.
+run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/done.test.ts
 # Wave-3 CLI cutover — dark hub REST read/CRUD surface consumed by the CLI.
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/list.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/tasks/get.test.ts

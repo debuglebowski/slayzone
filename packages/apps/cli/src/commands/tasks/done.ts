@@ -1,7 +1,5 @@
-import { openDb, postJson, getServerPort } from '../../db'
-import { apiPatch } from '../../api'
-import { getDoneStatus } from '@slayzone/projects/shared'
-import { getProjectColumnsConfig, resolveId } from './_shared'
+import { apiPost } from '../../api'
+import { resolveId } from './_shared'
 
 export interface DoneOpts {
   close?: boolean
@@ -9,43 +7,32 @@ export interface DoneOpts {
 
 export async function doneAction(idPrefix: string | undefined, opts: DoneOpts): Promise<void> {
   idPrefix = await resolveId(idPrefix)
-  const db = openDb()
 
-  const tasks = db.query<{ id: string; title: string; project_id: string }>(
-    `SELECT id, title, project_id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': idPrefix }
-  )
+  // POST /api/tasks/:id/done expresses the INTENT ("mark this done") and lets the
+  // hub decide which column that means for the task's project — the completed
+  // category, via `getDoneStatus`. That decision used to happen here, which meant
+  // reading `projects.columns_config` out of the hub's SQLite file: `openDb()`
+  // exits 1 when the file is absent, so `slay tasks done` could never work against
+  // a hub on another machine.
+  //
+  // Not `PATCH /api/tasks/:id { status: 'done' }`: PATCH resolves `status` as an
+  // ALIAS against the project's columns (id / label / slug), so a project whose
+  // completed column is `closed` would 400 — while the done intent still has an
+  // unambiguous answer there. Sending a concrete status would just move the
+  // category lookup back into the CLI.
+  //
+  // `--close` rides along in the same request. It used to call getServerPort()
+  // (itself another DB read) and post to /api/close-task/:id; the hub now closes
+  // the tab over the same injected menu bus that route uses, and reports whether
+  // anything could — a hub with no UI (standalone) answers `closed: false`.
+  const { data: task } = await apiPost<{
+    ok: true
+    data: { id: string; title: string; status: string; closed: boolean }
+  }>(`/api/tasks/${encodeURIComponent(idPrefix)}/done`, opts.close ? { close: true } : {})
 
-  if (tasks.length === 0) {
-    console.error(`Task not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (tasks.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-
-  const task = tasks[0]
-  const projectColumns = getProjectColumnsConfig(db, task.project_id)
-  const doneStatus = getDoneStatus(projectColumns)
-  db.close()
-
-  await apiPatch(`/api/tasks/${task.id}`, { status: doneStatus })
   console.log(`Done: ${task.id.slice(0, 8)}  ${task.title}`)
 
-  if (opts.close) {
-    const port = getServerPort()
-    if (!port) {
-      console.error('Warning: cannot close tab — no MCP port (is the app running?)')
-    } else {
-      const ok = await postJson(port, `/api/close-task/${task.id}`)
-      if (!ok) {
-        console.error(
-          'Warning: tab close failed — main process likely stale (rebuild + restart app)'
-        )
-      }
-    }
+  if (opts.close && !task.closed) {
+    console.error('Warning: cannot close tab — no app window attached to this hub')
   }
 }
