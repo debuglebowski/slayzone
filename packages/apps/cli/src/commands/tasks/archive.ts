@@ -1,30 +1,12 @@
-import { openDb } from '../../db'
 import { apiPost } from '../../api'
 
 export async function archiveAction(idPrefix: string): Promise<void> {
-  const db = openDb()
-
-  const tasks = db.query<{ id: string; title: string }>(
-    `SELECT id, title FROM tasks WHERE id LIKE :prefix || '%' AND archived_at IS NULL LIMIT 2`,
-    { ':prefix': idPrefix }
-  )
-
-  if (tasks.length === 0) {
-    console.error(`Task not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (tasks.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-
-  const task = tasks[0]
-  db.close()
-
-  await apiPost<{ ok: boolean; data: { id: string; title: string } }>(
-    `/api/tasks/${task.id}/archive`,
+  // POST /api/tasks/:id/archive owns id-prefix resolution (404 not-found /
+  // 400 ambiguous, same messages), the `archived_at IS NULL` scope, the archive
+  // op, and the renderer ping. It returns the archived task, so the prefix goes
+  // straight to the hub — no local DB read, which is what let a remote hub work.
+  const { data: task } = await apiPost<{ ok: true; data: { id: string; title: string } }>(
+    `/api/tasks/${encodeURIComponent(idPrefix)}/archive`,
     {}
   )
   console.log(`Archived: ${task.id.slice(0, 8)}  ${task.title}`)

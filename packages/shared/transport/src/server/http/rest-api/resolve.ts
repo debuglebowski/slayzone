@@ -21,22 +21,43 @@ export function isResolveFailure<T>(r: Resolved<T>): r is ResolveFailure {
   return !('row' in r)
 }
 
+export interface ResolveByIdPrefixOptions {
+  /**
+   * Extra SQL predicate ANDed onto the prefix match — a call-site literal, never
+   * caller input. Exists because a few CLI resolvers scope the addressable set
+   * rather than the whole table (`slay tasks archive` only ever matched
+   * `archived_at IS NULL`, so an already-archived task reads as "not found"
+   * instead of being silently re-archived).
+   */
+  where?: string
+  /**
+   * Noun for the ambiguity message, when the entity is addressed in a role the
+   * default "id prefix" wording would misattribute (`--parent <prefix>` reports
+   * `Ambiguous parent id prefix`, so the operator knows WHICH argument was
+   * ambiguous). Defaults to the plain `id prefix` wording.
+   */
+  ambiguousLabel?: string
+}
+
 /** Resolve one row by id prefix. `table`/`columns`/`entity` are call-site literals. */
 export async function resolveByIdPrefix<T extends { id: string }>(
   db: SlayzoneDb,
   table: string,
   prefix: string,
   entity: string,
-  columns = '*'
+  columns = '*',
+  opts: ResolveByIdPrefixOptions = {}
 ): Promise<Resolved<T>> {
-  const rows = await db.all<T>(`SELECT ${columns} FROM ${table} WHERE id LIKE ? || '%' LIMIT 2`, [
-    prefix
-  ])
+  const extra = opts.where ? ` AND ${opts.where}` : ''
+  const rows = await db.all<T>(
+    `SELECT ${columns} FROM ${table} WHERE id LIKE ? || '%'${extra} LIMIT 2`,
+    [prefix]
+  )
   if (rows.length === 0) return { status: 404, error: `${entity} not found: ${prefix}` }
   if (rows.length > 1) {
     return {
       status: 400,
-      error: `Ambiguous id prefix "${prefix}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
+      error: `Ambiguous ${opts.ambiguousLabel ?? 'id prefix'} "${prefix}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
     }
   }
   return { row: rows[0] }

@@ -1,6 +1,5 @@
 import { Command } from 'commander'
 import { apiGet, apiPost, apiDelete, apiFetch } from '../api'
-import { openDb } from '../db'
 
 interface PtyInfo {
   sessionId: string
@@ -424,24 +423,24 @@ export function ptyCommand(): Command {
   return cmd
 }
 
+/**
+ * Full task id for a task-id prefix.
+ *
+ * GET /api/tasks/:id is the hub's resolve channel: it owns the prefix match and
+ * reports 404 `Task not found: <prefix>` / 400 `Ambiguous id prefix "<prefix>".
+ * Matches: …` itself, which `apiGet` surfaces verbatim before exiting 1. Reading
+ * the hub's SQLite file here (as this used to) made every prefix-addressed pty
+ * command fail against a hub on another machine.
+ *
+ * The full id is needed CLIENT-side, not just server-side: the main-tab session
+ * id is `${taskId}:${taskId}`, so a prefix would compose a session id that
+ * matches nothing.
+ */
 async function resolveTaskIdPrefix(prefix: string): Promise<string> {
-  const db = openDb()
-  const rows = db.query<{ id: string }>(
-    `SELECT id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': prefix }
+  const { data } = await apiGet<{ ok: true; data: { id: string } }>(
+    `/api/tasks/${encodeURIComponent(prefix)}`
   )
-  db.close()
-  if (rows.length === 0) {
-    console.error(`Task not found: ${prefix}`)
-    process.exit(1)
-  }
-  if (rows.length > 1) {
-    console.error(
-      `Ambiguous task-id prefix "${prefix}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-  return rows[0].id
+  return data.id
 }
 
 async function waitForSession(sessionId: string, timeoutMs: number): Promise<void> {

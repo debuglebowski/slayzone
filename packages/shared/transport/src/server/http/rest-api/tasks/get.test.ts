@@ -52,6 +52,7 @@ interface Detail {
     id: string
     title: string
     project_name: string
+    project_path: string | null
     tags: string[]
     blockers: { id: string; title: string }[]
     blocking: { id: string; title: string }[]
@@ -75,6 +76,12 @@ await describe('GET /api/tasks/:id', () => {
     const res = await rest.request<Detail>('GET', '/api/tasks/11111111')
     expect(res.status).toBe(200)
     expect(res.body.data.id).toBe(taskId)
+  })
+
+  test('carries project_path (worktree-owner derivation needs it, no DB read)', async () => {
+    const res = await rest.request<Detail>('GET', `/api/tasks/${taskId}`)
+    expect(res.status).toBe(200)
+    expect(res.body.data.project_path).toBe('/tmp/alpha')
   })
 
   test('404: unknown id', async () => {

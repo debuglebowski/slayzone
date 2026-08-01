@@ -1,31 +1,17 @@
-import { openDb } from '../../db'
 import { apiDelete } from '../../api'
 
 type DeleteTaskOutput = boolean | { blocked: true; reason: 'linked_to_provider' }
 
 export async function deleteAction(idPrefix: string): Promise<void> {
-  const db = openDb()
-
-  const tasks = db.query<{ id: string; title: string }>(
-    `SELECT id, title FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': idPrefix }
-  )
-
-  if (tasks.length === 0) {
-    console.error(`Task not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (tasks.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-
-  const task = tasks[0]
-  db.close()
-
-  const { data } = await apiDelete<{ ok: true; data: DeleteTaskOutput }>(`/api/tasks/${task.id}`)
+  // DELETE /api/tasks/:id owns id-prefix resolution (404 not-found / 400
+  // ambiguous, same messages), the soft-delete, and the renderer ping. It returns
+  // the resolved task alongside the boolean|{blocked} result, so the prefix goes
+  // straight to the hub — no local DB read, which is what let a remote hub work.
+  const { data, task } = await apiDelete<{
+    ok: true
+    data: DeleteTaskOutput
+    task: { id: string; title: string }
+  }>(`/api/tasks/${encodeURIComponent(idPrefix)}`)
 
   if (typeof data === 'object' && data.blocked) {
     console.error(`Cannot delete: linked to external provider. Unlink first.`)

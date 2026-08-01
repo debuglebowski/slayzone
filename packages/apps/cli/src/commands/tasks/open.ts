@@ -1,5 +1,3 @@
-import http from 'node:http'
-import { openDb, getServerPort } from '../../db'
 import { apiPost } from '../../api'
 import { resolveId } from './_shared'
 
@@ -12,53 +10,21 @@ export interface OpenOpts {
 
 export async function openAction(idPrefix: string | undefined, opts: OpenOpts = {}): Promise<void> {
   idPrefix = await resolveId(idPrefix)
-  const db = openDb()
 
-  const tasks = db.query<{ id: string; title: string }>(
-    `SELECT id, title FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': idPrefix }
+  // POST /api/open-task/:id owns id-prefix resolution (404 not-found / 400
+  // ambiguous, same messages), the open broadcast, and the window raise. It
+  // returns the resolved `{ id, title }` — which is also what makes the
+  // subsequent `pty/start` correct, since that needs the FULL task id.
+  //
+  // This replaces a hand-rolled http.request to 127.0.0.1:<getServerPort()>:
+  // both the port lookup and the prefix resolution read the hub's DB file, so
+  // neither could work against a hub on another machine. `apiPost` routes
+  // through the same hub target (env / hub.json / --hub) as every other command
+  // and falls back to the local app exactly as before.
+  const { data: task } = await apiPost<{ ok: true; data: { id: string; title: string } }>(
+    `/api/open-task/${encodeURIComponent(idPrefix)}${opts.background ? '?background=1' : ''}`,
+    {}
   )
-
-  if (tasks.length === 0) {
-    console.error(`Task not found: ${idPrefix}`)
-    process.exit(1)
-  }
-  if (tasks.length > 1) {
-    console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-
-  const task = tasks[0]
-  db.close()
-
-  const port = getServerPort()
-  if (!port) {
-    console.error('No running SlayZone app found. Start the app first.')
-    process.exit(1)
-  }
-
-  const path = opts.background
-    ? `/api/open-task/${task.id}?background=1`
-    : `/api/open-task/${task.id}`
-
-  await new Promise<void>((resolve) => {
-    const req = http.request({ hostname: '127.0.0.1', port, path, method: 'POST' }, (res) => {
-      res.resume()
-      res.on('end', resolve)
-    })
-    req.on('error', () => {
-      console.error('Failed to reach SlayZone app. Is it running?')
-      process.exit(1)
-    })
-    req.setTimeout(3000, () => {
-      req.destroy()
-      console.error('Timed out reaching SlayZone app')
-      process.exit(1)
-    })
-    req.end()
-  })
 
   if (opts.start) {
     const timeoutMs = opts.wait === false ? 0 : parseInt(opts.timeout ?? '5000', 10)

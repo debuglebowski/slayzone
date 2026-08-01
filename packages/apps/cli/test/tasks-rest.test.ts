@@ -33,6 +33,9 @@ import { registerArchiveTaskRoute } from '../../../shared/transport/src/server/h
 import { registerDeleteTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/delete.js'
 import { registerUnarchiveTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/unarchive.js'
 import { registerOpenTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/open.js'
+// `tasks update --worktree-path` reads the project path from the task detail
+// route (it must not open the hub's DB file), so that route has to be mounted here.
+import { registerGetTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/get.js'
 import { BrowserWindow, ipcMain } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
@@ -109,6 +112,13 @@ registerDeleteTaskRoute(app, {
   }
 })
 registerUnarchiveTaskRoute(app, {
+  db: slayDb,
+  taskBus,
+  notifyRenderer: () => {
+    notifyCount++
+  }
+})
+registerGetTaskRoute(app, {
   db: slayDb,
   taskBus,
   notifyRenderer: () => {
@@ -431,6 +441,142 @@ await describe('CLI tasks archive → REST', () => {
     }
     expect(row.archived_at !== null).toBe(true)
     expect(spy.calls.length).toBe(1)
+  })
+})
+
+/**
+ * Id-PREFIX addressing over REST only. These run with `SLAYZONE_ROOT` pointed at a
+ * directory that has NO database file, which is the whole point: the CLI used to
+ * open the hub's SQLite file to expand a prefix, so a hub on another machine
+ * (where that file does not exist) died on `openDb()`'s "Database not found"
+ * `process.exit(1)`. The hub still has the DB; this CLI does not.
+ */
+await describe('CLI id-prefix addressing works without a local database', () => {
+  const noDbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-no-db-'))
+  const noDbEnv = { SLAYZONE_ROOT: noDbRoot }
+
+  function seed(title: string, id = crypto.randomUUID()): string {
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(id, projectId, title, 'todo', 3, 0)
+    return id
+  }
+
+  test('sanity: this root really has no database file', () => {
+    expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.sqlite'))).toBe(false)
+  })
+
+  test('tasks update <prefix> --title', async () => {
+    const id = seed('PrefixUpdate')
+    const r = await runCli(['tasks', 'update', id.slice(0, 8), '--title', 'Renamed'], noDbEnv)
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT title FROM tasks WHERE id = ?').get(id) as { title: string }
+    expect(row.title).toBe('Renamed')
+  })
+
+  test('tasks update <prefix> --status accepts a label alias', async () => {
+    const id = seed('PrefixStatus')
+    const r = await runCli(['tasks', 'update', id.slice(0, 8), '--status', 'In Progress'], noDbEnv)
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT status FROM tasks WHERE id = ?').get(id) as { status: string }
+    expect(row.status).toBe('in_progress')
+  })
+
+  test('tasks update: unknown status exits 1 with the CLI wording', async () => {
+    const id = seed('PrefixBadStatus')
+    const r = await runCli(['tasks', 'update', id.slice(0, 8), '--status', 'nonsense'], noDbEnv)
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes(`Unknown status "nonsense" for this task's project.`)).toBe(true)
+  })
+
+  test('tasks update <prefix> --parent <prefix> reparents', async () => {
+    const parent = seed('PrefixParent')
+    const child = seed('PrefixChild')
+    const r = await runCli(
+      ['tasks', 'update', child.slice(0, 8), '--parent', parent.slice(0, 8)],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT parent_id FROM tasks WHERE id = ?').get(child) as {
+      parent_id: string
+    }
+    expect(row.parent_id).toBe(parent)
+  })
+
+  test('tasks update: unknown parent exits 1 naming the PARENT', async () => {
+    const id = seed('PrefixBadParent')
+    const r = await runCli(
+      ['tasks', 'update', id.slice(0, 8), '--parent', 'no-such-parent'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('Parent task not found: no-such-parent')).toBe(true)
+  })
+
+  test('tasks update <prefix> --append-description appends to the stored text', async () => {
+    const id = seed('PrefixAppend')
+    db.prepare('UPDATE tasks SET description = ? WHERE id = ?').run('line one', id)
+    const r = await runCli(
+      ['tasks', 'update', id.slice(0, 8), '--append-description', 'line two'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT description FROM tasks WHERE id = ?').get(id) as {
+      description: string
+    }
+    expect(row.description).toBe('line one\nline two')
+  })
+
+  test('tasks archive <prefix>', async () => {
+    const id = seed('PrefixArchive')
+    const r = await runCli(['tasks', 'archive', id.slice(0, 8)], noDbEnv)
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.includes(`Archived: ${id.slice(0, 8)}  PrefixArchive`)).toBe(true)
+    const row = db.prepare('SELECT archived_at FROM tasks WHERE id = ?').get(id) as {
+      archived_at: string | null
+    }
+    expect(row.archived_at !== null).toBe(true)
+  })
+
+  test('tasks delete <prefix> still echoes id + title', async () => {
+    const id = seed('PrefixDelete')
+    const r = await runCli(['tasks', 'delete', id.slice(0, 8)], noDbEnv)
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.includes(`Deleted: ${id.slice(0, 8)}  PrefixDelete`)).toBe(true)
+    const row = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as {
+      deleted_at: string | null
+    }
+    expect(row.deleted_at !== null).toBe(true)
+  })
+
+  test('tasks open <prefix> broadcasts the FULL id', async () => {
+    resetOpenSpies()
+    const id = seed('PrefixOpen')
+    const r = await runCli(['tasks', 'open', id.slice(0, 8)], noDbEnv)
+    expect(r.exitCode).toBe(0)
+    expect(openTaskBroadcasts.length).toBe(1)
+    expect(openTaskBroadcasts[0].taskId).toBe(id)
+  })
+
+  test('ambiguous prefix exits 1 and lists the candidates', async () => {
+    const a = seed('Amb A', `77777777-aaaa-${crypto.randomUUID().slice(14)}`)
+    const b = seed('Amb B', `77777777-cccc-${crypto.randomUUID().slice(14)}`)
+    const r = await runCli(['tasks', 'archive', '77777777'], noDbEnv)
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('Ambiguous id prefix "77777777"')).toBe(true)
+    expect(r.stderr.includes(a.slice(0, 8))).toBe(true)
+    expect(r.stderr.includes(b.slice(0, 8))).toBe(true)
+  })
+
+  test('unknown prefix exits 1 naming what was searched for', async () => {
+    const r = await runCli(['tasks', 'archive', 'deadbeef'], noDbEnv)
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('Task not found: deadbeef')).toBe(true)
+  })
+
+  test('cleanup', () => {
+    fs.rmSync(noDbRoot, { recursive: true, force: true })
+    expect(true).toBe(true)
   })
 })
 

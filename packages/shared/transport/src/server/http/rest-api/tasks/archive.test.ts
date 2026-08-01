@@ -40,8 +40,7 @@ registerArchiveTaskRoute(app, {
 })
 const rest = await mountRestApp(app)
 
-function seedTask(): string {
-  const id = crypto.randomUUID()
+function seedTask(id = crypto.randomUUID()): string {
   h.db
     .prepare(
       'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
@@ -77,16 +76,40 @@ await describe('POST /api/tasks/:id/archive', () => {
     expect(notifyCount).toBeGreaterThanOrEqual(1)
   })
 
-  test('400: malformed id (Zod uuid validation)', async () => {
+  test('happy: unique id prefix resolves (CLI addresses tasks by prefix)', async () => {
+    const id = seedTask(`aaaaaaaa-${crypto.randomUUID().slice(9)}`)
+    const res = await rest.request<{ ok: boolean; data: { id: string } }>(
+      'POST',
+      '/api/tasks/aaaaaaaa/archive'
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.id).toBe(id)
+    const row = h.db.prepare('SELECT archived_at FROM tasks WHERE id = ?').get(id) as {
+      archived_at: string | null
+    }
+    expect(row.archived_at !== null).toBe(true)
+  })
+
+  test('400: ambiguous prefix lists the candidate ids', async () => {
+    const a = seedTask(`bbbbbbbb-aaaa-${crypto.randomUUID().slice(14)}`)
+    const b = seedTask(`bbbbbbbb-cccc-${crypto.randomUUID().slice(14)}`)
     const res = await rest.request<{ ok: boolean; error: string }>(
       'POST',
-      '/api/tasks/not-a-uuid/archive'
+      '/api/tasks/bbbbbbbb/archive'
     )
     expect(res.status).toBe(400)
     expect(res.body.ok).toBe(false)
+    expect(res.body.error.includes('Ambiguous id prefix "bbbbbbbb"')).toBe(true)
+    expect(res.body.error.includes(a.slice(0, 8))).toBe(true)
+    expect(res.body.error.includes(b.slice(0, 8))).toBe(true)
+    // Neither candidate was touched.
+    const rows = h.db
+      .prepare('SELECT archived_at FROM tasks WHERE id IN (?, ?)')
+      .all(a, b) as Array<{ archived_at: string | null }>
+    expect(rows.every((r) => r.archived_at === null)).toBe(true)
   })
 
-  test('404: archive non-existent task', async () => {
+  test('404: unknown id names what was searched for', async () => {
     const ghost = crypto.randomUUID()
     const res = await rest.request<{ ok: boolean; error: string }>(
       'POST',
@@ -94,6 +117,29 @@ await describe('POST /api/tasks/:id/archive', () => {
     )
     expect(res.status).toBe(404)
     expect(res.body.ok).toBe(false)
+    expect(res.body.error).toBe(`Task not found: ${ghost}`)
+  })
+
+  test('404: a non-uuid id is just a prefix that matches nothing', async () => {
+    const res = await rest.request<{ ok: boolean; error: string }>(
+      'POST',
+      '/api/tasks/not-a-uuid/archive'
+    )
+    expect(res.status).toBe(404)
+    expect(res.body.ok).toBe(false)
+    expect(res.body.error).toBe('Task not found: not-a-uuid')
+  })
+
+  test('404: an already-archived task is not addressable (CLI archived_at IS NULL filter)', async () => {
+    const id = seedTask(`dddddddd-${crypto.randomUUID().slice(9)}`)
+    const first = await rest.request('POST', `/api/tasks/${id}/archive`)
+    expect(first.status).toBe(200)
+    const second = await rest.request<{ ok: boolean; error: string }>(
+      'POST',
+      '/api/tasks/dddddddd/archive'
+    )
+    expect(second.status).toBe(404)
+    expect(second.body.error).toBe('Task not found: dddddddd')
   })
 
   test('side-effect: dual-emit invariant for archive (taskEvents + ipcMain)', async () => {

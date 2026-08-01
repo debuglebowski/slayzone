@@ -5,8 +5,8 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 /**
  * GET /api/tasks/:id — single-task detail.
  * Mirrors `slay tasks view` (cli/src/commands/tasks/view.ts): id-prefix
- * addressing, full task row + project_name, tag names (sort_order, name),
- * dependency blockers and blocking (id + title each).
+ * addressing, full task row + project_name + project_path, tag names
+ * (sort_order, name), dependency blockers and blocking (id + title each).
  */
 export function registerGetTaskRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/tasks/:id', async (req, res) => {
@@ -19,8 +19,12 @@ export function registerGetTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       const taskId = resolved.row.id
 
+      // `project_path` is here for `slay tasks update --worktree-path`: deriving
+      // which repo owns a worktree needs the project's configured path, and the
+      // CLI must not read the hub's DB file to get it (that is exactly what broke
+      // against a hub on another machine).
       const task = await db.get<Record<string, unknown>>(
-        `SELECT t.*, p.name AS project_name
+        `SELECT t.*, p.name AS project_name, p.path AS project_path
          FROM tasks t JOIN projects p ON t.project_id = p.id
          WHERE t.id = ?`,
         [taskId]
