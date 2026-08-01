@@ -63,8 +63,22 @@ export interface DiagnosticEventPayload {
  * object — a partial object would silently drop the remaining methods.
  */
 export interface WorktreeExecAdapters {
+  /**
+   * ── `taskId` on every routable method ──────────────────────────────────────
+   * Each of these can run on a runner, and picking one requires knowing WHICH
+   * TASK the work is for (`resolveTaskRunnerId`). The seam previously carried
+   * only paths, so the hub-side router had nothing to route on and was pinned to
+   * `() => null` — meaning a task whose agent runs on a runner had its worktree
+   * created on the HUB, leaving the agent with a cwd that does not exist on its
+   * own machine. Every call site already has the id in scope.
+   *
+   * `getWorktreeColor` / `ensureProjectWorktreeColors` are deliberately NOT
+   * given one: they are hub-local UI state, never routed (and the former is sync,
+   * so it could not be a network call).
+   */
   /** `createWorktree` from `@slayzone/worktrees/server`. */
   createWorktree: (
+    taskId: string,
     repoPath: string,
     worktreePath: string,
     branch: string,
@@ -72,26 +86,29 @@ export interface WorktreeExecAdapters {
   ) => Promise<void>
   /** `removeWorktree` from `@slayzone/worktrees/server` (no branch deletion). */
   removeWorktree: (
+    taskId: string,
     projectPath: string,
     worktreePath: string
   ) => Promise<{ branchDeleted?: boolean; branchError?: string }>
   /** `runWorktreeSetupScript` from `@slayzone/worktrees/server`. */
   runWorktreeSetupScript: (
+    taskId: string,
     worktreePath: string,
     repoPath: string,
     sourceBranch?: string | null
   ) => Promise<{ ran: boolean; success?: boolean; output?: string }>
   /** `copyIgnoredFiles` from `@slayzone/worktrees/server`. */
   copyIgnoredFiles: (
+    taskId: string,
     repoPath: string,
     worktreePath: string,
     behavior: 'all' | 'custom',
     customPaths: string[]
   ) => Promise<void>
   /** `getCurrentBranch` from `@slayzone/worktrees/server`. */
-  getCurrentBranch: (repoPath: string) => Promise<string | null>
+  getCurrentBranch: (taskId: string, repoPath: string) => Promise<string | null>
   /** `isGitRepo` from `@slayzone/worktrees/server`. */
-  isGitRepo: (path: string) => Promise<boolean>
+  isGitRepo: (taskId: string, path: string) => Promise<boolean>
   /** `getWorktreeColor` from `@slayzone/worktrees/server`. */
   getWorktreeColor: (projectPath: string, worktreePath: string) => string | undefined
   /** `ensureProjectWorktreeColors` from `@slayzone/worktrees/server`. */
@@ -99,11 +116,11 @@ export interface WorktreeExecAdapters {
   /** `fs.existsSync` seam (recovered-worktree check, artifact-dir guard). The
    *  local default stays sync (`boolean`); a runner-backed impl needs a network
    *  round-trip, so the return is widened to allow a Promise (call sites await). */
-  pathExists: (path: string) => boolean | Promise<boolean>
+  pathExists: (taskId: string, path: string) => boolean | Promise<boolean>
   /** `fs.rmSync(dir, { recursive, force })` seam for task artifact directories.
    *  Widened to `void | Promise<void>` for the same remote-async reason as
    *  `pathExists`; the local default stays sync. */
-  removeArtifactDir: (absDir: string) => void | Promise<void>
+  removeArtifactDir: (taskId: string, absDir: string) => void | Promise<void>
 }
 
 export interface TaskRuntimeAdapters {
@@ -133,16 +150,22 @@ export interface TaskRuntimeAdapters {
  * must survive every partial `configureTaskRuntimeAdapters` call.
  */
 export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
-  createWorktree,
-  removeWorktree,
-  runWorktreeSetupScript,
-  copyIgnoredFiles,
-  getCurrentBranch,
-  isGitRepo,
+  // The in-process impls run on the hub, so they IGNORE `taskId` — it exists only
+  // so a routing impl can resolve which runner the work belongs to.
+  createWorktree: (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
+    createWorktree(repoPath, worktreePath, branch, sourceBranch),
+  removeWorktree: (_taskId, projectPath, worktreePath) =>
+    removeWorktree(projectPath, worktreePath),
+  runWorktreeSetupScript: (_taskId, worktreePath, repoPath, sourceBranch) =>
+    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch),
+  copyIgnoredFiles: (_taskId, repoPath, worktreePath, behavior, customPaths) =>
+    copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths),
+  getCurrentBranch: (_taskId, repoPath) => getCurrentBranch(repoPath),
+  isGitRepo: (_taskId, path) => isGitRepo(path),
   getWorktreeColor,
   ensureProjectWorktreeColors,
-  pathExists: (p) => existsSync(p),
-  removeArtifactDir: (absDir) => rmSync(absDir, { recursive: true, force: true })
+  pathExists: (_taskId, p) => existsSync(p),
+  removeArtifactDir: (_taskId, absDir) => rmSync(absDir, { recursive: true, force: true })
 }
 
 const defaultRuntimeAdapters: TaskRuntimeAdapters = {
@@ -420,8 +443,8 @@ export async function cleanupTaskFull(
   // Clean up artifact files on disk. getDataRoot() is the single source of truth
   // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage).
   const artifactsBaseDir = path.join(runtimeAdapters.getDataRoot(), 'artifacts', taskId)
-  if (await runtimeAdapters.worktrees.pathExists(artifactsBaseDir)) {
-    await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
+  if (await runtimeAdapters.worktrees.pathExists(taskId, artifactsBaseDir)) {
+    await runtimeAdapters.worktrees.removeArtifactDir(taskId, artifactsBaseDir)
   }
 
   const task = await db.get<{ worktree_path: string | null; project_id: string }>(
@@ -448,7 +471,7 @@ export async function cleanupTaskFull(
 
   if (project?.path) {
     try {
-      await runtimeAdapters.worktrees.removeWorktree(project.path, task.worktree_path)
+      await runtimeAdapters.worktrees.removeWorktree(taskId, project.path, task.worktree_path)
     } catch (err) {
       console.error('Failed to remove worktree:', err)
       runtimeAdapters.recordDiagnosticEvent({
@@ -522,12 +545,12 @@ export async function maybeAutoCreateWorktree(
   let repoPath = projectRow.path
   if (repoName) {
     const childPath = path.join(projectRow.path, repoName)
-    if (await runtimeAdapters.worktrees.isGitRepo(childPath)) {
+    if (await runtimeAdapters.worktrees.isGitRepo(taskId, childPath)) {
       repoPath = childPath
     }
   }
 
-  if (!(await runtimeAdapters.worktrees.isGitRepo(repoPath))) {
+  if (!(await runtimeAdapters.worktrees.isGitRepo(taskId, repoPath))) {
     runtimeAdapters.recordDiagnosticEvent({
       level: 'info',
       source: 'task',
@@ -546,17 +569,17 @@ export async function maybeAutoCreateWorktree(
   const basePath = resolveWorktreeBasePathTemplate(baseTemplate, repoPath)
   const branch = slugify(taskTitle) || `task-${taskId.slice(0, 8)}`
   const worktreePath = path.join(basePath, branch)
-  const parentBranch = await runtimeAdapters.worktrees.getCurrentBranch(repoPath)
+  const parentBranch = await runtimeAdapters.worktrees.getCurrentBranch(taskId, repoPath)
 
   const sourceBranch = projectRow.worktree_source_branch ?? undefined
 
   // Block A: Create worktree and link to task immediately
   try {
-    await runtimeAdapters.worktrees.createWorktree(repoPath, worktreePath, branch, sourceBranch)
+    await runtimeAdapters.worktrees.createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch)
   } catch (err) {
     // Git may exit non-zero after creating the worktree (e.g. post-checkout hook failure).
     // If the dir exists, still link it — better than orphaning a worktree the user can see.
-    if (await runtimeAdapters.worktrees.pathExists(worktreePath)) {
+    if (await runtimeAdapters.worktrees.pathExists(taskId, worktreePath)) {
       await db.run(
         `
         UPDATE tasks
@@ -613,6 +636,7 @@ export async function maybeAutoCreateWorktree(
     const { behavior: copyBehavior, customPaths } = await resolveCopyBehavior(db, projectId)
     if (copyBehavior === 'all' || copyBehavior === 'custom') {
       await runtimeAdapters.worktrees.copyIgnoredFiles(
+        taskId,
         repoPath,
         worktreePath,
         copyBehavior,
@@ -632,7 +656,7 @@ export async function maybeAutoCreateWorktree(
   }
 
   // Fire-and-forget: don't block task creation on setup script
-  void runtimeAdapters.worktrees.runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
+  void runtimeAdapters.worktrees.runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch)
 }
 
 export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {

@@ -714,8 +714,14 @@ export interface RemoteWorktreeAdaptersOptions {
   gateway: RoutingGateway
   /** In-process adapters — fallback when unrouted, plus always-local color ops. */
   local: WorktreeExecAdapters
-  /** The runner these adapters route to, or null when it is hub-local. */
-  resolveRunnerId: () => string | null
+  /**
+   * The runner a given TASK's worktree work belongs to, or null for hub-local.
+   * Takes the taskId because that is the only thing a runner can be resolved
+   * from (`resolveTaskRunnerId`). Previously argument-less, which is why the
+   * composition root had to pin it to `() => null` and every method degraded to
+   * local — so a task whose agent ran on a runner got its worktree on the hub.
+   */
+  resolveRunnerId: (taskId: string) => string | null | Promise<string | null>
 }
 
 /**
@@ -729,9 +735,10 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
   const { gateway, local, resolveRunnerId } = options
 
   return {
-    async createWorktree(repoPath, worktreePath, branch, sourceBranch) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.createWorktree(repoPath, worktreePath, branch, sourceBranch)
+    async createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null)
+        return local.createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch)
       await gateway.request(runnerId, HubToRunnerMethods.gitCreateWorktree, {
         repoPath,
         worktreePath,
@@ -740,9 +747,9 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
       })
     },
 
-    async removeWorktree(projectPath, worktreePath) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.removeWorktree(projectPath, worktreePath)
+    async removeWorktree(taskId, projectPath, worktreePath) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null) return local.removeWorktree(taskId, projectPath, worktreePath)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitRemoveWorktree, {
         projectPath,
         worktreePath
@@ -750,9 +757,10 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
       return gitRemoveWorktreeResultSchema.parse(res)
     },
 
-    async runWorktreeSetupScript(worktreePath, repoPath, sourceBranch) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
+    async runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null)
+        return local.runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitRunWorktreeSetupScript, {
         worktreePath,
         repoPath,
@@ -761,9 +769,10 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
       return gitRunWorktreeSetupScriptResultSchema.parse(res)
     },
 
-    async copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths)
+    async copyIgnoredFiles(taskId, repoPath, worktreePath, behavior, customPaths) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null)
+        return local.copyIgnoredFiles(taskId, repoPath, worktreePath, behavior, customPaths)
       await gateway.request(runnerId, HubToRunnerMethods.gitCopyIgnoredFiles, {
         repoPath,
         worktreePath,
@@ -772,16 +781,16 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
       })
     },
 
-    async getCurrentBranch(repoPath) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.getCurrentBranch(repoPath)
+    async getCurrentBranch(taskId, repoPath) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null) return local.getCurrentBranch(taskId, repoPath)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitGetCurrentBranch, { repoPath })
       return gitGetCurrentBranchResultSchema.parse(res).branch
     },
 
-    async isGitRepo(path) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.isGitRepo(path)
+    async isGitRepo(taskId, path) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null) return local.isGitRepo(taskId, path)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitIsGitRepo, { path })
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
     },
@@ -795,16 +804,16 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
       return local.ensureProjectWorktreeColors(projectPath)
     },
 
-    async pathExists(path) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.pathExists(path)
+    async pathExists(taskId, path) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null) return local.pathExists(taskId, path)
       const res = await gateway.request(runnerId, HubToRunnerMethods.fsPathExists, { path })
       return fsPathExistsResultSchema.parse(res).exists
     },
 
-    async removeArtifactDir(absDir) {
-      const runnerId = resolveRunnerId()
-      if (runnerId == null) return local.removeArtifactDir(absDir)
+    async removeArtifactDir(taskId, absDir) {
+      const runnerId = await resolveRunnerId(taskId)
+      if (runnerId == null) return local.removeArtifactDir(taskId, absDir)
       await gateway.request(runnerId, HubToRunnerMethods.fsRemoveDir, { path: absDir })
     }
   }

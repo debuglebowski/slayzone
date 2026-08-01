@@ -208,7 +208,9 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
   const removeCalls: Array<[string, string]> = []
   const calls: string[] = []
   const fakes = makeFakes(calls, {
-    removeWorktree: async (projPath, wtPath) => {
+    // Signature is (taskId, projectPath, worktreePath) — the leading taskId is
+    // what lets a routing impl pick the runner this task's worktree lives on.
+    removeWorktree: async (_taskId, projPath, wtPath) => {
       removeCalls.push([projPath, wtPath])
       return {}
     },

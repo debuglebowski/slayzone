@@ -446,6 +446,9 @@ function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeE
   }
 }
 
+/** Any task id: the local adapters ignore it; the routing ones resolve a runner from it. */
+const TASK = 'task-1'
+
 describe('createRemoteWorktreeAdapters', () => {
   it('forwards git/fs ops to the right frames and parses the runner replies', async () => {
     const gateway = new FakeGateway()
@@ -460,13 +463,13 @@ describe('createRemoteWorktreeAdapters', () => {
     const local = makeLocalWorktrees()
     const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveRunnerId: () => 'runner-1' })
 
-    expect(await adapters.isGitRepo('/repo')).toBe(true)
+    expect(await adapters.isGitRepo(TASK, '/repo')).toBe(true)
     expect(requireCall(gateway, 'git.isGitRepo').params).toEqual({ path: '/repo' })
 
-    expect(await adapters.getCurrentBranch('/repo')).toBe('main')
+    expect(await adapters.getCurrentBranch(TASK, '/repo')).toBe('main')
     expect(requireCall(gateway, 'git.getCurrentBranch').params).toEqual({ repoPath: '/repo' })
 
-    await adapters.createWorktree('/repo', '/wt', 'feature', 'main')
+    await adapters.createWorktree(TASK, '/repo', '/wt', 'feature', 'main')
     expect(requireCall(gateway, 'git.createWorktree').params).toEqual({
       repoPath: '/repo',
       worktreePath: '/wt',
@@ -474,10 +477,10 @@ describe('createRemoteWorktreeAdapters', () => {
       sourceBranch: 'main'
     })
 
-    expect(await adapters.removeWorktree('/proj', '/wt')).toEqual({ branchDeleted: true })
+    expect(await adapters.removeWorktree(TASK, '/proj', '/wt')).toEqual({ branchDeleted: true })
     expect(requireCall(gateway, 'git.removeWorktree').params).toEqual({ projectPath: '/proj', worktreePath: '/wt' })
 
-    expect(await adapters.runWorktreeSetupScript('/wt', '/repo', null)).toEqual({
+    expect(await adapters.runWorktreeSetupScript(TASK, '/wt', '/repo', null)).toEqual({
       ran: true,
       success: true,
       output: 'ok'
@@ -488,7 +491,7 @@ describe('createRemoteWorktreeAdapters', () => {
       sourceBranch: null
     })
 
-    await adapters.copyIgnoredFiles('/repo', '/wt', 'custom', ['.env'])
+    await adapters.copyIgnoredFiles(TASK, '/repo', '/wt', 'custom', ['.env'])
     expect(requireCall(gateway, 'git.copyIgnoredFiles').params).toEqual({
       repoPath: '/repo',
       worktreePath: '/wt',
@@ -496,10 +499,10 @@ describe('createRemoteWorktreeAdapters', () => {
       customPaths: ['.env']
     })
 
-    expect(await adapters.pathExists('/some/path')).toBe(true)
+    expect(await adapters.pathExists(TASK, '/some/path')).toBe(true)
     expect(requireCall(gateway, 'fs.pathExists').params).toEqual({ path: '/some/path' })
 
-    await adapters.removeArtifactDir('/artifacts/x')
+    await adapters.removeArtifactDir(TASK, '/artifacts/x')
     expect(requireCall(gateway, 'fs.removeDir').params).toEqual({ path: '/artifacts/x' })
 
     // git/fs work never touched the local adapters.
@@ -527,13 +530,13 @@ describe('createRemoteWorktreeAdapters', () => {
     const local = makeLocalWorktrees({ isGitRepo: vi.fn(async () => true), pathExists: vi.fn(async () => true) })
     const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveRunnerId: () => null })
 
-    expect(await adapters.isGitRepo('/repo')).toBe(true)
-    expect(await adapters.pathExists('/x')).toBe(true)
-    await adapters.removeArtifactDir('/dir')
+    expect(await adapters.isGitRepo(TASK, '/repo')).toBe(true)
+    expect(await adapters.pathExists(TASK, '/x')).toBe(true)
+    await adapters.removeArtifactDir(TASK, '/dir')
 
-    expect(local.isGitRepo).toHaveBeenCalledWith('/repo')
-    expect(local.pathExists).toHaveBeenCalledWith('/x')
-    expect(local.removeArtifactDir).toHaveBeenCalledWith('/dir')
+    expect(local.isGitRepo).toHaveBeenCalledWith(TASK, '/repo')
+    expect(local.pathExists).toHaveBeenCalledWith(TASK, '/x')
+    expect(local.removeArtifactDir).toHaveBeenCalledWith(TASK, '/dir')
     expect(gateway.calls).toHaveLength(0)
   })
 })
@@ -586,9 +589,61 @@ describe('runner-off / no-runner fall-through (byte-identical to local)', () => 
 
     const localWt = makeLocalWorktrees({ isGitRepo: vi.fn(async () => true) })
     const wt = createRemoteWorktreeAdapters({ gateway, local: localWt, resolveRunnerId: () => null })
-    expect(await wt.isGitRepo('/repo')).toBe(true)
-    expect(localWt.isGitRepo).toHaveBeenCalledWith('/repo')
+    expect(await wt.isGitRepo(TASK, '/repo')).toBe(true)
+    expect(localWt.isGitRepo).toHaveBeenCalledWith(TASK, '/repo')
 
     expect(gateway.calls).toHaveLength(0)
+  })
+})
+
+// ===========================================================================
+// Per-task worktree routing
+// ===========================================================================
+
+describe('worktree routing is per-task', () => {
+  it('routes each task to ITS runner and keeps an unassigned task local', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
+    const local = makeLocalWorktrees({ isGitRepo: vi.fn(async () => true) })
+
+    // The whole point of threading taskId: two tasks in one process can land on
+    // different machines. Before this, the resolver took no argument and was
+    // pinned to null, so every task's worktree work ran on the hub — including
+    // tasks whose agents were running on a runner.
+    const wt = createRemoteWorktreeAdapters({
+      gateway,
+      local,
+      resolveRunnerId: (taskId) =>
+        taskId === 'task-on-runner' ? 'runner-7' : taskId === 'task-on-other' ? 'runner-9' : null
+    })
+
+    await wt.isGitRepo('task-on-runner', '/repo-a')
+    await wt.isGitRepo('task-on-other', '/repo-b')
+    await wt.isGitRepo('task-local', '/repo-c')
+
+    const routed = gateway.calls.filter((c) => c.method === 'git.isGitRepo')
+    expect(routed).toHaveLength(2)
+    expect(routed.map((c) => c.runnerId)).toEqual(['runner-7', 'runner-9'])
+    // The unassigned task never hit the wire; it went to the in-process adapter.
+    expect(local.isGitRepo).toHaveBeenCalledTimes(1)
+    expect(local.isGitRepo).toHaveBeenCalledWith('task-local', '/repo-c')
+  })
+
+  it('awaits an async resolver (the real one reads the DB)', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.pathExists', () => ({ exists: true }))
+    const local = makeLocalWorktrees()
+
+    // `resolveTaskRunnerId` is async, so a resolver returning a Promise must be
+    // awaited — not coerced to a truthy object (which would "route" to garbage).
+    const wt = createRemoteWorktreeAdapters({
+      gateway,
+      local,
+      resolveRunnerId: async (taskId) => (taskId === 'task-x' ? 'runner-3' : null)
+    })
+
+    expect(await wt.pathExists('task-x', '/some/path')).toBe(true)
+    expect(requireCall(gateway, 'fs.pathExists').runnerId).toBe('runner-3')
+    expect(local.pathExists).not.toHaveBeenCalled()
   })
 })

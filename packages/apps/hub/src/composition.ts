@@ -1038,11 +1038,12 @@ export function composeServer(opts: {
       ...baseTaskAdapters,
       worktrees: createRemoteWorktreeAdapters({
         gateway: runnerGateway,
-        // Per-task worktree runner routing is a later unit — the WorktreeExecAdapters
-        // seam carries no task id, so there's no task context to route on here.
-        // null keeps worktree git/fs work hub-local (createRemoteWorktreeAdapters
-        // degrades every method to `local`); the seam is wired, ready to route.
-        resolveRunnerId: () => null,
+        // Route each task's worktree/git/fs work to the SAME runner its agents
+        // spawn on — the seam now carries the taskId, so this is the same
+        // resolution the pty/chat backends use. Without it a task whose agent runs
+        // on a runner had its worktree created on the hub, leaving the agent with
+        // a cwd that does not exist on its own machine.
+        resolveRunnerId: (taskId) => resolveTaskRunnerId(db, taskId),
         local: defaultWorktreeExecAdapters
       })
     })
