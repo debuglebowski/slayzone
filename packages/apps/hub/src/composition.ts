@@ -55,7 +55,6 @@ import {
   setPtyBackend,
   setPtySpawnLookups,
   setRemoteMcpEnvProvider,
-  localPtyBackend,
   ptyEvents,
   createChatOps,
   createChatQueueOps,
@@ -88,8 +87,6 @@ import {
   hasSessionUserInput,
   configureTransport,
   createDbChatDataOps,
-  createLocalChatBackend,
-  whichBinary,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import {
@@ -114,8 +111,7 @@ import {
   listForTask,
   listAllProcesses,
   subscribeToProcessLogs,
-  setProcessBackend,
-  localProcessBackend
+  setProcessBackend
 } from '@slayzone/processes/server'
 // Runner transport: runner gateway + hub-auth + runner resolution, wired
 // unconditionally at boot (a hub always accepts runners).
@@ -1051,14 +1047,12 @@ export function composeServer(opts: {
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: runnerGateway,
-        local: localPtyBackend,
         resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     )
     setProcessBackend(
       createRoutingProcessBackend({
         gateway: runnerGateway,
-        local: localProcessBackend,
         resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     )
@@ -1069,7 +1063,6 @@ export function composeServer(opts: {
     configureTransport({
       backend: createRoutingChatBackend({
         gateway: runnerGateway,
-        local: createLocalChatBackend({ whichBinary }),
         resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     })

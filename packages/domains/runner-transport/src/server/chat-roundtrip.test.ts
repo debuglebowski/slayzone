@@ -20,7 +20,11 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
 import { RunnerNotificationMethods } from '../shared/frames'
-import { createRoutingChatBackend, type RoutingGateway } from './exec-proxies'
+import {
+  createRoutingChatBackend,
+  NoRunnerAvailableError,
+  type RoutingGateway
+} from './exec-proxies'
 import type { RunnerGatewayEvents } from './hub-gateway'
 
 const RUNNER_ID = 'runner-1'
@@ -93,11 +97,6 @@ describe('routed chat agent', () => {
 
     const backend = createRoutingChatBackend({
       gateway: runner.gateway,
-      local: {
-        spawn: () => {
-          throw new Error('must not fall back to local: a runnerId was resolved')
-        }
-      },
       resolveRunnerId: (spec) => spec.runnerId
     })
 
@@ -165,41 +164,29 @@ describe('routed chat agent', () => {
     await exited
   })
 
-  it('falls back to the local backend when no runner resolves', async () => {
+  it('throws NoRunnerAvailableError when no runner resolves (no hub-local spawn)', async () => {
     const runner = await loadRunner()
     if (!runner) return
     cleanup.push(() => runner.disposeAll())
 
-    let localCalls = 0
     const backend = createRoutingChatBackend({
       gateway: runner.gateway,
-      local: {
-        spawn: () => {
-          localCalls++
-          return {
-            pid: 1,
-            onSpawn: () => ({ dispose: () => {} }),
-            onStdout: () => ({ dispose: () => {} }),
-            onStderr: () => ({ dispose: () => {} }),
-            onExit: () => ({ dispose: () => {} }),
-            onError: () => ({ dispose: () => {} }),
-            write: () => {},
-            kill: () => {}
-          }
-        }
-      },
       resolveRunnerId: (spec) => spec.runnerId
     })
 
-    await backend.spawn({
-      sessionId: 'task-2:tab-1',
-      taskId: 'task-2',
-      runnerId: null,
-      binaryName: 'sh',
-      args: ['-c', 'true'],
-      cwd: dir,
-      env: {}
-    })
-    expect(localCalls).toBe(1)
+    // Chat used to be the ONE agent kind that always ran in the hub's own process.
+    // An unresolved runner is now a visible error, which is what keeps a chat agent
+    // and its worktree on the same machine.
+    await expect(
+      backend.spawn({
+        sessionId: 'task-2:tab-1',
+        taskId: 'task-2',
+        runnerId: null,
+        binaryName: 'sh',
+        args: ['-c', 'true'],
+        cwd: dir,
+        env: {}
+      })
+    ).rejects.toThrow(NoRunnerAvailableError)
   })
 })
