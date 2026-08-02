@@ -21,7 +21,15 @@ import { spawn } from 'node:child_process'
 import { accessSync, chmodSync, constants as fsConstants, existsSync } from 'node:fs'
 import { cp, mkdir } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
-import { RunnerNotificationMethods } from '@slayzone/runner-transport/shared'
+import {
+  gitCopyIgnoredFilesParamsSchema,
+  gitCreateWorktreeParamsSchema,
+  gitGetCurrentBranchParamsSchema,
+  gitIsGitRepoParamsSchema,
+  gitRemoveWorktreeParamsSchema,
+  gitRunWorktreeSetupScriptParamsSchema,
+  RunnerNotificationMethods
+} from '@slayzone/runner-transport/shared'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { z } from 'zod'
 import { assertPathAllowed } from '../config'
@@ -41,30 +49,19 @@ export const GitMethods = {
   copyIgnoredFiles: 'git.copyIgnoredFiles'
 } as const
 
-const isGitRepoParams = z.object({ path: z.string().min(1) })
-const getCurrentBranchParams = z.object({ path: z.string().min(1) })
-const createWorktreeParams = z.object({
-  repoPath: z.string().min(1),
-  worktreePath: z.string().min(1),
-  branch: z.string().min(1).optional(),
-  sourceBranch: z.string().min(1).optional()
-})
-const removeWorktreeParams = z.object({
-  repoPath: z.string().min(1),
-  worktreePath: z.string().min(1),
-  branchHint: z.string().min(1).optional()
-})
-const runWorktreeSetupScriptParams = z.object({
-  worktreePath: z.string().min(1),
-  repoPath: z.string().min(1),
-  sourceBranch: z.string().nullable().optional()
-})
-const copyIgnoredFilesParams = z.object({
-  repoPath: z.string().min(1),
-  worktreePath: z.string().min(1),
-  behavior: z.enum(['all', 'custom']),
-  customPaths: z.array(z.string()).optional()
-})
+// Param schemas come from the SHARED frame contract — they are NOT re-declared
+// here. Locally-written copies had drifted from what the hub actually sends:
+// `getCurrentBranch` expected `path` (hub sends `repoPath`) and `removeWorktree`
+// expected `repoPath` (hub sends `projectPath`), so both threw a zod error on
+// every routed call. Invisible until worktrees started routing, and the same
+// divergence class as the proc.* `sessionId`/`id` and `isGitRepo` result-key bugs:
+// two sides independently declaring one wire shape.
+const isGitRepoParams = gitIsGitRepoParamsSchema
+const getCurrentBranchParams = gitGetCurrentBranchParamsSchema
+const createWorktreeParams = gitCreateWorktreeParamsSchema
+const removeWorktreeParams = gitRemoveWorktreeParamsSchema
+const runWorktreeSetupScriptParams = gitRunWorktreeSetupScriptParamsSchema
+const copyIgnoredFilesParams = gitCopyIgnoredFilesParamsSchema
 
 const SETUP_SCRIPT = '.slay/worktree-setup.sh'
 const SETUP_SCRIPT_TIMEOUT_MS = 5 * 60_000
@@ -72,20 +69,26 @@ const SETUP_SCRIPT_TIMEOUT_MS = 5 * 60_000
 export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
   const roots = ctx.config.allowedRoots
 
-  async function isGitRepo(rawParams: unknown): Promise<{ isRepo: boolean }> {
+  // Result key is `isGitRepo`, matching `gitIsGitRepoResultSchema` in the SHARED
+  // frame contract. It used to be `isRepo`, so the hub's parse threw
+  // "expected boolean, received undefined" on every routed probe — and because
+  // `isGitRepo` gates worktree creation, that failed task creation outright once
+  // worktrees started routing. Same divergence class as the proc.* sessionId/id
+  // mismatch: two sides declaring the same wire shape independently.
+  async function isGitRepo(rawParams: unknown): Promise<{ isGitRepo: boolean }> {
     const { path } = isGitRepoParams.parse(rawParams)
     const repoPath = assertPathAllowed(path, roots)
     try {
       await execGit(['rev-parse', '--git-dir'], repoPath)
-      return { isRepo: true }
+      return { isGitRepo: true }
     } catch {
-      return { isRepo: false }
+      return { isGitRepo: false }
     }
   }
 
   async function getCurrentBranch(rawParams: unknown): Promise<{ branch: string | null }> {
-    const { path } = getCurrentBranchParams.parse(rawParams)
-    const repoPath = assertPathAllowed(path, roots)
+    const parsed = getCurrentBranchParams.parse(rawParams)
+    const repoPath = assertPathAllowed(parsed.repoPath, roots)
     try {
       const out = await execGit(['branch', '--show-current'], repoPath)
       return { branch: out.trim() || null }
@@ -109,8 +112,16 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
     rawParams: unknown
   ): Promise<{ branchDeleted?: boolean; branchError?: string }> {
     const params = removeWorktreeParams.parse(rawParams)
-    const repoPath = assertPathAllowed(params.repoPath, roots)
+    // The shared frame names this `projectPath` (it is the parent repo the worktree
+    // is registered in); the local copy called it `repoPath`.
+    const repoPath = assertPathAllowed(params.projectPath, roots)
     const worktreePath = assertPathAllowed(params.worktreePath, roots)
+
+    // Capture the worktree's branch BEFORE removing it (afterwards the checkout is
+    // gone and the name is unrecoverable).
+    const removedBranch = await getCurrentBranch({ repoPath: worktreePath })
+      .then((r) => r.branch)
+      .catch(() => null)
 
     try {
       await execGit(['worktree', 'remove', worktreePath, '--force'], repoPath)
@@ -123,11 +134,13 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       }
     }
 
-    if (params.branchHint === undefined) return {}
-
-    const branch = params.branchHint.replace(/^refs\/heads\//, '').trim()
+    // `branchHint` was a local-only param the hub never sent, so this branch-delete
+    // path was dead on every routed call. Resolve the branch from the worktree
+    // itself before removing it — same effect, no phantom parameter.
+    if (removedBranch === null) return {}
+    const branch = removedBranch.replace(/^refs\/heads\//, '').trim()
     if (!branch) return {}
-    const repoBranch = (await getCurrentBranch({ path: repoPath })).branch
+    const repoBranch = (await getCurrentBranch({ repoPath })).branch
     if (branch === repoBranch) {
       return { branchDeleted: false, branchError: `refusing to delete checked-out branch '${branch}'` }
     }

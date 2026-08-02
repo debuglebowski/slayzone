@@ -63,12 +63,15 @@ export function RunnerCard({
     await resolvedQuery.refetch()
   }
 
-  // No runners enrolled → runs locally. Keep the card minimal (don't hide it).
+  // No runners enrolled → nothing can run. Say so plainly: agents, terminals and
+  // git work all execute on runners now, so this is an actionable empty state, not
+  // a benign "runs locally" note (which is what it used to say, back when the hub
+  // silently executed everything itself).
   if (runners.length === 0) {
     return (
       <div>
         <label className="mb-1 block text-sm text-muted-foreground">Runner</label>
-        <p className="text-sm text-muted-foreground">No runners — runs locally</p>
+        <p className="text-sm text-muted-foreground">No runners — enroll one to run agents</p>
       </div>
     )
   }

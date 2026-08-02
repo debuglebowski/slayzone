@@ -371,6 +371,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
 export interface RoutingProcessBackendOptions {
   gateway: RoutingGateway
+  /**
+   * Route a spawn to a runnerId. `null` throws {@link NoRunnerAvailableError}.
+   *
+   * Sync by necessity: the process manager's `doSpawn` is synchronous (it is also
+   * called from restart / auto-restart timers), so this cannot await a reconnect
+   * the way the pty/chat spawn-time lookups do. A caller that needs the
+   * reconnect grace must therefore apply it before the spec reaches here.
+   */
   resolveRunnerId: (spec: ProcSpawnSpec) => string | null
   /**
    * Override how a spec becomes `proc.spawn` params. Default: treat
@@ -577,7 +585,9 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         .then(
           (res) => {
             const parsed = procSpawnResultSchema.safeParse(res)
-            if (parsed.success) pid = parsed.data.pid
+            // `pid` is nullable on the wire (immediate spawn failure); the handle
+            // exposes `number | undefined`, so map null → undefined.
+            if (parsed.success) pid = parsed.data.pid ?? undefined
           },
           () => finalize(entry, null, 'spawn-failed')
         )

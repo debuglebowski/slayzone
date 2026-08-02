@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { gitIsGitRepoResultSchema } from '@slayzone/runner-transport/shared'
 import type { RunnerConfig } from '../config'
 import { GitMethods, createGitHandlers } from './git'
 import type { RunnerDialer } from './types'
@@ -39,9 +40,16 @@ afterEach(() => {
 describe('createGitHandlers — git.isGitRepo', () => {
   it('is false for a bare directory and true after git init', async () => {
     const handlers = createGitHandlers(ctxWithRoots(roots))
-    expect(await handlers['git.isGitRepo']({ path: dir })).toEqual({ isRepo: false })
+    // Assert through the SHARED result schema, not a hand-written literal: this
+    // test previously encoded the runner's own `{isRepo}` shape, so it passed while
+    // the hub (parsing `{isGitRepo}`) rejected every reply.
+    expect(gitIsGitRepoResultSchema.parse(await handlers['git.isGitRepo']({ path: dir }))).toEqual({
+      isGitRepo: false
+    })
     git(['init'], dir)
-    expect(await handlers['git.isGitRepo']({ path: dir })).toEqual({ isRepo: true })
+    expect(gitIsGitRepoResultSchema.parse(await handlers['git.isGitRepo']({ path: dir }))).toEqual({
+      isGitRepo: true
+    })
   })
 })
 
@@ -54,12 +62,12 @@ describe('createGitHandlers — git.getCurrentBranch', () => {
     git(['checkout', '-b', 'my-feature'], dir)
 
     const handlers = createGitHandlers(ctxWithRoots(roots))
-    expect(await handlers['git.getCurrentBranch']({ path: dir })).toEqual({ branch: 'my-feature' })
+    expect(await handlers['git.getCurrentBranch']({ repoPath: dir })).toEqual({ branch: 'my-feature' })
   })
 
   it('returns null branch for a non-repo path (inside an allowed root)', async () => {
     const handlers = createGitHandlers(ctxWithRoots(roots))
-    expect(await handlers['git.getCurrentBranch']({ path: dir })).toEqual({ branch: null })
+    expect(await handlers['git.getCurrentBranch']({ repoPath: dir })).toEqual({ branch: null })
   })
 })
 

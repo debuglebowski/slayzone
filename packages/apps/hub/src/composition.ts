@@ -448,17 +448,89 @@ export function composeServer(opts: {
   // agent env and then run that agent on a runner, giving it a loopback hook URL
   // that resolves to the wrong machine.
   let execGateway: HubRunnerGateway | null = null
+  /**
+   * Last runner the default-resolution picked. Survives a gateway restart, which
+   * wipes the in-memory `byRunnerId` registry while the runner's DB row and
+   * credentials persist and it re-dials within ~1s.
+   *
+   * Used only by the SYNCHRONOUS resolution path (the process manager's `doSpawn`
+   * cannot await), and only while a runner is still enrolled. The routed request
+   * then either lands once the runner is back, or fails with a runner-addressed
+   * error — strictly better than failing as though nothing were configured.
+   */
+  let lastResolvedRunnerId: string | null = null
   const resolveExecRunner = (specRunnerId: string | null | undefined): string | null => {
     if (specRunnerId != null) return specRunnerId
     const connected = execGateway?.listRunners() ?? []
-    if (connected.length === 0) return null
-    if (connected.length === 1) return connected[0].runnerId
-    const local = connected.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
-    return local ? local.runnerId : null
+    if (connected.length === 1) {
+      lastResolvedRunnerId = connected[0].runnerId
+      return lastResolvedRunnerId
+    }
+    if (connected.length > 1) {
+      const local = connected.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+      // Several connected and none is the local one: refuse to guess rather than
+      // run an agent on an arbitrary machine. Do NOT fall back to the cache here —
+      // that would resolve a runner the caller never chose.
+      if (!local) return null
+      lastResolvedRunnerId = local.runnerId
+      return lastResolvedRunnerId
+    }
+    return lastResolvedRunnerId
   }
-  /** Effective runner for a task: explicit binding, else connected default. */
-  const resolveRunnerForTask = async (taskId: string): Promise<string | null> =>
-    resolveExecRunner(await resolveTaskRunnerId(db, taskId))
+  /**
+   * How long an exec resolution waits for a RECONNECTING runner before giving up.
+   *
+   * A runner that is momentarily disconnected is not the same thing as no runner.
+   * The gateway's registry is in-memory (`byRunnerId`), so it empties whenever the
+   * sidecar restarts — the runner's DB row and credentials survive and it re-dials
+   * within ~1s. Real installs hit the same window on a sidecar restart, a network
+   * blip, or a laptop waking up.
+   *
+   * Without this wait, any spawn landing in that window failed outright: the e2e
+   * suite restarts the sidecar on every `resetApp()`, which surfaced as a dozen
+   * timing-dependent failures (`pty.create_failed — No runner available`) while the
+   * `runners` row was present the whole time.
+   *
+   * 5s comfortably covers the observed ~1s redial while still failing fast when
+   * there genuinely is no runner (nothing enrolled → the wait is skipped entirely).
+   */
+  const RUNNER_RECONNECT_GRACE_MS = 5_000
+
+  /**
+   * Effective runner for a task: explicit binding, else the connected default —
+   * waiting out a transient reconnect rather than treating it as "no runner".
+   *
+   * The wait is only entered when a runner is ENROLLED but not currently connected;
+   * a hub with nothing enrolled still resolves `null` immediately, so the
+   * fail-loudly behavior for a genuinely runner-less hub is unchanged.
+   */
+  const resolveRunnerForTask = async (taskId: string): Promise<string | null> => {
+    const bound = await resolveTaskRunnerId(db, taskId)
+    const direct = resolveExecRunner(bound)
+    if (direct !== null) return direct
+
+    // Nothing connected. Is one merely reconnecting? Only the DB knows an enrolled
+    // runner exists across a gateway restart.
+    const enrolled = await db.get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM runners WHERE revoked_at IS NULL'
+    )
+    if ((enrolled?.n ?? 0) === 0) return null
+    const gateway = execGateway
+    if (!gateway) return null
+
+    const deadline = Date.now() + RUNNER_RECONNECT_GRACE_MS
+    while (Date.now() < deadline) {
+      // Race the connect event against a short tick: the event alone could miss a
+      // connection that lands between the check above and this subscription.
+      await Promise.race([
+        gateway.events.once('runner-connected'),
+        new Promise((r) => setTimeout(r, 250))
+      ])
+      const retry = resolveExecRunner(bound)
+      if (retry !== null) return retry
+    }
+    return null
+  }
 
   // Inject runner-aware spawn lookups BEFORE createPtyOps (which captures the
   // lookups at construction). Only `resolveRunnerId` is overridden; the mode-row /
@@ -1039,6 +1111,27 @@ export function composeServer(opts: {
     // spawn-time lookups and these exec backends resolve IDENTICALLY. Any spec
     // arriving with a null runnerId still gets the connected default here.
     execGateway = runnerGateway
+    // Drop the sync-path cache when a runner is REVOKED (not merely disconnected):
+    // a disconnect is the transient window the cache exists to cover, but a revoked
+    // or deleted runner must never keep resolving.
+    void (async () => {
+      try {
+        const stillEnrolled = async (): Promise<boolean> => {
+          const row = await db.get<{ n: number }>(
+            'SELECT COUNT(*) AS n FROM runners WHERE revoked_at IS NULL AND id = ?',
+            [lastResolvedRunnerId]
+          )
+          return (row?.n ?? 0) > 0
+        }
+        runnerGateway.events.on('runner-disconnected', () => {
+          void (async () => {
+            if (lastResolvedRunnerId && !(await stillEnrolled())) lastResolvedRunnerId = null
+          })()
+        })
+      } catch (err) {
+        console.error('[composition] runner cache invalidation wiring failed:', err)
+      }
+    })()
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: runnerGateway,

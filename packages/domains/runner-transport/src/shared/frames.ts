@@ -403,7 +403,10 @@ export const procSpawnParamsSchema = z.object({
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 
 export const procSpawnResultSchema = z.object({
-  pid: z.number().int()
+  /** `null` when the OS never assigned one (immediate spawn failure). The runner
+   *  reports `child.pid ?? null`, so a non-nullable int here rejected that reply —
+   *  the hub then treated a legitimately-failed spawn as a protocol error. */
+  pid: z.number().int().nullable()
 })
 export type ProcSpawnResult = z.infer<typeof procSpawnResultSchema>
 

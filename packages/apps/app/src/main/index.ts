@@ -720,8 +720,33 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       SLAYZONE_HUB_JOIN_TOKEN: minted.token
     },
     logger: (line) => logBoot(line),
+    // Re-mint before each restart. The token above is SINGLE-USE, so a runner that
+    // exits fatally on "join token rejected: unknown" (its stored api key failed
+    // verification, and its re-enroll fallback then reused a spent token) would
+    // otherwise fail identically on every retry and stay dead until the app
+    // restarts. Now every retry gets a usable token.
+    mintJoinToken: async () => {
+      const port = sidecarServerHandle?.getPort()
+      if (!port) return null
+      const fresh = await mintLocalRunnerJoinToken(port)
+      return fresh?.token ?? null
+    },
     onPermanentFailure: (info) => {
       console.error('[local-runner] permanent failure (local runner, non-fatal):', info)
+      // After this point NOTHING can execute — runners run the agents. Surface it
+      // where the user can see it rather than only in a console nobody reads.
+      try {
+        recordDiagnosticEvent({
+          level: 'error',
+          source: 'main',
+          event: 'local_runner.permanent_failure',
+          message:
+            `Local runner failed to stay running after ${(info as { attempts?: number }).attempts ?? 0} attempts. ` +
+            'Agents, terminals and git work all run on runners — restart the app or enroll a runner manually.'
+        })
+      } catch {
+        /* diagnostics unavailable — the console error above still records it */
+      }
     }
   })
   localRunnerCleanup = () => void handleRunner.stop()

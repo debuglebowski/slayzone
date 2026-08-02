@@ -41,6 +41,22 @@ export type LocalRunnerOpts = {
   /** Base env for the child (ELECTRON_RUN_AS_NODE + the SLAYZONE_RUNNER_* /
    *  SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN vars are merged in by the caller). */
   env: NodeJS.ProcessEnv
+  /**
+   * Mint a FRESH join token before a restart. Optional; without it a restart
+   * reuses `env` verbatim.
+   *
+   * Why it matters: `SLAYZONE_HUB_JOIN_TOKEN` is SINGLE-USE. If the runner's
+   * stored api key ever fails verification (it re-enrolls as a fallback), the
+   * enrollment is refused with "join token rejected: unknown" and the runner exits
+   * fatally. Restarting it with the same spent token reproduces that failure every
+   * time until the backoff budget is exhausted, so the runner stays dead until the
+   * app is restarted — a state that is invisible while the hub can execute work
+   * itself, and fatal once runners are the only execution path.
+   *
+   * Returning `null` keeps the existing env (the mint failed; the plain backoff
+   * retry is still worth attempting).
+   */
+  mintJoinToken?: () => Promise<string | null>
   /** Receives the runner's stdout/stderr lines + supervisor notices. */
   logger: (line: string) => void
   /** Called once the backoff budget is exhausted — log-only, non-fatal. */
@@ -60,6 +76,8 @@ export function startLocalRunner(opts: LocalRunnerOpts): LocalRunnerHandle {
   const stopSigtermGraceMs = opts.timing?.stopSigtermGraceMs ?? STOP_SIGTERM_GRACE_MS
 
   let child: ChildProcess | null = null
+  /** Latest re-minted join token, or null to use whatever `opts.env` carries. */
+  let currentJoinToken: string | null = null
   let attempt = 0
   let stopped = false
   let backoffTimer: NodeJS.Timeout | null = null
@@ -81,7 +99,27 @@ export function startLocalRunner(opts: LocalRunnerOpts): LocalRunnerHandle {
     const delay = backoffMs[attempt]
     attempt += 1
     opts.logger(`[local-runner] restart in ${delay}ms (attempt ${attempt}/${backoffMs.length})`)
-    backoffTimer = setTimeout(spawnChild, delay)
+    backoffTimer = setTimeout(() => {
+      // Refresh the join token before respawning: the old one may be spent, in
+      // which case reusing it makes every retry fail identically (see
+      // `mintJoinToken`). Best-effort — a mint failure still gets the plain retry.
+      if (!opts.mintJoinToken) {
+        spawnChild()
+        return
+      }
+      void opts
+        .mintJoinToken()
+        .then((token) => {
+          if (token) {
+            currentJoinToken = token
+            opts.logger('[local-runner] minted a fresh join token for restart')
+          }
+        })
+        .catch((err) => {
+          opts.logger(`[local-runner] join-token re-mint failed: ${String(err)}`)
+        })
+        .finally(() => spawnChild())
+    }, delay)
   }
 
   function spawnChild(): void {
@@ -90,7 +128,9 @@ export function startLocalRunner(opts: LocalRunnerOpts): LocalRunnerHandle {
     const proc = spawn(opts.execPath, [opts.scriptPath], {
       env: {
         ...opts.env,
-        ELECTRON_RUN_AS_NODE: '1'
+        ELECTRON_RUN_AS_NODE: '1',
+        // A re-minted token overrides the (possibly spent) one in `opts.env`.
+        ...(currentJoinToken ? { SLAYZONE_HUB_JOIN_TOKEN: currentJoinToken } : {})
       },
       stdio: ['pipe', 'pipe', 'pipe']
     })

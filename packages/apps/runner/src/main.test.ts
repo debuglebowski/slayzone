@@ -45,9 +45,11 @@ describe('createHubRequestHandler dispatch table', () => {
 
   it('routes implemented methods (git.isGitRepo does not throw unimplemented)', async () => {
     const { handle } = makeDispatch()
-    // /tmp is inside allowedRoots but not a git repo → resolves to { isRepo: false }.
+    // /tmp is inside allowedRoots but not a git repo → resolves to
+    // { isGitRepo: false } (the key the SHARED result schema declares; this test
+    // used to assert the runner's own divergent `isRepo`).
     const result = await handle('git.isGitRepo', { path: '/tmp' })
-    expect(result).toEqual({ isRepo: false })
+    expect(result).toEqual({ isGitRepo: false })
   })
 
   it('acks runner.shutdown and then triggers the shutdown callback', async () => {
