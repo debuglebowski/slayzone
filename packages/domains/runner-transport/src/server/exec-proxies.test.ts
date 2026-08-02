@@ -14,7 +14,6 @@ import {
   createRemoteWorktreeAdapters,
   createRoutingProcessBackend,
   createRoutingPtyBackend,
-  NoRunnerAvailableError,
   type PtyExitEvent,
   type RoutingGateway
 } from './exec-proxies'
@@ -104,14 +103,22 @@ const procSpec = (over: Partial<ProcSpawnSpec> = {}): ProcSpawnSpec => ({
 // ===========================================================================
 
 describe('createRoutingPtyBackend', () => {
-  it('throws NoRunnerAvailableError when no runner resolves (never spawns on the hub)', () => {
+  it('runs locally (no gateway traffic) when resolveRunnerId returns null', () => {
     const gateway = new FakeGateway()
-    const backend = createRoutingPtyBackend({ gateway, resolveRunnerId: () => null })
+    const localHandle: PtyHandle = {
+      pid: 7,
+      process: 'bash',
+      onData: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      write: () => {},
+      resize: () => {},
+      kill: () => {}
+    }
+    const local: PtyBackend = { spawn: vi.fn(() => localHandle) }
+    const backend = createRoutingPtyBackend({ gateway, local, resolveRunnerId: () => null })
 
-    // Runners run the agents: an unresolved runner is a hard, visible failure. It
-    // used to fall through to an in-process spawn, which made "which machine ran
-    // this?" an invisible property of DB state.
-    expect(() => backend.spawn(ptySpec({ runnerId: null }))).toThrow(NoRunnerAvailableError)
+    expect(backend.spawn(ptySpec({ runnerId: null }))).toBe(localHandle)
+    expect(local.spawn).toHaveBeenCalledTimes(1)
     expect(gateway.calls).toHaveLength(0)
   })
 
@@ -337,11 +344,19 @@ describe('createRoutingPtyBackend', () => {
 // ===========================================================================
 
 describe('createRoutingProcessBackend', () => {
-  it('throws NoRunnerAvailableError when no runner resolves', () => {
+  it('runs locally when resolveRunnerId returns null', () => {
     const gateway = new FakeGateway()
-    const backend = createRoutingProcessBackend({ gateway, resolveRunnerId: () => null })
+    const localHandle: ProcHandle = {
+      pid: 3,
+      onData: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      kill: () => {}
+    }
+    const local: ProcessBackend = { spawn: vi.fn(() => localHandle) }
+    const backend = createRoutingProcessBackend({ gateway, local, resolveRunnerId: () => null })
 
-    expect(() => backend.spawn(procSpec({ runnerId: null }))).toThrow(NoRunnerAvailableError)
+    expect(backend.spawn(procSpec({ runnerId: null }))).toBe(localHandle)
+    expect(local.spawn).toHaveBeenCalledTimes(1)
     expect(gateway.calls).toHaveLength(0)
   })
 
@@ -503,20 +518,15 @@ describe('createRemoteWorktreeAdapters', () => {
     expect(gateway.calls).toHaveLength(0)
   })
 
-  it('throws for every routable method when no runner resolves', async () => {
+  it('degrades every routable method to local when no runner resolves', async () => {
     const gateway = new FakeGateway()
-    const local = makeLocalWorktrees()
+    const local = makeLocalWorktrees({ isGitRepo: vi.fn(async () => true) })
     const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveRunnerId: () => null })
 
-    // WORKSPACE work must land on the SAME machine as the agent that will use it,
-    // so "no runner" cannot silently mean "do it on the hub".
-    await expect(adapters.isGitRepo(TASK, '/repo')).rejects.toThrow(NoRunnerAvailableError)
-    await expect(adapters.pathExists(TASK, '/x')).rejects.toThrow(NoRunnerAvailableError)
-    await expect(adapters.createWorktree(TASK, '/r', '/wt', 'b')).rejects.toThrow(
-      NoRunnerAvailableError
-    )
-    // …but HUB-storage ops keep working with no runner at all (archiving a task
-    // must not require one).
+    expect(await adapters.isGitRepo(TASK, '/repo')).toBe(true)
+    expect(local.isGitRepo).toHaveBeenCalledWith(TASK, '/repo')
+    // HUB-storage ops are local by DESIGN (not fallback) — they never route even
+    // WITH a runner, because artifacts live under the hub's own storage.
     expect(await adapters.hubPathExists('/storage/artifacts/x')).toBe(false)
     await adapters.removeArtifactDir('/storage/artifacts/x')
 
@@ -549,31 +559,46 @@ describe('createRemoteWorktreeAdapters', () => {
 // `request` throws (so any accidental routing is a hard failure).
 // ===========================================================================
 
-describe('no-runner: every exec kind fails loudly, nothing reaches the gateway', () => {
+describe('no-runner fall-through (byte-identical to local)', () => {
   class ExplodingGateway extends FakeGateway {
     override request<T = unknown>(_runnerId: string, method: string, _params?: unknown): Promise<T> {
       throw new Error(`a no-runner spawn must never reach the gateway (got ${method})`)
     }
   }
 
-  it('pty/proc/worktree all throw NoRunnerAvailableError', async () => {
+  it('pty/proc/worktree all resolve to local, zero gateway traffic', async () => {
     const gateway = new ExplodingGateway()
 
-    // The invariant, in one place: with no runner there is nowhere to run, and the
-    // hub must not quietly become the execution host. Each of these used to
-    // succeed in-process.
-    const pty = createRoutingPtyBackend({ gateway, resolveRunnerId: () => null })
-    expect(() => pty.spawn(ptySpec({ runnerId: null }))).toThrow(NoRunnerAvailableError)
+    const ptyHandle: PtyHandle = {
+      pid: 11,
+      process: 'bash',
+      onData: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      write: () => {},
+      resize: () => {},
+      kill: () => {}
+    }
+    const localPty: PtyBackend = { spawn: vi.fn(() => ptyHandle) }
+    const pty = createRoutingPtyBackend({ gateway, local: localPty, resolveRunnerId: () => null })
+    expect(pty.spawn(ptySpec({ runnerId: null }))).toBe(ptyHandle)
 
-    const proc = createRoutingProcessBackend({ gateway, resolveRunnerId: () => null })
-    expect(() => proc.spawn(procSpec({ runnerId: null }))).toThrow(NoRunnerAvailableError)
-
-    const wt = createRemoteWorktreeAdapters({
+    const procHandle: ProcHandle = {
+      pid: 22,
+      onData: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      kill: () => {}
+    }
+    const localProc: ProcessBackend = { spawn: vi.fn(() => procHandle) }
+    const proc = createRoutingProcessBackend({
       gateway,
-      local: makeLocalWorktrees(),
+      local: localProc,
       resolveRunnerId: () => null
     })
-    await expect(wt.isGitRepo(TASK, '/repo')).rejects.toThrow(NoRunnerAvailableError)
+    expect(proc.spawn(procSpec({ runnerId: null }))).toBe(procHandle)
+
+    const localWt = makeLocalWorktrees({ isGitRepo: vi.fn(async () => true) })
+    const wt = createRemoteWorktreeAdapters({ gateway, local: localWt, resolveRunnerId: () => null })
+    expect(await wt.isGitRepo(TASK, '/repo')).toBe(true)
 
     expect(gateway.calls).toHaveLength(0)
   })
@@ -584,7 +609,7 @@ describe('no-runner: every exec kind fails loudly, nothing reaches the gateway',
 // ===========================================================================
 
 describe('worktree routing is per-task', () => {
-  it('routes each task to ITS runner; an unassigned task has nowhere to run', async () => {
+  it('routes each task to ITS runner and keeps an unassigned task local', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
     const local = makeLocalWorktrees({ isGitRepo: vi.fn(async () => true) })
@@ -607,11 +632,9 @@ describe('worktree routing is per-task', () => {
     expect(routed).toHaveLength(2)
     expect(routed.map((c) => c.runnerId)).toEqual(['runner-7', 'runner-9'])
 
-    // A task bound to nothing does not silently run on the hub.
-    await expect(wt.isGitRepo('task-unassigned', '/repo-c')).rejects.toThrow(
-      NoRunnerAvailableError
-    )
-    expect(local.isGitRepo).not.toHaveBeenCalled()
+    // A task bound to nothing falls through to the in-process adapter.
+    await wt.isGitRepo('task-unassigned', '/repo-c')
+    expect(local.isGitRepo).toHaveBeenCalledWith('task-unassigned', '/repo-c')
   })
 
   it('awaits an async resolver (the real one reads the DB)', async () => {

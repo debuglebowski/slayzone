@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
  * Backend model (see `runners` router / store):
  *   - `tasks.runner_id`          : NULL = inherit the project default; else pinned.
  *   - `projects.default_runner_id`: NULL = no explicit default (exec uses the
- *     connected default runner); else a specific runner.
+ *     connected default runner, else runs in-process); else a specific runner.
  *   - `resolveTaskRunner`        : the effective (coalesced) runner — null = local.
  *
  * The task's own binding is only ever {inherit | pinned-to-runner}: `setTaskRunner`
@@ -63,15 +63,12 @@ export function RunnerCard({
     await resolvedQuery.refetch()
   }
 
-  // No runners enrolled → nothing can run. Say so plainly: agents, terminals and
-  // git work all execute on runners now, so this is an actionable empty state, not
-  // a benign "runs locally" note (which is what it used to say, back when the hub
-  // silently executed everything itself).
+  // No runners enrolled → runs locally. Keep the card minimal (don't hide it).
   if (runners.length === 0) {
     return (
       <div>
         <label className="mb-1 block text-sm text-muted-foreground">Runner</label>
-        <p className="text-sm text-muted-foreground">No runners — enroll one to run agents</p>
+        <p className="text-sm text-muted-foreground">No runners — runs locally</p>
       </div>
     )
   }

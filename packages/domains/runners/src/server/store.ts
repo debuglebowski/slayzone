@@ -304,8 +304,8 @@ export async function setTaskRunner(
   await db.run(`UPDATE tasks SET runner_id = ? WHERE id = ?`, [runnerId, taskId])
 }
 
-/** `null` = no explicit default; agents fall back to the connected default
- *  runner (see `resolveTaskRunnerIdOrDefault`). It does NOT mean "run on the hub". */
+/** `null` = no explicit default; exec falls back to the connected default runner,
+ *  else an in-process spawn. */
 export async function setProjectDefaultRunner(
   db: SlayzoneDb,
   projectId: string,

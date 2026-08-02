@@ -69,10 +69,10 @@ beforeEach(() => {
 })
 
 describe('RunnerCard', () => {
-  it('shows an actionable empty state when no runners are enrolled', () => {
+  it('shows a minimal "runs locally" state when no runners are enrolled', () => {
     runnersData = []
     render(<RunnerCard taskId="task-1" taskRunnerId={null} projectDefaultRunnerId={null} />)
-    expect(screen.getByText('No runners — enroll one to run agents')).toBeDefined()
+    expect(screen.getByText('No runners — runs locally')).toBeDefined()
     // No select rendered in the empty state.
     expect(screen.queryByTestId('runner-select')).toBeNull()
   })
