@@ -51,7 +51,11 @@ import {
   resolveUserShell,
   getShellStartupArgs
 } from '../shell-env'
-import { shouldShellFallback, buildRecoveryMessage } from '../pty-exit-strategy'
+import {
+  shouldShellFallback,
+  buildRecoveryMessage,
+  decideRecoveryAdoption
+} from '../pty-exit-strategy'
 import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
 import { filterBufferData } from '../filter-buffer-data'
@@ -2399,13 +2403,26 @@ export async function createPty(
           }
 
           // #5: Shell fallback — spawn interactive shell when AI provider exits
-          // non-zero. Suppressed for a stale session (handled by the overlay) and
-          // for remote sessions (runnerId != null — the runner owns its shell).
-          if (runnerId == null && shouldShellFallback(exitCtx)) {
+          // non-zero. Suppressed only for a stale session (the "session expired"
+          // overlay handles that case).
+          //
+          // Runs for RUNNER-ROUTED sessions too. It used to be gated on
+          // `runnerId == null` back when a runner was the exotic case and a local
+          // spawn was the norm; since every pty routes through a runner that gate
+          // disabled the feature outright — an agent that crashed left a dead pane
+          // with no recovery shell, on the ONLY path that exists. What actually
+          // differs remotely is the SPAWN CALL, not the recovery semantics: a
+          // remote spawn is a network round-trip, so it cannot run inside this
+          // synchronous onExit callback. Hence the async continuation below —
+          // everything after the spawn (buffer/seq bookkeeping, handler
+          // re-attachment, title polling) is shared, so the two paths cannot drift.
+          if (shouldShellFallback(exitCtx)) {
             const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
             const previousArgs = [...usedArgs]
-            try {
-              const fallbackShellPty = spawn(spawnFile, shellOnlyArgs)
+
+            // Adopt a freshly-spawned recovery shell as this session's pty. Shared
+            // verbatim by both paths; the ONLY difference upstream is sync vs await.
+            const adoptRecoveryShell = (fallbackShellPty: pty.IPty): void => {
               usedShellFallback = true
               ptyProcess = fallbackShellPty
               session.pty = fallbackShellPty
@@ -2438,15 +2455,17 @@ export async function createPty(
                   exitCode,
                   mode: terminalMode,
                   previousArgs,
-                  fallbackArgs: shellOnlyArgs
+                  fallbackArgs: shellOnlyArgs,
+                  runnerId
                 }
               })
 
               armStartupTimeout(fallbackShellPty)
               attachPtyHandlers(fallbackShellPty)
               startTitlePolling(session, fallbackShellPty)
-              return
-            } catch (fallbackErr) {
+            }
+
+            const recordFallbackFailure = (fallbackErr: unknown): void => {
               recordDiagnosticEvent({
                 level: 'error',
                 source: 'pty',
@@ -2456,9 +2475,54 @@ export async function createPty(
                 message: (fallbackErr as Error).message,
                 payload: {
                   shell: spawnFile,
-                  attemptedArgs: shellOnlyArgs
+                  attemptedArgs: shellOnlyArgs,
+                  runnerId
                 }
               })
+            }
+
+            if (runnerId != null) {
+              // Remote: the spawn is a round-trip, so finalize is deferred to the
+              // continuation rather than falling through synchronously below. On
+              // failure we finalize there — the session must never be left with a
+              // dead pty and no exit recorded.
+              void spawnRemote(spawnFile, shellOnlyArgs).then(
+                (fallbackShellPty) => {
+                  // The session can be torn down (tab closed, task killed, app
+                  // quitting) while the spawn is in flight — the local path cannot
+                  // race this way because it spawns synchronously inside onExit.
+                  // The decision is `decideRecoveryAdoption` (pure + unit-tested:
+                  // the three conditions fail independently and only the happy
+                  // path is reachable from e2e).
+                  const verdict = decideRecoveryAdoption({
+                    finalized,
+                    sessionReplaced: sessions.get(sessionId) !== session,
+                    isShuttingDown
+                  })
+                  if (verdict.action === 'discard') {
+                    try {
+                      fallbackShellPty.kill()
+                    } catch {
+                      // Already gone — nothing to clean up.
+                    }
+                    if (verdict.finalize) finalizeSessionExit(exitCode)
+                    return
+                  }
+                  adoptRecoveryShell(fallbackShellPty)
+                },
+                (fallbackErr: unknown) => {
+                  recordFallbackFailure(fallbackErr)
+                  finalizeSessionExit(exitCode)
+                }
+              )
+              return
+            }
+
+            try {
+              adoptRecoveryShell(spawn(spawnFile, shellOnlyArgs))
+              return
+            } catch (fallbackErr) {
+              recordFallbackFailure(fallbackErr)
             }
           }
 

@@ -2,7 +2,11 @@
  * Tests for PTY exit strategy decision logic.
  * Run with: npx tsx packages/domains/terminal/src/main/pty-exit-strategy.test.ts
  */
-import { shouldShellFallback, buildRecoveryMessage } from './pty-exit-strategy.js'
+import {
+  shouldShellFallback,
+  buildRecoveryMessage,
+  decideRecoveryAdoption
+} from './pty-exit-strategy.js'
 
 let passed = 0
 let failed = 0
@@ -86,6 +90,57 @@ describe('shouldShellFallback', () => {
 
   test('true for a genuine non-zero crash on resume (not stale)', () => {
     expect(shouldShellFallback({ ...base, exitCode: 1, resuming: true, isStale: false })).toBe(true)
+  })
+})
+
+// --- decideRecoveryAdoption ---
+//
+// Guards the runner-routed recovery shell. The fallback used to be gated on
+// `runnerId == null`, which silently disabled it once runners ran every pty (a
+// crashed agent left a dead pane with no recovery shell). Enabling it remotely
+// introduced a window the local path never had: the spawn is a network
+// round-trip, so the session can be torn down while it is in flight. Only the
+// happy path is reachable from e2e, hence these.
+
+const adopt = { finalized: false, sessionReplaced: false, isShuttingDown: false }
+
+describe('decideRecoveryAdoption', () => {
+  test('adopts when the session is still live', () => {
+    expect(decideRecoveryAdoption(adopt).action).toBe('adopt')
+  })
+
+  test('discards when the exit was already finalized — and does NOT re-finalize', () => {
+    const v = decideRecoveryAdoption({ ...adopt, finalized: true })
+    expect(v.action).toBe('discard')
+    // A concurrent path already reported the exit; finalizing again would be
+    // redundant (it is idempotent, but the verdict must say so explicitly).
+    expect(v.action === 'discard' && v.finalize).toBe(false)
+  })
+
+  test('discards + finalizes when the session id was replaced (tab closed / reused)', () => {
+    // Adopting here would attach a live pty to a session nothing owns, and the
+    // original exit would never be reported — a permanently "running" tab.
+    const v = decideRecoveryAdoption({ ...adopt, sessionReplaced: true })
+    expect(v.action).toBe('discard')
+    expect(v.action === 'discard' && v.finalize).toBe(true)
+  })
+
+  test('discards + finalizes during shutdown', () => {
+    // The session map is still intact on quit, so the identity check alone would
+    // wrongly adopt — spawning a shell into an app that is going away.
+    const v = decideRecoveryAdoption({ ...adopt, isShuttingDown: true })
+    expect(v.action).toBe('discard')
+    expect(v.action === 'discard' && v.finalize).toBe(true)
+  })
+
+  test('finalized wins over a concurrent replacement (no double finalize)', () => {
+    const v = decideRecoveryAdoption({
+      finalized: true,
+      sessionReplaced: true,
+      isShuttingDown: true
+    })
+    expect(v.action).toBe('discard')
+    expect(v.action === 'discard' && v.finalize).toBe(false)
   })
 })
 
