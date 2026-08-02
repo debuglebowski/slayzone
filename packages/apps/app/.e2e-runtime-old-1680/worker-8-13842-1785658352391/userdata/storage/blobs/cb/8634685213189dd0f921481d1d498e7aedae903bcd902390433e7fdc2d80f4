@@ -1,0 +1,30 @@
+# Layout 4 — CRM split (record left, workstream right)
+
+Left = compact metadata stack (Details/Labels/Connected/Versions). Right = Notes/Tasks/Activity always on screen, side by side with the record. Annotations promoted to co-equal.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ Tools / Hammer drill  [v3 Draft]                             [Publish] [⋮]       │
+├───────────────────────────────┬──────────────────────────────────────────────────┤
+│ Details                       │  Notes │ Tasks │ Activity                        │
+│  Name     Hammer drill        │ ┌──────────────────────────────────────────────┐ │
+│  Power    1100 W              │ │ [＋ Add note…]                               │ │
+│  Weight   2.9 kg              │ │                                              │ │
+│ ───────────────────────────── │ │ ▸ "Check chuck wear"                         │ │
+│ Labels                        │ │    Kalle · 2d ago                            │ │
+│  ◉ heavy ◉ rental [+]         │ │                                              │ │
+│ ───────────────────────────── │ │ ▸ "Manual PDF linked in description"         │ │
+│ Connected          [+ add]    │ │    Anna · 5d ago                             │ │
+│  → Site kit A                 │ │                                              │ │
+│  ← Depot 7 [v2]               │ │                                              │ │
+│  ← Crew North                 │ │                                              │ │
+│ ───────────────────────────── │ │                                              │ │
+│ Versions                      │ │                                              │ │
+│  ● v3 Draft  ○ v2  ○ v1       │ │                                              │ │
+│  [Publish] [New version]      │ └──────────────────────────────────────────────┘ │
+└───────────────────────────────┴──────────────────────────────────────────────────┘
+```
+
+**Pros:** write a note while reading the record — no scroll/tab dance; clear "facts vs work" split.
+**Cons:** metadata column gets long w/ many fields (scrolls independently); annotations get prime real estate even when empty.
+**Best when:** notes/tasks/activity are used daily, i.e. instances are living work objects, not reference data.

@@ -1,0 +1,227 @@
+# SlayZone Chromium migration — handoff to fresh orchestrator session
+
+You are taking over a troubled migration. Read every section. Do not skim. The previous orchestrator drifted, and this document is the corrective.
+
+---
+
+## Why this document exists
+
+The user (project owner) has lost confidence in the previous orchestration because I (previous orchestrator) took phase-agent exit-criteria reports at face value, never cross-validated composition against the Electron reference, and produced a fork that renders but does not function. The project is roughly 60% complete at surface level and perhaps 25% complete at functional level. Do not repeat the same mistakes. The user will not tolerate another drift.
+
+Goal: bring the SlayZone Chromium fork to **complete feature parity with the Electron app — in both function and looks**. The Electron app at `packages/apps/app/` is the source of truth. Your job ends only when launching the fork is indistinguishable from launching the Electron app.
+
+---
+
+## 1. Project context (minimal recap — read the full bootstrap asset for depth)
+
+- **SlayZone Chromium** = migration of the SlayZone desktop task-management app from Electron 41 onto a Chromium 148.0.7778.40 fork + Bun sidecar. Single-author, arm64 Mac only, no CI.
+- All surfaces are reborn as `chrome://slayzone-<name>/` WebUIs served from `packages/webui/<region>/dist` via `slayzone::ConfigureBundleSource`.
+- Bun sidecar owns SQLite, node-pty, Convex browser, file watchers, OS proxies. Unix-socket JSON-RPC to the fork's C++ `SlayzoneSidecarClient`. Mojo interfaces between region JS and C++ hosts.
+- **Authoritative reference assets on parent task `6a07e0b7-a1eb-46e8-b1d9-f908ef29d292`**: `cd3e6990` (session-bootstrap.md — full state), `49d1b20e` (Part I orchestrator brief), `1dce3dab` (execution plan), `488d7ef5` (holy-shit path Phase 7.1 spike).
+- Electron build at `packages/apps/app/` must keep running as parity baseline until Phase 18. Do not delete it.
+- Chromium pin stays at 148.0.7778.40. Xcode 26 (SDK 26.0). Patches live in `patches/chromium/`.
+
+---
+
+## 2. Honest snapshot of current state
+
+### What renders (surface-level)
+
+At `git log --oneline` (run it to confirm), the fork now has patches 0017–0050-ish landing these regions as dedicated `chrome://slayzone-<x>/` WebUIs:
+
+| Region | Patch | Functional? |
+|---|---|---|
+| statusbar (7.1) | 0017 | Read-only snapshot |
+| tabbar (7.2) | 0020 | Renders tabs; switch may not persist |
+| projects (7.3) | 0018 | Read-only list |
+| tools (7.9) | 0019 | Read-only state |
+| tasklist/kanban (7.4) | 0021 | Renders; **drag does not persist** |
+| sidebar (7.5) | part of 0021 | Read-only |
+| taskheader (7.6) | part of 0021 | Read-only |
+| browserchrome (7.8) | 0034 (in 827624ef) | URL bar renders; inline tab integration partial |
+| terminal (7.7) | in `af0e5e1d` | xterm + sidecar PTY streaming scaffolded; not user-verified |
+| home panels (8.1–8.4): automations, processes, test, git | 0023–0027 | Render; mutations unverified |
+| home-mode swap (8.5) | 5cb6245c | **Flawed slot-swap, not layout-tree swap** — superseded by iteration-2 |
+| overlay pages (9.1–9.3): leaderboard, usage, context | 0035 | Render; switcher UI incomplete |
+| overlay routing (9.4) | 115ed4f0 | Partial; needs CLI/ESC integration |
+| dialog framework (10.1) | 919bc0b5 | Host renders dialog by id |
+| task/project/search/aux dialogs (10.2–10.5) | 6d76b844–c35f3508 | **Forms render; submit does NOT invoke RPC — resolve/cancel only** |
+| focus trap + ESC (10.6) | 965e99f0 | JS layer only |
+| settings shell + tabs (11.1–11.5) | 3d0bda8d–70f37c89 | Shell + Labs/Appearance/Worktrees landed; **Providers/Panels/Data/MCP/Diagnostics/About are deferred stubs** |
+| auth + session (16.1–16.2) | ec463c99, 1bf56949 | slayzone:// deep-link + session handlers; cross-WebUI cookie flow unverified |
+| Sparkle update check (16.3) | 0f842e57 | **Stubbed — no real EdDSA keys** |
+| crash sink (16.4) | 25fac6fa | Local JSON file only |
+| LayoutMode {kTaskDetail, kHome, kOverlay} | 0a228d44 + 4b2a609a890bf | **JUST LANDED. CLI-switchable via `--slayzone-layout-mode=<m>`. NOT yet tab-driven.** |
+| iteration seed | f868d60b | `SLAYZONE_SEED_DEMO=1` seeds 1 project + 3 tasks |
+
+### What does NOT work (the painful truth)
+
+1. **Writes are not wired end-to-end.** All `*Host` Mojo interfaces expose `GetSnapshot()` only. No `Create*`, `Update*`, `Delete*`, `Move*` mojoms exist. Dialogs resolve client-side and do nothing. Kanban drag does not persist. Create Task dialog is visual only.
+2. **Sidecar handlers are in-memory aggregators, not the 468 domain handlers.** Phase 3.1's parity ledger says 468 handlers are "host-routed," but the fork-side C++ hosts only call a small set of aggregator snapshot methods. The full domain CRUD surface is not wired through Mojo.
+3. **Layout mode switches only via CLI flag.** The user cannot click the home tab and see kanban full-width; they must relaunch with `--slayzone-layout-mode=home`. Tab-type auto-switch is deferred ("needs TabSnapshot.type"). Overlay trigger is deferred (Phase 9.4 follow-up).
+4. **Phases not started at all**: Phase 12 (onboarding + 13 tutorial scenes), Phase 13 (CodeMirror file editor), Phase 14 (splash + floating agent + leaderboard popout windows), Phase 15 (plugin panels + user web panels), Phase 17 (keyboard/focus/zen mode polish), Phase 18 (test retarget), Phase 19 (distribution).
+5. **Parity harness is half-built.** `tools/parity/compare.js` exists as a pixelmatch skeleton with 8/10 fork baselines. Electron-side CDP port is missing (electron-vite dev binary doesn't expose remote debugging). Only structural diffing is possible; pixel parity is untested.
+6. **Tests are partially ported.** Each phase's `.T` step claimed to copy tests into webui packages, but the C5 test-coverage ledger at `tools/parity-ledger/parity-ledger.csv` is incomplete. Phase 18 (full test retarget) never ran.
+7. **The fork paints upstream Chromium browser chrome behind the region grid.** Per Phase 5.6 fence — a stripped browser frame is still underneath the WebViews. User-visible in pixel comparisons. Not hidden cleanly.
+8. **Settings tabs Providers/Panels/Data/MCP/Diagnostics/About are placeholder stubs** committed as `0d063f55` with partial 11.4 MCP / 11.5 About in `39581aee`. They render a heading and nothing else.
+9. **Floating agent panel, splash screen, leaderboard popout are not yet auxiliary windows** — the Electron app spawns them as separate always-on-top `views::Widget`s (Phase 14). The fork has no multi-window support.
+10. **Onboarding + 13 tutorial scenes do not exist in the fork.** First-run experience is dead.
+
+### Subtask status on parent `6a07e0b7`
+
+**Closed** (but several under honest re-examination are only partially complete):
+- d77957d6 Phase 1 (legacy, scope absorbed)
+- 166f8b7f Phase 7.1 StatusBar spike
+- 5fabb895 Phase 7 task-detail (7.7 terminal in-tree recreated but not E2E-verified)
+- c503e2d0 Phase 8 home-tab panels (8.5 supplanted; writes unwired)
+- a7d49f36 Phase 9 overlay pages (9.4 routing needs UI trigger)
+- a61cd65f Phase 10 dialogs (submit path does not invoke RPC)
+- 6ada6a51 Phase 11 settings (5 tabs are deferred stubs)
+- 94394df4 Phase 16 auth/updates/crash (Sparkle stubbed, cross-WebUI auth unverified)
+- 067347f8 Iteration: seed + diagnose CRUD gap
+- 4e882078 Iteration: LayoutMode fidelity (CLI-only, tab-driven deferred)
+
+**Still open (never started or paused)**:
+- b793ccd4 Phase 12 — onboarding + tutorial
+- ef6b6d88 Phase 13 — file editor
+- 14220e3b Phase 14 — auxiliary windows
+- 649a256d Phase 15 — plugin panels + user web panels
+- e9c3ccce Phase 17 — keyboard/focus/zen
+- 4616dc02 Phase 18 — full-suite test retarget
+- ef50091f Phase 19 — distribution
+
+---
+
+## 3. Learnings — what the previous orchestrator did wrong
+
+You (fresh session) must not repeat these. Each one broke the migration.
+
+1. **Trusted agent-reported exit criteria without independent validation.** When an agent said "exit criteria met" and ran `slay tasks done`, I accepted it. I never launched the fork, never screenshotted it, never diffed against Electron. The user discovered composition drift in Phase 8.5 (home-mode slot-swap ≠ layout-tree swap) and wireframe-only empty states in Phase 11 handoff. Both were caught by the user, not me. **Do not be the orchestrator who relies on the user as QA.** Every phase closes with you launching the fork, taking a screenshot, and comparing to Electron.
+2. **Did not distinguish "renders" from "functions."** A region that shows a snapshot is not the same as a region the user can interact with. Kanban renders cards but drag does nothing. Dialogs open but submit does nothing. Treat `renders` and `CRUD works` as separate exit criteria on every phase.
+3. **Let phase agents self-defer hard parts under "budget" or "later phase."** Agents faced session budget ceilings and cleanly stood down with deferrals like "Providers/Panels tab = placeholder stub" or "Mojo write mojoms = patch 0050+." These deferrals accumulated. I did not track them in a single backlog. Maintain a single `DEFERRED.md` file at repo root. Any deferral lands there with a date, patch number, and concrete exit criteria. Drain it before declaring Phase X complete.
+4. **Parallelized agents that edited the same chromium/src registry files.** `chrome_browser_interface_binders_webui_parts_desktop.cc`, `slayzone_region_container.cc`, `slayzone_webui_registry.cc`, `webui_url_constants.cc`, `slayzone_browser_view.{h,cc}` are the serial bottleneck. When I ran Phase 7 R3 + Phase 9 + Phase 10 + Phase 11 concurrently, they collided, one yielded to another via memory files, and real work was parked. Cap parallel agents at 2, and only if they touch disjoint file sets (verify first — grep the relevant chromium/src files).
+5. **Re-closed subtasks repeatedly because `slay tasks done` from inside the agent PTY sometimes only echoed without updating state.** Verify closure with `slay tasks view <id> | grep Status` after marking done.
+6. **Did not build the full Electron reference locally and open it alongside the fork.** I was supervising blindfolded. There is a one-time step: build or install the current Electron app so `/Applications/SlayZone.app` or the dev build exists, and launch it next to every fork launch.
+7. **Listened to "make assumptions, document, prefer momentum" as "skip validation."** The user's momentum directive was about tactical decisions (default choices on architectural Qs), not about skipping visual/functional verification. Read it correctly: fast on defaults, never fast on "does this work?"
+
+---
+
+## 4. Protocol for the fresh orchestrator — non-negotiable
+
+Apply these every time. Not optional. If you catch yourself skipping a step because "the agent will handle it," re-read this section.
+
+### Before launching any phase agent
+
+1. Ensure Electron reference is runnable: `pnpm --filter @slayzone/app dev` (or whatever the current dev command is — verify in `packages/apps/app/package.json`). If it doesn't run, that's the first blocker — fix it.
+2. Ensure fork latest builds: `./scripts/chromium/build.sh` and `./scripts/chromium/run.sh -- --slayzone-layout-shell --slayzone-layout-mode=home --slayzone-webui-bundle-dir=$(pwd)/packages/webui --user-data-dir=$(mktemp -d)` with `SLAYZONE_SEED_DEMO=1` prefixed.
+3. Launch both, side by side. Screenshot each. Commit baselines to `docs/chromium/parity-baselines/{electron,fork}/<phase>.png`.
+
+### Every phase close
+
+1. Ask the agent to launch the fork and produce a screenshot for every region/mode in the phase scope.
+2. You (orchestrator) open both the agent's screenshot and the Electron equivalent side-by-side. Compare structure and pixels. Do not skip this because you're polling another PTY.
+3. Test the user flows. If it's a dialog phase, actually submit a dialog and verify the mutation landed in SQLite. If it's a settings phase, flip a toggle and verify it persists across a relaunch.
+4. Only after visual + functional validation does the subtask close.
+
+### Deferral discipline
+
+1. Every deferral lands in `DEFERRED.md` at repo root: `<date> | <phase> | <what was deferred> | <reason> | <concrete exit criteria to drain>`.
+2. A phase cannot close while anything in its scope is on `DEFERRED.md`. If the agent declares "deferred to Phase 17," that's fine — move the row to a Phase 17 section and block Phase 17 on it.
+
+### Parallelism discipline
+
+1. List the chromium/src files an agent will edit. If it overlaps with another active agent, serialize.
+2. Max 2 agents running. Never 3+. Collision recovery eats more time than you save.
+
+### Manual test cadence
+
+1. Every ~3 phase closures, the user performs a manual smoke. You produce the launch command + expected vs. actual screenshot diff before handing over.
+2. Between manual smokes, you do the visual verification yourself every phase close.
+
+---
+
+## 5. Gap analysis — what's left to reach full parity
+
+Organized by priority. Top of the list is most important.
+
+### Tier 1 — functional blockers (app is unusable without these)
+
+1. **Writes end-to-end.** Wire `Create*`, `Update*`, `Delete*`, `Move*` Mojo methods on every `*Host`. Add SQLite-backed sidecar handlers for every one. Route dialog submits to these methods. Verify persistence across relaunch. Without this, the fork is a read-only demo.
+2. **Dialog submit invoker path.** Phase 10 wired resolve/cancel; the actual form-submit-to-RPC bridge is missing. CreateTaskDialog must call `tasks.Create` sidecar method and close on success.
+3. **Kanban drag persistence.** `drag-to-column` → `tasks.UpdateStatus(task_id, column)` → SQLite. Verify column assignment survives relaunch.
+4. **Tab-type auto-switch for LayoutMode.** When user selects home tab, LayoutMode becomes kHome automatically. Requires `TabSnapshot.type` exposure via tabs.mojom.
+5. **Overlay trigger paths.** Cmd+K / shortcuts / buttons / ESC should set overlay mode. No CLI flag in production.
+6. **Cross-region state fan-out actually running.** Verify `@slayzone/state` transport delivers updates across regions within 1s. This was a Phase 4.4 claim that's unverified in production.
+7. **The 468 domain handlers host-routed.** Phase 3.1's parity ledger says they exist in sidecar. Verify every handler is reachable from at least one Mojo path. Gap analysis: for each handler, identify which region's *Host should expose it. Fill in missing mojoms.
+
+### Tier 2 — visual + composition parity
+
+1. **Pixel diff against Electron for every mode.** Requires fixing the electron-vite CDP port gap so the parity harness can drive Electron headlessly. Structural diff only (region present/absent) is done; pixel diff is not.
+2. **Upstream Chromium chrome hidden.** Phase 5.6 fence still leaves the browser frame painted behind the region grid. Decide: either extend the fence (fully remove chrome via patch) or document as intentional and mask via window positioning.
+3. **Electron-shape typography, spacing, icons, animations.** Regions render but do not match Electron pixel-for-pixel. Design-tokens + ui-kit packages (Phase 4.1, 4.2) were claimed complete but never verified against rendered output.
+4. **Multi-panel home layout.** Electron's home tab can show kanban + tools rail + possibly more simultaneously. Current fork's kHome hides everything except kanban. Needs a panel-manifest system.
+
+### Tier 3 — missing phases
+
+1. **Phase 12 — onboarding + 13 tutorial scenes.** Not started. First-run flow is dead.
+2. **Phase 13 — CodeMirror file editor.** Not started. `chrome://slayzone-editor/` does not exist. File open/edit/save is non-functional.
+3. **Phase 14 — auxiliary windows.** Splash, floating agent panel, leaderboard popout. Needs multi-Widget support in the fork. Not started.
+4. **Phase 15 — plugin panels + user web panels.** Sandboxed plugin WebViews + arbitrary URL panels. Not started.
+5. **Phase 17 — keyboard/focus/zen mode.** Shortcut matrix audit, native menu accelerators, focus chain, zen mode. Not started; deferred multi-panel home likely belongs here.
+6. **Phase 18 — full-suite test retarget.** Playwright swap from electron.launch to chromium.launch. Parity screenshot suite. Coverage gate. Not started.
+7. **Phase 19 — distribution.** Mac `.dmg`, signing, notarization, Sparkle appcast with real EdDSA keys. Not started.
+
+### Tier 4 — infrastructure follow-ups
+
+1. **Sparkle EdDSA keys.** Generated + committed to `tools/release/signing/`. Appcast.xml served from CDN. Currently stubbed.
+2. **Crash sink production path.** Local-file JSON is dev-only. Decide on HTTP endpoint + ship.
+3. **Electron build decommission.** Phase 18 exit. Do not delete until every phase above is verified complete.
+
+---
+
+## 6. Prioritized iteration backlog — the ordered plan
+
+Run these as iteration subtasks on parent `6a07e0b7`. They are ordered by user-visible impact. Do not start lower items until the upper item is validated at both functional and visual levels.
+
+1. **`iter-writes`** — wire end-to-end CRUD for tasks + projects. This is the biggest unlock. Agent scope: add Mojo `Create/Update/Delete/Move` mojoms per domain, C++ host implementations, sidecar SQLite-backed handlers, route dialog submits. Exit: user creates a project, creates 3 tasks, drags between columns, edits a task, deletes a task; all persist across relaunch. Screenshot proof.
+2. **`iter-layout-tab-switch`** — LayoutMode auto-switch on tab type. Expose `TabSnapshot.type` via tabs.mojom. Tabbar JS calls `host.SetLayoutMode(kHome or kTaskDetail)` on tab switch. Exit: clicking the home tab vs. a task tab produces the right composition with no CLI flag. Screenshot proof.
+3. **`iter-overlay-trigger`** — overlay mode reachable via Cmd+K / leaderboard button / shortcuts / ESC. Exit: no CLI flag needed to enter overlay. Screenshot proof.
+4. **`iter-parity-electron-cdp`** — unblock Electron-side CDP port so the parity harness diffs fork vs. Electron pixel-by-pixel. Exit: `tools/parity/compare.js` produces a diff report per mode + region with real baselines. Pixel diff < 5% threshold per region.
+5. **`iter-visual-parity`** — per-region pixel tune-up (typography, spacing, icons, borders, animations) until diff is < 2%. Iterate region-by-region.
+6. **`iter-settings-full-tabs`** — drain the Providers/Panels/Data/MCP/Diagnostics/About deferred stubs. Each tab functional end-to-end.
+7. **Phase 12 onboarding + tutorial.** After writes work (tutorial uses CRUD).
+8. **Phase 13 file editor.** Independent surface.
+9. **Phase 14 auxiliary windows.** Multi-Widget support.
+10. **Phase 15 plugin panels.** Depends on auth flows being solid.
+11. **Phase 17 keyboard/focus/zen + multi-panel home.** Polish pass.
+12. **Phase 18 test retarget.** Gates on all surfaces solid.
+13. **Phase 19 distribution.** Gates on Phase 18.
+
+---
+
+## 7. Tools and shortcuts you should know
+
+- Parent task for all migration subtasks: `6a07e0b7-a1eb-46e8-b1d9-f908ef29d292`. Open with `slay tasks view 6a07e0b7`.
+- Key assets on parent: `cd3e6990` (session-bootstrap.md), `49d1b20e` (orchestrator-brief.md), `1dce3dab` (execution-plan.md), `488d7ef5` (holy-shit-path.md), this asset (you are reading it).
+- Launch fork: `SLAYZONE_SEED_DEMO=1 ./scripts/chromium/run.sh -- --slayzone-layout-shell --slayzone-layout-mode=<home|task-detail|overlay> --slayzone-webui-bundle-dir=$(pwd)/packages/webui --user-data-dir=$(mktemp -d)`
+- Launch Electron: `pnpm --filter @slayzone/app dev` (verify current command in `packages/apps/app/package.json`)
+- Parity harness: `./scripts/chromium/compare-with-electron.sh` (needs electron CDP fix to be truly useful)
+- Memory files live at `~/.claude/projects/-Users-Kalle-dev-projects-slayzone-chromium/memory/` — agent-shared notes live there, read them when starting a phase.
+- `DEFERRED.md` at repo root — create this on your first day and make every agent write to it.
+
+---
+
+## 8. Opening instructions for the fresh session
+
+1. Read this entire asset before touching anything.
+2. Read `cd3e6990` (bootstrap) for architecture depth.
+3. `git log --oneline -30` to see what landed.
+4. Launch the fork (with seed + home mode) and take a screenshot. Launch Electron. Compare. Write down the first three visual gaps you see.
+5. Read `DEFERRED.md` if it exists; if not, create it and populate it from this asset's Tier 1/2/3 lists.
+6. Start the `iter-writes` subtask. This is the single most important piece of work remaining. Everything else builds on it.
+7. Before closing ANY subtask: launch the fork, screenshot, diff against Electron, run the user flow manually. If you can't validate, you can't close.
+8. Every three phase closures, hand the user a manual-test script + expected-vs-actual screenshot before asking them to QA.
+
+Write down what you intend to do in your first response. Commit to visual validation. Do not be the orchestrator who the user has to QA for.
+
+Good luck. Get the app functional. Get it visually right. Don't drift.

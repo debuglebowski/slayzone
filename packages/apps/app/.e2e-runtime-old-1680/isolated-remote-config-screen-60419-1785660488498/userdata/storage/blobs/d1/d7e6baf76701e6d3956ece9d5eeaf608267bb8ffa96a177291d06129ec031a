@@ -1,0 +1,28 @@
+---
+title: "Approach A — Notify then targeted refetch (RECOMMENDED)"
+---
+flowchart TD
+  subgraph S["SERVER — single Bun process"]
+    W["User B does a write<br/>(advance deal / log interaction / create account)"]
+    A["EventStore.append()<br/>runs inside sql.withTransaction"]
+    N["SELECT pg_notify('km_events', envelope)<br/>delivered to listeners on COMMIT"]
+    HUB["Stream hub<br/>ONE app-wide LISTEN<br/>fan-out by orgId (isolation enforced here)"]
+    RPC["getAccountHub / getOwed / getDemand<br/>existing SQL joins + decay decoration<br/>(SERVER READS UNCHANGED)"]
+  end
+  subgraph C["CLIENT — User A's browser"]
+    SSE["SSE subscriber<br/>GET /api/stream"]
+    MAP["map envelope to affected collections<br/>coalesce/debounce ~120ms"]
+    COL["TanStack DB query collections<br/>call .utils.refetch()"]
+    LQ["useLiveQuery on pages<br/>Dashboard / Accounts / AccountDetail / sidebar"]
+    UI["UI updates within ~1s, no manual refresh"]
+  end
+  W --> A --> N --> HUB
+  HUB -->|"TINY envelope only:<br/>id, subjectKind, subjectId,<br/>eventType, conceptName"| SSE
+  SSE --> MAP --> COL
+  COL -->|"refetch over HTTP"| RPC
+  RPC -->|"decorated rows back"| COL
+  COL --> LQ --> UI
+  TIMER["local timer tick (~60s)"] -->|"decay/momentum drift<br/>via pure engine fns, no refetch"| LQ
+
+  classDef good fill:#16351f,stroke:#3fb96a,color:#d7f5e0;
+  class RPC good;

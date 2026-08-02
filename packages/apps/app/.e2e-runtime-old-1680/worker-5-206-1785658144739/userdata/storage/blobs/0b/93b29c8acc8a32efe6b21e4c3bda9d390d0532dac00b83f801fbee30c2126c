@@ -1,0 +1,101 @@
+# VPM-1 — Service infrastructure maintained
+
+**Vanta control:** [VPM-1](https://app.eu.vanta.com/c/normain.com/controls?controlId=support-infra-patched)
+**Frameworks:** SOC 2 CC 6.6, CC 6.8, CC 7.2, CC 7.4, CC 8.1
+**Owner:** Kalle Hansson
+**Status when investigated:** 17/20 OK (3 failing) — drifted from brief's 18/20
+
+## Sources of truth used
+
+- **Vanta** (live) via `slay tasks browser` → control status, test results, document evidence requirements, framework mapping, policy linkage state.
+- **Google Drive** (authoritative for compliance) via `gws` → policies, procedures, risk acceptances. Local repo files not used as compliance source.
+- **slay tasks** (live) → sibling task scope.
+- `gh` not yet queried — would be next step for Dependabot evidence export.
+
+## Situation
+
+Brief said 2 failing. Actually **3 failing**: 1 test + 2 documents. Azure-side fully clean — failures are GitHub-side + missing evidence paperwork.
+
+### Failing items (Vanta, live)
+
+| # | Type | Item | Detail |
+|---|------|------|--------|
+| 1 | Test | High vulnerabilities identified in packages are addressed (GitHub Repo) | 17 Dependabot vulns in `normainofficial/normain` repo. Several **due today / +1d** per Vanta (npm: path-to-regexp, effect, tar ×7, lodash, …). Identical scope to sibling **#29**. |
+| 2 | Doc | Sample of remediated vulnerabilities | Quarterly. Wants tickets/reports showing high-sev findings remediated (timestamps, descriptions, remediation owners). |
+| 3 | Doc | Vulnerability scan | Quarterly. Wants screenshot of latest scan listing assets + vuln types + severities. |
+
+Both docs marked "Upload during SOC 2 observation window", recurrence = quarterly.
+
+### Azure / OS patching state (Vanta, live)
+
+**All 8 Azure tests pass** — Critical/High/Med/Low for Azure Container + Azure Server, plus "Vulnerability scanning is enabled (GitHub)". Brief's "Azure Update Manager / OS patch state" angle is a red herring — Vanta is happy with Azure-side patching today. No Azure work needed.
+
+### Authoritative policy (Drive)
+
+**[Normain] Operations Security Policy.pdf** — Drive `1hHUDDPPLSAMCgHtI2auuvgQ51yDFR1py`, v1.0.0, signed 2025-11-05 (Ryan Rich → Sara Landfors). Located in policies folder `1S0j62KyZCiD8w-DnrHjbPbf3jpLR1FAa`. Latest version confirmed (newer .docx drafts are pre-signing copies).
+
+**No standalone "Patch Management" or "Vulnerability Management" policy exists** in Drive — full policies folder enumerated; vuln/patch coverage lives in Operations Security Policy (§ Technical Vulnerability Management + Appendix A). So linking *this* policy to VPM-1 is correct.
+
+Patch SLAs (from § Technical Vulnerability Management):
+
+| Severity | Remediation Time |
+|---|---|
+| Critical | 30 days |
+| High | **60 days** |
+| Medium | 120 days |
+| Low / Informational | As needed |
+
+- Vuln scans: **quarterly** on public-facing production systems.
+- Critical/high → service ticket, assigned to system/app/platform owner.
+- "Service tickets or other forms of vulnerability remediation tracking for any vulnerability that cannot be remediated within the standard timeline must show a risk acceptance plan or planned remediation timeline."
+- Hardening (App. A): "All security patches identified as critical and high must be applied to systems within SLAs established in this policy."
+
+→ **Policy already exists, signed, current.** No policy authoring needed for VPM-1.
+
+### Risk-acceptance workflow active (Drive)
+
+Found in policies folder: **[Normain] Risk Acceptance — uuid GHSA-w5hq-g745-h8pq** (Drive `1ojoDY1Acg4oqVvt9eYA6FGhPzvsh8tHjsD53OceReDU`, drafted 2026-04-30 by Kalle, **pending Sara Landfors approval**). Confirms the policy's "risk acceptance plan" clause is in active use. Not directly relevant to VPM-1's failing items (this is **Medium**, belongs to sibling **#33**), but useful context for the "Sample of remediated vulnerabilities" doc — it's an example of the vuln-evaluation process producing documented outcomes.
+
+### Vanta policy linkage (Vanta, live)
+
+VPM-1 currently shows "No policies associated with this control". Operations Security Policy is the natural link (only Drive policy covering patch/vuln mgmt).
+
+## Solution
+
+| # | Failing item | Fix | Effort | Dedup |
+|---|---|---|---|---|
+| 1 | Test: GitHub High vulns | **Defer to sibling #29** — same 17 CVEs, same repo. VPM-1 auto-greens when #29 closes them. Items due today per Vanta — bump #29 priority. | 0 here | #29 owns it |
+| 2 | Doc: Sample of remediated vulnerabilities | Export GitHub Security → Dependabot **closed/fixed** alerts for the SOC 2 window (CSV/PDF; resolved date + merging-PR owner). Best done **after** #29 closes some — gives a richer high-sev sample. Until then, currently-closed alerts work. Could also include risk-acceptance memos as "process evidence". Upload to Vanta. | ~15 min | Output of #29 |
+| 3 | Doc: Vulnerability scan | Screenshot GitHub Security → Dependabot alerts overview (asset = repo, vuln type, severity column visible). Can do today. Upload to Vanta. | ~5 min | None |
+
+**Net VPM-1-specific effort:** ~20 min of doc work. Test failure resolves automatically once #29 lands.
+
+**Sequencing:** doc #3 today → #29 burns down 17 vulns → doc #2 from closed-Dependabot export. Both docs recur quarterly → consider scripting next cycle via `gh api`.
+
+**Optional follow-up:** link [Normain] Operations Security Policy (`1hHUDDPPLSAMCgHtI2auuvgQ51yDFR1py`) to VPM-1 in Vanta.
+
+## Actions taken
+
+- Opened Vanta VPM-1 detail panel via `slay tasks browser`; expanded test list; clicked failing items to read evidence requirements.
+- Confirmed Azure-side fully passing — no Azure Update Manager work needed.
+- **Drive audit (this revision):** enumerated full Normain policies folder (`1S0j62KyZCiD8w-DnrHjbPbf3jpLR1FAa`); confirmed no standalone Patch/Vuln Management policy; confirmed Operations Security Policy v1.0.0 (2025-11-05) is the latest signed version; read full policy content to extract SLAs and process clauses.
+- Found new artifact: Risk Acceptance Memo for uuid GHSA-w5hq-g745-h8pq (Medium, pending approval — relevant to sibling #33, not VPM-1's failures).
+- Inspected sibling tasks #11 / #29 / #33 / VPM-2 (#6) via `slay tasks` to confirm dedup.
+
+**Not taken (stop for shared changes):** no Vanta uploads, no GitHub PR work, no policy edits, no policy↔control linking, no risk-acceptance approval pings.
+
+## What changed in this revision (v3)
+
+- Removed all references to local repo files (`current-ucf/inventory/operations_security.txt` etc.) — those were not authoritative.
+- Replaced with Drive-sourced policy citations (file IDs, signing date).
+- Confirmed via Drive that **no separate Patch/Vuln Management policy exists** — Operations Security Policy is the right (only) authoritative source.
+- Added risk-acceptance workflow finding (active, in use).
+- Clarified that Vanta integration target = `normainofficial/normain` repo (per the risk-acceptance memo's wording).
+
+## Still unverified / open questions
+
+- Per-vuln status of the 17 failing High Dependabot CVEs — which are PR-open, in-flight, or candidates for risk-acceptance memos? (Need to inspect each in GitHub Security.)
+- Whether Vanta's "Sample of remediated vulnerabilities" doc accepts Dependabot exports as the "periodic vulnerability scan" referenced in its instructions, vs. expecting a host-based scanner output (Defender for Cloud, Snyk). Asking Vanta Agent or auditor would settle this.
+- Whether Vanta has any prior/historical "Sample of remediated vulnerabilities" doc archived (didn't search Vanta's Documents module exhaustively, only the failing-doc detail pages).
+- Bump #29 priority — items due today?
+- Link Operations Security Policy to VPM-1 in Vanta now, or batch with other unmapped controls?

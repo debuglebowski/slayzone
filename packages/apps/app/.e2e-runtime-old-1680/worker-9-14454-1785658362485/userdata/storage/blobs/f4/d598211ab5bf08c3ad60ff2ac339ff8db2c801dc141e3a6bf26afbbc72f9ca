@@ -1,0 +1,29 @@
+# Benchmark Data Skills
+
+Skills to mutate `data/` for the normain-competitor-benchmarks app.
+
+## Skill Table
+
+| # | Skill | Action | Files touched |
+|---|---|---|---|
+| 1 | `add-use-case` | Scaffold new UC (use-case.json, empty structure, dirs) | `data/<uc>/*` |
+| 2 | `edit-use-case-meta` | Change label/description | `data/<uc>/use-case.json` |
+| 3 | `add-competitor` | Append to registry | `data/competitors.json` |
+| 4 | `remove-competitor` | Drop from registry (+ optional run-dir cleanup) | `data/competitors.json` |
+| 5 | `add-question` | Append a question to UC structure | `data/<uc>/structure.json` |
+| 6 | `edit-question` | Modify existing question (text/groundTruth/depth/trap/pair) | `data/<uc>/structure.json` |
+| 7 | `remove-question` | Delete a question | `data/<uc>/structure.json` |
+| 8 | `edit-spreadsheet-columns` | Add/rename/remove columns | `data/<uc>/structure.json` |
+| 9 | `edit-spreadsheet-rows` | Add/edit/remove rows | `data/<uc>/structure.json` |
+| 10 | `add-run` | Scaffold new run (run.json + competitor dirs) | `data/<uc>/runs/<run>/*` |
+| 11 | `edit-run-meta` | Change date/notes/ground-truth snapshot | `data/<uc>/runs/<run>/run.json` |
+| 12 | `record-answer` | Upsert one answer for a competitor in a run | `data/<uc>/runs/<run>/<cid>/answers.json` |
+| 13 | `record-verdict` | Upsert one verdict + reason | `data/<uc>/runs/<run>/<cid>/verdicts.json` |
+| 14 | `edit-run-instructions` | Write per-competitor instructions.md | `data/<uc>/runs/<run>/<cid>/instructions.md` |
+
+## Open Questions
+
+1. Granularity — keep one-row-at-a-time (12, 13) or batch (`record-answers` takes whole array)?
+2. Drop add/edit/remove split — collapse 5+6+7 into one `edit-questions`?
+3. Validation — run `bun src/server/check.ts` after every write?
+4. Skill scope — project `.claude/skills/` or global `~/.claude/skills/`?

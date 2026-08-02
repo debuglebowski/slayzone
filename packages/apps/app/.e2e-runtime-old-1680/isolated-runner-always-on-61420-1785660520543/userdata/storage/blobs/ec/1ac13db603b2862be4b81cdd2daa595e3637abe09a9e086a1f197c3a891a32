@@ -1,0 +1,39 @@
+INPUT — HOME / DASHBOARD               (tab: Input)
+════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────┐
+│  ▓▓ biotracker                            [+]  │  ← header wordmark + plus?
+├──────────────────────────────────────────────┤
+│                                                │
+│  ┌──────────────────────────────────────────┐ │  ← Banner (only if
+│  │ ⚠  Enable notifications to send your      │ │    triggers exist &
+│  │    scheduled reminders. Tap to open        │ │    perm not granted)
+│  │    settings.                               │ │
+│  └──────────────────────────────────────────┘ │
+│                                                │
+│  SLEEP                              (section)  │  ← category.name
+│  ┌──────────────────────────────────────────┐ │
+│  │  Hours slept                          ›    │ │  ← CardContent (datapoint)
+│  ├──────────────────────────────────────────┤ │
+│  │  Sleep quality                        ›    │ │
+│  └──────────────────────────────────────────┘ │
+│                                                │
+│  MOOD                               (section)  │
+│  ┌──────────────────────────────────────────┐ │
+│  │  Overall mood                         ›    │ │
+│  ├──────────────────────────────────────────┤ │
+│  │  Energy                               ›    │ │
+│  └──────────────────────────────────────────┘ │
+│                                                │
+│   (empty state: "No entries / Click the plus   │
+│    button in the header to add one")           │
+│                                                │
+│                                         ╭────╮ │
+│                                         │ +  │ │  ← FAB, primary, 56px
+│                                         ╰────╯ │
+├──────────────────────────────────────────────┤
+│      ⌨ Input          📈 Charts                │  ← bottom tabs
+└──────────────────────────────────────────────┘
+
+tap card row → input--entry--list (datapointUid)
+tap FAB → action menu (quick add)

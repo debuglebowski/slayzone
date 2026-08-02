@@ -1,0 +1,82 @@
+# Step 2 — Content Verification
+
+## Goal
+For every claim that will appear in the new system description, confirm it against the authoritative source. Flag mismatches with the current doc.
+
+## Inputs
+- Step 1 output block (period, TSC, diagrams, approver)
+- Current doc as baseline of claims to re-check
+
+## Verification matrix
+
+### DC 1 — Company + services
+- Source: Drive (commercial deck, MSA, Trust Center)
+- Claims to verify: hosting modes (managed / customer-owned Azure), product description
+- Status:
+- Findings:
+
+### DC 2 — Commitments + requirements
+- Source: Drive (MSA, DPA, SLA), Vanta commitments
+- Claims to verify: 90% uptime, 2 interruptions/month ≤4h, service credits, 90-day retention, subprocessor flow
+- Status:
+- Findings:
+
+### DC 3 — Components
+- Source: repo + IaC + Vanta asset register
+- Claims to verify:
+  - Azure / Linux / PostgreSQL (vs current infra)
+  - Integrations: SharePoint, Google Drive, Box
+  - Third-party access list: 1Password, Cloudflare, GitHub, Linear, Azure, Miro, Slack — plus any missing (Vanta? BetterStack? Sentry?)
+  - Encryption: AES-256 at rest, TLS 1.2+ in transit, Azure Key Vault
+- Status:
+- Findings:
+
+### DC 4 — Incidents in period
+- Source: Linear (Security Incident Response), post-mortems in Drive
+- Claims to verify: March 31 2025 token incident; plus anything within the new audit period
+- Status:
+- Findings:
+
+### DC 5 — TSC controls (CC1–CC9)
+- Source: Vanta control register; for pipeline claims also repo
+- Claims to verify per CC: control IDs, named tools (CodeQL/Dependabot/Grype/OWASP ZAP/Terraform), cadences (quarterly council, annual pen test, annual access review, annual BCP exercise)
+- Cross-check governance cadence claims against Circleback
+- Status:
+- Findings:
+
+### DC 6 — CUECs
+- Source: Drive (contracts), current doc
+- Claims to verify: CUEC list still aligns with how customers integrate
+- Status:
+- Findings:
+
+### DC 7 — CSOCs
+- Source: Drive (Azure SOC2 report review evidence), Vanta sub-processors
+- Claims to verify: Azure carve-out scope, annual SOC2 review evidence
+- Status:
+- Findings:
+
+### DC 8 — Out-of-scope TSC
+- Source: scope decision from Step 1
+- Status:
+- Findings:
+
+### DC 9 — Significant changes in period
+- Source: git history, release notes, Linear change tickets
+- Claims to verify: which changes fall inside the new audit period
+- Status:
+- Findings:
+
+## Output
+A consolidated findings doc per DC section, ready to drive the rewrite. Flag every divergence from current doc.
+
+## Status
+- [ ] DC 1 verified
+- [ ] DC 2 verified
+- [ ] DC 3 verified
+- [ ] DC 4 verified
+- [ ] DC 5 verified
+- [ ] DC 6 verified
+- [ ] DC 7 verified
+- [ ] DC 8 verified
+- [ ] DC 9 verified

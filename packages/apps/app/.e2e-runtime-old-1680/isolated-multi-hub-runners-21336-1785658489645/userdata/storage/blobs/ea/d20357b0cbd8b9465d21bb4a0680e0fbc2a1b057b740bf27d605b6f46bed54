@@ -1,0 +1,18 @@
+flowchart TD
+    Cash[💰 Cash]
+    Spend[Spend lines]
+    Caps[Capabilities<br/>Brand · Quality · Capacity]
+    Market[Demand share]
+    Rev[Revenue]
+
+    Cash -->|funds| Spend
+    Spend -->|builds| Caps
+    Caps -->|drives| Market
+    Market -->|served| Rev
+    Rev -->|refills| Cash
+
+    Situations((⚡ Situations)):::sit -.-> Caps
+    Situations -.-> Market
+    Situations -.-> Cash
+
+    classDef sit fill:#ffe6cc,stroke:#d79b00

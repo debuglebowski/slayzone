@@ -1,0 +1,106 @@
+# Phase 4 — Electron client retarget (local + remote modes)
+
+> **Master plan**: `server-mode-implementation-plan.md` on parent task `1f788452-581e-429f-9427-a1d61e8a349b` (artifact id `1eecca69-7d62-4763-8300-a5e9e4fcf894`).
+>
+> **Read first** (in master): §1 Context, §2 Decisions, §3 Audit Findings, §7 Conventions, §9 Boundaries, §11 Deferred. Then this phase.
+>
+> Master is canonical for cross-cutting decisions; this artifact is the tactical home for this phase only.
+
+---
+
+## Phase scope
+
+Add the "Server URL" setting and a Local-vs-Remote toggle.
+
+**Tasks:**
+- [ ] Add react-query (TanStack Query) to renderer via `@trpc/react-query`. Memory note: `useTasksData` exposes `window.__slayzone_refreshData` — keep this contract working (or migrate callers).
+- [ ] tRPC client points at WS URL. Local mode: `ws://localhost:<embedded-port>`. Remote mode: user-entered URL.
+- [ ] **Local mode** behavior: Electron main starts the embedded server in-process (same code as `@slayzone/server` pkg, imported as a lib). Renderer connects via WS to localhost. Server stops when Electron exits.
+- [ ] **Remote mode** behavior: Electron main does **NOT** start the embedded server. Renderer connects to user-supplied URL. Health check on connect.
+- [ ] **Embedded-server failure handling**: if the in-process server fails to start or crashes in local mode, **auto-restart with exponential backoff**. Surface a user-visible error after repeated failures.
+- [ ] Settings UI: "Server URL" field + Local/Remote toggle. Switching modes prompts reload. "Migrate data" wizard visible if switching from local to remote (Phase 5).
+- [ ] When in remote mode: hide Electron-only features (browser panel via WCV).
+
+**Done criteria:** Electron app works identically to today in local mode (no perceptible regression). Switching to remote URL works against a `npx @slayzone/server` running elsewhere.
+
+---
+
+## Cross-phase dependencies
+
+- **Upstream**: Phase 2 (tRPC router for renderer to call), Phase 3 (`@slayzone/server` pkg both as embedded lib in local mode and as a process to connect to in remote mode).
+- **Downstream**: Phase 5 (migration wizard plugs into the Local↔Remote toggle).
+
+---
+
+## Phase-specific notes
+
+### Decisions taken at sub-plan time (2026-05-08)
+
+| Q | Decision | Why |
+|---|---|---|
+| react-query migration scope | **Keep all data hooks on vanilla client (incl. `useTasksData`).** `TrpcProvider` already mounts `QueryClientProvider`. | Audit: 173 files use `getTrpcVanillaClient()`, 0 use `trpc.X.useQuery/useMutation`. Rest of app is uniformly vanilla. Phase 4 done-criteria is "zero perceptible regression"; migrating one hook = inconsistent + risky. Infra mounted; phased migration is a future cleanup. `window.__slayzone_refreshData` contract preserved trivially. |
+| Mode-switch reload | **`app.relaunch() + app.exit()`** | Embedded-server start/skip is a boot-time decision in Electron main. Full process restart = simplest correct semantics. |
+| Auto-restart backoff | **Exp 1s/2s/4s/8s/16s, give up after 5 consecutive failures.** Reset counter after 60s of healthy uptime. | Standard. Surfaces toast on permanent failure. Healthy reset prevents flaky restarts over hours from triggering false-permanent. |
+| Hidden-feature scope | **Skip hiding** in this phase. Browser panel + other Electron-only features remain visible in Remote mode; they fail gracefully when invoked (tRPC error / no-op). | User decision. Hide pass deferred. Master §11d already lists browser panel as a known Remote regression. |
+
+### Mode-switch UX details
+
+- New settings keys (local SQLite, via existing `settings` router):
+  - `server_mode`: `'local'` (default) | `'remote'`
+  - `remote_server_url`: full WS URL incl. `/trpc` path, e.g. `ws://box.lan:7800/trpc` (default `''`)
+- Renderer boot: replace `getTrpcPort()` IPC call with new `getServerUrl()` IPC → returns `{ mode, url }`.
+- If `mode==='remote'` and `remote_server_url` is empty/invalid, render a pre-mount `RemoteConfigScreen` (outside `TrpcProvider`) offering: enter URL → save+relaunch, OR switch back to Local → save+relaunch.
+- Settings → new **Server** tab (between Data and Diagnostics):
+  - Radio: Local / Remote.
+  - URL input (enabled in Remote).
+  - "Validate" button: probes `GET /health` (strip `ws://`→`http://`, drop `/trpc`).
+  - "Save" persists via `settings.set` + shows confirm "Reload required" → calls new IPC `app.relaunch()` (= `app.relaunch()+app.exit(0)`).
+  - Cancel discards.
+- Validation is best-effort — server may be down at config time but reachable after relaunch. Mode switch always requires reload.
+- Local SQLite stays opened in both modes for settings/theme/tab store. In Remote mode, `linearSyncPoller` / `discoveryPoller` / `taskEvents` listeners are skipped (their effects on local DB are pointless when remote owns data).
+
+### Embedded-server auto-restart
+
+- New module: `packages/apps/app/src/main/embedded-server-supervisor.ts`.
+- Supervisor wraps `serverMod.startServer(...)`. On reject: schedule retry with `BACKOFF_MS[attempt]`, attempt++.
+- After 5 fails: `notifyEvents.emit('embedded-server-failed', { attempts, lastError })` and stop. Surfaced to renderer via new `app.onEmbeddedServerFailed` tRPC subscription (mirrors `onSettingsChanged` pattern); renderer shows toast.
+- On success: store handle, set timer that resets attempt counter after 60s of healthy uptime.
+- **Crash detection scope**: only startup-time failures (port-in-use, DB lock, registration throw) are recoverable in-process. True post-start crashes via `uncaughtException` kill the whole Electron process and are out of scope here. Revisit if/when observed — matches master §11 deferral spirit.
+
+### Hidden features in remote mode
+
+Skipped in phase 4 per Q4 decision. Browser panel (WCV), file dialogs, reveal-in-finder, processes panel, devtools toggle, floating-agent global shortcut, etc. all remain visible. They will fail gracefully or no-op when invoked in Remote mode. Polished hide-pass = follow-up phase.
+
+### Files to touch
+
+**Modified:**
+- `packages/apps/app/src/main/index.ts` — gate embedded-server boot on `server_mode`; wire supervisor; new IPC handlers (`getServerUrl`, `relaunch`).
+- `packages/apps/app/src/preload/index.ts` (+ types) — expose `getServerUrl`, `relaunch`.
+- `packages/apps/app/src/renderer/src/main.tsx` — swap `getTrpcPort` → `getServerUrl`; pre-mount `RemoteConfigScreen` for invalid Remote config.
+- `packages/domains/settings/src/client/UserSettingsDialog.tsx` — register Server tab.
+- `packages/shared/transport/src/server/routers/app.ts` — `onEmbeddedServerFailed` subscription.
+- `packages/apps/app/src/renderer/src/App.tsx` — subscribe + toast on `onEmbeddedServerFailed`.
+
+**New:**
+- `packages/apps/app/src/main/embedded-server-supervisor.ts`
+- `packages/domains/settings/src/client/tabs/ServerSettingsTab.tsx`
+- `packages/apps/app/src/renderer/src/components/RemoteConfigScreen.tsx`
+
+**Untouched on purpose:**
+- `useTasksData.ts` (and the 172 other vanilla call sites) — vanilla preserved.
+- Browser panel + WCV code — no hide pass.
+
+---
+
+## Verification checklist
+
+- [ ] Done criteria met (zero perceptible regression in local mode; remote mode connects + works)
+- [ ] Tests added per §5 of master ("Electron client retarget" row)
+- [ ] Existing E2E suite passes via new transport (master §5 "E2E (existing)" row)
+- [ ] Embedded-server auto-restart verified (kill child PID in dev, observe recovery)
+- [ ] `useTasksData` `window.__slayzone_refreshData` contract preserved
+- [ ] Cross-phase deps satisfied (Phase 2 + Phase 3 done)
+- [ ] Mode toggle: Local→Remote→Local round-trip leaves coherent state
+- [ ] Empty Remote URL → `RemoteConfigScreen` renders + recovery works
+- [ ] Health-check button: valid ✓ / invalid ✗ / unreachable ✗ with reason
+- [ ] `pnpm typecheck && pnpm lint && pnpm lint:theme` clean

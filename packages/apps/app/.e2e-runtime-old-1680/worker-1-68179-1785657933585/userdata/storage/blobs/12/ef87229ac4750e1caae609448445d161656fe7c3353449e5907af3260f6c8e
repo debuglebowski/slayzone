@@ -1,0 +1,97 @@
+# UC01 — Competitor Comparison Table
+
+Verdict legend: ✅ correct · ⚠️ partial / minor error · ❌ wrong / hallucinated · 🛑 retrieval failure (tool couldn't fetch source) · — not yet run
+Question marker: 🪤 = trap row (correct answer is "not in doc" / refutes the question's premise)
+
+Extension columns kept blank to fill in as each competitor is run.
+
+| # | Question | Correct answer | Normain | Claude | Claude Cowork | Claude Code | ChatGPT | NotebookLM | MikeOSS | Gemini DR | M365 Copilot | V7 Go | Harvey | Legora |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | FY24 total revenue | $245,122M ($245.1B) | $245.122B ✅ | $245,122M ✅ | "Cannot verify" — Item 7/8 beyond truncation 🛑 | $245,122M vs $211,915M FY23 ✅ | — | — | — | — | "$245 billion" — rounded one digit beyond source's $245.1B ⚠️ | — | — | — |
+| 2 | FY24 operating income + YoY | $109,433M / +24% | $109.433B / +24% (+$20.9B) ✅ | $109,433M / +24% (FY23 $88,523M) ✅ | "Cannot verify" — Item 7/8 beyond truncation 🛑 | $109,433M vs $88,523M; +$20.9B / +24% ✅ | — | — | — | — | "$109 billion; +24%" — YoY exact, OI rounded one digit beyond source ⚠️ | — | — | — |
+| 3 | Diluted EPS YoY growth (1 dp) | 21.9% | 21.9% ✅ | 21.9% (notes 10-K rounds to 22%) ✅ | 21.9% (pure arithmetic from supplied figures) ✅ | 21.9% (computed from 11.80 / 9.68) ✅ | — | — | — | — | 21.9% (pure arithmetic from supplied figures) ✅ | — | — | — |
+| 4 | R&D FY24 absolute + YoY increase | $29,510M; +$2,315M; +9% | $29.510B; +$2.315B; +8.5% (9% rounded) ✅ | $29,510M; +$2,315M ($2.3B); +9% ✅ | "Cannot verify" — Item 7 MD&A beyond truncation 🛑 | $29,510M; +$2,315M; quotes "$2.3 billion or 9%" ✅ | — | — | — | — | "Not located" — R&D is in Item 7 MD&A, available in source but M365 didn't surface it ❌ | — | — | — |
+| 5 | Nadella total comp FY24 (proxy SCT) | $79,106,183 | $79,106,183 ✅ | "approximately $79.1M (reported as $79,107,734)" — wrong by $1,551; honest caveat that SCT didn't render ⚠️ | "Cannot verify" — proxy page 57 (SCT) beyond truncation 🛑 | $79,106,183 with full SCT breakdown ✅ | — | — | — | — | "Not located" — points to SCT location without extracting any value ❌ | — | — | — |
+| 6 | CEO pay ratio + median comp | 408:1; median $193,744 | 408:1; $193,744 ✅ | 408:1; $193,744 (with same SCT-render caveat) ✅ | "Cannot verify" — proxy page 62 beyond truncation 🛑 | 408:1; $193,744 (with verbatim proxy quote) ✅ | — | — | — | — | "Not located" — names section but no figures extracted ❌ | — | — | — |
+| 7 | Cybersec framework (10-K) + board oversight body & cadence (proxy) | NIST CSF; full Board; ≥ quarterly | NIST CSF; full Board; ≥ quarterly ✅ | NIST CSF; full Board; ≥ quarterly ✅ | Proxy half: full Board; ≥ quarterly ✅. 10-K half: Item 1C beyond truncation — could not name NIST CSF ⚠️ | NIST CSF; full Board; ≥ quarterly ✅ | — | — | — | — | Proxy half partial: "Board (and its committees) oversee" but no quarterly cadence. 10-K half: did not name NIST CSF ⚠️ | — | — | — |
+| 8 | Two ERM frameworks named in Item 1C | COSO ERM Integrating Strategy + ISO 31000:2018 | COSO ERM + ISO 31000:2018 ✅ | COSO ERM + ISO 31000:2018 ✅ | "Cannot verify" — Item 1C beyond truncation; correctly notes proxy doesn't name them 🛑 | COSO ERM + ISO 31000:2018 ✅ | — | — | — | — | "Not located" — Item 1C is in scope but neither framework named ❌ | — | — | — |
+| 9 | Three reportable segments | Productivity & Business Processes; Intelligent Cloud; More Personal Computing | All three correct ✅ | All three correct ✅ | All three correct (extracted from Item 1) ✅ | All three correct ✅ | — | — | — | — | "Not located" — basic Item 1 fact; even Cowork got this from the partial fetch ❌ | — | — | — |
+| 10 | SFI definition + launch + 3 principles | SFI = Secure Future Initiative; Nov 2023 (May 2024 expand); Secure by Design / Default / Operations | All 4 sub-parts correct ✅ | All 4 sub-parts correct (Nov 2023 + May 2024 expansion) ✅ | Got launch Nov 2023 + May 2024 expansion from proxy; could not quote 3 principles (Item 1C truncated) ⚠️ | All 4 sub-parts correct (Nov 2023 + May 2024 expansion) ✅ | — | — | — | — | Got SFI purpose + "launched in FY24" (vague); missed Nov 2023, May 2024 expansion, and 3 principles ⚠️ | — | — | — |
+| 11 | Trillion signals/day + managed devices | 78T signals; 135M devices | 78T signals; 135M devices ✅ | 78T signals; 135M devices ✅ | "Cannot verify" — Item 1C beyond truncation 🛑 | 78T signals; 135M devices ✅ | — | — | — | — | "Not located" — Item 1C content M365 should have ❌ | — | — | — |
+| 12 | Threat actors total + nation-state + ransomware | 300 total; 160 nation-state; 50 ransomware | 300 / 160 / 50 ✅ | 300 / 160 / 50 ✅ | "Cannot verify" — refuses to treat prompt's 160 figure as substitute for source 🛑 | 300 / 160 / 50 ✅ | — | — | — | — | "Not located" — though Q15 prompt mentions the 160 figure, M365 doesn't extract the 300/50 ❌ | — | — | — |
+| 13 | Activision close date + Item 1C quote on acquired-co cybersec | Oct 13 2023; "We also engage in robust cybersecurity assessments and remediation efforts for acquired companies" | Oct 13 2023 + verbatim quote ✅ | Oct 13 2023 + $75.4B + verbatim quote ✅ | "October 2023" (no exact Oct 13); Item 1C quote not captured; cites Item 1A acquisition risk-factor language as nearest available ⚠️ | Oct 13 2023 + $75.4B + verbatim quote ✅ | — | — | — | — | Oct 13 2023 ✅; Item 1C quote paraphrased not verbatim ⚠️ | — | — | — |
+| 🪤 14 | Activision impairment charge in FY24 | Not described / no impairment recorded | "No impairment"; added $51B goodwill + $22B intangibles + May 1 2024 test result (verify these supporting numbers) ✅ | "Not stated"; cites Note 9 (May 1 2022/23/24 tests) + Note 10 + Note 8 acquisition operating loss $1,362M ✅ | "Cannot verify" — Item 7/8 beyond truncation. Failed to give the trap answer because source not visible 🛑 | "No impairment"; cites Note 9 with three test dates (May 1 2022/23/24); accumulated goodwill impairment unchanged at $11.3B ✅ | — | — | — | — | "Could not find an explicit impairment charge amount" — functionally the trap answer (no impairment to point to) but hedged as retrieval gap not as definitive "no" ⚠️ | — | — | — |
+| 🪤 15 | Item 1A: nation-state as standalone risk category? | No; sub-topic within "CYBERSECURITY, DATA PRIVACY, AND PLATFORM ABUSE RISKS" category | "No"; cites correct category name; notes nation-state discussed within narrative ✅ | "No"; lists **all 7** top-level categories; cites specific risk factor + "Security of our information technology" subsection ✅ | "No"; lists 5 of 7 top-level categories (Item 1A also truncated after Legal/Regulatory); correctly places nation-state as sub-issue ✅ | "No"; lists **all 7** top-level Item 1A categories; correctly places nation-state as sub-issue within Cybersecurity; cites late-Nov 2023 password-spray incident ✅ | — | — | — | — | "No — nation-state actors are not explicitly presented as a top-of-section risk factor category"; doesn't enumerate the actual categories but correctly answers the binary trap ✅ | — | — | — |
+
+## Score summary
+
+| Competitor | Correct (✅) | Partial (⚠️) | Wrong (❌) | Retrieval-failed (🛑) | Total / 15 | Time (total run) |
+|---|---|---|---|---|---|---|
+| Normain | 15 | 0 | 0 | 0 | **15 / 15** | ~10 s |
+| Claude | 14 | 1 | 0 | 0 | **14 / 15** | 39 s |
+| Claude Cowork | 3 | 3 | 0 | 9 | **3 / 15** (effective; 6/15 if partials count half) | 151 s (~2 m 31 s) |
+| Claude Code | 15 | 0 | 0 | 0 | **15 / 15** | 236 s (~3 m 56 s) |
+| ChatGPT | — | — | — | — | — | — |
+| NotebookLM | — | — | — | — | — | — |
+| MikeOSS | — | — | — | — | — | — |
+| Gemini DR | — | — | — | — | — | — |
+| M365 Copilot | 2 | 6 | 7 | 0 | **2 / 15** (effective; 5/15 if partials count half) | ~60 s (timed externally from markers) |
+| V7 Go | — | — | — | — | — | — |
+| Harvey | — | — | — | — | — | — |
+| Legora | — | — | — | — | — | — |
+
+## Notes on Normain's run
+
+- **Q04 precision**: Normain gave 8.5% (calculated from absolute numbers) AND noted the 10-K's rounded 9%. More precise than required; matches ground truth.
+- **Q14 🪤 supporting details**: Normain volunteered $51B goodwill + $22B intangibles + a specific May 1, 2024 impairment test result. These details were NOT in my ground-truth read — needs human verification against the 10-K notes section before locking the ✅. If the supporting numbers are accurate, this is a clean win; if any are fabricated, downgrade to ⚠️.
+- **Q07 cadence**: Normain correctly said "at least quarterly" matching the proxy text exactly.
+- **Q10 SFI**: Composite question answered cleanly — all 4 sub-parts (acronym + concept + launch + 3 principles) addressed.
+- **Q15 🪤**: Normain not only said "no" correctly but cited supporting nation-state references within the cybersecurity narrative — strong contextual answer.
+- **Time**: ~10 s total for all 15 insights.
+
+## Notes on Claude's run
+
+- **Q05 ⚠️**: Claude gave a specific exact number ($79,107,734) instead of the SCT value ($79,106,183) — wrong by $1,551 (0.002%). Honestly caveated that the SCT didn't render in-session and referenced "widely reported coverage" as corroboration. This is a different failure than the v8 run (which rounded to $79.1M); here Claude committed to a specific wrong number rather than rounding. Still ⚠️, not ❌, because Claude self-flagged the precision risk.
+- **Q15 🪤**: Now lists **all 7** top-level Item 1A categories (v8 run missed "Intellectual Property Risks"). Also names the specific risk factor heading ("Cyberattacks and security vulnerabilities could lead to reduced revenue…") and subsection ("Security of our information technology") where nation-state actors are discussed. Strong improvement over the v8 run.
+- **Q14 🪤**: References both Note 9 (goodwill) AND Note 10 (intangibles) plus Note 8 acquisition operating loss ($1,362M) — most thorough of the three competitors that answered.
+- **Time**: 39 s — fastest non-Normain run so far. ~4× slower than Normain (~10 s), ~4× faster than Cowork (151 s), ~6× faster than Claude Code (236 s).
+- **Pattern**: Faster and more compact than Claude Code, with similar answer quality on most questions. The one weakness remains exact-numeric retrieval when an SCT-style multi-row table doesn't render — Claude commits to a wrong specific value rather than refusing.
+
+## Notes on Claude Cowork's run
+
+- **Retrieval failure dominates the run.** Cowork's `web_fetch` tool returned a truncated extract of each SEC URL — the 10-K cut off inside Item 1A (before Item 7, Item 8, Item 1C, Notes), and the proxy cut off inside director biographies (before SCT, CEO Pay Ratio, governance tables). 9 of the 15 questions reference sections beyond the truncation horizon → 🛑.
+- **Behavior was correct given the constraint**: zero hallucinations, every refusal cited specifically which section it couldn't see. Followed the "do not fabricate or guess" instruction strictly. This is the *right* failure mode — but it's still a failure from the end-user's perspective.
+- **What it did get**: Q3 (pure arithmetic, no doc needed), Q9 (segments named in Item 1, before truncation), Q15 🪤 (Item 1A core question answered from the partial Item 1A capture).
+- **Partials**: Q7, Q10, Q13 — each had one half visible (proxy text or Item 1A reference) and one half beyond truncation.
+- **The trap question Q14 was lost to truncation, not to hallucination** — different failure than Claude or Claude Code. The correct "no impairment recorded" answer requires reading Item 7/8/Note 9, which Cowork couldn't see.
+- **Pattern**: Cowork's bottleneck isn't model reasoning — it's the `web_fetch` size limit (~10k chars after extraction) vs. the size of a SEC 10-K (~300+ printed pages). For source-of-truth-from-URL workflows, Cowork is structurally limited here.
+- **Time**: 151 s. Faster than Claude Code (236 s) but produced ⅕ as many usable answers — speed reflects shorter responses, not throughput on the actual task.
+
+## Notes on Claude Code's run
+
+- **Clean 15/15** — every answer exact, every citation precise (page numbers, table names, Item references).
+- **Q05**: Full SCT breakdown ($2.5M salary + $71,236,392 stock + $5.2M NEI + $169,791 other) summing to exact $79,106,183 — the precision Claude.ai missed.
+- **Q13**: Volunteered $75.4B purchase price for Activision (correct, in Item 7 p. 39) — went beyond required scope cleanly.
+- **Q14 🪤**: Cites Note 9 page 78 verbatim and supplies three impairment-test dates (May 1 2022/23/24) plus the $11.3B accumulated impairment figure. Strongest trap response of the three competitors so far.
+- **Q15 🪤**: Lists all 7 top-level Item 1A categories. Cites the specific late-Nov 2023 nation-state password-spray incident as the sub-topic context.
+- **Time**: 236 s for 15 questions, self-measured via `date +%s` — ~23× slower than Normain (~10 s).
+- **Pattern**: precision over verbosity. Where Claude.ai rounded ($79.1M) / committed to a wrong-by-$1,551 figure, Claude Code returned the cents-exact number.
+
+## Notes on M365 Copilot's run
+
+- **Failure mode is "weak search," not truncation.** Unlike Cowork (which hit a hard `web_fetch` cap and refused cleanly with section citations), M365 Copilot returned 7 "Not located" responses for facts that *are* in the uploaded files — including the segment names (Q9, basic Item 1) which Cowork managed to get from a truncated fetch. So this isn't a tool-limit issue; M365 didn't search the attached files thoroughly.
+- **Correctly handled both traps**: Q14 🪤 and Q15 🪤 both arrived at the right conclusion (no impairment / nation-state not a top-level category). Q14 was hedged as "could not find" rather than the cleaner "no impairment recorded", but the model didn't fabricate. Net: trap pass rate 2/2.
+- **Rounding discipline**: Q1/Q2 reported "$245 billion" / "$109 billion" — both one digit rounder than the source ($245.1B / $109.4B). The prompt explicitly required "match the source exactly, including rounding" → ⚠️ for both.
+- **What it got right**: Q3 (arithmetic), Q13 (Activision date), Q14 🪤, Q15 🪤. Plus partials on Q1, Q2, Q7, Q10, Q13.
+- **Time**: ~60 s (marker mode — externally timed). M365 Copilot's Analyst persona / Python execution wasn't enabled in this run. Faster than Claude Code (236 s) and Cowork (151 s); slower than Claude.ai (39 s).
+- **Comparison**: Worse than Cowork on effective score (2 ✅ vs 3 ✅) despite having the full files attached. M365 Copilot underperformed its information access here.
+
+## Grading process
+
+For each competitor:
+1. Run all 15 questions in their tool with the same source URLs.
+2. Time the run — paste-to-final-token.
+3. Capture each answer (text + screenshot).
+4. Fill the corresponding column with: brief answer summary + verdict emoji.
+5. Update score summary including the time column.
+6. Note any anomalies (citation fabrications, refusals, ingestion failures) in a per-competitor notes section.

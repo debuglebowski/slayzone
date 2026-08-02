@@ -1,0 +1,102 @@
+# SlayZone Env Vars — Standalone Hub & Runner
+
+Every var surfaced by the full 4-cluster deep-dive, assessed for the standalone deploy surface. Dev/build/e2e/internal vars summarized at bottom.
+
+**Precedence everywhere:** `env var > SLAYZONE_RUNNER_CONFIG file (runner) > ~/.slayzone/config.json > generated/default`
+
+## The three situations (value columns below)
+
+| Situation | What it is | env-ownership | exposure |
+|---|---|---|---|
+| **Supervised** | Desktop app — Electron host spawns the hub/runner and injects their env | host owns env (`SLAYZONE_SUPERVISED=1`) | local |
+| **Standalone** | Local headless hub/runner or chromium-fork sidecar — process resolves its own env | self | local (`SLAYZONE_MODE=local`, default) |
+| **Remote** | Standalone on a server, reachable off-box | self | **remote** (`SLAYZONE_MODE=remote`) |
+
+**Two axes drive the differences.** *Env-ownership* (`SLAYZONE_SUPERVISED`, machine-set by the Electron host) separates Supervised from the rest → path/secret resolution. *Exposure* (`SLAYZONE_MODE`, operator-set) separates Remote → auth/transport hardening. The two are orthogonal: supervised always behaves as `local` exposure.
+
+**`SLAYZONE_MODE` is an explicit hardening intent, not a derived side-effect.** Earlier drafts derived exposure from `SLAYZONE_HOST` being non-loopback — but that makes security policy a side-effect of a networking knob (reverse-footgun). An explicit `local` | `remote` flag makes the operator DECLARE "internet-facing," and one flag sets the whole secure bundle:
+- `remote` → **hub**: auth ON, TLS client port, expect non-loopback bind · **runner**: require `wss` + pinned cert (reject plaintext `ws`)
+- `local` (default) → loopback, auth off, `ws` allowed — desktop / fork / laptop hub unchanged
+
+Shared var: whichever binary runs reads `SLAYZONE_MODE`. Replaces the HOST-derivation for auth; `SLAYZONE_HOST` reverts to a pure bind-address knob.
+
+## Single-anchor consolidation (`SLAYZONE_ROOT`)
+
+Standalone collapses ALL path knobs into ONE optional var. `SLAYZONE_ROOT` (renamed from `SLAYZONE_HOME_DIR`) is the universal anchor for BOTH hub + runner; everything derives from it. Default = **CWD** (standalone/remote), `$HOME/.slayzone` (supervised).
+
+```
+SLAYZONE_ROOT  (default: CWD standalone)
+├── slayzone.sqlite     ← was SLAYZONE_DB_PATH / SLAYZONE_STORE_DIR
+├── config.json
+├── logs/
+└── runner/             ← creds (was SLAYZONE_RUNNER_CREDENTIALS_DIR)
+```
+
+- `SLAYZONE_DB_PATH` — **removed from standalone surface** (derives `<ROOT>/slayzone.sqlite`). Code STAYS: supervised REQUIRES it (host passes exact path; `db.ts` throws without it).
+- `SLAYZONE_STORE_DIR` — **removed from standalone surface** (= `<ROOT>`). Code STAYS: read by the desktop app + supervised (`getTrpcDataRoot`, `ensureDataRoot`).
+- `SLAYZONE_HOME_DIR` → **renamed `SLAYZONE_ROOT`**.
+- Relocate everything = `cd /srv/slayzone && slayzone-hub` (or set `SLAYZONE_ROOT=/srv/slayzone`).
+
+**Minimize legend:** 🟢 keep (operator sets) · 🔵 derive (process computes, not a knob) · 🟠 hide (subsumed by token; advanced override only) · 🔴 delete
+
+## All vars (sorted: minimize action, then category)
+
+Value columns show how the var resolves in each situation. **bold** = operator normally sets it there.
+
+| Minimize | Category | Var (→ rename) | Purpose (question it answers) | Supervised | Standalone | Remote | cfg key | Action / change |
+|---|---|---|---|---|---|---|---|---|
+| 🟢 keep | Path | `SLAYZONE_ROOT` *(← `SLAYZONE_HOME_DIR`)* | Which single folder holds all on-disk state (DB, config, logs, runner creds hang off it)? | `$HOME/.slayzone` | CWD | **CWD or set** | — | rename HOME_DIR→ROOT; standalone default CWD |
+| 🟢 keep | Hub | `SLAYZONE_PORT` | Which port do the app/CLI connect to for all data (tRPC/HTTP)? | host-assigned | OS-assigned | **set** (fixed, known) | `port` | none — shared |
+| 🟢 keep | Control | `SLAYZONE_MODE` *(new)* | Is this hub/runner internet-facing? Sets the whole secure bundle (auth + TLS/wss + bind expectations) in one flag | `local` | `local` | **`remote`** | — | new shared flag; `remote` → hub auth+TLS on, runner requires wss+pin. Supersedes HOST-derivation |
+| 🟢 keep | Hub | `SLAYZONE_HOST` | Which interface does the client API bind to? (pure bind addr — no longer drives auth) | `127.0.0.1` | `127.0.0.1` | **non-loopback** (to expose) | — | none — shared; auth now from `SLAYZONE_MODE` |
+| 🟢 keep | Hub | `SLAYZONE_RUNNER_TRANSPORT_PORT` → **`SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`** | Which port do runners dial into (the `/runners` wss listener)? Pin it so the URL survives reboots | stable via DB | OS-assigned (stable via DB) | **pin** (stable URL) | `runnerTransportPort` | **rename** (hub-only) |
+| 🟢 keep | Hub | `SLAYZONE_RUNNER_TRANSPORT_HOST` → **`SLAYZONE_HUB_RUNNER_TRANSPORT_HOST`** | Which interface does the runner listener bind to? Defaults open — the link is TLS+cert-pinned | `0.0.0.0` | `0.0.0.0` | `0.0.0.0` | — | **rename** (hub-only) |
+| 🟢 keep | Hub | `SLAYZONE_RUNNER_TRANSPORT_SECRET` → **`SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`** | What secret signs runner auth + per-task tokens? Must stay stable so minted tokens keep verifying | host-supplied | gen+persist | gen+persist (pin for CI/multi-hub) | `runnerTransportSecret` | **rename** (hub-only) |
+| 🟢 keep | Hub | `SLAYZONE_HUB_TLS_PORT` | Which port serves the TLS `/trpc` listener for multi-hub federation? | OS-assigned | OS-assigned | pin (opt-in) | — | none — prefixed ✓ |
+| 🟢 keep | Hub | `SLAYZONE_HUB_PUBLIC_URL` | What externally-reachable URL do remote runners use to reach this hub's MCP + hook callbacks? | loopback | loopback | **set** (REQUIRED for real remote runners) | `publicUrl` | none — prefixed ✓ |
+| 🟢 keep | Runner | `SLAYZONE_JOIN_TOKEN` → **`SLAYZONE_RUNNER_JOIN_TOKEN`** | What one-time credential does a fresh runner present to join a hub? Embeds hub URL + cert pin + secret | host injects (auto-enroll) | — | **set** (minted on hub) | `joinToken` | **rename** (runner-only prefix); config key `joinToken` unchanged |
+| 🔵 derive | Runner | `SLAYZONE_RUNNER_ALLOWED_ROOTS` | Which dirs may this runner read/write/exec in (fail-closed security jail)? | host injects `homedir()` | `<ROOT>` + projects | `<ROOT>` + projects | `allowedRoots` (new) | drop env var; default `[ROOT]`, operator appends project dirs via config.json `allowedRoots`. MUST stay locally-declared, NEVER hub-pushed |
+| 🔴 delete | Runner | `SLAYZONE_RUNNER_NAME` | (display label on the hub) | `local-runner` (host) | hostname | hostname | `runnerName` | drop as standalone knob. Identity = hub-minted runnerId persisted in cred store (reused on reconnect, NOT name-derived); name = hostname default, renamable hub-side. Supervised local-runner name→deterministic-id path stays internal (no persisted cred store there) |
+| 🔴 delete | Runner | `SLAYZONE_RUNNER_CREDENTIALS_DIR` | (where post-enroll creds live) | `<dataRoot>/runner-creds` | `<ROOT>/runner` | `<ROOT>/runner` | — | derive `<ROOT>/runner`, no knob; **fix**: honor ROOT (raw os.homedir today) |
+| 🔴 delete | Runner | `SLAYZONE_RUNNER_CONFIG` | (path to a separate per-host runner JSON) | — | — | — | — | drop — `<ROOT>/config.json` already carries all runner keys; redundant file layer |
+| 🔴 delete | Runner | `SLAYZONE_RUNNER_HEARTBEAT_MS` | (hub liveness ping interval) | transport default | transport default | transport default | — | static const (existing default); nobody tunes a heartbeat |
+| 🔵 derive | Hub | `SLAYZONE_HUB_AUTH_REQUIRED` | Must client (app/CLI) `/trpc` connections present a verified identity? | off | off | **ON** | — | drop flag; derive from `SLAYZONE_MODE=remote`. Loses VPN-off / proxy-on edge overrides (re-add flag later if a deploy needs it) |
+| 🔵 derive | Path | `SLAYZONE_DB_PATH` | Which exact SQLite file backs the hub? | REQUIRED (host passes exact) | `<ROOT>/slayzone.sqlite` | `<ROOT>/slayzone.sqlite` | `dbPath` | off standalone surface; code STAYS (supervised throws if unset) |
+| 🔵 derive | Path | `SLAYZONE_STORE_DIR` | Which dir roots DB + artifacts + backups? | `getStateDir()` / userData | `<ROOT>` | `<ROOT>` | — | off standalone surface; code STAYS (app reads it) |
+| 🟠 hide | Runner | `SLAYZONE_HUB_URL` | Which `wss://…/runners` does a runner dial? Normally read from the join token | host injects | from token | from token (env only to retarget) | `hubUrl` | advanced override only; drop from docs |
+| 🟠 hide | Runner | `SLAYZONE_HUB_CERT_SHA256` | Which hub TLS cert fingerprint does the runner pin? Comes from the join token | from token | from token | from token (env only to override pin) | — | advanced override only; drop from docs |
+| 🔴 delete | Hub | `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` | May integration creds be stored plaintext when no OS keychain exists? | off (host cipher present) | off (on if NODE_ENV=test) | off | — | replace w/ runtime `cipher.isEncryptionAvailable()`; memory cipher in tests |
+| 🔴 delete | Hub | `SLAYZONE_DB_DIR` | (dup of STORE_DIR) — which dir holds the DB? ⚠️ precedence inverted vs artifacts | userData fallback | falls to STORE_DIR | falls to STORE_DIR | — | drop hub reads; keep app-only → retire |
+| 🔴 delete | Hub | `SLAYZONE_DB_NAME` | (which filename for the DB) — never varies on a server | (n/a) | `slayzone[.dev].sqlite` | `slayzone.sqlite` | — | drop read hub `db.ts:41`; becomes const under ROOT |
+| 🔴 delete | Hub | `SLAYZONE_RUNNER_TRANSPORT_BASE_URL` | (better-auth baseURL) — loopback constant; runners use bearer not cookies | `http://127.0.0.1:8788` | same | same | — | inline at composition.ts:904; remove env read |
+| 🔴 delete | Runner | `SLAYZONE_RUNNER_CAPABILITIES` | (advertised caps) — stored, NEVER enforced | `pty,git,fs,proc` | same | same | — | drop env read; hardcode full set at enroll |
+
+## Dead / bug (verified — remove or fix)
+
+| Minimize | Var | Finding | Action / change |
+|---|---|---|---|
+| 🔴 delete (dead) | `SLAYZONE_SERVER_PORT` | `getServerPort()` zero callers; superseded by SLAYZONE_PORT | remove helper + barrel export |
+| 🔴 delete (dead) | `SLAYZONE_MCP_HOST` | Only written to docker/ssh env; no reader (CLI hardcodes 127.0.0.1) | remove 2 writes pty-manager.ts:987,1011 |
+| 🔴 delete (dead) | `SLAYZONE_RUNNERS_ENABLED` | Only set in one test; never read in prod | remove from install-handshake.test.ts:196 |
+| 🔴 delete (dead) | `SLAYZONE_HOOK_NAME` | Not an env var — JS `const='slayzone-notify'` | drop from env docs |
+| 🐛 bug | `SLAYZONE_AGENT_MODE` | 1 reader, 0 setters → CLI artifacts always tag `user` | fix `_shared.ts:8` → read `SLAYZONE_AGENT_ID` |
+| 🐛 bug | `SLAYZONE_DB_DIR` ↔ `STORE_DIR` | Precedence inverted → split dirs if both set | unify STORE_DIR-wins in artifacts/shared.ts:12 |
+
+## Not operator-facing (code stays, omit from deploy docs)
+
+- **Machine-injected per-run:** `SLAYZONE_HUB_TOKEN` (per-task bearer, ≠ JOIN_TOKEN), `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_AGENT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_TASK_ID`, `SLAYZONE_MCP_PORT`
+- **Fork sidecar only:** `SLAYZONE_RUNTIME_DIR`, `SLAYZONE_HOST_CAP_URL`, `SLAYZONE_HOST_REST_URL`
+- **e2e-only:** `SLAYZONE_USER_DATA_DIR`, `SLAYZONE_BOOT_LOG_PATH`, `SLAYZONE_E2E_ALLOW_RUNNER`, `SLAYZONE_E2E_INSTALL_HOOKS`, `*_SETTINGS_PATH`/`*_HOOKS_PATH`/`OPENCODE_PLUGIN_PATH`
+- **Dev/build:** `SLAYZONE_DEV`, `SLAYZONE_REACT_DEV`, `SLAYZONE_PROFILE`, `SLAYZONE_CHROMIUM_PROD`, `SLAYZONE_DEBUG_BOOT`, `SLAYZONE_REGISTER_DEV_PROTOCOL`, `SLAYZONE_SIDECAR_HOT_RESTART`, `SLAYZONE_SHELL_DEV_SERVER`, `SLAYZONE_DISABLE_CLONEFILE`, `SLAYZONE_GC_*`, `*__` (build-time defines)
+
+## Net effect
+
+Path config → one optional var (`SLAYZONE_ROOT`, default CWD; DB_PATH + STORE_DIR fold in, code stays for supervised). Hardening → one flag (`SLAYZONE_MODE=remote` sets auth + TLS/wss bundle). Runner env surface collapsed: creds-dir/heartbeat static, runner-config dropped, name deleted, allowed-roots → config.json. Operator env knobs: ~27 → ~9.
+
+Hub ≠ runner box: two separate servers, two different CWDs (thus two `SLAYZONE_ROOT`s). A runner's ROOT is its own workspace, so `allowedRoots` default `[ROOT]` + operator-listed project dirs is a coherent, locally-owned jail.
+
+Deploy collapses to:
+- **Hub (remote):** `SLAYZONE_MODE=remote` + *(optional `SLAYZONE_ROOT`)* + `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` (auto-gen) + `SLAYZONE_HUB_PUBLIC_URL`; auth+TLS auto-on
+- **Runner (remote):** `SLAYZONE_MODE=remote` + `SLAYZONE_RUNNER_JOIN_TOKEN` + `<ROOT>/config.json` `allowedRoots`; everything else derives
+
+⚠️ All delete/derive/hide/rename/consolidate = behavior/code changes, SEPARATE from the original CWD-anchoring task.

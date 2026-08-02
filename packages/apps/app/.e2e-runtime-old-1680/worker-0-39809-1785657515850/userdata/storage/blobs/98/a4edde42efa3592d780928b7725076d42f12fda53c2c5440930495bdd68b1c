@@ -1,0 +1,88 @@
+# IAC-11 — Password policy enforced
+
+**Framework:** SOC 2 ‧ CC 6.1
+**Vanta control ID:** `policies-password-complexity`
+**Status at investigation:** 1 / 2 sub-checks passing
+**Investigated:** 2026-04-30
+
+> Compliance content below is sourced from Google Drive only (per project rule); the local repo is not authoritative.
+
+## Situation overview
+
+Two sub-checks make up this control:
+
+| Sub-check | Type | Status |
+|---|---|---|
+| Documents (1/1) | Policy attachment | ✅ OK — `[Normain] Access Control Policy` attached, owned by Kalle |
+| Tests (0/1) | Automated test `password-manager-records` | ❌ Failing |
+
+**Failing test:** `Password manager records` (owner: Dennis Landfors).
+Logic: *"This test verifies that all personnel workstations with Vanta Device Monitor installed have a password manager installed."*
+Last run: ~7h ago. SLA: 7 days.
+
+**Scope of failure: 1 machine** (everything else green).
+
+| Field | Value |
+|---|---|
+| Machine | Iko's MacBook Air |
+| Serial | C02DTRAHQ6L4 |
+| Owner | **Paul Nylund** (paul@epode.studio — external) |
+| OS | macOS 26.3 |
+| Vanta Device Monitor | 2.16.1 (installed & reporting) |
+| Due date in Vanta | **2026-03-10 (overdue)** |
+
+Vanta Device Monitor *is* running on the machine; it scans for known password-manager binaries (1Password, Bitwarden, LastPass, Dashlane, Keeper — see Vanta's support article). None detected. Other endpoint checks pass (FDE, screen lock, etc.).
+
+This is **not** a policy-doc gap and **not** a Google Workspace IdP-config gap. It is a single-endpoint software-installation gap.
+
+### Underlying policy + standard (Drive-sourced)
+
+`[Normain] Access Control Policy` v1.0.1 (Drive file `1wQZAmCnydHhOWiQOmI3z6Zj8avLn5RSZ`, dated 2025-07-28, approver Sara Landfors), §Password Policy:
+
+> "Passwords must be created and protected using a **Company-provided password manager**."
+
+**The company-provided manager is 1Password.** Drive evidence:
+
+- `AgileBits-DPA-v4.6-02032025.pdf` (file `1_Jv-HIRYevu-GIt5Wt_Te3owHoXbzxoa`) — DPA with AgileBits (1Password vendor)
+- `1Password license removed Francesca.png` (file `1XLinN1yhz1isAfDTJIQ7-M1vyvGWp1HG`) — license lifecycle evidence
+- Multiple dated 1Password screenshots in shared drives (Jul/Sep/Oct 2025)
+
+(The policy doc itself does not name a specific product — that's procurement detail outside the policy.)
+
+## Solution overview
+
+**Single concrete action: Paul Nylund installs 1Password on Iko's MacBook Air.** Once installed, Vanta Device Monitor auto-detects on next scan (≤24h typical) and the test flips green. No Vanta config changes required.
+
+Effort estimate: **~10 min for Paul** (download + login). Zero engineering work on the Normain side beyond the request itself.
+
+### Open question — is Paul in scope?
+
+Paul's email is `paul@epode.studio`, not `@normain.com`. He's a contractor / external. Two paths:
+
+1. **In scope (most likely):** he's been provisioned a Vanta Device Monitor agent and a Normain laptop nickname ("Iko's MacBook Air"), so he's tracked as personnel for SOC 2. Issue him a 1Password seat under the Normain tenant and have him install it.
+2. **Not in scope:** if he should *not* be tracked under Normain's SOC 2 perimeter, deprovision Vanta Device Monitor on his machine and remove him from the personnel list. Test will then have no failing sample.
+
+Path 1 is the cleaner answer — he's already declared as personnel and the policy says password manager is mandatory.
+
+## Actions taken
+
+- ✅ Read failing test + remediation guidance directly from Vanta UI (`/c/normain.com/tests/password-manager-records`).
+- ✅ Confirmed scope of failure (1 machine, identified owner & serial) via `/c/normain.com/computers`.
+- ✅ Verified policy requirement in Drive: `[Normain] Access Control Policy.docx` (`1wQZAmCnydHhOWiQOmI3z6Zj8avLn5RSZ`).
+- ✅ Confirmed 1Password is the company-provided manager via Drive evidence (AgileBits DPA, license-management screenshots).
+
+## Blocked on (handoff)
+
+Cannot proceed further without authorization — these touch a third party's machine and external comms:
+
+1. **Provision 1Password seat for Paul Nylund** (or confirm he already has one).
+2. **Message Paul** to install 1Password on `Iko's MacBook Air` (serial C02DTRAHQ6L4). Sign in to the company tenant. Done.
+3. Wait ≤24h for Vanta to re-scan; test should flip ✅. If not, "Run test" from the Vanta test page.
+
+Suggested owner for handoff: **Dennis Landfors** (already the test owner in Vanta) or **Kalle** (CTO, control owner).
+
+## Unresolved questions
+
+- Paul in scope as Normain personnel — confirm? (drives path 1 vs 2)
+- Already has a 1Password seat?
+- Anyone else should be CC'd on the install request (Sara as policy owner)?

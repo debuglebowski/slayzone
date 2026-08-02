@@ -1,0 +1,22 @@
+# Lint Overview
+
+_Updated 2026-06-05 (after safe-fix sweep — commits `c382a798`, `c3023714`)._
+
+`pnpm lint` → **0 errors, 226 warnings**. All warnings = `react-hooks/*` (React Compiler rules).
+Ordered easiest → hardest to fix. (Was 309 at start of effort.)
+
+**Effort:** 🟢 trivial · 🟡 medium · 🟠 high · 🔴 very high
+**Risk if left** (cost of NOT fixing) & **Risk to fix** (chance the fix breaks behavior): 🟢 low · 🟡 medium · 🟠 high · 🔴 severe
+
+| # | Rule | Count | Effort | Risk if left | Risk to fix | Status / notes |
+|---|------|------:|:------:|:----:|:----:|-------------|
+| 1 | `react-hooks/static-components` | ~~11~~ → **0** ✅ | 🟢 | 🟠 | 🟡 | DONE (`c3023714`): deleted orphaned `LayoutPreviews.tsx`. |
+| 2 | `react-hooks/preserve-manual-memoization` | ~~10~~ → **2** | 🟡 | 🟢 | 🟠 | 8 fixed (`c382a798`); 2 left intentional (git-diff-store `useSyncExternalStore`, load-bearing). |
+| 3 | `react-hooks/purity` | 5 | 🟢 | 🟠 | 🟡 | Untouched. Relative-time `Date.now` + stable `Math.random` width — all NEEDS_CARE (relocating stales display). |
+| 4 | `react-hooks/immutability` | 11 | 🟡 | 🔴 | 🟡 | Untouched. Clone-then-mutate; mostly NEEDS_CARE (shared refs / used-before-declare reorders). |
+| 5 | `react-hooks/refs` | ~~83~~ → **52** | 🟠 | 🟡 | 🟠 | 31 safe "latest-value mirror" writes relocated to `useEffect` (`c3023714`). Remaining 52 = render-reads feeding JSX, rAF/WebContentsView bounds, imperative handles → NEEDS_CARE/UNSAFE. |
+| 6 | `react-hooks/set-state-in-effect` | 156 | 🔴 | 🟡 | 🔴 | Untouched. ~99% NOT safe (async IPC fetch, subscriptions, auto-nav, form resets, timers). Per-site only, not a sweep. |
+
+**Safe work remaining:** see [lint-safe-to-fix](artifact:54a1fee7-5df1-4bf8-aeec-65e1e5844dd4). Net: the
+two easy wins (delete + ref mirrors) are DONE (−42 warnings). What's left is genuinely care-needed.
+Re-run `rtk proxy npx eslint . --format json` before any further fixing — the dogfood tree churns.

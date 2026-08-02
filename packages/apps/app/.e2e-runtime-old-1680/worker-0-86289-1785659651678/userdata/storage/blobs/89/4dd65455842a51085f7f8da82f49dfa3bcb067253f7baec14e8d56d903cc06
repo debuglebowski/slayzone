@@ -1,0 +1,14 @@
+# Normain App — Permissions Catalog
+
+> Working list of every permission available in the Normain app. Feeds the roles/permissions section of the KPMG deliverable.
+
+| Permission | Description | Scope |
+|---|---|---|
+| Create team | Create a new team within the organization | Org |
+| Add member to org | Add a new user to the Normain organization | Org |
+| Add member to team | Add a user to any team | Org |
+| Add member to team I'm a part of | Add a user to a team the acting user is a member of | Team |
+| Setup SharePoint integration | Configure the SharePoint integration for the organization | Org |
+| Assign SharePoint site to team | Connect a SharePoint site to a specific team | Team |
+
+> ⚠️ Incomplete — add remaining permissions as they are identified.

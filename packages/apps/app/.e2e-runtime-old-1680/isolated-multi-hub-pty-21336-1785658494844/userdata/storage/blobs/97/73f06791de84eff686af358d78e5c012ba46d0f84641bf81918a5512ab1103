@@ -1,0 +1,29 @@
+flowchart LR
+    subgraph External[" "]
+        direction TB
+        Variables[(Variables<br/>market size<br/>price sensitivity<br/>base costs)]
+        Situations((⚡ Situations))
+        Situations -.->|modify| Variables
+    end
+
+    subgraph Round["Per-round loop"]
+        direction TB
+        Start([Round start])
+        Agent[Agent decisions]
+        State[(Company state<br/>cash · capacity<br/>brand · models<br/>research)]
+        Compute[Market & cash update<br/>share · revenue · burn]
+        Check{Continue?}
+
+        Start --> Agent
+        Agent --> State
+        State --> Compute
+        Compute --> State
+        State --> Check
+        Check -->|no| Start
+    end
+
+    EndN([End])
+    Check -->|yes| EndN
+
+    Variables -.->|read| Compute
+    Situations -.->|modify| State

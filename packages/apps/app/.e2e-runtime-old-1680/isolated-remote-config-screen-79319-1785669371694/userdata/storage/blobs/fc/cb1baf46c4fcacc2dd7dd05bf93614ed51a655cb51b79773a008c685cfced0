@@ -1,0 +1,41 @@
+# Slice 3/8 — diagnostics IPC→tRPC router (P4)
+
+**Commit:** `3c2d1854` — `feat(transport): diagnostics router (P4)` (direct to `main`, no PR)
+
+## Done
+5 `diagnostics:*` IPC handlers mirrored as tRPC procedures; **IPC kept** (coexist — renderer cutover = slice 5).
+
+Followed the **tags** coexistence pattern + ref commit `2c1ba8c8`, **adapted to async** (main's `SlayzoneDb` is worker-thread; the ref's extracted store used the old sync better-sqlite3 API).
+
+### Diagnostics package
+- **NEW** `src/server/diagnostics-store.ts` — electron-free, async data core: `bindDiagnosticsDbs`, config cache (`get/save/loadDiagnosticsConfig`), event write-queue (`recordDiagnosticEvent`/`flushWriteQueue`), redaction, `normalizeClientError/Event`, new async `buildExportBundle` (JSON, no dialog).
+- **NEW** `src/server/index.ts` — barrel.
+- `package.json` — added `"./server"` export.
+- `src/main/service.ts` — now electron glue (`instrumentIpcMain`, dialog `runExport`, crash hooks); `registerDiagnosticsHandlers` calls `bindDiagnosticsDbs` then registers the **same 5 IPC handlers** delegating to the store. `/main` API unchanged via re-exports (~12 consumers intact).
+
+### Transport
+- **NEW** `src/server/routers/diagnostics.ts` — 5 procedures: `getConfig`/`setConfig`, `recordClientError`/`recordClientEvent`, `exportBundle`. Imports `@slayzone/diagnostics/server`.
+- `router.ts` — registered `diagnostics: diagnosticsRouter`.
+- `package.json` — added `@slayzone/diagnostics` dep (+ lockfile edge).
+
+### Export semantics
+IPC `diagnostics:export` keeps the Electron save-dialog (untouched). New tRPC `exportBundle` returns the JSON bundle (browser-download in slice 5). No renderer consumer yet — forward-looking + safe.
+
+### externalize
+**No change needed** — `@slayzone/diagnostics` already a direct app dep; `electron.vite.config.ts` auto-discovers `@slayzone/*` from app deps (ref commit also changed nothing here).
+
+## Verification
+- **typecheck** — GREEN (all pkgs incl. transport, diagnostics, app node+web).
+- **build** — GREEN (exit 0; main+preload bundle the new `/server` import).
+- **lint** — my 5 files **0 issues**; `lint:server-boundary` (electron-free `/server` check) **PASSES**. Repo-wide `pnpm lint` is red ONLY from a pre-existing `--max-warnings=301` breach (309 react-hooks warnings in unrelated dirty `M` files, e.g. App.tsx). Not my slice.
+- **e2e** — **778 passed, 10 failed, 110 skipped**. All 10 failures pre-existing / unrelated to diagnostics+transport:
+  - `core/25-panel-resize` (x2) → in-flight panel work (`usePanelSizes.ts`/`ResizeHandle.tsx`/`PanelsSettingsTab.tsx`, all `M` at session start).
+  - `terminal/28`,`terminal/37` (codex) → pre-existing test-helper bug on committed main: `__restorePtyHandlers` (src/main/index.ts:1513) omits `pty:interrupt` from its removeHandler list while `registerPtyHandlers` registers it → Electron "second handler". Independent of `instrumentIpcMain`.
+  - `browser/24`,`browser/87`(x2), `core/93-kanban`, `git/34-merge`(x2), `terminal/101-scramble` → other domains, dirty-tree/flaky.
+  - 778 passing confirms app boots + diagnostics binds/instruments/records post-refactor.
+
+## DONE-WHEN check
+5 sigs mirrored ✓ · registered ✓ · typecheck+build green ✓ · committed ✓ · IPC kept ✓ · renderer untouched ✓.
+
+## Caveat for orchestrator
+`pnpm lint` + `pnpm test:e2e` are red at repo level, but **exclusively from pre-existing causes** (warning-cap breach + in-flight dirty files + a latent pty test-helper bug on main). My slice introduces zero lint/type/build/test regressions. The pty `__restorePtyHandlers` mismatch is worth a separate fix (add `pty:interrupt` to its removal list).

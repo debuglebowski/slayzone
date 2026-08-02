@@ -1,0 +1,54 @@
+flowchart TD
+    EP1["Episode 1 — the map<br/>(a brief pass over every theme below)"]
+
+    subgraph T1["What AI actually is"]
+        T1a["'AI' is now the common word for LLMs/generative AI — name it once, no deeper naming"]
+        T1b["Skip mechanism entirely: no neural networks, training, next-word prediction, fine-tuning"]
+        T1c["Multiple concrete metaphors for what it does (Einstein-style, plural)"]
+        T1d["Capability = what you observe from use, not theory"]
+        T1e["'Just autocomplete' is rationalization — assume continued improvement across the board"]
+        T1f["Open vs. closed models"]
+        T1g["Where models keep getting smarter: execution, orchestration, reasoning"]
+        T1h["Emergent capabilities: complex behavior from simple primitives"]
+    end
+
+    subgraph T2["Where it already touches your life"]
+        T2a["AI you already interact with without knowing it"]
+        T2b["Generative tools: real uses, real limits"]
+        T2c["AI at work: automation vs. augmentation"]
+        T2d["Use cases across a broad spectrum"]
+    end
+
+    subgraph T3["The risks"]
+        T3a["Bias in automated decisions"]
+        T3b["Deepfakes and misinformation"]
+        T3c["Privacy: what happens to what you type"]
+        T3d["AI-enabled scams and fraud"]
+    end
+
+    subgraph T4["The big implications"]
+        T4a["Jobs and the economy: hype vs. realistic"]
+        T4b["EU AI Act: what it actually means for you"]
+        T4c["Who controls this, and why that matters"]
+        T4d["The AGI / superintelligence debate"]
+        T4e["Human vs. AI capability trajectory — teased in ep. 1, deep-dive later"]
+        T4f["Wave 1: replacing solo tasks -> Wave 2: orchestrating agent swarms (collaboration)"]
+        T4g["'What's still needed from humans' needs a time horizon (1/6/12/18/24/36/144 months) — guessing past ~24mo is futile"]
+        T4h["Core traits to lean into: human connection, clarity, being *more* technically enabled (+ more)"]
+        T4i["Prompt engineering is dying as a skill — taste and judgment on what's correct stays essential"]
+    end
+
+    N["Cutting through the noise<br/>(money + fear draw chaotic voices; aim for clarity over confusion)"]
+
+    G["Terminology deep-dive: model, product, MCP, skills, API, CLI<br/>(separate video, on demand)"]
+
+    EP1 --> T1
+    EP1 --> T2
+    EP1 --> T3
+    EP1 --> T4
+    EP1 -.-> G
+
+    N -.-> T1
+    N -.-> T2
+    N -.-> T3
+    N -.-> T4

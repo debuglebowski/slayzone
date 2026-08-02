@@ -1,0 +1,5 @@
+# Calendar
+
+- Auth method: OAuth app
+- Requirements: Google Cloud OAuth and/or Microsoft Entra app; calendar scopes; webhook renewal jobs
+- Capabilities: Sync events, create/update meetings, attendees, reminders, meeting triggers

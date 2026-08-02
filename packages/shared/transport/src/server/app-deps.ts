@@ -781,9 +781,22 @@ export function getProcessesDeps(): ProcessesDeps {
 
 /** Structural slice of the runner gateway the runners router reads — connection
  *  status only. Kept structural (not the full `HubRunnerGateway`) so transport
- *  stays decoupled from `@slayzone/runner-transport`. */
+ *  stays decoupled from `@slayzone/runner-transport`.
+ *
+ *  NOTE: structural mirrors of a real interface drift silently (that class of bug
+ *  cost four wire-contract fixes in the runner handlers). Keep this a strict
+ *  SUBSET of `HubRunnerGateway`'s member names/shapes so the real gateway is
+ *  always assignable to it. */
 export type RunnerGateway = {
+  /** Socket-open runners. Says nothing about liveness. */
   listRunners: () => ReadonlyArray<{
+    runnerId: string
+    connectedAt: number
+    lastSeenAt: number
+  }>
+  /** Runners that can actually take work now (open + inside the heartbeat window).
+   *  This is what a dispatch decision should read; `listRunners` is for display. */
+  listUsableRunners: () => ReadonlyArray<{
     runnerId: string
     connectedAt: number
     lastSeenAt: number

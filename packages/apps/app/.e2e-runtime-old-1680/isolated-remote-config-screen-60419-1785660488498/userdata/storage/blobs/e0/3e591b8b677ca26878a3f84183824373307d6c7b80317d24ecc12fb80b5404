@@ -1,0 +1,62 @@
+# Normain Competitor Benchmark Report
+
+> **Status:** Draft. Companion outline: `report-outline.md`.
+
+***
+
+## Abstract
+
+_TBD_
+
+## Background
+
+AI tools marketed at knowledge workers have multiplied — chat assistants, workspace agents, research agents. Each claims to handle real work on real documents.
+
+Public benchmarks don't test that claim. MMLU and its successors measure model capability in isolation, not whether a compliance analyst can answer a vendor questionnaire from their own SOC 2 report, or whether an M&A counsel can sweep a 150-document data room for change-of-control clauses.
+
+For that work, "useful" is concrete. A tool must produce correct answers from the user's own documents, cite them, scale to realistic corpus sizes, and not fail silently. All four are testable.
+
+Many tools claim this space, but few are practical for everyday knowledge work. The list below is built from the tools customers most often had on their shortlist, filtered to those with a graphical interface:
+
+* **Normain** — workspace-based document analysis platform
+
+* **ChatGPT Thinking** — OpenAI's reasoning-mode chat
+
+* **Claude** — Anthropic's standard chat surface
+
+* **Claude Cowork** — Anthropic's knowledge-worker workspace surface
+
+* **Gemini Deep Research** — Google's research-agent mode
+
+* **M365 Copilot** — Microsoft's enterprise assistant
+
+* **NotebookLM** — Google's source-grounded notebook
+
+### Purpose & Scope
+
+This report has two purposes:
+
+1. To put AI tools marketed at knowledge workers to work on real, everyday tasks.
+2. To map where each tool's competence ends: in quality, in scale, in reliability under load.
+
+The persona is the knowledge worker — decision maker, strategist, operator — working across enterprise document Q&A, compliance, due-diligence, and risk. The tools considered are those listed above; tests ran between _[start]_ and _[end]_ on versions current at the time.
+
+## Method
+
+_TBD_
+
+## Results
+
+_TBD_
+
+## Discussion
+
+_TBD_
+
+### Limitations
+
+_TBD_
+
+## Conclusion
+
+_TBD_

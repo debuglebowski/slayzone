@@ -1,0 +1,20 @@
+# Trend
+
+Purpose: direction over time — is activity rising, dying, or seasonal.
+Exists because point-in-time numbers can't distinguish "healthy and
+stable" from "flatlining"; only the curve can.
+
+| Option | Category | Values / default | Notes |
+|---|---|---|---|
+| size / position | layout | x,y,w,h (default 6x3) | |
+| chart | layout | area / bars | |
+| title | display | text | |
+| icon | display | icon name / none | |
+| bucket | data | day / week | |
+| since | data | 7d / 30d / 90d | |
+| delta header | display | off / vs prior period | "+18%" verdict |
+| total | display | on / off | header count |
+| axis labels | display | on / minimal | |
+| eventTypes | filter | event type[] (default all) | created/updated/... |
+| concept | filter | conceptId / inherit | |
+| actor | filter | any / member (proposed) | per-person trend |

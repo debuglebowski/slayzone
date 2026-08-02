@@ -1,0 +1,43 @@
+# Git Diff Panel — Performance Optimizations
+
+## Bottlenecks (ranked)
+
+1. Continuous-flow mounts ALL files simultaneously — no virtualization
+2. Lezer tokenizer runs on main thread (TSX/TS parser = heavy)
+3. No line-level virtualization inside DiffView
+4. Poll fetches `contextLines: 'all'` every 5s — big patches
+5. `parseUnifiedDiff` re-parses on every poll (even identical content)
+6. `applyInlineHighlights` runs for every file in patch (even unopened)
+7. `buildSbsRows` not memoized
+8. `renderContent` emits many adjacent same-class `<span>`s
+
+## Fixes
+
+| # | Fix | Target | Impact | Effort |
+|---|-----|--------|--------|--------|
+| A | Virtualize continuous-flow file list | `GitDiffPanel.tsx:858-901` | High | M |
+| B | Virtualize lines in DiffView | `DiffView.tsx:346-354` | High | M |
+| C | Lezer tokenize → Web Worker | `highlight.ts:55` | High | M |
+| D | Lazy inline-highlights (only visible files) | `parse-diff.ts:202` | Med | S |
+| E | Memoize parseUnifiedDiff by patch string | `GitDiffPanel.tsx:271-278` | Med | S |
+| F | Two-phase poll (status → patch on change) | `GitDiffPanel.tsx:231-255` | Med | M |
+| G | Fetch `diffContextLines` not `'all'` | `GitDiffPanel.tsx:237` | Med | S |
+| H | Memoize `buildSbsRows` per chunk | `DiffView.tsx:312` | Low | XS |
+| I | Skip highlight for huge files (>200kb/5k lines) | `highlight.ts:44` | Low | XS |
+| J | Pause poll on `document.hidden` | `GitDiffPanel.tsx:261-269` | Low | XS |
+| K | Coalesce adjacent same-class spans | `DiffView.tsx:117-137` | Low | S |
+
+## Implementation order
+
+1. A + C — ~90% of stall eliminated
+2. B — large-file smoothness
+3. E — poll overhead
+4. G — network/parse reduction
+5. D, I, H, K, J — polish
+
+## Notes
+
+- A + C together: virtualized list means worker only tokenizes in-viewport files
+- G trade-off: toggling context level requires re-fetch (cheap, acceptable)
+- I threshold tunable; log when highlight disabled
+- F optional if A+C+E already fast enough

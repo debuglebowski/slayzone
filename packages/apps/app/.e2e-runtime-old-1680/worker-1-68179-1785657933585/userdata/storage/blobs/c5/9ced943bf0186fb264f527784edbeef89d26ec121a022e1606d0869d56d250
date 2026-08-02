@@ -1,0 +1,21 @@
+# Security Incident Response
+
+**Status summary:** Resolved. A migration run against production truncated core tables; restored from the latest backup within RTO, ~12h of data lost within RPO. Not a security breach.
+
+**Security Event ticket:** NOR-XXX
+
+**Assign leadership for incident response:** Incident coordinator — Dennis Landfors; recovery lead — Max Netterberg.
+
+**Slack thread created in #security:** Yes — thread opened in #security.
+
+**Triage & Analysis (determine urgency):** Customer-facing product down; severity High (P1).
+
+**Investigation (what/why has gone wrong?):** A migration script was run against production instead of staging, truncating core tables (confirmed via logs). No security alerting — human error, not an attack.
+
+**Containment (how do we avoid additional damage):** Froze deployments and locked down production access; preserved the damaged instance for investigation.
+
+**Neutralization (what is the solution to the problem?):** Restore the most recent automated Azure backup (~02:00) to a fresh instance.
+
+**System recovery (how do we make the system work as normal again / recover data / etc?):** Verify data integrity (record counts, foreign-key checks, smoke test), then cut over; service restored within the 12h RTO. ~12h of data (02:00 → incident) lost, within the 24h RPO.
+
+**Hardening & Detection improvements (lessons learned, long-term response):** Add a guardrail to prevent migrations targeting production by mistake; revisit backup frequency as budget allows.

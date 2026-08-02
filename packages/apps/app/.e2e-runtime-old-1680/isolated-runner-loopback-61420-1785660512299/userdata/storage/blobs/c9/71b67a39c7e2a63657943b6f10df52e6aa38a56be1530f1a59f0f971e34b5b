@@ -1,0 +1,35 @@
+# Normain App — Permissions Catalog
+
+> Permissions in the Normain app, mapped to roles. Feeds the roles/permissions section of the KPMG deliverable.
+>
+> Checkmarks below are **suggested defaults** — review and adjust.
+>
+> **Scoped variants:** team-level permissions split into a broad form ("any team") and an "…I'm a part of" form (only teams the actor belongs to).
+
+## Permissions
+
+| Category                  | Permission                                             | Org owner | Org manager | Team owner | User   |
+| ------------------------- | ------------------------------------------------------ | --------- | ----------- | ---------- | ------ |
+| Org / tenant              | Add member to org                                      | ✓         | ✓           | <br />     | <br /> |
+| Org / tenant              | Remove member from org                                 | ✓         | ✓           | <br />     | <br /> |
+| Org / tenant              | Edit org settings                                      | ✓         | <br />      | <br />     | <br /> |
+| Teams                     | Create team                                            | ✓         | ✓           | ✓          | <br /> |
+| Teams                     | Add member to any team                                 | ✓         | ✓           | <br />     | <br /> |
+| Teams                     | Add member to team I'm a part of                       | ✓         | ✓           | ✓          | <br /> |
+| Teams                     | Remove member from any team                            | ✓         | ✓           | <br />     | <br /> |
+| Teams                     | Remove member from team I'm a part of                  | ✓         | ✓           | ✓          | <br /> |
+| Teams                     | Edit any team                                          | ✓         | ✓           | <br />     | <br /> |
+| Teams                     | Edit team I'm a part of                                | ✓         | ✓           | ✓          | <br /> |
+| Teams                     | Archive / delete any team                              | ✓         | ✓           | <br />     | <br /> |
+| Teams                     | Archive / delete team I'm a part of                    | ✓         | ✓           | ✓          | <br /> |
+| Teams                     | View any team                                          | ✓         | ✓           | <br />     | <br /> |
+| Teams                     | View teams I'm a part of                               | ✓         | ✓           | ✓          | ✓      |
+| Members / users           | Resend / revoke invitation                             | ✓         | ✓           | ✓          | <br /> |
+| SharePoint / integrations | Setup SharePoint integration                           | ✓         | <br />      | <br />     | <br /> |
+| SharePoint / integrations | Assign SharePoint site to team                         | ✓         | <br />      | <br />     | <br /> |
+| SharePoint / integrations | Remove SharePoint site from team                       | ✓         | <br />      | <br />     | <br /> |
+| SharePoint / integrations | View any connected SharePoint site                     | ✓         | <br />      | <br />     | <br /> |
+| SharePoint / integrations | View connected SharePoint sites for team I'm a part of | ✓         | ✓           | ✓          | ✓      |
+| SharePoint / integrations | Disconnect SharePoint integration                      | ✓         | <br />      | <br />     | <br /> |
+| Audit & compliance        | View audit log                                         | ✓         | <br />      | <br />     | <br /> |
+| Audit & compliance        | Export audit log                                       | ✓         | <br />      | <br />     | <br /> |

@@ -1,0 +1,84 @@
+%% Normain — System Data Flow (SOC 2 2026)
+%% Scope: production data path, in-scope system (Security category), period 4 May–4 Aug 2026.
+%% Hosting modes in scope: SaaS open-platform, Logical separation.
+%% Status: DRAFT — engineering to validate. Architecture as of 2026-06
+%% (supersedes the 2025 "Normain Data Flow" drawing — predates AWS/Anthropic, tenant-api, current Azure AI services).
+flowchart LR
+  U["Customer end-users (browser)"]
+  CF["Cloudflare (authoritative DNS)"]
+
+  subgraph SRC["Customer content sources (read-only)"]
+    SP["SharePoint"]
+    GD["Google Drive"]
+    BOX["Box"]
+  end
+  UP["Direct UI upload"]
+  URLN["Customer-supplied URLs"]
+
+  subgraph IDP["Identity providers (MFA at IdP)"]
+    ENTRA["Microsoft Entra ID — per tenant"]
+    GOOG["Google Workspace OAuth — platform tenant"]
+    EPW["Email + password — platform tenant only"]
+  end
+
+  subgraph EEA["EEA / EU data residency"]
+    subgraph SYS["Normain system boundary — Azure AKS (aks-normain-prod-01)"]
+      GW["Istio ingress gateway<br/>TLS 1.2+ termination, per-tenant certs"]
+      subgraph APP["Application tier (per tenant)"]
+        WEB["Web UI"]
+        API["API"]
+        TAPI["Tenant API"]
+        WORK["Worker"]
+        REDIS["Redis (in-cluster)"]
+      end
+      subgraph DATA["Data stores (per tenant, AES-256 at rest)"]
+        PG["PostgreSQL Flexible Server (network-private)"]
+        BLOB["Blob Storage"]
+        NFS["Azure Files (NFS)"]
+        KV["Key Vault (secrets)"]
+        LOG["Log Analytics + immutable storage (365 days)"]
+      end
+    end
+    subgraph AZ["Carved-out subservice — Microsoft Azure"]
+      AOAI["Azure OpenAI (OpenAI models)"]
+      ADI["Document Intelligence (OCR)"]
+      ASP["Speech (transcription)"]
+      ACS["Communication Services (email)"]
+    end
+    subgraph AWSS["Carved-out subservice — AWS (EU)"]
+      ANTH["Anthropic models (SaaS open-platform)"]
+    end
+    BS["BetterStack — logs/traces (OTel, EU)"]
+  end
+
+  U -->|HTTPS| CF --> GW --> WEB --> API
+  U -. SSO / OAuth .-> IDP -. authn .-> API
+  SP --> WORK
+  GD --> WORK
+  BOX --> WORK
+  UP --> API
+  URLN --> WORK
+  API --> WORK
+  API <--> PG
+  WORK <--> PG
+  WORK --> BLOB
+  WORK --> NFS
+  API -. secrets .-> KV
+  WORK -. inference .-> AOAI
+  WORK -. OCR .-> ADI
+  WORK -. transcription .-> ASP
+  WORK -. inference .-> ANTH
+  API --> ACS --> U
+  API -. logs .-> BS
+  WORK -. logs .-> BS
+  API --> LOG
+  TAPI -. tenant provisioning .-> PG
+
+  subgraph LEGEND["Legend / notes"]
+    direction TB
+    N1["Trust boundary: Normain-operated AKS + data stores;<br/>Microsoft Azure and AWS are carved-out subservice orgs"]
+    N2["In transit: TLS 1.2+ on external legs;<br/>internal VNet/pod traffic network-isolated, not mTLS"]
+    N3["At rest: AES-256 (MS-managed keys);<br/>selected fields app-layer encrypted; secrets in Key Vault via CSI"]
+    N4["Per-tenant isolation: namespace, database, storage, NFS share"]
+    N5["Subprocessor inventory of record = DPA Appendix B + Vendor Master Sheet;<br/>operational/non-data-path vendors excluded"]
+  end

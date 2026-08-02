@@ -1,0 +1,16 @@
+# Pre-approved subprocessor list — 2026-06-04 DRAFT
+
+**The master superset that feeds every DPA's appendix.**
+📄 Doc: https://docs.google.com/document/d/1RbAhmLFeDvfu-8-UrmWEFIQuZXllyyRQ15v1gt5YFC0/edit
+
+## Changes vs `2026-04-28 - LATEST`
+- **Anthropic added** (Table 2 / operations) — it was removed from the LATEST; now in the master.
+- **"ChatGPT" → "OpenAI"** (correct legal entity).
+- **Classifications settled (O3):**
+  - **AWS** = SaaS-only (Table 1).
+  - **Sentry** = pre-approved but in **no** DPA.
+  - **Firecrawl** = excluded (no PII).
+  - **Stripe / GitHub / Vanta** = internal-tools list, **NOT** customer subprocessors (code-verified for Stripe: only billing email + plan/org metadata; Normain is controller).
+
+**On sign-off:** rename `… - 2026-06-04 - DRAFT` → `- LATEST`; demote `… - 2026-04-28 - LATEST` → bare date.
+**Still open (O3-residual):** classify Loops / Zero / Cursor + the MS Marketplace publisher.

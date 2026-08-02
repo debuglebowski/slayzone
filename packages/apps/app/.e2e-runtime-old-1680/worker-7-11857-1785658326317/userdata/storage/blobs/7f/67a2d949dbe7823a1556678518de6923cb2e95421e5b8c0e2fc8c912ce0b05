@@ -1,0 +1,177 @@
+# SlayZone YouTube Series — Concept Doc
+
+## Demo Project: Hatable
+
+**Hatable** — "Like Lovable, but it creates bad applications."
+
+This is our through-line. Every episode uses Hatable as the demo project. The AI agents are always trying to fix, improve, or wrangle Hatable's terrible output. It's the perfect comedic foil:
+- Gives us **real code problems** to solve on camera (not contrived)
+- Visual gags — we can SHOW the bad apps (ugly UI, broken flows, absurd features)
+- Running joke that compounds — the Hatable codebase gets worse/weirder every episode
+- Natural demo structure: "Hatable made this mess → here's how we fix it with SlayZone"
+
+---
+
+## Theme Options
+
+### 1. "The Hatable Diaries" — Reality TV / The Office
+
+Each episode is a **mockumentary** about a dev team stuck maintaining Hatable. Talking-head confessionals to camera between demo segments.
+
+**Vibe**: The Office meets Silicon Valley. Deadpan reactions to Hatable's latest crime against UX.
+
+**Why it works:**
+- The Office format is instantly recognizable and beloved
+- "Confessionals" are a natural way to explain concepts without lecturing
+- Hatable is the Michael Scott of codebases — lovably terrible, always making things worse
+- Easy to produce — just you + screen + occasional cut to "confessional" angle
+
+**Example beat**: *\[screen shows Hatable's output: a todo app where checking an item unchecks everything else\]* → cut to talking head: "So... yeah. That's what we're working with." → *\[pulls up SlayZone, spins up Claude Code\]* "Let's see if our agent can make sense of this."
+
+**Recurring bits:**
+- "Hatable Showcase" cold open — reveal what Hatable generated this week
+- "The Incident Report" — a confessional explaining what went wrong
+- End card: the fixed version vs the Hatable original, side by side
+
+---
+
+### 2. "Slay Kitchen" — Cooking Show
+
+Each episode is a **cooking show** where the "ingredients" are code, AI agents are your kitchen tools, and SlayZone is the kitchen.
+
+**Vibe**: Bon Appétit / Binging with Babish but for code. Calm, methodical, satisfying.
+
+**Why it works:**
+- Cooking show structure maps perfectly: prep (project setup) → cook (AI does the work) → plate (ship it)
+- "Hatable is the ingredient you got in your mystery box" — Chopped-style constraint
+- Extremely watchable format — people love cooking shows even when they don't cook
+- Satisfying transformation arc: raw mess → polished result
+
+**Example beat**: "Today's mystery ingredient..." *\[reveals Hatable-generated e-commerce site with comic sans and a cart that adds items to other people's carts\]* "...oh no. Okay. Let's work with this. First, we prep our workspace..." *\[opens SlayZone, creates task\]*
+
+**Recurring bits:**
+- "Mystery box" cold open — Hatable generates something new, we react
+- "Mise en place" — setting up the project, skills, context (educational part disguised as prep)
+- "Taste test" — browser panel live preview check
+- "Plating" — final result reveal
+
+---
+
+### 3. "Crime Scene" — Forensic Investigation / True Crime
+
+Each episode is a **true crime investigation** into the atrocities committed by Hatable. The AI agents are forensic analysts. SlayZone is the crime lab.
+
+**Vibe**: True crime podcast meets code review. Dramatic narration over terrible code.
+
+**Why it works:**
+- True crime is the most popular podcast/YouTube genre — instant hook
+- "Investigating bad code" is genuinely how debugging feels
+- Dramatic reveals work perfectly: "And THAT's when we found... the nested ternary. Fourteen levels deep."
+- Hatable's output is literally the crime
+
+**Example beat**: *\[noir-ish lighting on terminal\]* "On March 15th, a user reported that the login page... logged them into someone else's account. Every time." *\[dramatic pause\]* "The investigation begins here." *\[opens SlayZone\]*
+
+**Recurring bits:**
+- "Case file #N" — each episode is a case
+- "Evidence review" — reading through Hatable's code with dramatic narration
+- "Calling in the specialists" — spinning up AI agents
+- "Case closed" — the fix, explained
+
+---
+
+### 4. "Mission Briefing" — Spy / Covert Ops
+
+Each episode is a **covert ops mission briefing**. Dev tasks are missions, AI agents are field operatives, shipping code is saving the world.
+
+**Vibe**: Wes Anderson meets Get Smart. Deadpan, meticulous, dry humor.
+
+**Why it works:**
+- Spy thriller gravitas applied to task management = inherent comedy
+- Natural structure: briefing → mission → debrief
+- Agent dossiers for Claude Code, Codex, Gemini (strengths, weaknesses, catchphrase)
+- Hatable is the antagonist organization producing chaos
+
+**Example beat**: "Intel suggests Hatable has deployed a new weapon: a calendar app where every event is scheduled for yesterday." *\[pulls up dossier\]* "We're sending in Agent Claude. Codename: Opus."
+
+---
+
+### 5. "Tech Support" — Call Center / Customer Complaints
+
+Each episode opens with a fake **customer complaint call** about a Hatable app. You're the one tech support person who actually knows how to fix things — with SlayZone.
+
+**Vibe**: IT Crowd meets Nathan For You. Absurdist customer interactions.
+
+**Why it works:**
+- Everyone's been on a bad support call — instant relatability
+- The "complaint" naturally sets up the problem to solve
+- Hatable's apps generating real user complaints is endlessly funny
+- Support ticket → task → fix is a clean episode arc
+
+**Example beat**: *\[phone ringing\]* "Hatable support, how can I— ...yes ma'am, I understand the weather app is only showing weather from 1987. Let me look into that." *\[hangs up, opens SlayZone\]* "Alright."
+
+---
+
+## Comparison Matrix
+
+| Theme | Humor style | Production effort | Hatable fit | Binge factor | Uniqueness |
+|-------|------------|-------------------|-------------|-------------|------------|
+| Mockumentary | Deadpan, cringe | Medium (two camera angles) | ★★★★★ | High | Medium |
+| Cooking Show | Warm, satisfying | Low-Medium | ★★★★ | High | High |
+| True Crime | Dramatic, dry | Low (VO + screen) | ★★★★★ | Very high | High |
+| Spy Briefing | Dry, absurdist | Medium (graphics) | ★★★★ | Medium | High |
+| Tech Support | Absurdist, improv | Low | ★★★★★ | Medium | Very high |
+
+---
+
+## Episode Structure (Theme-Agnostic)
+
+Regardless of theme, each episode hits these beats:
+
+1. **Hook** (0:00-0:30) — Hatable reveal / problem setup. Funny, visual, immediate.
+2. **Context** (0:30-1:30) — What are we actually learning today? (the educational anchor)
+3. **Setup** (1:30-3:00) — SlayZone workspace, project config, any relevant feature intro
+4. **The Work** (3:00-5:30) — AI agents in action, real demo, real code
+5. **Result** (5:30-6:30) — Before/after, Hatable vs fixed version
+6. **Outro** (6:30-7:00) — Takeaway + tease next episode
+
+---
+
+## Episode Plan (Updated)
+
+### Ep 0 — What is Claude Code? (Standalone pre-video)
+- Introduce Hatable as our running demo project
+- Show Claude Code from zero — install, first prompt, agentic workflow
+- Use a Hatable app as the first thing Claude Code fixes
+- Tease: "But what if you had a proper command center for this?"
+
+### Ep 1 — SlayZone Intro + Task Management
+- Full SlayZone setup, project creation, task lifecycle
+- Import the Hatable project, create first task, kanban overview
+
+### Ep 2 — Multi-Agent (Claude + Codex + Gemini)
+- Same Hatable bug, three agents, compare approaches
+- Terminal modes, split views, provider switching
+
+### Ep 3 — Browser Panel + Live Preview
+- Fix a Hatable UI disaster with real-time browser preview
+- Agent makes changes → see results instantly
+
+### Ep 4 — Skills, Context, MCP
+- Equip agents with Hatable-specific SKILL.md and project context
+- Show the difference: generic agent vs properly equipped agent
+
+### Ep 5 — Worktrees + Parallel Workflows
+- Multiple Hatable bugs, multiple branches, multiple agents at once
+- Git worktrees, parallel task execution
+
+---
+
+## Open Questions
+
+- Which theme resonates most? Could also hybrid (e.g. true crime structure + mockumentary confessionals)
+- Hatable: do we build a real repo with intentionally bad code, or generate fresh disasters per episode?
+- Face cam or screen-only with voiceover?
+- Release cadence — weekly? biweekly?
+- Season arc or standalone eps?
+- Should Ep 0 stand fully alone or tease SlayZone at the end?
+- Original music or licensed? Each theme suggests different soundtrack vibes

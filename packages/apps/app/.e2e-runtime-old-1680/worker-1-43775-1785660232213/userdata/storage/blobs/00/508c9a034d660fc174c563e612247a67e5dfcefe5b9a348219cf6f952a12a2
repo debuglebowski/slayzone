@@ -1,0 +1,5 @@
+# WhatsApp
+
+- Auth method: OAuth/token
+- Requirements: Meta app; WhatsApp Business Account; phone number; templates; user opt-in
+- Capabilities: Business messaging, inbound webhooks, support/notification flows

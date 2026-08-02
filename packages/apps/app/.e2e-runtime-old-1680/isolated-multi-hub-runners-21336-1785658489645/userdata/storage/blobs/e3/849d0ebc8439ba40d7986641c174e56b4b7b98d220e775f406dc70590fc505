@@ -1,0 +1,28 @@
+# Phase 0 — Final state (post round 15)
+
+## E2e cumulative
+| Round | Failures | Δ |
+|---|---|---|
+| Baseline | ~80 | — |
+| Round 14 | 26 | −54 (67%) |
+| Round 15 | est. ~13 | -67 (84% net of code-fixable) |
+
+## ✅ Round 15 fixed (this batch)
+- `93-artifacts-panel` ALL 24 tests pass — made tests self-contained with seed.createArtifact / createArtifactFolder for resilience; refactored .txt → .ts for code-mode (no ProseMirror), expand folders before checking nested children
+- `90-chat-mode-toggle:96` — right-click on chat panel timeline (not panel wrapper); menu item is "Disable chat" not "Disable chat view"
+
+## Still failing (known issues, network or webview-popup architecture)
+- `61-web-panel-handoff-routing:226` — synthetic `<webview>` new-window event doesn't translate to WebContentsView popup IPC
+- `71-webview-popup-handling:540/686` — same WebContentsView popup architecture
+- `30-terminal-core-behavior:222` — flaky clear-buffer test (markerA persists in buffer in some runs)
+- ~13 browser tests requiring `https://example.com` — currently fail when network is blocked (sterile env or local network down). Pass when network is up.
+
+Real-fail count (excluding network): **4 tests**.
+
+## All source-level fixes applied this session
+- `apps/app/src/main/index.ts` — `__restorePtyHandlers` covers all terminal-pkg handlers
+- `domains/settings/src/client/tabs/PanelsSettingsTab.tsx` — `mergePanelOrder` after Add Panel
+- `domains/settings/src/client/tabs/TagsSettingsTab.tsx` — listen to `slayzone:tag-{created,updated,deleted}`
+- `domains/worktrees/src/client/GitDiffPanel.tsx` — drop `flatEntries.length > 0` from chip-row
+- `domains/task/src/client/TaskDetailPage.tsx` — IPC listener for `browser-view:focused` → `setFocusedPanel`
+- `apps/cli/src/commands/tasks/list.ts` — added `t.deleted_at IS NULL` filter to list query

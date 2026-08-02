@@ -1,0 +1,29 @@
+OPTION H — Tabbed footer
+=========================
+
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│  (tree content above)                                   │
+│                                                         │
+├─────────────────────────────────────────────────────────┤
+│  ┌Tools┐  Status   Help                                 │  ← tab strip
+│  └─────┘                                                │
+│  [+task] [zen] [explode] [📁]                           │  ← active tab body
+├─────────────────────────────────────────────────────────┤
+│  [Boost] [██░ Claude] [██░ Codex]    [≡] [⚙]            │  ← persistent
+└─────────────────────────────────────────────────────────┘
+
+TAB CONTENTS:
+  Tools   → [+task] [zen] [explode] [📁]
+  Status  → [agent●3] [panel] [⊟] [⬇]
+  Help    → [trophy] [bar-chart] [handshake] [megaphone]
+            [keyboard] [feedback]
+
+· Persistent bottom = usage + view + settings (always seen)
+· Tab body cycles between groups
+· Settings = last
+· Pros:  great organization, low icon count per view,
+         users learn "Tools is workspace stuff"
+· Cons:  extra click for non-active tab,
+         contextual state hidden if not on Status tab,
+         agent badge may need to bleed across tabs

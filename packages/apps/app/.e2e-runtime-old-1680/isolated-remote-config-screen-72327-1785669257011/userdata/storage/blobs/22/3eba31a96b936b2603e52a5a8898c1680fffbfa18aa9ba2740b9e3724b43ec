@@ -1,0 +1,123 @@
+# Peka — Co-op 2D Platform Puzzler
+
+> Game Design Document (living draft). Filled out as we ideate.
+>
+> **Decided:** symmetric players + co-op verbs · local couch · mysterious/eerie tone
+
+---
+
+## 1. Description
+
+A **2D co-op platform game** built around **cooperative puzzles**. Two players
+progress through **one long level** together. The level is designed so it is
+**impossible to complete solo** — every major obstacle requires both players to
+act in coordination. The fun comes from communication, timing, and each player
+controlling something the other depends on.
+
+Tone is **mysterious and eerie** — sparse, atmospheric, story told through the
+environment rather than text (Limbo / Inside lineage). The pair are small and
+vulnerable; the world is large and unexplained.
+
+**Core pillars**
+- **Forced cooperation** — no section clears without two players.
+- **Puzzle-first platforming** — movement is the verb; the brain-teaser is the challenge.
+- **One handcrafted level** — a single, long, escalating journey rather than many short stages.
+- **Wordless atmosphere** — eerie mood, environmental storytelling, minimal UI.
+
+---
+
+## 2. Cooperation Model — ✅ Symmetric + co-op verbs
+
+Both players control **identical** characters with the **same abilities**. The
+dependency comes from **obstacles that need two bodies** and **co-op verbs**,
+not from asymmetric powers. Either player can be picked up by either person —
+no "main character."
+
+**Why this fits:** local couch + eerie tone + forced cooperation. Two identical
+small figures in a hostile world reads cleanly in silhouette and keeps the
+mechanics learnable for both players instantly.
+
+### Cooperative verbs (the teamwork vocabulary) — _draft, to refine_
+- **Hold-to-open** — one stands on a plate/lever to hold a gate while the other passes.
+- **Boost** — one crouches/cups hands to launch the other to a higher ledge.
+- **Catch / pull-up** — one hangs from a ledge, the other climbs over and pulls them up.
+- **Counterweight** — both needed on a see-saw, pulley, or balance platform.
+- **Carry** — one picks up and carries/throws the other across a gap.
+- **Block & path** — one body holds a mechanism while the other's path opens.
+
+- [ ] Lock the final list of ~4–6 verbs the whole level is built from
+- [ ] Decide which verbs are "taught early" vs "combined late"
+
+---
+
+## 3. Mechanics
+
+### Movement / platforming
+_(TBD)_ — run, jump, grab-ledge as a baseline. Open: double-jump? wall-cling?
+momentum/weight feel? Keep it tight and readable for an eerie-precision feel.
+
+### Failure & respawn
+_(TBD)_ — leaning **shared checkpoints**: if either player dies the pair
+respawns together at the last checkpoint. Fits shared-screen and keeps both
+invested. Open: instant-death hazards (Limbo-style) vs. health?
+
+### Input
+Local couch → two gamepads (or keyboard-split). _(TBD — confirm control scheme)_
+
+---
+
+## 4. The Level
+
+One long, escalating level. _(TBD — theme, beats, structure)_
+- [ ] Theme / setting (eerie — ruins? a vast machine? underground? a creature's body?)
+- [ ] Macro-structure (acts / zones / checkpoints)
+- [ ] Difficulty curve (teach each verb → test → combine → twist)
+- [ ] Climax / ending — does the mystery pay off?
+
+---
+
+## 5. Characters & World
+
+Two small, identical beings. _(TBD — what are they? why two? what's the world?)_
+The "why are there two of them" question can itself be part of the mystery.
+
+---
+
+## 6. Multiplayer / Technical — ✅ Local couch
+
+- ✅ **Local co-op**, two players, one machine.
+- **Camera (strong recommendation): shared single screen.** Forces players to
+  stay together → natural cooperation pressure, and reads beautifully for an
+  eerie silhouette style. (Alternative: split-screen — only if puzzles need
+  players far apart. Flag if so.)
+- [ ] Engine / tech stack
+- [ ] Target platform(s)
+- [ ] Control scheme (2 gamepads assumed)
+
+---
+
+## 7. Art & Audio Direction
+
+Direction set by tone: **mysterious / eerie**.
+- **Visual:** silhouette-forward, muted/desaturated palette, fog & depth,
+  minimal-to-no on-screen UI. Readable shapes over detail.
+- **Audio:** sparse ambient drone, diegetic sound, music that swells only at
+  beats. Sound as a tension/telegraph tool.
+- [ ] Lock palette & reference board
+- [ ] Animation feel (weighty & vulnerable vs. nimble)
+
+---
+
+## 8. Gaps / Open Questions
+
+Resolved: ~~co-op model~~ · ~~local/online~~ · ~~tone~~.
+
+Still open — knock down next:
+1. **Co-op verbs** — lock the 4–6 core teamwork interactions (§2).
+2. **Camera** — confirm shared single screen vs. split.
+3. **Level theme/setting** — what eerie world? (drives art + story)
+4. **Movement feel** — jump-only, double-jump, wall-cling, momentum?
+5. **Failure rules** — shared checkpoints + instant-death vs. health?
+6. **Level length** — "one long level" ≈ how many minutes?
+7. **Characters** — who are the two? why two? (can stay a mystery in-world)
+8. **Tech stack / engine** — and target platform(s).

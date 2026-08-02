@@ -1,0 +1,101 @@
+# xterm LRU pool — flow
+
+## Tab-switch → terminal mount
+
+```mermaid
+flowchart TD
+    Start([User switches to tab T]) --> Mount[React mounts TerminalPanel for sessionId S]
+    Mount --> Check{Pool has S?}
+
+    Check -- Hit --> Touch[pool.touch(S)<br/>move to MRU end]
+    Touch --> Attach[Re-attach cached<br/>xterm element to DOM]
+    Attach --> Pin[pin(S) — mark as active<br/>cannot evict]
+    Pin --> Ready([Terminal visible<br/>0 flicker])
+
+    Check -- Miss --> Evict{Pool full?<br/>size >= MAX}
+    Evict -- Yes --> DisposeLRU[Find LRU unpinned entry L<br/>L.terminal.dispose<br/>releases WebGL ctx<br/>pool.delete L]
+    DisposeLRU --> Create
+    Evict -- No --> Create[Create fresh xterm<br/>+ WebglAddon<br/>+ FitAddon<br/>+ SerializeAddon]
+
+    Create --> Rehydrate[window.api.pty.getBuffer S<br/>returns scrollback from main]
+    Rehydrate --> Write[terminal.write scrollback]
+    Write --> PoolAdd[pool.set S, instance<br/>touched = now]
+    PoolAdd --> Pin
+```
+
+## Tab-switch away
+
+```mermaid
+flowchart TD
+    Switch([User switches away from T]) --> Unpin[unpin prev active]
+    Unpin --> Detach[React unmounts TerminalPanel<br/>DOM element removed]
+    Detach --> Keep{In pool?}
+    Keep -- Yes --> Stay[Stay cached<br/>subject to LRU eviction]
+    Keep -- No --> Gone[Already disposed — no-op]
+    Stay --> Idle([Idle — may be evicted later<br/>when another tab mounts])
+```
+
+## Eviction state
+
+```mermaid
+stateDiagram-v2
+    [*] --> Fresh: create
+    Fresh --> Active: mount + pin
+    Active --> Cached: tab switch away (unpin)
+    Cached --> Active: tab re-focus (touch + pin)
+    Cached --> Disposed: LRU evict (pool full)
+    Active --> Disposed: PTY exit
+    Disposed --> [*]
+
+    note right of Active
+        pinned = cannot evict
+        held by React ref
+    end note
+    note right of Cached
+        detached from DOM
+        WebGL ctx still alive
+        in LRU queue
+    end note
+    note right of Disposed
+        terminal.dispose called
+        WebGL released
+        GPU ctx freed
+    end note
+```
+
+## Pool data structure
+
+```mermaid
+flowchart LR
+    subgraph Pool["xtermPool (module-scope Map, cap=8)"]
+        direction LR
+        MRU["MRU end<br/>just touched"] --> S3[S3 active pinned]
+        S3 --> S7[S7]
+        S7 --> S2[S2]
+        S2 --> S9[S9]
+        S9 --> S1[S1]
+        S1 --> S4[S4]
+        S4 --> S6[S6]
+        S6 --> S5[S5 LRU end<br/>evicts next]
+    end
+
+    NewMount[New mount S10] -.full, evict.-> Evicted[(S5<br/>disposed)]
+    NewMount -.added.-> MRU
+```
+
+## Invariants
+
+- **Pinned set** ⊆ **Pool** — active tab always in pool
+- **Pool size** ≤ MAX (default 8)
+- **Eviction skips pinned** — active sessions never evicted; if all pinned and full, new mount creates un-pooled orphan that disposes on unmount (rare — only with 8+ split panes visible simultaneously)
+- **Touch triggers:** mount, PTY data write (keeps hot bg streams warm), serialize addon read
+- **Dispose triggers:** LRU evict, PTY exit, mode change, app quit
+
+## Why this works
+
+- Cap on WebGL contexts ⇒ bounded GPU memory
+- Pinned active ⇒ never evict what user sees ⇒ no surprise blanks
+- Touch-on-write ⇒ noisy background processes stay warm
+- Rehydrate cost only on deep-past re-open ⇒ rare, ~100 ms, acceptable
+- Module-scope ⇒ survives React unmount ⇒ virtualized tabs work seamlessly
+- Explicit dispose ⇒ predictable GPU reclaim (vs GC)

@@ -1,0 +1,102 @@
+# AST-71 — Secure disposal/re-use of equipment (v2, Drive-sourced)
+
+**Framework:** ISO 27001:2022 A.7.14
+**Owner:** Kalle Hansson (newly assigned, was Unassigned)
+**Vanta status:** 3/4 mapped tests/docs OK
+**Vanta link:** https://app.eu.vanta.com/c/normain.com/controls?search=AST-71
+
+> **v2 note:** v1 investigation only searched My Drive. Per feedback, compliance content lives only in Drive — re-ran search across all 7 shared drives (Normain, Normain Dev, Data Room, Data Room - Extractional AI, Due Diligence, founders, investors). Read actual policy PDFs. Findings updated below; what changed and what's still unverified flagged at the end.
+
+## Situation
+
+### Control text
+> Items of equipment containing storage media shall be verified to ensure that any sensitive data and licensed software has been removed or securely overwritten prior to disposal or re-use.
+
+### What Vanta has mapped
+**Tests (2/3 OK):**
+- ✓ Approved Asset Management Policy (Dennis Landfors)
+- ✓ Approved Data Management Policy (Kalle Hansson)
+- ✗ Vendor security assessments (Sara Landfors) — failing globally: 12 vendors flagged. Test mapped to 5 controls; weak mapping for AST-71. Out of scope for this control.
+
+**Documents (1/1 OK):**
+- ✓ ISO certification from infrastructure provider (Dennis) — covers cloud-side equipment disposal
+
+**Linked policies (Vanta Policies index):** Asset Management Policy + Data Management Policy — both `OK` status, approved Jun 3 2025, 7/7 acknowledgments, renewal due Jun 3 2026.
+
+### Procedural coverage (verified against Drive, not Vanta proxies)
+
+Authoritative policy PDFs (folder `1S0j62KyZCiD8w-DnrHjbPbf3jpLR1FAa`, approved Nov 5 2025, both written by Ryan Rich, approved by Sara Landfors 2025-05-30):
+
+**`[Normain] Asset Management Policy.pdf` § "Asset Disposal & Re-Use":**
+> "Company devices and media that store or process confidential company data shall be securely disposed of when no longer needed. Data must be erased prior to disposal or re-use, using an approved technology in order to ensure that data is not recoverable. A Certificate of Destruction (COD) must be obtained for devices destroyed by a third-party service. Please refer to NIST Special Publication 800-88 Revision 1..."
+
+**`[Normain] Data Management Policy.pdf` Appendix A — Internal Retention and Disposal Procedure (Devices):**
+> "1. Employee devices will be collected promptly upon an employee's termination.
+> 2. Remote employees will be sent a shipping label and the return of their device shall be monitored.
+> 3. Collected devices will be cleared to be re-provisioned—or removed from inventory.
+> 4. The company will securely erase the device when reprovisioning.
+> 5. Device images may be retained at the discretion of management for business purposes.
+> 6. The company may employ a third party to manage the above."
+> ...
+> "In cases where a device is damaged ... use an E-Waste service that includes data destruction with a certificate. Certificates of destruction will be kept on record for one year. Physical destruction can be optional if it is verified that the device is encrypted with Full Disk Encryption..."
+
+**Verdict:** Procedural side of A.7.14 is **fully documented** in approved policies — verified erase prior to disposal/re-use, NIST 800-88 reference, COD requirement, FDE-as-substitute fallback, retention period for COD. Not a gap.
+
+### Execution evidence — actual gap
+Searched all 7 shared drives for: `disposal`, `wipe`, `erase`, `sanitiz`, `overwrit`, `destruction`, `Certificate of Destruction`, `COD`, `NIST 800-88`, `media sanitization`, `disposal log`, `disposal record`, `asset register`, `hardware`, `MacBook`, `serial number`, `device list`, `employee laptop`, `asset tag`, `MDM`, `Kandji`, `Jamf`. **No hardware asset register, laptop inventory, or disposal log found in Drive.** The `Data Asset Inventory` spreadsheet is for data sets, not hardware.
+
+A.7.14 audit evidence expects: documented procedure (✓ have it) + records demonstrating the procedure was applied during the audit period. The records artifact does not exist in Drive.
+
+### Cross-reference w/ Dennis
+- **AST-1** (Dennis, SOC 2 CC 6.5 / C 1.2): 2/3 — missing the destruction-certificates document. Same artifact gap as AST-71.
+- **AST-67** (Dennis, ISO A.5.11): 5/5 clean.
+
+One artifact closes both AST-71 and AST-1.
+
+## Solution
+
+### Recommended evidence artifact
+Single Google Doc/Sheet in the approved-policies folder (or sibling): **"Equipment Disposal & Re-use Log — [audit period]"**
+
+Per device:
+- Device ID (serial / asset tag)
+- Type (laptop / phone / external drive)
+- Action (disposed / re-used internally / returned to leasing co.)
+- Date
+- Verification method — pin to NIST 800-88 vocab the policies already use:
+  - "Clear" = factory reset (e.g. macOS *Erase All Content & Settings*, full OS reinstall) — for re-use
+  - "Purge" = cryptographic erase, valid only on FDE devices (per Data Mgmt Policy Appendix A)
+  - "Destroy" = third-party E-Waste service → attach COD
+- Responsible person (Asset owner per Asset Mgmt Policy)
+- Link to COD or wipe attestation
+
+If zero events in audit period: a one-paragraph attestation signed by the Security Delegate stating no equipment containing storage media was disposed/re-used in the period; the Data Mgmt Policy Appendix A procedure applies if any occurred.
+
+Upload to **both** AST-71 and AST-1 as a Document evidence item in Vanta.
+
+### Co-ownership
+Yes — co-build with Dennis. Dennis owns the Asset Mgmt Policy (Vanta), AST-1, AST-67, and the operational asset side. Kalle drafts the artifact + uploads. Suggest transferring AST-71 owner Kalle → Dennis after evidence is live (aligns with AST-1, AST-67 and the policy ownership in Vanta).
+
+### Effort
+30–60 min after Dennis confirms whether any disposals/re-uses occurred in the period. Likely small or zero given 6-person mostly-cloud company.
+
+## Actions taken
+- Read AST-71 / AST-1 / AST-67 control detail in Vanta
+- Confirmed Asset Mgmt Policy + Data Mgmt Policy show OK on Vanta Policies index
+- **Searched all 7 shared drives** via `gws drive files list` w/ `corpora=allDrives` — for disposal/wipe/erase/sanitiz/overwrit/destruction/COD/NIST 800-88/media sanitization/disposal log/asset register/hardware/MacBook/serial/laptop/MDM terms (filename + fullText)
+- Downloaded and read **`[Normain] Asset Management Policy.pdf`** (Drive id `15wYphNWlerlrEnG08WA6Mz6yEyRXZYOd`) and **`[Normain] Data Management Policy.pdf`** (Drive id `1OFi1o3x2-NoqIsV5rzJ7UVV9MF1JzrOH`) — verified disposal procedure text directly
+- **No edits to shared resources.** Evidence artifact requires confirmation/data from Dennis before drafting/upload.
+
+## What changed vs v1
+- **v1 said Drive had no disposal-related artifacts.** Correct conclusion, wrong evidence: v1 only searched My Drive. v2 confirms across all 7 shared drives — same conclusion now properly grounded.
+- **v1 said the Asset/Data Mgmt policies "likely cover" disposal but didn't verify.** v2 quotes the actual sections — coverage is explicit and complete (NIST 800-88, COD, FDE substitute, device collection on termination, COD retention).
+- **v1 attributed Vanta PDF authorship to "Kenneth Ciceron".** v2 corrects: Ciceron is just the Vanta uploader. The approved Drive PDFs are written by Ryan Rich, approved by Sara Landfors (2025-05-30).
+- **Conclusion unchanged:** procedural ≠ gap; execution-evidence = gap; one shared artifact closes AST-71 + AST-1.
+
+## Unresolved questions
+
+- Any disposals/re-uses in audit period? (ask Dennis)
+- Hardware/laptop register exists outside Drive (1Password, MDM, Linear, ops sheet)? — not visible via gws
+- Transfer AST-71 owner Kalle → Dennis post-upload?
+- Vendor sec-assessments test (Sara, 12 vendors) — separate ticket?
+- Audit period for AST-71's evidence window — confirm dates

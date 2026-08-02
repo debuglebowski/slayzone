@@ -1,0 +1,10 @@
+# Vanta A.8.7 — Screenshot captions
+
+**1. CleanMyMac (Moonlock) scan — per device**
+CleanMyMac/Moonlock anti-malware on [device] — real-time protection enabled, malware database current; scan completed [date], 0 threats found.
+
+**2. macOS Software Update settings — per device**
+macOS automatic protection enabled on [device] — "Install Security Responses and System files" ON, keeping XProtect malware definitions auto-updated.
+
+**3. macOS built-in anti-malware (CLI/System Info) — per device**
+macOS built-in anti-malware active on [device] — XProtect engine v5347, definitions v2157, XProtect Remediator (removal) v157, Gatekeeper enabled; definitions auto-update.

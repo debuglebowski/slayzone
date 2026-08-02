@@ -1,0 +1,95 @@
+# Vendor subprocessor classification
+
+Every vendor in the VENDOR MASTER SHEET classified against: **Table 1** = processes our *customers' data* (product data path) · **Table 2** = holds data *about* customers/prospects (CS / support / marketing / emails / inbounds / signing) · **Neither** = internal, no customer/prospect personal data. ⚠️ = change vs current DPAs or reopens an earlier call.
+
+| Vendor | Class | Why |
+|---|---|---|
+| 1Password | Table 2 | Customer passwords during trials |
+| Allshares | Neither | Cap table (own equity) |
+| Amazon Web Services (AWS) | Table 1 | Bedrock — hosts models that process customer content (SaaS) |
+| Anthropic | **Table 1 ⚠ (from T2)** | Product calls the model on customer content |
+| Apollo | **Table 2 ⚠ (add)** | Sales prospecting — prospect contact data |
+| Apple Business Connect | Neither | Own company listing |
+| AquaVoice | Neither | Personal dictation |
+| Attio | Neither | CRM — not used |
+| BetterStack | Table 1 | Product telemetry / logs |
+| Boardeaser | Neither | Board portal (own governance) |
+| Cacilian | Neither (verify) | Pentest — T1 if it touches production customer data |
+| Calendly | Neither (not used) | Scheduling — T2 if used |
+| Canva | Neither | Design (marketing) |
+| CapCut | Neither | Video editing (marketing) |
+| Carta | Neither | Cap table — not used |
+| Circleback | Table 2 | Meeting notes (customer/prospect meetings) |
+| Clay | **Table 2 ⚠ (add)** | Lead/prospect data enrichment |
+| Cloudflare | Neither | DNS only, not in data path |
+| Crunchbase | Neither | Company research (public data) |
+| Cursor | Neither | AI code editor (own code) |
+| Doodle | Neither (not used) | Scheduling |
+| Dropbox | Neither (not used) | File storage |
+| Eleven Labs | Neither (verify) | AI voice — T1 if used in product, else marketing |
+| Envato Elements | Neither | Marketing templates |
+| Epidemic Sound | Neither | Marketing music |
+| Figma | Neither | Design |
+| Firecrawl | Neither | Fetches customer-specified URLs only (your call) |
+| Fortnox | **T2? (confirm)** | Accounting — holds customer billing/invoice data |
+| Framer | **T2? (confirm)** | Marketing site — T2 if its forms capture inbound leads |
+| GitHub | Neither | Source-code hosting (own code) |
+| Google Ads | **T2? (confirm)** | Ads — T2 if you upload customer/prospect lists |
+| Google Chrome | Neither | Browser |
+| Google Cloud Platform | Table 2 | Under "Google" (operations) |
+| Google Workspace | Table 2 | Drive/Gmail/Docs/Calendar (customer data) |
+| HowdyGo | **T2? (confirm)** | Interactive demos — T2 if it captures viewer/lead data |
+| Instantly | **Table 2 ⚠ (add)** | Cold-email outbound — prospect emails + contacts |
+| iOS | Neither | Operating system |
+| Linear | Table 2 | Issue tracker (support/bug tickets) |
+| LinkedIn (Normain page) | Neither | Social presence |
+| LinkedIn Recruiter Lite | Neither (not used) | Recruiting (candidate data) |
+| LinkedIn Sales Navigator | **Table 2 ⚠ (add)** | Prospecting — prospect/lead data |
+| Loom | Neither (not used) | Screen recording |
+| Loops | Table 2 | Onboarding / marketing email |
+| Luma | **Table 2 ⚠ (add)** | Event registrations (prospect/customer contacts) |
+| Medium | Neither (not used) | Blog |
+| Meetup | Neither (not used) | Events |
+| Microsoft 365 (Office) | **T2? (confirm)** | Doc storage — T2 if customer-related docs |
+| Microsoft Azure | Table 1 | Core hosting / compute / storage |
+| Miro | Neither (not used) | Whiteboard |
+| MyAccess (Apple) | Neither | Device procurement |
+| Namecheap | Neither | Domain (not in path) |
+| Notion Calendar | Table 2 | Calendar (customer/prospect meetings) |
+| OpenAI | **Table 1 ⚠ (from T2)** | Product calls the model on customer content |
+| OVH Cloud | Neither (not used) | Hosting |
+| Permånad | Neither | HR/benefits (own employees) |
+| Perplexity Ask | Neither (not used) | AI search |
+| Pleo.io | Neither (not used) | Expense cards |
+| PostHog | Table 1 | Product analytics (customer/user activity) |
+| Producthunt | Neither | Launch platform (marketing) |
+| Revolut | Neither | Banking (own finance) |
+| Sana AI | Neither (not used) | AI learning |
+| Scrive | Table 2 | E-signing (customer signatories) |
+| Sendify | Neither (not used) | Shipping/logistics |
+| Setapp | Neither | Mac apps (internal) |
+| Simply | Neither | Domain (not in path) |
+| Slack | Table 2 | Team comms (may reference customer data) |
+| Spark | **T2? (confirm)** | Email client — T2 if used for customer/prospect mail |
+| Superhuman | Table 2 | Email client (customer/prospect mail) |
+| Swedbank | Neither | Bank (own finance) |
+| Teamtailor | Neither (not used) | ATS (candidate data) |
+| Telgea | Neither | Mobile plans |
+| Tre (3) | Neither | Mobile operator |
+| Typeform | Neither (not used) | Forms — T2 if used |
+| Vanta | Neither | Compliance (own infra/vendor metadata) |
+| Vimeo | Neither | Video (marketing) |
+| X | Neither | Social (marketing) |
+| YouTube | Neither | Video (marketing) |
+| Zapier | Neither (not used) | Automation |
+| Zero | **Table 2 ⚠ (add)** | CRM & sales automation — customer/prospect data |
+
+## Resulting lists (if all ⚠ applied)
+- **Table 1:** Microsoft Azure · AWS · BetterStack · PostHog · **OpenAI** · **Anthropic**
+- **Table 2:** 1Password · Circleback · Google · Linear · Loops · Notion Calendar · Scrive · Slack · Superhuman · **Apollo · Clay · Instantly · LinkedIn Sales Navigator · Luma · Zero** (+ any confirmed borderlines)
+
+## Key decisions to confirm
+1. **Models → Table 1** — move OpenAI + Anthropic from Table 2 (they process customer content). Requires re-editing the appendices.
+2. **Add sales/marketing tools to Table 2** — Apollo, Clay, Instantly, LinkedIn Sales Navigator, Luma, Zero. *(Reverses the earlier "exclude" call; mostly Normain-as-controller data — the conservative choice.)*
+3. **Borderlines:** Microsoft 365, Spark, Google Ads, HowdyGo, Fortnox, Framer.
+4. **Verify:** Eleven Labs (product vs marketing), Cacilian (production data access).

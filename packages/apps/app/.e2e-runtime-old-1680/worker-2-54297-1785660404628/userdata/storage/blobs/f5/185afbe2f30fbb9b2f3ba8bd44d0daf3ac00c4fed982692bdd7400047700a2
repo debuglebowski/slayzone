@@ -1,0 +1,87 @@
+# #18 — Vulnerability scan (document) — investigation
+
+**Vanta doc:** [Vulnerability scan](https://app.eu.vanta.com/c/normain.com/documents/vulnerability-scan)
+**Frameworks:** ISO 27001:2022, SOC 2
+**Owner:** Kalle Hansson · **Recurrence:** quarterly
+**Sources:** Vanta UI (slay browser), Drive (per project rule), `gh api` for technical state
+
+---
+
+## Overview
+
+**The Vulnerability scan doc is current and ready for next week's SOC 2 audit. No action required for #18 itself.**
+
+Latest evidence uploaded by Kalle on 2026-04-30. Status OK, renew Jul 30, 2026. The brief's "Overdue Dec 12 2025" was stale.
+
+Adjacent vulnerability-management items in the same audit window need attention — flagged below.
+
+## Situation
+
+### #18 doc status (verified in Vanta UI)
+
+Vanta's literal instruction:
+> Provide a screenshot of the findings from your most recent periodic vulnerability scans. This evidence should highlight any identified vulnerable assets within your system.
+
+Latest version on file:
+- **File:** Screenshot 2026-04-30 at 15.36.16.png
+- **Description:** "Screenshot of GitHub Security → Dependabot alerts for normainofficial/normain on 2026-04-30, post PR #1986 merge. Source feed for Vanta's GitHub Repo vulnerability tests; ZAP and Trivy weekly scans (Mon 02:00/06:00 UTC) feed the same GitHub Security view."
+- **Completed by:** Kalle Hansson on Apr 30, 2026
+- **Expires:** Jul 30, 2026
+- 2 prior completed versions in history
+
+Audit linkage:
+
+| Audit | Window | Status | Vuln scan evidence |
+|---|---|---|---|
+| SOC 2 Type II | **May 4 - Aug 4 2026** | Upcoming (in 2 days) | **Ready for audit** ✓ |
+| SOC 2 Type II | Jul 15 - Oct 15 2025 | Completed | Ready for audit ✓ |
+| ISO 27001:2022 | Jul 1 2024 - Aug 2 2025 | Completed | "Not ready for audit" — historical, audit closed |
+
+Active SOC 2 audit detail (`/audits`): Prescient Assurance (QA), kicking off May 4, 2026. Auditor has requested **early access** — pending Approve/Reject by Kalle.
+
+5 controls satisfied by this doc:
+- CPL-46 (ISO A.5.36) — Compliance with policies
+- NET-91 (ISO A.8.20) — Networks security
+- VPM-75 (ISO A.8.8) — Mgmt of technical vulnerabilities
+- VPM-1 (SOC 2 CC 6.6/6.8+) — Service infrastructure maintained
+- **VPM-2 (SOC 2 CC 2.1/4.1+) — Vulnerabilities scanned and remediated** ← same control as sibling task #6
+
+### Adjacent items hitting audit window (NOT #18's scope but auditor-visible)
+
+From `/tests?status=NEEDS_ATTENTION`:
+
+| Test | Status | Date | Sibling task |
+|---|---|---|---|
+| **P0 security issues resolved** | Due soon | **May 05, 2026** (3 days, 1 Linear Task open) | (none yet) |
+| Penetration test report (doc) | Due soon | May 16, 2026 | — owner: S |
+| Medium vulnerabilities (GitHub Repo) | Due soon | May 29, 2026 (15 vulns) | #33 |
+| Subnets have flow logs enabled (Azure) | Overdue | 9 months ago (12 subnets) | — |
+
+## Solution
+
+For #18 itself: nothing to do. Doc complete and audit-ready.
+
+Optional follow-ups (separate from #18):
+
+1. **Approve/Reject auditor early access** for SOC 2 Type II (pending in `/audits`). Shared change — Kalle decides.
+2. **Schedule renewal agent** for ~Jul 23, 2026 (one week before doc expires Jul 30).
+3. Triage the 4 adjacent vuln-management tests above before May 4 — `P0 security issues resolved` is the most time-critical (Linear task open, due May 5).
+
+## Actions taken
+
+- Located and verified actual Vanta doc (`/documents/vulnerability-scan`); confirmed name, owner, instruction text, latest version metadata, expiry.
+- Cross-checked the 5 controls the doc satisfies — confirmed VPM-2 overlap with sibling task #6.
+- Reviewed audit linkage: 1 upcoming + 2 completed audits, evidence "Ready" for active SOC 2.
+- Surveyed `/tests?status=NEEDS_ATTENTION` for vuln-management adjacent items.
+- Verified scan workflow runs via `gh api` (ZAP + Trivy both green 2026-04-27).
+- **Did not modify** any Vanta doc, Drive file, or GitHub workflow.
+
+## Blocked on / open
+
+None for #18 itself.
+
+Out-of-scope flags (raise separately if not already in flight):
+
+- Auditor early-access approval pending in Vanta `/audits` for SOC 2 Type II.
+- ASTP doc in Drive out of date (separate cleanup — see VPM-2 investigation).
+- GitHub `secret_scanning` and Dependabot auto-PR are disabled — minor toggle.

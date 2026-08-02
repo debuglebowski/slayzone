@@ -1,0 +1,32 @@
+# Phase 0 — Final state
+
+## Outcome
+**80 baseline → 3 real failures (96% reduction).** Phase 0 fs/env hardening complete.
+
+## Remaining 3 real failures
+
+| Spec : line | Effort | Reason |
+|---|---|---|
+| `61-web-panel-handoff-routing:226` | 🔴 architectural | `<webview>` `new-window` event doesn't exist in WebContentsView |
+| `71-webview-popup-handling:540` | 🔴 architectural | Same — `window.open` from inside WCV crashes Playwright bridge |
+| `71-webview-popup-handling:686` | 🔴 architectural | Same |
+
+These need a WebContentsView popup-test fixture: capture `setWindowOpenHandler` decisions in main, expose via IPC, swap the test's "watch the webview tag's URL" mechanism for "watch captured handler calls". ~1-2 hours.
+
+## Other excluded from real-fail count
+
+- **`30-terminal-core-behavior:222`** — flake. Passes iso, fails in full sequence. ~15-30 min: replace `getBuffer()` polling with `getBufferSince(seq)` post-clear.
+- **~13 browser tests** (73, 75, 76, 82, 83) require `https://example.com`. **Environment-specific** — `dscacheutil -q host -a name example.com` on this machine returns `127.0.0.1`, indicating a local resolver/firewall (VPN, Pi-hole, /etc/resolver split, etc.) is hijacking the domain. Tests pass on networks where `example.com` resolves to its real IP. Not a code defect.
+
+## Source-level fixes shipped
+
+| File | Change |
+|---|---|
+| `apps/app/src/main/index.ts` | `__restorePtyHandlers` reset list expanded to all `chat:*`, `session:*`, `pty:*`, `terminalModes:*` handlers |
+| `domains/settings/src/client/tabs/PanelsSettingsTab.tsx` | `mergePanelOrder` after Add Panel — custom panels render immediately |
+| `domains/settings/src/client/tabs/TagsSettingsTab.tsx` | Listen to `slayzone:tag-{created,updated,deleted}` events for cross-window refresh |
+| `domains/worktrees/src/client/GitDiffPanel.tsx` | Drop `flatEntries.length > 0` from chip-row condition — chip persists across clean↔dirty |
+| `domains/task/src/client/TaskDetailPage.tsx` | IPC listener for `browser-view:focused` → `setFocusedPanel('browser')` |
+| `apps/cli/src/commands/tasks/list.ts` | Added `t.deleted_at IS NULL` to WHERE clause — soft-deleted tasks were appearing |
+
+Plus ~40 e2e specs updated for theme-token / panel-rename / settings-refactor mismatches.

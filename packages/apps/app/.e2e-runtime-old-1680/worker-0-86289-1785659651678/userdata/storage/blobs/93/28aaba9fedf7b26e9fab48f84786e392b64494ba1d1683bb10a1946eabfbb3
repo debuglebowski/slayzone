@@ -1,0 +1,55 @@
+# Concept D — Tree Hierarchy
+
+Single wider panel. Projects collapsible; tasks render as children inline. No icon rail.
+
+## Behavior
+
+- Sidebar `w-64`
+- Each project = collapsible row w/ chevron
+- Expand → tasks listed beneath, indented
+- Click project name → select project (kanban view)
+- Click task → open task tab
+- Multi-select projects can be expanded simultaneously
+- Footer same as today (settings, usage, etc.) but laid out horizontally
+
+## Wireframe
+
+```
+┌──────────────────────────┐
+│ ≡  drag region           │
+├──────────────────────────┤
+│  🔍 search all tasks     │
+├──────────────────────────┤
+│  ▾ ⬢ Project A      (3)  │
+│      ◉ fix login bug     │
+│      ◉ refactor api ⏱   │
+│      ◉ ship release      │
+│      + new task          │
+│                          │
+│  ▾ ⬡ Project B      (1)  │
+│      ◉ migrate db        │
+│      + new task          │
+│                          │
+│  ▸ ⬡ Project C      (5)  │
+│  ▸ ⬡ Project D      (12) │
+│                          │
+│  + new project           │
+├──────────────────────────┤
+│ 📊 ⚙ ⌨ 📣              │
+└──────────────────────────┘
+        w-64
+```
+
+## Pros
+
+- Single panel — minimal visual chunking
+- Tree natural for hierarchy
+- Easy global scanning of all work
+- Search at top scopes globally
+
+## Cons
+
+- Loses iconic project rail (brand strong identifier today)
+- Long lists scroll a lot
+- Reordering projects vs tasks UX must distinguish levels
+- Footer collapse from vertical → horizontal = redesign

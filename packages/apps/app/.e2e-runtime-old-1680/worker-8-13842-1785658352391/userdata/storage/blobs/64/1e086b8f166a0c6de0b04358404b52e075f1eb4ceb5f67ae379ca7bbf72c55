@@ -1,0 +1,100 @@
+# AI Provider Tycoon — Action Catalog
+
+**Status key:** Locked = confirmed in design discussion · New = proposed, not yet confirmed · Deferred = explicitly punted
+
+***
+
+## Brand
+
+| Action                        | Status | Note                                               |
+| :---------------------------- | :----- | :------------------------------------------------- |
+| Marketing spend               | Locked | Volume knob already in                             |
+| Positioning choice            | New    | Frontier / efficient / safety / enterprise posture |
+| Open-source / community moves | New    | Brand boost without ad spend                       |
+
+## Capacity
+
+| Action                            | Status | Note                                     |
+| :-------------------------------- | :----- | :--------------------------------------- |
+| Buy / sell servers                | Locked | Tier variants sketched but not confirmed |
+| Inference vs research split       | Locked | Core allocation lever                    |
+| Per-model inference allocation    | New    | Split inference across live models       |
+| Reserved vs on-demand procurement | New    | Cheap-committed vs flexible-pricier      |
+| Efficiency upgrades               | New    | Capex to reduce unit cost                |
+| Decommission / sell-back          | New    | Quick downsizing for cash                |
+
+## Research / models
+
+| Action                        | Status | Note                               |
+| :---------------------------- | :----- | :--------------------------------- |
+| Research compute allocation   | Locked | Linear throughput                  |
+| Publish completed model       | Locked | Implied — release to market        |
+| Hold completed model          | Locked | Natural inverse of publish         |
+| Retire model                  | Locked | Just added                         |
+| Set per-model price           | Locked | Drives gross margin with unit cost |
+| Project target quality        | New    | Set per-project goal               |
+| Project type / specialization | New    | Frontier / efficient / domain      |
+| Multiple parallel projects    | New    | Hedge vs concentrate               |
+| Open-source weights release   | New    | Brand vs commoditization tradeoff  |
+| Cancel in-progress project    | New    | Free a slot, recover nothing       |
+
+## VC round
+
+| Action                         | Status | Note                                    |
+| :----------------------------- | :----- | :-------------------------------------- |
+| Attempt raise                  | Locked | Brand × share odds, cooldown gated      |
+| Round size                     | New    | Size × odds tradeoff                    |
+| Equity vs debt                 | New    | One-time cash vs recurring obligation   |
+| Strategic vs financial framing | New    | Narrative axis, small mechanical effect |
+
+## Operations *(restructured into sub-areas)*
+
+### Reliability
+
+| Action                      | Status | Note                                  |
+| :-------------------------- | :----- | :------------------------------------ |
+| Reliability investment      | New    | Reduce self-inflicted incident odds   |
+| Incident response readiness | New    | Mitigate event impact                 |
+| Overhead reduction          | New    | Process automation, lower fixed costs |
+
+### Security
+
+| Action                         | Status | Note                                 |
+| :----------------------------- | :----- | :----------------------------------- |
+| Penetration testing / red team | New    | External adversarial review          |
+| Security tooling investment    | New    | EDR, SIEM, key management            |
+| Bug bounty program             | New    | Crowdsourced vulnerability discovery |
+| AI model red-teaming           | New    | Jailbreak / harmful output testing   |
+
+### Compliance
+
+| Action                           | Status | Note                                               |
+| :------------------------------- | :----- | :------------------------------------------------- |
+| Certifications                   | New    | SOC 2, ISO 27001, HIPAA — unlock customer segments |
+| Lobbying / regulatory engagement | New    | Reduce regulatory-shock odds                       |
+| Insurance / liability coverage   | New    | Dampen incident financial damage                   |
+
+### Privacy / data handling *(new sub-area)*
+
+| Action                    | Status | Note                                                              |
+| :------------------------ | :----- | :---------------------------------------------------------------- |
+| Data residency investment | New    | Enable regional hosting (EU / US / customer cloud)                |
+| Customer isolation tier   | New    | Shared / logical / physical separation offerings                  |
+| Training data policy      | New    | Pledge re: training on customer data — trust vs research velocity |
+| Retention controls        | New    | Customer-controlled retention, zero-retention modes               |
+
+## M\&A
+
+| Action                    | Status | Note                             |
+| :------------------------ | :----- | :------------------------------- |
+| Acquire competitor        | New    | Buy weaker player outright       |
+| Acqui-hire / IP licensing | New    | Pay for a model without research |
+| Sell self                 | New    | Voluntary exit, convert to score |
+
+***
+
+## Meta note
+
+Every action expands the schema and per-tick token cost for every player. Strategic richness probably peaks around 8–12 distinct action types — beyond that, prompt authors can't reason about all of them in a single paragraph, and play converges to "use these three." For each New row, the question is not just "is this fun?" but "is this fun *enough* to crowd out something else?"
+
+Currently 9 actions are Locked, which is in the sweet spot. Promoting more than 3–4 of the New rows starts to crowd the schema.

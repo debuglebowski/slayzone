@@ -1,0 +1,57 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.45 -apple-system,system-ui,sans-serif;color:#18181b;background:#f4f4f5;padding:28px}
+.caption{max-width:960px;margin:0 auto 10px;color:#52525b;font-size:12px}
+.caption b{color:#18181b}
+.app{max-width:960px;margin:0 auto;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.04);position:relative;padding-bottom:120px}
+.titlebar{padding:14px 18px;border-bottom:1px solid #ececef;display:flex;align-items:center;gap:10px}
+h1{font-size:15px;font-weight:600}
+.count{color:#9ca3af;font-size:12px}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#71717a;text-align:left;padding:8px 14px;border-bottom:1px solid #ececef;background:#fafafa;font-weight:500;position:relative}
+th .f{color:#c4c4cc;font-size:10px;margin-left:5px}
+th.filtered{color:#3b4f9e}
+th.filtered .f{color:#3b4f9e}
+th .dot{position:absolute;top:7px;width:5px;height:5px;border-radius:999px;background:#3b4f9e;margin-left:2px}
+td{padding:9px 14px;border-bottom:1px solid #f1f1f4}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:500}
+.active{background:#dcfce7;color:#166534}
+.dd{position:absolute;left:14px;top:34px;width:190px;background:#fff;border:1px solid #e4e4e7;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.13);padding:8px;z-index:5;text-transform:none;letter-spacing:0;font-weight:400}
+.dd .op{display:flex;gap:4px;margin-bottom:8px}
+.dd .op span{border:1px solid #e4e4e7;border-radius:5px;padding:2px 8px;font-size:11px;color:#52525b}
+.dd .op .on{background:#18181b;color:#fff;border-color:#18181b}
+.dd .row{display:flex;align-items:center;gap:7px;padding:3px 2px;font-size:12.5px;color:#3f3f46}
+.cb{width:13px;height:13px;border:1px solid #d4d4d8;border-radius:3px;display:inline-block}
+.cb.on{background:#18181b;border-color:#18181b;position:relative}
+.cb.on:after{content:"✓";color:#fff;font-size:9px;position:absolute;left:2px;top:-1px}
+.dd .ft{border-top:1px solid #f1f1f4;margin-top:7px;padding-top:7px;font-size:11.5px;color:#3b4f9e;font-weight:500}
+.summary{display:flex;gap:8px;align-items:center;padding:8px 18px;border-bottom:1px solid #ececef;background:#fcfcfd;font-size:12px;color:#71717a}
+.mini{background:#eef2fe;color:#3b4f9e;border-radius:5px;padding:2px 7px;font-size:11.5px}
+</style></head><body>
+<div class="caption"><b>Layout 4 — Per-column header filters</b> (data-grid/Excel style). Funnel on every column header opens a type-aware dropdown (enum→checklist, number→range, date→presets); filtered columns marked; summary strip shows combined state. Discoverable but AND-only by nature, no cross-field "any".</div>
+<div class="app">
+  <div class="titlebar"><h1>Deals</h1><span class="count">3 of 7 shown</span></div>
+  <div class="summary">Filtered by: <span class="mini">Status: Active</span><span class="mini">Amount &gt; 50,000</span><span style="margin-left:auto">Clear all</span></div>
+  <table>
+    <tr>
+      <th>Name <span class="f">▼</span></th>
+      <th class="filtered">Status <span class="f">▼</span><span class="dot"></span>
+        <div class="dd">
+          <div class="op"><span class="on">is</span><span>is not</span><span>empty</span></div>
+          <div class="row"><span class="cb on"></span><span class="pill active">Active</span></div>
+          <div class="row"><span class="cb"></span>Negotiation</div>
+          <div class="row"><span class="cb"></span>Closed</div>
+          <div class="ft">Clear column filter</div>
+        </div>
+      </th>
+      <th class="filtered">Amount <span class="f">▼</span><span class="dot"></span></th>
+      <th>Close date <span class="f">▼</span></th>
+      <th>Owner <span class="f">▼</span></th>
+    </tr>
+    <tr><td>Acme renewal</td><td><span class="pill active">Active</span></td><td>$82,000</td><td>Jul 1, 2026</td><td>Mia</td></tr>
+    <tr><td>Globex expansion</td><td><span class="pill active">Active</span></td><td>$54,500</td><td>Jun 18, 2026</td><td>Theo</td></tr>
+    <tr><td>Umbrella upsell</td><td><span class="pill active">Active</span></td><td>$61,200</td><td>Aug 9, 2026</td><td>Ravi</td></tr>
+  </table>
+</div>
+</body></html>

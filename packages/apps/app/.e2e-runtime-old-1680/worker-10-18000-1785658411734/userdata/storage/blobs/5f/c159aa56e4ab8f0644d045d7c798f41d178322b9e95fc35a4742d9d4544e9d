@@ -1,0 +1,25 @@
+---
+title: "Approach B — Push enriched rows, client-side joins"
+---
+flowchart TD
+  subgraph S["SERVER — single Bun process"]
+    W["User B does a write"]
+    A["EventStore.append()<br/>runs inside sql.withTransaction"]
+    N["SELECT pg_notify('km_events', envelope)<br/>delivered to listeners on COMMIT"]
+    HUB["Stream hub: ONE app-wide LISTEN<br/>ENRICH each event into a<br/>fully projected + decorated ROW<br/>fan-out by orgId"]
+  end
+  subgraph C["CLIENT — User A's browser"]
+    SSE["SSE subscriber<br/>GET /api/stream"]
+    UP["apply upsert / delete<br/>(incremental patch)"]
+    BASE["BASE collections, bounded:<br/>instances, relations, concepts"]
+    JOIN["useLiveQuery JOINS done IN BROWSER<br/>hub = instances JOIN relations<br/>owed / demand rebuilt client-side"]
+    DECAY["decay/momentum recomputed in browser<br/>(pure engine fns + timer tick)"]
+    UI["UI updates ~instantly"]
+  end
+  W --> A --> N --> HUB
+  HUB -->|"FULL row over SSE:<br/>op (upsert/delete), conceptName,<br/>row { entire Instance / Relation }"| SSE
+  SSE --> UP --> BASE --> JOIN --> UI
+  DECAY --> JOIN
+
+  classDef risk fill:#3a1d1d,stroke:#e06666,color:#f7d7d7;
+  class JOIN risk;

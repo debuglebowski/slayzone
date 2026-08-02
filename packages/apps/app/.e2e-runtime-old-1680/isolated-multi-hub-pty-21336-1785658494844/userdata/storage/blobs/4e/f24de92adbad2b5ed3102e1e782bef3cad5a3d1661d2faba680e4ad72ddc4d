@@ -1,0 +1,13 @@
+flowchart TB
+  subgraph Data["data (exists)"]
+    REL[("relations<br/>fieldId / fromId / toItemId|toVersionId")]
+    INST[("instances")]
+  end
+  REL --> SG
+  INST --> SG
+  SG["subgraph builder (new, pure fn)<br/>seeds + depth + relation-field/concept filters<br/>visited-set = recursion-safe · node cap + truncation notice"]
+  SG --> CANVAS["InstanceGraphCanvas (new, generic)<br/>@xyflow/react · nodes=instances · edges=relations(field label, arrow)<br/>reuses graphLayouts.ts + SelfLoopEdge from ConceptGraphCanvas"]
+  CANVAS --> LENS["lens config = layout + edge filter + scope<br/>· hierarchy: dagre TB, one self-relation → ORG CHART<br/>· ego: radial, one instance, depth k<br/>· full: force/ELK stress, all fields"]
+  LENS --> S1["surface 1: ConceptView<br/>'Graph' display mode"]
+  LENS --> S2["surface 2: instance-view tile<br/>content key 'graph' (ego)"]
+  LENS --> S3["surface 3: dashboard widget<br/>(later)"]

@@ -1,0 +1,14 @@
+# Snooze Picker
+
+```
+                        ┌──────────────────────┐
+                        │  Snooze until...      │
+                        │──────────────────────│
+                        │  Later today    6pm   │
+                        │  Tomorrow       8am   │
+                        │  This weekend   Sat   │
+                        │  Next week      Mon   │
+                        │  ──────────────────── │
+                        │  Pick date & time...  │
+                        └──────────────────────┘
+```

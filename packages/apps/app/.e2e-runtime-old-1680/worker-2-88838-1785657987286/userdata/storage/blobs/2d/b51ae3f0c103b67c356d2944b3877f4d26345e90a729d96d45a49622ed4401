@@ -1,0 +1,32 @@
+# Dashboard widgets — overview
+
+| Widget | Scope | Description |
+|---|---|---|
+| **Metric** | concept | Single aggregate number — count / sum / avg of a field — over condition-filtered instances. |
+| **List** | concept | Table of instances matching conditions; configurable columns, order, limit. |
+| **Breakdown** | concept | Instances grouped by a field, rendered as bar or pie chart. |
+| **Attention** | concept | Instances surfaced by attention bands (cooling / cold / heating / steady) on a computed field, top-N. |
+| **Trend** | concept | Event volume over time; day/week buckets, 7/30/90-day window, filterable by event types. |
+| **Activity** | concept | Recent event feed (latest N), optionally scoped to one concept. |
+| **Tasks** | global | Org task surface; default assignee scope (all/me/none), optional toolbar, composer, show-done. |
+| **Members** | global | Org member directory; optional toolbar. |
+| **Welcome** | global | Greeting / landing tile; no config. |
+
+Notes:
+- Concept-scoped widgets carry an optional `conceptId` so the same body can later render in per-concept context (implicit conceptId).
+- Widget union is APPEND-ONLY in the contract; all share `id / title / icon / layout(x,y,w,h)`.
+
+# Suggested future widgets
+
+| Widget | Scope | Description |
+|---|---|---|
+| **Calendar** | concept/global | Month/week grid plotting instances by a date field (or tasks by due date); multi-concept overlay with color per concept. |
+| **Files** | concept/instance | File drop-zone + gallery; upload any number of files to an instance, browse/preview/download; concept-level shows recent uploads. |
+| **Timeline / Gantt** | concept | Instances as horizontal bars between two date fields (start/end); good for projects, campaigns. |
+| **Pinboard / Shortcuts** | global | Hand-picked links to instances, dashboards, external URLs — a curated jump-off tile. |
+| **Note / Richtext** | global | Free-form TipTap block on the canvas — dashboard-level commentary, runbooks, announcements. |
+| **Kanban** | concept | Instances as cards in columns keyed by an enum field; drag to update the field. |
+| **Leaderboard** | concept | Instances ranked by a number field, top-N with bar inline — e.g. top vendors by spend. |
+| **Inbox / Mentions** | global | Events/notes where current user is mentioned or assignee — personal triage queue. |
+| **Embed / iframe** | global | External URL embedded (sheets, BI, docs); escape hatch for surfaces we don't own yet. |
+| **Goal / Progress** | concept | Metric vs a manually-set target, progress bar + % — turns a count/sum into a goal tracker. |

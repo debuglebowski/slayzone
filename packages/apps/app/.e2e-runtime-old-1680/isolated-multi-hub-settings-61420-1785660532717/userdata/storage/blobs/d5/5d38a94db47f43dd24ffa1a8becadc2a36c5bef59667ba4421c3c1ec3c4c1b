@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>biotracker — Dark Vitals</title>
+<style>
+  /* ============================================================
+     RETAKE C · DARK VITALS  (dark-first; light derived as secondary)
+     Deep slate bg, off-white ink, coral+teal DUAL accents, glowing
+     chart lines, raised cards. Quantified-self / wearable feel.
+     Chart pair validated on dark surface: coral #ee5a48 + teal #1fa593
+     PASS (in lightness band, CVD ΔE 28, secondary-encoded w/ labels).
+     Brighter tints (#ff7b6e / #34d6c4) used ONLY for glow, not marks.
+     ============================================================ */
+  :root[data-mode="dark"] {
+    --bg:            #12161c;   /* deep slate */
+    --bg-elev:       #171d25;
+    --card:          #1b2431;   /* raised */
+    --card-2:        #202b3a;
+    --card-sunken:   #141b24;
+    --ink:           #e9eef4;   /* off-white */
+    --ink-soft:      #a7b4c2;
+    --ink-mut:       #6b7888;
+    --line:          #283242;
+    --line-strong:   #384658;
+    --brand:         #e9eef4;
+    --coral:         #ee5a48;   /* validated series/action */
+    --coral-glow:    #ff7b6e;
+    --teal:          #1fa593;   /* validated 2nd series/accent */
+    --teal-glow:     #34d6c4;
+    --act:           #ee5a48;   /* primary action = coral */
+    --act-ink:       #ffffff;
+    --coral-soft:    #2c1c1c;
+    --teal-soft:     #12292a;
+    --up:            #1fa593;
+    --down:          #ee5a48;
+    --chart:         #ee5a48;
+    --chart-2:       #1fa593;
+    --shadow:        0 2px 4px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.45);
+    --shadow-fab:    0 6px 22px rgba(238,90,72,.5);
+  }
+  :root[data-mode="light"] {
+    --bg:            #eef1f4;
+    --bg-elev:       #ffffff;
+    --card:          #ffffff;
+    --card-2:        #f6f8fa;
+    --card-sunken:   #eceff3;
+    --ink:           #17202b;
+    --ink-soft:      #45535f;
+    --ink-mut:       #8593a1;
+    --line:          #e2e7ec;
+    --line-strong:   #cfd7df;
+    --brand:         #17202b;
+    --coral:         #d94d3c;
+    --coral-glow:    #e5675c;
+    --teal:          #0e8e7f;
+    --teal-glow:     #1fa593;
+    --act:           #d94d3c;
+    --act-ink:       #ffffff;
+    --coral-soft:    #fbe6e3;
+    --teal-soft:     #dff2ef;
+    --up:            #0e8e7f;
+    --down:          #d94d3c;
+    --chart:         #d94d3c;
+    --chart-2:       #0e8e7f;
+    --shadow:        0 1px 2px rgba(23,32,43,.06), 0 6px 20px rgba(23,32,43,.08);
+    --shadow-fab:    0 6px 18px rgba(217,77,60,.4);
+  }
+</style>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif; background:#0a0d11; color:#ddd; }
+  .toolbar { position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:16px; padding:14px 24px; background:#070a0d; border-bottom:1px solid #1c2531; }
+  .toolbar h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.3px; }
+  .toolbar .sub { font-size:12px; color:#6b7888; }
+  .toolbar .spacer { flex:1; }
+  .toolbar button { font:inherit; font-size:13px; background:#ee5a48; color:#fff; border:none; padding:7px 16px; border-radius:8px; cursor:pointer; }
+  .gallery { display:flex; flex-wrap:wrap; gap:34px; padding:36px; align-items:flex-start; justify-content:center; }
+  .frame-wrap { display:flex; flex-direction:column; gap:11px; align-items:center; }
+  .frame-label { font-size:11px; color:#6b7888; letter-spacing:1px; text-transform:uppercase; }
+  .device { width:308px; height:646px; border-radius:44px; background:#000; padding:11px; box-shadow:0 24px 60px rgba(0,0,0,.6); position:relative; }
+  .screen { width:100%; height:100%; border-radius:33px; overflow:hidden; background:var(--bg); color:var(--ink); display:flex; flex-direction:column; position:relative; font-size:14px; }
+  .notch { position:absolute; top:11px; left:50%; transform:translateX(-50%); width:118px; height:24px; background:#000; border-radius:13px; z-index:30; }
+  .statusbar { height:44px; flex:none; display:flex; align-items:flex-end; justify-content:space-between; padding:0 22px 5px; font-size:12px; font-weight:600; color:var(--ink); }
+  .statusbar .r { display:flex; gap:5px; }
+  .body { flex:1; overflow:hidden; }
+  .scroll { height:100%; overflow:auto; padding:6px 16px 20px; }
+  .scroll::-webkit-scrollbar { display:none; }
+  .tabbar { height:66px; flex:none; border-top:1px solid var(--line); background:var(--bg-elev); display:flex; padding-bottom:6px; }
+  .tab { flex:1; display:flex; flex-direction:column; gap:4px; align-items:center; justify-content:center; font-size:11px; color:var(--ink-mut); font-weight:500; }
+  .tab .ic { font-size:20px; line-height:1; }
+  .tab.active { color:var(--coral); }
+  .fab { position:absolute; right:16px; bottom:82px; width:56px; height:56px; border-radius:28px; background:var(--act); color:var(--act-ink); display:grid; place-items:center; font-size:28px; box-shadow:var(--shadow-fab); z-index:20; }
+</style>
+<style>
+  .apphead { display:flex; align-items:center; gap:10px; padding:8px 16px 12px; }
+  .apphead .brand { font-size:21px; font-weight:800; letter-spacing:-.4px; color:var(--ink); }
+  .apphead .brand b { color:var(--coral); }
+  .apphead .spacer { flex:1; }
+  .apphead .iconbtn { width:36px; height:36px; border-radius:12px; background:var(--card); border:1px solid var(--line); display:grid; place-items:center; color:var(--ink-soft); font-size:18px; }
+  .stackhead { display:flex; align-items:center; gap:8px; padding:8px 14px 14px; }
+  .stackhead .back { font-size:24px; color:var(--coral); width:22px; line-height:1; }
+  .stackhead .title { font-size:19px; font-weight:800; letter-spacing:-.3px; color:var(--ink); }
+  .stackhead .spacer { flex:1; }
+  .stackhead .save { color:var(--coral); font-weight:700; font-size:15px; }
+  .stackhead .plus { width:34px; height:34px; border-radius:11px; background:var(--coral); color:#fff; display:grid; place-items:center; font-size:19px; box-shadow:var(--shadow-fab); }
+
+  .sectitle { font-size:11px; font-weight:700; letter-spacing:1px; color:var(--ink-mut); text-transform:uppercase; margin:18px 4px 9px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); overflow:hidden; }
+  .card + .card { margin-top:11px; }
+  .prow { display:flex; align-items:center; gap:12px; padding:14px 15px; }
+  .prow + .prow { border-top:1px solid var(--line); }
+  .prow .ic { width:36px; height:36px; border-radius:11px; display:grid; place-items:center; font-size:16px; background:var(--coral-soft); }
+  .prow .ic.t { background:var(--teal-soft); }
+  .prow .lead { flex:1; min-width:0; }
+  .prow .lead .t { font-weight:600; color:var(--ink); }
+  .prow .lead .s { font-size:12px; color:var(--ink-mut); margin-top:1px; }
+  .prow .metric { text-align:right; }
+  .prow .metric .v { font-size:18px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; letter-spacing:-.3px; }
+  .prow .metric .v small { font-size:11px; color:var(--ink-mut); font-weight:600; }
+  .prow .metric .d { font-size:11px; font-weight:700; }
+  .prow .metric .d.up { color:var(--up); } .prow .metric .d.down { color:var(--down); }
+  .prow .chev { color:var(--line-strong); font-size:18px; }
+  .prow .val { color:var(--ink-mut); font-size:13px; font-variant-numeric:tabular-nums; }
+
+  .banner { display:flex; gap:11px; align-items:center; background:var(--coral-soft); border:1px solid var(--coral); border-radius:14px; padding:12px 14px; margin-top:6px; }
+  .banner .i { color:var(--coral); font-size:16px; }
+  .banner .tx { font-size:12.5px; line-height:1.4; color:var(--ink-soft); }
+  .banner .tx b { color:var(--ink); }
+
+  /* hero ring + number */
+  .herocard { background:linear-gradient(160deg,var(--card-2),var(--card)); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow); padding:18px; margin-top:8px; display:flex; align-items:center; gap:16px; }
+  .herocard .num { font-size:34px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; letter-spacing:-1px; line-height:1; }
+  .herocard .num small { font-size:15px; color:var(--ink-mut); font-weight:600; }
+  .herocard .cap { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--ink-mut); }
+  .herocard .d { font-size:12px; font-weight:700; color:var(--up); margin-top:4px; }
+
+  /* two-up mini stat tiles */
+  .grid2 { display:flex; gap:11px; margin-top:11px; }
+  .tile { flex:1; background:var(--card); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); padding:14px; }
+  .tile .cap { font-size:10px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--ink-mut); }
+  .tile .v { font-size:24px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; margin-top:6px; letter-spacing:-.5px; }
+  .tile .v small { font-size:12px; color:var(--ink-mut); font-weight:600; }
+  .tile.coral .v { color:var(--coral-glow); } .tile.teal .v { color:var(--teal-glow); }
+
+  .label { font-size:11px; font-weight:700; color:var(--ink-mut); letter-spacing:.6px; text-transform:uppercase; margin:16px 2px 6px; }
+  .field { background:var(--card-sunken); border:1px solid var(--line-strong); border-radius:13px; padding:13px 13px; color:var(--ink); font-size:16px; display:flex; align-items:center; justify-content:space-between; }
+  .field .ph { color:var(--ink-mut); }
+  .field.focus { border-color:var(--coral); box-shadow:0 0 0 3px var(--coral-soft); }
+  .btn { height:52px; border-radius:14px; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700; font-size:16px; margin-top:14px; }
+  .btn.primary { background:var(--coral); color:#fff; box-shadow:var(--shadow-fab); }
+  .btn.ghost { background:var(--card); color:var(--ink-soft); border:1px solid var(--line-strong); }
+  .btn.danger { background:transparent; color:var(--coral); border:1px solid var(--coral); }
+
+  .seg { display:flex; background:var(--card-sunken); border-radius:13px; padding:4px; gap:4px; }
+  .seg > div { flex:1; text-align:center; padding:9px 6px; font-size:13px; font-weight:600; color:var(--ink-soft); border-radius:9px; display:flex; align-items:center; justify-content:center; gap:5px; }
+  .seg > div.on { background:var(--coral); color:#fff; }
+
+  .chartcard { background:var(--card); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); padding:16px; margin-top:8px; }
+  .chartcard .ct { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+  .chartcard .ct .nm { font-weight:700; color:var(--ink); }
+  .chartcard .ct .rg { font-size:11px; color:var(--ink-mut); }
+  .legend { display:flex; gap:14px; margin-top:10px; font-size:12px; }
+  .legend .lg { display:flex; align-items:center; gap:6px; color:var(--ink-soft); }
+  .legend .sw { width:10px; height:10px; border-radius:3px; }
+
+  .stars { font-size:24px; letter-spacing:6px; color:var(--coral); }
+  .stars .off { color:var(--line-strong); }
+  .dots { display:flex; gap:7px; justify-content:center; margin:20px 0 6px; }
+  .dots span { width:7px; height:7px; border-radius:4px; background:var(--line-strong); }
+  .dots span.on { background:var(--coral); width:22px; }
+  .center { text-align:center; margin-top:24px; }
+  .center .cat { font-size:11px; letter-spacing:1px; color:var(--ink-mut); text-transform:uppercase; font-weight:700; }
+  .center .dp { font-size:27px; font-weight:800; letter-spacing:-.5px; color:var(--ink); margin-top:5px; }
+  .biginput { margin:24px auto 0; width:80%; background:linear-gradient(160deg,var(--card-2),var(--card)); border:1px solid var(--line-strong); border-radius:16px; padding:22px; text-align:center; font-size:32px; font-weight:800; color:var(--coral-glow); font-variant-numeric:tabular-nums; box-shadow:var(--shadow); }
+  .biginput small { font-size:15px; color:var(--ink-mut); font-weight:600; }
+  .navrow { display:flex; gap:10px; padding:14px 16px 22px; }
+  .navrow .btn { flex:1; margin:0; }
+  .cal { display:flex; align-items:center; justify-content:center; gap:16px; color:var(--ink-soft); font-weight:600; font-size:14px; padding-bottom:8px; }
+  .cal .a { color:var(--coral); }
+</style>
+</head>
+<body data-palette="#ee5a48,#1fa593">
+  <div class="toolbar">
+    <h1>Retake C · Dark Vitals</h1>
+    <span class="sub">deep slate · coral + teal · glowing charts · dark-first</span>
+    <span class="spacer"></span>
+    <button onclick="tm()" id="mb">◑ Light</button>
+  </div>
+  <div class="gallery" id="g"></div>
+
+<script>
+const sb = `<div class="statusbar"><span>9:41</span><span class="r">◍ ⌵ ▮</span></div>`;
+const tab = (a)=>`<div class="tabbar">
+  <div class="tab ${a=='i'?'active':''}"><span class="ic">⌨</span>Input</div>
+  <div class="tab ${a=='c'?'active':''}"><span class="ic">📈</span>Charts</div></div>`;
+
+const S = {
+"01 · input home": `${sb}
+  <div class="apphead"><span class="brand">bio<b>tracker</b></span><span class="spacer"></span><div class="iconbtn">☰</div></div>
+  <div class="body"><div class="scroll">
+    <div class="herocard">
+      <svg width="66" height="66" viewBox="0 0 66 66"><circle cx="33" cy="33" r="27" fill="none" stroke="var(--line)" stroke-width="6"/>
+        <circle cx="33" cy="33" r="27" fill="none" stroke="var(--coral)" stroke-width="6" stroke-linecap="round" stroke-dasharray="170" stroke-dashoffset="44" transform="rotate(-90 33 33)"/>
+        <text x="33" y="38" text-anchor="middle" font-size="15" font-weight="800" fill="var(--ink)">4/5</text></svg>
+      <div><div class="cap">Today's logging</div><div class="num" style="margin-top:3px">4<small> of 5 done</small></div><div class="d">▲ on your 12-day streak</div></div>
+    </div>
+    <div class="sectitle">Sleep</div>
+    <div class="card">
+      <div class="prow"><span class="ic">🌙</span><span class="lead"><div class="t">Hours slept</div><div class="s">Today</div></span><span class="metric"><div class="v">7.5<small>h</small></div><div class="d up">↑ 0.4</div></span><span class="chev">›</span></div>
+      <div class="prow"><span class="ic t">✦</span><span class="lead"><div class="t">Sleep quality</div><div class="s">Today</div></span><span class="metric"><div class="v">4<small>/5</small></div><div class="d up">↑ 1</div></span><span class="chev">›</span></div>
+    </div>
+    <div class="sectitle">Mood</div>
+    <div class="card">
+      <div class="prow"><span class="ic t">⚡</span><span class="lead"><div class="t">Energy</div><div class="s">2h ago</div></span><span class="metric"><div class="v">6<small>/10</small></div><div class="d down">↓ 1</div></span><span class="chev">›</span></div>
+    </div>
+  </div></div>
+  <div class="fab">＋</div>
+  ${tab('i')}`,
+
+"02 · entry list": `${sb}
+  <div class="stackhead"><span class="back">‹</span><span class="title">Hours slept</span><span class="spacer"></span><div class="plus">＋</div></div>
+  <div class="cal"><span class="a">◀</span> Sat, Jul 12 <span class="a">▶</span></div>
+  <div class="body"><div class="scroll">
+    <div class="grid2"><div class="tile coral"><div class="cap">Today</div><div class="v">7.5<small>h</small></div></div>
+      <div class="tile teal"><div class="cap">7-day avg</div><div class="v">7.1<small>h</small></div></div></div>
+    <div class="sectitle">Entries · 2</div>
+    <div class="card">
+      <div class="prow"><span class="lead"><div class="t">7.5 h</div><div class="s">Morning</div></span><span class="val">09:14</span><span class="chev">›</span></div>
+      <div class="prow"><span class="lead"><div class="t">8.0 h</div><div class="s">Nap</div></span><span class="val">14:40</span><span class="chev">›</span></div>
+    </div>
+  </div></div>
+  ${tab('i')}`,
+
+"03 · entry all": `${sb}
+  <div class="stackhead"><span class="back">‹</span><span class="title">Log entries</span></div>
+  <div class="body">
+    <div class="center"><div class="cat">Sleep · 3 of 5</div><div class="dp">Hours slept</div></div>
+    <div class="biginput">7.5 <small>h</small></div>
+    <div class="dots"><span class="on"></span><span></span><span></span><span></span><span></span></div>
+    <p style="text-align:center;color:var(--ink-mut);font-size:13px;margin-top:14px">Tap Next for each datapoint</p>
+  </div>
+  <div class="navrow"><div class="btn ghost">Skip</div><div class="btn primary">Next</div></div>`,
+
+"04 · charts": `${sb}
+  <div class="apphead"><span class="brand">Charts</span><span class="spacer"></span><div class="iconbtn">＋</div></div>
+  <div class="body"><div class="scroll">
+    <div class="seg"><div class="on">Sleep + Energy</div><div>30d</div><div>Daily</div></div>
+    <div class="chartcard">
+      <div class="ct"><span class="nm">Sleep vs Energy</span><span class="rg">last 30 days</span></div>
+      <svg viewBox="0 0 250 130" width="100%" height="150" preserveAspectRatio="none">
+        <defs>
+          <filter id="glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <g stroke="var(--line)" stroke-width="1"><line x1="8" y1="16" x2="250" y2="16"/><line x1="8" y1="56" x2="250" y2="56"/><line x1="8" y1="96" x2="250" y2="96"/></g>
+        <polyline fill="none" stroke="var(--chart)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" points="14,92 54,58 94,34 134,56 174,40 214,60 244,44"/>
+        <polyline fill="none" stroke="var(--chart-2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" points="14,70 54,80 94,64 134,74 174,54 214,66 244,58"/>
+        <circle cx="244" cy="44" r="3.5" fill="var(--chart)"/><circle cx="244" cy="58" r="3.5" fill="var(--chart-2)"/>
+      </svg>
+      <div class="legend"><span class="lg"><span class="sw" style="background:var(--chart)"></span>Hours slept</span><span class="lg"><span class="sw" style="background:var(--chart-2)"></span>Energy</span></div>
+    </div>
+    <div class="grid2"><div class="tile coral"><div class="cap">Avg sleep</div><div class="v">7.1<small>h</small></div></div>
+      <div class="tile teal"><div class="cap">Avg energy</div><div class="v">6.4<small>/10</small></div></div></div>
+  </div></div>
+  ${tab('c')}`,
+
+"05 · settings home": `${sb}
+  <div class="stackhead"><span class="back">‹</span><span class="title">Settings</span></div>
+  <div class="body"><div class="scroll">
+    <div class="sectitle">General</div>
+    <div class="card"><div class="prow"><span class="ic">◐</span><span class="lead"><div class="t">Appearance</div></span><span class="val">Dark</span><span class="chev">›</span></div></div>
+    <div class="sectitle">Input</div>
+    <div class="card">
+      <div class="prow"><span class="ic">◇</span><span class="lead"><div class="t">Categories</div></span><span class="val">4</span><span class="chev">›</span></div>
+      <div class="prow"><span class="ic t">⦿</span><span class="lead"><div class="t">Datapoints</div></span><span class="val">11</span><span class="chev">›</span></div></div>
+    <div class="sectitle">Charts</div>
+    <div class="card"><div class="prow"><span class="ic t">▤</span><span class="lead"><div class="t">Charts</div></span><span class="val">3</span><span class="chev">›</span></div></div>
+    <div class="sectitle">Notifications</div>
+    <div class="card"><div class="prow"><span class="ic">🔔</span><span class="lead"><div class="t">Notifications</div></span><span class="val">3 active</span><span class="chev">›</span></div></div>
+    <div class="sectitle">Account</div>
+    <div class="card"><div class="prow"><span class="ic">🗑</span><span class="lead"><div class="t" style="color:var(--coral)">Delete account</div></span></div></div>
+  </div></div>`,
+
+"06 · settings list": `${sb}
+  <div class="stackhead"><span class="back">‹</span><span class="title">Datapoints</span><span class="spacer"></span><div class="plus">＋</div></div>
+  <div class="body"><div class="scroll">
+    <div class="sectitle">Sleep</div>
+    <div class="card">
+      <div class="prow"><span class="ic">🌙</span><span class="lead"><div class="t">Hours slept</div><div class="s">Number · h</div></span><span class="chev">›</span></div>
+      <div class="prow"><span class="ic t">✦</span><span class="lead"><div class="t">Sleep quality</div><div class="s">Rating · 1–5</div></span><span class="chev">›</span></div></div>
+    <div class="sectitle">Mood</div>
+    <div class="card">
+      <div class="prow"><span class="ic">☺</span><span class="lead"><div class="t">Overall mood</div><div class="s">Rating · 1–5</div></span><span class="chev">›</span></div>
+      <div class="prow"><span class="ic t">⚡</span><span class="lead"><div class="t">Energy</div><div class="s">Number · /10</div></span><span class="chev">›</span></div></div>
+  </div></div>`,
+
+"07 · settings one": `${sb}
+  <div class="stackhead"><span class="back">‹</span><span class="title">Edit datapoint</span><span class="spacer"></span><span class="save">Save</span></div>
+  <div class="body"><div class="scroll">
+    <div class="label">Name</div><div class="field focus">Hours slept</div>
+    <div class="label">Category</div><div class="field">Sleep <span class="ph">▾</span></div>
+    <div class="label">Type</div>
+    <div class="seg" style="margin-top:6px"><div>Binary</div><div class="on">Number</div><div>Rating</div><div>Text</div></div>
+    <div class="label">Unit</div><div class="field">h</div>
+    <div class="btn primary">Save changes</div>
+    <div class="btn danger">Delete datapoint</div>
+  </div></div>`,
+};
+
+const g=document.getElementById('g');
+for(const[l,h]of Object.entries(S)){const w=document.createElement('div');w.className='frame-wrap';
+  w.innerHTML=`<div class="device"><div class="notch"></div><div class="screen">${h}</div></div><div class="frame-label">${l}</div>`;g.appendChild(w);}
+function tm(){const r=document.documentElement;const n=r.getAttribute('data-mode')=='dark'?'light':'dark';r.setAttribute('data-mode',n);document.getElementById('mb').textContent=n=='dark'?'◑ Light':'◐ Dark';}
+</script>
+</body>
+</html>

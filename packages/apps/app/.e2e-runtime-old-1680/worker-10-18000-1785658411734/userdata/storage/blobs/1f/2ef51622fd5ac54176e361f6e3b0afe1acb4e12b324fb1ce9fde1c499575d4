@@ -1,0 +1,22 @@
+# Handoff: IDS/IPS control (Vanta + SOC 2 MON-1)
+
+**Goal:** close Vanta test *"Intrusion detection system installation"* (`ids-ips-enabled-in-cde`) → SOC 2 **MON-1** (CC6.6, CC7.2, A1.3). Manual **Document** test, currently *Needs remediation* — no evidence, no working detection layer.
+
+**Primary action: make Microsoft Sentinel actually detect.** A functioning SIEM satisfies this control; a Premium firewall/IDPS is **not** required (see fallback).
+
+## Current state (verified)
+- Sub `a9049f9f…`, region swedencentral. Serverless: 0 VMs, Container Apps + 2 AKS.
+- **Sentinel** onboarded on `law-normain-audit-prod-01` / `-dev-20` (`terraform/modules/azure/audit.tf`) but **inert: 0 data connectors, only the default Fusion rule** → detects nothing.
+- **Firewall** `afw-normain-prod-01`: Standard SKU, inline chokepoint, threat-intel=Deny, logging on (`firewall.tf`). Standard = **no IDPS**.
+
+## Do this — wire up Sentinel
+Target `law-normain-audit-prod-01`. **Codify in Terraform** (extend `audit.tf` or add `sentinel.tf`) — no portal-only drift.
+1. **Connect data** (`azurerm_sentinel_data_connector_*` / diagnostics): Azure Activity, Defender for Cloud, Entra sign-in+audit, and **Azure Firewall logs** (point `azurerm_monitor_diagnostic_setting.firewall` at this workspace).
+2. **Enable analytics rules** (`azurerm_sentinel_alert_rule_scheduled` / templates) that raise incidents — keep Fusion.
+3. **Verify it operates:** telemetry landing in tables + an incident can generate. "Enabled" ≠ working.
+
+## Close the test
+Capture real timestamped screenshots (connected connectors, enabled rules, an incident) → upload to the [Vanta test](https://app.eu.vanta.com/c/normain.com/tests/ids-ips-enabled-in-cde) and **Submit** (upload alone = draft). Owner: Kalle. Annual renewal.
+
+## Fallback — only if Sentinel can't satisfy it
+If Sentinel can't be evidenced, or a customer/auditor requires an actual **IDPS**: in `firewall.tf` set `sku_tier = "Premium"` + add an `intrusion_detection` block (`mode = "Alert"`/`"Deny"`). Traffic already routed through it. ~€1,200–1,500/mo. IDPS is Premium-only — Standard + threat-intel ≠ IDPS, and Sentinel is detection-only (no inline prevention).

@@ -1,0 +1,65 @@
+# Agreements & Policies — Structure & Conventions
+
+_Where Normain's customer-facing agreements and published policies live, and how they're versioned._
+
+## Where things live
+
+| Doc type | Home |
+|---|---|
+| **Enterprise templates** (Microsoft Marketplace, Customer Cloud Hosting), **NDA**, SLA calculator | `02 - Sales & CS / 04 - Contracts & Agreements / 00 - Customer agreement Templates` |
+| **Executed per-customer agreements** (one folder per customer) | `… / 04 - Contracts & Agreements / 01 - Customer agreements (drafts and signed)` |
+| **Published / SaaS docs** — Terms of Use, DPA, Privacy Policy, Cookie Policy (Website + Application) | `05 - InfoSec / 02 - Official Other Policies` |
+| **Pre-approved subprocessor list** (+ signed vendor DPAs) | `05 - InfoSec / 05 - Vendor Management / 02 - Pre-approved subprocessor list` |
+| **Internal ISMS policies** | `05 - InfoSec / 01 - Official InfoSec Policies` |
+
+**`02 - Official Other Policies`** uses a flat numbered scheme: `01. SaaS - Terms of Use` · `02. SaaS - DPA` · `11/12/13. Website - Privacy/Cookie/Terms of Use` · `21/22. Application - Privacy/Cookie`.
+
+## Versioning (snapshots)
+
+- Each doc lives in a dated form: `YYYY-MM-DD - LATEST` (active) · `YYYY-MM-DD - DRAFT` (in progress) · `YYYY-MM-DD` (superseded history).
+- Cut a new version when the **offer/agreements change materially** — not per customer, not per minor edit.
+- To change: **duplicate the latest → rename to today → edit there.** Never edit a snapshot already used in a signed agreement.
+- Exactly **one `- LATEST`** per item; the in-doc effective date matches the folder/file date.
+- **Enterprise templates** snapshot the **whole package** together (Main Agreement/Order + attachments) in dated subfolders; **single docs** (policies, subprocessor list) use dated **files**.
+
+## Which document governs which motion
+
+| Document | How it's accepted | Self-serve SaaS | Enterprise – Marketplace | Enterprise – Hosting |
+|---|---|---|---|---|
+| *Governing contract* | accepted by org/user | Terms of Use (SaaS), click-accept | Order + Microsoft Standard Contract | Main Agreement + Attachment 1 |
+| **Terms of Use (SaaS)** | contract | ✅ it *is* the contract | ❌ | ❌ |
+| **Privacy Policy** | user notice — not a contract term | ✅ | ✅ | ✅ |
+| **Cookie Policy** | user/browser consent — not a contract term | ✅ | ✅ | ✅ |
+| **DPA** | legal requirement (GDPR Art. 28) | ✅ click-through (SaaS DPA) | ✅ Marketplace DPA (14-day notice) | ✅ Hosting DPA (14-day notice) |
+| **SLA** | commercial — plan-dependent | eligible tiers only | ✅ via Attachment 2 (99%) | ✅ Attachment 2 (99%) |
+
+Privacy & Cookie are accepted by individual **users** (notices/consent), not incorporated into the enterprise contract; the contract's data-protection terms sit in the **DPA**. The **SLA** is a contract attachment (commercial, tier-dependent), not a published policy.
+
+## The three DPAs
+
+| DPA | Used for | Home | Table 1 (hosting subprocessors) |
+|---|---|---|---|
+| **Marketplace DPA** | Microsoft Marketplace, Normain-hosted dedicated | `00 - Customer agreement Templates / 01 - Microsoft Marketplace Template` | Azure, BetterStack, PostHog |
+| **Customer Cloud Hosting DPA** | customer self-hosts in their cloud | `00 - … / 02 - Customer Cloud Hosting Template` | BetterStack, PostHog |
+| **SaaS DPA** | open self-serve SaaS | `05 - InfoSec / 02 - Official Other Policies / 02. SaaS - DPA` | Azure, **AWS**, BetterStack, PostHog |
+
+- **Table 2 (operations) is identical in all three** — same set incl. OpenAI + Anthropic.
+- **AWS** only in the SaaS DPA (hosts Anthropic's models); **Sentry** pre-approved but in no DPA.
+- Each DPA's subprocessor appendix is drawn from the master **Pre-approved subprocessor list**; only Table 1 varies by deployment model.
+
+## Publishing (live links)
+
+Customer-facing policies are published from Google Docs "Publish to the web", fronted by `normain.com` 308 redirects. Current mapping:
+
+- `normain.com/product-privacy-policy` → App Privacy (`21.`) — auto-syncs from the canonical doc
+- `normain.com/product-terms` → SaaS Terms (`01.`) — auto-syncs
+- `normain.com/privacy-policy` → Website Privacy (`11.`) — auto-syncs
+- `normain.com/terms` → Website Terms (`13.`) — auto-syncs
+- `normain.com/cookie-policy` → **separate/legacy cookie doc** (2024-08-05), NOT the canonical `12.`; **orphaned** (unlinked from footer/app)
+
+**Published-doc convention (differs from the rest):**
+
+- Each published policy keeps its **live file in a `00 - Published/` subfolder** inside its policy folder, **named cleanly** (e.g. `Privacy Policy`, no date) — the published page's tab title is taken from the file name, so a dated `- LATEST` name would leak.
+- **Edit in place.** Before each change, copy the current version into the parent folder as a dated archive (e.g. `Privacy Policy - 2026-04-23`), then edit the live file. The file ID — and therefore the publish-to-web URL and the `normain.com` redirect — never changes, so **nothing needs re-pointing** and the live link can't go stale.
+- The effective date lives **inside** the doc ("Last updated …"); the dated archives in the parent hold the history.
+- Unpublished docs (DPAs, subprocessor list) keep the **opposite** pattern: dated `- LATEST` filename + copy-forward to a new file.

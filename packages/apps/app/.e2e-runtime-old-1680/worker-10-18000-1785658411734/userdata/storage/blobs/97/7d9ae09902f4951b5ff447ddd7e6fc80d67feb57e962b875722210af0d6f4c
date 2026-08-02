@@ -1,0 +1,76 @@
+# CPL-46 — Compliance with policies, rules and standards for information security — Investigation
+
+**Task:** CPL-46 · ISO 27001:2022 A.5.36 · Owner: Kalle Hansson (reassigned, ex-Gustav)
+**Vanta:** https://app.eu.vanta.com/c/normain.com/controls?search=CPL-46&controlId=9yz4l6l3
+
+## Overview
+
+CPL-46 has **two independent failing conditions** in Vanta — it does NOT piggyback on CHG-39's policy renewal. CHG-39 fails on Operations Security + Secure Development; CPL-46 fails on a different set (07-ISMS, 08-ISMS, Risk Management) **plus** a technical Dependabot gap. Org-wide pattern is the same (annual renewals all due 2026-06-03), but the specific policies don't overlap.
+
+## Situation
+
+### Vanta state — CPL-46 control drawer
+
+| Section | Status |
+|---|---|
+| Tests | **18 / 19 OK** ❌ — 1 failing (Dependabot, Kalle) |
+| Documents | 5 / 5 OK ✅ |
+| **Policies** | **0 / 3 OK** ❌ — all "Control depends on policy approval" |
+
+### Failing policies (3)
+
+| Policy | Vanta status | Original approver | Renew before | Linked controls |
+|---|---|---|---|---|
+| **Risk Management Policy** | **Approved** (valid through Oct 15, 2026) | — | 2026-10-15 | 7 |
+| **07-ISMS Procedure for Internal Audits** | RENEW_SOON | Sara Landfors | **2026-06-03** | 1 |
+| **08-ISMS Procedure for Management Review** | RENEW_SOON | Sara Landfors | **2026-06-03** | 1 |
+
+**Anomaly:** Risk Management Policy shows "Approved" on the Policies page but the CPL-46 drawer reports "Control depends on policy approval." Likely a Vanta UI lag / pending re-link after a control mapping change. Worth a sanity-click in the policy detail before audit.
+
+### Failing test (1)
+
+**"High vulnerabilities identified in packages are addressed (GitHub Repo)"** — Owner: Kalle Hansson · 4 controls depend on it
+- Repo: `normain` · Source: GitHub Dependabot
+- **13 high-severity vulns open**, several **due today**, the rest within 8 days.
+- Sample: npm-tar (6 CVEs), npm-lodash, npm-defu, npm-drizzle-orm, npm-basic-ftp.
+
+### Cross-check vs CHG-39 (subtask #4)
+
+CHG-39's blocker is renewal of **Secure Development Policy + Operations Security Policy** (Kenneth Ciceron, expire 2026-06-03). **No overlap with CPL-46's failing policies.** Renewing CHG-39's two policies will NOT clear CPL-46. Same-day expiry pattern (2026-06-03) suggests a global annual renewal cycle — worth a sweep.
+
+## Solution
+
+**Standalone — does not piggyback on CHG-39.** Two parallel actions:
+
+1. **Policy renewals (Kalle / policy owner):**
+   - 07-ISMS Procedure for Internal Audits → "Renew without updates"
+   - 08-ISMS Procedure for Management Review → "Renew without updates"
+   - Risk Management Policy → verify in policy detail; likely UI lag, but re-confirm linkage to CPL-46 if an updated version is pending approval.
+
+2. **Dependabot remediation (Kalle):**
+   - Bump 13 high-severity packages in `normain` repo. Several due today.
+   - This is the technical blocker; policy renewals alone will not flip the control green.
+
+Both must close for CPL-46 to pass. Audit starts next week — Dependabot is the time-critical item.
+
+## Actions taken
+
+- ✅ Read CHG-39 investigation asset — confirmed no policy overlap with CPL-46.
+- ✅ Opened CPL-46 in Vanta UI; captured tests/docs/policies status.
+- ✅ Verified policy state on `/policies` page (Risk Mgmt approved through Oct 2026; 07/08-ISMS renew-soon Jun 3).
+- ✅ Drilled into failing test — 13 Dependabot CVEs in `normain` repo.
+
+## Blocked on
+
+- **Shared changes not made** (per brief): no policy renewals, no Dependabot bumps.
+- **Open question for Kalle:** is "Renew without updates" sufficient for the audit, or does the auditor want fresh content review on 07/08-ISMS procedures?
+- **Open question:** confirm Risk Management Policy drawer mismatch — pending newer version, or stale UI?
+
+## Authoritative sources
+
+| Source | Use |
+|---|---|
+| Vanta UI — CPL-46 control drawer | Failing tests/docs/policies |
+| Vanta UI — `/policies` page | Approval state + expiry of all 3 policies |
+| Vanta UI — failing test detail | 13 Dependabot CVEs, due dates |
+| CHG-39 investigation.md asset (`f75d5bae`) | Cross-check policy overlap |

@@ -1,0 +1,125 @@
+# Subnet Flow Logs — Investigation (Vanta Test #15)
+
+## Overview
+
+Vanta's "Subnets have flow logs enabled (Azure)" test fails on all 12 subnets (6 in `vnet-normain-dev-20`, 6 in `vnet-normain-prod-01`, both Sweden Central, subscription `Normain` / `a9049f9f-…`). Only one NSG flow log exists today (`nsg-vm-normain-prod-01`, NIC-attached, 90-day retention to storage), so per-subnet coverage is effectively zero. Recommended fix is **VNet flow logs** (one per VNet, covers every subnet automatically) into the existing storage account `stsublogarch` with **180-day retention** to meet the Logging policy minimum, plus Traffic Analytics into the per-env `loganalytics-*` workspace. Estimated incremental cost: ~$15–40/month combined; nothing prod-mutating has been done.
+
+## Situation
+
+### What is failing
+
+- Vanta test: **#15 Subnets have flow logs enabled (Azure)** — overdue 9 months, audit starts next week.
+- Scope (confirmed via `az network vnet subnet list`): **12 subnets total**.
+  - `vnet-normain-dev-20` (`rg-normain-dev-20`): `default`, `GatewaySubnet`, `snet-api-normain-dev-20`, `snet-db-normain-dev-20`, `snet-vm-normain-dev-20`, `snet-aks-normain-dev-20`.
+  - `vnet-normain-prod-01` (`rg-normain-prod-01`): `default`, `GatewaySubnet`, `snet-api-normain-prod-01`, `snet-db-normain-prod-01`, `snet-vm-normain-prod-01`, `snet-aks-normain-prod-01`.
+- Existing flow logs (`az network watcher flow-log list --location swedencentral`): **1**, on NSG `nsg-vm-normain-prod-01`, target is NICs (not a subnet), retention 90 d, storage `stsublogarch`, no Traffic Analytics.
+- NSG topology means classic NSG flow logs cannot satisfy a per-subnet check:
+  - Only `snet-db-*` (2 subnets) have an NSG attached at the subnet.
+  - AKS NSGs (`aks-agentpool-…`) are NIC-attached inside `MC_…` resource groups, not on the `snet-aks-*` subnets.
+  - `default`, `GatewaySubnet`, `snet-api-*`, `snet-vm-*`, `snet-aks-*` have no NSG at the subnet → 8 subnets cannot be covered by NSG flow logs without first attaching NSGs.
+
+### Evidence requirements (from Drive — authoritative source)
+
+- **Logging & Observability policy** (`logging.pdf`, Normain Data Room, Drive id `1o5GnpF99DeXlLNno_quvoLBtNP0Zo666`): "Retention periods are **minimum 180 days** and defined with infrastructure-as-code." Infrastructure telemetry is collected by **Azure Monitor**; secrets in **Azure Key Vault**; dashboards via **Terraform**.
+- **Data Management Policy** (`[Normain] Data Management Policy.docx`, Drive id `1usz20wFySa6yth7ASfRqLlDTSp817pke`): flow logs contain source/dest IPs (PII under GDPR) → classify **Restricted** by default; encryption at rest required (Azure SSE on `stsublogarch` satisfies this).
+- Data residency: keep all logs in **Sweden Central** (EU) — both VNets and `stsublogarch` already are.
+
+### Available infrastructure (already provisioned, reuse)
+
+- Storage: `stsublogarch` (rg-normain-global, Sweden Central, StorageV2, RA-GRS, public blob disabled). Retention extension to 180 d only adds storage cost.
+- Log Analytics workspaces (for Traffic Analytics):
+  - dev → `loganalytics-dev-20` (retention 30 d, PerGB2018) or `law-normain-audit-dev-20`.
+  - prod → `loganalytics-prod-01` (retention 365 d, PerGB2018) or `law-normain-audit-prod-01`.
+- Network Watcher: `NetworkWatcher_swedencentral` exists.
+
+### Why the failure persisted
+
+NSG flow logs only apply where an NSG is attached at the subnet level; most subnets have no subnet-level NSG, so the per-subnet check has been structurally impossible to satisfy with the current NSG-flow-log approach. Microsoft has also announced **NSG flow logs retiring 2027-09-30** in favour of VNet flow logs — building more NSG flow logs is throwaway work.
+
+## Solution
+
+### Recommended approach: VNet flow logs (one per VNet)
+
+Two flow logs cover all 12 subnets, are forward-compatible (NSG flow logs deprecated), and don't require attaching NSGs to subnets that don't need them.
+
+- **Destination (dual sink):**
+  - Storage `stsublogarch` (raw JSON, lifecycle to Cool/Archive after 30 d) — long-term audit evidence.
+  - Traffic Analytics enabled → write summarised data to `law-normain-audit-dev-20` / `law-normain-audit-prod-01` (separate audit workspaces, keep app workspaces clean).
+- **Retention: 180 days** on the flow log resource (matches Logging policy minimum); raw blobs governed by storage lifecycle rules; Traffic Analytics processing interval 60 min (cheaper than 10 min).
+- **IaC:** define both flow logs and the storage lifecycle rule in Terraform (same repo as existing Azure Monitor / dashboard IaC) so retention and destination are auditable and reproducible.
+
+### Sequenced enablement
+
+1. **Pre-flight (no prod change):**
+   - Confirm `Microsoft.Insights` resource provider registered in subscription.
+   - Confirm storage lifecycle rules don't conflict with new prefix `insights-logs-networksecuritygroupflowevent/` (and the new VNet flow log path `resourceId=…/virtualNetworks/…`).
+2. **Dev first** — create VNet flow log on `vnet-normain-dev-20`, verify blobs land within ~10 min, verify Traffic Analytics queries (`AzureNetworkAnalytics_CL`) populate within ~1 h.
+3. **Prod** — create VNet flow log on `vnet-normain-prod-01` after dev verification.
+4. **Decommission overlap** — once VNet flow logs are confirmed working, disable the existing `nsg-vm-normain-prod-01-…-flowlog` (don't delete blobs; lifecycle handles them) to avoid double-billing.
+5. **Vanta refresh** — let the Vanta connector re-scan (or trigger manually). Test should flip to passing within one scan cycle.
+6. **Codify** — port the manual `az` commands into Terraform; add a CI check that asserts flow logs exist per VNet with retention ≥ 180.
+
+### Exact `az` commands (for review — DO NOT EXECUTE against prod yet)
+
+```bash
+SUB=a9049f9f-3d1b-43f0-9278-7f1d603f6a00
+LOC=swedencentral
+STORAGE_ID=/subscriptions/$SUB/resourceGroups/rg-normain-global/providers/Microsoft.Storage/storageAccounts/stsublogarch
+
+# DEV
+VNET_DEV=/subscriptions/$SUB/resourceGroups/rg-normain-dev-20/providers/Microsoft.Network/virtualNetworks/vnet-normain-dev-20
+LAW_DEV=$(az monitor log-analytics workspace show --subscription $SUB \
+  -g rg-normain-dev-20 -n law-normain-audit-dev-20 --query id -o tsv)
+LAW_DEV_GUID=$(az monitor log-analytics workspace show --subscription $SUB \
+  -g rg-normain-dev-20 -n law-normain-audit-dev-20 --query customerId -o tsv)
+
+az network watcher flow-log create \
+  --subscription $SUB --location $LOC \
+  --name vnet-normain-dev-20-flowlog \
+  --vnet $VNET_DEV \
+  --storage-account $STORAGE_ID \
+  --retention 180 --enabled true \
+  --traffic-analytics true \
+  --workspace $LAW_DEV --interval 60
+
+# PROD (run only after DEV verified)
+VNET_PROD=/subscriptions/$SUB/resourceGroups/rg-normain-prod-01/providers/Microsoft.Network/virtualNetworks/vnet-normain-prod-01
+LAW_PROD=$(az monitor log-analytics workspace show --subscription $SUB \
+  -g rg-normain-prod-01 -n law-normain-audit-prod-01 --query id -o tsv)
+
+az network watcher flow-log create \
+  --subscription $SUB --location $LOC \
+  --name vnet-normain-prod-01-flowlog \
+  --vnet $VNET_PROD \
+  --storage-account $STORAGE_ID \
+  --retention 180 --enabled true \
+  --traffic-analytics true \
+  --workspace $LAW_PROD --interval 60
+
+# DECOMMISSION old NSG flow log (after VNet flow logs confirmed)
+az network watcher flow-log delete --subscription $SUB --location $LOC \
+  --name nsg-vm-normain-prod-01-rg-normain-prod-01-flowlog
+```
+
+### Cost estimate (Sweden Central list price, indicative)
+
+- Storage (raw flow log blobs, JSON): ~$2–10/mo per VNet at typical SMB traffic volumes; lifecycle to Cool after 30 d cuts ~70 %.
+- Traffic Analytics processing: ~$1.20/GB ingested + LA ingestion ~$2.30/GB. At 60-min interval and modest traffic, ~$5–15/mo per VNet.
+- **Combined ≈ $15–40/mo total**, well below alerting thresholds. Verify after first month and tune `--interval` if needed.
+
+## Actions taken / Blocked on
+
+### Done
+
+- Inspected Azure: enumerated 12 subnets across 2 VNets, mapped NSG attachments, confirmed only 1 existing flow log (NIC-targeted, 90-day retention, storage-only).
+- Read Drive policies: Logging & Observability (180-day minimum), Data Management Policy (PII handling for IPs in flow logs), confirmed EU residency requirement (Sweden Central OK).
+- Identified existing reusable infrastructure: `stsublogarch`, `law-normain-audit-{dev,prod}`, `NetworkWatcher_swedencentral`.
+- Drafted exact `az` commands for dev → prod enablement plus old-flow-log decommission.
+
+### Blocked on (handoff)
+
+- **User approval before any prod mutation.** Per task instructions, stopped before running `az network watcher flow-log create` against prod.
+- **Vanta UI cross-check** — `slay tasks browser` could not open the panel (task tab not focused in the SlayZone app). Recommend the user opens https://app.eu.vanta.com/c/normain.com/tests, searches "subnets flow logs", confirms the failing-subnet list matches the 12 enumerated above, and copies the remediation text into this asset for the auditor record.
+- **Data Retention Matrix (Appendix B of Data Management Policy)** — referenced but not located in Drive; need to confirm it doesn't override the 180-day floor with a stricter network-log retention.
+- **IaC repo location** — solution assumes there is an existing Terraform repo for Azure (Logging policy says "infrastructure-as-code"); need pointer so the `az` commands can be ported there before applying.
+- **Traffic Analytics workspace choice** — recommended `law-normain-audit-*` to keep app workspaces clean; confirm with platform owner.

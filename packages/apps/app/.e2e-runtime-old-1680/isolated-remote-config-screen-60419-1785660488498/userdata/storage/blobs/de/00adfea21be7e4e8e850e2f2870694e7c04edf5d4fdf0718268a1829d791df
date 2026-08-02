@@ -1,0 +1,47 @@
+# SlayZone Env Vars — Target State (post-simplification)
+
+The env vars that actually exist (read from `process.env`) once the simplification lands. Deleted/derived-away vars are NOT listed — they no longer exist as env vars. Precedence: `env var > ~/.slayzone config.json > generated/default`.
+
+Two flags produce the three value columns: **`SLAYZONE_SUPERVISED`** (host-set → Supervised) and **`SLAYZONE_MODE=local|remote`** (operator-set → Standalone vs Remote). `remote` sets the whole hardening bundle (hub: auth+TLS; runner: wss+cert-pin); `local` (default) = loopback, auth off. Supervised is always `local` exposure.
+
+## Single anchor: `SLAYZONE_ROOT`
+
+One optional var anchors all on-disk state for hub AND runner. Default = CWD (standalone) / `$HOME/.slayzone` (supervised). Relocate = `cd /srv/slayzone && slayzone-hub` or `SLAYZONE_ROOT=/srv/slayzone`.
+
+```
+SLAYZONE_ROOT
+├── slayzone.sqlite     (hub DB)
+├── config.json         (carries: allowedRoots + the env-mirrored keys below)
+├── logs/
+├── run/sidecar.sock    (fork sidecar socket; falls back to short OS-runtime dir if path > ~104 chars)
+└── runner/             (runner post-enroll creds)
+```
+
+Hub and runner are separate servers with separate CWDs → separate `SLAYZONE_ROOT`s. Non-env-var config that lives ONLY in `<ROOT>/config.json`: `allowedRoots` (runner FS jail — default `[ROOT]` + operator-listed project dirs; locally-declared, never hub-pushed).
+
+## Hub / runner env vars
+
+The minimum surface — only vars an operator sets on a normal deploy. Everything else auto-derives (port OS-assigned + DB-persisted, secret auto-generated, host from MODE, hub URL/cert from the join token); those become env-settable only if a concrete need appears. **bold** = operator normally sets it there.
+
+**Naming:** prefixed `SLAYZONE_HUB_` / `SLAYZONE_RUNNER_` by the binary that reads it. `SLAYZONE_ROOT` + `SLAYZONE_MODE` are read by both binaries → unprefixed.
+
+| Var | Purpose | Supervised | Standalone | Remote | config.json |
+|---|---|---|---|---|---|
+| `SLAYZONE_ROOT` | Single folder holding all on-disk state | `$HOME/.slayzone` | CWD | **CWD or set** | — |
+| `SLAYZONE_MODE` | Internet-facing? Sets the whole secure bundle | `local` | `local` | **`remote`** | — |
+| `SLAYZONE_HUB_PUBLIC_URL` | URL remote runners use for this hub's MCP + hooks (can't auto-derive — hub can't know its own external address) | loopback | loopback | **set** (required) | `publicUrl` |
+| `SLAYZONE_RUNNER_JOIN_TOKEN` | One-time enroll credential (embeds hub URL+cert+secret) | host injects | — | **set** (minted on hub) | `joinToken` |
+
+### Auto-derived — not env knobs (add back only when needed)
+
+- **Hub:** `SLAYZONE_HUB_PORT` (OS-assigned), `SLAYZONE_HUB_HOST` (`127.0.0.1`), `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` (OS-assigned + DB-persisted), `SLAYZONE_HUB_RUNNER_TRANSPORT_HOST` (from MODE), `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` (auto-gen + persisted), `SLAYZONE_HUB_TLS_PORT` (on when `remote`).
+- **Runner:** `SLAYZONE_RUNNER_HUB_URL`, `SLAYZONE_RUNNER_HUB_CERT_SHA256` (both from the join token); `allowedRoots` lives in `<ROOT>/config.json`.
+- **Internal:** `SLAYZONE_SUPERVISED` (the standalone-vs-supervised discriminator, host-set).
+
+*Excluded entirely (not hub/runner deploy): agent-terminal injection, supervised sidecar↔host bridge, e2e/test, dev/build — see the full deep-dive artifact.*
+
+## Deploy quickref
+
+- **Hub (remote):** `SLAYZONE_MODE=remote` + `SLAYZONE_HUB_PUBLIC_URL` (+ optional `SLAYZONE_ROOT`). Secret auto-generates; auth + TLS auto-on.
+- **Runner (remote):** `SLAYZONE_MODE=remote` + `SLAYZONE_RUNNER_JOIN_TOKEN` + `<ROOT>/config.json` `allowedRoots`. Everything else derives.
+- **Local (either):** just launch — CWD anchor, loopback, no auth.

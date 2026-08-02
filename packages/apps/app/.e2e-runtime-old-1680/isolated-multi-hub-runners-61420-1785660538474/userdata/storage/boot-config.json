@@ -1,0 +1,13 @@
+{
+  "server_mode": "local",
+  "multi_hub": true,
+  "hubs": [
+    {
+      "id": "remote-b",
+      "kind": "remote",
+      "label": "Hub B",
+      "url": "ws://127.0.0.1:57401/trpc"
+    }
+  ],
+  "default_hub_id": "local"
+}

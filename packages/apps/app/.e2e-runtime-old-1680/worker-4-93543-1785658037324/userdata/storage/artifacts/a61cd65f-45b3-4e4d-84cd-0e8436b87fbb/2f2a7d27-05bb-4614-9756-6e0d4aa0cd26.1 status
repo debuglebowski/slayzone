@@ -1,0 +1,31 @@
+# 10.1 shipped
+
+**Patch 0040** — dialog framework + `chrome://slayzone-dialogs/<id>` WebUI.
+
+Landed:
+- `chrome://slayzone-dialogs/` host (C++ SlayzoneDialogsUI + host) binding DialogHost Mojo.
+- DialogHost forwards `Resolve(invocation_id, result_json)` + `Cancel(invocation_id)` to sidecar (`dialog:resolve` / `dialog:cancel` JSON-RPC).
+- Outer bundle `packages/webui/dialogs/` — URL routes `/<dialogId>?invocation=<uuid>&props=<base64url-json>` → lazy-loaded component; UnknownDialog fallback.
+- Mojom source-of-truth + in-tree mirror + regenerated TS bindings.
+- Tests: 7/7 green (`App.test.tsx` + `invocation.test.ts`).
+- Chromium framework built clean; outer typecheck clean.
+
+Outer commit: `919bc0b5`. In-tree commit: `dba90e0d`.
+
+## Incident — parallel-agent data loss
+Concurrent Phase 11 agent ran `git clean -fd` in `chromium/src`, wiping my untracked files mid-build. Recovered from context; committed before re-running build. Memory recorded at `feedback_chromium_untracked_wipes.md`.
+
+## Remaining (10.2–10.7 + 10.T)
+- 10.2 CreateTaskDialog (485 LOC) + EditTaskDialog (243) + DeleteTaskDialog (54)
+- 10.3 Create/Settings/Delete project dialogs
+- 10.4 SearchDialog (Cmd+K)
+- 10.5 Feedback/CliInstall/Changelog
+- 10.6 `views::Widget` modal mode + ESC + focus trap — blocked by `slayzone_browser_view.{h,cc}` scope fence (Phase 7 R3 must recreate first)
+- 10.7 parity gate + 10.T tests + C5 ledger
+
+## Invoker channel
+No invoker-side wiring yet. Sidecar needs two new handlers:
+- `dialog:open` (invoker-side): register invocation_id → props, return URL to open
+- `dialog:resolve` + `dialog:cancel` handlers: complete the pending invocation future
+
+These are orthogonal to 10.1 framework and should land alongside the first real-dialog port (10.2).

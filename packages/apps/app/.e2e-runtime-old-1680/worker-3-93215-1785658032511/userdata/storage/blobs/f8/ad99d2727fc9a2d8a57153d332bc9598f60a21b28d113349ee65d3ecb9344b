@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-serien — Kartan</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #55554f;
+    --ink-faint: #8a8a80;
+    --line: #e6e6e0;
+    --accent: #2f6d5b;
+    --accent-soft: #e6f0ec;
+    --lens: #7a4f1d;
+    --lens-soft: #f7ede0;
+    --script-bg: #f0f5f2;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+    --radius: 14px;
+    /* fyra fakta-fack + en åsiktstagg */
+    --b-durable: #2f6d5b; --b-durable-bg: #e6f0ec;
+    --b-current: #2f5bd0; --b-current-bg: #e6ecfa;
+    --b-claim:   #9a6410; --b-claim-bg:   #f7ede0;
+    --b-unknown: #8a3db0; --b-unknown-bg: #f2e6fa;
+    --b-take:    #55554f; --b-take-bg:    transparent;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121312;
+      --surface: #1c1e1c;
+      --ink: #ecece7;
+      --ink-soft: #b4b4ac;
+      --ink-faint: #7d7d75;
+      --line: #2c2f2c;
+      --accent: #6bbfa4;
+      --accent-soft: #1b2b26;
+      --lens: #d6a86a;
+      --lens-soft: #2a2016;
+      --script-bg: #172420;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+      --b-durable: #6bbfa4; --b-durable-bg: #1b2b26;
+      --b-current: #86a6f2; --b-current-bg: #182034;
+      --b-claim:   #d6a86a; --b-claim-bg:   #2a2016;
+      --b-unknown: #c79ae8; --b-unknown-bg: #241831;
+      --b-take:    #b4b4ac; --b-take-bg:    transparent;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { margin: 0 auto; padding: clamp(24px, 5vw, 56px) clamp(18px, 4vw, 40px) 72px; }
+
+  header.masthead { margin-bottom: 8px; }
+  .eyebrow { font-size: 12.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+  h1 { font-size: clamp(28px, 5vw, 44px); line-height: 1.08; font-weight: 760; letter-spacing: -0.02em; margin: 0 0 14px; max-width: 22ch; }
+  .dek { font-size: clamp(15px, 2.2vw, 17.5px); color: var(--ink-soft); margin: 0; max-width: 62ch; }
+  .dek strong { color: var(--ink); font-weight: 620; }
+
+  /* redaktionell lins */
+  .lens { display: flex; gap: 14px; align-items: flex-start; background: var(--lens-soft); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 20px; margin: 32px 0 0; }
+  .lens .mark { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--lens); color: #fff; font-size: 16px; font-weight: 700; margin-top: 1px; }
+  .lens .body { font-size: 14.5px; }
+  .lens .body b { color: var(--lens); font-weight: 680; }
+  .lens .body span { color: var(--ink-soft); display: block; margin-top: 2px; }
+
+  /* kontrollrad: manusläge + tagg-förklaring */
+  .controls { display: flex; align-items: center; gap: 16px 20px; flex-wrap: wrap; margin: 26px 0 0; }
+  .mode-btn {
+    cursor: pointer; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
+    font-size: 13px; font-weight: 650; border-radius: 999px; padding: 8px 16px; font-family: inherit;
+    transition: filter .15s;
+  }
+  .mode-btn:hover { filter: brightness(1.05); }
+  .hint { font-size: 12.5px; color: var(--ink-faint); }
+  .legend { display: flex; gap: 8px 12px; flex-wrap: wrap; font-size: 12px; color: var(--ink-faint); align-items: center; }
+  .legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+  .legend .swatch { width: 11px; height: 11px; border-radius: 3px; }
+
+  /* fyra fack + åsiktstagg, inline i manus */
+  .b { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+       padding: 1px 6px; border-radius: 5px; vertical-align: 15%; margin: 0 3px 0 1px; white-space: nowrap; line-height: 1.5; }
+  .b.durable { color: var(--b-durable); background: var(--b-durable-bg); }
+  .b.current { color: var(--b-current); background: var(--b-current-bg); }
+  .b.claim   { color: var(--b-claim);   background: var(--b-claim-bg); }
+  .b.unknown { color: var(--b-unknown); background: var(--b-unknown-bg); }
+  .b.take    { color: var(--b-take);    background: var(--b-take-bg); border: 1px solid var(--line); }
+  .swatch.durable { background: var(--b-durable); }
+  .swatch.current { background: var(--b-current); }
+  .swatch.claim   { background: var(--b-claim); }
+  .swatch.unknown { background: var(--b-unknown); }
+  .swatch.take    { background: transparent; border: 1px solid var(--ink-faint); }
+
+  /* global inställning: dölj alla käll-taggar + deras förklaring */
+  body.notags .b { display: none; }
+  body.notags .legend { display: none; }
+
+  /* skämt-flagga: markerar delkort där manuset har ett skämt (+ ton) */
+  .joke-flag {
+    display: inline-block; margin-left: 8px; font-size: 10px; font-weight: 700;
+    letter-spacing: .03em; text-transform: uppercase; color: var(--lens);
+    background: var(--lens-soft); border: 1px solid var(--line); border-radius: 999px;
+    padding: 1px 8px; vertical-align: middle; white-space: nowrap; line-height: 1.6;
+  }
+  .joke-flag.kind { color: var(--b-durable); background: var(--b-durable-bg); }
+  .joke-flag.raw  { color: #b5482f; background: #f7e2dc; }
+  @media (prefers-color-scheme: dark) { .joke-flag.raw { color: #e88a72; background: #2e1a15; } }
+  .script-body .joke { color: var(--lens); font-style: italic; }
+  .narrator { font-size: 13.5px; color: var(--ink-faint); margin: 12px 0 0; }
+  .narrator b { color: var(--ink-soft); font-weight: 640; }
+
+  /* diagonal trappa — sekventiellt flöde, växlande sidor, begränsad överlappning */
+  .themes { position: relative; margin-top: 30px; }
+  .theme {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 6px clamp(18px, 3vw, 28px) 26px; scroll-margin-top: 20px;
+    box-shadow: var(--shadow); position: relative; width: 48%; z-index: 1;
+  }
+  /* kortet du läser/redigerar lyfts över grannen så inget täcks */
+  .theme:hover, .theme:focus-within { z-index: 6; }
+  .theme:nth-of-type(odd)  { margin-left: 0;    margin-right: auto; }  /* 1,3,5 → vänster */
+  .theme:nth-of-type(even) { margin-left: auto; margin-right: 0;    }  /* 2,4   → höger */
+  /* överlappningen är mindre än det kortaste kortets höjd, så varje kort ändå
+     börjar under det föregående (läsordning bevaras) trots kraftig vävning */
+  .theme + .theme { margin-top: -210px; }
+
+  /* MANUSLÄGE — platt, full bredd, läsbart uppifrån och ner för skrivande/inspelning */
+  body.scriptmode .theme { width: 100%; }
+  body.scriptmode .theme + .theme { margin-top: 22px; }
+  body.scriptmode .theme:nth-of-type(odd),
+  body.scriptmode .theme:nth-of-type(even) { margin-left: 0; margin-right: 0; }
+
+  @media (max-width: 720px) {
+    .theme { width: 100%; }
+    .theme + .theme { margin-top: 24px; }
+    .theme:nth-of-type(odd), .theme:nth-of-type(even) { margin-left: 0; margin-right: 0; }
+  }
+
+  /* klickbara toggle-kort (native <details>) */
+  details.sc { }
+  details.sc > summary { cursor: pointer; list-style: none; display: block; position: relative; }
+  details.sc > summary::-webkit-details-marker { display: none; }
+  details.sc > summary::after {
+    content: "▸"; position: absolute; right: 0; top: 2px; font-size: 10px; color: var(--ink-faint);
+  }
+  details.sc[open] > summary::after { content: "▾"; }
+
+  /* tema-rubrik som klickbar summary */
+  .theme .theme-sc > summary { padding: 18px 24px 0 0; }
+  .theme .th-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
+  .theme .num { flex: none; align-self: flex-start; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-weight: 730; font-size: 16px; background: var(--accent); color: #fff; }
+  @media (prefers-color-scheme: dark) { .theme .num { color: #10221c; } }
+  .theme h2 { font-size: clamp(20px, 3vw, 24px); font-weight: 700; letter-spacing: -0.015em; margin: 0; line-height: 1.15; }
+  .theme .desc { color: var(--ink-faint); font-size: 14.5px; margin: 3px 0 0 48px; max-width: 62ch; }
+  .theme-sc .script-body { margin: 12px 0 4px 48px; }
+  @media (max-width: 620px) { .theme .desc, .theme-sc .script-body { margin-left: 0; } }
+
+  /* delkort — ren vertikal stapel */
+  ol.points { list-style: none; counter-reset: p; margin: 18px 0 0 48px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  @media (max-width: 620px) { ol.points { margin-left: 0; } }
+  ol.points li {
+    counter-increment: p; position: relative; padding: 14px 18px 15px 46px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+    transition: border-color .15s;
+  }
+  ol.points li:hover { border-color: var(--accent); }
+  ol.points li::before {
+    content: counter(p); position: absolute; left: 14px; top: 15px;
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft);
+    display: grid; place-items: center; line-height: 1; z-index: 1;
+  }
+  ol.points li > details.sc > summary { padding-right: 20px; }
+  ol.points .lead { display: block; font-size: 15.5px; font-weight: 640; color: var(--ink); letter-spacing: -0.005em; }
+  ol.points .detail { display: block; margin-top: 4px; font-size: 14.5px; color: var(--ink-soft); }
+  ol.points .detail em { color: var(--ink); font-style: italic; }
+
+  /* manuspanelen */
+  .script-body {
+    font-size: 14.5px; line-height: 1.7; color: var(--ink); margin-top: 12px;
+    background: var(--script-bg); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px;
+  }
+  .script-body p { margin: 0 0 11px; }
+  .script-body p:last-child { margin-bottom: 0; }
+  .script-body .cue { display: block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 8px; }
+  .script-body.empty { color: var(--ink-faint); font-style: italic; border-left-color: var(--line); }
+
+  .aside { margin-top: 34px; border: 1px dashed var(--line); border-radius: var(--radius); padding: 16px 20px; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .aside .tag { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-faint); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; }
+  .aside .txt { font-size: 14px; color: var(--ink-soft); }
+  .aside .txt b { color: var(--ink); font-weight: 620; }
+
+  footer.foot { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-faint); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body class="notags">
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Serie om AI · på svenska · gratis · inga sponsorer</p>
+    <h1>Vad alla faktiskt borde förstå om AI</h1>
+    <p class="dek"><strong>Avsnitt 1 är hela den här kartan</strong> — en snabb genomgång av varje tema nedan. Varje tema blir sedan en egen fördjupning längre fram. Målet är inte att rapportera nyheterna; det är att göra dig kapabel att bedöma dem själv.</p>
+    <p class="narrator">Berättare: <b>Sockrates</b> — en strumpdocka som förklarar avancerad AI. Strumpvitsen finns kvar men sparsamt; humorn i övrigt varierar brett (bransch, vår egen art, chefer, mörk absurdism, cynism). Kort märkta <span class="joke-flag kind">skämt · snäll</span> eller <span class="joke-flag raw">skämt · rå</span> innehåller en humoristisk formulering i manuset — taggen visar tonen.</p>
+  </header>
+
+  <div class="lens">
+    <div class="mark">!</div>
+    <div class="body">
+      <b>Linsen över allt: skär genom bruset.</b>
+      <span>AI drar till sig en flod av röster drivna av pengar och rädsla. De flesta vill väl; få skapar klarhet. Allt här är till för att minska förvirringen, inte öka den.</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="mode-btn" id="modeBtn" type="button">Manusläge — expandera allt</button>
+    <button class="mode-btn" id="tagBtn" type="button" aria-pressed="false">Käll-taggar: av</button>
+    <span class="hint">Klicka på ett kort för att visa dess manus.</span>
+    <div class="legend">
+      <span class="lg"><span class="swatch durable"></span> beständigt faktum</span>
+      <span class="lg"><span class="swatch current"></span> aktuellt, bekräftat</span>
+      <span class="lg"><span class="swatch claim"></span> obekräftat påstående</span>
+      <span class="lg"><span class="swatch unknown"></span> ingen vet än</span>
+      <span class="lg"><span class="swatch take"></span> min åsikt</span>
+    </div>
+  </div>
+
+  <div class="themes">
+
+  <section class="theme" id="t1">
+    <details class="sc theme-sc">
+      <summary>
+        <div class="th-head"><div class="num">1</div><h2>Vad AI faktiskt är</h2></div>
+        <p class="desc">Precis nog för att kunna resonera om det — medvetet ingen teknik, ingen jargong. Vad det är, och varför det inte kommer sluta bli bättre.</p>
+      </summary>
+      <div class="script-body">
+        <span class="cue">Övergång till tema 1 · ton: snäll</span>
+        <p><span class="joke">Hej. Jag är en strumpa. Och jag ska förklara den mest avancerade teknologi mänskligheten någonsin byggt. Om du kan lita på mig med det här, kan du lita på vem som helst.</span></p>
+        <p>Vi börjar med den minst glamorösa frågan, och samtidigt den viktigaste: vad är det här, egentligen?</p>
+        <p>Jag hoppar över hur det fungerar under huven — inga neurala nätverk, inga träningsdiagram, inget sånt. Du behöver det inte, och ärligt talat är det mest i vägen. Det du behöver är en fungerande mental bild, och en känsla för vart det här är på väg. Det är hela den här första delen.</p>
+      </div>
+    </details>
+
+    <ol class="points">
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">”AI” är numera bara vardagsordet</span>
+            <span class="detail">Det som förr delades upp i ”LLM:er”, ”generativ AI”, ”transformers” heter numera bara ”AI” i vanligt tal. Nämn det en gång och gå vidare — inga neurala nätverk, ingen träning, inget ”så funkar det” under huven.</span>
+            <span class="joke-flag raw">skämt · rå</span>
+          </summary>
+          <div class="script-body">
+            <p><span class="cue">ton: rå</span></p>
+            <p>Ett snabbt ord om orden, för de ställer till det för folk. Du kommer höra ”LLM”, ”generativ AI”, ”transformer”, ”GPT” — slängda omkring som om det vore olika saker du förväntas hålla reda på.</p>
+            <p><span class="joke">Och du kommer träffa nån som rättar dig: ”tja, tekniskt sett är det en LLM.” Le, nicka, gå vidare. Ingen har någonsin vunnit både ett argument och en vän i samma mening som började med ”tja, tekniskt sett”.</span></p>
+            <p>För vårt syfte är allt bara ”AI”. Det är faktiskt så vanligt folk pratar nu <span class="b durable">beständigt</span>, och så kommer jag prata. Om ett specifikt ord faktiskt spelar roll längre fram definierar jag det precis när vi behöver det. Fram till dess: lägg inte en sekund på att plugga in begrepp — det är inte poängen, och det är inte det som gör dig kapabel att bedöma det här.</p>
+          </div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Du bedömer det utifrån vad du ser, inte utifrån teori</span>
+            <span class="detail">Du behöver inte förstå det inre för att förstå förmågan. Vad det kan göra <em>är</em> vad du ser när du använder det, vad verktyg byggda på det gör, och vad trovärdiga personer visar att det gör.</span>
+            <span class="joke-flag kind">skämt · snäll</span>
+          </summary>
+          <div class="script-body">
+            <p><span class="cue">ton: snäll (strumpvits — behålls)</span></p>
+            <p>Här är tankeskiftet som faktiskt hjälper. Du förstår inte en bil genom att förstå motorn — du förstår den genom att köra den. Samma sak här.</p>
+            <p><span class="joke">Ta mig, till exempel. Du behöver verkligen inte veta vad som finns inuti mig för att bedöma om det jag säger håller. Faktiskt: låt oss alla komma överens om att aldrig prata om vad som finns inuti mig. Vi fokuserar på orden. Orden.</span></p>
+            <p>Vad AI kan göra är helt enkelt vad du ser när du använder det, vad verktygen byggda på det gör, och vad personer du litar på visar att det gör <span class="b durable">beständigt</span>. Du har rätt att bedöma det här utifrån hur det beter sig. Du behöver inget godkännande från det inre, och den som säger att du inte får ha en åsikt förrän du förstår matematiken ägnar sig, ärligt talat, åt att vakta grindarna.</p>
+          </div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">”Det är bara autocomplete” är en tröstande bortförklaring</span>
+            <span class="detail">Det kan till och med vara tekniskt sant idag — men det är ett sätt att känna sig trygg, inte ett skäl att vara det. Utgå från att varje ny version blir bättre på alla plan. Inget är hugget i sten; enda riktningen är framåt.</span>
+          </summary>
+          <div class="script-body">
+            <p>Du kommer höra en väldigt tröstande replik: ”ta det lugnt, den gissar bara nästa ord — det är avancerad autocomplete”.</p>
+            <p>Två saker. Ett: som beskrivning av hur dagens system fungerar är det inte direkt fel <span class="b current">aktuellt</span>. Två: det är fel sak att luta sig mot. För hur det fungerar säger nästan ingenting om vad det kan göra — och ingenting alls om vad nästa års version kan göra.</p>
+            <p>Så här är mitt arbetsantagande, och jag föreslår att du lånar det <span class="b take">min åsikt</span>: utgå från att det fortsätter bli bättre, på alla plan. Planera för det, inte emot det.</p>
+          </div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Det blir hela tiden smartare på konkreta saker</span>
+            <span class="detail">En växande lista, inget fast tak: <em>utförande</em> (skriva kod, sammanfattningar, rapporter), <em>resonemang</em>, och <em>orkestrering</em> — att samordna arbete i flera steg snarare än att svara på en enda fråga.</span>
+          </summary>
+          <div class="script-body">
+            <p>När jag säger ”bättre” — bättre på vad, egentligen? Tänk dig tre fack.</p>
+            <p>Utförande — skriva kod, göra en sammanfattning, förvandla en hög röriga anteckningar till en ren rapport. Resonemang — att jobba sig igenom ett problem steg för steg istället för att bara slänga ur sig ett svar. Och orkestrering — att köra en hel kedja av uppgifter, inte bara svara på en fråga.</p>
+            <p>Just nu är det riktigt starkt på utförande <span class="b current">aktuellt</span>, förbättras snabbt på resonemang <span class="b current">aktuellt</span>, och har precis börjat med orkestrering <span class="b claim">obekräftat</span>. Det sista — att få AI att samordna arbete som ett team snarare än att svara som en sökruta — är där jag tror att mycket av de kommande åren faktiskt händer <span class="b take">min åsikt</span>.</p>
+          </div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Framväxande förmågor</span>
+            <span class="detail">Ur enkla byggstenar dyker mer komplext beteende bara upp — förmågor som ingen medvetet byggt in, som uppstår av sig själva när systemen växer.</span>
+            <span class="joke-flag raw">skämt · rå</span>
+          </summary>
+          <div class="script-body">
+            <p><span class="cue">ton: rå (mörk)</span></p>
+            <p>Här kommer den genuint märkliga delen — och jag vill vara ärlig med att den är märklig, inte släta över det.</p>
+            <p>Ingen satte sig ner och programmerade de här systemen att skriva poesi, eller felsöka kod, eller förklara ett skämt. De förmågorna dök upp av sig själva när systemen blev större — saker som byggarna inte uttryckligen la in, och ibland inte ens förutsåg <span class="b durable">beständigt</span>. Vi har ett namn för det — ”emergens” — men att sätta namn på något är inte samma sak som att förstå det, och ärligt talat förstår vi inte det här helt <span class="b unknown">ingen vet</span>.</p>
+            <p><span class="joke">Och det är alltså inte jag, strumpan, som säger att vi inte förstår det. Det är de som byggde det. Deras officiella förklaring till de mest kraftfulla förmågorna är, mer eller mindre ordagrant, ”vi vet inte, det bara hände när vi tryckte in mer”. Det är inte en förklaring. Det är vad man säger till polisen.</span></p>
+            <p>Ha det i bakhuvudet. Det är precis därför tvärsäkra påståenden om att ”AI kommer aldrig kunna göra X” åldras så dåligt gång på gång.</p>
+          </div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Öppna kontra stängda modeller</span>
+            <span class="detail">Den enda strukturella skillnaden värd att kunna — vem som kan köra det, vem som styr det. Lokalt-mot-moln och kvalitetsavvägningar hoppar vi medvetet över; inte relevant för den här publiken.</span>
+          </summary>
+          <div class="script-body">
+            <p>En skillnad som faktiskt är värd din tid — och jag ger dig bara den här enda: öppet mot stängt.</p>
+            <p>En del AI är stängd: ett företag kör den, du hyr åtkomst, och de bestämmer vad den vill och inte vill göra. En del är öppen: du kan ladda ner den, köra den på din egen dator, och ingen kan tyst stänga av den för dig <span class="b durable">beständigt</span>.</p>
+            <p>Just den uppdelningen driver en stor del av det vi kommer bråka om senare — makt, säkerhet, vem som egentligen bestämmer. Jag hoppar medvetet över de andra tekniska skillnaderna, som moln-mot-din-laptop eller vilken modell som fick högst poäng på något test, för just nu spelar de ingen roll för dig. Den här gör det.</p>
+          </div>
+        </details>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t2">
+    <details class="sc theme-sc">
+      <summary>
+        <div class="th-head"><div class="num">2</div><h2>Där det redan påverkar ditt liv</h2></div>
+        <p class="desc">Ingen framtidsteknik — vi förankrar det i sånt du redan gör, hemma och på jobbet.</p>
+      </summary>
+      <div class="script-body empty">Inte skrivet än.</div>
+    </details>
+    <ol class="points">
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">AI du redan använder utan att veta om det</span>
+            <span class="detail">Rekommendationer, skräppostfilter, kartor, bedrägeridetektering, fotosortering — det har funnits tyst inbyggt i vardagens verktyg i åratal, långt före chatbottarna.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Generativa verktyg: verklig nytta, verkliga gränser</span>
+            <span class="detail">Var de gör verklig nytta idag, och var de faller platt — ärligt satt, så att förväntningarna matchar verkligheten istället för hypen.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">AI på jobbet: automatisering kontra förstärkning</span>
+            <span class="detail">Två väldigt olika framtider: att ersätta en uppgift helt, kontra att förstärka personen som utför den. Vilken av dem du har framför dig ändrar allt om hur du bör reagera.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Bredden av användningsområden</span>
+            <span class="detail">Över hela spektrumet — från triviala tidsbesparingar till genuint omvälvande — så att bilden inte fastnar vid ett enda flashigt exempel.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t3">
+    <details class="sc theme-sc">
+      <summary>
+        <div class="th-head"><div class="num">3</div><h2>Riskerna</h2></div>
+        <p class="desc">De verkliga baksidorna, ordnade från det som drabbar dig personligen till det samhälleliga — klarsynt, inte alarmistiskt.</p>
+      </summary>
+      <div class="script-body empty">Inte skrivet än.</div>
+    </details>
+    <ol class="points">
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Integritet — vad som händer med det du skriver</span>
+            <span class="detail">Vart det du matar in faktiskt tar vägen, vem som lagrar det, och vad det innebär att klistra in något känsligt i ett verktyg du inte styr över.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">AI-drivna bedrägerier</span>
+            <span class="detail">Samma förmågor gör bedrägerier billigare, mer övertygande och möjliga i stor skala — röstkloner, skräddarsytt nätfiske, falsk brådska.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Deepfakes och desinformation</span>
+            <span class="detail">När vad som helst kan förfalskas på ett övertygande sätt blir det svåra att alls lita på det du ser och hör.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Snedvridning i automatiska beslut</span>
+            <span class="detail">När ett system fattar beslut <em>om</em> dig — ett lån, en jobbgallring, en flaggning — blir det dyrt när det tyst blir fel, och svårt att överklaga.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t4">
+    <details class="sc theme-sc">
+      <summary>
+        <div class="th-head"><div class="num">4</div><h2>Vad som förblir mänskligt — och vad du kommer behöva</h2></div>
+        <p class="desc">Den centrala, personliga frågan: i en värld med kapabel AI, vad är fortfarande ditt att göra — och på vilken tidshorisont?</p>
+      </summary>
+      <div class="script-body empty">Inte skrivet än.</div>
+    </details>
+    <ol class="points">
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Människans kontra AI:s förmågekurva</span>
+            <span class="detail">Var var och en leder just nu, och — viktigare — vart de två kurvorna är på väg. Vi nuddar vid det här; en full fördjupning får ett eget avsnitt.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Våg 1 → Våg 2: från soloarbete till svärmar</span>
+            <span class="detail">Den första vågen ersatte sånt människor gjorde <em>ensamma</em> och kämpade med sånt människor gör <em>tillsammans</em>. Nästa våg handlar om att orkestrera svärmar av agenter — så den når rakt in i själva samarbetet.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Varje svar på ”vad behövs fortfarande?” kräver en tidshorisont</span>
+            <span class="detail">1, 6, 24, 144 månader ger vitt skilda svar — frågan är meningslös utan en. Personlig åsikt: att gissa längre än ungefär <em>24 månader</em> är lönlöst, och att låtsas annat är där mycket av förvirringen kommer ifrån.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Prompt-teknik är på väg ut</span>
+            <span class="detail">Verktygen är snabbt på väg mot att inte längre kräva att du är minutiöst tydlig. Det som består är att veta vad som är <em>rätt</em> och fel — din expertis och smak förblir avgörande även när formuleringen slutar spela roll.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Mänskliga kärnegenskaper att luta sig mot</span>
+            <span class="detail">Mänsklig kontakt, klar tanke, och att vara <em>mer</em> tekniskt bemyndigad — inte mindre. Förmodligen fler än bara dessa tre, men det är riktningen att röra sig åt.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t5">
+    <details class="sc theme-sc">
+      <summary>
+        <div class="th-head"><div class="num">5</div><h2>Helhetsbilden — samhälle och makt</h2></div>
+        <p class="desc">Vi zoomar ut från individen: var pengarna, kontrollen och de genuint öppna frågorna finns.</p>
+      </summary>
+      <div class="script-body empty">Inte skrivet än.</div>
+    </details>
+    <ol class="points">
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Jobb och ekonomi: hype kontra realism</span>
+            <span class="detail">Att skilja de svepande spådomarna från vad belägget faktiskt stöder om arbete och ekonomi.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Vem som styr det här, och varför det spelar roll</span>
+            <span class="detail">En handfull organisationer sitter på merparten av förmågan. Vilka de är — och vad den koncentrationen betyder för alla andra.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">EU:s AI-förordning: vad den faktiskt betyder för dig</span>
+            <span class="detail">Att skala ner regelverket till de delar som i praktiken berör en vanlig person eller ett vanligt företag, inte lagtexten.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+      <li>
+        <details class="sc">
+          <summary>
+            <span class="lead">Debatten om AGI / superintelligens</span>
+            <span class="detail">Hanteras ärligt som genuint olöst — ”ingen vet faktiskt än, inte jag heller”-territorium, tydligt åtskilt från det vi faktiskt vet.</span>
+          </summary>
+          <div class="script-body empty">Inte skrivet än.</div>
+        </details>
+      </li>
+    </ol>
+  </section>
+
+  </div><!-- /.themes -->
+
+  <div class="aside">
+    <span class="tag">Vid efterfrågan</span>
+    <span class="txt"><b>Ordlista (smakprov)</b> — model, product, MCP, skills, API, CLI. En separat video, som bara görs om folk efterfrågar den.</span>
+  </div>
+
+  <footer class="foot">
+    <span>Kartan = Avsnitt 1. Tema 1–5 läses uppifrån och ner, konkret → spekulativt.</span>
+    <span>Serieöversikt</span>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  // manusläge: platta ut layouten + expandera alla manuspaneler
+  var btn = document.getElementById('modeBtn');
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var on = document.body.classList.toggle('scriptmode');
+      document.querySelectorAll('details.sc').forEach(function (d) { d.open = on; });
+      btn.textContent = on ? 'Lämna manusläge' : 'Manusläge — expandera allt';
+    });
+  }
+
+  // global inställning: visa/dölj käll-taggarna
+  var tagBtn = document.getElementById('tagBtn');
+  if (tagBtn) {
+    tagBtn.addEventListener('click', function () {
+      var off = document.body.classList.toggle('notags');
+      tagBtn.setAttribute('aria-pressed', String(!off));
+      tagBtn.textContent = off ? 'Käll-taggar: av' : 'Käll-taggar: på';
+    });
+  }
+})();
+</script>
+</body>
+</html>

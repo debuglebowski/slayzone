@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="ad" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#334155"/></marker>
+    <marker id="ab" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#2563eb"/></marker>
+    <marker id="ap" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#7c3aed"/></marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#94a3b8"/></marker>
+    <marker id="adS" markerWidth="9" markerHeight="9" refX="1" refY="3.2" orient="auto"><path d="M7.5,0 L0,3.2 L7.5,6.4 Z" fill="#334155"/></marker>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#0f172a" flood-opacity="0.12"/></filter>
+  </defs>
+
+  <rect width="1200" height="700" fill="#f6f8fb"/>
+  <text x="28" y="32" font-size="20" font-weight="700" fill="#1f2733">Normain — System Data Flow</text>
+  <text x="28" y="52" font-size="12.5" fill="#5b6675">SOC 2 2026 · DC 3.1 · production data path (in-scope system).</text>
+
+  <!-- boundaries -->
+  <rect x="246" y="70" width="918" height="520" rx="16" fill="#f3fbf5" stroke="#15803d" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="262" y="90" font-size="12" font-weight="700" fill="#15803d" letter-spacing="0.4">EEA / EU DATA RESIDENCY</text>
+
+  <rect x="266" y="132" width="548" height="438" rx="12" fill="#eff4ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="280" y="152" font-size="11.5" font-weight="700" fill="#2563eb">NORMAIN SYSTEM BOUNDARY — Azure AKS (aks-normain-prod-01)</text>
+
+  <rect x="858" y="158" width="300" height="156" rx="10" fill="#e6f6fa" stroke="#0e7490" stroke-width="1.3"/>
+  <text x="872" y="178" font-size="11.5" font-weight="700" fill="#0e7490">MICROSOFT AZURE — subservice</text>
+
+  <rect x="858" y="338" width="300" height="74" rx="10" fill="#fdf3e3" stroke="#d97706" stroke-width="1.3"/>
+  <text x="872" y="358" font-size="11.5" font-weight="700" fill="#d97706">AWS (EU) — subservice</text>
+
+  <!-- edges (drawn under nodes) -->
+  <g fill="none" stroke-width="1.7">
+    <path d="M130,166 L130,188" stroke="#334155" marker-end="url(#ad)"/>
+    <path d="M220,210 L300,210" stroke="#334155" marker-end="url(#ad)"/>
+    <path d="M405,246 L405,272" stroke="#334155" marker-end="url(#ad)"/>
+    <path d="M220,300 L300,318" stroke="#2563eb" marker-end="url(#ab)"/>
+    <path d="M220,388 L300,360" stroke="#334155" marker-end="url(#ad)"/>
+    <path d="M392,430 L402,460" stroke="#334155" marker-start="url(#adS)" marker-end="url(#ad)"/>
+    <path d="M470,430 L648,462" stroke="#94a3b8" marker-end="url(#ag)" stroke-dasharray="5 4"/>
+    <path d="M514,300 L856,240" stroke="#7c3aed" marker-end="url(#ap)"/>
+    <path d="M514,352 L856,392" stroke="#7c3aed" marker-end="url(#ap)"/>
+    <path d="M514,326 L856,300" stroke="#334155" marker-end="url(#ad)"/>
+    <path d="M514,372 L856,470" stroke="#94a3b8" marker-end="url(#ag)" stroke-dasharray="5 4"/>
+  </g>
+  <g font-size="10.5" fill="#5b6675">
+    <text x="226" y="202">HTTPS</text>
+    <text x="224" y="296" fill="#2563eb">authn / SSO</text>
+    <text x="222" y="392">ingest (read-only)</text>
+    <text x="640" y="232" fill="#7c3aed" font-weight="600">AI inference</text>
+    <text x="640" y="388" fill="#7c3aed" font-weight="600">AI inference</text>
+    <text x="612" y="300">email</text>
+    <text x="600" y="430">telemetry</text>
+    <text x="548" y="462">audit logs</text>
+    <text x="345" y="452">read / write</text>
+  </g>
+
+  <!-- input nodes (external, left) -->
+  <g filter="url(#sh)">
+    <g><rect x="40" y="120" width="180" height="46" rx="9" fill="#fff" stroke="#cfd6e0"/><text x="130" y="139" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2733">Customer end-users</text><text x="130" y="155" text-anchor="middle" font-size="11" fill="#5b6675">browser</text></g>
+    <g><rect x="40" y="188" width="180" height="44" rx="9" fill="#fff" stroke="#cfd6e0"/><text x="130" y="207" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2733">Cloudflare</text><text x="130" y="222" text-anchor="middle" font-size="11" fill="#5b6675">authoritative DNS</text></g>
+    <g><rect x="40" y="274" width="180" height="56" rx="9" fill="#fff" stroke="#cfd6e0"/><text x="130" y="294" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2733">Identity providers</text><text x="130" y="309" text-anchor="middle" font-size="10.5" fill="#5b6675">Entra ID · Google ·</text><text x="130" y="322" text-anchor="middle" font-size="10.5" fill="#5b6675">email+pw (MFA at IdP)</text></g>
+    <g><rect x="40" y="360" width="180" height="58" rx="9" fill="#fff" stroke="#cfd6e0"/><text x="130" y="380" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2733">Content sources</text><text x="130" y="395" text-anchor="middle" font-size="10.5" fill="#5b6675">SharePoint · Drive · Box</text><text x="130" y="408" text-anchor="middle" font-size="10.5" fill="#5b6675">· upload · URLs (read-only)</text></g>
+  </g>
+
+  <!-- normain nodes -->
+  <g filter="url(#sh)">
+    <g><rect x="300" y="188" width="210" height="58" rx="9" fill="#fff" stroke="#2563eb" stroke-opacity="0.5"/><text x="405" y="210" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2733">Istio ingress gateway</text><text x="405" y="227" text-anchor="middle" font-size="10.5" fill="#5b6675">TLS 1.2+ termination</text><text x="405" y="240" text-anchor="middle" font-size="10.5" fill="#5b6675">per-tenant certs</text></g>
+    <g><rect x="300" y="272" width="210" height="150" rx="9" fill="#fff" stroke="#2563eb" stroke-opacity="0.5"/><text x="405" y="298" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1f2733">Application tier</text><text x="405" y="314" text-anchor="middle" font-size="10.5" fill="#5b6675">(per tenant)</text><text x="405" y="338" text-anchor="middle" font-size="11.5" fill="#334155">Web UI · API</text><text x="405" y="355" text-anchor="middle" font-size="11.5" fill="#334155">Worker</text><text x="405" y="372" text-anchor="middle" font-size="11.5" fill="#334155">Tenant API · Redis</text></g>
+    <g><rect x="288" y="460" width="232" height="62" rx="9" fill="#fff" stroke="#cfd6e0"/><text x="404" y="482" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2733">Per-tenant data stores</text><text x="404" y="497" text-anchor="middle" font-size="10.5" fill="#5b6675">PostgreSQL · Blob · Azure Files</text><text x="404" y="510" text-anchor="middle" font-size="10.5" fill="#5b6675">· Key Vault (AES-256 at rest)</text></g>
+    <g><rect x="560" y="460" width="232" height="62" rx="9" fill="#fff" stroke="#cfd6e0"/><text x="676" y="482" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2733">Log Analytics + immutable</text><text x="676" y="500" text-anchor="middle" font-size="10.5" fill="#5b6675">audit logs · 365 days</text></g>
+  </g>
+
+  <!-- subservice nodes -->
+  <g filter="url(#sh)">
+    <g><rect x="874" y="190" width="268" height="54" rx="9" fill="#fff" stroke="#0e7490" stroke-opacity="0.5"/><text x="1008" y="211" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2733">Azure OpenAI · Doc Intelligence</text><text x="1008" y="227" text-anchor="middle" font-size="11" fill="#5b6675">· Speech (OpenAI models, OCR)</text></g>
+    <g><rect x="874" y="256" width="268" height="46" rx="9" fill="#fff" stroke="#0e7490" stroke-opacity="0.5"/><text x="1008" y="275" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2733">Communication Services</text><text x="1008" y="290" text-anchor="middle" font-size="10.5" fill="#5b6675">transactional email to users</text></g>
+    <g><rect x="874" y="366" width="268" height="44" rx="9" fill="#fff" stroke="#d97706" stroke-opacity="0.55"/><text x="1008" y="385" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2733">Anthropic models</text><text x="1008" y="400" text-anchor="middle" font-size="10.5" fill="#5b6675">SaaS open-platform mode</text></g>
+    <g><rect x="858" y="446" width="300" height="50" rx="9" fill="#fff" stroke="#cfd6e0"/><text x="1008" y="467" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2733">BetterStack</text><text x="1008" y="483" text-anchor="middle" font-size="10.5" fill="#5b6675">logs / traces (OpenTelemetry, EU)</text></g>
+  </g>
+
+  <!-- legend -->
+  <g font-size="11" fill="#5b6675">
+    <rect x="28" y="624" width="14" height="11" rx="2" fill="#eff4ff" stroke="#2563eb"/><text x="48" y="634" fill="#1f2733">Normain boundary</text>
+    <rect x="170" y="624" width="14" height="11" rx="2" fill="#e6f6fa" stroke="#0e7490"/><text x="190" y="634">Azure subservice</text>
+    <rect x="300" y="624" width="14" height="11" rx="2" fill="#fdf3e3" stroke="#d97706"/><text x="320" y="634">AWS subservice</text>
+    <line x1="430" y1="630" x2="456" y2="630" stroke="#7c3aed" stroke-width="2" marker-end="url(#ap)"/><text x="462" y="634">AI inference</text>
+    <line x1="560" y1="630" x2="586" y2="630" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4"/><text x="592" y="634">secrets / telemetry / audit</text>
+    <text x="772" y="634">TLS 1.2+ in transit (internal VNet not mTLS) · AES-256 at rest · per-tenant isolation</text>
+  </g>
+</svg>

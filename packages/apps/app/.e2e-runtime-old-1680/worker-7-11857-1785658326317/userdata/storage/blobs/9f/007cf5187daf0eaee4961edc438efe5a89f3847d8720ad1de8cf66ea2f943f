@@ -1,0 +1,129 @@
+# UC08 — Normain
+
+1. New project in Normain: `Benchmark UC08 - DDQ 100Q`. Ingest all 29 documents from the sibling `data-sources/` folder (see `../corpus.md` for the file list and SHA-256s). Wait for indexing to complete. Open a new conversation.
+2. Paste this prompt:
+
+```
+You are responding to a customer/auditor due-diligence questionnaire (DDQ) on behalf of Normain. Answer the 100 questions below from Normain's own documentation pack (the 29 ingested sources). For every fact, cite the specific document and section/page. If a question asks about something not in the documents, say "Not addressed in our documentation" explicitly — do NOT fabricate, guess, or generalize from outside knowledge.
+
+Answer formats:
+- Questions tagged [Y/N] → answer Yes / No / N-A on the first line, then a 1–3 sentence justification with citation.
+- Questions tagged [FF] → answer in 1–5 sentences, plain prose, with citation.
+- Questions tagged [CL] → answer In-scope / Out-of-scope / Partial on the first line, then 1–3 sentence rationale with citation.
+- Cite as: `[doc-name] § [section]` or `[doc-name] p. [page]`.
+- Keep answers concise. Do not pad. Do not repeat the question.
+- Be consistent across related questions — your answer to one question must not contradict your answer to another.
+
+Measure how long you take to answer using whichever method is available to you:
+- If you can execute shell commands: run `date +%s` BEFORE question 1 and AGAIN after question 100, then report the difference in seconds.
+- If you can execute Python: run `import time; t0 = time.time()` before, then `print(time.time() - t0)` after, and report the printed value.
+- If you cannot execute code at all: print `===START===` on its own line before question 1 and `===END===` on its own line after question 100 so the user can time externally.
+
+On the final line of your response, print:
+ELAPSED_SECONDS: <number from above, or "n/a — cannot measure" if no execution is available>
+
+Answer each of the 100 questions below as a numbered list (1-100) — do not merge, skip, or reorder.
+
+1. [Y/N] Is Normain's information security management system (ISMS) certified to ISO/IEC 27001:2022? If yes, name the certification body and the certificate issue date.
+2. [Y/N] Does Normain hold a current SOC 2 Type II report covering an audit period within the last 12 months? If yes, name the auditor and the period covered.
+3. [FF] What is the documented scope of Normain's ISMS — which business functions, locations, and departments are included?
+4. [FF] Describe Normain's risk assessment methodology — risk identification approach, scoring/criteria, treatment, and how residual risk is accepted by leadership.
+5. [CL] Is the physical security of the underlying cloud data-center facilities in-scope, out-of-scope, or partial within Normain's ISMS boundary?
+6. [Y/N] Has Normain designated a single executive role with documented overall accountability for the information security program? If yes, name the role.
+7. [FF] How often is the ISMS subject to formal management review, and who attends/owns the review?
+8. [Y/N] Does Normain maintain a Statement of Applicability (SoA) covering all ISO/IEC 27001:2022 Annex A controls with inclusion/exclusion rationale per control?
+9. [Y/N] Does Normain offer a Business Associate Agreement (BAA) for processing of HIPAA-regulated protected health information (PHI)?
+10. [Y/N] Does Normain currently hold a FedRAMP authorization (Low, Moderate, or High)?
+11. [Y/N] Is least privilege enforced for access to production systems and customer data?
+12. [FF] Describe Normain's multi-factor authentication requirements for privileged access to production — which factor types are accepted, and what documented exceptions exist?
+13. [FF] Describe Normain's policy on shared accounts — when shared accounts are permitted, and what compensating controls offset the loss of individual accountability.
+14. [FF] Describe Normain's user access review program — cadence, systems reviewed, who reviews, and what evidence is retained.
+15. [Y/N] Is access automatically removed within a documented SLA upon employee termination? If yes, state the SLA.
+16. [Y/N] Are remote connections from employee endpoints to production systems and networks encrypted in transit?
+17. [FF] Describe the approval workflow for granting a Normain employee new privileged access to a production system.
+18. [Y/N] Does Normain mandate FIDO2 hardware security keys (e.g., YubiKey) as the sole permitted MFA factor for all privileged production access?
+19. [CL] Is direct, interactive database access by Normain employees against production databases in-scope, out-of-scope, or partial for Normain's access-review program?
+20. [FF] Can Normain offer customer-side IP allowlisting or private-link/private-endpoint connectivity to the application tier? Describe the supported options and limits.
+21. [Y/N] Is customer data encrypted at rest using AES-256 (or equivalent strength)?
+22. [Y/N] Is data in transit between customer endpoints and the Normain application encrypted with TLS 1.2 or higher?
+23. [FF] List Normain's data classification levels and the criteria distinguishing them.
+24. [Y/N] Does Normain enforce a maximum lifetime for symmetric encryption keys protecting confidential data at rest? If yes, state the maximum.
+25. [FF] Describe how Normain protects production data backups — encryption, isolation from primary production storage, and restoration testing.
+26. [CL] Is customer-managed encryption keys (BYOK / HYOK) for production data at rest in-scope, out-of-scope, or partial for Normain's hosted service?
+27. [FF] Describe Normain's secure data disposal / media sanitization process at end of life.
+28. [Y/N] Does Normain provide a dedicated hardware security module (HSM) per customer for cryptographic key isolation?
+29. [Y/N] Does Normain support customer-supplied / customer-controlled key material (e.g., via Azure Key Vault BYOK) for production data-at-rest encryption?
+30. [FF] Describe Normain's post-quantum cryptography migration roadmap and current status.
+31. [Y/N] Is mandatory peer code review required before code can be merged to a production branch?
+32. [Y/N] Are automated security scans (SAST, dependency vulnerability scanning, container scanning) integrated into the CI pipeline for production repositories?
+33. [FF] Describe Normain's penetration testing program — cadence, scope (apps + infra), and tester independence.
+34. [Y/N] Does every production change require formal approval before deployment?
+35. [FF] Describe Normain's SDLC stage gates — what testing and approvals each of development, staging, and production deployments requires.
+36. [FF] State Normain's vulnerability remediation SLAs by severity (critical / high / medium / low).
+37. [Y/N] Are production and non-production environments segregated, with no shared credentials and no production data in non-production environments?
+38. [CL] Is third-party open-source license / SBOM management in-scope, out-of-scope, or partial for Normain's SDLC controls?
+39. [Y/N] Does Normain operate a public bug bounty program with disclosed scope and rewards?
+40. [FF] Describe Normain's threat-modeling practice — when threat models are produced, by whom, and how they shape design requirements.
+41. [Y/N] Is Normain's production infrastructure hosted entirely on a single cloud provider? If yes, name the provider.
+42. [Y/N] Are production networks segmented to isolate customer data planes from internal corporate networks?
+43. [FF] Identify the web application firewall (WAF) and/or DDoS-protection layer in front of Normain's customer-facing endpoints.
+44. [Y/N] Is endpoint detection and response (EDR) deployed on all employee endpoints with access to production?
+45. [FF] Describe Normain's patch management cadence for production operating systems and container base images.
+46. [CL] Is multi-region active-active production deployment in-scope, out-of-scope, or partial for Normain's current production architecture?
+47. [FF] Describe Normain's logging and security event monitoring — what is captured, where it is stored, how alerts are triaged, and the log retention period.
+48. [Y/N] Does Normain offer a dedicated single-tenant infrastructure deployment as a standard product option?
+49. [Y/N] Does Normain provide FIPS 140-3 validated cryptographic modules for the customer-facing service tier?
+50. [Y/N] Does Normain maintain documented secure configuration baselines for production systems?
+51. [Y/N] Does Normain maintain a current publicly available sub-processor list for hosted-service customers?
+52. [FF] Describe Normain's sub-processor onboarding due-diligence — what security review precedes engagement.
+53. [FF] Describe how Normain notifies customers prior to engaging a new sub-processor that processes their personal data, and what objection mechanism is available.
+54. [Y/N] Are signed Data Processing Agreements (or equivalent contractual safeguards) in place with every sub-processor that processes personal data?
+55. [FF] Describe Normain's recurring vendor / sub-processor security review process — cadence, evidence requested, and what triggers re-review.
+56. [CL] Is vendor management of business-critical SaaS that does not process personal data (e.g., engineering tooling) in-scope, out-of-scope, or partial for Normain's third-party management policy?
+57. [FF] Identify every Normain sub-processor whose primary data-processing location is outside the EEA.
+58. [FF] Provide the most recent customer-attestation letter Normain has issued regarding a sub-processor breach event affecting their data.
+59. [Y/N] Does Normain operate any sub-processor whose primary processing location is in mainland China?
+60. [Y/N] Has Normain put EU Standard Contractual Clauses (SCCs) or an equivalent transfer mechanism in place with each sub-processor that processes personal data outside the EU/EEA?
+61. [Y/N] Does Normain maintain a documented Incident Response Plan covering security events affecting non-public company or customer data?
+62. [FF] Describe Normain's incident severity classification scheme — what distinguishes severity levels and what response each triggers.
+63. [Y/N] Is the IR plan tested at least annually via tabletop or technical exercise?
+64. [FF] State Normain's customer-notification commitment for a confirmed security incident affecting customer data — channel, owner, and target timeframe from awareness to notification.
+65. [Y/N] Does Normain operate a 24×7 on-call rotation for security incidents?
+66. [FF] Describe Normain's forensic / evidence-preservation steps when a confirmed security incident is declared.
+67. [CL] Is regulatory reporting to non-EU authorities (e.g., US state breach notification laws) in-scope, out-of-scope, or partial for Normain's IR plan?
+68. [Y/N] Are all Normain employees required to complete security and incident-reporting training at least annually?
+69. [Y/N] Has Normain experienced a publicly disclosed material security incident or data breach within the past 24 months?
+70. [FF] Describe how Normain ensures incident learnings feed into the corrective-action register and ISMS continual improvement.
+71. [Y/N] Does Normain maintain a documented Business Continuity / Disaster Recovery plan covering the customer-facing service?
+72. [Y/N] Is the BC/DR plan, including backup-restoration testing, exercised at least annually?
+73. [FF] State Normain's documented Recovery Time Objective (RTO) for restoring the customer-facing service after a major disruption.
+74. [FF] State Normain's documented Recovery Point Objective (RPO) for customer data.
+75. [Y/N] Are production backups stored in a separate geographic region from primary production data, with at least one immutable / write-protected copy?
+76. [CL] Is automated cross-region DR failover in-scope, out-of-scope, or partial for Normain's current BC/DR architecture?
+77. [Y/N] Does Normain offer customer-specific RTO / RPO commitments in its standard hosted-service contract?
+78. [FF] Describe the trigger criteria and decision authority for declaring a disaster and invoking the BC/DR plan.
+79. [Y/N] Does Normain provide customers with a cyber-insurance certificate naming them as additional insureds?
+80. [FF] Provide the results of Normain's most recent chaos-engineering / game-day exercise, including the failure-injection scenarios and the observed recovery times.
+81. [Y/N] Does Normain operate as a data processor under GDPR for customer-controlled personal data processed in the hosted service?
+82. [FF] State Normain's legal basis(es) under GDPR Art. 6 for processing personal data of users of its own website / marketing properties.
+83. [Y/N] Does Normain offer a signed customer-facing Data Processing Agreement (DPA) to every customer that processes personal data through the service?
+84. [FF] Describe Normain's procedure for handling data subject rights requests (access, rectification, erasure) — both for its own controllership and for forwarding customer-controller requests.
+85. [Y/N] Has Normain designated a Data Protection Officer (DPO) or equivalent privacy lead, with a public point of contact?
+86. [CL] Is direct marketing using personal data of customer end-users in-scope, out-of-scope, or partial for Normain's privacy program as a processor?
+87. [Y/N] Has Normain contractually committed to notifying customer-controllers without undue delay upon becoming aware of a personal data breach?
+88. [FF] State Normain's data residency arrangement — where customer personal data is stored and processed by default, and what onward transfers occur.
+89. [Y/N] Is Normain certified under the EU-U.S. Data Privacy Framework as a direct participant (independent of any sub-processor's DPF participation)?
+90. [FF] Describe Normain's GDPR international-transfer safeguards — which legal mechanism(s) are relied upon for transfers to which third countries.
+91. [Y/N] Has Normain undergone an external penetration test within the past 12 months? If yes, name the tester and the report date.
+92. [Y/N] Does Normain undergo an annual ISMS internal audit prior to external certification audits?
+93. [FF] State Normain's process for sharing audit reports (SOC 2, pen test, ISO) with customers — under NDA, via a customer trust portal, on request, or another channel.
+94. [Y/N] Are findings from external audits and pen tests tracked in a documented corrective-action register through to closure?
+95. [FF] Describe how Normain's controls map to ISO/IEC 27001:2022 Annex A — which controls (if any) are excluded from the SoA, and the rationale per exclusion.
+96. [CL] Is PCI-DSS in-scope, out-of-scope, or partial for Normain's compliance program?
+97. [Y/N] Does Normain hold a current ISO/IEC 27017 (cloud security) or ISO/IEC 27018 (cloud PII) certification in its own name?
+98. [Y/N] Has Normain completed a SOC 1 Type II audit covering financial reporting controls?
+99. [FF] List every regulatory enforcement action, supervisory fine, or consent decree Normain has been subject to in the past 5 years.
+100. [FF] Describe how Normain demonstrates ongoing compliance with the laws and regulations identified in its ISMS context (e.g., GDPR, NIS2) — what evidence is generated and reviewed on a recurring basis.
+```
+
+3. Fill the **Normain** column in `../competitor-comparison.md` from the response. Record `ELAPSED_SECONDS` (or time from `===START===` to `===END===` if Normain can't self-measure) in the score summary.

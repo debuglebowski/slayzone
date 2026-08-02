@@ -1,0 +1,33 @@
+# Enforce SMB 3.1.1+ on all Azure Storage Accounts
+
+## End result we need
+All 20 Azure storage accounts allow **only SMB 3.1.1** for file shares (drop SMB 2.1 / 3.0). This makes the Vanta test pass and stays fixed (no drift, new accounts born compliant).
+
+Note: no SMB file shares are actually mounted today (the one file share is NFS; everything else is blob/tfstate). So this is a config-hardening change with **no expected functional impact** — it just closes the policy gap.
+
+The setting, per storage account (provider `azurerm >= 4.51`):
+```hcl
+share_properties {
+  smb {
+    versions = ["SMB3.1.1"]
+  }
+}
+```
+
+## The accounts split into 3 groups
+- **A — 8 accounts** created by Terraform in `terraform/modules/azure` (`uploaded_files`, `artifacts`, `data_sources`, `audit_immutable`), used by both `app-production` and `app-development`.
+- **B — 6 accounts** = Terraform state backends (`normaintf*`, `normainfglobal`, `storagenormainiac*`), created by `terraform/scripts/createStorageBackend.ts`.
+- **C — 6 accounts** created out-of-band, not in any repo: `rps*`, `stwinvm*`, `stsublogarch`, `normainstorage`.
+
+## Suggested path (simplest sustainable route)
+- **Group A — fix in code (covers 8):** add the `share_properties` block above to the 4 storage-account resources in `modules/azure`. `terraform plan` → in-place update only. Apply to dev, then prod.
+- **Group B — fix the bootstrap, then backfill (covers 6):**
+  - Add to `createStorageBackend.ts` after account create: `az storage account file-service-properties update --account-name <n> --resource-group <rg> --versions SMB3.1.1` → all *future* backends are compliant.
+  - Run that same command once for each of the 6 existing backend accounts.
+- **Group C — backfill + decide ownership (covers 6):**
+  - Run the same `az ... file-service-properties update --versions SMB3.1.1` once per account.
+  - Then confirm what `normainstorage` and `stwinvm*` are for. If live, bring them under Terraform so they don't drift. If unused, flag for deletion (separate decision).
+- **Verify:** re-run the Vanta Azure sync → test should flip to 20/20 passing.
+
+## Sustainability principle
+Prefer Terraform for anything long-lived (Group A is the model). The `az` one-shots in B/C are only for accounts that exist outside IaC today — the durable end-state is to get B and C under Terraform/script control so this can never regress.

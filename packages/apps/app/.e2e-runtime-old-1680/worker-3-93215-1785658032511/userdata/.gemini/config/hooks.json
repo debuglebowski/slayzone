@@ -1,0 +1,35 @@
+{
+  "slayzone-notify": {
+    "PreInvocation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/worker-3-93215-1785658032511/userdata/hooks/notify.sh PreInvocation"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/worker-3-93215-1785658032511/userdata/hooks/notify.sh PostToolUse"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/worker-3-93215-1785658032511/userdata/hooks/notify.sh Stop"
+          }
+        ]
+      }
+    ]
+  }
+}

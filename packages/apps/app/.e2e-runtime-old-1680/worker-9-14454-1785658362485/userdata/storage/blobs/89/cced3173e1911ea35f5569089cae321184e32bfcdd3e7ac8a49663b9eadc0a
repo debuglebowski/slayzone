@@ -1,0 +1,5 @@
+# PostHog
+
+- Auth method: Project key + API key
+- Requirements: Project key; personal/project API key; region host; rate-limit handling
+- Capabilities: Event capture, persons/groups, feature flags, analytics/query exports

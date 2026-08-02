@@ -1,0 +1,47 @@
+# Proposed guideline changes — `docs/testing.md`
+
+**Goal:** make `docs/testing.md` the real source-of-truth backing the Vanta test "Production data not used for dev or test" (ISO 27001 A.8.31 / A.8.33), so renewal evidence is a true engineering doc, not a self-authored memo.
+
+**Repo:** `normainofficial/normain` · file `docs/testing.md`
+
+## Change 1 — add a "Test Data Management" section
+
+Append this new top-level section (after "Writing Tests"):
+
+```markdown
+## Test Data Management
+
+Development and test environments never use production data. All non-production data is
+synthetic.
+
+- **Local development** runs against local Docker Postgres/Redis (see the Development Guide).
+  The database is populated by the seed script
+  (`src/apps/server/tenant-api/src/database/seed.ts`), which uses the open-source
+  `drizzle-seed` library to generate deterministic, fictional records (e.g. a single
+  "Dev Tenant"). No production data is ever exported or imported.
+- **Automated tests** build their own in-test fixtures. AI evaluation tests use checked-in
+  synthetic fixtures (`src/apps/server/worker/src/extractInsightWorker/exhaustiveEvalFixtures`).
+  No production data is referenced.
+- **Environment separation** — `development` and `production` are provisioned as separate
+  Terraform stacks (`terraform/environments/app-development` vs `app-production`) with
+  separate resource groups, storage accounts, databases, and database-access groups
+  (`sg_normain_dev_db_accessor` vs `sg_normain_prod_db_accessor`). No database server is
+  shared between environments, so production data cannot flow into dev/test.
+```
+
+## What this deliberately does NOT say
+- **No "proprietary seeding solution."** That claim (in the old `QAAndTesting.jpg` memo) is
+  not true — seeding is the open-source `drizzle-seed` library. Removed.
+- **No E2E test layer.** `testing.md` already correctly states E2E/Playwright does not exist.
+  The old memo's E2E claim is dropped by using this doc as evidence instead.
+
+## After merge — renewal evidence to attach in Vanta
+1. The updated `docs/testing.md` (permalink to the merged commit).
+2. A capture of `terraform/environments/` showing `app-development` vs `app-production`
+   separation (separate state/RG + `sg_normain_dev_db_accessor` vs `sg_normain_prod_db_accessor`).
+
+Replaces the `QAAndTesting.jpg` memo with real, verifiable source docs.
+
+## Open questions
+- Land via PR myself, or hand to eng (Sara/Gustav)?
+- Add the same separation note to `docs/development.md`, or keep it only in `testing.md`?

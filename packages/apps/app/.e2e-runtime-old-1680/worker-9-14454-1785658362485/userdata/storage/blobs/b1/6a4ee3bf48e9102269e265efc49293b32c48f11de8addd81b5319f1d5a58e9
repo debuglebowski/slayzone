@@ -1,0 +1,36 @@
+# Slice 5 — Renderer tRPC cutover — progress
+
+Mode: autonomous, live tree, direct-to-main per verified batch (signed commits).
+Plan: ~/.claude/plans/slice-5-of-8-fluffy-pine.md
+
+## Verification gates in use
+- Per batch: scoped tsgo typecheck + scoped eslint on changed files.
+- `pnpm lint` (full) UNUSABLE in dogfood tree — traverses gitignored chromium/ fork (70GB) → using scoped eslint instead. [UNCLARITY]
+- Build/e2e: at tier checkpoints (build done at P0).
+
+## Batches
+- [x] P0 infra — tanstack-react-query switch + e2e vanilla client + tRPC dataRoot fix. typecheck+eslint+build green. commit 34f40031, pushed.
+- [ ] P1 tags
+- [ ] P2 agent-turns
+- [ ] P3 usage-analytics
+- [ ] P4 automations
+- [ ] P5 test-panel
+- [ ] P6 task-artifacts
+- [ ] P6b feedback router + dialog
+- [ ] P7 file-editor
+- [ ] P8 settings
+- [ ] P9 projects
+- [ ] P10 task-browser
+- [ ] P11 worktrees
+- [ ] P12 ai-config
+- [ ] P13 task-terminals
+- [ ] P14 terminal ops
+- [ ] P15 terminal subscriptions
+- [ ] P16 tasks (board + refreshData)
+- [ ] P17a-d app renderer
+- [ ] P18 remaining domain pkgs
+- [ ] P19 e2e vanilla swap
+
+## Unclarities (for final report)
+1. `pnpm lint` polluted by chromium/ fork tree — full lint gate broken; scoped eslint used. Should chromium/ be added to eslint ignores?
+2. 1Password ssh signing works without hanging (confirmed P0) — signed commits OK.

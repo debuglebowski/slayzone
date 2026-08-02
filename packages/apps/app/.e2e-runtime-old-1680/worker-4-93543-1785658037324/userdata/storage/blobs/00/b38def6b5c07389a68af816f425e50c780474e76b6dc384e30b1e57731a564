@@ -1,0 +1,19 @@
+# Proposed edit — 7 new Table 2 rows (all 3 DPA DRAFTs)
+
+_To be appended to Table 2 in: Marketplace DPA (`2026-06-05 - DRAFT`), Cloud Hosting Att 3 DPA (`2026-06-05 - DRAFT`), SaaS DPA (`2026-06-04 - DRAFT`). Same 6-column format as existing rows. Plus: "This list was updated:" → **12 June, 2026** (MP + CH; line added to SaaS, which lacks it). No stored vendor DPAs exist for these 7 → "Link" points to public DPA pages (same pattern as Google/Slack/Superhuman/Notion/Loops rows)._
+
+| Subprocessor | Categories of data processed | Purpose | Location & legal framework | Registered organization | DPA link |
+|---|---|---|---|---|---|
+| Apollo | Prospect and customer business contact data (names, email addresses, job titles, employers) | Sales prospecting and outreach | US; EU-U.S. DPF, Swiss-U.S. DPF, UK Ext.; SCCs | ZenLeads Inc. (d/b/a Apollo.io), 440 N Barranca Ave #4750, Covina, CA 91723, United States | apollo.io/dpa |
+| Clay | Prospect and lead business contact data used for enrichment | Lead data enrichment for sales and marketing | US; GDPR; SCC | Clay Labs Inc., 119 N 11th Street, 3C, Brooklyn, NY 11249, United States | trust.clay.com (no public DPA — on request via security@clay.com) |
+| Instantly | Prospect names, email addresses and outreach correspondence | Outbound email campaigns to prospects | US; GDPR; SCC (2021/914) + UK Addendum | Foo Monk LLC (operating as Instantly), 30 N. Gould St., Ste. R, Sheridan, WY 82801, United States | instantly.ai/dpa |
+| LinkedIn Sales Navigator | Prospect and lead business contact data (names, roles, companies) | Sales prospecting and lead management | EEA/EU and US; EU-U.S. DPF; SCCs | LinkedIn Ireland Unlimited Company, One Wilton Park, Wilton Place, Dublin 2, D02 FX04, Ireland | legal.linkedin.com/dpa |
+| Microsoft | Documents, emails and files shared with customers, including SharePoint sites used during trial periods (Microsoft 365) | Document storage, collaboration and file sharing | EEA/EU; EU-U.S. DPF, Swiss-U.S. DPF, UK Ext. to the EU-U.S. DPF | Microsoft Ireland Operations, Ltd., One Microsoft Place, Dublin 18, D18 P521, Ireland | Microsoft Products and Services DPA |
+| Spark | Email metadata and customer/prospect correspondence | Email management and productivity | EEA/EU entity; hosting EEA/US (Google Cloud); GDPR; SCCs | Spark Mail Limited, Glandore Business Centres, 26-27 Fitzwilliam Place, Dublin 2, D02 T292, Ireland | sparkmailapp.com/legal/data-processing-agreement |
+| Zero | Customer and prospect contact data and interaction history | CRM and sales automation | EU (Finland; hosting in EU); GDPR; SCCs for US sub-subprocessors | Zero Technologies Oy, PO Box 1188, FI-00101 Helsinki, Finland | zero.inc/policies/data-processing-agreement |
+
+## Flags
+- **Zero identity:** assumed = zero.inc (Helsinki, zero-click AI CRM/GTM OS, Zero Technologies Oy). Confirm that's your Zero.
+- **Clay:** no public DPA URL; link goes to their gated trust center. Consider requesting + storing their DPA in `02 - Signed DPAs with subprocessors`.
+- **Microsoft entry named "Microsoft"** (grouped) per your call; Azure stays a separate Table 1 row.
+- DPF claims (Apollo, LinkedIn) are from their legal pages, not re-verified against the DPF registry.

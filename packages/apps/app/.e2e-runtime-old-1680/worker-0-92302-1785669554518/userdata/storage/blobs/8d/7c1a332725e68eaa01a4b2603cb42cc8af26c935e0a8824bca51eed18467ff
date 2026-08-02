@@ -1,0 +1,161 @@
+# Members Widget — 5 Design Suggestions
+
+Mockups for new presentations of the dashboard **Members** widget.
+Current widget supports two variants only: `rows` and `grid`. These 5 push
+further, each using data already available per member: **name, avatar/initials,
+email, role (owner/admin/member), joined date, deactivated flag, "(you)" badge,
+admin actions**, plus optional **open-task counts** (via subject refs).
+
+Legend: `◐` avatar  ·  `●` status dot  ·  `▸` admin menu  ·  pills = role badge
+
+---
+
+## 1. Compact Directory (role-grouped rows)
+
+Refines today's `rows`: same density but members are bucketed under role
+headers so structure reads at a glance. Sticky search toolbar on top.
+
+```
+┌─ Members ──────────────────────────── ⌕ filter…  [+ Add] ─┐
+│                                                            │
+│  OWNERS · 1                                                │
+│  ◐  Kalle Renström (you)        kalle@normain.com   owner  │
+│                                                            │
+│  ADMINS · 2                                                │
+│  ◐  Mira Patel                  mira@normain.com    admin ▸│
+│  ◐  Tom Vega                    tom@normain.com     admin ▸│
+│                                                            │
+│  MEMBERS · 14                                              │
+│  ◐  Ada Cho                     ada@normain.com    member ▸│
+│  ◐  Ben Ortiz                   ben@…    deactivated      ▸│
+│  ◐  Cleo Wynn                   cleo@normain.com   member ▸│
+│  …                                          View all 17 →  │
+└────────────────────────────────────────────────────────────┘
+```
+
+- **Why:** scannable hierarchy without a separate org-chart concept.
+- **Data:** name, email, role, deactivated, you-badge, admin menu.
+- **Config:** reuse `fields` (email/joined), `showToolbar`, `limit`, plus new
+  `group: "role" | "none"`.
+
+---
+
+## 2. Avatar Wall (gallery cards)
+
+A "who's on the team" wall. Bigger avatars, centered cards, role pill under
+each. Great for a wide hero tile.
+
+```
+┌─ Team · 17 ───────────────────────────────────── ⌕ ──┐
+│  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐  ┌──────┐ │
+│  │  ◐    │  │  ◐    │  │  ◐    │  │  ◐    │  │  ◐   │ │
+│  │ Kalle │  │ Mira  │  │ Tom   │  │ Ada   │  │ Ben  │ │
+│  │ owner │  │ admin │  │ admin │  │member │  │ —    │ │
+│  └───────┘  └───────┘  └───────┘  └───────┘  └──────┘ │
+│  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐  ┌──────┐ │
+│  │  ◐    │  │  ◐    │  │  ◐    │  │  ◐    │  │  +7  │ │
+│  │ Cleo  │  │ Dia   │  │ Eli   │  │ Fox   │  │ more │ │
+│  │member │  │member │  │member │  │member │  │      │ │
+│  └───────┘  └───────┘  └───────┘  └───────┘  └──────┘ │
+└────────────────────────────────────────────────────────┘
+```
+
+- **Why:** visual, friendly; auto-fills columns to widget width.
+- **Data:** avatar/initials, name, role, deactivated (`—`).
+- **Config:** today's `grid` variant + `limit` overflow → `+N more` tile
+  (instead of text link).
+
+---
+
+## 3. Team Pulse (workload)
+
+Each member shows an open-task load bar + a status dot. Turns the roster into
+a capacity view. Sorted by load by default.
+
+```
+┌─ Team Pulse ─────────────────────────────────────────┐
+│                          open   load                  │
+│  ● ◐ Mira Patel    admin    9   ████████░░  busy      │
+│  ● ◐ Kalle (you)   owner    6   █████░░░░░  steady     │
+│  ◐   Tom Vega      admin    4   ███░░░░░░░  steady     │
+│  ◐   Ada Cho      member    2   █░░░░░░░░░  light      │
+│  ○ ◐ Ben Ortiz    member    0   ░░░░░░░░░░  idle       │
+│                                          View all 17 → │
+└────────────────────────────────────────────────────────┘
+```
+
+- **Why:** answers "who's overloaded?" right on the dashboard.
+- **Data:** name, role, avatar, **open-task count** (subject refs); dot = recent
+  activity (●online/◐recent/○idle).
+- **Config:** `sort: "load"`, `metric: "open" | "completed"`, bar on/off.
+
+---
+
+## 4. Org Chart (role hierarchy)
+
+Indented tree by authority. Read-only, mirrors the catalog's nested feel
+without a dedicated graph tile.
+
+```
+┌─ Org ──────────────────────────────────────────────┐
+│                                                      │
+│   ◐ Kalle Renström · owner (you)                     │
+│   │                                                  │
+│   ├── ◐ Mira Patel · admin                           │
+│   │     ├── ◐ Ada Cho · member                       │
+│   │     └── ◐ Cleo Wynn · member                     │
+│   │                                                  │
+│   └── ◐ Tom Vega · admin                             │
+│         ├── ◐ Dia Lund · member                      │
+│         ├── ◐ Eli Rosa · member                      │
+│         └── ◐ Fox Marin · member                     │
+│                                                      │
+└────────────────────────────────────────────────────┘
+```
+
+- **Why:** instant grasp of who outranks whom; great onboarding tile.
+- **Data:** role rank (owner→admin→member), name, avatar, you-badge.
+- **Config:** `groupBy: "role"`; collapse/expand branches; depth limit.
+- **Note:** pure role grouping (no manager field exists yet) — branches are
+  role tiers, not reporting lines.
+
+---
+
+## 5. Summary Card (KPI + avatar stack)
+
+Compact stat tile for small dashboard slots. Big headline count, role
+breakdown, overlapping avatar stack (like the catalog preview).
+
+```
+┌─ Members ───────────────────────┐
+│                                  │
+│     17   members                 │
+│     ───────────────────          │
+│     1 owner · 2 admins · 14 mem  │
+│     2 deactivated                │
+│                                  │
+│     ◐◐◐◐◐◐◐ +10                  │
+│                                  │
+│     [ View directory → ]         │
+└──────────────────────────────────┘
+```
+
+- **Why:** fits a 1×1 / small tile; headline metric + face recognition.
+- **Data:** counts by role + deactivated, overlapping avatars, link to `/members`.
+- **Config:** `variant: "summary"`; toggle breakdown line; avatar stack count.
+
+---
+
+## Quick compare
+
+| # | Variant         | Best slot      | Killer data        | Read-only |
+|---|-----------------|----------------|--------------------|-----------|
+| 1 | Compact roster  | tall column    | role grouping      | no (▸)    |
+| 2 | Avatar wall     | wide hero      | faces + overflow   | yes       |
+| 3 | Team pulse      | medium         | open-task load     | yes       |
+| 4 | Org chart       | tall           | role hierarchy     | yes       |
+| 5 | Summary card    | small 1×1      | counts + stack     | yes       |
+
+All five fit the existing `MembersWidget` → `MemberDirectory` path by adding a
+`variant` value (+ a few optional config keys); 3 & 5 need an open-task count
+join, the rest use data the widget already loads.

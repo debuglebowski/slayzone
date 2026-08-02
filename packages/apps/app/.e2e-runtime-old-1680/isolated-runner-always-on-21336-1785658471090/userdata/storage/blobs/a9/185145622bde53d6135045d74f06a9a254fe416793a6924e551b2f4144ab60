@@ -1,0 +1,31 @@
+OPTION F — Pill / segmented groups
+===================================
+
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│  (tree content above)                                   │
+│                                                         │
+├─────────────────────────────────────────────────────────┤
+│  ╭──────╮ ╭──────────╮ ╭──────────╮                     │
+│  │Boost │ │██░░ Claude│ │██░░ Codex│                     │  ← usage pill
+│  ╰──────╯ ╰──────────╯ ╰──────────╯                     │
+├─────────────────────────────────────────────────────────┤
+│  ╭───────────────────────────╮                          │
+│  │ + │ zen │ x │ 📁           │                          │  ← workspace
+│  ╰───────────────────────────╯                          │
+│  ╭───────────────────────────╮                          │
+│  │ agent●3 │ panel │ ⊟ │ ⬇   │                          │  ← runtime
+│  ╰───────────────────────────╯                          │
+│  ╭───────────────╮                                      │
+│  │ ··· │ ≡ │ ⚙   │                                      │  ← meta
+│  ╰───────────────╯                                      │
+└─────────────────────────────────────────────────────────┘
+
+· Each row is a single rounded pill — tight inner dividers
+   replace separator lines
+· Visual grouping via background, not whitespace
+· Settings = last (rightmost in last pill)
+· Pros:  scannable groups, premium feel, less padding
+         per icon
+· Cons:  more CSS work (segmented buttons), shared border
+         radii tricky, internal dividers add noise

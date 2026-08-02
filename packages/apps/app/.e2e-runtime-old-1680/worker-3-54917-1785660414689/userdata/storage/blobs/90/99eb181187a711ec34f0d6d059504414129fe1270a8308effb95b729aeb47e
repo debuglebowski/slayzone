@@ -1,0 +1,9 @@
+# Apollo
+
+- Auth method: API key
+- Requirements: Apollo API key; API-enabled plan; rate-limit handling; data-use compliance
+- Capabilities:
+  - Read: People, companies, contacts, accounts
+  - Write: Contacts, accounts, sequence actions where enabled
+  - Triggers: Polling or external workflow triggers
+  - Limits: Plan/API limits; data-use compliance

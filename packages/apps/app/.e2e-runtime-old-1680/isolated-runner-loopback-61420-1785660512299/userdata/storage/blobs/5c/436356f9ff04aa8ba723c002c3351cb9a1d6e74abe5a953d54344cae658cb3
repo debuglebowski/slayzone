@@ -1,0 +1,147 @@
+# Main-merge deep review (commit 23a6eb9a)
+
+**Branch**: `phase-0-path-port-hardening` (148 ahead of main pre-merge)
+**Merge**: `f214d151` (branch tip) + `57c33fac` (main tip) → `23a6eb9a`
+**Conflicts resolved**: 28 (5 structural + 22 content + 1 add/add)
+**User strategy**: main = improvements, branch = migration → take main's logic, port to branch's restructured layout (server/electron split + tRPC + react-query)
+
+## TL;DR
+
+Merge is **mechanically sound** but has several issues worth flagging. **One real bug found post-commit** (`App.tsx:507` window.api.db caller missed during initial sweep — fixed in working tree, not yet committed). Three deferred items inherited from Phase 6.1 (not introduced by merge). Two concerns where I should have asked rather than guessed.
+
+## What I missed (real bugs)
+
+### 1. `App.tsx:507` — `window.api.db.updateTask` orphaned caller
+- Auto-merged from main's `needs_attention` feature; lives in renderer effect that clears the flag on tab focus
+- Branch's preload removed `window.api.db` block; this caller was orphaned
+- Typecheck DID flag it; I missed it during my filtered "baseline only" pass because I grouped it with pre-existing baseline noise
+- **Fix applied (uncommitted):** `trpcClient.task.update.mutate(...)`
+- **Lesson**: my "baseline filter" was too aggressive. Should diff baseline-error count pre vs post merge, not pattern-match against Phase 6.1's prose description.
+
+### 2. Lost test coverage for subtask worktree inheritance + shared-worktree guard
+- Main's `task/main/handlers.test.ts` had ~14 tests across these features (used IPC harness `h.invoke('db:tasks:create', ...)`)
+- Phase 6.1 deleted the file when handlers were tRPC-migrated — branch inherited that gap
+- I ported the 11 `handleAttentionTransition` tests (don't need IPC) to `task/server/attention.test.ts` ✅
+- **Did not** port the subtask inheritance / shared-worktree-guard tests (would need rewrite against `createTaskOp`/`archiveTaskOp` directly)
+- Implementations are intact (`task/server/ops/create.ts:85-98`, `shared.ts:cleanupTaskFull`); just no regression coverage
+
+## False alarms (initially flagged, on inspection are correct)
+
+### `getIdleSeconds` removal in diagnostics
+- Initial worry: dropping idle-aware retention pacing as perf regression
+- **Reality**: main's commit `f700ee54 perf(diagnostics): skip hot-channel ipc logs + always-run retention` (May 9) ALREADY removed idle gating, with the rationale: *"Retention only ran when getSystemIdleTime() ≥ 60s. Active dev → never idle → 200k cap never enforced. Drop idle gate; tick every 60s unconditionally."*
+- Branch's retention.ts matches main's tip; the stale `getIdleSeconds:` call site in branch's `service.ts` was the leftover I cleaned up
+- ✅ My fix aligned with main's intent; not a regression
+
+### `IPC_LOG_SKIP_CHANNELS` removal
+- Initial worry: lost diagnostic perf optimization
+- **Reality**: main's skip-list was for IPC channels (`chat:listFiles`, `git:isGitRepo`, `git:getDiffStats`, `db:tasks:getSubTasks`, `db:loadBoardData` etc.) that no longer exist in branch (all migrated to tRPC). The remaining IPC surface in branch is tiny (`pty:write/getBuffer*` plus a few `ipcMain.on` notification channels).
+- Branch's `IPC_PAYLOAD_SKIP_CHANNELS` covers the relevant noisy PTY channels.
+- ✅ Skip list is moot in branch's architecture; deletion is correct
+
+### `instrumentIpcMain` perf
+- Initial worry: tRPC procedures spam diagnostics
+- **Reality**: `instrumentIpcMain` patches `ipcMain.handle`; tRPC procedures don't go through that path. Only the few remaining IPC channels are instrumented.
+- ✅ No regression
+
+## Choices that look correct (sample)
+
+| File | Resolution | Why correct |
+|------|------------|-------------|
+| `task/server/ops/shared.ts` | Keep HEAD's `/server` import + add main's `/shared` import | Branch already had main's logic (needs_attention, batchIds, shared-worktree guard); just an import path adjustment |
+| `task/server/attention.ts` (UA) | Accept main's add at branch's renamed path | Main added the file, Wave B/C renamed dir, git resolved location naturally |
+| `task-terminals/.../useFollowBottom.ts` (AA) | Take main's verbatim | Main's version is the bug fix (separates `stuck` from `isAtBottom` so streaming bursts don't falsely release lock) |
+| `apps/app/src/main/index.ts` | HEAD's tRPC imports + add `handleAttentionTransition` from `task/server` | HEAD's structural reality, main's new function exposed via the migrated path |
+| `apps/app/src/preload/index.ts` | Delete `git`/`tabs`/`diagnostics` blocks per HEAD | Phase 6.1 migrated; tested by typecheck (no orphan callers EXCEPT the one I missed at App.tsx:507) |
+| `App.tsx` rightContent | Take main's extracted `tabBarRightContent` | Verified: `renderHeaderActions(true)` is a SUPERSET of HEAD's inline buttons + uses `attentionTaskIds.size` (semantic upgrade over HEAD's `idleTasks.length`) |
+| `App.tsx` update subscription | HEAD's tRPC structure + main's `setUpdateDownloadPercent` calls | HEAD got the migration, main got the new download progress feature |
+| `TreeDisplaySettings.tsx` | Take main's new Popover UI verbatim | Main is a feature improvement (7 settings vs HEAD's 3); state already auto-merged into `useTabStore` |
+| `chat-timeline.ts` | Accept main's `isAwaitingUserQuestion` addition | New function, branch already imports + uses it (auto-merged consumer side) |
+| `pty-manager.ts` | Keep HEAD's `../server/...` paths + add main's `shouldFlipToRunningOnInput` etc. | Wave A/B/C location wins; new state-machine helpers verified to be exported |
+| Worktrees client tabs | HEAD's tRPC + main's hash-dedup pattern | Best of both: tRPC for transport, hash dedup for poll-cycle state stability |
+
+## Choices I should have escalated rather than guessed
+
+### 1. UI variant mismatch in `TreeDisplaySettings.tsx`
+- HEAD = 3-option DropdownMenu, main = 7-option Popover with sub-tasks radio group
+- I took main's verbatim because more features = improvement
+- **Should have asked**: branch may have intentionally simplified the UI for reasons I don't see (a11y, consistency with sidebar density, etc.)
+- Risk if wrong: surprising a UX change that branch was deliberately undoing
+
+### 2. Subtask inheritance test rewrite vs deferral
+- Main's tests use IPC harness; would need rewrite to call `createTaskOp` directly
+- I deferred — left implementation intact, tests gone
+- **Should have asked**: how important is this regression coverage? If user has E2E coverage elsewhere, deferral is fine; if not, this should block merge
+
+## Inherited from Phase 6.1, not my merge
+
+These were already in branch pre-merge; I want to flag them since the merge surfaces them:
+
+### A. `withResultDedup` is dead code
+- IPC dedup helper exists in `@slayzone/platform/ipc-dedup` with **zero callers** in branch
+- Main's perf optimization for heavy git polling (`getResolvedCommitDag`, `detectWorktrees`, `getDiffStats`, `getResolvedForkGraph`, `listOpenPrs`) gone
+- Renderer-side `lastHashRef` patterns mitigate state churn but pay full deserialize cost every poll tick
+- **Sustainable fix**: tRPC middleware that returns sentinel + client cache; or rely on react-query's `structuralSharing` and accept wire cost as tradeoff for cleaner architecture
+
+### B. E2E tests reference removed `window.api.{db,tabs,git}`
+- Files: `64-execution-context.spec.ts`, `91-chat-queue.spec.ts`, `94-settings-cards-sizing.spec.ts`, `66-tab-store.spec.ts`, etc.
+- Tests will fail at runtime (preload no longer exposes these)
+- Phase 6.1 didn't migrate test scaffolding
+- **Sustainable fix**: introduce test-only `__testInvoke` shims or migrate tests to tRPC client
+
+### C. Mixed polling patterns across worktrees client
+- Some files use `useQuery + refetchInterval` (StashTab, PullRequestTab)
+- Others use `useStablePoll + lastHashRef` (BranchesTab, ProjectGeneralTab, WorktreesTab)
+- Inconsistent; harder to reason about cache lifetime + render behavior
+- **Sustainable fix**: pick one (probably useQuery + structuralSharing); add server-side dedup helper for heavy payloads where wire cost matters
+
+### D. Pre-existing baseline (5 errors)
+Phase 6.1 documented these; merge preserved them as-is:
+- `ArtifactsPanel.tsx 1392/1399/1432`: `electronAPI.settings` (preload no longer exposes settings)
+- `ArtifactsPanel.tsx:5`: unused lucide imports (ZoomIn/ZoomOut/Rows2/Rows3/Maximize2/AlignCenter/Settings2/Type)
+- `FileEditorView.tsx:18-22`: unused Select* imports
+- `TaskDetailPage.tsx:879`: implicit `any` for `taskId`
+- `milkdown-mermaid-render.tsx:21`: `@slayzone/markdown/client` module resolution (pre-existing in branch's package boundaries)
+
+## Sustainability scorecard
+
+| Concern | Severity | Source | Action |
+|---------|----------|--------|--------|
+| `App.tsx:507` orphan caller | **HIGH** — runtime error on tab focus | My merge oversight | **Fix uncommitted** — needs amend or follow-up commit |
+| Lost subtask inheritance tests | **MEDIUM** — silent regression risk | My merge deferral | Add direct ops-level tests in follow-up |
+| `withResultDedup` dead | **MEDIUM** — wire-cost perf regression for heavy polling | Phase 6.1 architecture | Add tRPC dedup middleware |
+| E2E tests broken | **MEDIUM** — CI red | Phase 6.1 deferral | Migrate test scaffolding or add shims |
+| Mixed poll patterns | **LOW** — code clarity | Phase 6.1 + my merges | Unify in follow-up |
+| Pre-existing baseline | **LOW** — known TODO | Phase 6.1 | Address as part of cleanup phase |
+
+## Recommendations
+
+### Must-do before pushing this branch
+1. **Commit the `App.tsx:507` fix** (amend merge or follow-up commit). It's a runtime crash on first task tab focus when needs_attention is set.
+2. Run `pnpm test` (unit tests only) to surface any other auto-merge cruft typecheck didn't catch.
+
+### Should-do as Phase 7 (or wherever)
+3. Add direct-ops tests for subtask worktree inheritance + shared-worktree cleanup guard (no IPC harness; call `createTaskOp` / `archiveTaskOp` directly with mock db).
+4. Migrate broken E2E tests off `window.api.{db,tabs,git}` — introduce a `testTrpcClient` in test fixtures or expose a typed `__testInvoke` for db ops.
+5. Decide on tRPC dedup story for heavy git data (commit graphs, fork graphs). Without it, polling cost is silent CPU/GC pressure.
+
+### Nice-to-have
+6. Unify polling pattern across worktrees client tabs.
+7. Address Phase 6.1's 5 baseline errors as a sweep.
+
+## Honest self-assessment
+
+**What I did well**
+- Correct architectural choice rule: HEAD's structure (server/electron split + tRPC) wins for layout, main's logic wins for behavior. Applied consistently.
+- Asked the user the merge-strategy question before plowing into 28 conflicts blindly.
+- Verified key feature integrations (`handleAttentionTransition` wiring, `tabBarRightContent` superset check, `parseTask` `needs_attention` round-trip).
+- Caught false alarms by checking main's actual tip rather than assuming the conflict diff represented main's current intent (the `getIdleSeconds` story).
+
+**What I did poorly**
+- Missed `App.tsx:507` because I filtered typecheck output too aggressively against Phase 6.1's prose. Should have done a quantitative diff: errors-pre-merge vs errors-post-merge, then investigated each delta.
+- Did not run unit tests post-merge — typecheck-green is necessary but not sufficient.
+- Took main's `TreeDisplaySettings` UI rewrite without asking the user — branch could have had reasons to simplify.
+- Spent a lot of time iterating on unused-import cleanup that's mostly cosmetic; could have batched these.
+
+**Was the merge "the right call"?**
+Given the constraint that user wanted main's improvements + branch's migration preserved, and the alternative was abort or a 137-commit rebase: **yes**. The merge result is internally consistent (modulo the one orphan caller) and preserves both efforts' value. But it inherits Phase 6.1's deferred work and adds one new oversight. A more careful author would have done a diff-the-diff baseline check and surfaced the orphan caller before committing.

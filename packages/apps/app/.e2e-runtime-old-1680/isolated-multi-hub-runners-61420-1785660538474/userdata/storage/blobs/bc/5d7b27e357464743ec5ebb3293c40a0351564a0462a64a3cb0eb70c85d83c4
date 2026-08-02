@@ -1,0 +1,60 @@
+# Security Remediation Attestation
+
+**Normain**
+
+**Date:** 2026-
+**Re:** Remediation of CORS misconfiguration — app.normain.com
+
+***
+
+To whom it may concern,
+
+This letter attests that the security finding described below, identified in a penetration test conducted on 2025-05-16, has been remediated in the Normain production environment.
+
+## Finding
+
+* **Severity:** Medium
+
+* **Classification:** OWASP A5/A6 — Security Misconfiguration
+
+* **Host:** <https://app.normain.com/> (port 443/tcp)
+
+* **Description:** Server responded with `Access-Control-Allow-Origin: *` to requests containing a `null` Origin header, permitting Cross-Origin Resource Sharing from arbitrary origins.
+
+## Remediation
+
+The CORS policy in the API server (`src/apps/server/api/src/server.ts`) was updated to replace the reflective `origin: true` configuration with an explicit allowlist of trusted tenant origins derived from per-tenant configuration.
+
+* **Commit:** `[git SHA]`
+
+* **Merged:** \[YYYY-MM-DD]
+
+* **Deployed to production:** \[YYYY-MM-DD]
+
+## Verification
+
+Post-deployment verification confirms the server no longer reflects arbitrary origins:
+
+```
+$ curl -I -H "Origin: https://evil.example" https://app.normain.com/
+HTTP/2 200
+[paste relevant response headers here — confirm no Access-Control-Allow-Origin echoing the injected origin]
+```
+
+No `Access-Control-Allow-Credentials: true` is set on the endpoint, further limiting exposure.
+
+## Attestation
+
+I, the undersigned, attest under my authority as an officer of \[Company Name] that the above remediation has been implemented and verified in the production environment as of the date signed.
+
+***
+
+**Signed:**
+
+***
+
+\[Name]
+\[Title — e.g., Chief Technology Officer / Head of Security]
+\[Company Name]
+\[Date]
+\[Email]

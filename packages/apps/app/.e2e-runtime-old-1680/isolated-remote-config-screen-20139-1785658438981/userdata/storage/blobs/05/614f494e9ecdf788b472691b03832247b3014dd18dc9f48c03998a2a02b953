@@ -1,0 +1,5 @@
+flowchart TB
+  Q{"where does the<br/>org chart live?"}
+  Q --> A["A — ConceptView display mode (rec)<br/>+ reuses search/filters/quick-edit toolbar<br/>+ generic: any concept w/ a self-relation gets it<br/>− ConceptView monolithic, needs mode extraction"]
+  Q --> B["B — standalone page /c/:slug/chart<br/>+ full-screen pan/zoom UX<br/>− new route, duplicate toolbar/filter logic"]
+  Q --> C["C — dashboard widget<br/>+ fits existing widget arch<br/>− cramped in grid cell; better as follow-up on top of A"]

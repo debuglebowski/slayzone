@@ -1,0 +1,140 @@
+# Calendar widget — 5 design directions
+
+All 5 build on the existing data model: instances plotted by a **date field**, several
+concepts **overlaid** on one surface, each source a **color**, plus the optional **tasks
+by due date** source. Today's marker + click-to-open carry over. Each note flags box-size
+fit (the widget lives in the auto-layout tile tree, so it can be tall, wide, or small).
+
+Current modes for reference: `month` · `week` · `agenda` (+ month `density: full | dots`).
+
+---
+
+## 1 · Activity heatmap (year-at-a-glance)
+
+GitHub-contributions grid. One cell per day, color **intensity = event count**. No paging —
+a long range fits in a short, wide box. Great for "how busy / when do things cluster".
+
+```
+ Activity · last 16 weeks                 ▢ 0   ▣ 1–2   ▦ 3–4   ▩ 5+
+
+        Mar          Apr           May           Jun
+  Mon   ▢ ▣ ▣ ▦   ▢ ▣ ▩ ▦   ▢ ▣ ▢ ▦   ▩ ▣ ▢ ▣
+  Tue   ▣ ▢ ▦ ▩   ▣ ▢ ▣ ▦   ▩ ▢ ▣ ▢   ▦ ▩ ▣ ▢
+  Wed   ▢ ▩ ▣ ▢   ▦ ▩ ▢ ▣   ▣ ▦ ▩ ▢   ▣ ▢ ▦ ▩
+  Thu   ▦ ▣ ▢ ▣   ▩ ▦ ▣ ▢   ▢ ▣ ▦ ▩   ▢ ▣ ▣ ▦
+  Fri   ▩ ▢ ▣ ▦   ▢ ▣ ▩ ▦   ▣ ▢ ▢ ▣   ▦ ▩ ▢ ▣
+                                          ▲ hover a cell → day's events
+```
+
+- **Fit:** short + wide. Degrades to fewer weeks as the box narrows.
+- **Multi-source:** intensity = total; optionally tint the cell toward the dominant source's color.
+- **Reuse:** `eventsByDay` already gives per-day counts — this is a new renderer over the same map.
+
+---
+
+## 2 · Day timeline rail (time-of-day)
+
+The one thing month/week/agenda can't show: **when** inside a day. A vertical hour axis for a
+single day, events as blocks; overlaps sit side by side. A live "now" line.
+
+```
+  Thu Jun 18              ‹  Today  ›
+  ─────────────────────────────────────
+  08 │
+  09 │ ▓▓ Standup (Eng)
+  10 │ ▓▓▓▓ Vendor sync
+  11 │
+  12 │ ░░ Lunch hold
+  13 │ ███ Design review ──┐
+  14 │ ███                 │  side-by-side
+  15 │     ▒▒ 1:1 Sara ────┘  on overlap
+  16 │ ▓ Ship cutoff
+  now━━━━━━━━━━━━━━━━━━━━━━  ← 3 events left
+  17 │
+```
+
+- **Fit:** tall + narrow (a sidebar rail). Scrolls vertically.
+- **Needs:** a *time* component on the date value; date-only sources render as all-day chips pinned to the top.
+- **Reuse:** new `DayRail` mode beside Month/Week/Agenda; same `CalendarEvent`/color/`onOpen`.
+
+---
+
+## 3 · Continuous scroll (paging-free weeks)
+
+Fantastical-style infinite list. Weeks stack vertically and you just scroll — no
+prev/next chrome. Today is anchored and highlighted. Empty days collapse.
+
+```
+  ▼ This week
+    Mon 15   • Kickoff   • Invoice #204 due
+    Tue 16   —
+  ◉ Wed 17   • Design review   • 1:1 Sara   +2
+    Thu 18   • Ship cutoff
+    Fri 19   • Retro
+  ▼ Next week
+    Mon 22   • Vendor onboarding
+    Tue 23   • Board prep   +3
+    Wed 24   • Webinar
+            ⋮  scroll for more ⋮
+```
+
+- **Fit:** any height; shines tall + medium width. No header buttons to crowd small boxes.
+- **Multi-source:** colored dots before each label (`•` carries the source color).
+- **Reuse:** `agendaEvents` grouping logic, extended to render empty days + week dividers.
+
+---
+
+## 4 · Mini-month + agenda (split)
+
+A compact month *picker* drives a detail **agenda** beside it. Click a day → list filters to it.
+Responsive: when the box narrows it drops the agenda and becomes a plain mini-month.
+
+```
+  ┌─ June 2026  ‹ › ─┐   ┌ Wed Jun 17 ──────────────┐
+  │ M  T  W  T  F  S │   │ ● Design review     10:00 │
+  │  ·  ·  ·  ·  ·  1│   │ ● 1:1 Sara          14:00 │
+  │  2  3  4  5  6  7│   │ ● Invoice #204       due  │
+  │  9 10 11 12 13 14│   ├ Thu Jun 18 ──────────────┤
+  │ 16[17]18 19 20 21│   │ ● Ship cutoff             │
+  │ 23 24 25 26 27 28│   │ ● Retro             16:00 │
+  │ 30 ·  ·  ·  ·  · │   │                           │
+  └──────────────────┘   └───────────────────────────┘
+   ● = day has events      (selected day + look-ahead)
+```
+
+- **Fit:** wide + medium height. Collapses gracefully to just the month on narrow boxes.
+- **Reuse:** literally Month grid (compacted, dots) + Agenda list side by side; a `selectedDay` state links them.
+
+---
+
+## 5 · Source swimlanes (compare across concepts)
+
+Rotate the emphasis from *dates* to *sources*. One **lane per concept/source**, days across the
+top, an event marker in the cell. Answers "which stream is busy this week" at a glance.
+
+```
+              Mon  Tue  Wed  Thu  Fri  Sat  Sun
+              15   16   17   18   19   20   21
+  Deals       ●          ●●         ●
+  Tasks            ●     ●    ●●          ●
+  Calendar    ●●   ●     ●●●  ●     ●
+  Invoices               ●               ●    ●
+              └──── today ────┘
+  ● Deals   ● Tasks   ● Calendar   ● Invoices
+```
+
+- **Fit:** wide + short. Lane count = source count; scrolls if many.
+- **Multi-source:** this is the *most* multi-source view — each row is one source, dot count = events that day.
+- **Reuse:** `eventsByDay` partitioned by `source` instead of merged; week columns from `weekDays`.
+
+---
+
+### At a glance
+
+| # | Direction          | Best box        | Key new need                  | Reuse level |
+|---|--------------------|-----------------|-------------------------------|-------------|
+| 1 | Activity heatmap   | short · wide    | count→intensity scale         | high        |
+| 2 | Day timeline rail  | tall · narrow   | time-of-day on date value     | medium      |
+| 3 | Continuous scroll  | tall · any      | render empty days + dividers  | high        |
+| 4 | Mini-month + agenda| wide · medium   | linked `selectedDay` state    | very high   |
+| 5 | Source swimlanes   | wide · short    | per-source partition of byDay | high        |

@@ -1,0 +1,29 @@
+OPTION D — Vertical rail + summary bar
+=======================================
+
+┌──────────────────────────────────────┬───┐
+│                                      │ + │  ← +task
+│                                      │ z │  ← zen
+│                                      │ x │  ← explode
+│  (tree content above)                │ 📁│  ← project tabs
+│                                      │   │
+│                                      │ ● │  ← agent (badge)
+│                                      │ □ │  ← agent panel
+│                                      │ ⊟ │  ← terminals
+│                                      │   │
+│                                      │···│  ← more dropdown
+├──────────────────────────────────────┴───┤
+│  [Boost]  [██░░ Claude]  [██░░ Codex]    │  ← usage
+├──────────────────────────────────────────┤
+│  [≡]                                  [⚙]│  ← view + settings
+└──────────────────────────────────────────┘
+
+· Right-edge vertical strip = quick actions / state dots
+· Tree gets full vertical room (rail is narrow ~32px)
+· Bottom = usage + meta only
+· Settings = last
+· Pros:  VS Code activity-bar feel, separates tools
+         from chrome, tree breathes
+· Cons:  big architectural change — rail is new, need
+         to ensure tree resize handle still works,
+         tooltip placement flips to "left"

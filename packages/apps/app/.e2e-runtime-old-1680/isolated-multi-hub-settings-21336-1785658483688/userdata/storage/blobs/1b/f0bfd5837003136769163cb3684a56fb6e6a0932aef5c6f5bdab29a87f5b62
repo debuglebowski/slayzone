@@ -1,0 +1,86 @@
+# Consolidate "Concepts" + "Concepts graph"
+
+## Goal
+- One Settings tab instead of two.
+- Clicking a concept node in the graph opens that concept's **settings** (not the instance browser, which is where it goes today).
+
+## What exists today
+- **Concepts** tab (admin-only): text-list of concepts on the left  +  name/description/fields editor on the right. (`Concepts.tsx`)
+- **Concepts graph** tab (all members): React-Flow LR diagram, nodes=concepts, edges=relation fields. Node click -> `/concepts/:id` instance browser. (`ConceptsGraph.tsx`)
+
+So we already have a master-detail editor. The merge = swap the text-list "master" for the graph as the selector, keep the detail editor.
+
+---
+
+## Option A — Graph canvas + right drawer  (recommended)
+Graph owns the tab. Click a node -> settings slide in on the right; graph stays visible.
+
+```
+Settings   [Profile][Organization][Members][ Concepts ]
++----------------------------------------------------------+
+| Concepts                                  [+ New concept] |
++-------------------------------------------+--------------+
+|                                           | Player    [x]|
+|   +--------+   owns    +--------+          |--------------|
+|   | Player |---------->| Estate |          | Name         |
+|   +--------+           +--------+          | [Player    ] |
+|       |                                    | Description  |
+|       | rival                              | [..........] |
+|       v                                    |              |
+|   +--------+                               | Fields    [+]|
+|   | House  |                               |  name   text |
+|   +--------+                               |  gold   money|
+|                                            |  owns -> Est |
+|   (pan / zoom canvas)                      |              |
+|                                            | [View rows]  |
+|                                            | [Save][Del]  |
++-------------------------------------------+--------------+
+```
++ Graph is the spatial home; editing in context.
+- Drawer overlaps canvas; a bit more new code (drawer state/animation).
+
+## Option B — Persistent split: graph left / editor right
+Closest to today's master-detail; lowest-risk reuse of `Concepts.tsx` editor.
+
+```
+Settings  >  Concepts
++----------------------------------+----------------------+
+| graph canvas          [+ New]    | Player               |
+|  +--------+    +--------+         | Name [Player       ] |
+|  | Player |--->| Estate |         | Desc [............]  |
+|  +--------+    +--------+         | Fields          [+]  |
+|       |                           |  name   text         |
+|       v                           |  gold   money        |
+|  +--------+                       |  owns   -> Estate    |
+|  | House  |                       | [View rows]          |
+|  +--------+                       | [Save]      [Delete] |
++----------------------------------+----------------------+
+```
++ Detail always visible, no overlay; mostly a layout swap.
+- Graph gets ~60% width; editor + fields can feel cramped side-by-side.
+
+## Option C — Graph on top / editor below
+```
+Settings > Concepts
++----------------------------------------------------------+
+| graph canvas                            [+ New concept]  |
+|   +--------+   +--------+   +--------+                    |
+|   | Player |-->| Estate |   | House  |                    |
+|   +--------+   +--------+   +--------+                    |
++----------------------------------------------------------+
+| Player                                  [Save] [Delete]  |
+| Name [Player       ]  Desc [.....................]       |
+| Fields                                            [+]    |
+|  name text | gold money | owns -> Estate(many) ...       |
++----------------------------------------------------------+
+```
++ Editor gets full width (good when fields list is long).
+- Graph height is squeezed; more vertical scrolling.
+
+---
+
+## Open questions
+1. **Admin gating.** Editor is admin-only today; graph is all-members. Merged tab -> admin-only (non-admins lose the graph), or keep graph readable by all with editor disabled for them?
+2. **Reach the instance browser.** Node-click currently jumps to instances; that becomes "open settings". Keep a path via a "View rows" link in the detail pane? (sidebar + dashboard already link to instances, so not the only path.)
+3. **Layout** A / B / C.
+4. **Tab label** after merge — keep "Concepts", drop "Concepts graph"?

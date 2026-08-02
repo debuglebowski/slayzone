@@ -1,0 +1,56 @@
+# UC02 — Questions + Ground-Truth Answers
+
+15 distinct questions asked verbatim of EACH company's report (Repeat mode). 2 companies → 30 ground-truth cells. Authored from direct read of both PDFs.
+
+## How competitors are asked
+
+- Upload BOTH `hm-group-annual-sustainability-2024.pdf` and `orsted-annual-report-2024.pdf` into a fresh session/project. Tools that don't natively support per-source comparison: run the question set against each company separately and stitch.
+- For each question below, paste verbatim: "Based on the attached reports, answer the following question for EACH of H&M Group and Ørsted. Return as a two-column table. [QUESTION]".
+- Capture: prompt, full answer text/table, full-session PDF, screenshot, anomaly notes.
+
+## Question taxonomy
+
+| Type | Count | Question IDs |
+|---|---|---|
+| Numerical extraction | 8 | Q01, Q02, Q03, Q06, Q07, Q08, Q12, Q14 |
+| Classification (framework/assurance/Y-N) | 4 | Q04, Q09, Q10, Q11 |
+| Reasoning / comparison | 2 | Q05, Q13 |
+| Hallucination trap | 1 | Q15 |
+
+## The 15 questions
+
+| # | Question | H&M ground truth | Ørsted ground truth |
+|---|---|---|---|
+| Q01 | What is your absolute Scope 1+2 GHG emissions reduction percentage versus your science-based-target baseline year? | **−41%** vs 2019 baseline (target: −56% by 2030) | Reported as **intensity** not absolute: **16 g CO₂e/kWh** in 2024 (target: −98% intensity vs 2018 baseline by 2025). Correct competitor answer notes the methodology difference. |
+| Q02 | What is your absolute Scope 3 GHG emissions reduction percentage versus your baseline year? | **−24%** vs 2019 baseline (target: −56% by 2030) | Scope 3 was **9.0 million tonnes CO₂e in 2024**, and **INCREASED** vs 2023 due to additional 2.4 GW renewable asset capacity being commissioned. No simple "% reduction vs baseline" comparable to H&M's framing. |
+| Q03 | What is your net-zero target year? | **2040** | **2040** |
+| Q04 | Has your net-zero target been validated by the Science Based Targets initiative (SBTi)? | **Yes** — formally approved by SBTi against the SBTi Net-Zero Standard | **Yes** — SBTi-validated climate targets 2018–2040 |
+| Q05 | What is your baseline year for SBTi-validated targets? | **2019** | **2018** (replaced original 2006 baseline) |
+| Q06 | What percentage of your own-operations electricity is from renewable sources in 2024? | **96%** (target: 100% by 2030) | Ørsted is itself a renewable-energy producer; the proper answer references its installed renewable capacity (18.2 GW, +16% YoY 2024) and that its own operations are predominantly renewable-powered. No single "% renewable electricity in own operations" figure reported in the same format as H&M's. |
+| Q07 | What was your total Scope 3 GHG emissions in 2024 (million tonnes CO₂e)? | Total Scope 3 absolute is not stated as a single Mt CO₂e figure in the executive summary — it's reported by category in the data tables. Correct competitor answer notes this and either cites the per-category breakdown or states the figure isn't in summary form. | **9.0 million tonnes CO₂e** |
+| Q08 | Did your Scope 3 emissions increase or decrease in 2024 vs 2023? | **Decreased** — Scope 3 was 24% below 2019 baseline; trend continued downward year-on-year | **Increased** — driven by additional 2.4 GW of renewable asset capacity being commissioned in 2024 (more lifecycle emissions from manufactured wind/solar assets) |
+| Q09 | Which sustainability reporting frameworks does your 2024 report align with? | **TCFD** (climate risk analysis updated 2024); **GRI Standards** (since 2023+); **transitioning to CSRD/ESRS** with EFRAG implementation guidance | **CSRD/ESRS** — Ørsted's 2024 annual report is its **first fully CSRD-compliant** report, prepared under the European Sustainability Reporting Standards (ESRS) framework |
+| Q10 | Is your 2024 report prepared in full compliance with the EU CSRD and ESRS framework? | **No, not yet** — transitioning, with board training on CSRD during 2024; full ESRS implementation in progress | **Yes** — first fully CSRD-compliant annual report; integrated ESRS disclosure requirements |
+| Q11 | What level of independent assurance is provided on your sustainability disclosures (none / limited / reasonable)? | **Limited assurance** on the sustainability progress report | **Limited assurance** — Independent Auditor's Limited Assurance Report on Sustainability Statements |
+| Q12 | Who is the independent assurance provider? | **Deloitte AB** (auditor and assurance provider; appointed at 2024 AGM for a 1-year term) | **PwC** |
+| Q13 | What is your Scope 1+2 emissions reduction target by 2030 (percentage)? | **−56%** by 2030 vs 2019 baseline (absolute) | **−98%** intensity vs 2018 baseline by **2025** (note: target year is 2025, NOT 2030; correct competitor answer flags the year mismatch with the question) |
+| Q14 | What is the GHG emissions intensity (g CO₂e per kWh) reported for your operations? | **Not applicable / not reported** — H&M is fashion, doesn't report g CO₂e/kWh. Correct answer states that the metric isn't applicable to H&M's industry. | **16 g CO₂e/kWh** (scopes 1+2); **127 g CO₂e/kWh** including Scope 3 excluding gas |
+| Q15 | Does your 2024 report state a "carbon-negative" climate ambition or target? | **TRAP. No.** H&M targets net-zero by 2040, not carbon-negative. A correct competitor answer notes the term is not used in the report; an incorrect competitor confuses "carbon-negative" (used by Microsoft) with H&M's "net-zero" target. | **TRAP. No.** Ørsted targets net-zero by 2040, not carbon-negative. Same expected behavior. |
+
+## Trap rows + asymmetry traps (catch fabricated or industry-confused answers)
+
+- **Q15** is the explicit hallucination trap — neither company uses "carbon-negative" framing.
+- **Q01, Q02, Q06, Q07, Q13, Q14**: industry-asymmetry traps. The "correct" answer for one company is "metric not applicable" or "reported differently" — a competitor that forces a numerical answer for both will be wrong on one side. This tests whether the tool can recognize when a question's framing doesn't fit the source.
+
+## Distribution summary
+
+| Field | H&M | Ørsted |
+|---|---|---|
+| Net-zero target | 2040 | 2040 |
+| SBTi validated | ✓ | ✓ |
+| Baseline year | 2019 | 2018 |
+| 2030 S1+2 target | −56% absolute | n/a (2025 intensity-based) |
+| Renewable electricity own ops | 96% | Renewable producer (industry-different) |
+| CSRD fully compliant 2024 | No (transitioning) | Yes (first year) |
+| Assurance provider | Deloitte AB | PwC |
+| Assurance level | Limited | Limited |

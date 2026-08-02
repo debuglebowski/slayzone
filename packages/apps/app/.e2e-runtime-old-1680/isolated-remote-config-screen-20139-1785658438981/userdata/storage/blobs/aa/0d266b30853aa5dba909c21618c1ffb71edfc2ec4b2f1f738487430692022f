@@ -1,0 +1,53 @@
+# Phase 0 — Remaining failing tests (post round 5+6)
+
+E2e r4 baseline: **659 passed / 37 failed**
+After r5+r6 partial verifications: ~10 more cleared on touched specs
+
+## Verified fixed (this session)
+- ✅ Phase 0 fs/env hardening — full suite
+- ✅ ~30 e2e tests via Settings dialog rename (Color theme), Terminal→Agent, theme tokens, file-editor unified search, tags refresh, panels mergeOrder, pty/chat/session handler reset list, CLI deleted_at filter, kanban progress (DB-backed), 01-smoke exact text, 19-panel-toggles, 35-terminal-panel-toggle, 25-panel-resize, 67-home-panel-persistence, 18-kanban-interactions blocked-pill, 17-multi-project, 11-create-task-dialog, 12-tags, 24-browser-panel CSS, 46-web-panels (16 tests), 60-cli env-leak
+
+## Still failing — sorted by effort
+
+### 🟢 Small (2)
+
+| Spec : line | Status |
+|---|---|
+| `72-custom-shortcuts:84` rebind search | ⏭️ Page-closed cascade |
+| `30-terminal-core-behavior:276` Cmd+Alt+R | 🔍 Buffer not cleared after restart — search-highlight escape codes remain |
+
+### 🟡 Medium (3)
+
+| Spec : line | Status |
+|---|---|
+| `14-project-settings:454` delete column | ⏭️ Page-closed cascade |
+| `94-artifact-html-preview:36` script runs | ⏭️ iframe sandbox click bug |
+| `22-terminal-mode-switching:140` temp tasks | 🔍 Mode swap UI doesn't update trigger |
+
+### 🔴 Large (7)
+
+| Spec : line | Status |
+|---|---|
+| `93-artifacts-panel` ×7 (down from 11) | ⏭️ folder-row scoping fixed; remaining 7 need per-test work |
+| `33-pty-respawn-forced` ×4 | ⏭️ Cascade from earlier crash |
+| `42-terminal-tab-isolation:26` Cmd+K | ⏭️ Possible real bug |
+| `24-browser-panel:145` Alt+Shift+Click | ⏭️ Real feature flow |
+| `61-web-panel-handoff-routing:182` | ⏭️ Cmd+J panel header |
+| `71-webview-popup-handling:540/696` | ⏭️ Same root |
+| `32-git-diff-panel:171/219` | ⏳ Patched; flake risk |
+
+### 💀 Very Large (3)
+
+| Spec : line | Status |
+|---|---|
+| `90-terminal-fd-limit:34` RLIMIT | ⏭️ Platform-specific |
+| `72-browser-view-lifecycle:184` Bug 1 | ⏭️ Open feature bug |
+| `77-browser-view-focus:89` glow | ⏭️ Multi-panel fix unverified |
+
+## Tally
+
+🟢 2 · 🟡 3 · 🔴 7 · 💀 3 → **15 rows / ~25 individual tests** still failing
+
+Running cumulative: **80 → ~25 failures** (~69% reduction this session).
+
+A full-suite re-run would confirm; selective re-runs covering the touched specs report ~104/114 pass.

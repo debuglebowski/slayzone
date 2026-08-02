@@ -1,0 +1,72 @@
+# PES-78 — Clear desk and clear screen (investigation)
+
+**Control**: PES-78 · ISO 27001:2022 A.7.7 · Vanta status: needs evidence
+**Owner**: Kalle (was Unassigned)
+**Cross-ref**: END-40 (endpoint screenlock, task #8) · Dennis's screenlock test
+
+---
+
+## Situation
+
+### What ISO A.7.7 / Vanta wants
+- **Clear desk**: papers and removable media not left unattended.
+- **Clear screen**: screens locked when away from processing facilities.
+- Evidence pattern: a defined policy clause + a technical enforcement signal (typically MDM-enforced auto-lock). Awareness/training optional but commonly attached.
+
+### What Normain has today
+
+| Source | Where | Coverage |
+|---|---|---|
+| **Information Security Policy / AUP** | `inventory/info_security_aup.txt:41-42` | "Clear Screen Clear Desk Policy" section — one sentence: confidential materials not left unsecured + screens locked when not in use, esp. public areas. |
+| AUP — Mobile Device | same file `:35-36` | 15-min auto-lock + lock-when-unattended (clear-screen technical rule). |
+| AUP — Remote Working | same file `:45` | "Clear desk protocols" referenced for remote work. |
+| **Physical Security Policy** | `inventory/physical_security.txt` | **Does not** mention clear desk/screen. |
+| UCF register | `control-register.csv` → `NRM-PHY-007` | A.7.7 mapped → status `Implemented`, owner Security Delegate, source `Physical Security Policy` — **but the actual policy text lives in the AUP, not Physical Security**. Register pointer is wrong. |
+
+### Overlap with END-40 + Dennis's screenlock test
+- **END-40** = the technical half of clear-screen (MDM auto-lock evidence). The Mobile Device 15-min-lock clause backs both PES-78 and END-40 → reuse the END-40 MDM screenshot/export verbatim.
+- **Dennis's screenlock test** = real-world observation evidence → strong supporting artifact for PES-78.
+
+### Verification gap
+Vanta's PES-78 page itself was **not** opened in this session — both the slay browser panel (task tab not focused in SlayZone UI) and chrome-devtools MCP (profile locked by the running slay panel) were unreachable. Repo evidence is sufficient to scope the work, but Vanta's exact required-evidence list should be re-verified before upload.
+
+---
+
+## Solution
+
+**Effort: ~30–60 min. Mostly Vanta admin + a small policy patch.**
+
+1. **Tighten AUP "Clear Screen Clear Desk" clause** (`info_security_aup.txt:41-42`). 2–3 sentences explicitly covering: papers, removable media, screen lock when leaving processing facilities. Match wording to existing Mobile Device + Remote Working clauses. **Drive source-of-truth doc ID needed before editing.**
+2. **Reconcile UCF register**: change `NRM-PHY-007` evidence-source from "Physical Security Policy" to "Information Security Policy / AUP" — or add a clear-desk para to Physical Security to match the register. Pick one, don't leave the mismatch.
+3. **Vanta evidence upload (PES-78)**:
+   - Updated AUP (PDF or Drive link).
+   - Reuse END-40 MDM screenlock evidence.
+   - Optional: Dennis's screenlock test artifact as awareness evidence.
+4. Set PES-78 owner = Kalle, review cadence = annual (matches register).
+
+**No technical change required** — END-40/MDM already enforces screen lock.
+
+---
+
+## Actions taken (this session)
+
+- ✅ Read repo policy inventory (`projects/current-ucf/inventory/`); located clear-desk/screen language in `info_security_aup.txt`.
+- ✅ Cross-checked Physical Security Policy — confirmed it does NOT contain clear-desk/screen language.
+- ✅ Checked UCF register / ISO mapping — found `NRM-PHY-007` mapped to A.7.7, evidence source mismatch noted.
+- ✅ Cross-referenced END-40 / Dennis screenlock test — no in-repo artifacts; identified reuse path.
+- ✅ Searched Drive (`gws drive files list`) for security policy / AUP master — name-search returned nothing matching, full-text search hit only an incident-response doc. Drive source-of-truth Doc ID still unknown.
+- ❌ Vanta PES-78 page not opened — browser tooling blocked (see Verification gap above).
+- ❌ No shared artifacts changed (per scope).
+
+## Stopped before
+
+- Editing the AUP master in Drive.
+- Updating the UCF register.
+- Uploading anything to Vanta.
+
+## Open questions
+
+- Drive doc ID for AUP master?
+- Patch AUP clause, or move clear-desk para into Physical Security to match register?
+- Reuse END-40 MDM evidence verbatim under PES-78, or upload a separate copy?
+- Attach Dennis's screenlock test, or keep END-40-only?

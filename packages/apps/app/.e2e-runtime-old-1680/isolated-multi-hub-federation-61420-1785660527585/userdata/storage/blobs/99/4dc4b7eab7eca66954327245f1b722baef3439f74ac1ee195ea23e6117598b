@@ -1,0 +1,12 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="BioTracker">
+  <defs>
+    <linearGradient id="drop2" x1="180" y1="90" x2="330" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4297a0"/>
+      <stop offset="1" stop-color="#2f5061"/>
+    </linearGradient>
+  </defs>
+  <path d="M256 78 C256 78 384 236 384 316 A128 128 0 1 1 128 316 C128 236 256 78 256 78 Z"
+    fill="url(#drop2)"/>
+  <polyline points="150,320 196,320 224,276 258,372 292,232 320,320 366,320"
+    fill="none" stroke="#f4eae6" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

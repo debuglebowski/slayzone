@@ -1,0 +1,106 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-runner-loopback-61420-1785660512299/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ]
+  }
+}

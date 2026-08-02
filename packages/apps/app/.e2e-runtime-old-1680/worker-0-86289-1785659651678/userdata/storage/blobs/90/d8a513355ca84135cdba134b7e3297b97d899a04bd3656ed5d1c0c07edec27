@@ -1,0 +1,112 @@
+# Vanta Vendors vs Vendor Master Sheet
+
+Captured 2026-05-14.
+
+- Vanta source: app.eu.vanta.com — All tab (Active + Archived). 54 rows.
+- Master sheet source: Drive "VENDOR MASTER SHEET" (`1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts`), tab "Vendor Master" col D. 71 rows.
+
+## Summary
+
+- In both: 50 unique vendors (Vanta lists Notion + Notion Calendar separately; sheet has them combined as one entry. Revolut also appears twice in Vanta).
+- Only in Vanta (missing from sheet): 2
+- Only in master sheet (missing from Vanta): 21
+
+## Only in Vanta (not in master sheet)
+
+- ChatGPT — sheet only lists OpenAI
+- Google Drive — sheet only lists Google Workspace
+
+## Only in master sheet (not in Vanta)
+
+- Apple Business Connect
+- Bolago
+- Calendly
+- CapCut
+- Crunchbase
+- Doodle
+- Dropbox
+- Envato Elements
+- Epidemic Sound
+- Linkedin Recruiter Lite
+- Meetup
+- MyAccess (Apple Online Store)
+- Permånad
+- Pleo.io
+- Producthunt
+- Sana AI
+- Sendify
+- Tre (3)
+- Typeform
+- YouTube
+- Zapier
+
+## Naming variants (in both, different spelling)
+
+- 1Password / 1password
+- AWS / Amazon Web Services (AWS)
+- Better Stack / BetterStack
+- Cloudflare Dashboard / Cloudflare
+- Google Cloud Platform (GCP) / Google Cloud Platform
+- LinkedIn Normain Page / LinkedIn Normain page
+- LinkedIn Sales Navigator / Linkedin Sales Navigator
+- Microsoft 365 / Microsoft 365 (Office)
+- Notion + Notion Calendar (Vanta, two rows) / Notion / Notion Calendar (sheet, one row)
+- OVHCloud / OVH Cloud
+- Telgea Mobile Portal / Telgea
+
+## Full Vanta vendor list (54)
+
+1. 1Password
+2. Anthropic
+3. Attio
+4. AWS
+5. Better Stack
+6. Boardeaser
+7. Carta
+8. ChatGPT
+9. Circleback
+10. Cloudflare Dashboard
+11. Cursor
+12. Figma
+13. Firecrawl
+14. Fortnox
+15. Framer
+16. GitHub
+17. Google Ads
+18. Google Chrome
+19. Google Cloud Platform (GCP)
+20. Google Drive
+21. Google Workspace
+22. iOS
+23. Linear
+24. Linkedin Normain Page
+25. LinkedIn Sales Navigator
+26. Loom
+27. Loops
+28. Luma
+29. Medium
+30. Microsoft 365
+31. Microsoft Azure
+32. Miro
+33. Namecheap
+34. Notion
+35. Notion Calendar
+36. OpenAI
+37. OVHCloud
+38. Perplexity Ask
+39. PostHog
+40. Revolut
+41. Revolut (duplicate row in Vanta)
+42. Scrive
+43. Setapp
+44. Simply
+45. Slack
+46. Spark
+47. Superhuman
+48. Swedbank
+49. Teamtailor
+50. Telgea Mobile Portal
+51. Vanta
+52. Vimeo
+53. X
+54. Zero

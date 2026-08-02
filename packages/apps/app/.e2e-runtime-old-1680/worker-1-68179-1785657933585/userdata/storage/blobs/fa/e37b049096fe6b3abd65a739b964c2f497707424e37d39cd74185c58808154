@@ -1,0 +1,66 @@
+# UC01 — ChatGPT Instructions
+
+## Access
+
+- **URL**: <https://chatgpt.com>
+- **Account**: benchmark-dedicated
+- **Plan**: ChatGPT Plus (or Team / Enterprise)
+- **Model**: pick the latest top-tier model from the model picker. Record exact name in run notes.
+  - If running both a reasoning model and a standard model, do TWO runs and report both ("ChatGPT (reasoning)" + "ChatGPT (standard)"). Otherwise pick one and disclose.
+
+## Setup for UC01
+
+Two options — pick the one that works and disclose:
+
+**Option A — File upload (preferred)**:
+1. New Project → name: `Benchmark UC01 - DD financial`.
+2. Upload `msft-fy24-10k.htm` + `msft-fy24-proxy.htm` to Project files.
+3. If ChatGPT refuses `.htm`, convert to PDF: `pandoc /tmp/uc01/msft-fy24-10k.htm -o msft-fy24-10k.pdf`. Note this deviation.
+4. Verify both files show as processed.
+
+**Option B — URLs with browsing**:
+1. New conversation (no Project).
+2. Ensure web browsing is enabled.
+3. Paste the URLs from `../questions-only.md` in the first message, ask the model to ingest them.
+4. Note: this is a different ingestion mode and should be flagged 🌐 in the comparison table.
+
+## Per-question protocol
+
+1. Paste each question from `../questions-only.md` **verbatim**. No system prompt. No preamble.
+2. Capture per question:
+   - `prompt.txt` — verbatim
+   - `answer.md` — full response
+   - `answer.pdf` — print-to-PDF
+   - `screenshot.png` — full-page
+   - `notes.md` — anomalies (especially: did the tool browse the web mid-answer? Mark 🌐)
+3. **Start a fresh conversation between questions** within the same Project.
+
+## Session metadata (record start + end)
+
+```
+account_email: <redacted>
+plan_tier: Plus
+model_at_start: <exact name from model picker>
+model_at_end:   <exact name from model picker>
+date_start: ...
+date_end:   ...
+ingestion_mode: file-upload | url-browsing
+project_url: <if applicable>
+file_sha256: <list, if file-upload>
+anomalies: <list — model auto-swap, browsing decisions, rate-limit hits>
+```
+
+## UC01-specific quirks to watch for
+
+- **Silent web browsing**: ChatGPT may browse the web even when not asked (look for "searched the web" indicators). If it does, mark the answer 🌐 in the comparison table.
+- **Q14 trap (Activision impairment)**: ChatGPT may pull from training data or news articles instead of the 10-K — verify each cited fact appears in the uploaded file.
+- **Q15 over-claim trap**: same risk — model may regurgitate "typical 10-K categories" from priors. Verify it reads the actual Item 1A categories.
+- **Model auto-swap**: ChatGPT may downgrade silently between messages on Plus tier. Check the per-message indicator and record any mid-run swaps.
+- **Citation style**: varies by model. Record what format is produced (inline numbered, prose, links to docs).
+
+## After running
+
+Update `../competitor-comparison.md`:
+- Fill the "ChatGPT" column for all 15 rows: brief answer + verdict emoji + 🌐 if web-browsed
+- Update score summary row
+- Add notes section especially noting: model used, browsing on/off, any model swaps

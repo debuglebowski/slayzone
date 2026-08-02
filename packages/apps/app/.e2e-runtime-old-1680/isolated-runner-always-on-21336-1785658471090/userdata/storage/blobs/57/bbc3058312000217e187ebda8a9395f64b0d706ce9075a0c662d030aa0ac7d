@@ -1,0 +1,27 @@
+INPUT — ENTRY LIST (one datapoint)     stack, calendar-swipe header
+════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────┐
+│  ‹     Hours slept                       [+]   │  ← back | title=datapoint | plus
+│        ◀   Sat, Jul 12   ▶                     │  ← withCalendarSwipe day nav
+├──────────────────────────────────────────────┤
+│                                                │
+│  ┌──────────────────────────────────────────┐ │  ← CardList (entries for day)
+│  │  7.5 h                       09:14    ›    │ │  ← entry item: value + time
+│  ├──────────────────────────────────────────┤ │
+│  │  8.0 h                       23:40    ›    │ │
+│  └──────────────────────────────────────────┘ │
+│                                                │
+│                                                │
+│   (empty state:                                │
+│     "No entries /                              │
+│      Click the plus button in the header       │
+│      to add one")                              │
+│                                                │
+│                                                │
+├──────────────────────────────────────────────┤
+│      ⌨ Input          📈 Charts                │
+└──────────────────────────────────────────────┘
+
+tap [+] → input--entry--one (new, datapointUid)
+tap entry row → input--entry--one (edit)

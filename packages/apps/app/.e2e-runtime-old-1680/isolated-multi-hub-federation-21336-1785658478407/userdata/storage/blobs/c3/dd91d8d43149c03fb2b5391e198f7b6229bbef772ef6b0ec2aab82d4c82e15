@@ -1,0 +1,105 @@
+# Video Series Outline
+
+**Goal:** promote me (know-how) + SlayZone (product).
+
+> One-sentence self-intro opens Ep 1 of Series A — no dedicated "about me" episode.
+
+---
+
+## Viewer Promise (exercise — fill in)
+
+Each series needs a clear answer to: *what does the viewer leave with?*
+
+### Series A — Fundamentals
+
+Draft candidates (pick / edit / reject):
+
+- "After this series you'll understand the AI dev landscape well enough to make your own tooling choices — no hype, no fluff, real trade-offs."
+- "A grounded primer for curious devs who keep nodding through AI conversations without fully getting it."
+- "The mental model I wish I had two years ago — LLMs, providers, assistants, and the skills that compound."
+
+**Pick / rewrite:** _____
+
+### Series B — SlayZone
+
+Draft candidates:
+
+- "Watch a real product shipped in public — the workflow, the bets, the mistakes — and decide if SlayZone fits how you want to build."
+- "The dev environment I built for myself, now open to you. Real features shipped on camera using the thing itself."
+- "How one developer ships at AI-native speed, and the tool that makes it possible."
+
+**Pick / rewrite:** _____
+
+---
+
+# Series A — Fundamentals
+
+Hygiene-factor primer for curious devs. Coherent voice across the basics. Each ep promotable standalone.
+
+## A1. AI / LLM Primer
+- What an LLM actually is (intuition, no math)
+- Why this moment — capability + cost curves
+- Where they fail (hallucination, context, determinism)
+- Why this matters for builders
+
+## A2. Model Providers
+**Format:** ~50% landscape, ~50% opinion.
+- Anthropic, OpenAI, Google, local (Llama, Qwen, …)
+- Trade-offs: capability, cost, latency, privacy
+- My takes — who wins what, who's overrated, who's underrated
+- How to pick per task
+
+## A3. Coding Assistants
+**Format:** ~50% landscape, ~50% opinion.
+- Claude Code, Codex, Gemini CLI, Cursor, Copilot, Aider, OpenCode
+- CLI vs IDE vs hybrid
+- My daily stack + why
+- Where each shines / breaks
+- Limits of single-assistant workflows
+
+## A4. Prompting Fundamentals
+- What actually moves the needle
+- Anti-patterns + common myths
+- Reusable templates
+
+## A5. Agentic Workflows
+- Planning → tools → verification loop
+- When agents help, when they hurt
+- Designing tools that agents use well
+
+## A6. Multi-Agent Orchestration
+- One model, many tasks vs many models, one task
+- Coordination patterns
+- Real example end-to-end
+
+## A7. Context Engineering
+- Memory, retrieval, scope
+- What goes in the prompt vs what doesn't
+- Long-context vs RAG vs tools
+
+## A8. Debugging with LLMs
+- Where they reliably help
+- Where they confidently mislead
+- My debugging loop
+
+---
+
+# Series B — SlayZone
+
+Product-led. Lead with hook (strong take or live build) — backfill context for newcomers from Series A.
+
+**Positioning sketch (detail later):**
+- Ep 1: strong-take hook — "how I ship features Nx faster" or live-build cold open
+- Mid: origin, philosophy, core features, dogfooding story
+- Recurring: live builds shipped on camera using SlayZone
+- Recurring: roadmap + bets + against-the-grain opinions
+
+**Defer:** episode list, ordering, count.
+
+---
+
+## Format notes
+
+- ~8–15 min per episode
+- One core idea per video
+- Each ep ends with: tangible takeaway + (where relevant) SlayZone tie-in

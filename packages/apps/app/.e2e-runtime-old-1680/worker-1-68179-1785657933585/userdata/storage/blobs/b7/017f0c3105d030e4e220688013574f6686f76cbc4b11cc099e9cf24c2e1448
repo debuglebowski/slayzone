@@ -1,0 +1,23 @@
+# Phase 0 — Open Questions (resolved 2026-05-06)
+
+## 1. Single-instance lock — **DECIDED: gate on `SLAYZONE_DB_DIR`** (rec a)
+
+Lock prevents 2 Electron procs sharing same `userData` (SQLite WAL corruption, `Extensions/` race, file-write collisions, Finder/protocol-handler routing).
+
+**Loss w/ gate:** default behavior unchanged. Footgun: same `SLAYZONE_DB_DIR` value twice → user-induced corruption. Real per-data-dir lockfile lands in Phase 3 (master §3 single-writer lockfile). Phase 0 gate is dev-time concession.
+
+## 2. `SLAYZONE_PORT` — **DECIDED: defer**
+
+MCP and `@slayzone/server` will be same server (single WS multiplexing tRPC + MCP, master §4 Phase 3). No need for separate `SLAYZONE_PORT` helper. Phase 0 only ships `getMcpPort()` + `getServerHost()`.
+
+## 3. `SLAYZONE_HOST` — **DECIDED: rec a**
+
+Default `127.0.0.1`. `console.warn` on non-loopback bind. Full trusted-net banner deferred to Phase 3 per master §11b.
+
+## 4. CLI `SLAYZONE_DB_PATH` — **DECIDED: no-op (re-audit corrected)**
+
+CLI already honors `SLAYZONE_DB_DIR` (`cli/src/db.ts:27`, also L106, L149). `SLAYZONE_DB_PATH` is e2e-only full-file-path override (L26 comment). Two vars by design. Phase 0 touches nothing here.
+
+## 5. `db/index.ts:65` legacy migration — **DECIDED: skip + comment** (rec a)
+
+Pre-rebrand migration reads Electron-default `userData`, not env override. Keep `app.getPath()`. Add comment explaining intent.

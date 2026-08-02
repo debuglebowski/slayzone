@@ -1,0 +1,47 @@
+# AI Provider Tycoon — Pre-Implementation Plan
+
+Everything we still need to **decide, define, or plan** before building v0.1. Decided items move to [6. Implementation](asset:52c166c2) or the relevant model/rules asset.
+
+**Size key:** 🟢 small (≤ half a day) · 🟡 medium (1–3 days) · 🔴 large (multi-day, may need playtest)
+
+| Area | Item | Size | Notes | Answer |
+|---|---|:---:|---|---|
+| 📋 Schema | Final action set | 🟡 | Reconcile [3. Action Schema](asset:e0f3dc31) with [2. Actions Catalog](asset:a3a67c22) | |
+| 📋 Schema | Param ranges, units, types | 🟡 | Per action | |
+| 🎯 Mechanics | [Demand Model](asset:bdf03bf5) | 🔴 | First draft done; tune τ, α, weights via playtest | |
+| 🎯 Mechanics | [Revenue Formula](asset:faa21bd3) | 🔴 | demand × price × served capacity — exact form | |
+| 🎯 Mechanics | [Model Quality](asset:698bfd13) | 🟡 | Single 1–10 vs. multi-dimensional | |
+| 🎯 Mechanics | [Research Production](asset:5b188901) | 🔴 | time-to-completion, quality from compute+duration, parallelism | |
+| 🎯 Mechanics | [Server Tiers](asset:6a42651b) | 🟡 | Cost, throughput, efficiency per tier | |
+| 🎯 Mechanics | [VC Raise](asset:e7765686) | 🟡 | Odds, dilution, cooldown | |
+| 🎯 Mechanics | [M&A Pricing](asset:687f5dec) | 🟡 | Offer evaluation + voluntary-exit conversion | |
+| 🎯 Mechanics | [Scoring & Win Condition](asset:e2454150) | 🟡 | Money / brand / composite | |
+| ⚔️ Actions | Per-action cost + state effect | 🔴 | Every entry in [2. Actions Catalog](asset:a3a67c22) | |
+| ⚔️ Actions | Per-action cooldown / prereqs | 🟡 | | |
+| ⚔️ Actions | [Sabotage Mechanics](asset:9b813dbc) | 🟡 | Success, detection, backfire | |
+| 🎲 Situations | Per-situation magnitude × severity | 🔴 | Damage/benefit numbers, every entry in [5. Situation Catalog](asset:c9f245df) | |
+| 🎲 Situations | Prerequisite thresholds | 🟡 | What counts as "high Reliability" etc. | |
+| 🤖 Agent input | Self state structure | 🟡 | Private + derived view | |
+| 🤖 Agent input | Competitor public state structure | 🟡 | | |
+| 🤖 Agent input | Event history window | 🟡 | Last N / all / compacted | |
+| 🤖 Agent input | Situation feed format | 🟢 | Active + telegraphed + recent | |
+| 🛠️ Engine | Tick scheduler | 🟡 | Single loop vs. per-match worker (Convex scheduled fn?) | |
+| 🛠️ Engine | Determinism / seeded RNG | 🟡 | Plumbed through situations + sabotage rolls | |
+| 🛠️ Engine | Per-tick concurrency model | 🟡 | Fan out → gather → validate → apply atomically | |
+| 🔄 Lifecycle | Pre-match: key/model ping, prompt lock, seed | 🟡 | | |
+| 🔄 Lifecycle | In-match: tick driver, validation, update | 🟡 | Core loop | |
+| 🔄 Lifecycle | Failure modes (crash, partition, key outage) | 🟡 | Treat as no-op tick? Eliminate player? | |
+| 🖥️ GUI | Live match view | 🟡 | Scoreboard + events + agent state | |
+| ❓ Meta | One canonical scenario or configurable? | 🟡 | | |
+
+***
+
+## Suggested sequencing
+
+1. Lock [Action Schema](asset:e0f3dc31) + finalize [Actions Catalog](asset:a3a67c22) effects.
+2. Pin economic formulas (the **Models** folder) + situation magnitudes.
+3. Define agent input shape.
+4. Build tick loop with stub agents (stack already chosen — see [6. Implementation](asset:52c166c2)).
+5. Wire real BYOK calls.
+6. Bolt on throwaway GUI.
+7. Playtest, tune, iterate.

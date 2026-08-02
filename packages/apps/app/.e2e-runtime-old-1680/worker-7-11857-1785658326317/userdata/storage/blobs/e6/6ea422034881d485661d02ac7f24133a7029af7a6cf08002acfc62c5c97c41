@@ -1,0 +1,12 @@
+# Setapp — Vanta security assessment (annual refresh)
+
+**Recommendation:** Approved (documented risk acceptance).
+Not "Conditionally approved" — there's no follow-up condition Setapp will meet.
+
+**Summary of findings (paste):**
+
+Annual refresh of the Jun 2025 review. Setapp (MacPaw) - High inherent risk. Checked their trust center (security.setapp.com, Jun 2026): MacPaw ISO 27001:2022 cert (Bureau Veritas, issued Aug 2024), privacy policy, subprocessor list (Paddle, Braintree), and external security grades (SecurityScorecard A, Qualys SSL Labs, HSTS). SOC 2 is still the 2021 Type 1 - no Type 2 has been issued, and they still don't share a pentest report (they list pentesting as a control in the trust center). We accept the residual risk again: ISO 27001:2022 certification covers their ISMS including secure development and testing, external posture is clean, and [data Setapp handles for us is limited - confirm scope]. Recommend approval. Next review Jun 2027.
+
+**Fill the blank:** `[data Setapp handles for us]` — highest-leverage line; if data is minimal/non-sensitive the acceptance is trivially defensible.
+
+**Files:** keep ISO 27001 (swap in current Bureau Veritas cert), keep privacy policy, keep 2021 SOC 2 Type 1 (label as stale); optionally add the subprocessor list. Evidence is essentially unchanged from last year — the documented risk acceptance is what makes it audit-safe, not new files.

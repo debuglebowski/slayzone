@@ -1,0 +1,39 @@
+flowchart LR
+    subgraph today["TODAY — 3 surfaces, ad-hoc sharing"]
+        direction TB
+        t1["ConceptView /concepts/:id<br/>HTML table · quick-edit<br/>persist: URL params + localStorage"]
+        t2["InstanceView /instances/:id<br/>9 tiles · presets + RGL editor<br/>persist: per-user prefs row"]
+        t3["Dashboards + MemberProfile<br/>6 widgets · RGL canvas<br/>persist: per-dashboard row + etag"]
+        tdup["duplicated ×2:<br/>useMeasuredWidth · RGL config<br/>tile chrome · layout mapping"]
+        tshared["already shared:<br/>conditions.ts · ConditionList<br/>GRID consts · useConceptData"]
+        t2 -.-> tdup
+        t3 -.-> tdup
+        t1 -.-> tshared
+        t3 -.-> tshared
+    end
+
+    subgraph target["TARGET — shared substrate, separate surfaces"]
+        direction TB
+        s1["ConceptView<br/>stays a table<br/>+ saved views (later)"]
+        s2["InstanceView<br/>record canvas"]
+        s3["Dashboards / Members<br/>mixed canvas"]
+        sub1["GridCanvas + TileChrome<br/>one impl"]
+        sub2["ONE registry, scope-tagged tiles:<br/>record | collection | org"]
+        sub3["generalized body+etag<br/>persistence hook"]
+        s2 --> sub1
+        s3 --> sub1
+        s2 --> sub2
+        s3 --> sub2
+        s3 --> sub3
+        s1 -. "saved views reuse persistence;<br/>list widget reuses table cells" .-> sub3
+    end
+
+    subgraph why["WHY NOT one merged surface"]
+        direction TB
+        w1["data scope is irreducible:<br/>collection vs one record vs org"]
+        w2["sharing semantics clash:<br/>URL-shareable vs personal prefs<br/>vs owned dashboards"]
+        w3["table-first editing UX ≠ canvas;<br/>merged = ConceptView as degenerate<br/>'one giant list widget'"]
+    end
+
+    today ==> target
+    target -.-> why

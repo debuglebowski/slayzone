@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Literacy Series — The Map</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #55554f;
+    --ink-faint: #8a8a80;
+    --line: #e6e6e0;
+    --accent: #2f6d5b;
+    --accent-soft: #e6f0ec;
+    --lens: #7a4f1d;
+    --lens-soft: #f7ede0;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121312;
+      --surface: #1c1e1c;
+      --ink: #ecece7;
+      --ink-soft: #b4b4ac;
+      --ink-faint: #7d7d75;
+      --line: #2c2f2c;
+      --accent: #6bbfa4;
+      --accent-soft: #1b2b26;
+      --lens: #d6a86a;
+      --lens-soft: #2a2016;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: clamp(24px, 5vw, 56px) clamp(18px, 4vw, 40px) 72px; }
+
+  header.masthead { margin-bottom: 8px; }
+  .eyebrow { font-size: 12.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+  h1 { font-size: clamp(28px, 5vw, 44px); line-height: 1.08; font-weight: 760; letter-spacing: -0.02em; margin: 0 0 14px; max-width: 20ch; }
+  .dek { font-size: clamp(15px, 2.2vw, 17.5px); color: var(--ink-soft); margin: 0; max-width: 60ch; }
+  .dek strong { color: var(--ink); font-weight: 620; }
+
+  /* editorial lens banner */
+  .lens { display: flex; gap: 14px; align-items: flex-start; background: var(--lens-soft); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 20px; margin: 32px 0 0; }
+  .lens .mark { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--lens); color: #fff; font-size: 16px; font-weight: 700; margin-top: 1px; }
+  .lens .body { font-size: 14.5px; }
+  .lens .body b { color: var(--lens); font-weight: 680; }
+  .lens .body span { color: var(--ink-soft); display: block; margin-top: 2px; }
+
+  /* at-a-glance strip */
+  .glance { margin: 30px 0 4px; }
+  .glance .rail { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; color: var(--ink-faint); font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .glance .rail::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .glance ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .glance a {
+    display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 14px 7px 8px; color: var(--ink-soft); font-size: 13.5px; font-weight: 550;
+    transition: border-color .15s, color .15s;
+  }
+  .glance a:hover { border-color: var(--accent); color: var(--ink); }
+  .glance a .n { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 730; display: grid; place-items: center; }
+
+  /* stacked theme sections */
+  .theme { border-top: 1px solid var(--line); padding: 30px 0 6px; scroll-margin-top: 20px; }
+  .theme > .th-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
+  .theme .num { flex: none; align-self: flex-start; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-weight: 730; font-size: 16px; background: var(--accent-soft); color: var(--accent); }
+  .theme h2 { font-size: clamp(20px, 3vw, 24px); font-weight: 700; letter-spacing: -0.015em; margin: 0; line-height: 1.15; }
+  .theme .summary { color: var(--ink-faint); font-size: 14.5px; margin: 3px 0 0 48px; max-width: 62ch; }
+
+  ol.points { list-style: none; counter-reset: p; margin: 18px 0 0 48px; padding: 0; }
+  @media (max-width: 560px) { ol.points, .theme .summary { margin-left: 0; } }
+  ol.points li {
+    counter-increment: p; position: relative; padding: 14px 0 14px 34px;
+    border-top: 1px solid var(--line);
+  }
+  ol.points li:first-child { border-top: 0; padding-top: 4px; }
+  ol.points li::before {
+    content: counter(p); position: absolute; left: 0; top: 15px;
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft);
+    display: grid; place-items: center; line-height: 1;
+  }
+  ol.points li:first-child::before { top: 5px; }
+  ol.points .lead { display: block; font-size: 15.5px; font-weight: 640; color: var(--ink); letter-spacing: -0.005em; }
+  ol.points .detail { display: block; margin-top: 3px; font-size: 14.5px; color: var(--ink-soft); }
+  ol.points .detail em { color: var(--ink); font-style: italic; }
+
+  .aside { margin-top: 34px; border: 1px dashed var(--line); border-radius: var(--radius); padding: 16px 20px; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .aside .tag { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-faint); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; }
+  .aside .txt { font-size: 14px; color: var(--ink-soft); }
+  .aside .txt b { color: var(--ink); font-weight: 620; }
+
+  footer.foot { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-faint); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">AI-literacy series · Swedish · free · no sponsors</p>
+    <h1>What everyone should actually understand about AI</h1>
+    <p class="dek"><strong>Episode 1 is this whole map</strong> — one brief pass over every theme below. Each theme then becomes its own deep-dive later. The goal isn't to cover the news; it's to leave you able to judge it.</p>
+  </header>
+
+  <div class="lens">
+    <div class="mark">!</div>
+    <div class="body">
+      <b>The lens over everything: cut through the noise.</b>
+      <span>AI attracts a flood of money- and fear-driven voices. Most mean well; few add clarity. Every topic here is delivered to reduce confusion, not add to it.</span>
+    </div>
+  </div>
+
+  <nav class="glance">
+    <div class="rail">The five themes at a glance</div>
+    <ol>
+      <li><a href="#t1"><span class="n">1</span> What AI actually is</a></li>
+      <li><a href="#t2"><span class="n">2</span> Where it touches your life</a></li>
+      <li><a href="#t3"><span class="n">3</span> The risks</a></li>
+      <li><a href="#t4"><span class="n">4</span> What stays human</a></li>
+      <li><a href="#t5"><span class="n">5</span> Society &amp; power</a></li>
+    </ol>
+  </nav>
+
+  <section class="theme" id="t1">
+    <div class="th-head"><div class="num">1</div><h2>What AI actually is</h2></div>
+    <p class="summary">Enough to reason about it — deliberately no mechanics, no jargon. What it is, and why it won't stop getting better.</p>
+    <ol class="points">
+      <li>
+        <span class="lead">“AI” is just the everyday word now</span>
+        <span class="detail">What used to be split into “LLMs”, “generative AI”, “transformers” is now simply “AI” in normal speech. Name that once and move on — no neural networks, no training, no “how it works” under the hood.</span>
+      </li>
+      <li>
+        <span class="lead">You judge it by what you observe, not by theory</span>
+        <span class="detail">You don't need to understand the internals to understand the capability. What it can do <em>is</em> what you see when you use it, what tools built on it do, and what credible people demonstrate it doing.</span>
+      </li>
+      <li>
+        <span class="lead">“It's just autocomplete” is a comforting rationalization</span>
+        <span class="detail">It may even be technically true today — but it's a way to feel safe, not a reason to be. Assume each new version gets better across the board. Nothing is fixed; the only direction is forward.</span>
+      </li>
+      <li>
+        <span class="lead">It keeps getting smarter at concrete things</span>
+        <span class="detail">A growing list, not a fixed ceiling: <em>execution</em> (writing code, summaries, reports), <em>reasoning</em>, and <em>orchestration</em> — coordinating multi-step work rather than answering one prompt.</span>
+      </li>
+      <li>
+        <span class="lead">Emergent capability</span>
+        <span class="detail">From simple building blocks, more complex behavior just appears — abilities nobody explicitly designed in, showing up on their own as the systems scale.</span>
+      </li>
+      <li>
+        <span class="lead">Open vs. closed models</span>
+        <span class="detail">The one structural distinction worth knowing — who can run it, who controls it. Local-vs-cloud and quality tradeoffs are skipped on purpose; not relevant for this audience.</span>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t2">
+    <div class="th-head"><div class="num">2</div><h2>Where it already touches your life</h2></div>
+    <p class="summary">Not a future technology — grounding it in things you already do, at home and at work.</p>
+    <ol class="points">
+      <li>
+        <span class="lead">AI you already use without realizing it</span>
+        <span class="detail">Recommendations, spam filters, maps, fraud detection, photo sorting — it's been quietly embedded in daily tools for years, long before the chatbots.</span>
+      </li>
+      <li>
+        <span class="lead">Generative tools: real uses, real limits</span>
+        <span class="detail">Where they're genuinely useful today, and where they fall down — set honestly, so expectations match reality instead of the hype.</span>
+      </li>
+      <li>
+        <span class="lead">AI at work: automation vs. augmentation</span>
+        <span class="detail">Two very different futures: replacing a task outright, versus amplifying a person doing it. Which one you're looking at changes everything about how you react.</span>
+      </li>
+      <li>
+        <span class="lead">The breadth of use cases</span>
+        <span class="detail">Across the whole spectrum — from trivial time-savers to genuinely transformative — so the picture isn't anchored to one flashy example.</span>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t3">
+    <div class="th-head"><div class="num">3</div><h2>The risks</h2></div>
+    <p class="summary">The real downsides, ordered from what touches you personally to what's societal — clear-eyed, not alarmist.</p>
+    <ol class="points">
+      <li>
+        <span class="lead">Privacy — what happens to what you type</span>
+        <span class="detail">Where your inputs actually go, who stores them, and what it means to paste something sensitive into a tool you don't control.</span>
+      </li>
+      <li>
+        <span class="lead">AI-enabled scams &amp; fraud</span>
+        <span class="detail">The same capabilities make scams cheaper, more convincing, and possible at scale — voice clones, tailored phishing, fake urgency.</span>
+      </li>
+      <li>
+        <span class="lead">Deepfakes &amp; misinformation</span>
+        <span class="detail">When anything can be fabricated convincingly, the hard part becomes trusting what you see and hear at all.</span>
+      </li>
+      <li>
+        <span class="lead">Bias in automated decisions</span>
+        <span class="detail">When a system decides <em>about</em> you — a loan, a job screen, a flag — the stakes of getting it quietly wrong are high and hard to appeal.</span>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t4">
+    <div class="th-head"><div class="num">4</div><h2>What stays human — and what you'll need</h2></div>
+    <p class="summary">The central, personal question: in a world of capable AI, what's still yours to do — and on what timeline?</p>
+    <ol class="points">
+      <li>
+        <span class="lead">Human vs. AI capability trajectory</span>
+        <span class="detail">Where each is ahead right now, and — more importantly — where the two curves are heading. Touched here; a full deep-dive gets its own episode.</span>
+      </li>
+      <li>
+        <span class="lead">Wave 1 → Wave 2: from solo tasks to swarms</span>
+        <span class="detail">The first wave replaced things humans did <em>alone</em> and struggled with things people do <em>together</em>. The next wave is orchestrating swarms of agents — so it reaches straight into collaboration itself.</span>
+      </li>
+      <li>
+        <span class="lead">Any “what's still needed?” answer needs a time horizon</span>
+        <span class="detail">1, 6, 24, 144 months give wildly different answers — the question is meaningless without one. Personal take: guessing past roughly <em>24 months</em> is futile, and pretending otherwise is where a lot of confusion comes from.</span>
+      </li>
+      <li>
+        <span class="lead">Prompt engineering is dying</span>
+        <span class="detail">Tools are fast heading toward not needing you to be painstakingly explicit. What survives is knowing what's <em>correct</em> versus not — your expertise and taste stay essential even as the phrasing stops mattering.</span>
+      </li>
+      <li>
+        <span class="lead">Core human traits to lean into</span>
+        <span class="detail">Human connection, clarity of thought, and being <em>more</em> technically enabled — not less. Probably more than just these three, but that's the direction to move.</span>
+      </li>
+    </ol>
+  </section>
+
+  <section class="theme" id="t5">
+    <div class="th-head"><div class="num">5</div><h2>The big picture — society &amp; power</h2></div>
+    <p class="summary">Zooming out from the individual: where the money, control, and genuinely open questions sit.</p>
+    <ol class="points">
+      <li>
+        <span class="lead">Jobs &amp; the economy: hype vs. realistic</span>
+        <span class="detail">Separating the sweeping predictions from what the evidence actually supports about work and the economy.</span>
+      </li>
+      <li>
+        <span class="lead">Who controls this, and why it matters</span>
+        <span class="detail">A handful of organizations hold most of the capability. Who they are — and what that concentration means for everyone else.</span>
+      </li>
+      <li>
+        <span class="lead">The EU AI Act: what it actually means for you</span>
+        <span class="detail">Cutting the regulation down to the parts that touch a normal person or business in practice, not the legal text.</span>
+      </li>
+      <li>
+        <span class="lead">The AGI / superintelligence debate</span>
+        <span class="detail">Handled honestly as genuinely unresolved — the “nobody actually knows yet, including me” territory, kept clearly separate from what we do know.</span>
+      </li>
+    </ol>
+  </section>
+
+  <div class="aside">
+    <span class="tag">On demand</span>
+    <span class="txt"><b>Glossary teaser</b> — model, product, MCP, skills, API, CLI. A separate video, made only if people ask for it.</span>
+  </div>
+
+  <footer class="foot">
+    <span>The map = Episode 1. Themes 1–5 read top to bottom, concrete → speculative.</span>
+    <span>Series overview</span>
+  </footer>
+
+</div>
+</body>
+</html>

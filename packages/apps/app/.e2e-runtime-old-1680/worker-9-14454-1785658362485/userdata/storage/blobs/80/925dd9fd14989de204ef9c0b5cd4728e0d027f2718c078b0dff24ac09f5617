@@ -1,0 +1,64 @@
+# Monday 2026-06-15 — BCDR + IR exercise pack (turnkey)
+
+**Why this matters:** SOC 2 Type II needs these controls to *operate in-period* (2026-05-04 → 2026-08-04) WITH EVIDENCE. The 2026-05-21 IR brief didn't count because no conducted-session record exists. The evidence template (§3) is the deliverable — performing the exercise without filling it in is what went wrong last time.
+
+**Timing:** Monday 2026-06-15 is clean — before the July 4 IR anniversary and the July 22 DR anniversary; hard backstop is Aug 4. No "late" gap.
+
+**Two controls, mapped:**
+- IR tabletop → CC9 (and CC7 incident response). Last conducted: 2025-07-04. Policy: description says annual; IR plan states no cadence.
+- DR tabletop + backup-restore test (one combined exercise) → CC4 + CC9. Last: 2025-07-22. BCDR plan: "disaster recovery test, including a test of backup restoration processes, shall be performed on an annual basis."
+
+---
+
+## 1. IR Tabletop (discussion-based, ~60 min)
+
+**Scenario (fresh — don't reuse 2025's SharePoint/embeddings ones):** A dependency-confusion alert fires from GitHub; a maintainer token appears in a public gist; within the hour customers report the platform returning other tenants' data in AI outputs. Treat as a suspected credential compromise + cross-tenant data exposure.
+
+**Objectives:** validate IR plan triage/severity classification; confirm roles (who declares an incident, who is Security Delegate, who comms to customers under the DPA); test the decision to revoke credentials + rotate secrets in Key Vault; surface gaps.
+
+**Facilitator inject questions:**
+1. Who declares the incident and assigns severity? Where is that recorded (Linear "Security Incident Response")?
+2. First containment action for a leaked token — who has authority, what's the rotation path (Key Vault, workload identities)?
+3. Cross-tenant exposure: what's the GDPR/DPA customer-notification trigger and timeline? Who drafts it?
+4. How do you confirm scope — which orgs, which data? What logs (Log Analytics, pgaudit)?
+5. When do you stand down, and who signs off the post-incident review?
+
+---
+
+## 2. DR Tabletop + Backup-Restore Test (~90 min total)
+
+**Part A — DR tabletop (~45 min).** Scenario: the production PostgreSQL Flexible Server is lost (accidental drop / region disruption in the primary Azure region). Walk recovery: detection → decision to restore → restore from Azure automated backup (retention 14 days) → app/worker reconnection → validation → customer comms. Discuss RTO/RPO expectations vs. the actual config (geo-redundant backup = false, single-zone, Burstable SKU).
+
+**Part B — backup-restore TEST (~45 min, technical, NON-DESTRUCTIVE).** This is the part auditors weight most.
+- Restore the latest automated PostgreSQL backup **into an isolated/throwaway target** — NEVER touch production.
+- Record: backup timestamp used, restore start/finish (→ measured RTO), data currency (→ measured RPO), and an integrity check (row counts / a known recent record present).
+- Screenshot the Azure restore operation + completion. Tear down the test instance after.
+
+---
+
+## 3. Evidence-capture template (FILL DURING each session — this is the artifact)
+
+```
+Exercise type:        [IR tabletop | DR tabletop + backup-restore test]
+Date / time / dur:    2026-06-15, __:__–__:__ CEST
+Facilitator:
+Participants (name + role):
+Scenario presented:
+Discussion timeline (decisions as they were made, with times):
+Backup-restore measured results (DR only): backup used ____ | RTO ____ | RPO ____ | integrity check: pass/fail
+Gaps / weaknesses identified:
+Action items (owner + due date) → file in Linear:
+Lessons learned:
+Plan revisions needed (IR plan / BCDR plan):
+Sign-off (Security Delegate):
+```
+
+Store each completed record in its dated Drive folder (mirror the 2025 structure under `08 - Incidents & Disaster Recovery`).
+
+---
+
+## 4. After Monday (pre-issuance description refresh)
+- CC4: update backup-restore "most recent exercise" → 2026-06-15.
+- CC9: update "most recent IR tabletop" → 2026-06-15 (and DR tabletop → 2026-06-15); drop the stale 2025-07-04 / 2025-07-22.
+- File action items in Linear; attach evidence in Vanta against the mapped controls.
+- Optional: one-line confirm to Prescient that both annual exercises ran in-period.

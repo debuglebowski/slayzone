@@ -1,0 +1,43 @@
+# Reset ChatGPT Desktop App Credentials (macOS, Terminal)
+
+Run each step yourself. Steps 4–5 are irreversible — do step 3 first.
+
+## 1. Confirm the bundle ID
+```
+osascript -e 'id of app "ChatGPT"'
+```
+Substitute whatever it returns for `com.openai.chat` below.
+
+## 2. Quit the app
+```
+osascript -e 'quit app "ChatGPT"'
+```
+
+## 3. Inspect before deleting (non-destructive)
+```
+ls -la ~/Library/Application\ Support/com.openai.chat ~/Library/Preferences/com.openai.chat.plist ~/Library/Caches/com.openai.chat 2>/dev/null
+security find-generic-password -s "ChatGPT" 2>/dev/null; security dump-keychain login.keychain-db 2>/dev/null | grep -i -B1 -A3 openai
+```
+
+## 4. Delete app data (irreversible — the actual reset)
+```
+rm -rf ~/Library/Application\ Support/com.openai.chat \
+       ~/Library/Preferences/com.openai.chat.plist \
+       ~/Library/Caches/com.openai.chat \
+       ~/Library/Saved\ Application\ State/com.openai.chat.savedState
+```
+
+## 5. Remove stored token from Keychain
+Run for each entry surfaced in step 3; adjust `-s` to the exact service name.
+```
+security delete-generic-password -s "ChatGPT" login.keychain-db
+```
+
+## 6. Reopen and sign in fresh
+```
+open -a ChatGPT
+```
+
+Notes:
+- If step 1's bundle ID or step 3's Keychain service name differs, swap in the real values before running 4–5.
+- The in-app route (Settings -> Account -> Log out) is cleaner if it works; use this only if logout is stuck or a full wipe is wanted.

@@ -1,0 +1,325 @@
+# Server Mode — Run SlayZone Backend on a Remote Host
+
+**Status**: planning · **Owner**: TBD · **Commit policy**: standard (per-phase PRs preferred for big surface area; ask before merging).
+
+This doc is a self-contained handoff. A fresh Claude Code (or human) session should be able to read this top-to-bottom and start executing without back-channel context.
+
+---
+
+## 1. Context — Why this exists
+
+Today SlayZone runs entirely as an Electron desktop app. Main process owns the SQLite DB, PTY processes, agent CLI subprocesses (Claude Code, Codex, Gemini, etc.), worktrees, and assets. Renderer talks to main via Electron IPC.
+
+**Problem**: starting an agent and closing the laptop kills the agent. There is no way to leave a long-running coding task working unattended.
+
+**Goal**: a backend that can run on a remote box (or locally), so a user can kick off an agent and walk away. First scope is *self-hosted* — the user provisions a server, points the Electron client at it, done. Hosted SaaS is not in scope.
+
+**Concrete deliverable for scope 1**: a publishable npm package (`@slayzone/server`) runnable via `npx @slayzone/server`. The Electron app gains a "Server URL" setting; default keeps current behavior (Electron spawns server as a child process). Switching to a remote URL connects over HTTP/WS instead.
+
+This work also makes a future web/mobile client possible, but those clients are explicitly **out of scope for now**. Electron remains the primary (and only) client.
+
+---
+
+## 2. Key Decisions (and what was rejected)
+
+These were settled in the planning conversation. Do not relitigate without checking with the user.
+
+| Decision | Chosen | Rejected | Why |
+|---|---|---|---|
+| Multi-tenancy model | **Process-level** (N server processes on one box, each w/ own port + DB dir) | Logical (single process, `user_id` col scopes data) | Process-level is bulletproof isolation, ~zero code cost, no leak risk. Logical = ~6-8 weeks work, query-audit minefield, only worth it for hosted SaaS or sharing features. Neither in roadmap. |
+| Auth | **Defer entirely** for scope 1 | Token / OAuth / password now | Server intended for trusted networks. Doc the assumption. Add later when hosting offering arrives. |
+| Web/mobile client | **Out of scope** | Build alongside server | Electron is the only reliable browser-rendering surface (per CLAUDE.md). Web client is hypothetical, do not design for it. |
+| PTY ownership | **Server owns** (local server → local PTY, remote → remote) | Client-owned, server proxy | Whole point is decoupling agent lifetime from client. |
+| Worktree ownership | **Server owns** (same as PTY) | — | Consistent w/ PTY. Implies remote worktrees are inaccessible to local fs tools — flagged in §10 unresolved. |
+| Server statefulness on restart | **PTYs die on restart** | Persistent (tmux-style detach) | Matches current Electron behavior. Big complexity add, defer. |
+| Migration tool direction | **Local → remote only** | Bidirectional | Scope-1 use case is one-way move. Add reverse later if needed. |
+| Offline mode | **Out of scope**, but use react-query in client refactor so it's possible later | Build offline-first now | Premature. react-query gives free path. |
+| Agent CLI provisioning | **User installs on server box** (their API keys, their CLI binaries) | Server bundles them | Aligns w/ self-hosted scope 1. |
+| User concept in DB | **Skipped** | `user_id` col scaffold | Process-level multi-tenancy makes it unnecessary. See first row. |
+
+---
+
+## 3. Audit Findings (state of the codebase as of 2026-05-04)
+
+These were established by exploration. Cite when making implementation decisions.
+
+### 3a. DB schema
+
+- 39 tables across `slayzone.sqlite` + 1 separate `slayzone.diagnostics.sqlite`.
+- **Zero `user_id` columns anywhere.** Latest migration version: 126.
+- All migrations live under `packages/domains/*/src/main/migrations/` (per-domain).
+- Single SQLite file per data dir. Connection pattern: shared `Database` instance per process.
+- Process-level multi-tenancy means we don't need to touch any of this.
+
+### 3b. Filesystem layout (~80% already isolated)
+
+| Root | Accessed via | Sites |
+|------|-------------|-------|
+| `userData` | `app.getPath('userData')` OR `SLAYZONE_DB_DIR` env | 12+ call sites |
+| `temp` | `app.getPath('temp')` | 3 sites |
+| `crashDumps` | `app.getPath('crashDumps')` | 1 site |
+| `downloads` | `app.getPath('downloads')` | 1 site |
+
+Inside `userData`:
+- `slayzone.sqlite` / `slayzone.dev.sqlite` — main DB
+- `slayzone.diagnostics.sqlite` — diagnostics
+- `assets/{taskId}/{assetId}` — task uploads
+- `backups/`
+- `project-icons/`
+- `Extensions/` — **hardcoded path, must fix**
+- `browser-extensions.json` — **hardcoded, must fix**
+
+Worktrees: NOT under `userData`. Created at user-supplied paths (e.g. sibling of project dir). Stored as relative string in `tasks.worktree_path`.
+
+The pattern `process.env.SLAYZONE_DB_DIR || app.getPath('userData')` is repeated at ~12 call sites. **Extract to a single utility**, otherwise it's fragile if any new site forgets the env var.
+
+### 3c. Sessions (already multi-tenant ready by accident)
+
+PTYs and chat sessions are already keyed by opaque IDs with no implicit "current user" anywhere:
+
+- `packages/domains/terminal/src/main/pty-manager.ts:134` — `Map<sessionId, PtySession>`. Every op takes `sessionId` explicitly.
+- `packages/domains/terminal/src/main/chat-transport-manager.ts:147` — `Map<tabId, Session>`.
+- Adapters (`agents/registry.ts`) are stateless; instantiated per-session.
+- Env vars (incl API keys) inherited at PTY spawn time, not stored on adapter.
+- `chat-handlers.ts:330` enforces `(taskId, cwd, mode)` identity guard.
+- Persistence keyed by `(tabId, seq)` composite PK.
+
+→ Conclusion: when we add a server abstraction layer, sessions just work. No refactor needed for isolation.
+
+### 3d. Existing transport surfaces
+
+- **IPC handlers**: scattered across `packages/domains/*/src/main/*-handlers.ts`. These are the routes we need to mirror as HTTP endpoints.
+- **REST API already exists partially**: `packages/apps/app/src/main/rest-api/**` (see `.plans/wave0-split-mcp-server.md`). MCP-related, but the pattern + plumbing is reusable.
+- **Renderer notifications**: `notifyRenderer()` (`packages/apps/app/src/main/notify-renderer.ts`) + `broadcastToWindows()` (`broadcast-to-windows.ts`). These need a WS-backed sibling.
+- **CLI → app notify**: already REST-based (`POST /api/notify` per CLAUDE.md). No `watchDatabase` polling. Good template.
+- **MCP server**: dynamic-port aware; writes bound port to `settings.mcp_server_port` for CLI discovery. Same pattern works for the new HTTP server.
+
+### 3e. WebContentsView (browser panels)
+
+`packages/domains/browser/` uses Electron's `WebContentsView` to render embedded browser panels (per memory + `feedback_pinch_zoom_wcv.md`, `feedback_webcontentsview_zorder.md`). **This is Electron-native; there is no remote equivalent.** When the user is on a remote server, the browser panel feature must either (a) be disabled, (b) render in a real browser tab via the Electron client locally, or (c) be redesigned. **Open question — see §10.**
+
+---
+
+## 4. Phased Plan
+
+Each phase is a coherent merge unit with a verifiable end state. Don't combine phases unless you have a strong reason.
+
+### Phase 0 — Path & port hardening
+
+Make every fs root and bound port honor environment variables. Process-level multi-tenancy depends on this.
+
+**Tasks:**
+- [ ] Create `getDataRoot()` utility. Likely lives in `packages/shared/paths/` (new) or an existing `@slayzone/shared` package — check first.
+- [ ] Replace ~12 sites of `process.env.SLAYZONE_DB_DIR || app.getPath('userData')` with `getDataRoot()`.
+- [ ] Fix hardcoded `Extensions/` and `browser-extensions.json` paths (browser domain).
+- [ ] Audit `app.getPath()` call sites. Electron-only packages may keep them; any code destined for the server package must not depend on Electron.
+- [ ] Confirm `SLAYZONE_PORT`, `SLAYZONE_MCP_PORT` honored at every bind site. Add `SLAYZONE_HOST` (default `localhost`).
+- [ ] Smoke test: run two `pnpm dev` instances side-by-side with different `SLAYZONE_DB_DIR` + `SLAYZONE_PORT`. Verify zero data crossover.
+
+**Done criteria:** can spin up two isolated dev instances on one machine.
+
+### Phase 1 — Domain extraction (decouple from Electron)
+
+Lift main-process logic into framework-free packages. Same code must be runnable from Electron main *or* from a plain Node process.
+
+**Tasks:**
+- [ ] Per-domain audit. For each `packages/domains/*/src/main/`, list every Electron import (`app`, `BrowserWindow`, `ipcMain`, `webContents`, etc.).
+- [ ] Replace `app.getPath()` with `getDataRoot()` (Phase 0 dep).
+- [ ] Replace `BrowserWindow.webContents.send()` with an event-emitter abstraction. Two impls: Electron-IPC (for current desktop) and WS-broadcast (for server). Define interface in shared transport package.
+- [ ] Move pure logic into `packages/domains/*/src/server/` (or rename `main` → `server` and keep Electron-specific glue in a thin wrapper). Decide naming — check existing convention.
+- [ ] `packages/domains/auto-updater/` stays Electron-only.
+
+**Done criteria:** every domain's logic compiles and runs in a plain Node process. Unit tests run without booting Electron.
+
+### Phase 2 — Transport layer
+
+Build HTTP + WS layer that shadows current IPC. Run both side-by-side during transition.
+
+**Tasks:**
+- [ ] Create `packages/shared/transport/`. Defines: route registry (zod schemas), HTTP server adapter (likely Hono — confirm by checking what `rest-api/` already uses), WS server adapter, matching client SDK.
+- [ ] Per IPC handler: define a route schema, mount HTTP endpoint, write parity test. Generate OpenAPI artifact.
+- [ ] WS event protocol for streaming: PTY data, agent events, task changes, `tasks:changed` broadcasts. Must replace `notifyRenderer` + `broadcastToWindows`.
+- [ ] **Compat layer**: keep IPC handlers live, register HTTP routes that delegate to the same backing functions. Both transports do identical work. This is the safety net during cutover.
+
+**Done criteria:** every action in the app has a working HTTP/WS equivalent that produces identical DB state. Parity test matrix green.
+
+### Phase 3 — Server package
+
+Publishable npm package.
+
+**Tasks:**
+- [ ] New package: `packages/apps/server/`. Add to pnpm workspace.
+- [ ] Add to `electron.vite.config.ts` `externalizeDepsPlugin({ exclude: [...] })` if it gets imported by the Electron main bundle (per memory: missing this breaks runtime).
+- [ ] `bin/slayzone-server.js` — npm bin entry.
+- [ ] `src/index.ts` — boot: bind port (`SLAYZONE_PORT`, default ?), init DB at `getDataRoot()`, start MCP, mount HTTP+WS, print banner.
+- [ ] Banner must include: bound URL, data dir, version, **trusted-network warning**.
+- [ ] Lifecycle: handle SIGTERM/SIGINT — drain WS, kill PTYs, close DB, exit clean.
+- [ ] Config surface: `SLAYZONE_PORT`, `SLAYZONE_DB_DIR`, `SLAYZONE_HOST`, `SLAYZONE_MCP_PORT`. CLI flags as alternative to env.
+- [ ] Publishing config — keep unpublished initially (`"private": true`) until ready.
+- [ ] Cross-platform sanity check: macOS, Linux, Windows. Node 20 + 22.
+
+**Done criteria:** `cd packages/apps/server && node bin/slayzone-server.js` boots, `/health` returns 200, data dir respected.
+
+### Phase 4 — Electron client retarget
+
+Replace IPC client with HTTP+WS client. Add server URL setting.
+
+**Tasks:**
+- [ ] Add react-query (TanStack Query) to renderer. Wrap existing data hooks. (Memory note: `useTasksData` exposes `window.__slayzone_refreshData` — keep this contract working.)
+- [ ] Replace IPC bindings in `packages/apps/app/src/preload/index.ts` with HTTP client wrappers. Or keep preload thin and have renderer talk HTTP directly — decide based on what's clean.
+- [ ] WS client for streams (PTY, agent events, broadcasts).
+- [ ] Settings UI: "Server URL" field. Default: empty (= local mode = spawn child).
+- [ ] **Local mode** behavior: Electron main spawns `@slayzone/server` as a child process on app start, picks free port, points renderer at `http://localhost:<port>`. Child dies when Electron exits. (This preserves the current single-process UX.)
+- [ ] **Remote mode** behavior: user enters URL, Electron skips child spawn, connects directly. Health check on connect.
+- [ ] Mode-switch UX: changing URL prompts reload. Migrate-data button visible if switching from local to remote.
+
+**Done criteria:** Electron app works identically to today in local mode (no perceptible regression). Switching to remote URL works against a `npx @slayzone/server` running elsewhere.
+
+### Phase 5 — Migration tool
+
+One-way: local data → running remote server.
+
+**Tasks:**
+- [ ] CLI command (likely under `packages/apps/cli/src/commands/migrate.ts` — confirm path). Invoke as `slay migrate --to <server-url>`.
+- [ ] Tar local SQLite (closed cleanly first) + `assets/` + `project-icons/` + `backups/`. Worktrees: complex (often outside `userData`) — decide whether to copy or just rewrite paths.
+- [ ] POST archive to server `/migrate/import`. Server validates, imports, returns receipt.
+- [ ] Worktree path strategy: server-side worktree root = `getDataRoot()/worktrees/<taskId>/`. Migration rewrites `tasks.worktree_path` to match. (Open question — §10.)
+- [ ] Dry-run flag: produce a report (what would copy/rewrite/skip) without writing.
+- [ ] Integrity check: round-trip checksums on assets, row counts on tables.
+
+**Done criteria:** migrate a real local userdata to a remote server, point Electron at the server, all tasks/projects/worktrees present and functional.
+
+---
+
+## 5. Test Strategy
+
+Comprehensive coverage was the original ask. Test layers:
+
+| Layer | What | Where to add |
+|-------|------|--------------|
+| **fs/env hardening** (Ph 0) | Two server processes side-by-side, different env, zero data crossover. Extensions path derived. No hardcoded ports remain. | New unit test in shared/paths package. Smoke script under `scripts/`. |
+| **Domain pkgs** (Ph 1) | Unit tests run without Electron. Real SQLite tmpfile (per project convention, no mocked DB — see memory `feedback_no_mock_db_in_tests`-style guidance). | Per-domain test files. |
+| **HTTP contract** (Ph 2) | Zod schema validation per route. OpenAPI export buildable. Per-route happy path + 4xx + 5xx. | New `packages/shared/transport/` test suite. |
+| **WS protocol** (Ph 2) | Event order. Backpressure (slow client doesn't OOM server). Reconnect — define behavior: fresh subscribe, no auto-replay. PTY byte fidelity (incl ANSI sequences). Resize event propagation. | New WS test suite. |
+| **Compat layer** (Ph 2) | Same op via IPC vs HTTP yields identical DB state. Parity matrix per handler. This is the cutover safety net. | New parity test under `packages/apps/app/test/`. |
+| **Server pkg** (Ph 3) | Boot/bind/SIGTERM/SIGINT. Port-in-use returns clean error. Trusted-net banner present in stdout. Cross-platform: macOS+Linux+Windows × Node 20/22. | New `packages/apps/server/test/`. CI matrix. |
+| **Electron client retarget** (Ph 4) | Local mode: Electron spawns + connects to child server. Remote mode: connects to URL, no child. Switching modes preserves UI state where possible. react-query cache invalidation works on `tasks:changed`. | Extend `packages/apps/app/e2e/`. |
+| **E2E (existing)** | Current Playwright-Electron suite must keep passing. Now exercises HTTP path under the hood. | `packages/apps/app/e2e/` — should require minimal changes if compat layer is right. |
+| **Migration tool** (Ph 5) | Round-trip: local DB → server → identical content (row counts, asset checksums, worktree paths rewritten correctly). Dry-run produces report without writes. Concurrent access during migration handled or refused. | New `packages/apps/cli/test/migrate.test.ts`. |
+| **Perf (light)** | 10 concurrent PTYs, 100 msg/sec WS throughput, memory ceiling stays bounded over 10 minutes. | Bench script under `scripts/`. |
+| **Lifecycle** | Server kill mid-PTY-stream → client gets clean disconnect, not OOM/hang. Long-running PTY survives until client reconnect or server SIGTERM. | E2E. |
+
+**Note on TDD** (per CLAUDE.md): for bug fixes write failing test first. For this feature work, contract tests (Phase 2) and parity tests should be written before flipping the cutover, not after.
+
+---
+
+## 6. Critical Files
+
+### Existing (will be modified)
+
+- `packages/apps/app/src/main/index.ts` — Electron boot. Will spawn `@slayzone/server` as child in local mode.
+- `packages/apps/app/src/main/mcp-server.ts` + `rest-api/**` — pattern to copy for new HTTP routes.
+- `packages/apps/app/src/main/notify-renderer.ts` + `broadcast-to-windows.ts` — needs WS-backed sibling for remote clients.
+- `packages/apps/app/src/preload/index.ts` — IPC bindings → HTTP client (or remove preload bridge entirely if renderer talks HTTP directly).
+- `packages/domains/terminal/src/main/pty-manager.ts` — already session-keyed. No structural changes; just lift Electron-specific bits.
+- `packages/domains/terminal/src/main/chat-transport-manager.ts` — ditto.
+- `packages/domains/terminal/src/main/chat-handlers.ts` — IPC handlers → HTTP routes.
+- `packages/domains/browser/**` — WCV-based, see §10 open question.
+- `electron.vite.config.ts` — `externalizeDepsPlugin({ exclude })` must include any new domain pkgs (per CLAUDE.md memory; missing this fails at runtime).
+- ~12 call sites of `process.env.SLAYZONE_DB_DIR || app.getPath('userData')` — wrap.
+
+### New
+
+- `packages/shared/paths/` (or extend existing shared) — `getDataRoot()`, port helpers.
+- `packages/shared/transport/` — HTTP+WS server adapters, zod route registry, client SDK.
+- `packages/apps/server/` — npm package, `bin/`, `src/index.ts`, banner, lifecycle.
+- `packages/apps/cli/src/commands/migrate.ts` — migration command.
+- `.plans/server-mode.md` — this doc.
+
+---
+
+## 7. Conventions to Follow
+
+Pulled from `CLAUDE.md`, `ARCHITECTURE.md`, `PHILOSOPHY.md`, and project memory. Non-exhaustive.
+
+- **Sustainability over simplicity**: pick the most robust long-term solution; never preserve a quick hack. But never drop existing functionality — migrate.
+- **Imports from package barrels only**, not deep file paths. (memory: `feedback_slayzone_barrel_imports`)
+- **No destructive git** without asking (memory: `feedback_no_destructive_git`). Manual edits to revert. No `--no-verify`. No branch switching without asking.
+- **Theming**: every color via theme tokens. No raw Tailwind palette classes (`bg-neutral-*` etc.) or hex (`bg-[#1a1a1a]`). Lint enforces (`pnpm lint:theme`). Server pkg has no UI so this rarely applies, but Electron client changes do.
+- **Conventional commits**: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`, `release:`. Scope optional, e.g. `feat(server): bind on host`.
+- **No auto-commit / no auto-publish**. Every commit and release needs explicit user approval. (memory: `feedback_no_auto_commit_v2`, `feedback_no_publish_without_approval`)
+- **Plan before implement**. Get approval on a plan file before writing code. (memory: `feedback_plan_before_implement`) — this doc is the plan.
+- **Read skill docs before slay CLI**. Always load the relevant skill (e.g. `slay-tasks`, `slay-assets`) before invoking `slay` commands. (memory: `feedback_read_skills_first`)
+- **CLI invocations need `--dev` flag** when interacting with running dev SlayZone (per CLAUDE.md). Task ID auto-injected from `$SLAYZONE_TASK_ID` if present.
+- **Caveman ultra mode** for chat in this project. Apply skill at session start. Code/commits/PRs/docs (like this file) stay normal. (CLAUDE.md)
+- **TDD for bug fixes**, write failing test first. For feature work like this, contract/parity tests precede cutover.
+- **E2E rules**: useRef + callback ref for DOM measurement (early returns kill `useEffect`). New tabs needed for fresh hook mounts (mounted-but-hidden tabs don't re-trigger effects). See CLAUDE.md "E2E Testing Rules" + extensive memory under `MEMORY.md` "E2E Testing".
+- **Migration numbering**: next is v127. Migrations live per-domain under `packages/domains/*/src/main/migrations/`. (Note: scope-1 doesn't add a migration — process-level isolation needs no schema change.)
+- **Vite externalization gotcha**: new domain pkgs MUST be added to `externalizeDepsPlugin({ exclude: [...] })` in `electron.vite.config.ts` or they fail at runtime.
+- **Dual-write for Provider Config** (v34+): legacy per-provider columns still written alongside `provider_config` JSON. Don't break this.
+- **Diagnostics in separate DB** (`slayzone.dev.diagnostics.sqlite` via `getDiagnosticsDatabase()`). Never write `diagnostics_events` to main DB.
+
+---
+
+## 8. Bootstrap for the Next Session
+
+If you (a fresh session) are starting work on this:
+
+1. Read this doc top to bottom.
+2. Read `CLAUDE.md`, `ARCHITECTURE.md`, `PHILOSOPHY.md` in repo root.
+3. Skim `.plans/wave0-split-mcp-server.md` — the REST API pattern there is what to extend.
+4. Pick the next phase (start at §4 Phase 0).
+5. **Get explicit approval from the user before starting Phase 1 onward**. Phase 0 is mechanical and low-risk. Phase 1+ are big surface-area changes — show your sub-plan and pause.
+6. **Do not commit without explicit approval.** Standard project rule.
+7. **Do not publish `@slayzone/server` to npm without explicit approval.** Keep `"private": true` until the user says ship.
+8. Memory files in `~/.claude/projects/-Users-Kalle-dev-projects-slayzone/memory/` contain user-specific feedback rules — load them via the auto-memory mechanism (already automatic in Claude Code).
+
+---
+
+## 9. Boundaries — Don't Do These
+
+- Don't add `user_id` columns. Multi-tenancy is process-level.
+- Don't add auth. Trusted-network model. Document it loud, don't implement.
+- Don't build a web client. Electron only.
+- Don't add TLS termination. User's reverse proxy concern.
+- Don't make WCV (browser panel) work over remote. Disable or fall through gracefully.
+- Don't add persistent PTY (tmux-style). Out of scope.
+- Don't backwards-compat shim if a clean break is fine — but during the IPC→HTTP transition, keep both transports until parity proven.
+- Don't drop existing functionality to simplify a migration. Always migrate, never delete-and-rewrite.
+
+---
+
+## 10. Unresolved Questions
+
+These need user input before the relevant phase starts. Don't guess.
+
+| # | Question | Phase | Default if unanswered |
+|---|----------|-------|------------------------|
+| 1 | WS or SSE for streaming? | Ph 2 | WS (bidir for PTY input) |
+| 2 | Default `SLAYZONE_HOST`: `localhost` or `0.0.0.0`? | Ph 3 | `localhost`, opt-in `0.0.0.0` |
+| 3 | Compat layer duration — keep IPC for entire migration (months) or rip per-phase? | Ph 2 | Keep until Phase 4 done |
+| 4 | Agent CLI install discovery — server checks PATH at boot and fails loud, or install-on-demand? | Ph 3 | Fail loud at boot |
+| 5 | Worktree root on server: `getDataRoot()/worktrees/<taskId>/`? Or user-configurable `SLAYZONE_WORKTREE_ROOT`? | Ph 0/5 | Env-overridable, default under `getDataRoot()` |
+| 6 | Asset upload size limit? | Ph 2 | 100MB per file, configurable |
+| 7 | **Browser panel (WCV)** — when client is on remote server, does the panel: (a) silently disable, (b) fall back to opening in system browser, (c) render locally in Electron only? | Ph 4 | (c) — local-Electron-only feature; hide UI when remote |
+| 8 | Migration tool: CLI flag (`slay migrate --to ...`) or in-app wizard? | Ph 5 | CLI first, wizard later |
+| 9 | When local-mode child server crashes, restart automatically or surface error to user? | Ph 4 | Auto-restart with backoff, surface on repeated fail |
+| 10 | Is local mode = embedded server in Electron main process, or always spawned as child? Spawning is cleaner but uses more RAM. | Ph 4 | Always spawn child (cleaner separation) |
+
+---
+
+## 11. Out of Scope (record so it doesn't drift back in)
+
+- Web client.
+- Mobile client.
+- Authentication / authorization.
+- TLS termination by SlayZone.
+- Logical multi-tenancy / `user_id` in DB.
+- Hosted SaaS offering.
+- Persistent PTYs across server restart.
+- Rate limiting.
+- Sandboxing (chroot/jail/container).
+- Sharing / teams / mentions / cross-user features.
+- Offline mode (but react-query laid down so it's reachable later).
+- Reverse migration (remote → local).
+- Cross-server migration (remote → remote).

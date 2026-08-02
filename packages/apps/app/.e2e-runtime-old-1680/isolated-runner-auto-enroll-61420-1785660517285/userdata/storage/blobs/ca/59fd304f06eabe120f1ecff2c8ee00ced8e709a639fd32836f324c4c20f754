@@ -1,0 +1,85 @@
+# IR Table-Top 2026 — Case Options
+
+Goal: pick one scenario that gets us through the May/June IR table-top with the **minimum effort to satisfy ISO 27001 A.5.24 / SOC 2 CC7.4 evidence**. All three below are 1-hour, virtual, facilitator-driven, and exercise the same IR Plan steps audit looks for. Last year's "Sharepoint document not processing" exercise sets the bar — these are deliberately at that level.
+
+## What "audit-minimum" means here
+
+The auditor wants to see, in the exercise doc:
+1. Date + facilitator + attendees
+2. A scenario the team had to respond to
+3. The IR Plan stages were walked: **report → severity → triage → containment → recovery → post-mortem**
+4. Findings + action items (Linear tickets ok)
+5. Signed/dated by Security Delegate
+
+That's it. No regulator notification drill required, no breach-decision needed. Severity P1 is the sweet spot — high enough to exercise the plan, low enough to wrap in 60 min.
+
+---
+
+## Case 1 — Stuck embeddings worker (recommended)
+
+**Pitch:** Direct sibling of last year's scenario. Customer-reported, AI-pipeline regression. Lowest prep cost.
+
+**Scenario (facilitator script, surface view):**
+> Two customers within 3 minutes report that "Generate insights" returns nothing in the Normain web app. CSM raises it in `#security`. CTO files a Security Event Report.
+
+**Hidden truth (facilitator only):**
+A new framework with ~120 long source docs hit the embedding worker; one job retries indefinitely, blocking the queue. Logs show "context window exceeded" 18 min ago, queue depth growing. Fix = drop the stuck row, then ship a prompt-size guard.
+
+**Severity:** P1 (availability impact, no data loss).
+**Tests:** event report → security channel → triage in DB/logs → containment (clear queue) → recovery (deploy guard) → customer comms (48h DPA clock not triggered, no PII leak).
+**Prep effort:** ~30 min — reuse 2025-07-04 structure.
+**Risk:** Looks like a re-run of last year. Auditor probably fine; team may feel it's repetitive.
+
+## Case 2 — Engineer commits Azure key to public GitHub
+
+**Pitch:** Different muscle than last year — credential exposure, fast rotation drill. Still small.
+
+**Scenario (surface view):**
+> GitHub secret-scanning alert hits `security@normain.com`: an Azure storage account key was pushed to a public repo at 09:47. The repo is an engineer's personal sandbox, not Normain's, but the key grants read on a dev storage account that contains synthetic customer documents.
+
+**Hidden truth:**
+Key was committed 14 minutes before detection. No external access in logs. Synthetic data only — but team has to confirm that, not assume it. Fix = rotate key, force-push remove, rerun secret scan, document.
+
+**Severity:** P1 (high exploitability, no confirmed exposure of real customer data).
+**Tests:** report channel (automated alert vs. human), Security Delegate ownership, P0 vs P1 call, breach-determination conversation (CEO + Security Delegate), GDPR triage (no PII → no notification), evidence preservation (the alert + git log).
+**Prep effort:** ~45 min — need to mock a GitHub secret-scanning alert email and one log line.
+**Risk:** Tempting to make it scarier; resist — keep it dev storage with synthetic data.
+
+## Case 3 — Phished SSO session on a low-privilege account
+
+**Pitch:** Exercises user-reporting path, account containment, and "what data was accessible." Slightly broader than Case 2.
+
+**Scenario (surface view):**
+> A sales rep DMs the CTO: they clicked a fake "Microsoft re-auth" link this morning, entered credentials + MFA push, then realized it was off. Their account had Google Workspace + Slack + read access to the customer CRM (HubSpot).
+
+**Hidden truth:**
+Attacker logged in once from a Helsinki IP at 08:12, opened the Gmail inbox, did not exfiltrate anything before the rep reported it (you can verify from Workspace audit log). Fix = revoke sessions, reset password, re-enroll MFA, scope the data the account could see.
+
+**Severity:** P1 (confirmed unauthorized access, contained quickly, no confirmed data exfil).
+**Tests:** user-reported (not automated) channel, P1 escalation, session containment, GDPR risk-assessment ("did personal data get exposed?"), 48h customer DPA clock review, post-mortem with awareness-training action.
+**Prep effort:** ~45 min — need a mock Workspace audit log line and a screenshot-style description of the phish.
+**Risk:** Phish is the most "real-feeling" — good engagement — but slightly more variables for the facilitator to track.
+
+---
+
+## Recommendation
+
+**Go with Case 1 (Stuck embeddings worker).** Reasons:
+- Lowest facilitator prep — the 2025 doc is a template you can clone almost line-for-line.
+- Auditor cares about *the plan was followed*, not scenario novelty. Annual cadence + documented exercise is the bar; variation is a "nice to have."
+- The team already knows the rhythm from last year, so the 1-hour budget is realistic.
+
+If you want a *little* novelty for the team's sake, **Case 2** is the next-cheapest and exercises a different code path in the IR Plan (breach-determination conversation, evidence preservation), which is worth showing once before the Year 1 surveillance audit in July.
+
+Avoid Case 3 unless you want to invest the extra 30 min of prep.
+
+## Phase 2 (after you pick)
+
+Once you choose, I'll generate a full mock report in the format of the 2025-07-04 doc:
+- Section 1–3: introduction, scenario, discussion questions filled in
+- Section 4: pre-written "Discussion & Conclusions" with placeholder findings
+- Section 5: empty meeting-notes block ready for Gemini transcript paste-in
+- Folder created under `11 / 01 - Incident Response Exercises / 2026-MM-DD - <title>`
+- Calendar invite body updated with link to the doc
+
+That gives you a doc you can drop straight into the meeting and only need to fill the live notes during/after.

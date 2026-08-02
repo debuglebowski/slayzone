@@ -1,0 +1,93 @@
+# IAC-199 — Authentication information
+
+**Vanta control**: IAC-199 · **ISO 27001:2022** A.5.17 · 2/3 tests passing
+**Owner (control)**: Kalle Hansson · **Owner (failing test)**: Dennis Landfors
+**Investigated**: 2026-04-30
+
+---
+
+## Situation
+
+Vanta runs 3 tests against IAC-199:
+
+| # | Test | Status | Notes |
+|---|---|---|---|
+| 1 | Company has an approved Access Control Policy | ✅ | Approved (Kalle) |
+| 2 | Company has an approved Information Security Policy (AUP) | ✅ | Approved (Dennis) |
+| 3 | **Password manager records** | ❌ | 1 machine flagged |
+
+**Failing test**: *Password manager records*
+> "This test verifies that all personnel workstations with Vanta Device Monitor installed have a password manager installed."
+
+**Failure detail** (only 1 of N managed Macs):
+- **Iko's MacBook Air** — serial `C02DTRAHQ6L4`
+- **Owned by**: Paul Nylund
+- **Due**: 2026-03-10 (overdue by ~7 weeks)
+- **Last test run**: ~7h ago
+
+**Root cause**: Vanta Agent on Iko's MacBook is not reporting an approved password manager. Either:
+1. The company password manager is not installed on the machine, OR
+2. It is installed but Vanta Agent doesn't detect it (older browser-only extension, sandboxed App Store version, agent needs reauth/restart)
+
+---
+
+## Policy basis (verified in Drive)
+
+**Source**: `[Normain] Access Control Policy.docx (1).pdf` v1.0.1 (Drive `1Ztu-C3cA9y6WzPM_SONZh5D0P62g-DQy`, 2025-07-28)
+
+Quote (Password Policy → Employee password requirements):
+> "Passwords must be created and protected using a **Company-provided password manager**"
+
+Policy does not name the tool. Drive evidence indicates **1Password** is the deployed tool:
+- `AgileBits-DPA-v4.6-02032025.pdf` (1Password vendor DPA)
+- `1Password license removed Francesca.png` (2026-01-01 admin screenshot)
+- Recurring 1Password admin-console screenshots (Jul 2025 → Jan 2026)
+
+---
+
+## Solution
+
+Single, low-effort fix. No policy work needed — policies are approved; failing test is a pure endpoint-state check.
+
+**Step 1 — Verify on the Mac (Paul/Iko, ~5 min)**
+- Open `1Password.app`. If absent → install via Normain MDM/self-service.
+- Sign in to the Normain 1Password tenant (login required for the policy spirit; Vanta only needs presence).
+- Confirm Vanta Agent: menu bar → Vanta → "Sync now".
+
+**Step 2 — Force re-scan**
+- Vanta → Tests → *Password manager records* → "Run test" (or wait <24h for next scheduled run).
+
+**Step 3 — Verify**
+- Test flips 2/3 → **3/3**. Control IAC-199 turns ✅.
+
+**Effort**: 10 min for Iko/Paul + 5 min Kalle to nudge & verify.
+
+**Vanta detection note**: Vanta scans for an approved password manager from a supported list. Install alone closes the test; login is not checked but is required for the policy to actually be met. Have Iko sign in too.
+
+---
+
+## Actions taken
+
+1. ✅ Opened Vanta IAC-199 control via slay browser CLI; identified failing test = *Password manager records*.
+2. ✅ Drilled into failing endpoint: Iko's MacBook Air (`C02DTRAHQ6L4`), owner Paul Nylund, due 2026-03-10 (overdue).
+3. ✅ Verified policy basis in Drive: Access Control Policy v1.0.1 (Drive `1Ztu-C3cA9y6WzPM_SONZh5D0P62g-DQy`).
+4. ✅ Cross-referenced 1Password as deployed tool via Drive (vendor DPA + license-mgmt screenshots).
+5. ⏸️ **No** comms sent — Slack/email actions require Kalle's confirmation.
+
+---
+
+## Recommended next action (for Kalle)
+
+Single Slack DM to Paul Nylund and/or Iko:
+
+> "Vanta is flagging Iko's MacBook Air (`C02DTRAHQ6L4`) for missing a password manager — overdue, blocking IAC-199 for the SOC 2 evidence pack. Could one of you install 1Password from the Normain tenant, sign in, and force a Vanta sync? Should clear in <24h."
+
+Re-check Vanta IAC-199 in 24h.
+
+---
+
+## Open questions
+
+- Iko's role / employment status — still active?
+- Has Iko ever had 1Password? (reinstall vs fresh setup)
+- MDM-pushable, or self-service install only?

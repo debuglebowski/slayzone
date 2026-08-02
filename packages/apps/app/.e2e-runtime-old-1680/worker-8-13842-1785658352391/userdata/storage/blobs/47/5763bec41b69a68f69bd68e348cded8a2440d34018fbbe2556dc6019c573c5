@@ -1,0 +1,120 @@
+# SlayZone Env Vars — Standalone Hub & Runner
+
+Every var surfaced by the full 4-cluster deep-dive, assessed for the standalone deploy surface. Dev/build/e2e/internal vars summarized at bottom.
+
+**Precedence everywhere:** `env var > SLAYZONE_RUNNER_CONFIG file (runner) > ~/.slayzone/config.json > generated/default`
+
+## Two orthogonal axes (why one abstraction isn't enough)
+
+- **`SLAYZONE_SUPERVISED`** — *who owns the env*: Electron host injects everything (`=1`) vs process resolves its own. Governs **path anchoring, config.json reads, secret gen-vs-supplied**. → the two Default columns below.
+- **`SLAYZONE_HOST` exposed** (non-loopback) — *is the client surface reachable off-box*. Governs **auth / network hardening**. → derived, NOT a column.
+
+Three deploy shapes prove neither axis alone suffices:
+
+| Shape | SUPERVISED | HOST exposed | paths from | auth |
+|---|---|---|---|---|
+| Desktop app | yes | no (loopback) | host-injected | off |
+| Fork sidecar | no | no (loopback) | own / CWD | off |
+| Remote hub | no | yes | own / CWD | **on** |
+
+Exposed-only can't split desktop↔fork (paths differ). Supervised-only can't split fork↔remote (auth differs). So: **supervised axis for paths, exposed axis for auth.** Deriving auth from *supervised* would break the standalone-but-loopback fork — do NOT.
+
+## Single-anchor consolidation (`SLAYZONE_ROOT`)
+
+Standalone collapses ALL path knobs into ONE optional var. `SLAYZONE_ROOT` (renamed from `SLAYZONE_HOME_DIR`) anchors BOTH hub + runner; everything derives. Default = **CWD** standalone, `$HOME/.slayzone` supervised.
+
+```
+SLAYZONE_ROOT  (default: CWD standalone)
+├── slayzone.sqlite     ← was SLAYZONE_DB_PATH / SLAYZONE_STORE_DIR
+├── config.json
+├── logs/
+└── runner/             ← creds (was SLAYZONE_RUNNER_CREDENTIALS_DIR)
+```
+
+Relocate everything = `cd /srv/slayzone && slayzone-hub` (or `SLAYZONE_ROOT=/srv/slayzone`).
+
+**Minimize legend:** 🟢 keep · 🟠 hide (subsumed/advanced override, code stays) · 🔴 delete
+
+## Operator knobs (things an operator actually sets/overrides)
+
+| Minimize | Category | Var (→ rename) | Purpose | Default (standalone) | Default (supervised) | config.json key | Action / change |
+|---|---|---|---|---|---|---|---|
+| 🟢 keep | Path | `SLAYZONE_ROOT` *(← `SLAYZONE_HOME_DIR`)* | **Single anchor** — config.json, DB, logs, creds all derive | **CWD** | `$HOME/.slayzone` | — | rename HOME_DIR→ROOT; standalone default CWD; DB+store+creds derive |
+| 🟢 keep | Hub | `SLAYZONE_PORT` | Client-facing tRPC/HTTP port | OS-assigned | host-assigned | `port` | none — shared, NOT renamed |
+| 🟢 keep | Hub | `SLAYZONE_HOST` | Bind addr for /trpc; **exposure axis source** (non-loopback → auth on) | `127.0.0.1` | `127.0.0.1` | — | none — shared; now also drives auth derivation |
+| 🟢 keep | Hub | `SLAYZONE_RUNNER_TRANSPORT_PORT` → **`SLAYZONE_HUB_RUNNER_TRANSPORT_PORT`** | `/runners` wss listener port (stable) | OS-assigned (stable via DB) | stable via DB | `runnerTransportPort` | **rename** (hub-only) |
+| 🟢 keep | Hub | `SLAYZONE_RUNNER_TRANSPORT_HOST` → **`SLAYZONE_HUB_RUNNER_TRANSPORT_HOST`** | `/runners` bind addr | `0.0.0.0` | `0.0.0.0` | — | **rename** (hub-only) |
+| 🟢 keep | Hub | `SLAYZONE_RUNNER_TRANSPORT_SECRET` → **`SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET`** | HMAC secret; runner-auth + token mint | gen+persist 256-bit | host-supplied | `runnerTransportSecret` | **rename** (hub-only) |
+| 🟢 keep | Hub | `SLAYZONE_HUB_TLS_PORT` | TLS `/trpc` https port (multi-hub) | OS-assigned | OS-assigned | — | none — already prefixed ✓ |
+| 🟢 keep | Hub | `SLAYZONE_HUB_PUBLIC_URL` | Public base URL advertised to remote MCP/hooks | derived loopback | derived loopback | `publicUrl` | none — already prefixed ✓ |
+| 🟢 keep | Runner | `SLAYZONE_JOIN_TOKEN` | First-contact enroll token — embeds hubUrl+cert+secret | — | host injects (auto-enroll) | `joinToken` | none |
+| 🟢 keep | Runner | `SLAYZONE_RUNNER_ALLOWED_ROOTS` | FS path-jail (security sandbox); every fs/git/proc path checked | **none → fs refused** (fail-closed) | host injects `homedir()` | — | optional: derive **CWD-subtree** default (narrow, NOT homedir); keep fail-closed override |
+| 🟢 keep | Runner | `SLAYZONE_RUNNER_NAME` | Display name on hub (dedup key) | hostname | `local-runner` (host sets) | `runnerName` | none |
+| 🟢 keep | Runner | `SLAYZONE_RUNNER_CREDENTIALS_DIR` | Post-enroll cred store dir (fine-grained override) | **`<ROOT>/runner`** | `<dataRoot>/runner-creds` | — | default derives from ROOT; **fix**: credential-store honors ROOT (raw os.homedir today) |
+| 🟢 keep | Runner | `SLAYZONE_RUNNER_CONFIG` | Path to per-host JSON config file | — | — (unused) | — | none |
+| 🟢 keep | Runner | `SLAYZONE_RUNNER_HEARTBEAT_MS` | Heartbeat interval (ms) — low-priority tuning | transport default | transport default | — | none |
+| 🔴 delete | Hub | `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` | Escape hatch for no-cipher plaintext cred storage | off (on if NODE_ENV=test) | off (host cipher present) | — | replace w/ runtime `cipher.isEncryptionAvailable()`; memory cipher in tests |
+| 🔴 delete | Hub | `SLAYZONE_DB_DIR` | Dup of STORE_DIR. ⚠️ precedence inverted vs artifacts/shared.ts | falls to STORE_DIR | host userData fallback | — | drop reads from hub `db.ts`/`artifacts/shared.ts`; keep app-only → retire |
+| 🔴 delete | Hub | `SLAYZONE_DB_NAME` | Filename never varies (now fixed const under ROOT) | `slayzone[.dev].sqlite` | (n/a) | — | drop read from hub `db.ts:41` |
+| 🔴 delete | Hub | `SLAYZONE_RUNNER_TRANSPORT_BASE_URL` | Loopback constant; runners use bearer not cookies | `http://127.0.0.1:8788` | `http://127.0.0.1:8788` | — | inline constant at composition.ts:904; remove env read |
+| 🔴 delete | Runner | `SLAYZONE_RUNNER_CAPABILITIES` | Stored, NEVER enforced | `pty,git,fs,proc` | `pty,git,fs,proc` | — | drop env read; hardcode full set at enroll |
+
+## Derived / not-overridable — NOT operator knobs (removed from list above)
+
+These aren't things an operator sets — the process computes them. Listed only to record the decision.
+
+| Var | Derived from | Resolves to | Note |
+|---|---|---|---|
+| `SLAYZONE_HUB_AUTH_REQUIRED` | **exposure axis** (`SLAYZONE_HOST` non-loopback) | loopback → off; exposed → on | Do NOT derive from SUPERVISED (breaks loopback fork). Drop the flag; auto-on when exposed. Tradeoff: loses exposed-but-trusted-VPN-off + loopback-behind-proxy-on edge cases |
+| `SLAYZONE_DB_PATH` | `SLAYZONE_ROOT` | `<ROOT>/slayzone.sqlite` | Code STAYS: supervised REQUIRES it (host passes exact path; `db.ts:32` throws if unset). Not a standalone knob |
+| `SLAYZONE_STORE_DIR` | `SLAYZONE_ROOT` | `<ROOT>` | Code STAYS: desktop app + supervised read it (`getTrpcDataRoot`, `ensureDataRoot`). Not a standalone knob |
+
+## Advanced overrides — technically overridable, off the main list
+
+Real env reads (env wins), but never set in a normal token deploy. Document as a footnote, not an operator knob.
+
+| Var | Normally from | Override use case |
+|---|---|---|
+| `SLAYZONE_HUB_URL` | join token (embeds it) | retarget a token to a moved hub / dial via tunnel hostname |
+| `SLAYZONE_HUB_CERT_SHA256` | join token (embeds it) | override cert pin for a wss-without-token path |
+
+## Dead / bug (verified — remove or fix)
+
+| Minimize | Var | Finding | Action / change |
+|---|---|---|---|
+| 🔴 delete (dead) | `SLAYZONE_SERVER_PORT` | `getServerPort()` defined + barrel-exported, zero callers. Superseded by SLAYZONE_PORT | remove `getServerPort` + barrel export |
+| 🔴 delete (dead) | `SLAYZONE_MCP_HOST` | Only written to docker/ssh child env; no reader (CLI hardcodes 127.0.0.1) | remove 2 write lines pty-manager.ts:987,1011 |
+| 🔴 delete (dead) | `SLAYZONE_RUNNERS_ENABLED` | Only set in one test; never read in prod. Hub always runs gateway | remove from install-handshake.test.ts:196 |
+| 🔴 delete (dead) | `SLAYZONE_HOOK_NAME` | Not an env var — JS `const='slayzone-notify'` | none (mislabeled); drop from env docs |
+| 🐛 bug | `SLAYZONE_AGENT_MODE` | 1 reader (`cliAuthor()`), 0 setters → CLI artifacts always tag `user` | fix `_shared.ts:8` → read `SLAYZONE_AGENT_ID` |
+| 🐛 bug | `SLAYZONE_DB_DIR` ↔ `STORE_DIR` | Precedence inverted → split dirs if both set | unify to STORE_DIR-wins in artifacts/shared.ts:12 |
+
+## Not operator-facing (code stays, omit from deploy docs)
+
+- **Machine-injected per-run** (agent/hooks/session): `SLAYZONE_HUB_TOKEN` (per-task bearer, ≠ JOIN_TOKEN), `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_AGENT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_TASK_ID`, `SLAYZONE_MCP_PORT`
+- **Fork sidecar only:** `SLAYZONE_RUNTIME_DIR`, `SLAYZONE_HOST_CAP_URL`, `SLAYZONE_HOST_REST_URL` (supervised host bridge)
+- **e2e-only:** `SLAYZONE_USER_DATA_DIR`, `SLAYZONE_BOOT_LOG_PATH`, `SLAYZONE_E2E_ALLOW_RUNNER`, `SLAYZONE_E2E_INSTALL_HOOKS`, `*_SETTINGS_PATH`/`*_HOOKS_PATH`/`OPENCODE_PLUGIN_PATH` (test redirects)
+- **Dev/build:** `SLAYZONE_DEV`, `SLAYZONE_REACT_DEV`, `SLAYZONE_PROFILE`, `SLAYZONE_CHROMIUM_PROD`, `SLAYZONE_DEBUG_BOOT`, `SLAYZONE_REGISTER_DEV_PROTOCOL`, `SLAYZONE_SIDECAR_HOT_RESTART`, `SLAYZONE_SHELL_DEV_SERVER`, `SLAYZONE_DISABLE_CLONEFILE`, `SLAYZONE_GC_*`, `*__` (build-time defines)
+
+## SLAYZONE_HUB_ rename map (hub-only vars)
+
+| Old | New |
+|---|---|
+| `SLAYZONE_RUNNER_TRANSPORT_PORT` | `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` |
+| `SLAYZONE_RUNNER_TRANSPORT_HOST` | `SLAYZONE_HUB_RUNNER_TRANSPORT_HOST` |
+| `SLAYZONE_RUNNER_TRANSPORT_SECRET` | `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` |
+| `SLAYZONE_HUB_TLS_PORT` / `SLAYZONE_HUB_PUBLIC_URL` | *(already prefixed — no change)* |
+
+**NOT renamed (shared w/ app+CLI):** `SLAYZONE_PORT`, `SLAYZONE_HOST`, `SLAYZONE_DB_PATH`, `SLAYZONE_STORE_DIR`, `SLAYZONE_DB_DIR`.
+
+## Net effect
+
+- **Path config** → one optional var (`SLAYZONE_ROOT`, default CWD). DB_PATH + STORE_DIR fold in (code stays for supervised).
+- **Auth** → derived from exposure (`SLAYZONE_HOST`), no flag.
+- Operator knobs: ~27 → **~13 keep**. Rest derived, advanced-override, deleted, or dead.
+
+Deploy collapses to:
+- **Hub:** *(optional `SLAYZONE_ROOT`)* + `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` (auto-gen) + optional port/public-url; expose via `SLAYZONE_HOST` → auth auto-on
+- **Runner:** `SLAYZONE_JOIN_TOKEN` + `SLAYZONE_RUNNER_ALLOWED_ROOTS`
+
+⚠️ All delete/derive/hide/rename/consolidate = behavior/code changes, SEPARATE from the original CWD-anchoring task.

@@ -1,0 +1,11 @@
+flowchart TD
+    A[Start] --> B{Coffee?}
+    B -->|Yes| C[Brew]
+    B -->|No| D[Tea]
+    C --> E[Code]
+    D --> E
+    E --> F{Bug?}
+    F -->|Yes| G[Debug]
+    F -->|No| H[Ship]
+    G --> E
+    H --> I[Sleep]

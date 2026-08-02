@@ -1,0 +1,14 @@
+# UC04 — Contract Clause Sweep
+
+**Persona**: Legal ops or M&A counsel scanning a contract portfolio for risk.
+
+**Scenario**: Across a bundle of contracts, find every instance of specific clause types (change-of-control, limitation of liability, IP assignment, termination-for-convenience) and classify them.
+
+**Question types**:
+- Exhaustive ("find every change-of-control clause")
+- Classification (clause type)
+- Citation fidelity (point to the exact paragraph)
+
+**Sample docs**: 5–10 publicly filed SEC EDGAR material contracts, plus a synthesized MSA bundle with planted clauses.
+
+**What this tests**: exhaustive search across many docs + accurate clause-level citation.

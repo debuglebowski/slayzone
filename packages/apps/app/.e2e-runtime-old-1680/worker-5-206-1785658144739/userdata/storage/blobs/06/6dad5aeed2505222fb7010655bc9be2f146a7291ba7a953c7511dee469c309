@@ -1,0 +1,5 @@
+# Circleback
+
+- Auth method: API key/webhook/fallback
+- Requirements: Confirm public API/webhooks; workspace access; fallback via Zapier/Make/email
+- Capabilities: Meeting-note intake, transcript/summary sync, trigger follow-up workflows

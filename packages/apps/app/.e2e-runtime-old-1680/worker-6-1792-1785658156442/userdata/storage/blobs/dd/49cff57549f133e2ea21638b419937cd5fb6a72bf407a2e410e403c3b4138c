@@ -1,0 +1,63 @@
+# Reopen-blank — ② REJECTED attempt (this session): client-owned snapshot
+
+> ⚠️ **NOT the old system.** This is a design we built **during this session and then discarded** — it never shipped. The true starting point is ① baseline (no restore at all).
+>
+> Progression: ① baseline → **② rejected client attempt (this doc)** → ③ shipped server design.
+
+## Idea in one line
+The **client** (the renderer / xterm window) takes a picture of its own screen, stores it in **browser localStorage**, and paints it back on reopen.
+
+## Where the "last screen" lives — on the CLIENT
+
+```mermaid
+flowchart TB
+  subgraph CLIENT["CLIENT (renderer)"]
+    direction TB
+    XT["xterm screen"]
+    LS["localStorage<br/>(per browser, per device)"]
+    RC["reconcile + provider table<br/>+ fallback spinner"]
+    XT -->|"serialize()"| LS
+    LS -->|"read → repaint"| XT
+    RC -.->|"clear/replace logic"| XT
+  end
+  subgraph SERVER["MAIN / future terminal server"]
+    PTY["PTY + output buffer<br/>(real source of truth)"]
+  end
+  CLIENT <-->|"thin pipe"| SERVER
+  classDef bad fill:#5b2330,stroke:#e0506a,color:#ffd7df;
+  class LS,RC bad
+```
+
+State + logic pile up **inside the client box**. The server owns the session but not its screen.
+
+## Flow
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant C as Client (xterm)
+  participant S as Server (PTY)
+  rect rgb(40,40,48)
+  note over C,S: Hibernate
+  C->>C: serialize screen → localStorage
+  S->>S: kill PTY (in-memory buffer lost)
+  end
+  rect rgb(40,40,48)
+  note over C,S: Reopen
+  U->>C: click Reopen
+  C->>C: read localStorage → repaint (instant)
+  S->>S: spawn CLI --resume
+  S-->>C: reprint transcript (live)
+  C->>C: reconcile: clear old screen / replace
+  end
+```
+
+## Why we moved away from it
+The terminal process is being **moved to a separate server**. That makes this design fight the direction:
+
+- 🔴 **State on the wrong side.** Session history lives in the *client's* localStorage. A reconnect, a second window, or a web client sees **nothing**.
+- 🔴 **Lossy copy.** The client re-derives a screen via xterm; the server already holds the **real output bytes**.
+- 🔴 **Logic drift.** "Which providers reprint on resume" lives in the **server's** adapters, but the client kept its own copy.
+- 🔴 **Heavy client.** Capture + store + restore + reconcile + a fallback spinner — all on the renderer.
+
+**Verdict:** works in one desktop window, but accumulates responsibility on the client right as the architecture is trying to thin it. → replaced by the server-owned design (other artifact).

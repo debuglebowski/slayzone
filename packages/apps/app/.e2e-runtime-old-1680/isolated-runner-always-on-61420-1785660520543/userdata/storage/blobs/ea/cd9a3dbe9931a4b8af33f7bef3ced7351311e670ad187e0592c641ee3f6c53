@@ -1,0 +1,59 @@
+# AI Provider Tycoon — Action Schema
+
+The contract between the LLM and the simulation. Every tick, an agent returns a response; this asset defines what's legal.
+
+## Decisions
+
+### Response envelope
+Agents reply with a structured object:
+
+```jsonc
+{
+  "reasoning": "...",         // free-text trace, surfaced to spectators
+  "actions": [
+    { "type": "buy_server", "...": ... },
+    ...
+  ]
+}
+```
+
+Reasoning is stored alongside parsed actions in the per-tick decision log.
+
+### Illegal-action policy
+**Reject with feedback.** Each illegal action is dropped and an error entry is written into next tick's input under `recent_errors` (e.g. `{action: "buy_server", reason: "tier 'xxl' not in enum"}`). Lets the agent self-correct without silently masking mistakes.
+
+Hard validation rules:
+- Unknown action type → reject.
+- Param out of range / wrong type → reject.
+- Conflicting actions in one response (e.g. two `set_price` for same model) → only the last one applies.
+
+### Token budget
+- **Input:** 8k tokens (state snapshot + recent events + schema).
+- **Output:** 2k tokens (reasoning + actions).
+Compact the state snapshot aggressively; expand only if playtests show agents starved for context.
+
+## Starter action set
+
+```
+- set_marketing_spend(amount)
+- set_research_spend(amount)
+- set_reliability_spend(amount)
+- allocate_compute(inference_servers, research_servers)   // capacity, not spend
+- start_research(target_quality: 1..10, est_cost)
+- buy_server(tier)
+- upgrade_server(server_id, target_tier)
+- set_price(model_id, price_per_token)
+- publish_model(model_id)
+- offer_to_buy(player_id, price)
+- solicit_buyer(player_id)
+- accept_offer(offer_id)
+- send_message(player_id, body)
+- attempt_hack(player_id)
+- throw_dirt(player_id)
+- tip_off(player_id)
+```
+
+## Open
+
+- Final action set + per-action param ranges (must reconcile with **2. Actions Catalog**).
+- Dependencies (e.g. can `publish_model` reference an in-progress research job?).

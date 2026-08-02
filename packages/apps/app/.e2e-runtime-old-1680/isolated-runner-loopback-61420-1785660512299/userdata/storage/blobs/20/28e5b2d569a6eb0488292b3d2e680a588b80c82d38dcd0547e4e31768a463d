@@ -1,0 +1,213 @@
+# Phase 5 — Migration wizard (in-app, Electron)
+
+> **Master plan**: `server-mode-implementation-plan.md` on parent task `1f788452-581e-429f-9427-a1d61e8a349b` (artifact id `1eecca69-7d62-4763-8300-a5e9e4fcf894`).
+>
+> **Read first** (in master): §1 Context, §2 Decisions, §3 Audit Findings, §7 Conventions, §9 Boundaries, §11 Deferred. Then this phase.
+>
+> Master is canonical for cross-cutting decisions; this artifact is the tactical home for this phase only.
+
+---
+
+## Phase scope
+
+One-way: local data → running remote server. Built into the Electron app, not a CLI command.
+
+**Tasks:**
+- [ ] Wizard UI in Electron settings → "Migrate to remote server". Steps: enter URL → health check → preview (counts of tasks/projects/artifacts/worktrees) → confirm → progress → done.
+- [ ] Tar local SQLite (closed cleanly first) + `artifacts/` + `project-icons/` + `backups/`. Worktrees: complex (often outside `userData`) — decide whether to copy or just rewrite paths.
+- [ ] Upload archive to server via tRPC mutation `migrate.import` (streaming). Server validates, imports, returns receipt.
+- [ ] Worktree path strategy: server-side worktree root = `getDataRoot()/worktrees/<taskId>/` (overridable via `SLAYZONE_WORKTREE_ROOT`). Migration rewrites `tasks.worktree_path` to match.
+- [ ] Dry-run option in wizard: produce a report (what would copy/rewrite/skip) without writing.
+- [ ] Integrity check: round-trip checksums on artifacts, row counts on tables.
+- [ ] On success: prompt user to switch to remote mode (Phase 4 toggle).
+
+**Done criteria:** migrate a real local userdata to a remote server, switch to remote mode, all tasks/projects/worktrees present and functional.
+
+---
+
+## Cross-phase dependencies
+
+- **Upstream**: Phase 3 (server hosts `migrate.import` tRPC mutation), Phase 4 (mode toggle to flip to remote post-migration).
+- **Downstream**: none (final phase). Note: §11c Deferred (bidirectional migration) — do NOT implement remote → local in this phase.
+
+---
+
+## Phase-specific notes
+
+### Audit summary (pre-implementation)
+
+- `getDataRoot()` lives in `packages/shared/platform/src/paths.ts:12`. Honors `SLAYZONE_STORE_DIR`.
+- Server pkg exists, Express + raw `ws`, tRPC mounted at `/trpc`. Boot in `packages/apps/server/src/boot.ts:221`.
+- Lockfile `{dataRoot}/server.lock` at `packages/apps/server/src/lockfile.ts`. Skipped when `embedded: true`.
+- Embedded supervisor in Electron `index.ts:1690-1745` gated on `server_mode` setting (`'local'` | `'remote'`).
+- Phase 2's chunked artifact-upload pattern was **NOT actually built** — current artifact upload is single-shot. Phase 5 invents the chunking.
+- Settings dialog in `packages/domains/settings/src/client/UserSettingsDialog.tsx:108-130`. `ServerSettingsTab.tsx` is single-screen.
+- Multi-step pattern reusable from `ProjectIntegrationSetupWizard.tsx` (numeric `step` state machine + Radix Dialog).
+- **Worktree gap**: `tasks.worktree_path` stores **absolute local fs paths** (`packages/domains/task/src/server/ops/shared.ts:314-317`). Default base = `{project}/..`. Settings override `worktree_base_path`. `SLAYZONE_WORKTREE_ROOT` env override per master plan **not implemented** yet — added in this phase.
+
+### Decisions confirmed
+
+- **Backups**: skip from archive (`userData/backups/`, not under `getDataRoot()`). Server creates own. Wizard intro mentions explicitly. Deviation from master §4 task list, intentional.
+- **Empty-server**: hard requirement — refuse migration if target has any tasks/projects.
+- **`SLAYZONE_WORKTREE_ROOT`**: implemented in this phase. Inserted into priority chain in `maybeAutoCreateWorktree`: env > settings > `{project}/..` default. Template expansion still applies (so env value can include `{project}` placeholder).
+- **Pre-migration backup**: auto-triggered as wizard step 5a (`backupCreate('pre-migration')`).
+- **`projects.path` remap**: not handled in wizard. Existing "Project path not found" UI covers it post-migration.
+- **Tar lib**: add `tar` npm dep on both Electron-main pack side and `@slayzone/server` untar side.
+- **Stop-the-world UX**: full modal block during steps 5–6.
+
+### Worktree migration policy
+
+**Rewrite (null out), do NOT copy.**
+
+Rationale:
+- Worktrees are git-linked dirs sharing `.git` w/ origin repo. Cannot copy a worktree without copying the whole repo. Out of scope.
+- Server can't reach user's local repo. Server-side worktrees presuppose the user provisions the repo on the server box themselves.
+- Master plan target (`getDataRoot()/worktrees/<taskId>/` w/ `SLAYZONE_WORKTREE_ROOT` override) is the **destination convention** for *future* worktrees on the server. We implement the env override here so the server creates new worktrees there. Existing local worktrees are abandoned (left on user's disk untouched).
+
+Migration semantics:
+- For all rows: set `tasks.worktree_path = NULL`.
+- `auto_create_worktree` flag preserved. Next time user opens task on server, server attempts worktree creation under env-overridden path — assuming the project's path resolves on server.
+- `projects.path` left as-is. Existing fallback UI ("Project path not found") covers the gap. Wizard preview shows count of projects whose path likely won't resolve on server (best-effort: flag any path NOT under `getDataRoot()`).
+- Local worktree dirs on user's disk: **not deleted**. User reclaims manually.
+
+### Wizard UX states
+
+Component: `packages/domains/settings/src/client/MigrateToRemoteWizard.tsx` (new). Triggered by "Migrate to remote server…" button in `ServerSettingsTab` (visible only when `server_mode === 'local'`). Modeled after `ProjectIntegrationSetupWizard.tsx`.
+
+Steps:
+
+1. **Intro** — explain one-way nature, what migrates, what doesn't (worktrees, diagnostics, backups). Note auto pre-migration backup. Buttons: Cancel | Next.
+2. **Server URL** — input `ws://host:port/trpc`. "Validate" runs `migrate.health` query. Errors surface inline: connection refused, timeout, schema-version mismatch, server already has data.
+3. **Preview** — `migrate.preview()` mutation locally + server probe. Shows: tasks N, projects N, artifacts N (size MB), project icons N, archive size estimate, worktrees-to-null N, projects-with-unresolvable-paths N (warning). Server-side: refuses if non-empty. Buttons: Back | Dry-run | Migrate.
+4. **Dry-run** (optional path from step 3) — full tar + upload + server-side validate, but `commit=false`. Server returns receipt.
+5. **Progress** — four sub-phases:
+   - a. Auto pre-migration backup (`backupCreate('pre-migration')`) — safety net, ~1s, lives in `userData/backups/`.
+   - b. Snapshot local DB (`VACUUM INTO`), enumerate files, build tar, sha256 each entry.
+   - c. Stream tar to server (chunked tRPC). Progress = bytes sent / total.
+   - d. Server unpack + validate + commit. Progress via `migrate.progress` subscription.
+6. **Done** — receipt summary (counts client vs server, all match green). Buttons: Stay local | Switch to remote now (flips `server_mode`, prompts reload).
+
+Error recovery states:
+- **Connection failure**: surface `error.message`, "Retry" button. UploadId expires server-side after 1h TTL.
+- **Version mismatch** (step 2): hard stop, instructs upgrade.
+- **Server non-empty** (step 3): hard stop, instructs `rm -rf` server data dir or fresh box.
+- **Embedded server can't suspend** (step 5a): hard stop, log to diagnostics, ask user to quit + relaunch.
+- **Upload aborted mid-stream**: server discards partial via TTL. Wizard offers "Retry from start" (no resume — scope-1 simplicity).
+- **Server-side commit error**: server rolls back transaction. Wizard surfaces, no client state damaged. Retry = restart wizard.
+- **Local snapshot failure** (disk full / lockfile contention): surface, no upload attempted.
+
+Stop-the-world during steps 5–6:
+- Wizard suspends embedded server before snapshot. Embedded supervisor stops and refuses restart while wizard active. Once user advances to "Done" + chooses Stay local, embedded restarts. If user chooses Switch to remote, embedded stays stopped and `server_mode` flips.
+- Active PTYs: killed by embedded server stop. User warned in step 1.
+- Whole-app interaction blocked during steps 5–6: modal w/ no escape until completion or explicit cancel.
+
+### Tar / upload streaming approach
+
+#### Archive contents
+
+Tar (uncompressed; SQLite already compresses poorly + we want fast pack/unpack) with `manifest.json` at root:
+
+```
+manifest.json           — { version, source: {dataRoot, hostname, slayzoneVersion}, tables: {tasks: N, ...}, files: [{path, sha256, bytes}] }
+db.sqlite               — VACUUM INTO snapshot (no WAL)
+artifacts/<taskId>/...  — full tree from getDataRoot()/artifacts/
+project-icons/...       — full tree from getDataRoot()/project-icons/
+.secret                 — integrations API keys (mode 0600, only if exists)
+```
+
+Excluded: `backups/` (local-only safety nets), `slayzone.diagnostics.sqlite` (telemetry), `worktrees/*` (N/A per policy), tmp/uploads-tmp dirs.
+
+#### Pack pipeline (client, Electron main)
+
+```
+1. Wizard sends migrate.preflight → server replies { uploadId, maxChunkBytes: 4MB, maxArchiveBytes: SLAYZONE_MAX_UPLOAD_BYTES default 2GB }.
+2. Pre-flight on local: VACUUM INTO {dataRoot}/migrations-tmp/{uploadId}/db.sqlite. Enumerate artifacts/ + project-icons/. Compute sha256 per file. Build manifest.
+3. Pipe tar.create({ ... }, [paths]) → Transform that buffers up to 4MB → emits chunks. Each chunk: sha256 computed, base64 encoded, sent via migrate.uploadAppend({ uploadId, seq, data, sha256 }).
+4. After last chunk: migrate.uploadFinalize({ uploadId, manifest, archiveSha256, archiveBytes }).
+5. Subscribe to migrate.progress(uploadId) for server-side phase emissions.
+6. Client cleans local migrations-tmp/{uploadId}/ on success or cancel.
+```
+
+#### Server side
+
+New router `packages/shared/transport/src/server/routers/migrate.ts` (added to root `appRouter`). Procedures:
+
+- `health` (query): `{ slayzoneVersion, schemaMigrationVersion, isEmpty: boolean }`.
+- `preflight` (mutation): generate `uploadId`, mkdir `{dataRoot}/migrations-tmp/{uploadId}/`, return chunk caps.
+- `uploadAppend` (mutation): seq + base64 + sha256. Decode, verify sha, append to `archive.tar`. Reject out-of-order seq.
+- `uploadFinalize` (mutation): full-archive sha + manifest. Validate sha. Untar to `unpacked/`. Validate manifest vs unpacked tree. Trigger commit (or stop if `dryRun: true`).
+- `progress` (subscription): observable emitting `{ phase, percent, message }` keyed by uploadId.
+- `commit` (internal helper): all-or-nothing transaction:
+  1. Acquire DB write lock.
+  2. Sanity: server DB still empty (re-check, race-safe).
+  3. ATTACH unpacked db.sqlite as `src`. INSERT INTO main.<table> SELECT * FROM src.<table> per table.
+  4. Rewrite: `UPDATE tasks SET worktree_path = NULL`.
+  5. Move artifacts/ + project-icons/ from `unpacked/` into `{dataRoot}/`.
+  6. Move `.secret` into `{dataRoot}/.secret` (mode 0600).
+  7. COMMIT.
+  8. rm -rf migrations-tmp/{uploadId}/.
+
+TTL cleanup: server boot scans `migrations-tmp/`, removes dirs older than 1h.
+
+Concurrency: `migrate.preflight` rejects if any in-flight uploadId exists. `migrate.commit` runs under server-process-level mutex.
+
+### Integrity check strategy
+
+Three layers:
+
+1. **Per-chunk sha256**: client → server, verified pre-write. Drift = abort.
+2. **Whole-archive sha256**: client → server at finalize, server re-computes from disk. Drift = abort.
+3. **Per-file sha256 in manifest** vs server-side post-unpack. Mismatch = abort, no commit.
+4. **Row counts**: manifest declares table counts. Server post-import: `SELECT COUNT(*) FROM each table` and compare. Mismatch = transaction rolled back.
+
+Receipt:
+
+```
+{ ok: true,
+  files: { expected: 142, present: 142, mismatched: [] },
+  tables: { tasks: {expected:142, actual:142}, projects: {...} },
+  worktreeRowsRewritten: 87,
+  durationMs: 12345 }
+```
+
+Wizard "Done" screen renders verbatim w/ green checks. Any mismatch = red error, transaction already rolled back.
+
+### Critical files
+
+To modify:
+- `packages/domains/task/src/server/ops/shared.ts` — `SLAYZONE_WORKTREE_ROOT` override.
+- `packages/shared/transport/src/server/router.ts` — add `migrate` sub-router.
+- `packages/domains/settings/src/client/tabs/ServerSettingsTab.tsx` — add "Migrate" button (visible when local mode).
+- `packages/apps/app/src/main/index.ts` — IPC bridge for main-process fs ops + embedded supervisor pause/resume hooks.
+- `packages/apps/server/src/boot.ts` — boot-time tmp GC for `migrations-tmp/`.
+- `packages/apps/app/electron.vite.config.ts` — externalizeDepsPlugin if new pkgs added.
+
+To create:
+- `packages/shared/transport/src/server/routers/migrate.ts`
+- `packages/apps/server/src/migrate/{archive,commit,tmp,manifest}.ts`
+- `packages/apps/app/src/main/migrate-pack.ts`
+- `packages/domains/settings/src/client/MigrateToRemoteWizard.tsx`
+- Test files mirroring above.
+
+### Implementation order
+
+1. **Server pkg**: env override `SLAYZONE_WORKTREE_ROOT` in `maybeAutoCreateWorktree` (`task/server/ops/shared.ts`). Tiny.
+2. **Server pkg**: new `packages/apps/server/src/migrate/` w/ `archive.ts` (untar + validate), `commit.ts` (transactional import), `tmp.ts` (TTL GC), `manifest.ts` (types). Boot scan for stale tmp dirs.
+3. **Transport**: new `migrate` tRPC router. Wire into root `appRouter`. Inject deps via existing `TrpcContext` (db, dataRoot).
+4. **Client tar pipeline**: new `packages/apps/app/src/main/migrate-pack.ts`. Bridged to renderer via existing IPC pattern (renderer can't fs.read getDataRoot directly).
+5. **Wizard UI**: `packages/domains/settings/src/client/MigrateToRemoteWizard.tsx`. Modeled after `ProjectIntegrationSetupWizard.tsx`. Triggered by button in `ServerSettingsTab.tsx`.
+6. **Tests** per master §5 "Migration wizard" row.
+
+---
+
+## Verification checklist
+
+- [ ] Done criteria met (full round-trip: local → migrate → remote mode → all data present and functional)
+- [ ] Tests added per §5 of master ("Migration wizard" row)
+- [ ] Dry-run produces report without writing
+- [ ] Artifact checksums match end-to-end
+- [ ] Row counts match across all migrated tables
+- [ ] Worktree paths rewritten correctly; tasks open and run on remote
+- [ ] No regression in existing E2E suite
+- [ ] Cross-phase deps satisfied (Phase 3 + Phase 4 done)
+- [ ] Bidirectional (remote → local) NOT implemented (deferred per §11c)

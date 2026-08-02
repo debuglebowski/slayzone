@@ -1,0 +1,44 @@
+# Vanta Inquiry — Typed Answer
+
+**Target inquiry:** [Inquiry] The company's security and privacy incidents are logged, tracked, resolved, and communicated to affected or relevant parties by management according to the company's security incident response policy and procedures.
+
+**Vanta doc URL:** https://app.eu.vanta.com/c/normain.com/documents/68d477b7b9f32d79cd6cecae
+
+---
+
+## Typed answer (paste into Vanta)
+
+During the SOC 2 Type II audit period, **one (1) security incident** was identified at severity P1 (per Normain's Incident Response Plan v1.0.1 severity definitions). No P0 / Critical incidents occurred during this period.
+
+### Incident: INT-306 — Bad migration (2025-11-08)
+
+- **Severity:** P1 (High)
+- **Detected:** 2025-11-08 13:30 CET via QA after deployment
+- **Resolved:** 2025-11-08 14:30 CET (database rollback completed)
+- **Customer communication:** 2025-11-08 15:27 CET (email to affected customers)
+- **Description:** A Prisma-generated migration in PR #789 included a destructive `DROP COLUMN` + `ADD COLUMN` operation on `SpreadsheetFrameworkSheetCell.content`, truncating the column on production. Customer-generated cell content from approximately 24 hours prior to the migration was lost.
+- **Root cause:** Prisma's auto-generated destructive-warning was not flagged in PR review.
+- **Containment:** Production traffic stopped at 13:40 to halt further damage.
+- **Recovery:** Database rolled back from automated backup; corrective non-destructive migration deployed in PR #801.
+- **RCA:** Formal report signed off by Security, IT, and Legal on 2025-11-20.
+- **Corrective actions shipped:**
+  1. Backup retention increased from 7 to 14 days on Azure PG Flexible Server (PR #1985, merged 2026-04-30).
+  2. Migration review process tightened — explicit catch on Prisma destructive-warning blocks during PR review.
+
+The incident was handled in accordance with Normain's Incident Response Plan v1.0.1: detection, escalation, triage, containment, recovery, customer communication, and root cause analysis were each completed and documented.
+
+A separate prior incident (NOR-1, March 2025) is out of scope for this audit period; it was handled within the prior SOC 2 Type II audit window.
+
+---
+
+## URLs to attach as evidence (Vanta "Add URL" → label each)
+
+| Label | URL |
+|---|---|
+| Incident Response Plan v1.0.1 | https://drive.google.com/file/d/1gRVFO7xKhEDJTZZfsFQ9hNVcNLz5K3P9/view |
+| RCA — INT-306 (signed off) | https://docs.google.com/document/d/1Dnvra0AbS8UM9ZLLEASkCD7fYKGOy2RCpGn1dGoHlTA/edit |
+| Linear INT-306 (full lifecycle + closure) | https://linear.app/normain/issue/INT-306/security-incident-response-bad-migration-2025-11-08 |
+| Linear INT-307 (event report) | https://linear.app/normain/issue/INT-307/security-event-report |
+| Corrective action — PR #1985 | https://github.com/normainofficial/normain/pull/1985 |
+| Annual IR Tabletop 2025-07-04 (process exercised) | https://docs.google.com/document/d/1Dx_5gp8r99Pg9YwevWQwoXISVjcjhPdSJYIAHePBGnE/edit |
+| Tabletop ticket INT-74 | https://linear.app/normain/issue/INT-74/security-incident-response-exercise-2025-07-04 |

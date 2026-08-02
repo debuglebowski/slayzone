@@ -1,0 +1,42 @@
+# Alt 5 — Org out of the sidebar entirely
+
+**Move org switching to the top app bar; the sidebar bottom becomes user-only.** The workspace becomes a pill next to the page title (where breadcrumbs/scope usually live). The sidebar footer is then unambiguously one thing: the user.
+
+### Top content header (new home for the org)
+
+```
+┌──────────────────────────────────────────────────┐
+│  Dashboard          [ ▢ Acme Inc ⌄ ]      🔔  ?  │
+└──────────────────────────────────────────────────┘
+```
+
+### Org pill clicked (dropdown down, in context)
+
+```
+   [ ▢ Acme Inc ⌃ ]
+   ╭─────────────────────────╮
+   │  ✓ Acme Inc             │
+   │    Globex Corp          │
+   │  + New organization     │
+   ╰─────────────────────────╯
+```
+
+### Sidebar bottom (user only — unchanged shape, half the rows)
+
+```
+│  …nav…                        │
+├───────────────────────────────┤
+│ (GD) Greg Daniels         ↗  │
+│      greg@acme.com            │
+└───────────────────────────────┘
+```
+
+### Collapsed sidebar
+Footer is a single user avatar; org no longer needs sidebar space at all.
+
+```
+│(GD)│
+```
+
+**Pros:** cleanest separation — sidebar = me, top bar = where I am; org switch stays one click and sits next to the data it scopes; bottom is genuinely a single item.
+**Cons:** requires a top app bar to exist (new surface if there isn't one today); org becomes less "global-feeling," more page-scoped; two surfaces to maintain.

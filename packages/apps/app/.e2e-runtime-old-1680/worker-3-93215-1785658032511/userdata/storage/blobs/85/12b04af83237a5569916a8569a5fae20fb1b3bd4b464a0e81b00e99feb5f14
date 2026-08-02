@@ -1,0 +1,63 @@
+# Concept B — Mode Toggle
+
+Rail keeps `w-18`. Top toggle switches between Projects view ↔ Tasks view.
+
+## Behavior
+
+- Single icon button at top: switches mode
+- **Projects mode** = current rail
+- **Tasks mode** = vertical list of task icons (one per active task), grouped by project color stripe on left edge
+- Click task icon → open task tab
+- Long-press / right-click → context menu (move, archive, etc.)
+- Project still selectable via separate dropdown at top in Tasks mode
+
+## Wireframe — Projects mode
+
+```
+┌────┐
+│ ≡  │
+├────┤
+│[P]│  ← mode toggle: P=projects
+├────┤
+│ ⬢ A│
+│ ⬡ B│
+│ ⬡ C│
+│ +  │
+├────┤
+│ ⚙  │
+└────┘
+```
+
+## Wireframe — Tasks mode
+
+```
+┌────┐
+│ ≡  │
+├────┤
+│[T]│  ← mode toggle: T=tasks
+├────┤
+│▾All▾  ← project filter dropdown
+├────┤
+│ ⓘ │  ← task 1 (project A stripe)
+│ ⓘ │  ← task 2 (project A)
+│ ⓘ │  ← task 3 (project B)
+│ ⓘ │  ← task 4 (project C)
+│ +  │  ← new task
+├────┤
+│ ⚙  │
+└────┘
+```
+
+Each task icon = small avatar/glyph w/ status dot + colored stripe matching project.
+
+## Pros
+
+- Width unchanged → no canvas reflow
+- Cheap to implement (swap inner content)
+- Tasks become globally browsable
+
+## Cons
+
+- 18px wide = tiny — task labels invisible, only icons + tooltips
+- Loss of project switcher in Tasks mode (need filter dropdown)
+- Context-switch friction every time user toggle

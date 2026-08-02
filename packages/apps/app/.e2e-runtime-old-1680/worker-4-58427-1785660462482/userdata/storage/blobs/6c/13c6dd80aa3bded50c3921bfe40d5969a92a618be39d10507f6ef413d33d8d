@@ -1,0 +1,111 @@
+# Runner Architecture — Distributed Inference/Exec Nodes
+
+Design doc for splitting execution ("inference servers" / runners) from the team server. Iterating draft.
+
+## Goals
+
+1. **One database per team** — single data authority.
+2. **Run inference anywhere** — users attach any machine as a runner; settings control what's allowed.
+3. **Horizontal scale** — execution no longer limited to one server's capacity.
+
+## Core split: control plane vs exec plane
+
+| Role | Count | Owns |
+|------|-------|------|
+| **Team server** | 1 per team | DB (SQLite), task/project/tags/settings routers, auth, event fan-out, policy |
+| **Runner** (`@slayzone/inference`) | N | PTY sessions, agent CLIs (Claude Code etc.), git/worktrees, fs, processes |
+
+Naming note: "inference server" is a misnomer — inference happens at the model provider. These nodes execute agents/terminals. Working name: **runner**.
+
+**Architect as roles, not deployments.** Today's app = degenerate case: team server + 1 runner on the same machine. Solo/offline use must keep working with zero network dependency.
+
+## Key design decisions
+
+### 1. Placement is a first-class domain concept
+
+A task's terminal needs a cwd — a path on a specific machine. Repo checkouts, node_modules, build caches are machine-local. Therefore:
+
+- **Project ↔ runner binding** must exist in the domain model.
+- Scheduling is **sticky per project**, never round-robin.
+
+### 2. Runners never touch the DB
+
+better-sqlite3 is in-process. All runner state writes (task status, terminal state) go up to the team server via RPC. SQLite behind a single-writer server is fine at team scale (async SlayzoneDb seam already exists). No Postgres migration needed yet.
+
+### 3. Topology: hub-and-spoke relay, direct as upgrade
+
+- **Connection direction: one-way.** Runner always dials OUT to team server (wss). Client dials OUT to team server. Solves NAT/firewalls completely — no port forwarding, no per-runner certs. Runner config = server URL + join token, done.
+- **Message direction: bidirectional** over that socket:
+  - server → runner: spawn/kill/resize pty, stdin keystrokes, fs/git queries, policy pushes
+  - runner → server: enrollment, heartbeat, capabilities, pty output, exit events, state reports
+- Responsibilities asymmetric: server = orchestrator + data owner; runner = exec authority, owns nothing persistent.
+- Impl: duplex RPC over one runner-initiated WS. Either dual tRPC routers over a duplex adapter, or JSON-RPC duplex (pattern already exists in fork sidecar socket). Pick one.
+
+### 4. Direct client ↔ runner connection (latency upgrade)
+
+- Streams are **addressable channels**, relay-agnostic — so relay vs direct is a transport detail, not baked in.
+- Mechanism: auto-negotiate. Try direct (server-minted token), fall back to relay. Relay always works.
+- Setting is a **policy gate**, not a code path: `relay-only` (default) | `auto-direct`. Admins may force relay for audit/egress control. Direct mode means the runner opens a listener (LAN-bind default) — a security surface change, hence policy-gated.
+
+### 5. Latency budget
+
+Echo path: keypress → server → runner → pty echoes → back. Lag ≈ RTT(client↔server) + RTT(server↔runner).
+
+| Case | Echo lag | Verdict |
+|------|----------|---------|
+| All local (solo) | sub-ms | non-issue |
+| Runner near server (cloud) | ~20–40ms | ssh-class, fine |
+| **Hairpin**: runner on user's LAN, server in cloud | 60–150ms | hurts; fixed by direct-conn upgrade |
+
+Thresholds: <30ms invisible, 30–70ms ssh-normal, >100ms annoying, >150ms painful.
+
+Mitigations:
+1. Direct-conn upgrade kills the hairpin case (<5ms). Ship when needed, not before.
+2. Agent workloads are output-heavy, not typing-heavy — stream latency is invisible (arrives shifted, still smooth).
+3. Coalesce pty output frames runner-side (8–16ms batching) + backpressure. Do regardless.
+4. No mosh-style predictive echo — agent TUIs redraw constantly, prediction misfires.
+
+### 6. Authentication (BetterAuth)
+
+- **User ↔ server:** BetterAuth core + `bearer`/`jwt` plugin (Electron/WS = token-based, no cookies). `organization` plugin maps to teams.
+- **Runner ↔ server:** GitHub-Actions-runner / Tailscale pattern. User generates a short-lived scoped **join token** → runner presents it once at enrollment → server issues a per-runner credential (BetterAuth `apiKey` plugin: M2M, rotation, revoke). Revoke key = kill runner.
+- **Runner authenticating the server:** TLS on the known wss URL. Nothing more needed.
+- **Client ↔ runner direct:** runner holds NO user DB. Server mints a short-lived JWT (user + runner + task + expiry); runner verifies via server JWKS. Stateless, expires naturally.
+
+### 7. CLI
+
+CLI = just another client of the team server. Same tRPC/REST surface, auth via API key or device session.
+
+- Agents run ON runners → `slay` inside a runner terminal must work. Runner injects per-PTY env: `SLAYZONE_SERVER_URL` + scoped per-task token (analogous to `$SLAYZONE_TASK_ID` today).
+- CLI behaves identically everywhere: laptop, remote runner terminal, CI.
+- Today's loopback REST becomes a team-server endpoint — one surface, delete special-casing.
+- Latency irrelevant (request/response, not keystrokes).
+
+## `@slayzone/inference` package shape
+
+```
+@slayzone/inference (working name: runner)
+├── config: server URL, join token, allowed roots, capabilities
+├── outbound WS → team server (enrollment, heartbeat, reconnect)
+└── exec domains only: pty, worktrees, processes, fs
+```
+
+- Composes existing domain `server/` code (pty-manager etc.). Owns NO DB.
+- Same composition pattern as `packages/apps/server`, minus db.ts, plus uplink.
+- Host-bridge capabilities must be classified: client-side (dialogs, shell-open) vs runner-side (pty, fs). Existing getAppDeps/host-bridge seam is the interface to formalize.
+
+## Phasing
+
+1. **In-process split.** Split server composition into data-composition + exec-composition, same process. Enforce: exec code reaches data only via (loopback) RPC client. The real refactor; testable locally.
+2. **Multi-process, same machine.** Exec runs as a separate process connecting to the data server over WS. Enrollment, heartbeat, node identity.
+3. **Remote.** TLS, auth hardening, direct-stream tokens, placement UI, policy settings.
+
+## Open questions
+
+- **Convex overlap:** team server auth (BetterAuth) vs existing Convex auth — replace or federate? Two identity systems = long-term pain.
+- **Multi-user concurrency** on shared DB (two users drag the same kanban card) — is last-write-wins acceptable?
+- **Project ↔ runner binding UX:** user picks node per project, or auto-placement?
+- **Runner credential storage:** plaintext config file vs OS keychain where available.
+- **Join token UX:** UI-generated string pasted into runner config, or `slay runner enroll` interactive flow?
+- **Client offline** while team server is remote — read cache, or hard-require connection?
+- **Runner on laptop vs shared box:** both supported? Affects enrollment/NAT story (relay covers it, but placement/availability semantics differ).

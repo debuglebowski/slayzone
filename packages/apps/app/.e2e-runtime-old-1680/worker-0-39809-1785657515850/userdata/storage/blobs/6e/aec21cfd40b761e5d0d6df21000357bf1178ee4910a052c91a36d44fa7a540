@@ -1,0 +1,15 @@
+# UC04 — Contract Clause Sweep at Scale
+
+**Persona**: Legal ops, M&A counsel, or general counsel managing a portfolio of contracts.
+
+**Scenario**: Across a bundle of **100+ contracts** (real customer scale — most enterprises have hundreds to thousands), find every change-of-control clause, limitation-of-liability cap, IP assignment provision, termination-for-convenience clause, indemnification scope, and assignability restriction. Output is a per-contract comparison table.
+
+**Question types**:
+- Exhaustive ("find every X across the bundle")
+- Classification (clause type, risk tier)
+- Clause-level citation fidelity
+- Cross-contract pattern detection (e.g. "which contracts have non-standard IP assignment?")
+
+**Sample docs (100+)**: SEC EDGAR is the goldmine — thousands of publicly filed material contracts across companies (license agreements, supply agreements, SPAs, master service agreements, employment agreements). Pull ~100–150 representative contracts spanning industries and contract types. Augment with one synthesized MSA bundle with planted clauses for clean ground truth.
+
+**What this tests**: Repeat-mode scale ceiling. Most competitors degrade past 20–50 files (file count caps, context window saturation, latency walls, indexing failures). Citation fidelity at clause-level across hundreds of docs is the second wedge. This is the test that exposes "demo-grade" tools vs production-scale ones.

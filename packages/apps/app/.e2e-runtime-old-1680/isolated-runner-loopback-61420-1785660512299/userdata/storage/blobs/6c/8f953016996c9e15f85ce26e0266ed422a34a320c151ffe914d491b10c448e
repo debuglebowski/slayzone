@@ -1,0 +1,143 @@
+# Phase 1 — Domain extraction (decouple from Electron)
+
+> **Master plan**: `server-mode-implementation-plan.md` on parent task `1f788452-581e-429f-9427-a1d61e8a349b` (artifact id `1eecca69-7d62-4763-8300-a5e9e4fcf894`).
+>
+> **Read first** (in master): §1 Context, §2 Decisions, §3 Audit Findings, §7 Conventions, §9 Boundaries, §11 Deferred. Then this phase.
+>
+> Master is canonical for cross-cutting decisions; this artifact is the tactical home for this phase only.
+
+---
+
+## Phase scope
+
+Lift main-process logic into framework-free packages. Same code must be runnable from Electron main *or* from a plain Node process.
+
+**Tasks:**
+- [ ] **Convex audit (do first)**: the repo contains a `convex/` directory. Confirm whether Convex is still in active use, and if so whether the server pkg needs to talk to Convex too or whether Convex code is dormant / deprecated. **Investigate the code; ask the user if uncertain.** This determines whether `@slayzone/server` has a cloud dependency or is fully self-contained.
+- [ ] Per-domain audit. For each `packages/domains/*/src/main/`, list every Electron import (`app`, `BrowserWindow`, `ipcMain`, `webContents`, etc.).
+- [ ] Replace `app.getPath()` with `getDataRoot()` (Phase 0 dep).
+- [ ] Replace `BrowserWindow.webContents.send()` with an event-emitter abstraction. Server code emits events; Electron-main wraps as tRPC subscriptions, the renderer subscribes via tRPC client. No more direct `webContents.send`.
+- [ ] Move pure logic into `packages/domains/*/src/server/` (or rename `main` → `server` and keep Electron-specific glue in a thin wrapper). Decide naming — check existing convention.
+- [ ] `packages/domains/auto-updater/` stays Electron-only.
+
+**Done criteria:** every domain's logic compiles and runs in a plain Node process. Unit tests run without booting Electron. Convex relationship is documented.
+
+---
+
+## Cross-phase dependencies
+
+- **Upstream**: Phase 0 (`getDataRoot()` must exist before lifting code out of Electron-only modules).
+- **Downstream**: Phase 2 (tRPC procedures wrap the now-framework-free domain functions).
+
+---
+
+## Phase-specific notes
+
+(Add findings, decisions, deviations, links, sub-PR references here as work progresses.)
+
+### Convex audit findings
+
+(Document outcome of Convex investigation here — is it in use? deprecated? does server pkg need it? Decision propagates to Phase 3 server pkg deps.)
+
+### Per-domain Electron-import inventory
+
+(Fill in as audit progresses. Helps size remaining work and identify shared abstractions needed.)
+
+---
+
+## Verification checklist
+
+- [ ] Done criteria met (domain logic runs sans Electron, unit tests pass headless)
+- [ ] Convex audit documented (in this file + master if conclusion changes scope)
+- [ ] Tests added per §5 of master ("Domain pkgs" row)
+- [ ] No regression in existing E2E suite
+- [ ] Phase 0 deliverables consumed (no `process.env.SLAYZONE_DB_DIR || app.getPath()` remaining in lifted code)
+
+---
+
+## Phase 1 execution log (filled by execution session)
+
+### Convex audit findings
+
+**Verdict: ACTIVE but out of Phase 1 scope.**
+
+- `convex/` directory live, last touched 2026-03-12 (`feat(feedback): add delete thread …`).
+- Real production deployment (`silent-emu-581.eu-west-1.convex.cloud`).
+- Active features: leaderboard (queries/mutations/sync), feedback dialog (Discord webhook), GitHub OAuth.
+- **Critical**: Convex consumed only from the **renderer** (`useQuery`/`useMutation`/`useAction` in `LeaderboardPage.tsx`, `FeedbackDialog.tsx`, `convexAuth.tsx`) and from **`packages/apps/app/src/main/index.ts`** (OAuth deep-link bridge — Electron app proper, NOT a domain).
+- **No `packages/domains/*/src/main/` code touches Convex.** → Phase 1 (domain extraction) unaffected.
+- **Implication for Phase 3**: `@slayzone/server` does **not** need a Convex dep. Convex stays a renderer concern; OAuth glue stays Electron-only. Leaderboard/feedback features work in remote mode because the renderer talks directly to Convex cloud independently of the SlayZone backend.
+
+### Per-domain Electron-import inventory + execution outcome
+
+| Domain | Tier | ipcMain | wc.send | app.getPath | Outcome |
+|--------|------|---------|---------|-------------|---------|
+| projects | trivial | 6 | 0 | 0 | Wave A. Split. parseProject extracted to `server/parse.ts`. |
+| usage-analytics | trivial | 3 | 0 | 0 | Wave A. cache + parsers → `server/`. |
+| history | trivial | 2 | 0 | 0 | Wave A. recorder → `server/`, handlers → `electron/`. |
+| agent-turns | trivial | 1 | 1 | 0 | Wave A. Runtime `require('electron')` removed; emits on `agentTurnsEvents`. |
+| settings | mod | 6 | 1 | 0 | Wave B. Renamed main → electron (theme.ts uses `nativeTheme` + `BrowserWindow`). |
+| tags | mod | 8 | 0 | 0 | Wave B. `tagsEvents.emit('tags:set-for-task')` replaces ipcMain bus. |
+| file-editor | mod | 15 | 1 | 0 | Wave B. Renamed main → electron (BrowserWindow broadcasts + `shell` runtime). |
+| automations | mod | 17 | 0 | 0 | Wave B. engine.ts → server, `engine.start()` lost IpcMain arg, subscribes to `tagsEvents`. |
+| diagnostics | mod | 7 | 4 | 0 | Wave B. retention → server, service → electron. |
+| task-terminals | mod | 7 | 2 | 0 | Wave B. createTabRow + splitTabRow + helpers → `server/ops.ts`. |
+| test-panel | mod | 18 | 0 | 0 | Wave B. scanner → server, handlers → electron. |
+| integrations | mod (special) | 43 | 0 | 0 | Wave B. **StorageAdapter** (AES-256-GCM Node impl) abstracts safeStorage. |
+| ai-config | heavy | 65 | 0 | 8 | Wave C. 8 `app.getPath('home')` → `os.homedir()`. 1 `app.isPackaged` retained. |
+| worktrees | heavy | 86 | 3 | 0 | Wave C. git-watcher in server, `attachWatcherBridge` moved to glue. `resolveCopyBehavior` extracted to `server/copy-behavior.ts`. |
+| terminal | heavy | 60 | 18 | 0 | Wave C. Most aggressive split. PTY + chat in electron, 28 pure files (shell-env, agents, adapters, state-machine) → server. `onTaskReachedTerminal` becomes setter-injected hook (`setOnTaskReachedTerminalHandler`). session-registry stays in electron (reads PTY runtime). |
+| task | heavy | 62 | 6 | 6 | Wave C. ops/, events, history, template (extracted parseTemplate + getTemplateForTask) → server. handlers, template-handlers, files, artifact-export (BrowserWindow PDF/PNG), artifact-watcher → electron. |
+
+**Total**: 16/16 domains migrated. **No new failures introduced** vs Wave A baseline (verified via stash + bisect on automations engine.test.ts and task handlers.test.ts — same pre-existing failures pre and post).
+
+**Reality check on Phase 1 audit**: master plan mentioned `auto-updater/` and `browser/` as domains (auto-updater Electron-only, browser via WCV) but **neither exists as a domain package**. They live at `packages/apps/app/src/main/{auto-updater.ts,browser-view-manager.ts}` (app proper, not domains). All 16 domains in `packages/domains/` were in scope; no exemptions applied.
+
+### Phase-specific notes — implementation choices
+
+**Naming**: Picked **rename `main/` → `server/` in place** (per Decision 1) for files w/ pure logic. Files with runtime Electron deps (`BrowserWindow`, `nativeTheme`, runtime `require('electron')`, `safeStorage`, `dialog`, `shell`) moved to `src/electron/`. For domains where ALL of `main/` was Electron handlers (settings, file-editor), renamed to `electron/` only — no `server/` subdir created. Mixed files split per-symbol (e.g. `projects/handlers.ts` had pure `parseProject` extracted to `server/parse.ts`; rest stayed in `electron/handlers.ts`).
+
+**Event-emitter shape**: Per-domain typed emitter, copying `task/main/events.ts` `TypedEmitter<EventMap>` pattern in-place per domain. No new shared package. Created emitters: `agentTurnsEvents` ({ 'agent-turns:changed': string }), `tagsEvents` ({ 'tags:set-for-task': { taskId, tagIds } }). Existing `taskEvents` preserved.
+
+**Glue layer** (`packages/apps/app/src/main/glue/index.ts`): subscribes to `agentTurnsEvents` + `gitWatcher` events, forwards via existing `broadcastToWindows`. Called once at app boot via `wireDomainEvents()`. Phase 2 will swap forwarders for tRPC subscription publishers.
+
+**StorageAdapter** (integrations Wave B special):
+- `StorageAdapter` interface w/ module-level singleton (`setStorageAdapter`/`getStorageAdapter`)
+- `ElectronStorageAdapter` wraps `electron.safeStorage` (OS keychain)
+- `NodeStorageAdapter` uses Node `crypto.createCipheriv('aes-256-gcm', ...)`. Key = SHA-256 of either `SLAYZONE_SECRET` env var, OR auto-generated `getDataRoot()/.secret` file (32 random bytes, mode 0600). Env wins if both set.
+- Pre-existing `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS=1` / `NODE_ENV=test` escape hatch retained.
+- Wired at app boot: `setStorageAdapter(new ElectronStorageAdapter())` before `registerIntegrationHandlers`.
+
+**Cross-domain `ipcMain` bus removal** (Phase 1 work that emerged from audit but wasn't in the original recipe):
+- tags `ipcMain.emit('db:taskTags:setForTask:done', null, taskId, tagIds)` → `tagsEvents.emit('tags:set-for-task', { taskId, tagIds })`
+- automations engine subscribes to `tagsEvents.on(...)` (was `ipcMain.on('db:taskTags:setForTask:done', ...)`)
+- `engine.start(ipcMain: IpcMain)` → `engine.start()`
+- task ops still emit `ipcMain.emit('db:tasks:*:done', ...)` alongside `taskEvents.emit('task:*', ...)` — left as-is. App-side `ipcMain.on('db:tasks:*:done', ...)` listeners still fire correctly. Phase 2 (tRPC) will rip the legacy ipcMain.emit.
+
+**`onTaskReachedTerminal` indirection** (terminal domain): function sits in `terminal/electron/pty-manager.ts` (renamed `electronOnTaskReachedTerminal` — needs PTY runtime to kill chats/PTYs). Cross-domain callers (integrations sync from `server/`) call `onTaskReachedTerminal(taskId)` from `terminal/server/task-events.ts` — a pluggable hook. App boot wires `setOnTaskReachedTerminalHandler(electronOnTaskReachedTerminal)`. Server pkg can register its own handler later (Phase 3) or accept the no-op default.
+
+### Decisions deferred from Phase 1
+
+- **Puppeteer for PDF/PNG export** (task domain): Punted. Pure HTML builders (`buildPdfHtml`, `buildMermaidPdfHtml`, `buildPngHtml`, `escapeHtml`, `PDF_CSS`) accessible from `task/electron`. BrowserWindow renderer (`renderToPdf`, `renderToPng`) stays Electron-only — mirrors master plan §11d browser-panel pattern. Server pkg cannot render PDF/PNG until Puppeteer added in Phase 3 (deps: `puppeteer-core`, `@puppeteer/browsers`, postinstall hook for Chromium).
+- **WCV browser panel**: Already deferred in master §11d. Lives in app proper (`browser-view-manager.ts`), not a domain. Untouched.
+- **`app.isPackaged` in ai-config/handlers.ts** (1 site, line 2138): retained. Used to decide `--dev` flag for spawned `slay init` subprocess. Electron-only code path. Server pkg won't reach this handler.
+
+### Verification status
+
+| Check | Result |
+|------|--------|
+| `pnpm -r typecheck` | ✅ 35 pkgs green |
+| `pnpm --filter @slayzone/app build` | ✅ 33s |
+| `scripts/check-server-electron-free.sh` (new — Phase 1 deliverable) | ✅ 16 domains, 0 electron imports in `server/` |
+| `agent-turns turn-tracker.test.ts` (Wave A canary) | ✅ 14/14 pass |
+| `automations engine.test.ts` cascade test | Same 9 pre-existing failures pre/post Wave B+C — no regression |
+| `task handlers.test.ts` | Same pre-existing TypeError crash pre/post — no regression |
+| Full unit suite (`run-all.sh`) | Pre-existing brokenness (handlers.test.ts crash aborts via `set -e`). Suite is widely red **at Wave A baseline**, untouched by Phase 1. **Out of Phase 1 scope**. |
+| `pnpm test:e2e` | NOT RUN. Long-running. Suite was already red on this branch (per earlier commits `test(e2e): align suite w/ current UI`). Phase 1 changes are behavior-preserving (Electron app still has the same handlers, just imports from `electron/` instead of `main/`). Pre-Phase-2 (tRPC) is the natural point to revisit E2E. |
+
+### Commits
+
+- `a02cd4a6` — Wave A (4 trivial domains: projects, usage-analytics, history, agent-turns)
+- `3b75d7c4` — Wave B+C (12 domains: 7 moderate + integrations StorageAdapter + 4 heavy)
+
+Both on branch `phase-0-path-port-hardening` (branch name retained — user did not request rename).

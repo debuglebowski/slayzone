@@ -1,0 +1,20 @@
+# Use Cases
+
+100 questions total. Even split (~17 per use case). Mode = which Normain workflow each use case exercises.
+
+| # | Use case | Mode | Persona | Scenario | Question types | # docs | # questions | What it tests |
+|---|---|---|---|---|---|---|---|---|
+| 01 | Due diligence financial review | Simple | PE / corp dev analyst reviewing a target | Verify financials, spot red flags, cross-check numbers between annual report, proxy, and Excel model | Numerical calc; cross-doc (10-K vs proxy); Excel step-by-step logic; reasoning on covenants/warning signs | 6 | 17 | Numeric extraction + cross-doc consistency + chained reasoning |
+| 02 | ESG / sustainability audit | Repeat | Sustainability lead prepping CSRD, or auditor | Same Qs across multiple companies' sustainability reports → comparison table | Exhaustive search; numerical aggregation; multi-doc cross-reference (report vs framework) | 4 | 17 | Long-doc exhaustive extraction + framework alignment |
+| 03 | Regulatory-vs-policy gap check | Spreadsheet | GRC / internal audit | Each row = one obligation from the regulation; columns assess policy coverage with citations | Cross-doc (reg vs policy); exhaustive requirements enumeration; classification; reasoning on partial coverage | 6 | 17 | Cross-doc reasoning + exhaustiveness + citation fidelity |
+| 04 | Contract clause sweep | Repeat | Legal ops / M&A counsel | Same clause-finding Qs across each contract in a bundle → per-contract table | Exhaustive (find every X); classification; clause-level citation fidelity | ~12 | 17 | Exhaustive search across many docs + accurate clause-level citation |
+| 05 | Board / committee composition audit | Repeat | Corporate secretariat | Same board/committee Qs across each company's disclosures → per-company table | Exhaustive person extraction; cross-doc identity resolution; mixed formats | ~10 | 16 | Exhaustive person extraction + identity reconciliation across formats |
+| 06 | Multimodal evidence extraction | Simple | Advisory / forensic analyst | Single mixed-format corpus; varied Qs pull facts from scans, photos, charts, handwriting | OCR-grade text from scans; handwriting recognition; image-only chart interpretation; cross-modal reconciliation | 4 | 16 | Format coverage — exposes tools that can't ingest non-text inputs |
+
+## Mode coverage
+
+- **Simple** (2): UC01, UC06
+- **Repeat** (3): UC02, UC04, UC05
+- **Spreadsheet** (1): UC03
+
+All three Normain modes covered.

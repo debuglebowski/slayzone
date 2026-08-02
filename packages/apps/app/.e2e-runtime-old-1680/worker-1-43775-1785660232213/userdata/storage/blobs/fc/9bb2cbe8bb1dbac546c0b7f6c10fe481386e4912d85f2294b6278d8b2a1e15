@@ -1,0 +1,66 @@
+# Subprocessor reconciliation — VENDOR MASTER SHEET vs the DPAs
+
+Source of truth = the **"Subprocessor" column** in the VENDOR MASTER SHEET (Application → Table 1 hosting · Operations → Table 2 operations). The four document columns show the **current state** today: ✅ = currently included · ❌ = not. The **Comment** column is for your decision / notes.
+
+## Table 1 — Hosting (sheet flag: *Application*)
+
+| Vendor                | Sheet           | Marketplace | Customer hosting | SaaS | Master list | Comment                                                                                                                                                    |
+| --------------------- | --------------- | :---------: | :--------------: | :--: | :---------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Microsoft Azure       | Application     |      ✅      |         ❌        |   ✅  |      ✅      | <br />                                                                                                                                                     |
+| AWS                   | Application     |      ❌      |         ❌        |   ✅  |      ✅      | <br />                                                                                                                                                     |
+| BetterStack           | Application     |      ✅      |         ✅        |   ✅  |      ✅      | <br />                                                                                                                                                     |
+| PostHog               | Application     |      ✅      |         ✅        |   ✅  |      ✅      | <br />                                                                                                                                                     |
+| Cloudflare            | Application     |      ❌      |         ❌        |   ❌  |      ❌      | DNS-only — not in the data path; only sees DNS query metadata, not customer data → not a subprocessor. Revisit if Cloudflare proxy/WAF/Workers is enabled. |
+| Google Cloud Platform | Application     |      ❌      |         ❌        |   ❌  |      ❌      | <br />                                                                                                                                                     |
+| Firecrawl             | Application     |      ❌      |         ❌        |   ❌  |      ❌      | <br />                                                                                                                                                     |
+| Sentry                | — (not flagged) |      ❌      |         ❌        |   ❌  |      ✅      | <br />                                                                                                                                                     |
+
+<br />
+
+## Table 2 — Operations (sheet flag: *Operations*)
+
+| Vendor    | Sheet      | Marketplace | Customer hosting | SaaS | Master list | Comment                              |
+| --------- | ---------- | :---------: | :--------------: | :--: | :---------: | ------------------------------------ |
+| OpenAI    | Operations |      ✅      |         ✅        |   ✅  |      ✅      | master list still names it "ChatGPT" |
+| Anthropic | ⚠️ blank   |      ✅      |         ✅        |   ✅  |      ✅      | <br />                               |
+| Linear    | Operations |      ✅      |         ✅        |   ✅  |      ✅      | <br />                               |
+| Loops     | Operations |      ✅      |         ✅        |   ✅  |      ✅      | <br />                               |
+| Canva     | Operations |      ❌      |         ❌        |   ❌  |      ❌      | <br />                               |
+| Clay      | Operations |      ❌      |         ❌        |   ❌  |      ❌      | <br />                               |
+| Dropbox   | Operations |      ❌      |         ❌        |   ❌  |      ❌      | <br />                               |
+| Instantly | Operations |      ❌      |         ❌        |   ❌  |      ❌      | <br />                               |
+| Miro      | Operations |      ❌      |         ❌        |   ❌  |      ❌      | <br />                               |
+| Zero      | Operations |      ❌      |         ❌        |   ❌  |      ❌      | <br />                               |
+| GitHub    | Operations |      ❌      |         ❌        |   ❌  |      ❌      | <br />                               |
+
+## Currently in the DPAs/list but NOT flagged in the sheet (review for removal)
+
+| Vendor           | Sheet         | Marketplace | Customer hosting | SaaS | Master list | Comment                    |
+| ---------------- | ------------- | :---------: | :--------------: | :--: | :---------: | -------------------------- |
+| 1Password        | —             |      ✅      |         ✅        |   ✅  |      ✅      | Should be in all "Table 2" |
+| Circleback       | —             |      ✅      |         ✅        |   ✅  |      ✅      | Should be in all "Table 2" |
+| Google Workspace | —             |      ✅      |         ✅        |   ✅  |      ✅      | Should be in all "Table 2" |
+| Slack            | —             |      ✅      |         ✅        |   ✅  |      ✅      | Should be in all "Table 2" |
+| Attio            | — (tool "No") |      ✅      |         ✅        |   ✅  |      ✅      | No longer used             |
+| Superhuman       | —             |      ✅      |         ✅        |   ✅  |      ✅      | Should be in all "Table 2" |
+| Notion Calendar  | —             |      ✅      |         ✅        |   ✅  |      ✅      | Should be in all "Table 2" |
+| Scrive           | —             |      ✅      |         ✅        |   ✅  |      ✅      | Should be in all "Table 2" |
+| LinkedIn         | No            |      ✅      |         ✅        |   ✅  |      ✅      | Handles no sensitive data  |
+| Framer           | No            |      ✅      |         ✅        |   ✅  |      ✅      | Handles no sensitive data  |
+| Loom             | No            |      ✅      |         ✅        |   ✅  |      ✅      | Handles no sensitive data  |
+
+## Open conflicts to settle (these contradict our earlier O3 calls)
+
+* **GitHub** — sheet: Operations subprocessor · O3: internal tool, not a subprocessor.
+
+* **Firecrawl** — sheet: Application subprocessor · O3: excluded (no PII). (Code: it fetches web content the product analyses — borderline; it's a processing API, not hosting.)
+
+* **Google Cloud Platform** — sheet: Application · not actually used for hosting (only Google Drive read + OAuth via `googleapis`).
+
+* **Anthropic** — sheet cell is blank, but it's in every DPA — likely just unfilled in the sheet.
+
+* **OpenAI vs "ChatGPT"** — the DPAs say "OpenAI"; the master list still says "ChatGPT".
+
+## Note
+
+Table 1 (hosting) legitimately differs per deployment: **AWS** is SaaS-only; **Customer hosting** uses neither Azure nor AWS (the customer hosts in their own cloud). **Table 2 (operations) is identical across all three DPAs.**

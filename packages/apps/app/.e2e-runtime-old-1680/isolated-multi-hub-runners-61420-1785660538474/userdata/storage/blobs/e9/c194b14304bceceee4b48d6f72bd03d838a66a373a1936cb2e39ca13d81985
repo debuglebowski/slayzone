@@ -1,0 +1,34 @@
+# Business Continuity & Disaster Recovery Tabletop Exercise
+
+**Date:** ____________________
+**Facilitator:** ____________________
+
+## Scenario: "Production database lost"
+A developer accidentally drops the primary production database on a normal workday (alt: ransomware encrypts it). One scenario, exercises both DR and BC.
+
+## Agenda (~60 min, all staff)
+1. **Detection & declaration** (5m) — how it's noticed, who declares the incident, who leads.
+2. **DR portion** (20m) — locate last good backup, restore steps, verify data integrity, confirm RTO/RPO are met.
+3. **BC portion** (20m) — roles/decision authority, internal comms (Slack), customer/stakeholder notification, how the business keeps operating while systems are down.
+4. **Wrap-up** (10m) — what worked, gaps, 2–3 action items.
+
+## Topics covered (tick to evidence scope)
+- [ ] DR: backup location, restore procedure, data-integrity check, RTO/RPO
+- [ ] BC: incident roles, decision authority, internal comms, customer comms, operating during downtime
+
+## Attendees (all in-scope staff = completion record)
+| Name | Present |
+|------|---------|
+| Dennis Landfors |  |
+| Kalle Hansson |  |
+| Max Netterberg |  |
+| Philip Ngo |  |
+| Sahba Sadeghi |  |
+| Sara Landfors |  |
+
+## Outcomes & action items
+1. 
+2. 
+3. 
+
+_Tested Normain's BC/DR plan._

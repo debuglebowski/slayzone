@@ -1,0 +1,34 @@
+# Secure Configuration Baselines — 2026 Renewal Action Items
+
+**Vanta test:** Secure configuration baselines developed (ISO 27001:2022 · A.8.9 CFG-44, A.8.27 SEA-56)
+**Source:** Google Sheet "Secure Configuration Baselines" (111 rows / 34 systems · 85 Yes / 22 No / 4 N/A)
+**Status:** Renewal due — current evidence expires Jul 14, 2026. Last edited 2025-07-30.
+
+## Bottom line
+Doc is sound; no rebuild. Clearing the Vanta test = re-upload non-expired file. Passing the ISO audit *cleanly* = address only the rows below. The other 15 "No" rows are already defensible plan-limitations (Enterprise-tier / no-MDM, justified) → no work.
+
+**After checking the live codebase (`normainofficial/normain` @ main) + GitHub API:** 2 of the 7 items are already effectively solved, 1 is mostly there. Only GitHub secret-scanning is confirmed open; the rest need a portal check.
+
+**Legend:** 🟢 already solved (verified) · 🟡 mostly there / one small change · ❌ confirmed open · ❓ not verifiable from code, needs portal
+
+## Action items
+
+| # | System · Config | Baseline | 🔎 Verified now | Finding (evidence) | Minimal action | Owner |
+|---|---|---|---|---|---|---|
+| 1 | GitHub · Secret scanning alerts | No | ❌ | `security_and_analysis.secret_scanning = disabled` (+ push-protection & dependabot disabled) via GitHub API | Enable (free) → flip to Yes | Gustav |
+| 4 | Normain SaaS App · strong-password + MFA auth | No | 🟢 | Prod auth is **SSO-only**: `PASSWORD_LOGIN_ENABLED` defaults `false` & not set in `deploy-k8s-prod.yml`; no in-app password login → MFA enforced at IdP (Google/MS, both "Yes" in doc). No 2FA plugin needed | Reword row to "Yes — SSO-only, MFA at IdP, password login disabled" | Kalle |
+| 5 | Managed PostgreSQL · query/access logs | No "Todo" | 🟡 | Pipeline **done**: `azurerm_monitor_diagnostic_setting.psql_audit` ships `PostgreSQLLogs` → Log Analytics (`law-…-audit`) + immutable storage w/ retention. But pgaudit loaded with `pgaudit.log = NONE` → statement-level audit off | One-line TF: set `pgaudit.log` to `WRITE,DDL,ROLE` (or risk-accept connection-log-only) | Kalle |
+| 6 | GitHub · org audit-log review | No | ❌ | Process item — GitHub retains the org audit log, but no review cadence in place. Not code-resolvable | Define light quarterly review OR risk-accept | Gustav |
+| 7 | Microsoft Azure · Security Center recs | No | ❓ | Not managed in IaC (no Defender resources in `main.tf`); Defender plans appear enabled per separate evidence captures, but "some remaining" unverifiable from code | Portal check → clear recs or note tracked + risk-accept | Kalle |
+| 2 | Microsoft 365 · Conditional access | No | ❓ | M365 admin config — not in codebase | Portal check + add risk decision/justification | Dennis |
+| 3 | Microsoft 365 · DLP for sensitive data | No | ❓ | M365 admin config — not in codebase | Portal check + add one-line justification | Dennis |
+
+## Already-fine "No"/"N/A" rows (no action)
+1Password (req. 1P Business), ChatGPT usage logs (Enterprise only), iOS passcode/wipe/app-block (no MDM → policy + offboarding), Linear/Miro integrations & activity (Enterprise), Slack file sharing (business need, ext. users approved), Superhuman MDM (Enterprise), Google Workspace external sharing (business need, monitored) & DLP (req. GW Enterprise), OpenAI API logs (prod via Azure). N/A: ChatGPT & Cloudflare API keys, Linear & Slack audit logs.
+
+## Sequence to renew
+1. Re-review + re-date doc for 2026 (~1 hr desk).
+2. Close items above: #4 reword (already true), #5 one-line TF, #1 free toggle; #2/#3/#7 = quick portal check; #6 process decision.
+3. Re-export sheet → PDF → upload to Vanta → re-attest.
+
+**Estimated effort: ~half a day.** Codebase check removed PostgreSQL as a big unknown (pipeline already built) and confirmed the app-auth row is effectively already a "Yes".

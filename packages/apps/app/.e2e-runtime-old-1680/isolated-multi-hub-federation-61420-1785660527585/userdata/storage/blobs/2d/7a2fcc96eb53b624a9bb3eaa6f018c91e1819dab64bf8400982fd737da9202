@@ -1,0 +1,42 @@
+# Phase 0 — Remaining failing tests (post round 14)
+
+## Cumulative session progress
+80 → ~12 failures (~85% reduction)
+
+## Still failing — sorted by effort
+
+### 🔴 Large (3 specs / 12 tests)
+- `93-artifacts-panel` ×7 — test ordering deps (rename → delete) and toolbar state (view-mode toggle behind collapsible banner). Each test would need targeted rewrite. Investigated 307 (conflict banner) and 358 (caret) iso — even iso `.cm-editor` doesn't render after artifactRow click despite `seed.createArtifact` + `refreshData`. Click sees the row but selection chain to ArtifactContentEditor doesn't materialize. Skipping for now.
+- `61-web-panel-handoff-routing:226` (cross-host popups) — synthetic `<webview>` new-window event doesn't translate to WebContentsView; needs popup-IPC simulation
+- `71-webview-popup-handling:540/696` — same WebContentsView popup root
+
+## Approach summary
+
+| Round | Fixes | Cumulative cleared |
+|---|---|---|
+| 0 | Phase 0 fs/env hardening | (baseline 80) |
+| 2 | settings dialog rename, theme tokens, file-editor unified search, tags refresh listener, `__restorePtyHandlers` reset list | 21 |
+| 3 | ⚡/🟢 trivials: smoke text, panel-toggles, kanban progress, custom-shortcuts | 33 |
+| 4 | 🟡: settings tabs, blocked pill, panel-resize version, chat-mode rewrite | 45 |
+| 5-6 | folder-row scoping, mergePanelOrder, tags event listener | 50 |
+| 7 | custom-shortcuts group expansion | 55 |
+| 8 | iframe sandbox click via evaluate | 59 |
+| 9 | Cmd+Alt+R poll wrap, all 🟢 cleared | 63 |
+| 10-11 | 14-project-settings tab rename, 22-temp-mode bypass UI | 65 |
+| 12 | 33-pty-respawn fetch from Playwright context (CSP) | 69 |
+| 13 | git-diff polling refresh, terminal-tab rewrite, browser cascade | 73 |
+| 14 | fd-limit poll fix, 72-bug1 CSS, 77-glow IPC source patch, 61-handoff (1 of 3) | 77 ✅ Phase 0 hardening + 78% e2e net cleanup |
+
+## Source-level fixes applied
+- `apps/app/src/main/index.ts` — `__restorePtyHandlers` now lists every terminal-package handler
+- `domains/settings/src/client/tabs/PanelsSettingsTab.tsx` — `mergePanelOrder` after Add Panel
+- `domains/settings/src/client/tabs/TagsSettingsTab.tsx` — listen to `slayzone:tag-{created,updated,deleted}`
+- `domains/worktrees/src/client/GitDiffPanel.tsx` — drop `flatEntries.length > 0` from chip-row condition
+- `domains/task/src/client/TaskDetailPage.tsx` — IPC listener for `browser-view:focused` → `setFocusedPanel`
+- `apps/cli/src/commands/tasks/list.ts` — added `t.deleted_at IS NULL` filter
+
+## Skipped (real app bugs / large rewrites)
+- 93-artifacts-panel ×7
+- 61/71 webview popup simulation ×3
+
+E2e suite went from 80 → ~12 fails. The remaining 12 either need source-level feature investigation or webview→WebContentsView migration in tests.

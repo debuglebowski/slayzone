@@ -1,0 +1,24 @@
+# Secure Configuration Baselines — 2026 Renewal Status
+
+**Vanta test:** Secure configuration baselines developed (ISO 27001:2022 · A.8.9 / A.8.27)
+**Source sheet:** "Secure Configuration Baselines" (Drive) · evidence expires **Jul 14, 2026**
+
+## Status: all 7 flagged rows resolved in the sheet ✅ — only the re-export + upload remain.
+
+| # | Row | Final state | Resolution |
+|---|---|---|---|
+| 1 | GitHub · secret scanning | ✅ **Yes** | TruffleHog CI workflow merged — PR #2281 / NOR-2865 (runs on PRs + weekly; native scanning needs paid GHAS, deferred) |
+| 2 | M365 · conditional access | ✅ **No + risk-accept** | Verified 0 CA policies (Graph, Global Admin); MFA enforced at IdP; granular CA deferred (needs Entra P1). Accepted by Kalle |
+| 3 | M365 · DLP | ✅ **No + risk-accept** | Verified in Purview (2026-06): 0 DLP policies; mitigated by access controls + SSO/MFA + monitoring; rollout deferred |
+| 4 | Normain SaaS App · auth | ✅ **Yes** | Prod is SSO-only (`PASSWORD_LOGIN_ENABLED` default false); MFA at IdP |
+| 5 | Managed PostgreSQL · logs | ✅ **Yes** | No standing access; JIT via PIM (Entra group = Postgres AD admin); activations + connection logs in immutable Log Analytics. No pgaudit (by decision) |
+| 6 | GitHub · audit-log review | ✅ **Yes** | Quarterly recurring calendar review (Kalle/Max/Philip), starts **2026-08-25**; dated note = evidence |
+| 7 | Azure · Defender recs | ⏳ **No + remediation plan** | Defender on (CSPM+Containers); ~91% of recs are container dep-CVEs (→ CI dep-bump pipeline); posture items tracked in triage task `35277bc5`. Score improvement in progress |
+
+## Remaining to close the Vanta test (before Jul 14)
+1. Re-date the sheet (mark reviewed 2026).
+2. Re-export Sheet1 → PDF.
+3. Upload to Vanta as new evidence draft → attest.
+
+## Side-track (not blocking)
+Defender triage task `35277bc5` — Azure secure score 15.5% / 4,914 unhealthy (91% container dep-CVEs vs 480 config items). Own workstream.

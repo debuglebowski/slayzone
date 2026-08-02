@@ -1,0 +1,76 @@
+# Engineering Operation Procedures — Exact Old → New Edits
+
+**Doc:** Engineering Operation Procedures · Drive `1om9654c…MY3Dkw` · v538
+Apply these to make it audit-ready, then export PDF → upload as Vanta renewal.
+Quotes use the doc's curly apostrophes — match exactly.
+
+---
+
+## Edit 1 — Delete the draft appendix  (BLOCKING)
+
+**Keep** everything through the last clean line:
+> Documentation that is not closely source code-related is put in Normain's Google Workspace.
+
+**DELETE** everything from the next heading to the end of the document — i.e. the entire block starting at:
+
+> **Overview**
+> Development process
+> &nbsp;&nbsp;• General process
+> … (Swedish notes, `💬`/`❓` open items: Rollback, Post-mortem, Disaster recovery, Backup & recovery, Capacity planning, DB access, Access Control Policies) …
+
+…through the final line of the doc, **including the two editor comments `[a]` and `[b]`** ("Have Gustav tested?" etc.).
+
+**New:** (nothing — document ends at the "Non-source code" paragraph.)
+
+---
+
+## Edit 2 — Add document-control header  (BLOCKING)
+
+**Insert at the very top, above the title "Normain Engineering Operation Procedures":**
+
+```
+Document Control
+| Owner            | CTO (Kalle Hansson)        |
+| Version          | 1.0                        |
+| Status           | Approved                   |
+| Approved by      | <name / role>              |
+| Approval date    | <YYYY-MM-DD>               |
+| Next review      | <YYYY-MM-DD, ≤12 months>   |
+| Classification   | Internal                   |
+```
+
+(Fill the 3 placeholders. Set "Next review" to the Vanta annual renewal date.)
+
+---
+
+## Edit 3 — Peer-review bypass  (RECOMMENDED)
+
+**OLD** (end of "Code Reviews"):
+> The one exception to above is that Kalle is allowed to merge PR's without a review. This is in order to be able to quickly fix burning issues with speed. This practice will be removed when the team is big enough to ensure that we always have 2 people on call at any given time. At that moment we will enforce a review for each PR.
+
+**NEW:**
+> Exception: where a critical production or security issue requires an immediate fix and no second reviewer is available, a designated maintainer (currently the CTO) may merge without prior review. Every such merge must record a rationale in the PR and receive a retrospective review within one business day. This exception is removed once the team sustains at least two available reviewers; until then it is reviewed quarterly.
+
+*(Keep the doc consistent with actual GitHub branch protection — the Vanta branch-protection test reads classic `enforce_admins`.)*
+
+---
+
+## Edit 4 — Aspirational wording → current state  (MINOR)
+
+**4a. Feature Flags — OLD:**
+> Although feature flags are not yet actively used in the current system, establishing an infrastructure to manage them is a priority. Solutions such as Posthog or equivalent systems should be evaluated and adopted to provide robust flag management, tracking, and analytics.
+
+**NEW:**
+> Feature flags are not yet in active use. Planned: adopt a flag-management capability (e.g. PostHog or equivalent) to provide rollout control, tracking, and analytics as the system scales.
+
+**4b. AI-Driven Algorithm Quality — OLD:**
+> As Normain's products increasingly rely on AI-driven capabilities, we recognize the need for systematic quality assessment of our algorithms. As the organization grows, we will invest in developing an evaluation framework to:
+
+**NEW:**
+> As Normain's products increasingly rely on AI-driven capabilities, algorithm quality is assessed as part of QA. Planned: a formal evaluation framework to:
+
+*(Leaves the three bullets and the closing sentence unchanged.)*
+
+---
+
+**Blocking:** Edits 1 + 2. **Edit 3** = judgment call. **Edit 4** = polish.

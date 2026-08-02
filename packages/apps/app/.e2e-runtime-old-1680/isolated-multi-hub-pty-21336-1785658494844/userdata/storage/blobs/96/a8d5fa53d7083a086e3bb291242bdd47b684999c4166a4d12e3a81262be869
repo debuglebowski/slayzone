@@ -1,0 +1,175 @@
+# Code Review vs Draft System Description
+
+## Goal
+Verify every technical claim in the new system description draft against the actual product codebase. Flag drift, missing controls, and overstatements.
+
+## Inputs
+- New draft: Google Doc `1lnb6Lu4ZWnwuQTGjpH1ijteMgTS9olCz1et4LBEhbBs` (exported to `.tmp/soc2-review/draft.txt`)
+- Product repo: `/Users/Kalle/dev/projects/normain/` (`src/`, `iac/`, `terraform/`, `.github/`)
+- Compliance UCF: `/Users/Kalle/dev/projects/normain-ops/projects/current-ucf/`
+
+## Method
+For each claim in the draft (DC 3 + DC 5 are the main surfaces): map to a concrete evidence locus in the repo. Verdict: ✅ matches, ⚠️ partial / drift, 🔴 contradicts / unsupported.
+
+## Sections to verify
+
+### DC 3 — System components
+- Infrastructure: Azure / Linux / PostgreSQL
+- File-store integrations: SharePoint, Google Drive, Box
+- Third-party access list (data path + operational): 1Password, Cloudflare, GitHub, Linear, Azure, Slack, Sentry, PostHog, OpenAI, Anthropic, BetterStack, Vanta, Google Workspace, Cursor
+
+### DC 5 — Control activities (verify in repo)
+- **CC6 Cryptography**: AES-256 at rest, TLS 1.2+ in transit, Azure Key Vault
+- **CC6 Access control**: MFA enforced; RBAC; PR + ≥1 independent reviewer
+- **CC7 Vulnerability mgmt**:
+  - CodeQL — cadence, scope
+  - Dependabot — alerts-only, auto-updates disabled
+  - Trivy — container image scanning during build
+  - OWASP ZAP — cadence, scope
+- **CC7 Monitoring**: Azure Monitor, BetterStack
+- **CC8 Change management**: PR enforcement, CI/CD gates, deployment via GitHub Actions, IaC via Terraform
+- **CC9 BCDR**: Azure backup config, multi-AZ replication claims
+
+### Findings table
+
+| # | DC / CC | Claim | Evidence locus | Verdict | Note |
+|---|---------|-------|----------------|---------|------|
+| 1 | DC 3.1 | Cloud provider = Microsoft Azure | `terraform/global/main.tf`, `terraform/modules/azure/main.tf` | ✅ | Subscription pinned `a9049f9f-…`; region `swedencentral`. |
+| 2 | DC 3.1 | OS = Linux (managed services) | `terraform/modules/azure/main.tf` AKS default node pool | ✅ | AKS Linux nodes (no Windows pool). |
+| 3 | DC 3.1 | Primary DB = Azure Database for PostgreSQL — Flexible Server | `terraform/modules/azure/database.tf` `azurerm_postgresql_flexible_server.psql` (v16) | ✅ | — |
+| 4 | DC 3.1 | Object storage = Azure Blob Storage | `terraform/modules/azure/main.tf` `azurerm_storage_account.uploaded_files` | ✅ | — |
+| 5 | DC 3.1 | Key management = Azure Key Vault | `terraform/modules/azure/keyvault.tf` `azurerm_key_vault.main` (Standard SKU, RBAC) | ⚠️ | Key Vault holds app **secrets**, not customer-data encryption keys. Encryption at rest uses Microsoft-managed keys (platform). Wording in draft 3.4 ("AES-256 ... keys managed in Azure Key Vault") is misleading. See finding 19. |
+| 6 | DC 3.1 | Edge / DNS = Cloudflare | `terraform/modules/azure/email.tf`, `terraform/environments/*/infra/main.tf` (`cloudflare_zone_id`) | ✅ | DNS only — see finding 13 for "WAF" claim. |
+| 7 | DC 3.2 | App = web app, API services, background workers | `src/apps/server/api`, `src/apps/server/worker`, `src/apps/browser/insights` | ✅ | Worker queues via BullMQ/Redis. |
+| 8 | DC 3.2 | Integrations: SharePoint, Google Drive, Box | `src/shared/integrations/contentStorage/{sharepoint,googledrive,box}/server` | ✅ | All three present as packages. |
+| 9 | DC 3.4 | TLS 1.2+ in transit (customer↔platform, platform↔subprocessor) | Gateway-API HTTPRoute redirects HTTP→HTTPS (`customer-tenant/main.tf:486`); Cloudflare edge | ✅ | Public ingress enforces HTTPS. **Note**: internal NFS storage account `azurerm_storage_account.data_sources` sets `https_traffic_only_enabled = false` — internal-VNet only, but a hardening gap worth fixing. |
+| 10 | DC 3.4 | AES-256 at rest (database, blob, backups) | Azure platform default | ✅ | Azure SSE = AES-256 by default; no claim contradicted. |
+| 11 | DC 3.4 | Secrets/keys in Azure Key Vault | `terraform/modules/customer-tenant/keyvault.tf` (Key Vault CSI driver, workload identity) | ✅ | Confirmed for app secrets. |
+| 12 | DC 3.4 | Customer content processed by OpenAI/Anthropic | `src/apps/server/worker/src/extractInsightWorker/{openAi,anthropic}ExtractInsightAgent/*` | ✅ | Both SDKs present. Customer-opt-in / DPA-Appendix-B mechanism not verified at code level. |
+| 13 | DC 3.5 | **Sentry — Application error and performance monitoring** (production data path) | _No_ `@sentry/*` dependency in any `package.json`; no `Sentry.init` in source; no `SENTRY_DSN` in IaC/secrets | 🔴 | **Sentry is not present in the codebase.** Either remove from DC 3.5 or wire it up before issuance. The current draft asserts a subprocessor that does not receive any data. |
+| 14 | DC 3.5 | PostHog — product analytics | `src/shared/analytics/package.json` (`posthog-js@1.335.2`, `posthog-node@^5.24.1`); `src/shared/analytics/src/{browser,node}/index.ts` | ✅ | — |
+| 15 | DC 3.5 | OpenAI / Anthropic | See row 12 | ✅ | — |
+| 16 | DC 3.5 | BetterStack — uptime + log aggregation | `terraform/modules/betterstack/main.tf` (`logtail_source.otel`); `src/shared/otel/src/index.ts` | ⚠️ | IaC provisions **Logs** (Logtail) only. "Uptime monitoring" portion not IaC-managed (likely configured in BetterStack UI). Claim is not contradicted but the IaC view is incomplete. |
+| 17 | DC 3.6 | Cloudflare — Edge, DNS, **WAF** | Terraform: only `cloudflare_record` resources via `cloudflare_zone_id`; no `cloudflare_ruleset` / WAF resources anywhere in `terraform/` | ⚠️ | DNS is provisioned in IaC. **WAF is not declared in IaC**; it would have to be configured in the Cloudflare dashboard. Either confirm dashboard-level WAF is enabled (with a screenshot for the auditor) or remove "WAF" from this sentence. |
+| 18 | CC6 | MFA enforced on all employee accounts + admin access to prod | AKS `local_account_disabled = true`, `azure_active_directory_role_based_access_control{ azure_rbac_enabled = true }`, PostgreSQL `active_directory_auth_enabled = true`; PIM groups in `terraform/modules/azure/pim.tf`. SSO-side enforcement = Entra config (not in repo). | ✅ | Repo side consistent. Entra MFA conditional access is enforced organization-wide (Vanta tests confirm — see Risk-5 row 6.4). |
+| 19 | CC6 | "AES-256 at rest (Azure platform-managed); keys managed in Azure Key Vault" | Same as rows 5 + 10 | ⚠️ | Wording conflates two things. **Suggested edit**: "AES-256 at rest (Azure platform-managed encryption with Microsoft-managed keys). Application secrets and credentials are stored in Azure Key Vault." |
+| 20 | CC6 | RBAC | AKS `azure_rbac_enabled = true`; Key Vault `rbac_authorization_enabled = true`; PostgreSQL Entra+pgaudit with per-tenant role + PIM | ✅ | Strong RBAC posture. |
+| 21 | CC6 | PR + ≥ 1 independent reviewer (CC8.1) | `.github/CODEOWNERS` (3 owners) + comment confirms `require_code_owner_review` ruleset on `main` | ✅ | Independent-reviewer rule depends on the GitHub branch-protection ruleset (not in repo); CODEOWNERS file is consistent with the claim. |
+| 22 | CC7 | **CodeQL (default setup), weekly + on push to default branch** | No `codeql.yml` workflow in `.github/workflows/` (only Trivy, ZAP, build, deploy, pr-checks, cleanup, etc.) | ⚠️ | "Default setup" runs without a workflow file (configured in repo Settings → Code security), so the absence isn't a contradiction. **Verify Settings → Code security → Default setup** is enabled with the stated cadence and attach a screenshot before issuance (same as Risk-5 row 7.1). |
+| 23 | CC7 | Dependabot alerts (auto-update PRs disabled; remediation via Linear) | No `.github/dependabot.yml` in repo | ⚠️ | Absence of dependabot.yml is consistent with "alerts-only, auto-update PRs disabled" (GitHub default when no config file). Verify repo Settings → Code security → Dependabot alerts is on; attach screenshot. |
+| 24 | CC7 | Trivy — container image scanning, weekly | `.github/workflows/trivy-scan.yml` — `cron: 0 6 * * 1` (Mon 06:00 UTC), scans `normain-api`, `normain-worker`, `normain-tenant-api`, severity `CRITICAL,HIGH`, results uploaded to GH Security tab | ✅ | Cadence matches. Note: severity floor is HIGH — auditors may ask whether MEDIUM is intentionally excluded. |
+| 25 | CC7 | OWASP ZAP baseline — "production and staging", weekly | `.github/workflows/zap-scan.yml` — `cron: 0 2 * * 1` against `https://app.normain.com` (prod) and `https://app-dev.normain.com` | ⚠️ | Cadence ✅. Targets are **prod + dev**, not prod + staging. **Suggested edit**: change "production and staging" to "production and development". |
+| 26 | CC7 | Pre-merge code quality: lint, type-check, automated tests; every PR | `.github/workflows/pr-checks.yml` — runs `yarn root:lint`, `yarn root:ts`, `yarn root:test` on `pull_request` (opened/sync/reopened) and fails the workflow if any step fails | ✅ | — |
+| 27 | CC7 | Production monitoring + alerting: BetterStack (uptime + log), 24/7 | `terraform/modules/betterstack/main.tf` (Logtail OTel source) + `terraform/modules/azure/alerts.tf` (Azure Monitor metric alerts on VMSS CPU + storage availability, severity 2, 5-min frequency / 15-min window, routed to action group) | ✅ | Both surfaces present; Azure Monitor + BetterStack pair the draft does not explicitly call out Azure Monitor separately, which is fine. |
+| 28 | CC7 | Security alert triage: GitHub Security Center → Linear; continuous | No code evidence of automatic Security-Center→Linear sync in `.github/workflows/`. Manual triage process. | ⚠️ | Claim is not contradicted but no automation visible in repo. If the link is manual (process), no edit needed; if intended to imply automation, soften wording. |
+| 29 | CC8 | All prod code via PR + 1 independent reviewer before merge to default | `.github/CODEOWNERS` + PR template + `pr-checks.yml` `on: pull_request` | ✅ | Same as row 21. |
+| 30 | CC8 | **Deployments are executed by GitHub Actions; release notes are generated automatically** | `deploy-k8s-prod.yml` triggers on `Build & Push` success on `main` and runs `kubectl set image`. **No** `release-please` / `semantic-release` / `conventional-changelog` config; no `gh release create` step. | 🔴 | "Deployments executed by GitHub Actions" ✅. **"Release notes are generated automatically" is unsupported** — no automation in the repo emits release notes. Either add a release-notes step (e.g., `softprops/action-gh-release` reading commit messages) or remove the sentence. |
+| 31 | CC8 | Infra changes managed via Terraform; same review process | Entire `terraform/` tree + `pr-checks.yml` `terraform-format` job + CODEOWNERS coverage | ✅ | — |
+| 32 | CC9 | BCDR — annual review + annual tabletop | No code-side evidence; documented in policies + Vanta tests | n/a | Out of scope for code review. |
+| 33 | CC9 | (Implicit Azure backup config) | `terraform/modules/azure/database.tf` PostgreSQL: `backup_retention_days = 14`, `geo_redundant_backup_enabled = false`, `zone = "1"` (single AZ, no HA). Blob storage: `account_replication_type = "LRS"`. | ⚠️ | Draft does **not** claim multi-AZ or geo-redundancy, so there is no direct contradiction. But the DR tabletop sentence implies full restore from Azure-managed backup — true within 14-day window only. Auditor may probe RPO/RTO; consider stating retention explicitly. **No draft change required**; this is awareness for the BCDR exhibit. |
+
+## Summary
+
+- **Total claims checked:** 33
+- **✅ Match:** 18
+- **⚠️ Drift / partial:** 12
+- **🔴 Contradict / unsupported:** 2 (rows 13 Sentry, 30 auto release notes)
+- **n/a:** 1
+
+## Recommended draft edits
+
+Only the 🔴 + material ⚠️ items below need draft changes; the rest are evidence-side actions.
+
+1. **DC 3.5 — Sentry row (🔴, finding 13)**
+   - Either remove the row entirely, or, if Sentry will be wired up before the audit period closes, keep it and add the integration to the codebase before issuance. **Recommended:** remove until actually integrated.
+
+2. **DC 3.4 / CC6 — Encryption wording (⚠️, findings 5 + 19)**
+   - Replace: *"AES-256 (Azure platform-managed) … Secrets / keys Azure Key Vault"* and *"AES-256 at rest (Azure platform-managed); keys managed in Azure Key Vault"*
+   - With: *"AES-256 at rest (Azure platform-managed encryption with Microsoft-managed keys). Application secrets and credentials are stored in Azure Key Vault."*
+
+3. **DC 3.6 — Cloudflare row (⚠️, finding 17)**
+   - Either remove "WAF" or verify the WAF is enabled in the Cloudflare dashboard and attach a screenshot. **Recommended (auditor-cleaner):** keep "WAF" only if dashboard evidence is collected; otherwise change to *"Edge, DNS"*.
+
+4. **CC7 — ZAP row (⚠️, finding 25)**
+   - Change: *"OWASP ZAP baseline against production and staging"*
+   - To: *"OWASP ZAP baseline against production and development environments"*
+
+5. **CC8 — Auto-generated release notes (🔴, finding 30)**
+   - Either implement automated release-notes generation, or change:
+   - *"Deployments are executed by GitHub Actions; release notes are generated automatically."*
+   - To: *"Deployments are executed by GitHub Actions. Release-relevant changes are tracked in Linear and summarised in monthly release notes."* (or whatever the actual process is).
+
+6. **CC7 — Security alert triage (⚠️, finding 28)** — _optional_
+   - If triage is manual, change *"GitHub Security Center → Linear"* to *"GitHub Security Center alerts triaged and tracked in Linear"* to avoid implying automation.
+
+## Status
+- [x] Draft exported and claims inventoried
+- [x] DC 3 verified
+- [x] DC 5 CC6 verified
+- [x] DC 5 CC7 verified
+- [x] DC 5 CC8 verified
+- [x] DC 5 CC9 verified
+- [x] Findings table filled
+- [x] Summary + recommended edits
+
+## Open Questions (decisions needed from owner)
+
+1. Sentry: remove from DC 3.5, or wire up Sentry before issuance? (Recommend: remove.)
+2. Cloudflare WAF: keep claim with dashboard screenshot evidence, or drop "WAF"? (Recommend: drop unless WAF rules already configured.)
+3. ZAP targets: confirm "production + development" wording vs. introducing a true staging env.
+4. Release notes: introduce automation (e.g., `softprops/action-gh-release` + Conventional Commits), or soften the claim to match current manual process?
+---
+
+## Terraform Deep-Dive Addendum (deeper second pass)
+
+Findings below are from a closer reading of `terraform/environments/app-production/{infra,workloads}/` rather than just `modules/`. Things that only appear at the environment-instantiation layer were missed in the first pass.
+
+### New findings
+
+| # | DC / CC | Claim or assumption | Evidence locus | Verdict | Note |
+|---|---------|---------------------|----------------|---------|------|
+| 34 | **DC 1** | Three hosting modes offered: Shared, Dedicated, Customer-hosted | Only `Shared` is implemented in `terraform/environments/app-production/`. No Terraform exists for a per-customer "Dedicated" environment (separate AKS / separate Postgres server / separate Key Vault). No artifacts for a "Customer-hosted" deployment. | ⚠️ | Draft describes contractual hosting **options**, but production IaC only implements Shared. **Verify**: is any customer in Dedicated or Customer-hosted mode during the SOC 2 examination window (4 May – 4 Aug 2026)? If no, fine as-is (commercial options that are not exercised need not be in scope). If yes, scope is incomplete. |
+| 35 | **DC 3.5 / DC 7** | OpenAI, Anthropic listed as data-path subprocessors ("per-feature, customer-opt-in") | `terraform/.../app-production/infra/main.tf` — all production LLM/embedding traffic routes through `azurerm_cognitive_account` (Azure OpenAI Service), 5 EU regions. `src/shared/ai/ai.groups/src/index.ts` uses `createAzure({ baseURL: AZURE__LLM__EU__ENDPOINT/openai })`. `src/.../openAiExtractInsightAgent/modelProvider.ts` reads `OPEN_AI_GPT_MODELS` — which in `app-production/workloads/main.tf` is set to `local.infra.ai_models_csv["gpt-5.1"]`, i.e. the Azure cognitive_deployment URL set. **`OPENAI_API_KEY`, `ANTHROPIC_API_KEY` are NOT set anywhere in production IaC** (the env vars are read with `.optional()` schema and the Anthropic path is gated `if (ANTHROPIC_API_KEY)` — see `ExtractInsightWorker.ts`). | 🔴 | **Production LLM traffic does not reach OpenAI Inc. or Anthropic PBC directly during the examination period.** It is delivered via Azure OpenAI Service (Microsoft, already carved out in DC 7). Three options to reconcile: <br>(a) **Remove OpenAI / Anthropic from DC 3.5** for this period and note in DC 9 if either is introduced later. Cleanest.<br>(b) Reframe as a **capability** statement in a separate paragraph rather than a subprocessor row, so the auditor doesn't infer current data flow.<br>(c) If a customer-opt-in mechanism actually does swap providers, point to the code path that injects `ANTHROPIC_API_KEY` per-tenant — I did not find one (selection is global env-var, not per-tenant).<br>Recommend (a). |
+| 36 | **DC 1 / DC 3** | Tenant isolation in Shared mode | All tenants share one AKS cluster, one PostgreSQL Flexible Server, one Key Vault, one ACR. Per-tenant: K8s namespace, Postgres database, Postgres role (`tenant_${uid}`), Storage Account container, NFS share, Key Vault secret prefix (`${tenant_uid}--`), PIM group, tenant API key. (See `terraform/environments/app-production/workloads/main.tf` `module.customer_tenant for_each = local.tenants` and `terraform/modules/customer-tenant/`.) | ✅ | Draft does not claim physical per-tenant isolation in Shared mode, so no contradiction. Auditor will likely ask how cross-tenant access is prevented — be ready with: per-tenant Entra group → per-tenant Postgres role; per-tenant Key Vault objectAlias; per-tenant K8s namespace + service account. |
+| 37 | **DC 1** | "Customer tenant in Normain's shared Microsoft Azure environment." Implication: data residency = Sweden Central. | `app-production/infra/main.tf`: AKS, Postgres, primary Storage Accounts in `swedencentral`. **But** Azure OpenAI deployments span `Sweden Central`, `West Europe`, `France Central`, `Germany West Central`, `Norway East`. Customer prompts/embeddings may be processed in any of those EU regions depending on the `RandomDelegatingEmbeddingModel` rotation and `gpt-4o` region selection (zone-mode). | ⚠️ | Not a SOC 2 issue per se, but very relevant for GDPR (Article 28 subprocessor list) and EU data-residency expectations. Recommend a one-line addition to DC 3.4 or DC 3.5: *"AI inference is performed within the European Economic Area (Azure OpenAI Service regions: Sweden Central, West Europe, France Central, Germany West Central, Norway East)."* |
+| 38 | **CC9 BCDR** | DR tabletop simulated production-database deletion, full restore from Azure-managed automated backup | `terraform/modules/azure/database.tf`: `azurerm_postgresql_flexible_server` with `backup_retention_days = 14`, `geo_redundant_backup_enabled = false`, `zone = "1"`. `app-production/infra/main.tf`: `postgresql_sku = "B_Standard_B2ms"` (**Burstable** tier — does NOT support Azure PostgreSQL HA). | ⚠️ | The DR claim is **technically true** (backup-and-restore works within 14 days), but the auditor will probe RPO/RTO. Burstable SKU precludes zone-redundant HA → primary DB has no replica → DR = backup restore = hours of RTO. Either: (a) leave draft as-is and document RPO ≤ 24h / RTO ~ hours in the supporting BCDR exhibit, or (b) plan a SKU upgrade to General Purpose (HA-capable) before the examination period closes. **No draft text change required** unless the BCDR document misstates RPO/RTO. |
+| 39 | **CC8** | "All production code changes flow through a pull request with at least one independent reviewer prior to merge into the default branch." | `.github/workflows/provision-tenants.yml`: triggered by `repository_dispatch` from the tenant API, runs `terraform apply -auto-approve`, then commits the regenerated `tenants.json` back to `main` with `[skip ci]` from a GitHub App identity. | ⚠️ | Code changes ✅. **Tenant-configuration changes** (adding/removing a customer, updating per-tenant env) are applied by an automated workflow that bypasses PR review. This is not "production code" in the strict sense, but auditors often interpret CC8 to cover production system changes generally. Recommend a short clarification in CC8: *"Customer-tenant configuration (per-tenant settings, environment variables, DNS) is provisioned via an authenticated tenant API and applied by Terraform automation; the underlying Terraform modules themselves remain change-controlled via the same PR + reviewer process."* |
+| 40 | **CC8** | "Deployments are executed by GitHub Actions" | `.github/workflows/deploy-k8s-prod.yml` triggers on `Build & Push` success on `main`, runs `kubectl set image deployment/{api,worker} ...` across 3 namespaces (`normain`, `tenant-advisense`, `tenant-miljogiraff`). | ✅ | Deployment ✅. But: deploy is direct `kubectl set image` against prod with no canary/blue-green/staging gate between build and prod. Not a SOC 2 description issue, but a CC8 robustness note. |
+| 41 | **DC 3.4** | "Secrets / keys → Azure Key Vault" | `terraform/environments/app-production/workloads/main.tf`: `data "azurerm_key_vault_secret" "encryption_key"` is read from Key Vault and injected as `ENCRYPTION_KEY` into every tenant's app pod. | ✅+ | There is an **application-layer encryption** (with a Key Vault-stored key) on top of Azure SSE. Optional disclosure: extend DC 3.4 with *"Application-managed encryption is applied to selected sensitive fields using a key stored in Azure Key Vault, in addition to Azure platform-managed encryption at rest."* Adds rigour for the auditor. |
+| 42 | **DC 3.1** | Container registry implied (image source) | `terraform/global/main.tf`: `azurerm_container_registry "acr"` SKU = `"Standard"`, `admin_enabled = true`, `public_network_access_enabled = true`. | ⚠️ | Two concerns: <br>(1) ACR **Standard SKU** does not include built-in image vulnerability scanning (Premium feature). The Trivy CI workflow + Defender for Containers (subscription level) cover this — make sure both are cited as evidence. <br>(2) `admin_enabled = true` keeps a username/password admin account on the registry alongside RBAC; this is generally discouraged. Worth a remediation note even if it doesn't break a description claim. |
+| 43 | **DC 3.1** | Azure Blob Storage (object storage) | `terraform/modules/azure/main.tf`: `azurerm_storage_account "uploaded_files"` → `account_replication_type = "LRS"` (locally redundant, single AZ). `azurerm_storage_account "data_sources"` → `account_replication_type = "LRS"`, `https_traffic_only_enabled = false`. | ⚠️ | LRS = single-AZ redundancy. Same BCDR comment as #38. Repeat note on `https_traffic_only_enabled = false` for `data_sources` (NFS-only internal traffic, but still a hardening gap). |
+| 44 | **DC 3.6** | Slack listed as operational tool (internal communication) | `terraform/environments/app-production/workloads/slack-bot.tf`: **entire `module "slack_bot" { ... }` block is commented out**. The `src/apps/server/slack-bot` code exists but no deployment manifests are applied. | ✅ | The **Slack workspace** is a real internal-comms tool (Slack as SaaS, used by employees), so DC 3.6 row is correct. The Slack **bot integration** code is dormant; no need to mention it. Only flag if the auditor asks why slack-bot code is in the repo. |
+| 45 | **DC 1 / DC 7** | Microsoft Azure = sole carved-out subservice organization | Confirmed by infra structure. Cloudflare for DNS, BetterStack for logs, PostHog for analytics — all listed as DC 3.5 third parties, not subservices. | ✅ | Carve-out is appropriate. The DC 7 CSOC scope (CC6.4 physical access + CC7.2 environmental controls) is correct for what Microsoft provides. |
+
+### Revised summary
+
+After the deep dive:
+
+- Add **1 🔴** (finding 35 — direct OpenAI / Anthropic not in current production data path).
+- Add **6 ⚠️** (34 hosting modes, 37 EU region disclosure, 38 BCDR posture, 39 tenant-provisioning bypass of PR, 42 ACR SKU + admin, 43 storage LRS + NFS TLS).
+- Add **2 ✅** with optional enhancement (36 isolation model, 41 app-layer encryption).
+- Confirm **2 ✅** (40 deploy, 44 Slack, 45 carve-out).
+
+**Updated overall**: 33 + 12 new = 45 claims/observations. ✅ 22 / ⚠️ 19 / 🔴 3 / n/a 1.
+
+### Revised top recommended draft edits (in addition to those in the first pass)
+
+7. **DC 3.5 — OpenAI / Anthropic rows (🔴, finding 35)**
+   - Production IaC routes all LLM traffic through Azure OpenAI Service (Microsoft). Direct OpenAI Inc. and Anthropic PBC are not currently in the data path.
+   - **Recommended:** remove both rows from DC 3.5 for the audit period. If they may be reintroduced later, add a short forward-looking note: *"Direct integrations with OpenAI and Anthropic are available as a deferred capability; any activation will be disclosed as a subprocessor change under the DPA's 30-day notice (DC 2)."*
+
+8. **DC 1 — Hosting modes (⚠️, finding 34)**
+   - If no customer is in Dedicated or Customer-hosted mode during the examination window, add a parenthetical: *"During the examination period, all customers operate under the Shared (Normain-managed) hosting mode."* This pre-empts the auditor's scoping question.
+
+9. **DC 3.4 / DC 3.5 — EU data residency for AI (⚠️, finding 37)**
+   - Optional but auditor-friendly addition: *"AI inference is performed within the European Economic Area, across Azure OpenAI Service regions: Sweden Central, West Europe, France Central, Germany West Central, Norway East."*
+
+10. **CC8 — Tenant-provisioning automation (⚠️, finding 39)**
+    - Add: *"Customer-tenant configuration is provisioned via an authenticated tenant API and applied by Terraform automation. The underlying Terraform modules remain change-controlled via the same PR + reviewer process."*
+
+### Updated Open Questions
+
+5. Hosting modes — confirm whether any Dedicated / Customer-hosted customer is in scope for the examination period.
+6. OpenAI / Anthropic in DC 3.5 — remove from this period's subprocessor list (recommended), or surface evidence that a customer-opt-in actually routes traffic to OpenAI Inc. / Anthropic PBC directly during the period.
+7. PostgreSQL HA — accept Burstable + 14-day backup as the documented BCDR posture, or plan an SKU upgrade to General Purpose (HA-capable) before issuance.
+8. ACR `admin_enabled = true` — remediate (rely on RBAC only) before issuance, or note in the residual-risk register.

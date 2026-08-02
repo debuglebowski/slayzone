@@ -1,0 +1,106 @@
+# Dashboard Widgets
+
+Authoritative list of all **16** widget types available on dashboards.
+
+- **Widget union:** `apps/web/rpc/contract.ts` (lines ~696–713)
+- **Renderers:** `apps/web/src/components/dashboard/WidgetCanvas.tsx`
+- **Factory:** `apps/web/src/lib/dashboards.ts` (`newWidget`)
+
+## Summary
+
+| # | Type | conceptId | Scope | One-liner |
+|---|------|-----------|-------|-----------|
+| 1 | `metric` | Yes | Concept | Single aggregated number (count/sum/avg) + delta |
+| 2 | `list` | Yes | Concept | Filtered instances as table or cards |
+| 3 | `breakdown` | Yes | Concept | Group instances by field → bar/pie chart |
+| 4 | `attention` | Yes (opt) | Concept | Decay/momentum band rollup + stale queue |
+| 5 | `trend` | Optional | Org/Concept | Event count time-series over 7/30/90d |
+| 6 | `activity` | Optional | Org/Concept | Recent events as timeline or log feed |
+| 7 | `tasks` | No* | Org | Global task list, grouped/filterable |
+| 8 | `members` | No | Org | Member directory (rows/grid) |
+| 9 | `welcome` | No | Org | Greeting banner + pulse + quick links |
+| 10 | `goal` | Yes | Concept | Metric vs manual target (bar/ring/number) |
+| 11 | `shortcuts` | No | Static | Hand-picked jump-off links |
+| 12 | `note` | No | Static | Free-form rich-text on the canvas |
+| 13 | `kanban` | Yes | Concept | Enum-grouped card board, drag-to-update |
+| 14 | `calendar` | No | Multi-concept | Instances by date field (month/week/agenda) |
+| 15 | `gantt` | Yes | Concept | Bars between two date fields, swimlanes |
+| 16 | `files` | Yes (opt) | Instance/Concept/Org | Attachment browser + upload |
+
+\* `tasks` is org-global but accepts an optional concept filter.
+
+---
+
+## Data-bound widgets (require a concept)
+
+### 1. `metric` — Hero Number
+Single aggregated number with optional change delta.
+Config: `conditions`, `agg` (count/sum/avg), `field`, `label`, `variant` (auto/tile/bar), `format` (plain/compact/currency/percent), `delta` (off/7d/30d), `includeArchived`.
+
+### 2. `list` — List / Table
+Instances matching filters, as a table (columns) or cards on narrow tiles.
+Config: `conditions`, `orderBy`, `limit`, `columns`, `variant` (auto/table/cards), `archived` (exclude/include/only).
+
+### 3. `breakdown` — Grouping Chart
+Groups instances by an enum field (or labels) into a bar/pie chart.
+Config: `conditions`, `groupBy` (field id or `__labels`), `chart` (bar/pie), `sort` (count/label/field), `values` (count/percent/both), `maxGroups`.
+
+### 4. `attention` — Band Rollup
+Decay/momentum computed-field bands (cooling/cold/heating/steady) + stale-queue list.
+Config: `computedField`, `bands[]`, `limit`, `variant` (bands/strip), `showDays`, `conditions`.
+
+### 10. `goal` — Progress Tracker
+Metric with a manual target finish line.
+Config: `conditions`, `agg`, `field`, `target`, `direction` (reach=quota / stay=budget), `variant` (bar/ring/number), `showPercent`.
+
+### 13. `kanban` — Board
+Instances as cards in columns keyed by an enum field.
+Config: `conditions`, `groupBy` (enum field), `cardFields[]`, `dragToUpdate`, `columns` (subset/order), `showEmptyColumns`, `orderBy`, `includeArchived`.
+
+### 15. `gantt` — Timeline
+Instances as bars between two date fields with optional swimlanes.
+Config: `conditions`, `scale` (day/week/month), `startField`, `endField` (absent = milestone), `groupBy` (swimlanes), `barLabelField`, `progressField` (0–100), `showTodayLine`, `window` (fit/90d/quarter).
+
+---
+
+## Optional-concept / multi-concept widgets
+
+### 5. `trend` — Time Series
+Event count bucketed by day/week. Org-wide if no concept.
+Config: `eventTypes[]`, `bucket` (day/week), `since` (7d/30d/90d), `chart` (area/bars), `showDelta`.
+
+### 6. `activity` — Activity Feed
+Recent events (updates, notes, tasks) as a timeline rail or dense log.
+Config: `limit`, `variant` (auto/timeline/log), `showDiffs`, `eventTypes[]`.
+
+### 14. `calendar` — Calendar
+Multi-concept overlay; instances plotted by a date field. Scoped via `sources`.
+Config: `mode` (month/week/agenda), `sources[]` (conceptId, dateField, +color/labelField/conditions), `includeTasks`, `density` (full/dots).
+
+### 16. `files` — Attachment Browser
+Uploads attached to instances, browsed at a chosen scope.
+Config: `scope` (instance/concept/org), `instanceId` (for instance scope), `allowUpload`, `variant` (gallery/list), `sort` (newest/name/size), `limit`, `fileType` (all/image/doc/pdf/other).
+
+---
+
+## Page widgets (no concept — org/static)
+
+### 7. `tasks` — Tasks
+Org-global task list with toolbar, composer, grouping.
+Config: `assignee` (all/me/none), `showToolbar`, `showComposer`, `showDone`, `variant` (full/checklist), `groupBy` (schedule/status/priority/none), `rowMeta[]` (due/priority/labels/assignee), `statusIds[]`, `due` (any/overdue/week), `conceptId` (optional filter).
+
+### 8. `members` — Directory
+Org member directory.
+Config: `showToolbar`, `variant` (rows/grid), `fields[]` (role/email/joined), `sort` (name/role/joined), `limit`.
+
+### 9. `welcome` — Welcome
+Big-title greeting banner with optional pulse line + quick links.
+Config: `variant` (hero/card), `showPulse`, `links[]` (ShortcutItem).
+
+### 11. `shortcuts` — Shortcuts
+Hand-picked jump-off points (manual, no filters).
+Config: `items[]` (kind = instance/dashboard/url, ref, label, icon), `variant` (list/grid), `newTab`.
+
+### 12. `note` — Note
+Free-form rich-text (ProseMirror JSON envelope).
+Config: `content` ({doc, text}), `appearance` (plain/info/warn/success), `overflow` (clip/scroll).

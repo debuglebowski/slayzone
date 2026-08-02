@@ -1,0 +1,16 @@
+flowchart TD
+  All([All tasks]) --> F1{Archived?}
+  F1 -->|yes| D1[Drop]
+  F1 -->|no| F2{Priority<br/>matches filter?}
+  F2 -->|no| D2[Drop]
+  F2 -->|yes| F3{Status matches filter?<br/>or pinned<br/>or active<br/>or open?}
+  F3 -->|no| D3[Drop]
+  F3 -->|yes| F4{Temporary hidden?}
+  F4 -->|yes,<br/>not open| D4[Drop]
+  F4 -->|no| F5{Only active on?}
+  F5 -->|yes,<br/>not pinned/active/open| D5[Drop]
+  F5 -->|no| Post[Pull in parents]
+  Post --> Visible([Visible])
+
+  classDef drop fill:#7f1d1d,color:#fff
+  class D1,D2,D3,D4,D5 drop

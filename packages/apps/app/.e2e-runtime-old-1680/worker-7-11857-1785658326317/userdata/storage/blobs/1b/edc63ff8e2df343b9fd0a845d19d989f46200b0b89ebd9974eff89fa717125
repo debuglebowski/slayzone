@@ -1,0 +1,35 @@
+%% Normain — Production network diagram (high level)
+%% Source: normain/terraform (app-production). 2026-06-10.
+flowchart TB
+  client(["Clients / Internet"])
+  cf["Cloudflare DNS<br/>normain.com"]
+
+  subgraph az["Azure — Sweden Central"]
+    lb["Azure Load Balancer"]
+
+    subgraph vnet["VNet (private)"]
+      subgraph aks["AKS cluster — Istio + Gateway API"]
+        gw["Ingress Gateway<br/>TLS terminate"]
+        app["App workloads<br/>api + worker (per tenant)"]
+      end
+      psql[("PostgreSQL<br/>Flexible Server")]
+      redis[("Azure Managed Redis")]
+    end
+
+    kv["Key Vault"]
+    storage["Storage<br/>blob + NFS"]
+    ai["Azure OpenAI + Doc Intelligence<br/>EU regions"]
+    acr["Container Registry"]
+  end
+
+  client -->|HTTPS| cf
+  client -->|HTTPS 443| lb
+  lb --> gw
+  gw --> app
+
+  app -->|private| psql
+  app -->|private| redis
+  app --> kv
+  app --> storage
+  app -->|HTTPS| ai
+  aks -->|image pull| acr

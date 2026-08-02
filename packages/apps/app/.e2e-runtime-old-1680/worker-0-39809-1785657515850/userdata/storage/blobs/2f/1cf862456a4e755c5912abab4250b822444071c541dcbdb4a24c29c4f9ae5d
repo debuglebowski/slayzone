@@ -1,0 +1,35 @@
+# Expanding the Mission's Splash
+
+Distribution's solved. "More splash" = new modes, not more platforms. Split by goal.
+
+## Reach (Goal 1 — literacy)
+
+- **Folkbildning** (ABF, Vuxenskolan, libraries, komvux). Mandate = literacy for non-curious adults — who video won't reach. Uniquely Swedish, credible. Top non-obvious move.
+- **Text articles.** Search is where people land Googling "hallucinerar AI" at 11pm. Video is invisible to search; text is the funnel. (Also: podcast, newsletter.)
+- **Teacher packs.** Episode → ready-to-teach lesson. Reaches teens + one teacher = 30 households.
+
+## Authority (Goal 2 — the voice)
+
+- **Be the number media calls.** Press-ready pitch + rapid commentary when AI hits DN/SvD/Aktuellt. Low-volume, high-authority.
+- **Op-eds.** DN Debatt / SvD on AI literacy as public issue. How you get *cited*, not watched.
+- **Panels / policy briefings.** Politicians don't get it — be who explains it to them.
+
+## Build (digital — deepen + scale)
+
+- **Interactive sandbox.** Let a non-technical person *make* a model hallucinate, watch tokenization, poke a tiny model. Video shows; a sandbox lets them *do* — durable understanding comes from doing. The thing video structurally can't be.
+- **Spaced-repetition retention.** Video is watch-once-forget; the literacy gap is retention, not exposure. Anki-style Swedish decks per episode make it *stick*.
+- **AI-literacy self-test.** "Hur AI-kunnig är du?" Shareable + the *only* thing here that measures Goal 1 (did understanding move?). Diagnostic routes you to the right episode.
+- **Live four-bucket claim tracker.** Public searchable DB of circulating AI claims, each tagged 1–4. Turns the signature framework into a destination site, not just a device.
+- **Swedish AI glossary.** SEO capture for "vad är [term]" searches. Non-technical people search terms first; own that surface.
+- **Swedish AI-tools directory.** Table of AI tools with metadata: what it does, company, **country of origin**, founding year, free/paid. Three buckets: consumer products (ChatGPT, Claude, Gemini…), Swedish companies (Lovable, Sana, Legora…), underlying models (GPT, Llama, Mistral…). Plus: which big companies (Swedish + global) publicly use what, each with a source. Point that emerges on its own: near-total US/China concentration vs. what Sweden's actually built. Adoption facts rot fast (cf. Klarna's walked-back AI claims) → four-bucket-tag them.
+
+## Tradeoff
+
+Reach wants volume + institutions. Authority wants scarcity + gatekeeper citations. One calendar can't max both.
+
+## Unresolved
+
+- Hours/week beyond video?
+- Institutional (folkbildning/schools) or independent-voice?
+- Media/policy visibility now, or after series proves itself?
+- Build capacity — who codes the digital tools?

@@ -1,0 +1,30 @@
+# PR #1 (zabealbe) vs v0.32.3 — final
+
+PR: https://github.com/zabealbe/slayzone/pull/1 · +253/−0
+
+## Status: folded in
+
+- `isActive` false→true reactivate `useEffect` — applied to `Terminal.tsx`
+- `100-task-switch-atlas-stability.spec.ts` smoke spec — copied verbatim
+- Both typecheck clean; webgl-loader unit tests 12/12 still green
+
+## Plus: companion audit found one more uncovered case
+
+Sub-agent audit of the runtime font-change path found a real gap NOT in the PR:
+
+- v0.32.2 font-size + font-family handlers set the option, then immediately `fit()` — no `document.fonts.load()` await. Switching to a not-yet-loaded font measured fallback cells, atlas rasterized against fallback, FOUT swap-in → smeared tiles.
+- Both effects now await the new face inside a 1500 ms-bounded `Promise.race`, mirroring the cold-start await. `cancelled` flag on cleanup aborts a stale wait.
+
+## PR's unshipped claims
+
+Per-frame rAF cell-key drift watchdog + `cellKey` export + `readTermCellKey()` — not in diff, ignored. The font-load await catches the case the watchdog claimed to target, at lower cost.
+
+## Next gap (audit flagged, not fixed yet)
+
+WebGL addon dispose / re-attach race during context-loss: an in-flight `scheduleAtlasCorrection` rAF runs against a disposed addon, producing a one-frame stale-atlas flash. `correctAtlas` swallows the throw, so symptom is rare. Mitigation if it shows up: addon-instance generation counter.
+
+## Final layering (working-notes updated)
+
+- v0.32.0 webfont-before-open · v0.32.1 startup correction window · v0.32.2 post-fit corrections · v0.32.3 heartbeat + visibility/focus + reactivate + font-load await
+
+All in `webgl-loader.ts` + `Terminal.tsx`. Never propose one in isolation again.

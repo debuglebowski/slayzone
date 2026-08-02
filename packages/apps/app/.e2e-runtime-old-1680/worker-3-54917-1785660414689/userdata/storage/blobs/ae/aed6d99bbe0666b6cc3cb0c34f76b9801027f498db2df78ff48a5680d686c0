@@ -1,0 +1,62 @@
+# Sign-off Package — Draft (NOT SENT)
+
+**Approver**: Sara Landfors, CEO & Co-founder (per Step 1.5)
+**Channel**: Email + share Google Doc with edit comment-access (ISMS Governance Council CC if council review precedes CEO sign-off, per ISMS Roles & Responsibilities `10GfPF1hCLdVv4oY5eb-CmxaC9vPEhLbg`)
+**Status**: Not sent. Awaiting explicit user authorization to send.
+
+---
+
+## Draft email
+
+**To**: sara@normain.com (verify before send)
+**CC**: ISMS Governance Council members (CTO, COO, business-unit delegates, engineering leaders — finalize list before send)
+**Subject**: Sign-off requested — Normain System Description for SOC 2 Type 2 (May 4 – Aug 4 2026)
+
+**Body** (proposed):
+
+> Hi Sara,
+>
+> We've drafted a slimmer replacement for the Normain System Description ahead of the SOC 2 Type 2 examination period 4 May – 4 August 2026 (Prescient Assurance LLC). The current doc is retained as-is; nothing has been replaced yet.
+>
+> What you're approving:
+> – New doc: [Normain System Description — May 4 – Aug 4 2026](https://docs.google.com/document/d/1lnb6Lu4ZWnwuQTGjpH1ijteMgTS9olCz1et4LBEhbBs)
+> – Current doc kept for reference: [Normain System Description](https://docs.google.com/document/d/1-aa9Pa9vNNsf3ZE8pyGoA6oBAcOOOv-rCi1e03lJOZ0)
+> – Diff summary (key changes vs current, with source links per claim): attached / linked
+>
+> Highlights of what changed and why:
+> – Audit period corrected (was Q2-Q3 2025).
+> – DC 2 commitments aligned to signed SLA / DPA: uptime 90 % → 99 %; service-credit thresholds shifted; subprocessor notice 30 days / objection 14 days made explicit; 90-day retention claim dropped (no source found).
+> – DC 3 third-party access reconciled against DPA Appendix B and Vendor Master Sheet: Miro removed (approved=No); Sentry, PostHog, OpenAI, Anthropic, BetterStack added to data-path table; operational access (Vanta, Google Workspace, Cursor) split into a separate table.
+> – DC 4 prior-cycle token incident removed (out of period); placeholder pending pre-issuance re-check.
+> – DC 5 CC7 corrected: Grype → Trivy; CodeQL / ZAP / Trivy cadences corrected to weekly; Dependabot stated as alerts-only.
+> – Internal control-ID prefixes (GOV-, HRS-, etc.) removed from CC1–CC9 headings; AICPA TSC IDs only.
+> – DC 8 enumerates the four out-of-scope TSCs explicitly.
+> – Length ~30 % of current doc.
+>
+> Items still open before issuance (kept transparent so you can flag if any are blockers for your sign-off):
+> – ISMS Governance Council quarterly cadence — confirm via Circleback or council-minutes folder.
+> – 2026 backup recovery test evidence.
+> – 2026 BCP/DR exercise evidence (2025-07-22 tabletop is last on record).
+> – Azure SOC 2 review-of-record (2025/2026) — pull from Microsoft STP.
+> – Encryption claim phrasing — keep "AES-256 / TLS 1.2+" or tighten to Azure-default wording (Key Vault is confirmed in IaC).
+> – DC 4 / DC 9 final re-check at issuance against Linear.
+>
+> Could you (a) review the diff summary, (b) note any required edits in the doc as suggestions, and (c) reply with approval or request-changes? If approved, we'll mark the current doc superseded with a banner linking forward — no deletion.
+>
+> Thanks,
+
+## Pre-send checklist
+
+- [ ] Approver email verified (Sara Landfors — check current address)
+- [ ] Council CC list finalized (or council step deferred per current process)
+- [ ] Diff summary linked or attached
+- [ ] Both Google Docs shared with approver at correct access level (commenter on current, editor on new)
+- [ ] **User authorization received to send** (per `feedback_linear_comments_need_explicit_auth` and `feedback_compliance_drive_only`: do not send without explicit OK)
+
+## On approval (post-sign-off actions, not yet authorized)
+
+1. Capture approver decision + date in step-4-signoff.md artifact.
+2. Apply any requested edits in the new doc; re-route if material.
+3. Add a banner to the current doc: "SUPERSEDED 2026-MM-DD by [new doc link]. Retained for reference."
+4. Do NOT delete the current doc.
+5. Record supersession action taken.

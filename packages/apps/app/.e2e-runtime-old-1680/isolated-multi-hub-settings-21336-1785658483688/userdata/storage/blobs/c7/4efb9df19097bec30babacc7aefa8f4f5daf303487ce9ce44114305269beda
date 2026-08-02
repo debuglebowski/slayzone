@@ -1,0 +1,63 @@
+# Quick-edit · Option A — per-cell inline (toggle in Display menu)  ★ recommended
+
+The enable/disable lives **inside the Display popover** (right under "Show archived"), remembered
+per concept. When ON, cells become inline editors and row-click→detail is suppressed (click the #
+to open detail). An active cue keeps the mode visible so it isn't hidden in a menu.
+
+```
+TOOLBAR  (the "Display" button is the sliders icon; it opens a popover)
+
+  Vendors                       🔍   ☰ Filter   ⊞ Display ▾   [ + Create ]
+                                                    │
+                                                    ▼  popover (Radix), align end
+                                          ┌─ Display ─────────────┐
+                                          │  ☐  Show archived     │
+                                          │  ☑  Quick edit        │ ← lives here now (new)
+                                          └───────────────────────┘
+
+
+ACTIVE CUE  (Quick edit ON → Display button gets an accent dot + a subtle "Editing" pill)
+
+  Vendors                  🔍   ☰ Filter   ⊞ Display •   ✎ Editing   [ + Create ]
+                                                     ▲ dot           ▲ click to exit
+
+
+READ MODE  (Quick edit OFF — unchanged; click anywhere on a row → detail page)
+  #  │ Name        │ Appr │ Risk Score │ Cost/mo │ Business owner   │ SSO
+ ────┼─────────────┼──────┼────────────┼─────────┼──────────────────┼─────
+  1  │ 1Password   │  ✓   │  Critical  │  20.95  │ Dennis Landfors  │  ✓
+  2  │ Anthropic   │  ✓   │  Medium    │   ···   │ Dennis Landfors  │  ✓
+  3  │ Cloudflare  │  ✓   │  High      │   ···   │ Dennis Landfors  │  –
+        └─ whole row links to the vendor detail
+
+
+QUICK-EDIT MODE  (Quick edit ON — cells editable; click the # to open detail)
+  #  │ Name        │ Appr │ Risk Score │ Cost/mo │ Business owner   │ SSO
+ ────┼─────────────┼──────┼────────────┼─────────┼──────────────────┼─────
+  1▸ │ 1Password   │ [✓]  │ Critical ▾ │  20.95  │ Dennis Land.. ▾  │ [✓]
+  2▸ │ Anthropic   │ [✓]  │ Medium   ▾ │[ 18.00█]│ Dennis Land.. ▾  │ [✓]   ← number cell focused
+ ────┼─────────────┼──────┼─────┬──────┴────┐────┼──────────────────┼─────
+  3▸ │ Cloudflare  │ [✓]  │ Hig │ • Critical │    │  ▒ saving… ▒     │ [ ]
+       click # to open ▲     │ • High     │    └─ autosave on blur / Enter
+                             │ • Medium   │
+                             │ • Low      │  ← enum = dropdown (keeps option colors)
+                             └────────────┘
+
+  Esc cancels · Enter commits · Tab → next cell
+```
+
+## Placement & state
+- Control sits in the **Display popover** beside *Show archived* — the same `Checkbox` + `label`
+  pattern already at `ConceptView.tsx` (no new toolbar real estate).
+- **Sticky** — remembered per concept (localStorage / URL), so the Vendors view stays in edit mode.
+- **Active cue** (so the mode isn't invisible): accent dot on the Display button + a small "Editing"
+  pill that also acts as a one-click exit; editable cells additionally show a hover affordance.
+
+## Interaction
+- One field per edit → `updateInstance(id, version, { [fieldId]: value })`.
+- Optimistic local write, reconciles via the live SSE collection. Version clash → cell flags + refetch.
+- Editors reused from `InstanceForm.renderInput`: bool=checkbox · enum=dropdown · user=member picker
+  · number/text/date inputs. **computed** cells = read-only; **relation/file** aren't columns (edit in detail).
+
+**Forks captured here:** entry = toggle **inside the Display menu** (not a standalone chip) · sticky
+per-concept preference · per-cell autosave · active-state indicator to keep the mode visible.

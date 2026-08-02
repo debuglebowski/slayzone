@@ -1,0 +1,7 @@
+# Defender for Cloud — IDS/IPS evidence descriptions
+
+Evidence for Vanta test **"Intrusion detection system alerts"**.
+Tool: **Microsoft Defender for Cloud** (NORMAIN tenant, 3 subscriptions). Captured 2026-06-16.
+
+- **defender-environment-settings-2026-06-16.png** — Defender for Cloud → Environment settings, showing Defender plans enabled across all 3 subscriptions. Confirms IDS/IPS is deployed and continuous threat monitoring is actively configured.
+- **defender-sample-alerts-2026-06-16.png** — Security alerts blade showing 97 active alerts (High/Medium severity) with affected resources and timestamps. Demonstrates Defender detects and generates alerts on suspicious/harmful activity.

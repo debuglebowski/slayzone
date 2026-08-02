@@ -1,0 +1,37 @@
+# Draft updates to the IR Tabletop report (Scenario B)
+
+Two pieces of content. Review before I apply to the doc.
+
+---
+
+## Section 2 — Scenario (replaces current text)
+
+> Two customers within 5 minutes report that nothing happens when they press **Run Extraction** on a run page — the button enters its loading state and stays. No error toast appears. CSM raises it in #security. CTO files a Security Event Report. One engineer recognises it as a potential urgent issue and calls a virtual meeting.
+
+(Single paragraph, same shape as the current Section 2. Just swaps "Generate insights" → "Run Extraction" and tightens the timeline detail.)
+
+---
+
+## Section 6 — Facilitator instructions (appended; minimal)
+
+This is the scenario-specific addition. Keeping it tight per your "not over-cooked" feedback — three short blocks only: truth, reveal cues, stop condition. No injects, no full stage timeline (those live in your head as facilitator).
+
+### Scenario truth (facilitator only)
+An older `ExtractionInsightResult` row for the same extraction crashed (container OOM) leaving its `status` at `{"type":"WAITING"}`. The `assertExtractionNotRunning` guard now silently rejects every new `Run Extraction` call for that extraction — the worker never starts.
+
+### Reveal cues
+- When they ask whether the frontend mutation succeeded: yes, `createRun` returned 200, no client-side error.
+- When they check Bull Board's `ExtractInsightQueue`: no recent activity for the affected `extractionId`.
+- When they query `ExtractionInsightResult` for that `extractionId`: there's a row stuck in `WAITING` with `updatedAt` ≈ 3 hours ago.
+- When they look at that original job's last log line: container OOM kill at the same timestamp.
+
+### Expected containment + fix path
+- Manually transition the stuck row to `CANCELED`.
+- Open a Linear ticket: watchdog that auto-cancels `WAITING`/`RUNNING` rows older than N minutes + alerts when ghosts accumulate.
+
+### Stop condition
+If the team reaches "stuck row cleared + Linear ticket logged for the watchdog" before 45 minutes, move to the follow-up questions above.
+
+---
+
+OK to apply both?

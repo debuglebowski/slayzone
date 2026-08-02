@@ -1,0 +1,30 @@
+CHARTS                                  (tab: Charts)
+════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────┐
+│  ▓▓ biotracker                          [⚙/+]  │  ← header (create/manage top-right)
+├──────────────────────────────────────────────┤
+│  ┌─── ButtonGroup ──────────────────────────┐ │  ← Settings bar
+│  │  📊 Sleep │  📅 Range  │  ⧗ Interval      │ │    chart | range | interval
+│  └──────────────────────────────────────────┘ │    (tap → action sheet)
+│                                                │
+│  ┌─── ChartView ────────────────────────────┐ │
+│  │  8 ┤            ╭─╮                        │ │
+│  │  6 ┤     ╭──╮  ╱   ╲   ╭╮                  │ │
+│  │  4 ┤  ╭─╯   ╲╱     ╰──╯ ╰─╮                │ │
+│  │  2 ┤ ╱                     ╲               │ │
+│  │  0 ┼──┬────┬────┬────┬────┬──              │ │
+│  │    Mon  Tue  Wed  Thu  Fri                 │ │
+│  └──────────────────────────────────────────┘ │
+│                                                │
+│                                                │
+│   (empty state:                                │
+│     "You have no charts /                      │
+│      Create one by going to charts in the      │
+│      top right corner")                        │
+│                                                │
+├──────────────────────────────────────────────┤
+│      ⌨ Input          📈 Charts                │
+└──────────────────────────────────────────────┘
+
+chart btn → pick chart | range btn → time window | interval btn → bucket size

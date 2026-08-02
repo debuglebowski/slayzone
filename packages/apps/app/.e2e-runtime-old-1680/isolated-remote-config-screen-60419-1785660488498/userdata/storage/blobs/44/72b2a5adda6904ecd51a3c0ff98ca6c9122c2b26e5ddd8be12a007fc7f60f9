@@ -1,0 +1,69 @@
+# DR Tabletop — Facilitator Instructions
+
+> For an unsure facilitator. This is a **guided discussion, not a test**. You hold the ground truth (see Scenario artifact); attendees see only the surface. Your job: ask, let them work it out, drop injects to steer, and capture findings. Silence or "we're not sure" is **not failure — it's a finding** (→ becomes an action item).
+
+---
+
+## A. Before the exercise (prep — ~15 min, once)
+- [ ] Create the exercise folder under the `02 - Disaster Recovery Exercises` drive; copy the template in.
+- [ ] Set date/time; book **60 min** on Google Meet with **all 6 in-scope staff**.
+- [ ] **Attach the exercise doc to the calendar invite** (this is itself evidence).
+- [ ] Turn on **meeting recording + Gemini notes** at the start (proof it happened).
+- [ ] Have open: BC/DR plan + **Appendix B (RTO/RPO)** and the Scenario artifact.
+- [ ] Name a **note-taker** (can be you).
+
+## B. Assign roles at the start (1 min)
+- **Incident Lead / Security Delegate** — runs recovery (suggest **Sara Landfors**; she owns the plan).
+- **Comms owner** — customer/external comms (CEO + Customer Support per plan).
+- **Engineering** — owns hosting/DB recovery (Appendix B owner).
+- **Note-taker** — captures decisions + action items live.
+
+---
+
+## C. Running it — what to ask + the model answer to steer toward (~50 min)
+
+### Phase 1 · Detection & declaration (5 min)
+- *How do we first notice, and who declares an incident?* → **Model:** alerts + customer reports in Slack; on-call declares; **Incident Lead** takes command; dedicated Slack channel opened.
+
+### Phase 2 · DR — recovery (20 min) — *the must-have*
+- *Where's the last good backup and how old is it?* → **Model:** automated nightly Azure backup, ~12h old → **within 24h RPO**.
+- *Walk the restore steps.* → **Model:** isolate prod, identify last clean backup, restore to a fresh instance, **verify integrity**, cut over.
+- *How do we verify data integrity post-restore?* → **Model:** row/record counts, app smoke test, confirm no corruption.
+- *Our RTO/RPO targets — are we meeting them?* → **Model:** **RTO 12h / RPO 24h** (Appendix B). Restore ~3–4h → **inside RTO**; ~12h data loss → **inside RPO**.
+- ⚠️ **Capture a real backup-restore artifact** (screenshot/log of one actual successful restore + integrity check). The plan *requires* the annual test to include backup restoration — without this capture the evidence is incomplete.
+
+### Phase 3 · BC — continuity (20 min)
+- *Who can decide to pause signups / roll back / notify?* → **Model:** Incident Lead, founder sign-off for customer-impacting calls.
+- *Internal comms — who, how often?* → **Model:** Lead posts status in Slack every ~30 min.
+- *Customer comms — who, channel, message?* → **Model:** Comms owner; honest status, no PII, ETA when known; **confirm it's not a breach** (inject 1).
+- *How do we operate while down?* → **Model:** manual fallback for critical ops, queue + reconcile work, prioritize by customer impact.
+
+### Phase 4 · Wrap-up (10 min)
+- *What worked? What gaps surfaced? Agree 2–3 action items + owners.* → write them down with names.
+
+**Inject timing:** T+15 breach question · T+30 slow restore · T+45 data-loss question (see Scenario artifact).
+
+---
+
+## D. What MUST be captured for the evidence to be valid
+1. **Attendance** — all 6 in-scope present (= the BC-training completion record).
+2. **Findings** documented *with* attendees → goes in the *Discussion & Conclusions* tab.
+3. **Backup-restore capture** — at least one real restore screenshot/log (plan-mandated).
+4. **Action items → Linear tickets** (team "Normain Product & Tech"), owner + due date.
+5. **Meeting recording + notes** pasted into the *Meeting notes* tab.
+
+## E. After the exercise
+- [ ] Paste meeting notes into the doc.
+- [ ] Create the Linear action tickets.
+- [ ] Follow up the actions; update this doc's status when closed.
+- [ ] Attach the completed doc (+ calendar invite + restore capture) to the Vanta test → resubmit.
+
+---
+
+## F. Validity check — you're done when all are true
+- [ ] Topic visibly covers **BC *and* DR** (not DR-only).
+- [ ] All 6 in-scope staff attended.
+- [ ] A real backup restoration was tested + captured.
+- [ ] RTO/RPO discussed against Appendix B.
+- [ ] Action items exist as Linear tickets.
+- [ ] Recording/notes + calendar invite retained.

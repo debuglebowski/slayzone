@@ -1,0 +1,246 @@
+# Slice 2.5 Architecture — Side-car `@slayzone/server` shell
+
+End state after slice 2.5: Electron main spawns a supervised Node side-car subprocess. Side-car hosts the tRPC WS server (empty `appRouter`). All existing IPC handlers stay in Electron main untouched.
+
+## Process topology
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      Electron App                             │
+│                                                               │
+│  ┌─────────────────────────┐    ┌─────────────────────────┐  │
+│  │  Electron Main Process  │    │   Renderer Process      │  │
+│  │  (current backend)      │    │   (React)               │  │
+│  │                         │    │                         │  │
+│  │  • IPC handlers (all)   │    │  • TrpcProvider         │  │
+│  │  • MCP server           │    │  • <App />              │  │
+│  │  • REST API             │◄───┤  • IPC client (preload) │  │
+│  │  • node-pty             │    │  • tRPC client (WS)     │  │
+│  │  • browser-view-manager │    │                         │  │
+│  │  • DB writer (existing) │    └────────────┬────────────┘  │
+│  │  • Migrations + backup  │                 │WS              │
+│  │  • Supervisor ──────────┼────┐            │ws://127.0.0.1: │
+│  └──────────┬──────────────┘    │            │  <port>/trpc   │
+│             │spawn              │            │                │
+│             │SIGTERM            ▼            ▼                │
+│             │            ┌──────────────────────────────┐    │
+│             └───────────►│   Side-car (Electron-as-Node) │    │
+│                          │   @slayzone/server            │    │
+│                          │                               │    │
+│                          │   • http.Server               │    │
+│                          │     ├─ GET  /health           │    │
+│                          │     └─ WS   /trpc → appRouter │    │
+│                          │       (empty this slice)      │    │
+│                          │   • better-sqlite3 handle     │    │
+│                          │     (writer, no procs writing │    │
+│                          │      yet → zero contention)   │    │
+│                          └──────────────────────────────┘    │
+│                                                               │
+│                          Shared SQLite file (WAL mode)        │
+│                          ~/Library/Application Support/       │
+│                          slayzone/slayzone[.dev].sqlite       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Both processes hold writer handles on the same SQLite file. WAL mode + `busy_timeout=5000` serializes. Router empty this slice → side-car never writes → zero contention. Once slice 4+ procedures land, monitor for `SQLITE_BUSY`.
+
+## Packages
+
+| Package | Role | Status |
+|---|---|---|
+| `@slayzone/server` | NEW. Side-car http+ws server. Imports `appRouter` from transport. | created this slice |
+| `@slayzone/transport` | tRPC router + types + client/provider. Single source of truth for `appRouter`. | exists; `ws-server.ts` becomes dead (delete slice 4) |
+| `@slayzone/platform` | Env readers, paths, DB pragmas. Now also exports `SlayzoneDb` type alias. | exists; +1 line |
+| `@slayzone/app` | Electron host. Becomes supervisor for side-car. All IPC handlers stay. | modified |
+| `@slayzone/types` | Shared `ElectronAPI` contract. Add `waitForServerReady` + `onEmbeddedServerFailed`. | modified |
+
+Dep graph (slice 2.5):
+
+```
+@slayzone/app
+  ├─ @slayzone/server (workspace, runtime side-car)
+  ├─ @slayzone/transport (in-process tRPC code deleted; types still used)
+  ├─ @slayzone/platform
+  └─ @slayzone/types
+
+@slayzone/server
+  ├─ @slayzone/transport (appRouter, applyWSSHandler)
+  ├─ @slayzone/platform (DB_PRAGMAS, getStateDir, getServerHost, getTrpcPort, SlayzoneDb)
+  ├─ better-sqlite3 (Electron ABI, shared w/ main)
+  └─ ws, @trpc/server, superjson
+
+@slayzone/transport
+  ├─ @slayzone/platform
+  └─ @trpc/server, @trpc/client, @trpc/react-query, ws, superjson, zod
+
+@slayzone/platform
+  └─ better-sqlite3 (types only via `SlayzoneDb`)
+```
+
+Static guard (`scripts/check-server-electron-free.sh`) ensures `@slayzone/server` + `@slayzone/transport` + `@slayzone/platform` src trees never `import 'electron'`.
+
+## Public interfaces
+
+### `@slayzone/platform` — `SlayzoneDb`
+
+```ts
+import type { Database } from 'better-sqlite3'
+export type SlayzoneDb = Database
+```
+
+Single-line type alias. Sustainability hedge: engine swap in slice 4+ = redefine alias in one file. No invented methods, no speculation on sync/async, no fake transaction shape. Concrete `Database` already satisfies; existing Electron IPC handlers untouched.
+
+### `@slayzone/server` — programmatic API
+
+```ts
+export type StartServerConfig = {
+  storeDir?: string   // defaults: SLAYZONE_STORE_DIR or ensureDataRoot()
+  port?: number       // defaults: SLAYZONE_PORT, 0 = OS-assigned
+  host?: string       // defaults: SLAYZONE_HOST or '127.0.0.1'
+  mcpPort?: number    // reserved slice 3+, ignored this slice
+  db?: SlayzoneDb     // pre-opened (tests); prod passes undefined
+}
+
+export type ServerHandle = {
+  port: number
+  host: string
+  dataRoot: string
+  healthCheck: () => Promise<boolean>
+  stop: () => Promise<void>
+}
+
+export async function startServer(config?: StartServerConfig): Promise<ServerHandle>
+```
+
+CLI entry `bin.ts` reads env, calls `startServer()`, traps SIGTERM/SIGINT, idempotent shutdown.
+
+### `@slayzone/transport` — context (narrowed)
+
+```ts
+// context.ts — replace Database import with SlayzoneDb
+import type { SlayzoneDb } from '@slayzone/platform'
+
+export type TrpcServerDeps = { db: SlayzoneDb; dataRoot: string }
+export type TrpcContext = TrpcServerDeps & { req?: IncomingMessage }
+```
+
+Procedures (slice 4+) typed against `TrpcContext.db: SlayzoneDb`. Engine swap is single-alias-redefine away.
+
+### Electron main — `EmbeddedServerHandle`
+
+```ts
+export type EmbeddedServerOpts = {
+  execPath: string          // process.execPath (Electron binary)
+  scriptPath: string        // absolute dist/bin.js
+  env: NodeJS.ProcessEnv    // includes ELECTRON_RUN_AS_NODE=1, SLAYZONE_*
+  host: string
+  logger: (line: string) => void
+  onReady: (info: { pid: number; port: number }) => void
+  onPermanentFailure: (info: { attempts: number; lastError: unknown }) => void
+}
+
+export type EmbeddedServerHandle = {
+  getPort: () => number | null
+  getHealth: () => 'starting' | 'ready' | 'restarting' | 'failed'
+  waitForReady: () => Promise<void>      // rejects on permanent failure
+  stop: () => Promise<void>
+  restart: () => Promise<void>           // test-reset path
+}
+
+export function startEmbeddedServer(opts: EmbeddedServerOpts): EmbeddedServerHandle
+```
+
+Lifecycle:
+- Pre-probe free port via `net.createServer().listen(0)` → close → pass via env.
+- `spawn(process.execPath, [scriptPath], {env:{...ELECTRON_RUN_AS_NODE:'1'}, stdio:['ignore','pipe','pipe']})`.
+- Health poll `GET /health` every 250ms until 200 OK or 10s timeout.
+- Exit handler: exp backoff `[1,2,4,8,16]s`, max 5 attempts. 60s healthy-streak resets counter.
+- `stop()`: SIGTERM, 3s grace, SIGKILL.
+
+### Renderer-facing IPC (preload bridge)
+
+| IPC | Direction | Purpose |
+|---|---|---|
+| `app:get-trpc-port` | invoke → main | Returns supervisor's bound port (await ready). Rewritten this slice. |
+| `app:wait-for-server-ready` | invoke → main | NEW. Resolves on first /health 200, rejects on permanent failure. |
+| `app:embedded-server-failed` | main → renderer | NEW. Permanent-failure broadcast. Swap to fallback screen. |
+
+Slice 7 replaces the failure event w/ tRPC subscription. This slice uses plain IPC since router is empty.
+
+## Boot sequence
+
+```
+Electron main start
+  │
+  ├─ getDatabase() ────────────────► open SQLite (writer) + apply pragmas
+  ├─ createPreMigrationBackup()
+  ├─ runMigrations()
+  ├─ settings warm-cache
+  ├─ createMainWindow() ──────────► splash + main BrowserWindow
+  │
+  ├─ setImmediate(startMcpServer)  ──► MCP listens (Electron main)
+  │
+  └─ setImmediate(startEmbeddedServer)
+       │
+       ├─ pre-probe free port (e.g. 51234)
+       ├─ spawn(execPath, [bin.js], env={ELECTRON_RUN_AS_NODE=1, SLAYZONE_PORT=51234, ...})
+       │
+       │  ┌──────────────────────────────────────────┐
+       │  │ Side-car bin.ts                          │
+       │  │   startServer()                          │
+       │  │     openServerDatabase() (writer)        │
+       │  │     http.createServer(...)               │
+       │  │     WebSocketServer({server, path:/trpc})│
+       │  │     applyWSSHandler({wss, appRouter})    │
+       │  │     http.listen(51234, '127.0.0.1')      │
+       │  │     state.ready = true                   │
+       │  │     stdout: "[slayzone-server] listening │
+       │  │              on http://...:51234"        │
+       │  └──────────────────────────────────────────┘
+       │
+       └─ supervisor polls /health every 250ms
+            on 200 OK → onReady({pid, port}) + start 60s healthy-reset timer
+            renderer's waitForServerReady() promise resolves
+
+Renderer main.tsx
+  Promise.all([
+    tabStoreReady,
+    window.api.app.waitForServerReady().then(window.api.app.getTrpcPort).catch(()=>0)
+  ]).then(([_, port]) => {
+    if (!port) <ServerFailedScreen />
+    else <TrpcProvider url={`ws://127.0.0.1:${port}/trpc`}>...
+  })
+```
+
+## Failure modes + recovery
+
+| Failure | Detection | Recovery |
+|---|---|---|
+| Side-car crash after ready | `child.on('exit')` while `health='ready'` | Restart immediately (attempt counter not bumped) |
+| Side-car fails to bind port | 10s `/health` timeout | SIGKILL child, `attempt++`, backoff `BACKOFF_MS[attempt-1]` |
+| Side-car repeatedly fails | `attempt > 5` | `onPermanentFailure` → renderer shows `<ServerFailedScreen />` |
+| Electron `kill -9`'d | OS reaps child via SIGCHLD process group | side-car exits cleanly (or orphan reaped by `pgrep` cleanup in next launch's global-setup) |
+| Both processes try migrate DB | N/A this slice | Migrations stay in Electron only. Side-car opens already-migrated DB. |
+
+## Deferred to future slices
+
+| Item | When |
+|---|---|
+| First procedure migration (tags pilot) | Slice 4 |
+| Domain split `server/+electron/` per package | Slice 4 (per-domain) |
+| Renderer cutover IPC → tRPC | Slice 4 (per-domain) |
+| Migration runner moves to side-car | Slice ~8 (when side-car becomes sole writer) |
+| MCP server moves to side-car | Alongside its domain router |
+| REST API moves to side-car | Alongside its domain router |
+| Local/Remote toggle UI | Slice 7 |
+| Crash-recovery e2e spec | Follow-up (manual verification only this slice) |
+| Replace `app:embedded-server-failed` IPC w/ tRPC subscription | Slice 7 |
+| Procedure-level abstraction (repo/adapter pattern) | Slice 4+, designed from real procedure evidence |
+| Engine swap (if pursued) | Slice 4+, change `SlayzoneDb` alias definition |
+
+## Sustainability notes
+
+1. **No structural DB interface this slice.** Type alias only. Designing `SlayzoneDatabase` shape w/o procedure consumers risks wrong abstraction (sync-only locks out async backends; bs3-flavored transaction shape misfits node:sqlite). Real abstraction designed from evidence in slice 4.
+2. **Migrations stay in Electron main this slice.** Smallest behavior-preserving change. Move atomic w/ writer transition in slice ~8.
+3. **`@slayzone/transport`'s in-process `ws-server.ts` deliberately not deleted this slice.** Kept to minimize diff. Delete in slice 4 when first procedure migrates + transport-server-as-host pattern fully phased out.
+4. **Static guard catches `import 'electron'` in side-car-reachable code.** Future package additions to side-car deps need explicit allow-list entry in `check-server-electron-free.sh`.

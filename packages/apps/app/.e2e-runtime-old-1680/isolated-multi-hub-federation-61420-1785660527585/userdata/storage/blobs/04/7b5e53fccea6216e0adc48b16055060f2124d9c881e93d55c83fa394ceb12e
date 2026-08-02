@@ -1,0 +1,52 @@
+# Phase 0 — Remaining failing tests (post round 4)
+
+E2e r4 result: **659 passed / 37 failed / 49 skipped / 17 did not run** (down from ~80 baseline → 54% reduction).
+
+## Effort key
+🟢 5-15 min · 🟡 15-30 min · 🔴 30+ min · 💀 1 h+
+
+## 🟢 Small (4)
+
+| Spec : line | Status |
+|---|---|
+| `01-smoke:8` empty state | ⏭️ Cascade — page-closed-style state leak |
+| `72-custom-shortcuts:84` rebind search | ⏭️ Page-closed cascade |
+| `30-terminal-core-behavior:276` Cmd+Alt+R | 🔍 Buffer shows `\x1b[7m...\x1b[27m` search-highlight escapes after restart — restart doesn't clear render |
+| `60-cli:312` (was 308) tasks delete | 🔍 Env-leak strip applied; still fails — possibly DB write-flush timing |
+
+## 🟡 Medium (5)
+
+| Spec : line | Status |
+|---|---|
+| `93-resume-command:300` provider flags | ⏳ Was `chat:list`; main fix landed — still in r4 fail list, may need rebuild propagation |
+| `94-session-invalidation:252` | ⏳ Same |
+| `14-project-settings:454` delete column | ⏭️ Page-closed cascade |
+| `22-terminal-mode-switching:140` temp tasks | 🔍 Mode swap UI doesn't update trigger — possibly temp-task `is_main` session ID race |
+| `90-chat-mode-toggle:96` (Disable chat) | 🔍 New test from rewrite — context menu after chat-mode swap may need different surface |
+
+## 🔴 Large (7)
+
+| Spec : line | Status |
+|---|---|
+| `93-artifacts-panel` ×11 | ⏭️ Deep cascade — all "Target page closed" |
+| `33-pty-respawn-forced` ×4 | ⏭️ Cascade from earlier crash |
+| `42-terminal-tab-isolation:26` Cmd+K | ⏭️ Possible real bug |
+| `24-browser-panel:145` Alt+Shift+Click | ⏭️ Real feature flow |
+| `61-web-panel-handoff-routing:182` | ⏭️ Cmd+J panel header not surfacing |
+| `71-webview-popup-handling:540/696` | ⏭️ Same root |
+| `32-git-diff-panel:171/219` chip + polling | ⏳ Sources patched; may still flake |
+
+## 💀 Very Large (3)
+
+| Spec : line | Status |
+|---|---|
+| `90-terminal-fd-limit:34` RLIMIT | ⏭️ Platform-specific |
+| `72-browser-view-lifecycle:184` Bug 1 | ⏭️ Open feature bug |
+| `77-browser-view-focus:89` glow | ⏭️ Multi-panel fix didn't take — needs deeper look |
+
+## Tally
+🟢 4 · 🟡 5 · 🔴 7 · 💀 3 → **19 rows / ~37 individual tests**
+
+⏳ = expected to clear once verification rebuild propagates  
+🔍 = investigated, deeper dive in progress  
+⏭️ = needs deeper investigation

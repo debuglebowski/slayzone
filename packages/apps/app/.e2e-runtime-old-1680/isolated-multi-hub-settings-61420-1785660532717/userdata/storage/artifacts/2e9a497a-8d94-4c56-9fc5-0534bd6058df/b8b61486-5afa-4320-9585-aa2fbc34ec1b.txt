@@ -1,0 +1,98 @@
+# HRS-52 Competence — Investigation
+
+**Control:** HRS-52 — Competence
+**Framework:** ISO 27001:2022 Clause 7.2 (mgmt clause, *not* Annex A)
+**Vanta status:** 8/10 tests passing — 2 failing
+**Owner:** Kalle (CTO) · coordinate w/ Sara
+**Investigated:** 2026-04-30 · all evidence sourced from Google Drive via `gws` CLI
+
+> ⚠️ Live Vanta UI not accessible during investigation (orphan Chrome locked chrome-devtools MCP profile; slay browser blocked because task tab not focused in SlayZone). Findings below from Drive content + Vanta `controls` CSV dump in Drive (id `1n9ouTdoptTOYKq5tLRsJY1Y7xec1ljUPrLrnW4kkK9A`, refreshed 2025-06-08).
+
+---
+
+## Situation
+
+### ISO 27001:2022 C.7.2 requirements (verbatim from Vanta `controls` CSV dump)
+The org shall:
+- (a) determine necessary competence per role
+- (c) take actions to acquire necessary competence + evaluate effectiveness
+- (d) retain appropriate documented information as evidence of competence
+
+> Note: Vanta's HRS-52 description in this dump omits sub-req (b) ("ensure persons are competent on the basis of education, training, experience"); not material — the rest is intact.
+
+### Authoritative Drive evidence base
+
+**Policy text** — verified by direct PDF read of `1bkO39vKlFn7t6tD3iaejSCegwQQNTtTx`:
+- `[Normain] Human Resource Security Policy` v1.0.0 (2025-05-30, written by Ryan Rich, approved by Sara Landfors as Security Delegate)
+- Confirmed sections: **Competence & Performance Assessment**, **Information Security Awareness, Education & Training**
+- **Key internal clause:** *"All Company employees and contractors with administrative or privileged technical access to Company production systems and networks shall complete security awareness training at the time of hire and annually thereafter. Management shall monitor training completion and shall take appropriate steps to ensure compliance with this policy."*
+- Implication: a training-completion register is **required by Normain's own policy**, not just Vanta
+
+**Evidence inventory:**
+
+| C.7.2 sub-req | Drive evidence | File ID | Status |
+|---|---|---|---|
+| (a) determine competence | `Job descriptions for key security roles` (Doc, 2025-07-09) — defines competence for CEO, CTO, COO, Founding Engineer & Security Delegate | `1pne5QB5XmS0ytbTO_tViFlpE4wWpXuQTfvKyoNjs_44` | ✅ verified (text exported) |
+| (a) determine competence | `Normain Org Chart & ISMS roles` (Slides, 2026-04-28) | `11SKtTn1viXOGAyW87Rt49XntqfIo-1IyK9kW91U-hbI` | ✅ recent |
+| (a) determine competence | `[Normain] 03-ISMS Roles, Responsibilities, and Authorities.docx` | `1sqolufUw7rgazsfPp6ICFzgQhgAylLIR` | ✅ exists (metadata only) |
+| Pre-hire screening evidence | `Normain background check_Paul Nylund` (Sheet, 2026-04-27) | `1Nqq4iUEZOkjQck3CixFreebUBI2uhVP4INS5krQIYjQ` | ✅ recent (metadata only) |
+| Performance review evidence | `Performance Review - Max - 2025-11-26` | `1XrcNWs7lGhzr1hSRFuNOB-60zn-ZYmlARA1dg1yMDzQ` | ✅ exists (metadata only) |
+| Training material (not records) | `10 - Trainings` folder: `Anti-Corruption Training - Microsoft 2026-03-19.pdf`, `Automated Security Testing Training` (Facilitator Guide + Handout, 2025-07-05) | folder `1dRl_U48muoSRTtaw7d_f5nzvftMstDqe` | ⚠️ material only — **no completion log** |
+| **Pre-hire competence eval doc (Sara)** | — | — | ❌ **NOT in Drive** (overdue 2026-04-14) |
+| **Per-employee training-completion register** | — | — | ❌ **NOT in Drive** — directly violates own policy clause |
+
+### Likely 2 failing Vanta tests
+Cannot confirm exact names without UI access. Most likely:
+1. **Pre-hire competence evaluation documented** → Sara's overdue doc fills this
+2. **Personnel completed required trainings (with retained evidence)** → no per-employee training-completion register exists; the Drive Trainings folder only has training *materials*
+
+### Overlap w/ Sara
+- Sara is the **Security Delegate** (per HR Sec Policy approval block) — owns InfoSec-policy approvals and overdue exceptions
+- Her overdue "Competence evaluated prior to offer/hiring" doc maps cleanly to test #1
+- Test #2 covers *current* personnel — Kalle's lane, no duplication
+- Both attach as evidence in the same Vanta HRS-52 control
+
+---
+
+## Solution
+
+| Test | Fix | Owner | Effort |
+|---|---|---|---|
+| #1 Pre-hire competence eval | File Sara's overdue doc to `01 - Official InfoSec Policies` (or Trainings folder); attach in Vanta HRS-52 | **Sara** | ~1h (overdue 16d) |
+| #2 Per-personnel training-completion | Create training-completion register (Sheet) — current 4-person team × required trainings × completion date; cover security awareness, anti-corruption, automated security testing; attach in Vanta HRS-52 | **Kalle** | ~1h |
+| Side-effect: HR Sec Policy v1.0.0 (2025-05-30) is approaching/past 1y annual-review threshold per its own "Management Responsibilities" clause — **flag, not in scope** for HRS-52 | (separate item) | Sara | — |
+
+**Total Kalle effort:** ~1h. Confirms 🟢 small-effort.
+
+---
+
+## Actions taken (this session)
+
+1. Surveyed 7 shared drives via `gws drive files list` w/ fullText + name queries (Normain Data Room, Normain Dev, Normain main, Normain founders, etc.)
+2. Located + downloaded `[Normain] Human Resource Security Policy.pdf` (`1bkO39vKlFn7t6tD3iaejSCegwQQNTtTx`); **verified content directly** — confirmed section names, training-completion clause, approval by Sara as Security Delegate
+3. Located + exported as text `Job descriptions for key security roles` Doc — confirmed it defines competence per role for CEO/CTO/COO/Founding Engineer
+4. Located `10 - Trainings` folder; confirmed contents are **training materials** (Anti-Corruption PDF, Automated Security Testing Facilitator Guide + Handout) but **no per-employee completion log**
+5. Located Vanta `controls` CSV dump in Drive — confirmed HRS-52 maps to C.7.2 and was "OK" as of 2025-06-08 dump (predates current 2-failing state)
+6. Confirmed Sara's "Competence evaluated prior to offer/hiring" doc is **not yet in Drive** (overdue 2026-04-14)
+7. **No shared-Drive changes made** (per instructions: STOP for shared)
+
+---
+
+## What changed vs. previous version of this asset
+
+- v1 of this asset cited **local repo files** (`projects/current-ucf/inventory/hr_security.txt`, `control-register.csv`) for policy and control-mapping claims — those local files are **not authoritative** and have been removed as sources
+- v2 cited Drive metadata only; v3 (this version) **verifies policy section names + clause text by direct PDF read**
+- New finding: HR Sec Policy itself mandates *"Management shall monitor training completion"* → the missing register is required by Normain's own policy, not just Vanta
+- Sara's role clarified: she's the **Security Delegate** (HR Sec Policy approver), not just a person assigned one overdue doc
+- Effort revised: Kalle ~1h (was ~1.25h); the "wiring" sub-step removed since the policy already references training records via its existing clause
+
+---
+
+## Still unverified
+
+- **Exact 2 failing test names in Vanta** — need live UI access (activate task tab in SlayZone, then re-run)
+- **Sara's overdue doc draft state** — does any draft exist anywhere (Drive search by name returned 0 results)?
+- **Vanta-native trainings module** — if integrated, completion log may auto-pull → register may already partially exist → Kalle effort drops
+- **Performance review coverage** — only Max's review found in Drive; coverage for the other 3 employees unverified
+- **Background check coverage** — only Paul Nylund's check found; coverage for other employees unverified
+- **HR Sec Policy review cadence** — v1.0.0 dated 2025-05-30; the policy mandates annual review; status of any 2026 review not confirmed in Drive

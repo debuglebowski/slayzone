@@ -1,0 +1,34 @@
+# CORS misconfiguration on app.normain.com
+
+## Background
+
+Pentest (Workstreet automated scan, 2025-05-16) flagged 1 medium finding on https://app.normain.com/ (port 443/tcp):
+
+- Injecting `null` in the `Origin` header caused the server to respond with `Access-Control-Allow-Origin: *` — arbitrary origins accepted.
+- Risk: combined with `Access-Control-Allow-Credentials: true`, attacker JS on any domain could read authenticated user data.
+- OWASP A5/A6 — Security Misconfiguration.
+- Fix guidance: whitelist allowed origins instead of reflecting/parsing Origin; never allow cross-origin on pages with sensitive data; set `Allow-Credentials: false` on sensitive pages.
+
+Scan totals: 0 critical, 0 high, 1 medium, 3 low, 69 info.
+
+## Issue (still present)
+
+`src/apps/server/api/src/server.ts:94`:
+
+```typescript
+await app.register(cors, { origin: true });
+```
+
+`origin: true` in fastify-cors reflects whatever `Origin` the request sends (including `null`) back in `Access-Control-Allow-Origin`, so arbitrary origins are accepted — same behavior the pentest flagged.
+
+Mitigating factor: no `credentials: true` is set, so cookies/auth headers aren't sent cross-origin, limiting impact. Misconfig itself unaddressed.
+
+tRPC WebSocket subscriptions (`server.ts:108-114`) may transmit auth via connection-level mechanisms — verify separately.
+
+## Fix
+
+Whitelist explicit origins. Multi-tenant setup: `APP_ORIGIN` is per-tenant (`terraform/modules/customer-tenant/main.tf:109`), so the allowlist likely needs to derive from tenant config rather than a static value.
+
+```typescript
+await app.register(cors, { origin: ['https://app.normain.com', /* other tenant domains */] });
+```

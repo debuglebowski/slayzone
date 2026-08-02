@@ -1,0 +1,119 @@
+# AI Provider Tycoon — Mechanics Overview
+
+Three levels of zoom on the same system.
+
+## Level 1 — The economic loop
+
+The core round-robin. Cash funds spend, spend builds capabilities, capabilities win market share, market share generates revenue, revenue refills cash. Situations perturb the loop from outside.
+
+```mermaid
+flowchart LR
+    Cash[💰 Cash]
+    Spend[Spend lines]
+    Caps[Capabilities<br/>Brand · Quality · Capacity]
+    Market[Demand share]
+    Rev[Revenue]
+
+    Cash -->|funds| Spend
+    Spend -->|builds| Caps
+    Caps -->|drives| Market
+    Market -->|served| Rev
+    Rev -->|refills| Cash
+
+    Situations((⚡ Situations)):::sit -.-> Caps
+    Situations -.-> Market
+    Situations -.-> Cash
+
+    classDef sit fill:#ffe6cc,stroke:#d79b00
+```
+
+## Level 2 — Player decisions → state
+
+What every action category affects. Spend lines feed burn; capability-building actions move state directly.
+
+```mermaid
+flowchart LR
+    subgraph Actions["Player actions"]
+        direction TB
+        Marketing[Marketing spend]
+        ResearchSpend[Research spend]
+        ReliabilitySpend[Reliability spend]
+        BuyServer[Buy / sell servers]
+        SetPrice[Set price]
+        Publish[Publish model]
+        VC[VC raise]
+        Ops[Certifications · Security · Privacy]
+        Inter[M&A · Messaging · Sabotage]
+    end
+
+    subgraph State["Player state"]
+        direction TB
+        BrandS[Brand]
+        QualityS[Model quality]
+        CapacityS[Servers · Capacity]
+        OpsS[Ops levels]
+        CashS[Cash]
+        BurnS[Burn rate]
+    end
+
+    Marketing --> BrandS
+    Marketing --> BurnS
+    ResearchSpend --> QualityS
+    ResearchSpend --> BurnS
+    ReliabilitySpend --> OpsS
+    ReliabilitySpend --> BurnS
+    BuyServer --> CapacityS
+    BuyServer --> CashS
+    SetPrice -.->|exposed to market| BrandS
+    Publish --> QualityS
+    VC --> CashS
+    Ops --> OpsS
+    Inter -.->|targets others| BrandS
+    Inter -.->|targets others| OpsS
+    BurnS -->|drains| CashS
+```
+
+## Level 3 — Situations & counters
+
+Situations are server-generated shocks, polarised on two axes (scope × sign). Pre-bought capabilities (mostly Operations) reduce, null, or flip them.
+
+```mermaid
+flowchart LR
+    subgraph Sit["Situation"]
+        direction TB
+        Polarity{Polarity}
+        Polarity --> GN[Global<br/>Negative]
+        Polarity --> CN[Conditional<br/>Negative]
+        Polarity --> CP[Conditional<br/>Positive]
+        Polarity --> GP[Global<br/>Positive]
+    end
+
+    subgraph Prereqs["Pre-bought prerequisites"]
+        direction TB
+        Reliability
+        IncidentResponse[Incident response]
+        SecurityP[Security level]
+        Certs[Certifications]
+        PrivacyP[Privacy level]
+        EfficiencyP[Efficiency upgrades]
+        PositioningP[Positioning]
+    end
+
+    subgraph Effects["Effect on player"]
+        direction TB
+        Damage[Damage]
+        Skip[No effect]
+        Benefit[Benefit]
+    end
+
+    GN --> Damage
+    CN -->|no prereq| Damage
+    CN -->|prereq met| Skip
+    CP -->|prereq met| Benefit
+    CP -->|no prereq| Skip
+    GP --> Benefit
+
+    Prereqs -.->|reduce<br/>severity| GN
+    Prereqs -.->|gate| CN
+    Prereqs -.->|gate| CP
+```

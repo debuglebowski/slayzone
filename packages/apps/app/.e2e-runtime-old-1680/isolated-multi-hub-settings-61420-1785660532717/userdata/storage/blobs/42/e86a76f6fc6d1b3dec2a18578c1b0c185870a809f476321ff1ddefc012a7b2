@@ -1,0 +1,57 @@
+# Browser Panel → Chromium Fork: Shim Gap Analysis
+
+**Headline:** the browser shim is NOT greenfield. `EmbeddedTabHost` mojom = **19 methods, all implemented in the binary + TS bindings generated**; `window-api-shim/src/shims/browser.ts` already wires ~80% of the renderer's active calls. The remaining gap is short and specific — and the two scariest methods (`sendInputEvent`, `setKeyboardPassthrough`) are probably *obsolete* on the fork, not work.
+
+## Surface sizes (verified, not estimated)
+- Renderer `window.api.browser.*` contract: ~50 members; **~24 actively called** by task-browser client code.
+- Fork `SlayzoneEmbeddedTabHost` mojom: **19 methods** (CreateView…OpenExtensionPopup) + `EmbeddedTabObserver` (8 events). All fully implemented in C++ (`chromium/src/chrome/browser/slayzone/slayzone_embedded_tab_host.cc`, 1175 lines) + TS bindings (`packages/shared/mojo-bindings/src/generated/embedded_tab.mojom-webui.ts`).
+- Shim browser namespace: real object (NOT behind the stub Proxy) at `packages/shared/window-api-shim/src/shims/browser.ts:355-479`.
+
+## Status of each ACTIVELY-CALLED method on the fork
+
+### ✅ Working (mojo-backed)
+createView, destroyView, setBounds, setVisible, navigate, goBack, goForward, reload, stop, focus, onEvent (observer). Direct `EmbeddedTabHost` calls. Solid.
+
+### ⚠️ Working-but-approximate
+- `executeJs / insertCss / removeCss / setZoom` — routed via a **CDP bridge** (`__slayzoneCdpEvaluateOnEmbedded`), targets first non-shell view. Functional for smoke; production wants proper injection + HostZoomMap.
+- `openDevTools / closeDevTools` — mapped onto mojom `ToggleDevtools`. **Lossy**: `mode` param dropped; explicit open/close on a toggle desyncs if state already matches.
+- `isDevToolsOpen` — hardcoded `false` (browser.ts:468 region). Wrong but non-crashing.
+
+### 🟡 Stubbed noop (safe, but feature absent)
+- `setHandoffPolicy` → noop. Electron desktop-handoff concept; **likely N/A on fork** — accept noop.
+- `findInPage / stopFindInPage` → noop (returns null). **Real feature (browser Ctrl+F) silently dead.** No mojom counterpart.
+- `setKeyboardPassthrough`, `sendInputEvent` → noop. **Likely OBSOLETE on fork** — embedded tabs are real Chromium WebContents composited into the shell, so they receive input/focus through Chromium's native pipeline. The Electron-era key-forwarding hack existed *because* WebContentsView didn't route keys cleanly. NEEDS VERIFICATION (Tier 1).
+
+### 🔴 Missing — would THROW when mounted
+- `setLocked` (agent-lock feature, BrowserTabPlaceholder.tsx:119) — absent from browserShim.
+- `reparentToCurrentWindow` (multi-window, useBrowserView.ts:91,93) — absent.
+- `onAgentTouched` (useBrowserLock.ts:62) — absent; also has NO tRPC equivalent.
+Latent: task-browser not yet imported into renderer-app, so no live crash today.
+
+### 🔵 Belongs on tRPC, not mojo
+- `onAgentTouched` — fires when `slay tasks browser` (CLI/server) touches a tab. Server-originated event → should ride tRPC/notify, exactly like the #1 drains. Not a fork concern at all.
+
+## Recommended sequence (by cost)
+
+**Tier 0 — no rebuild, pure TS (do alongside task-browser import into renderer-app):**
+1. Add noop stubs for `setLocked` + `reparentToCurrentWindow` so the panel doesn't throw on the fork. (reparent may instead map to mojom `AttachView`.)
+2. Drain `onAgentTouched` → tRPC subscription (server event); removes it from the native surface on BOTH shells.
+3. Track devtools open-state locally → fix `isDevToolsOpen`; map open/close explicitly instead of toggle.
+
+**Tier 1 — verification (decides Tier 2 scope, cheap):**
+4. Confirm native input/focus routing to embedded WebContents on the fork. If native (expected): `sendInputEvent` + `setKeyboardPassthrough` stay noop and the renderer's Electron input-hack gets gated behind a capability flag = the two scariest methods become DELETIONS, not new mojom. If not native: they need new mojom.
+
+**Tier 2 — genuine fork patches, batch into ONE chromium rebuild (~hours):**
+5. `FindInPage` / `StopFindInPage` mojom + C++ + bindings — real broken feature.
+6. Agent-lock input suppression mojom (for `setLocked`) — IF not doable renderer-side.
+7. DevTools fidelity (explicit Open(mode)/Close + IsOpen query) — if toggle proves insufficient.
+8. Proper zoom (HostZoomMap) + script/CSS injection — if CDP approximation insufficient for production.
+
+## Bottom line
+Browser panel is much closer to fork-ready than the "26 vs 13" framing suggested. Near-term work is mostly **Tier 0 TS + one verification**, not a big C++ push. Only find-in-page is a clear-cut "needs a fork patch + rebuild" feature; the rest is either done, approximate-but-functional, or likely-obsolete-on-fork.
+
+## Open questions
+- Native input routing on fork — confirmed? (gates Tier 1 vs new mojom)
+- Agent-lock: renderer-side input-ignore vs native suppression?
+- reparentToCurrentWindow: needed on fork's per-task-windowless-Browser model, or N/A → AttachView?
+- find-in-page: ship Tier 2 rebuild now, or accept dead Ctrl+F until a batched rebuild?

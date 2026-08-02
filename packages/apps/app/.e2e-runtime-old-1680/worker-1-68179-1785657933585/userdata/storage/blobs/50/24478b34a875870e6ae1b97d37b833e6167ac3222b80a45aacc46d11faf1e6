@@ -1,0 +1,7 @@
+# Proposal
+
+## Summary
+Replace legacy auth middleware with OAuth 2.1.
+
+## Motivation
+Current middleware stores tokens in cookies.

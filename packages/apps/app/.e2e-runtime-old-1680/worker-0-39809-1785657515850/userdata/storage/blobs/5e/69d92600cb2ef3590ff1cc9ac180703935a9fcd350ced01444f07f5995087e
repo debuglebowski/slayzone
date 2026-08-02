@@ -1,0 +1,44 @@
+graph LR
+  classDef spine fill:#1f2937,stroke:#9ca3af,color:#fff;
+  classDef crm fill:#0e7490,stroke:#67e8f9,color:#fff;
+  classDef cs fill:#15803d,stroke:#86efac,color:#fff;
+  classDef comp fill:#b45309,stroke:#fcd34d,color:#fff;
+
+  subgraph SPINE[Shared spine]
+    A[Account]:::spine
+    C[Contact]:::spine
+    R["Review<br/>by: member<br/>drives freshness"]:::spine
+  end
+
+  subgraph CRM[CRM docs]
+    AP["AccountPlan<br/>owner: member<br/>draft to active to archived"]:::crm
+    MN["MeetingNote<br/>author: member"]:::crm
+    PR["Proposal<br/>draft to sent to accepted"]:::crm
+  end
+
+  subgraph CS[Customer Success docs]
+    PB["Playbook<br/>owner: member<br/>draft to published to archived"]:::cs
+    OB["OnboardingPlan<br/>owner: member"]:::cs
+    KB["KBArticle<br/>owner: member<br/>freshness via decay"]:::cs
+  end
+
+  subgraph COMP[Compliance docs]
+    TPL["Template<br/>doc_type: MSA/DPA/NDA/SOW<br/>owner: member<br/>draft to active to deprecated"]:::comp
+    AG["Agreement (executed)<br/>owner: member<br/>draft to active to expired<br/>effective + expiry dates"]:::comp
+    PO["Policy<br/>owner + approved_by: member<br/>review_due"]:::comp
+    RB["Runbook<br/>owner: member<br/>review_due"]:::comp
+  end
+
+  C -->|works_at| A
+  AP -->|for| A
+  MN -->|about| A
+  MN -->|with| C
+  PR -->|for| A
+  OB -->|for| A
+  AG -->|based_on| TPL
+  AG -->|for| A
+  AG -->|signed_by| C
+  R -.->|reviews any doc| TPL
+  R -.->|reviews any doc| PO
+  R -.->|reviews any doc| RB
+  R -.->|reviews any doc| KB

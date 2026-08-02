@@ -1,0 +1,109 @@
+# Engineering Operation Procedures — Exact Old → New Edits
+
+**Doc:** Engineering Operation Procedures · Drive `1om9654c…MY3Dkw` · v538
+Apply, then export PDF → upload as Vanta renewal. Quotes use the doc's curly apostrophes — match exactly.
+
+## Where each edit lands (document order, top → bottom)
+```
+[Title] Normain Engineering Operation Procedures
+  Purpose and Scope
+  Development Process
+    GitHub Flow / Issue tracking / Branch naming
+    Code Reviews                                       ← EDIT 3a (replace last paragraph)
+    Emergency Fixes                                    ← EDIT 3b (rewrite section body)
+  QA and Testing
+    Unit / Integration / E2E / Test Data Management
+    AI-Driven Algorithm Quality                        ← EDIT 4b (first sentence)
+    Feature Flags                                      ← EDIT 4a (third paragraph)
+  Environments → Staging → Deployment → Monitoring
+  Incident Management → Tooling & Vendor Management
+  Documentation
+    Source code
+    Non-source code  ← LAST LINE OF BODY TO KEEP
+  Overview ……… (to end of doc)                         ← EDIT 1 (delete this whole tail)
+  [append Document History table here]                 ← EDIT 2 (new section at very bottom)
+```
+
+---
+
+## EDIT 1 — Delete the draft appendix  (BLOCKING)
+**Location:** the very bottom of the doc, immediately after the **"Documentation → Non-source code"** subsection.
+
+**Last line you KEEP:**
+> Documentation that is not closely source code-related is put in Normain's Google Workspace.
+
+**First line you DELETE** (heading right after it):
+> Overview
+
+**DELETE from "Overview" through the end of the document** — the whole duplicated outline, all Swedish notes, all `💬`/`❓` open items, and the editor comments `[a]` and `[b]` ("Have Gustav tested?").
+
+---
+
+## EDIT 2 — Add a "Document History" table at the BOTTOM  (BLOCKING)
+**Location:** the **very bottom of the document** (after the "Non-source code" paragraph, once Edit 1's tail is removed). Matches the company policy template (e.g. Secure Development Policy).
+
+**Insert as the final section:**
+```
+Document History
+| Version | Date         | Description                                                           | Written by   | Approved by |
+| 1.0.0   | 2025-06-08   | Initial version (uploaded as Vanta evidence)                          | Gustav Lidén | <name>      |
+| 1.1.0   | <YYYY-MM-DD> | Removed draft appendix; required review for all merges; added control | <name>       | <name>      |
+```
+The doc already had a baseline (the version uploaded as evidence on 2025-06-08), so this revision is **1.1.0**, not a fresh 1.0.0. Set the 1.1.0 date to the version you upload; fill the approver name(s).
+
+---
+
+## EDIT 3 — Remove every "merge without review" path  (now BLOCKING)
+Aligns the doc with the Secure Development Policy ("changes shall not be performed by a single individual without approval and oversight").
+
+### 3a — Code Reviews: delete the CTO exception
+**Location:** section **"Development Process → Code Reviews"**, the **final paragraph** (begins "The one exception to above…"), just before the "Emergency Fixes" heading.
+
+**OLD (replace):**
+> The one exception to above is that Kalle is allowed to merge PR's without a review. This is in order to be able to quickly fix burning issues with speed. This practice will be removed when the team is big enough to ensure that we always have 2 people on call at any given time. At that moment we will enforce a review for each PR.
+
+**NEW:**
+> All changes merged to main require at least one approving review from someone other than the author. There are no exceptions to this requirement.
+
+### 3b — Emergency Fixes: remove the review override
+**Location:** section **"Development Process → Emergency Fixes"** — the whole section body (intro line + two bullets + closing line).
+
+**OLD (replace entire section body):**
+> Emergency situations such as addressing security issues or critical functionality bugs may result in a single engineer working against a sharp timeline. In these situations it may be needed to sidestep some of the normal working procedures in order to return to a stable situation:
+> * If a Linear issue is missing, create a branch fix/{{ title }}.
+> * If there is no other engineer actively working at the same time as the one addressing the issue, overriding the PR-review requirement may be needed.
+> After the emergency has been resolved measures should be taken to close the gap between normal practice and the side-steps taken, e.g. retrospective PR-review and issue tracking.
+
+**NEW:**
+> Emergency situations such as security issues or critical functionality bugs may require an engineer to work against a sharp timeline. The review requirement still applies — no change reaches production without an independent review — but the process is expedited:
+> * If a Linear issue is missing, create a branch fix/{{ title }} and backfill the issue.
+> * Reviews are handled synchronously and given top priority; a reviewer is paged if none is immediately available.
+> Once the emergency is resolved, any expedited tracking steps are backfilled to restore full traceability.
+
+**Also enforce in reality:** set GitHub branch protection to require review with no admin bypass (the Vanta branch-protection test reads classic `enforce_admins`) — otherwise the doc contradicts config.
+
+---
+
+## EDIT 4 — Aspirational wording → current state  (MINOR)
+
+### 4a — Feature Flags
+**Location:** section **"QA and Testing → Feature Flags"**, the **third paragraph** ("Although feature flags are not yet…"), between "Flags are to be reviewed…" and "As the system scales…".
+
+**OLD:**
+> Although feature flags are not yet actively used in the current system, establishing an infrastructure to manage them is a priority. Solutions such as Posthog or equivalent systems should be evaluated and adopted to provide robust flag management, tracking, and analytics.
+
+**NEW:**
+> Feature flags are not yet in active use. Planned: adopt a flag-management capability (e.g. PostHog or equivalent) to provide rollout control, tracking, and analytics as the system scales.
+
+### 4b — AI-Driven Algorithm Quality
+**Location:** section **"QA and Testing → AI-Driven Algorithm Quality"**, the **first (lead-in) sentence** before the three bullets. Bullets and closing sentence unchanged.
+
+**OLD:**
+> As Normain's products increasingly rely on AI-driven capabilities, we recognize the need for systematic quality assessment of our algorithms. As the organization grows, we will invest in developing an evaluation framework to:
+
+**NEW:**
+> As Normain's products increasingly rely on AI-driven capabilities, algorithm quality is assessed as part of QA. Planned: a formal evaluation framework to:
+
+---
+
+**Blocking for audit:** Edits 1 + 2 + 3. **Edit 4** = polish.

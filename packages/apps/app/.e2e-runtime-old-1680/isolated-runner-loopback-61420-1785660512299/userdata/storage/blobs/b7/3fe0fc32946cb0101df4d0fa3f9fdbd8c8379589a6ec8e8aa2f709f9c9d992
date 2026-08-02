@@ -1,0 +1,22 @@
+# Attention
+
+Purpose: the triage radar — surfaces instances going cold (or
+suspiciously hot) so neglect is visible before it's a problem. Exists
+because lists show what you ask for; attention shows what you forgot.
+
+Size/position: drag + resize on the canvas (dnd), never in the menu.
+Relevancy: 🔥 core · ⭐ valuable · 💤 later
+
+| Option | Category | Relevancy | Values / default | Notes |
+|---|---|---|---|---|
+| variant | layout | ⭐ | band groups / heat strip + worst-N | |
+| title | display | 🔥 | text | |
+| icon | display | 💤 | icon name / none | |
+| computedField | data | 🔥 | attention signal field | |
+| bands | display | 🔥 | subset of cooling/cold/heating/steady | which bands render |
+| limit | display | 🔥 | n per band / n total | |
+| quiet duration | display | ⭐ | on / off | "34d quiet" per row |
+| band counts | display | 💤 | on / off | strip summary |
+| concept | filter | 🔥 | conceptId / inherit | |
+| conditions | filter | ⭐ | SidebarCondition[] (proposed — not in schema yet) | pre-filter population |
+| owner | filter | 💤 | any / me (proposed) | "my neglected things" |

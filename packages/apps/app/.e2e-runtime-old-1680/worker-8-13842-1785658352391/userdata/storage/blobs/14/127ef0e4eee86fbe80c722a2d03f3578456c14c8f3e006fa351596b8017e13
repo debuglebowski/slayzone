@@ -1,0 +1,35 @@
+# Slice 3/8 — automations tRPC router (P7)
+
+**Commit:** `cc5d6ef7` — `feat(transport): automations router (P7)` (direct to main, no PR)
+**Files:** 11 changed, +312 / −131
+
+## Done (DONE-WHEN met)
+10 `db:automations:*` IPC sigs mirrored → tRPC `automationsRouter`, registered, committed.
+
+| Proc | IPC channel mirrored |
+|------|----------------------|
+| getByProject, get, create, update, delete, toggle, reorder, getRuns, runManual, clearRuns | `db:automations:*` (1:1) |
+
+## Approach
+Coexistence slice (no renderer/handler-deletion — that's slice 5).
+- **NEW** `automations/src/server/automations-store.ts` — 9 pure **async** SlayzoneDb ops + `./server` export. Shared by IPC handlers AND router (single source of truth, diagnostics-P4 pattern).
+- `main/handlers.ts` — refactored to delegate to store (behaviour-identical, no SQL dup, IPC stays live).
+- **NEW** `transport/.../routers/automations.ts` — 10 procedures. `runManual` pulls engine from `ctx.automationEngine`.
+- `transport/context.ts` + `ws-server.ts` — added structural `AutomationEngineLike` + `automationEngine?` opt; `app/main/index.ts` passes it at both `startTrpcServer` sites.
+- Registered in `appRouter`; added `@slayzone/automations` transport dep.
+
+## Deviation from ref 48a4468c
+Ref predates main's async worker-thread DB. Ref uses **sync** `better-sqlite3` (`db.prepare().all()`); reworked for main's **async** `SlayzoneDb`. Excluded ref's full-cutover parts (onChanged subscription, events.ts, engine notifyRenderer restructure, broadcast removal, preload/renderer edits) — those are slice 5. **Improvement over ref:** typed `executeManual(): Promise<AutomationRun>` via pure shared type (ref used `Promise<unknown>`), zero new coupling.
+
+## Verification
+- `pnpm typecheck` — ✅ green (all pkgs)
+- `pnpm lint` — my 7 files **0 problems**. Repo has 1 pre-existing error (`terminal/useTerminalStateStore.ts:242`, unchanged vs HEAD) + 309 warns — not mine.
+- `pnpm build` (prod) — ✅ green. `/server` subpath resolves; store + router bundled into main; no electron dragged in.
+- `pnpm test:e2e` — **778 passed**, 110 skipped, **9 failed — ALL pre-existing/environmental, ZERO automation, ZERO in files I touched:**
+  - `03-projects` create ×4 → uncommitted sidebar redesign in dirty tree renamed `title="Add project"` → `"Add project (right-click for folder)"` (other WIP, 656-line sidebar diff). Intact at committed HEAD.
+  - `87-agent-lock` ×2 → missing local-server sidecar in `out/` (build-orchestration gap); **re-ran with sidecar present → PASS**.
+  - `85-tab-reorder`, `86-wcv-cleanup` → browser/WCV flakies (untouched).
+  - `99-tree rename:341` → documented known focus-steal bug.
+- automations unit tests (`handlers.test.ts`) — pre-broken by async-DB rot (`ipc-harness` lacks `namedTxn`/`batchTxn`; HEAD handler called them too → identical fail at HEAD). Not a regression.
+
+On clean committed main (no dirty sidebar WIP + CI builds sidecar), all 9 vanish → my commit is isolated + green.

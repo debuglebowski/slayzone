@@ -1,0 +1,72 @@
+# Video Series Outline
+
+**Goal:** promote me (know-how) + SlayZone (product).
+
+> One-sentence self-intro opens Ep 1 — no dedicated "about me" episode.
+
+---
+
+## 1. AI / LLM Primer
+
+What they are, why now.
+
+- What an LLM actually is (no math, real intuition)
+- Why this moment — capability curve, cost curve
+- Where they fail (hallucination, context, determinism)
+- Why this matters for builders
+
+## 2. Model Providers
+
+The brains.
+
+- Anthropic, OpenAI, Google, local (Llama, Qwen, …)
+- Trade-offs: capability, cost, latency, privacy
+- How to pick per task
+
+## 3. Coding Assistants
+
+The tools wrapping the models — lead-in to SlayZone.
+
+- Claude Code, Codex, Gemini CLI, Cursor, Copilot, Aider, OpenCode
+- CLI vs IDE vs hybrid
+- My daily stack + why
+- Limits of single-assistant workflows → why orchestration matters
+
+## 4. Skills
+
+Reusable practices viewers can steal. Establishes authority.
+
+- Prompting fundamentals
+- Agentic workflows (planning, tools, verification)
+- Multi-agent orchestration
+- Context engineering (memory, retrieval, scope)
+- Debugging with LLMs
+
+## 5. SlayZone
+
+Product demo woven into skills story — show, don't pitch.
+
+- Origin: why I built it (dogfood story)
+- Core: task-centric workspace + integrated AI coding assistants
+- Killer features:
+  - Multi-provider terminals (Claude Code, Codex, Gemini, …)
+  - Skills + MCP
+  - Artifacts, projects, automations
+- Live build: ship a real feature on camera using SlayZone
+
+## 6. Future
+
+Vision → invites viewers along for the ride.
+
+- Where AI dev tooling is heading (next 12–24 months)
+- SlayZone roadmap teaser
+- What I'm betting on (and against)
+- Call to action: try SlayZone, follow series
+
+---
+
+## Format notes
+
+- ~8–15 min per episode
+- One core idea per video
+- End every episode: tangible takeaway + SlayZone tie-in

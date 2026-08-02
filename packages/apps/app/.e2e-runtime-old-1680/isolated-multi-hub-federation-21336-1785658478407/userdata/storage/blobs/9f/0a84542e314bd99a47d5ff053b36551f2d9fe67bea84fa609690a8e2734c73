@@ -1,0 +1,23 @@
+flowchart TB
+  subgraph CUR["CURRENT — name IS the key (so name is immutable)"]
+    direction LR
+    ci["instance.state<br/>{ 'email': 'jane@x.com' }"] -->|"matched by NAME string"| cf["fields row<br/>id = uuid (exists, unused as key)<br/>name = 'email'  (key AND label)"]
+    cnote["rename blocked: changing<br/>name orphans every state blob"]:::warn
+  end
+
+  subgraph OPTA["OPTION A — uuid is the key (the literal proposal)"]
+    direction LR
+    ai["instance.state<br/>{ 'c3d4-7f..': 'jane@x.com' }"] -->|"matched by field id"| af["fields row<br/>id = uuid  (the key)<br/>name = 'Email'  (decorative, renameable)"]
+    anote["state blobs, logs, psql,<br/>jsonb/GIN queries become opaque"]:::warn
+  end
+
+  subgraph OPTB["OPTION B — immutable slug is the key (recommended)"]
+    direction LR
+    bi["instance.state<br/>{ 'email': 'jane@x.com' }"] -->|"matched by immutable slug"| bf["fields row<br/>id = uuid  (PK)<br/>slug = 'email'  (stable key)<br/>name = 'Email address'  (decorative, renameable)"]
+    bnote["readable + renameable +<br/>mirrors the concept slug pattern you already shipped"]:::good
+  end
+
+  CUR --> OPTA --> OPTB
+
+  classDef warn fill:#fde8e8,stroke:#c0392b,color:#000;
+  classDef good fill:#e8f8ef,stroke:#27ae60,color:#000;

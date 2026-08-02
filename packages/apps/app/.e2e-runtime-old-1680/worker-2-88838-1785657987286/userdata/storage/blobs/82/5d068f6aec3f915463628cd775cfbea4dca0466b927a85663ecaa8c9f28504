@@ -1,0 +1,55 @@
+# [DRAFT] Runbook — Delete Entire Organisation (SaaS & Enterprise)
+
+> **Status:** Draft — pending deletion feature/job implementation.
+> **Scope:** Full organisation deletion only. Not partial or data-subject (GDPR) deletion.
+> **Owner:** Engineering on-call (executes) · Security Delegate (approves).
+> **Control:** DCH-110 Information deletion · ISO 27001 A.8.10.
+
+## When this runs
+
+An org is deleted once it has been **`closed` for 90 days**. `closedAt` is stamped when:
+
+- User self-serve "delete organisation"
+- Subscription / trial ends
+- Inactivity cutoff (free orgs with no end signal)
+- Enterprise offboarding (manual entry)
+
+SaaS deletions run automatically via the scheduled purge job. Enterprise teardown is operator-run. Use this runbook to execute/verify the deletion and capture evidence.
+
+## 1. Before deleting (both)
+
+1. Identify the org: `uid`, name, **hosting type (SaaS vs Enterprise)**.
+2. Confirm `closedAt` is set and **≥90 days elapsed**.
+3. Check exceptions:
+   - **Legal hold?** → STOP. Do not delete.
+   - **Billing/tax records** (7-yr legal retention) → kept separately; exclude from purge.
+4. Confirm authorization (Security Delegate sign-off or verified owner request).
+
+## 2a. SaaS deletion
+
+1. Trigger purge for `org.uid` (purge job or admin action).
+2. Verify removed: Postgres rows for the org, Azure storage (uploaded files, artifacts, data room, data sources).
+3. **Backups:** confirm PITR/backup copies age out within retention window (≤90 days).
+4. **Sub-processors:** trigger deletion of org data in PostHog + any other relevant sub-processors.
+
+## 2b. Enterprise deletion
+
+1. Run **`terraform destroy`** for the customer-tenant module — **via CI pipeline, not local**.
+2. Verify destroyed: Postgres flexible server + DB, storage accounts/containers/shares, Key Vault, K8s namespace, Redis.
+3. Confirm in **Azure Activity Log**: "Delete" events for the above resources.
+4. **Note:** Key Vault soft-delete (~90 days) and Postgres backups age out per retention — full erasure completes once those windows lapse.
+
+## 3. After deleting (both)
+
+1. Write **deletion audit record**: org uid, hosting type, requested_at, executed_at, operator, scope deleted.
+2. Capture **evidence**:
+   - SaaS → deletion audit-log export.
+   - Enterprise → Terraform destroy run log + Azure Activity Log delete confirmation.
+3. Close offboarding ticket; attach evidence.
+
+## Abort
+
+If any check fails (legal hold, wrong org, close window not met), STOP and escalate to the Security Delegate.
+
+---
+*Draft — review & confirm steps against the implemented deletion job before publishing.*

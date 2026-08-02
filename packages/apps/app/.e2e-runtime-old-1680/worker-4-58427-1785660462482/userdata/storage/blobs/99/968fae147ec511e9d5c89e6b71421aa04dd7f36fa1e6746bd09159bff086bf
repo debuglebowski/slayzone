@@ -1,0 +1,78 @@
+# AI Provider Tycoon — Demand Model
+
+How market state turns into per-player demand share each tick. This is the central allocator — every other economic formula reads from it.
+
+These are **suggestions / starting points**, not locked. Numbers especially will need playtesting.
+
+## Decisions and proposals
+
+### Total market size
+**Proposal:** baseline market `M_0` (in tokens or $/tick), modified per-tick by active situations.
+
+```
+M[t] = M_0 × (1 + Σ situation_modifiers)
+```
+
+- `Demand surge` adds a positive modifier for a duration.
+- `Regulatory action` (geo restriction) subtracts.
+- Default modifier = 0; situations are the only thing that moves the total.
+
+This keeps the market a fixed pie unless something dramatic happens, which makes situations the primary source of macro change.
+
+### Share allocation — softmax over utility
+**Proposal:** each player has a utility score; demand share is softmax over utility.
+
+```
+utility[p] = w_q × quality[p] + w_b × brand[p] − w_p × price[p]
+share[p]   = exp(utility[p] / τ) / Σ exp(utility[k] / τ)
+```
+
+- **τ (temperature)** controls how sharply quality differences translate to share. Low τ → winner-take-most; high τ → flatter distribution. **Suggest τ = 1.0** as starting point.
+- NPC competitors are included in the denominator with fixed utility values, so a small-market match still has a "rest of the world" baseline.
+
+Why softmax over tier-bucketing: smoother, no edge cases at boundaries, naturally handles 1 to N players.
+
+### Weights — quality > brand > price
+**Proposal:** quality dominates, brand is meaningful, price is least sensitive.
+
+| Weight | Value | Rationale |
+|---|---|---|
+| `w_q` (quality) | 0.5 | Frontier model wins enterprise even with weak brand |
+| `w_b` (brand) | 0.3 | Brand drives consumer + default-tool adoption |
+| `w_p` (price) | 0.2 | Price matters only at commodity tier; frontier is price-insensitive |
+
+These are the v0.1 defaults; tunable per scenario.
+
+**Implication:** undercutting alone doesn't win — you still need quality or brand to be competitive. This is intentional and matches the real AI provider market.
+
+### Inertia — exponential moving average
+**Proposal:** demand doesn't snap; it converges to the target share over a few ticks.
+
+```
+actual_share[p, t] = α × target_share[p, t] + (1 − α) × actual_share[p, t-1]
+```
+
+- **Suggest α = 0.3.** A frontier release takes ~5 ticks to fully shift demand.
+- Rewards established players (cushion against sudden quality drops) *and* agile players (their actions still pay off in a reasonable window).
+
+Without inertia, every tick is a discontinuous reshuffle, which is bad for replay watchability and prompt-strategy depth.
+
+### Capacity coupling — allocate, then serve, then spill
+**Proposal:** demand allocation and demand fulfillment are separate steps.
+
+1. **Allocate:** softmax-derived share gives each player their `demand_allocated[p, t]`.
+2. **Serve:** `demand_served[p, t] = min(demand_allocated[p, t], inference_capacity[p, t])`.
+3. **Spill:** unfilled allocation is redistributed proportionally to other players' headroom; if no one has headroom, it evaporates (lost market).
+
+**Implications:**
+- Buying capacity is rewarded — without it, your share is capped no matter how strong your brand.
+- A lean player with high quality but no capacity feeds free demand to competitors.
+- Consistent with the "preparation is strategy" principle in Situation Rules.
+
+## Open / needs playtest
+
+- Concrete value of `M_0` and its growth/shrinkage from situations.
+- τ value — affects how cutthroat the market feels.
+- α value — affects how quickly strategies pay off.
+- Whether brand and quality are bounded (e.g. 0–10) or unbounded; affects how utility behaves at extremes.
+- Whether NPC baseline utility is static or drifts upward over the match (simulating a maturing market).

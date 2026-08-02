@@ -1,0 +1,206 @@
+# Normain Repository — April 2026 Commit Review
+## Total Commits: 185
+
+---
+
+## Summary
+
+| Metric            | Value  |
+|-------------------|--------|
+| Total Commits     | 185    |
+| Avg Complexity    | 3.50   |
+| Avg Effort        | 3.21   |
+| Avg Thought       | 3.62   |
+| Total Est. Hours  | 456.5  |
+
+---
+
+## Commit Table
+
+| Hash      | Date       | Subject                                                            | CX | Eff | Thought | Hrs  |
+|-----------|------------|--------------------------------------------------------------------|----|-----|---------|------|
+| 955a23ea0 | 2026-04-30 | Add result-level chat, prompt improvement, and review mode         | 8  | 8   | 9       | 16.0 |
+| 4f31ed60d | 2026-04-30 | Add Azure monitor alerts for app environments                      | 4  | 3   | 4       | 3.0  |
+| 3f5de4bdf | 2026-04-30 | Lift 16 deps to clear ~30 medium CVEs (Vanta)                      | 3  | 3   | 2       | 1.5  |
+| 32f2faf0b | 2026-04-30 | Lift hono to ^4.12.14 to close 7 medium CVEs (Vanta)              | 2  | 2   | 2       | 0.5  |
+| bdef183ee | 2026-04-30 | Lift @anthropic-ai/sdk to close GHSA-5474-4w2j-mq4c               | 2  | 1   | 2       | 0.5  |
+| b88cee910 | 2026-04-30 | Fix spreadsheet not emitting change event on Enter/Tab             | 3  | 2   | 3       | 1.0  |
+| c9ffb3949 | 2026-04-30 | Bump backup retention 7 → 14 days (INT-306)                       | 1  | 1   | 1       | 0.5  |
+| feec5a921 | 2026-04-30 | Add image rendering to trust panel and file viewer                 | 4  | 3   | 4       | 2.0  |
+| d7b539a0d | 2026-04-30 | Remove 40 unused dependencies across 22 packages                  | 3  | 3   | 3       | 2.0  |
+| 86bea7ea9 | 2026-04-30 | Remove auto-jump to next insight on approve/reject                 | 3  | 2   | 4       | 1.5  |
+| 0d01adf78 | 2026-04-29 | Fix PRISMA_SCHEMA_PATH env var in API and worker Dockerfiles       | 2  | 1   | 2       | 0.5  |
+| 2248b47f0 | 2026-04-29 | Remove legacy code, unused packages, and dead UI code             | 5  | 6   | 4       | 6.0  |
+| aa607d94f | 2026-04-29 | chore: add CODEOWNERS                                              | 1  | 1   | 2       | 0.5  |
+| 4f18eefba | 2026-04-29 | Bump protobufjs to 7.5.6 (CVE-2026-41242)                        | 2  | 2   | 2       | 0.5  |
+| 081f1e533 | 2026-04-29 | Add spreadsheet column filter                                      | 6  | 6   | 6       | 5.0  |
+| c9883abd2 | 2026-04-28 | Restore citation row highlight in spreadsheet preview             | 5  | 4   | 5       | 3.0  |
+| 43328b412 | 2026-04-28 | Match data source icons in table; tooltip shows confidence level  | 3  | 2   | 3       | 1.0  |
+| af2ccf89e | 2026-04-28 | Add inline preview for data source files                          | 7  | 7   | 7       | 7.0  |
+| d6fb14843 | 2026-04-28 | Move extraction to another team (NOR-2500)                        | 5  | 5   | 5       | 4.0  |
+| b812f7a28 | 2026-04-28 | Handle web fetch errors gracefully                                | 3  | 3   | 3       | 1.5  |
+| 827a31a54 | 2026-04-28 | Fix vectorize queue failing on transient errors                   | 3  | 2   | 3       | 1.5  |
+| e95ea7097 | 2026-04-28 | Add authorization middleware to tRPC subscriptions                | 5  | 4   | 6       | 3.0  |
+| ea2ed2dbf | 2026-04-28 | Refactor insight processing with unified filtering and mode       | 6  | 6   | 7       | 6.0  |
+| 1beeae512 | 2026-04-27 | Unify Extract button styling across view modes                    | 2  | 2   | 2       | 0.5  |
+| 9ed61feb4 | 2026-04-27 | Autohide scrollbars in unified table cells                        | 2  | 2   | 2       | 0.5  |
+| 79319b8cf | 2026-04-27 | Auto-fit Data Source column width to longest filename             | 4  | 3   | 4       | 2.0  |
+| 787dd1350 | 2026-04-27 | Clean up table grid lines and inline insight suggestions          | 3  | 3   | 3       | 2.0  |
+| 08b4e2729 | 2026-04-27 | Notify org owners when someone requests team access               | 4  | 4   | 4       | 2.5  |
+| 94b6bb7d3 | 2026-04-27 | Default base document to blank in deliverable modal               | 2  | 2   | 2       | 0.5  |
+| fbd9f6db8 | 2026-04-27 | Allow templates to be shared across teams in an organization      | 6  | 5   | 6       | 4.0  |
+| 1b309d22e | 2026-04-27 | Add database indexes for spreadsheet queries                      | 4  | 3   | 5       | 2.0  |
+| 3440fc52e | 2026-04-27 | Merge spreadsheet context menus into centralized menu system      | 4  | 4   | 4       | 2.5  |
+| 32f3cf6ba | 2026-04-27 | Fix insight OK button, spreadsheet paste, and play button issues  | 5  | 5   | 5       | 3.5  |
+| 2cb775160 | 2026-04-27 | Truncate long extraction names in breadcrumb with tooltip         | 2  | 2   | 2       | 0.5  |
+| 36430c38f | 2026-04-27 | Show provider name on storage tab when only one is connected      | 2  | 2   | 2       | 0.5  |
+| 5f247eb68 | 2026-04-24 | Allow users to reindex data sources from the sidebar              | 4  | 4   | 4       | 2.5  |
+| a184452d2 | 2026-04-24 | Add Redis real-time updates for data sources and refactor sidebar | 7  | 7   | 7       | 8.0  |
+| 6aee6c966 | 2026-04-24 | Dedupe background extraction toast and auto-dismiss after 10s     | 2  | 2   | 2       | 0.5  |
+| 045660c1e | 2026-04-24 | Expand rays to cover bottom-left and fix active team color        | 2  | 2   | 2       | 0.5  |
+| 6c03c4f3e | 2026-04-24 | Redesign canvas cell footer and wire verification and comments    | 7  | 6   | 7       | 6.0  |
+| b1d9cca51 | 2026-04-24 | Fix @column references not resolving in SpreadsheetView           | 4  | 3   | 5       | 2.0  |
+| 4996a7576 | 2026-04-23 | Run one sync job per group and hide arrows for empty folders      | 5  | 5   | 5       | 3.5  |
+| 11cdfc6e0 | 2026-04-23 | Add Reply button to trust panel comment replies                   | 3  | 3   | 3       | 1.5  |
+| 7ed20677f | 2026-04-23 | Fix row height clipping short result values in extraction table   | 3  | 2   | 3       | 1.0  |
+| 61be9bbca | 2026-04-23 | Redesign comment indicator in result footer                       | 3  | 3   | 4       | 1.5  |
+| 65df40879 | 2026-04-23 | Fix column names not showing on initial render in SpreadsheetView | 3  | 3   | 3       | 1.5  |
+| e2a786631 | 2026-04-23 | Show 'Link copied' as tooltip on Share button                     | 2  | 2   | 2       | 1.0  |
+| a1ebf99b4 | 2026-04-23 | Fix SharePoint PDF preview in trust panel                         | 3  | 2   | 3       | 1.0  |
+| 0ffe52ea0 | 2026-04-23 | Add file attachments to review comments and PDF preview           | 6  | 6   | 6       | 5.0  |
+| d2c400e00 | 2026-04-23 | fix: restrict CORS origin to tenant APP_ORIGIN allowlist          | 4  | 2   | 5       | 1.5  |
+| 97bb695f4 | 2026-04-23 | fix version issue in extraction output artifacts                  | 3  | 2   | 3       | 1.0  |
+| 748cb0c10 | 2026-04-23 | Revert "also the build workflows"                                 | 1  | 1   | 1       | 0.5  |
+| 60b2ee5a3 | 2026-04-23 | Revert "run on medium runner"                                     | 1  | 1   | 1       | 0.5  |
+| 6be046863 | 2026-04-23 | also the build workflows                                          | 1  | 1   | 1       | 0.5  |
+| cd058224b | 2026-04-23 | run on medium runner                                              | 1  | 1   | 1       | 0.5  |
+| d2a9600ed | 2026-04-23 | Add canvas-based spreadsheet with collaborative editing           | 9  | 9   | 9       | 20.0 |
+| cb0db9a6d | 2026-04-23 | NOR-2547: Add Word document outputs flow                          | 9  | 9   | 9       | 18.0 |
+| 3f091f383 | 2026-04-23 | Default onboarding extraction to single mode for non-internal     | 2  | 1   | 3       | 0.5  |
+| 8f18a2d2a | 2026-04-23 | Replace duplicate ProcessManager implementations with shared pkg  | 5  | 4   | 5       | 3.0  |
+| 6c38fe324 | 2026-04-22 | Update tsgo version                                               | 2  | 2   | 1       | 0.5  |
+| 0f1edd8d6 | 2026-04-21 | Bump whisper deployment capacity                                  | 1  | 1   | 2       | 0.5  |
+| 8abb1f0a1 | 2026-04-21 | Update privacy policy and terms links to normain.com              | 1  | 1   | 1       | 0.5  |
+| 0a61a401d | 2026-04-21 | fix issue with read/write json                                    | 2  | 1   | 2       | 0.5  |
+| d95020706 | 2026-04-21 | NOR-2463: Add exhaustive search tool                              | 7  | 7   | 8       | 10.0 |
+| 7113d7242 | 2026-04-21 | Add folder sync support                                           | 7  | 7   | 7       | 8.0  |
+| b4eeaa549 | 2026-04-21 | Widen panel resize handle hit area (NOR-2544)                     | 2  | 2   | 2       | 0.5  |
+| 1652a4607 | 2026-04-20 | fix advisense single org name                                     | 2  | 1   | 2       | 0.5  |
+| fdbbbfb1e | 2026-04-20 | Fix flash when clicking on same outline line                      | 3  | 2   | 3       | 1.0  |
+| 09d0cd5b4 | 2026-04-20 | Fix duplicated spreadsheets losing column references              | 4  | 3   | 5       | 2.0  |
+| 293059577 | 2026-04-17 | Add toggleable section bar, card outline, and performance imps    | 6  | 6   | 6       | 5.0  |
+| 261bca489 | 2026-04-17 | Add voice-to-text input using Azure OpenAI Whisper (NOR-2539)     | 7  | 7   | 7       | 8.0  |
+| 3decd9f40 | 2026-04-16 | Paginate SharePoint sites to support large tenants                | 4  | 3   | 4       | 2.0  |
+| 6a5b7f675 | 2026-04-16 | Allow chat to run selected insights and answer product questions  | 7  | 6   | 7       | 6.0  |
+| bfb3b8efc | 2026-04-16 | Add progress indicator showing remaining extractions              | 4  | 4   | 4       | 2.0  |
+| b85887975 | 2026-04-16 | Add single organisation mode (NOR-2501)                           | 6  | 6   | 6       | 5.0  |
+| 27a099190 | 2026-04-16 | Fix ghost card                                                    | 3  | 2   | 3       | 1.0  |
+| 20d86079a | 2026-04-16 | Add arrow key navigation between sources in trust panel           | 4  | 4   | 4       | 2.5  |
+| 2227d99cf | 2026-04-15 | Fix prompt text selection in spreadsheet mode                     | 3  | 3   | 3       | 1.5  |
+| 2b10368fb | 2026-04-15 | Add site filtering support for web search and fetch tools         | 5  | 5   | 5       | 3.0  |
+| 8e9ee26c0 | 2026-04-15 | Update dropdown to be like paul                                   | 2  | 2   | 2       | 0.5  |
+| acb3239eb | 2026-04-15 | Fix TrustPanel closing on internal clicks in spreadsheet mode     | 3  | 3   | 4       | 1.5  |
+| a2cec014b | 2026-04-15 | remove more normain blocks from package.json                      | 1  | 1   | 1       | 0.5  |
+| dd4cdd4f1 | 2026-04-15 | Fix notification header                                           | 2  | 1   | 2       | 0.5  |
+| 25002fd4e | 2026-04-15 | Limit web search scope in extraction insight agents               | 4  | 3   | 4       | 2.0  |
+| 8f673d082 | 2026-04-15 | Add clearer selection card for org switching and creation         | 4  | 4   | 4       | 2.0  |
+| 841aa139c | 2026-04-15 | Invite dialog: default teams to unselected (opt-in)               | 2  | 2   | 3       | 1.0  |
+| cd2d1fa90 | 2026-04-15 | NOR-2466: Drag-and-drop column reordering in spreadsheet mode     | 6  | 6   | 6       | 5.0  |
+| edbd7bd54 | 2026-04-15 | Add web search and web fetch tools to AI extraction agent         | 7  | 7   | 7       | 9.0  |
+| 423521f93 | 2026-04-15 | NOR-2522: Refresh dashboard layout, header, and sidebar           | 5  | 5   | 5       | 4.0  |
+| a5cd2f524 | 2026-04-14 | Add Slack bot service with AI-powered prompt analysis             | 7  | 7   | 7       | 10.0 |
+| 36ff2c37c | 2026-04-14 | Fix card drag and add subtle answer separation                    | 4  | 4   | 4       | 2.5  |
+| 8312c95f0 | 2026-04-14 | NOR-2523: Add text labels to extraction toolbar buttons           | 2  | 2   | 2       | 0.5  |
+| 3bc312d89 | 2026-04-14 | Remove worker liveness probe and increase memory limit to 4Gi    | 3  | 2   | 3       | 1.0  |
+| 44e3ea052 | 2026-04-14 | NOR-noticket: Test Anthropics Models                              | 7  | 7   | 7       | 9.0  |
+| 31dd7ab65 | 2026-04-14 | NOR-2518: Fix multi-row delete in spreadsheet mode                | 3  | 3   | 3       | 1.5  |
+| 580795cc3 | 2026-04-14 | Add horizontal padding to suggestion badges                       | 1  | 1   | 1       | 0.5  |
+| e57ee0622 | 2026-04-14 | NOR-2514: Make chat content fade faster than slide animation      | 2  | 2   | 2       | 0.5  |
+| 86c908da7 | 2026-04-14 | NOR-2520: Fix greeting format to "Hey Sara,"                      | 1  | 1   | 2       | 0.5  |
+| 0656ee990 | 2026-04-14 | add base branch too                                               | 1  | 1   | 1       | 0.5  |
+| 9c7151b5f | 2026-04-13 | Klara Consulting: Require comment on non-OK checks for download   | 7  | 7   | 8       | 8.0  |
+| 7f819981d | 2026-04-13 | Fix check                                                         | 1  | 1   | 1       | 0.5  |
+| 2ce16b91a | 2026-04-13 | NOR-2494: Update consent modals UI                                | 4  | 4   | 4       | 2.5  |
+| cb71d1c5b | 2026-04-13 | Fix padding                                                       | 1  | 1   | 1       | 0.5  |
+| 49f54f4c1 | 2026-04-13 | Replace Postgres presence cache with in-memory registry           | 5  | 4   | 6       | 3.0  |
+| 5a7030876 | 2026-04-13 | Stream uploaded files instead of buffering entire files in memory | 5  | 4   | 5       | 3.0  |
+| b23cdffb7 | 2026-04-13 | Fix chat UI and add developer settings to toggle visibility       | 5  | 4   | 5       | 3.0  |
+| 5a64e5ab7 | 2026-04-10 | Handle missing directory in Ripgrep grep                          | 3  | 2   | 3       | 1.0  |
+| fdd1df1ac | 2026-04-10 | Add OTel spans for SimpleWorker jobs                              | 4  | 3   | 4       | 2.0  |
+| 835d96fa4 | 2026-04-10 | Fix paste truncation when pasting 800+ rows into spreadsheet      | 4  | 3   | 4       | 1.5  |
+| d39b8fd6c | 2026-04-10 | Improve header row detection error handling                       | 3  | 3   | 3       | 1.5  |
+| b9b41156a | 2026-04-10 | Fix: download fails for repeat mode extractions                   | 2  | 1   | 2       | 0.5  |
+| 4e3d90953 | 2026-04-10 | Clean up tenant API: setup OpenTelemetry and replace logger       | 4  | 4   | 4       | 2.5  |
+| c178decda | 2026-04-10 | Remove unused dependencies from API and worker packages           | 2  | 2   | 2       | 1.0  |
+| 4fb0619c8 | 2026-04-10 | Remove extra left indentation from file tree items                | 2  | 2   | 2       | 0.5  |
+| ee32c2050 | 2026-04-10 | Multi-select row/column resize (Excel-like)                       | 6  | 6   | 6       | 5.0  |
+| 152960278 | 2026-04-10 | Update extraction background color and show folder chevron        | 2  | 2   | 2       | 0.5  |
+| ab36164ef | 2026-04-10 | Fix: spreadsheet deleteRows silently fails for large row dels     | 4  | 4   | 4       | 2.0  |
+| 9f1f2625a | 2026-04-10 | Handle content policy violations gracefully                       | 3  | 3   | 3       | 1.5  |
+| bb3185571 | 2026-04-10 | Fix table layout and minor UI improvements                        | 2  | 2   | 2       | 0.5  |
+| 1d745f385 | 2026-04-10 | remove axios                                                      | 2  | 1   | 2       | 0.5  |
+| 69fdaa73a | 2026-04-10 | fix yarn                                                          | 2  | 2   | 1       | 0.5  |
+| dc0d9f0e3 | 2026-04-10 | Restore empty-state heading and fix chat loading indicator        | 3  | 2   | 3       | 1.0  |
+| 664b23bb9 | 2026-04-10 | Remove ESLint                                                     | 3  | 3   | 3       | 1.5  |
+| a40451ab6 | 2026-04-10 | fix embedding models sometimes error during development           | 2  | 1   | 2       | 0.5  |
+| a55f0da71 | 2026-04-10 | Improve job cancellation and queue cleanup in BullMQ Pro          | 5  | 4   | 5       | 3.0  |
+| 0df1d01fb | 2026-04-10 | Fix options output auto-save on close                             | 3  | 3   | 4       | 1.5  |
+| a695c07a6 | 2026-04-10 | Fix raw mention markup showing in comment notification emails      | 3  | 2   | 3       | 1.0  |
+| e0d0902be | 2026-04-10 | Fix mention dropdown, insight rename sync, and clipboard copy     | 4  | 4   | 4       | 2.0  |
+| 0b2e8e525 | 2026-04-10 | Add extraction-scoped chat and simplify extraction creation flow  | 8  | 8   | 8       | 14.0 |
+| cf500774a | 2026-04-09 | Add credit manager role with permissions-based access control     | 6  | 5   | 6       | 4.0  |
+| 9274ad2cd | 2026-04-09 | Handle Miljögiraff tenant in tenant API                           | 5  | 5   | 5       | 3.0  |
+| b5d9e20f7 | 2026-04-09 | add miljogiraff to CI/CD                                          | 1  | 1   | 1       | 0.5  |
+| 525d0a092 | 2026-04-09 | chore: update tenants.json from API [skip ci]                     | 1  | 1   | 1       | 0.5  |
+| 15bcb486e | 2026-04-09 | use kubelogin in the provision tenants workflow                   | 2  | 2   | 2       | 0.5  |
+| 9a18b4a7b | 2026-04-09 | grab the tenant id from the tenant table not the marketplace sub  | 3  | 2   | 3       | 1.0  |
+| 0dbc62849 | 2026-04-09 | handle get response in error handler                              | 2  | 2   | 2       | 0.5  |
+| cf09f7f4e | 2026-04-09 | make sure not to grab tenants database url                        | 2  | 1   | 2       | 0.5  |
+| 53bf72d51 | 2026-04-09 | Normalize uploaded file paths to NFC encoding + migration         | 4  | 4   | 5       | 2.5  |
+| 722519120 | 2026-04-09 | Fix org creation to use rollover credits instead of period        | 3  | 2   | 4       | 1.5  |
+| 54f938993 | 2026-04-09 | Add dev environment support to CLI database connection tool       | 3  | 3   | 3       | 1.5  |
+| 29e1b1338 | 2026-04-09 | Add ability to disable deploy workflows per environment           | 4  | 4   | 4       | 2.5  |
+| 257e90ba2 | 2026-04-09 | Handle extraction not found gracefully                            | 2  | 2   | 2       | 0.5  |
+| c868b5e6c | 2026-04-09 | add enterprise default plan for advisense                         | 1  | 1   | 1       | 0.5  |
+| 97ebe431b | 2026-04-08 | Normalize file paths to use NFC encoding before writing           | 4  | 4   | 5       | 3.0  |
+| e204c0a77 | 2026-04-08 | make sure the pod has a random name                               | 2  | 2   | 2       | 0.5  |
+| c66eaf599 | 2026-04-08 | add cli tool to connect to postgres database in saas              | 4  | 4   | 4       | 2.5  |
+| 5aba36ddc | 2026-04-07 | Add MANUAL as third CONTROL answer option                         | 5  | 5   | 5       | 3.5  |
+| 2dd85dd9e | 2026-04-07 | Remove old IAC infrastructure code                                | 3  | 3   | 3       | 2.0  |
+| a9193ceab | 2026-04-07 | setup advisense                                                   | 2  | 2   | 2       | 1.0  |
+| 8ec74f90f | 2026-04-07 | Add export with sources support for spreadsheet mode              | 7  | 7   | 7       | 8.0  |
+| 9c1f88dd1 | 2026-04-07 | Throw error if options are invalid                                | 3  | 2   | 3       | 1.0  |
+| 3b9da0b1a | 2026-04-07 | Auto-create insights from ghost cards in CardsView                | 5  | 5   | 6       | 4.0  |
+| ccf35cb6f | 2026-04-02 | Fix NotificationBell showing ?? instead of initials               | 2  | 2   | 2       | 0.5  |
+| 42fd7d4c6 | 2026-04-02 | Fix assign-insight showing ?? instead of initials                 | 2  | 2   | 2       | 1.0  |
+| a0abd21da | 2026-04-02 | save all failed jobs                                              | 2  | 2   | 2       | 0.5  |
+| a253cc130 | 2026-04-02 | Support DOCX to PDF conversion                                    | 6  | 6   | 6       | 5.0  |
+| 24303e557 | 2026-04-02 | Add row deletion and spreadsheet UX improvements                  | 5  | 5   | 5       | 4.0  |
+| a444a9c5e | 2026-04-02 | Fix logic                                                         | 1  | 1   | 1       | 0.5  |
+| a5caa699b | 2026-04-02 | Allow klaraconsulting to see original blueprint extraction        | 2  | 1   | 2       | 0.5  |
+| 6de9eb8b9 | 2026-04-02 | Add pdfkit to build                                               | 1  | 1   | 1       | 0.5  |
+| a327dcde1 | 2026-04-02 | do not have default remove on fail                                | 2  | 1   | 2       | 0.5  |
+| 372c1562f | 2026-04-02 | Add retries with exponential backoff for extract insights worker  | 4  | 3   | 4       | 2.0  |
+| f1a3fd7a6 | 2026-04-02 | Lower concurrency of extract insights worker                      | 2  | 1   | 3       | 0.5  |
+| ccea32b02 | 2026-04-02 | Spreadsheet: column deletion, compact UI, and UX improvements     | 6  | 6   | 6       | 5.0  |
+| c3fbf400f | 2026-04-02 | Fix redis unsubscribe error on connection close                   | 3  | 3   | 3       | 1.5  |
+| f1adb3336 | 2026-04-02 | Reject file paths with control characters                         | 4  | 3   | 5       | 2.0  |
+| f1426a227 | 2026-04-01 | add more logging                                                  | 2  | 2   | 2       | 0.5  |
+| 5ef290e42 | 2026-04-01 | fix zap scan                                                      | 2  | 2   | 2       | 0.5  |
+| 925cf6f4f | 2026-04-01 | Deploy to dev and prod in parallel                                | 3  | 3   | 4       | 1.5  |
+| 08f4b4856 | 2026-04-01 | Enable duplication for spreadsheet extractions                    | 4  | 4   | 4       | 2.5  |
+| 4f5963488 | 2026-04-01 | Add leave team button to team settings                            | 4  | 4   | 4       | 2.5  |
+| f723d80b0 | 2026-04-01 | Remove delete team from insights app                              | 2  | 2   | 2       | 0.5  |
+| 65e73de62 | 2026-04-01 | Add undo/redo for spreadsheet cells (NOR-2462)                    | 6  | 6   | 6       | 5.0  |
+| d73b25014 | 2026-04-01 | Add Normain display name to Azure email configuration             | 1  | 1   | 1       | 0.5  |
+| 9c39e14f2 | 2026-04-01 | Fix table for single mode                                         | 3  | 3   | 3       | 1.0  |
+| 6ce71c4d1 | 2026-04-01 | Fix popover, fix darkmode                                         | 3  | 3   | 3       | 1.5  |
+| cf9812a01 | 2026-04-01 | Redesign extractions and templates list screens                   | 6  | 6   | 6       | 6.0  |
+| b4b284ba4 | 2026-04-01 | Fix tool errors and normalize inputs in agent tools               | 5  | 4   | 5       | 3.0  |
+| b805e7fb5 | 2026-04-01 | Upgrade tsgo, add otel spans to logs, remove PII from auth        | 4  | 4   | 4       | 2.5  |
+| 42ccacaf3 | 2026-04-01 | Fill repeat table viewport with grid lines (NOR-2453)             | 4  | 4   | 4       | 2.5  |
+| c2d434b5f | 2026-04-01 | Fix spreadsheet paste from rich-text sources                      | 5  | 5   | 5       | 3.5  |
+| cdba5ac7c | 2026-04-01 | Add url to actual run in email                                    | 1  | 1   | 1       | 0.5  |
+| cab883d4b | 2026-04-01 | Add Excel-like keyboard shortcuts to spreadsheet view             | 5  | 5   | 5       | 3.5  |
+| 3b7c64135 | 2026-04-01 | ignore disconnection errors on workers                            | 2  | 2   | 2       | 0.5  |
+| eead9b458 | 2026-04-01 | Add retry on connection error                                     | 2  | 2   | 2       | 0.5  |

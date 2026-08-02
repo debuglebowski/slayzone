@@ -1,0 +1,57 @@
+# SlayZone Env Vars — Target State (post-simplification)
+
+Intended env surface for standalone hub + runner after simplification. Precedence: `env var > ~/.slayzone config.json > generated/default`.
+
+Two flags produce the three value columns: **`SLAYZONE_SUPERVISED`** (host-set → Supervised) and **`SLAYZONE_MODE=local|remote`** (operator-set → Standalone vs Remote). `remote` sets the whole hardening bundle (hub: auth+TLS; runner: wss+cert-pin); `local` (default) = loopback, auth off. Supervised is always `local` exposure.
+
+## Single anchor: `SLAYZONE_ROOT`
+
+One optional var anchors all on-disk state for hub AND runner. Default = CWD (standalone) / `$HOME/.slayzone` (supervised). Relocate = `cd /srv/slayzone && slayzone-hub` or `SLAYZONE_ROOT=/srv/slayzone`.
+
+```
+SLAYZONE_ROOT
+├── slayzone.sqlite     (hub DB)
+├── config.json
+├── logs/
+└── runner/             (runner post-enroll creds)
+```
+
+Hub and runner are separate servers with separate CWDs → separate `SLAYZONE_ROOT`s.
+
+## All env vars
+
+**Role:** 🟢 operator (you set it) · 🔵 derived (process computes) · ⚙️ internal (machine/dev/e2e — never in deploy docs). **bold** = operator normally sets it there.
+
+| Role | Var | Purpose | Supervised | Standalone | Remote | config.json |
+|---|---|---|---|---|---|---|
+| 🟢 | `SLAYZONE_ROOT` | Single folder holding all on-disk state | `$HOME/.slayzone` | CWD | **CWD or set** | — |
+| 🟢 | `SLAYZONE_MODE` | Internet-facing? Sets the whole secure bundle | `local` | `local` | **`remote`** | — |
+| 🟢 | `SLAYZONE_PORT` | Port app/CLI connect to (tRPC/HTTP) | host-assigned | OS-assigned | **set** | `port` |
+| 🟢 | `SLAYZONE_HOST` | Interface the client API binds to (pure bind addr) | `127.0.0.1` | `127.0.0.1` | **non-loopback** | — |
+| 🟢 | `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` | Port runners dial into (`/runners` wss) | stable via DB | OS-assigned (stable via DB) | **pin** | `runnerTransportPort` |
+| 🟢 | `SLAYZONE_HUB_RUNNER_TRANSPORT_HOST` | Interface the runner listener binds to | `0.0.0.0` | `127.0.0.1` | `0.0.0.0` | — |
+| 🟢 | `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` | Secret signing runner auth + per-task tokens | host-supplied | gen+persist | gen+persist (pin CI/multi-hub) | `runnerTransportSecret` |
+| 🟢 | `SLAYZONE_HUB_TLS_PORT` | Port serving the TLS `/trpc` listener | off | off | **on** (required) | — |
+| 🟢 | `SLAYZONE_HUB_PUBLIC_URL` | URL remote runners use for this hub's MCP + hooks | loopback | loopback | **set** (required) | `publicUrl` |
+| 🟢 | `SLAYZONE_RUNNER_JOIN_TOKEN` | One-time enroll credential (embeds hub URL+cert+secret) | host injects | — | **set** (minted on hub) | `joinToken` |
+| 🟢 | `SLAYZONE_HUB_URL` | wss the runner dials — normally from token, set to override | host injects | from token | from token | `hubUrl` |
+| 🟢 | `SLAYZONE_HUB_CERT_SHA256` | Hub TLS cert pin — normally from token, set to override | from token | from token | from token | — |
+| 🔵 | `SLAYZONE_HUB_AUTH_REQUIRED` | Gate client `/trpc` on verified identity | off | off | ON | — |
+| 🔵 | `SLAYZONE_DB_PATH` | Exact SQLite file (required as-is in supervised) | REQUIRED (host) | `<ROOT>/slayzone.sqlite` | `<ROOT>/slayzone.sqlite` | `dbPath` |
+| 🔵 | `SLAYZONE_STORE_DIR` | Dir rooting DB + artifacts + backups | `getStateDir()`/userData | `<ROOT>` | `<ROOT>` | — |
+| 🔵 | `SLAYZONE_RUNNER_ALLOWED_ROOTS` | FS jail (locally-declared, never hub-pushed) | host injects `homedir()` | `[ROOT]`+projects | `[ROOT]`+projects | `allowedRoots` |
+| 🔵 | (runner credentials dir) | Where post-enroll creds live | `<dataRoot>/runner-creds` | `<ROOT>/runner` | `<ROOT>/runner` | — |
+| 🔵 | (runner name) | Display label on hub (renamable hub-side) | `local-runner` | hostname | hostname | `runnerName` |
+| 🔵 | (runner heartbeat) | Hub liveness ping interval | const | const | const | — |
+| ⚙️ | `SLAYZONE_SUPERVISED` | Electron host owns env (`=1`) | `1` | — | — | — |
+| ⚙️ | `SLAYZONE_HUB_TOKEN` | Per-task bearer (≠ join token) | injected | injected | injected | — |
+| ⚙️ | `SLAYZONE_AGENT_HOOK_URL` / `_AGENT_ID` / `_SESSION_ID` / `_PROJECT_ID` / `_TASK_ID` / `_MCP_PORT` | Agent/hook/session identity injected into child procs | injected | injected | injected | — |
+| ⚙️ | `SLAYZONE_RUNTIME_DIR` / `_HOST_CAP_URL` / `_HOST_REST_URL` | Fork/supervised host bridge | fork/host | fork | — | — |
+| ⚙️ | `SLAYZONE_USER_DATA_DIR` / `_BOOT_LOG_PATH` / `_E2E_*` / `*_SETTINGS_PATH` / `*_HOOKS_PATH` | e2e sandboxing / test redirects | — | — | — | — |
+| ⚙️ | `SLAYZONE_DEV` / `_REACT_DEV` / `_PROFILE` / `_CHROMIUM_PROD` / `_DEBUG_BOOT` / `_SIDECAR_HOT_RESTART` / `_GC_*` / `*__` | Dev / build-time defines | — | — | — | — |
+
+## Deploy quickref
+
+- **Hub (remote):** `SLAYZONE_MODE=remote` + `SLAYZONE_HUB_PUBLIC_URL` (+ optional `SLAYZONE_ROOT`). Secret auto-generates; auth + TLS auto-on.
+- **Runner (remote):** `SLAYZONE_MODE=remote` + `SLAYZONE_RUNNER_JOIN_TOKEN` + `<ROOT>/config.json` `allowedRoots`. Everything else derives.
+- **Local (either):** just launch — CWD anchor, loopback, no auth.

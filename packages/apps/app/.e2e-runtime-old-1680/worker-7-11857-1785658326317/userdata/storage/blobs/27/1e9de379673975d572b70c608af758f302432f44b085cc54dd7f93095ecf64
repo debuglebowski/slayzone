@@ -1,0 +1,48 @@
+# Alt 4 — Avatar-only, hover to expand
+
+**Strip the footer to a single avatar.** At rest the bottom is just the user avatar — no name, no email, no org row. Hover reveals the full identity inline; click opens the combined menu. The leanest footer; reclaims the most vertical space for nav.
+
+### Resting (one small avatar, left-aligned)
+
+```
+│  …nav…                        │
+│                               │
+├───────────────────────────────┤
+│ (GD)                          │
+└───────────────────────────────┘
+```
+
+### Hover (expands inline)
+
+```
+├───────────────────────────────┤
+│ (GD) Greg Daniels · Acme  ⌄  │
+└───────────────────────────────┘
+```
+
+### Clicked (combined menu)
+
+```
+   ╭─────────────────────────────╮
+   │ ORGANIZATION                │
+   │  ✓ Acme Inc                 │
+   │    Globex Corp              │
+   │  + New organization         │
+   ├─────────────────────────────┤
+   │  ⚙  Settings                │
+   │  ↗  Sign out                │
+   ╰─────────────────────────────╯
+┌───────────────────────────────┐
+│ (GD) Greg Daniels · Acme  ⌃  │
+└───────────────────────────────┘
+```
+
+### Collapsed sidebar
+Already an avatar — collapsed and expanded states are nearly identical, so the footer is visually stable across both.
+
+```
+│(GD)│
+```
+
+**Pros:** minimal chrome, maximum nav room, one resting target, identical in collapsed mode.
+**Cons:** name/email/org hidden at rest (discoverability + multi-account clarity suffer); hover-only reveal is awkward on touch.

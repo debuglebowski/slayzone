@@ -1,0 +1,149 @@
+# Peka — Co-op 2D Platform Puzzler
+
+> Game Design Document (living draft). Filled out as we ideate.
+>
+> **Decided:** symmetric players · local couch · eerie tone · lightless caverns · mirrored-gravity core (flip-at-will, mid-air redirect · shared tunnel · fall = death) · tight movement · lethal surface-bound threats · darkness = atmosphere
+
+---
+
+## 1. Description
+
+A **2D co-op platform game** built around **cooperative puzzles**. Two players
+travel together through **one long level** in a system of **lightless caverns**.
+Each player can **flip their own gravity at will** — even mid-air, redirecting a
+fall — sticking to the floor or ceiling of a **shared tunnel** with a lethal gap
+between. The level is **impossible to complete solo**: clearing it requires two
+bodies oriented and positioned in ways one player can never achieve alone.
+
+**Goal:** *get out of the cave.* Two beings reach the exit together. No deeper
+story yet — escape is the whole objective (the "why" can become mystery later).
+
+Tone is **mysterious and eerie** — sparse, atmospheric, told through the
+environment rather than text (Limbo / Inside lineage). Two small, vulnerable
+figures; a large, unexplained dark.
+
+**Core pillars**
+- **Forced cooperation** — no section clears without two players.
+- **Flip-at-will gravity** — the signature verb; floor/ceiling is fluid.
+- **Puzzle-first platforming** — movement is the verb; the brain-teaser is the challenge.
+- **One handcrafted journey** — a single, long, escalating level.
+- **Wordless atmosphere** — eerie mood, environmental storytelling, minimal UI.
+
+---
+
+## 2. Cooperation Model — ✅ Symmetric + Mirrored Gravity
+
+Identical characters. Either **flips their own gravity anytime, including
+mid-air** (redirecting a fall), landing on floor or ceiling of one continuous
+**shared tunnel**. Falling into the central gap with no surface to catch you, or
+onto a hazard, = **death** (no checkpoints — see §3).
+
+### ⚠️ Central design tension — forcing cooperation
+Free flipping means a careless puzzle is **soloable**. Co-op is enforced by
+designing around what **one body cannot do**:
+- **Simultaneity** — two inputs held *at once* on opposite surfaces; one body, one place.
+- **Bodies as platforms** — be your partner's landing / ledge across the lethal gap.
+- **Asymmetric reach** — your input clears the *other's* hazard or builds their crossing.
+This discipline is the heart of level design — solved for in every puzzle.
+
+### Cooperative verbs — _working set_
+- **Hold-two-at-once** — simultaneous opposite-surface plates/switches.
+- **Be the landing / bridge** — partner is the platform across the gap.
+- **Build the crossing** — one holds a ledge/mechanism out so the other crosses.
+- **Clear the path** — your input removes the other's hazard / opens their gate.
+- **Coordinated flip** — flip together to move a shared counterweight.
+
+---
+
+## 3. Mechanics — ✅ locked
+
+### Movement — tight & minimal
+**Run · single jump · flip gravity.** That's the kit. The flip (incl. mid-air
+redirect) is the depth. No double-jump / wall-cling. Instantly learnable; puzzles
+stay about coordination, not execution.
+
+### Visibility — atmosphere only
+Ambient bioluminescence; you can always see. Dark is **mood**, not a mechanic.
+Keeps gravity the single star system.
+
+### Threat — shadow creatures, lethal on touch
+**Surface-bound**, **instant death on contact** (Limbo dread). Each player avoids
+the creatures on their own surface; they add **timing pressure**, not the core
+co-op (puzzles do that). Often a partner's input controls/lures the other's threat.
+*Lore (see `story.md`): the shadows are **lost halves** — beings split here that
+never reunited; touching one unmakes you. The threat embodies the theme.*
+
+### Failure & respawn — instant death, no checkpoints, ✅ HARDCORE RESTART
+Any death (gap or creature) is instant, **shared** (both die), and sends both
+players back to the **level start**. The whole level is one continuous,
+**deathless mastery run** — tense, high-stakes (Jump King / arcade lineage).
+
+**Constraints this imposes (non-negotiable for fairness):**
+- **Deterministic & telegraphed** — every hazard readable in advance; creature
+  patrols fixed, never random. No cheap deaths — a death must always feel earned.
+- **Recoverable** — no states that become unwinnable short of dying.
+- **Anti-grief** — never let one player *unavoidably* doom the other; mistakes
+  should be jointly readable so the pair learns the run together, not blames.
+- **Length self-limits** — see ⚠️ tension in §4.
+
+### Input
+Local couch → **two gamepads**, each with run / jump / **flip**.
+
+---
+
+## 4. The Level — Lightless Caverns
+
+One long, escalating level winding horizontally + vertically. _(see companion
+level-design artifact for puzzle sketches)_
+- **Act 1 — Teach:** flip → simultaneity → bodies-as-platforms → threat timing → combined capstone.
+- **Act 2 — Test:** separation across the gap; layered hazards; faster flips.
+- **Act 3 — Twist:** dense simultaneity, creature gauntlets, the exit in sight.
+- **Climax / ending:** reach the cave **exit** together — emerge from the dark.
+
+⚠️ **Length tension** — "one long level" + "no target minutes" + **hardcore
+restart** collide: a physically long level with full-restart-on-death becomes
+unbeatable. Resolve by reading "long" as **long-to-master, not long-to-traverse**
+— a physically *compact* level (≈ a handful of dense rooms) with a high skill
+ceiling, beaten over many attempts. (rec) — confirm vs. accepting a brutal long run.
+
+---
+
+## 5. Characters, World & Goal — see `story.md`
+
+Two halves of one being, split at the bottom of the world and bound to opposite
+gravities. **Objective: escape the cave** — climb to the light and become whole
+again. Apart in the dark, a half decays into a shadow (the threat). Told
+**wordlessly**. Full narrative bible in the companion **`story.md`** artifact.
+
+---
+
+## 6. Multiplayer / Technical — ✅ Local couch
+
+- ✅ Local co-op, two players, one machine, two gamepads.
+- **Camera (rec): shared single screen**, framing both surfaces; players can't
+  stray off-screen from each other.
+- **Engine / tech stack / platform:** owned by the user — out of scope for this doc.
+
+---
+
+## 7. Art & Audio Direction
+
+Tone (**eerie**) + setting (**lightless caverns**).
+- **Visual:** silhouette-forward; mirrored tunnel as composition (two figures,
+  opposite walls, lethal void between). Deep blacks, cold palette, bioluminescent
+  accent. Minimal UI. Flip needs a clear, readable tell.
+- **Audio:** sparse cave ambience, drips, distant movement; sound telegraphs
+  threats; satisfying *whump* on each flip.
+- [ ] Lock palette & reference board · animation feel
+
+---
+
+## 8. Gaps / Open Questions
+
+Resolved: ~~co-op model~~ · ~~local/online~~ · ~~tone~~ · ~~setting~~ · ~~core mechanic~~ · ~~gravity control~~ · ~~spatial model~~ · ~~falling~~ · ~~flip timing~~ · ~~darkness~~ · ~~threats~~ · ~~movement~~ · ~~length (none)~~ · ~~goal (escape)~~ · ~~tech (user-owned)~~ · ~~checkpoints (none)~~ · ~~death model (hardcore restart)~~.
+
+Still open:
+1. **Length** — ✅ resolved as "long-to-master, compact level" (§4).
+2. **Story** — ✅ drafted in `story.md` (split-halves / escape to the light).
+3. **Art:** lock palette / reference board / animation feel.
+4. **Level:** sketch Acts 2–3.

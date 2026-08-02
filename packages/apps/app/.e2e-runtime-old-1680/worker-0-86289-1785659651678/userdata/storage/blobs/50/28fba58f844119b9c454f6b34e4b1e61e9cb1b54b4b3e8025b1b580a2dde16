@@ -1,0 +1,25 @@
+# Metric
+
+Purpose: the smallest unit of insight — one number answering one
+question ("how many open deals?", "pipeline value?"). Exists because
+every other widget makes you read; a metric is glanceable from across
+the room. The atom of every overview row.
+
+Size/position: drag + resize on the canvas (dnd), never in the menu.
+Relevancy: 🔥 core · ⭐ valuable · 💤 later
+
+| Option | Category | Relevancy | Values / default | Notes |
+|---|---|---|---|---|
+| title | display | 🔥 | text, default auto from agg+concept | |
+| agg | data | 🔥 | count / sum / avg | |
+| field | data | 🔥 | number field (sum/avg only) | |
+| concept | filter | 🔥 | conceptId / inherit | optional for per-concept context |
+| conditions | filter | 🔥 | SidebarCondition[] | |
+| match | filter | 🔥 | all / any | |
+| variant | layout | ⭐ | auto / tile / bar | auto: w>=6,h=1 renders wide stat bar |
+| number format | display | ⭐ | plain / compact (1.2k) / currency / percent | |
+| delta | display | ⭐ | off / vs prior 7d / 30d | secondary stat |
+| archived | filter | ⭐ | exclude (default) / include | |
+| icon | display | 💤 | icon name / none | |
+| sub-caption | display | 💤 | on / off | renders condition summary |
+| color thresholds | display | 💤 | none / {green<=, red>=} | accent by value |

@@ -1,0 +1,48 @@
+# DR Tabletop — Action tickets (Linear)
+
+How the three action items should look as Linear tickets. Team: **Normain Product & Tech** (NOR). Each links back to the exercise for audit traceability. _Not yet created — reference only._
+
+---
+
+## Ticket 1 — Simplify the BC/DR plan + first-response quick-card
+- **Team / Project:** Normain Product & Tech — Compliance / BC-DR
+- **Assignee:** Kalle Hansson
+- **Priority:** Medium
+- **Labels:** `compliance`, `bc-dr`, `process`
+
+**Description**
+Raised in the DR tabletop exercise (<date>). The team found the BC/DR plan sound but carrying overhead that could slow a live response.
+
+- **Action:** Trim the BC/DR plan and add a lightweight one-page "first-response quick-card" so engineering can begin recovery immediately while formal roles and comms spin up in parallel.
+- **Acceptance criteria:** plan reviewed and trimmed; quick-card created and linked from the plan; change reviewed/approved per the policy process.
+- **Source:** DR Tabletop Exercise report (<link>).
+
+---
+
+## Ticket 2 — Pre-approved customer outage-comms template
+- **Team / Project:** Normain Product & Tech — Compliance / Comms
+- **Assignee:** Sara Landfors
+- **Priority:** Medium
+- **Labels:** `compliance`, `comms`
+
+**Description**
+Raised in the DR tabletop exercise (<date>). No ready-made customer outage message exists; drafting one under pressure costs time.
+
+- **Action:** Create a pre-approved customer outage-comms template — honest status, no PII, ETA placeholder, channels (email + status page).
+- **Acceptance criteria:** template drafted, approved by CEO/Customer Support, and stored where on-call can find it quickly.
+- **Source:** DR Tabletop Exercise report (<link>).
+
+---
+
+## Ticket 3 — Review backup frequency (tighten RPO) as budget allows
+- **Team / Project:** Normain Product & Tech — Compliance / Infrastructure
+- **Assignee:** Kalle Hansson
+- **Priority:** Low (backlog — cost-gated)
+- **Labels:** `compliance`, `infra`, `backlog`
+
+**Description**
+Raised in the DR tabletop exercise (<date>). Current automated backups meet the 24h RPO; more frequent backups would reduce worst-case data loss but are primarily a cost question.
+
+- **Action:** Revisit backup frequency / RPO during the year as revenue grows; decide whether to increase.
+- **Acceptance criteria:** a decision is recorded — increase frequency, or defer with rationale and a review date.
+- **Source:** DR Tabletop Exercise report (<link>).

@@ -35,15 +35,22 @@ const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes
 
 export const runnersRouter = router({
   /**
-   * All non-revoked runners from the store, each annotated with live connection
-   * status merged from the runner gateway (when wired). A runner in the store but
-   * not currently dialed in reports `connected: false`.
+   * All non-revoked runners from the store, each annotated with live status from
+   * the runner gateway (when wired). A runner in the store but not currently dialed
+   * in reports `connected: false`.
+   *
+   * `connected` = socket open. `usable` = socket open AND heard from inside the
+   * heartbeat window — that is the flag to gate work on. They differ while a runner
+   * has gone silent but its watchdog has not reaped it yet, and `connected` alone
+   * previously let a caller conclude a runner was available when it was not.
    */
   list: publicProcedure.query(async ({ ctx }) => {
     const rows = await storeListRunners(ctx.db)
     const deps = getRunnersDepsOrNull()
-    const live = deps?.getGateway()?.listRunners() ?? []
+    const gateway = deps?.getGateway()
+    const live = gateway?.listRunners() ?? []
     const liveById = new Map(live.map((r) => [r.runnerId, r]))
+    const usableIds = new Set((gateway?.listUsableRunners() ?? []).map((r) => r.runnerId))
     return rows.map((row) => {
       const conn = liveById.get(row.id)
       return {
@@ -55,6 +62,7 @@ export const runnersRouter = router({
         lastSeenAt: row.last_seen_at,
         createdAt: row.created_at,
         connected: conn !== undefined,
+        usable: usableIds.has(row.id),
         connectedAt: conn?.connectedAt ?? null
       }
     })

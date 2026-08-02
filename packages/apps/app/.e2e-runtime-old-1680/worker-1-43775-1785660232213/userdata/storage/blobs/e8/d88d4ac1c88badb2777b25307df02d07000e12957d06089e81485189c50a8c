@@ -1,0 +1,13 @@
+flowchart TB
+  subgraph LIN["Logical Item A  (item_id = stable lineage key)"]
+    direction TB
+    V1["v1<br/><i>instance row</i><br/>own state · own events · own relations"]
+    V2["v2  ◀ HEAD/current<br/><i>instance row</i>"]
+    V3["v3 (draft)<br/><i>instance row</i>"]
+  end
+
+  B["Item B"] -->|"ref: toItem=A, toVersion=NULL<br/><b>'the item in general'</b>"| LIN
+  LIN -. resolves at read-time .-> V2
+  C["Item C"] -->|"ref: toItem=A, toVersion=v1<br/><b>pinned to a version</b>"| V1
+
+  note["relations row gains:  toItemId (lineage)  +  nullable toVersionId<br/>non-versioned concept ⇒ toItemId = the single instance id, toVersionId = NULL ⇒ zero behavior change"]

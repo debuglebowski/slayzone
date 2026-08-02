@@ -1,0 +1,55 @@
+# Phase 0 — Failing tests status
+
+Snapshot: 2026-05-06, after Round 4 medium-effort batch.
+
+## Effort key
+- ⚡ <5 min
+- 🟢 5-15 min
+- 🟡 15-30 min
+- 🔴 30+ min
+- 💀 1 h+ (real feature bug or platform-specific)
+
+## Status table
+
+| # | Spec : line | Effort | Status |
+|---|---|---|---|
+| 1 | `01-smoke:8` empty state | 🟢 | ⏳ Cascade — may clear in r4 |
+| 3 | `11-create-task-dialog:49` change status | 🟡 | ✅ Fixed (r4) — kanban click via `getByRole('button')` |
+| 4 | `11-create-task-dialog:78` change priority | 🟢 | ⏳ Cascade from :49 — should clear |
+| 5 | `14-project-settings:454` delete column | 🟡 | ⏭️ Skipped — page-closed cascade |
+| 10 | `67-home-panel-persistence:28/45/60` | 🟡 | ✅ Fixed (r4) — `bg-surface-3` → `bg-surface-2`, `bg-muted` → `bg-surface-3` |
+| 11 | `72-custom-shortcuts:84` rebind search | 🟢 | ⏳ Cascade |
+| 12 | `90-chat-mode-toggle:42/47/64/88` | 🟡 | ✅ Fixed (r4) — full rewrite for context-menu flow |
+| 13 | `93-artifacts-panel` ×11 | 🔴 | ⏭️ Deep cascade |
+| 14 | `94-artifact-html-preview:36` script runs | 🟡 | ⏭️ Skipped — iframe sandbox click bug |
+| 18 | `93-resume-command:300` provider flags | 🟡 | ⏳ Was `chat:list`, fixed via main; pending verification |
+| 19 | `94-session-invalidation:252` | 🟡 | ⏳ Same `chat:list` fix |
+| 20 | `22-terminal-mode-switching:140` temp tasks | 🟡 | ⏭️ Skipped — mode switch UI bug |
+| 22 | `30-terminal-core-behavior:276` Cmd+Alt+R | 🟢 | ⏭️ Real shortcut investigation |
+| 23 | `33-pty-respawn-forced` ×4 | 🔴 | ⏭️ Cascade |
+| 26 | `42-terminal-tab-isolation:26` Cmd+K | 🔴 | ⏭️ Possible real bug |
+| 27 | `90-terminal-fd-limit:34` RLIMIT | 💀 | ⏭️ Platform-specific |
+| 28 | `24-browser-panel:145` Alt+Shift+Click | 🔴 | ⏭️ Real feature flow |
+| 29 | `61-web-panel-handoff-routing:182` | 🔴 | ⏭️ Cmd+J panel header |
+| 30 | `71-webview-popup-handling:540/696` | 🔴 | ⏭️ Same as #29 |
+| 31 | `72-browser-view-lifecycle:184` Bug 1 | 💀 | ⏭️ Open feature bug |
+| 32 | `77-browser-view-focus:89` glow | 🟡 | ✅ Fixed (r4) — multi-panel state |
+| 34 | `32-git-diff-panel:219` polling | 🔴 | ⏳ Increased timeout; flake risk |
+| — | `35-terminal-panel-toggle-continuity:35` | — | ✅ Fixed (r4) — bg-surface fix + Terminal→Agent |
+| — | `25-panel-resize:76` | — | ✅ Fixed (r4) — `_v` 4→5 |
+| — | `18-kanban-interactions:95` | — | ✅ Fixed (r4) — "Blocked" pill |
+
+## Tally
+
+- ✅ Fixed in r4 batch: **8 distinct rows / ~13 individual tests** — pending r4 verification
+- ⏳ Cascade-dependent / handler-fix dependent: **5** — should clear post-rebuild
+- ⏭️ Deferred: **13 rows / ~22 individual tests** — mostly 🔴 / 💀 long tail (real feature bugs, platform-specific, deep cascades)
+
+## E2e progress (this session)
+
+| Round | Failures | Δ |
+|---|---|---|
+| Baseline (after Phase 0 fs/env hardening landed) | ~80 | — |
+| Round 2 (handler/listener/CSS fixes) | 59 | -21 |
+| Round 3 (small + trivial sweep) | ~57 | -2 (rebuild was partial) |
+| Round 4 (medium) — projected | ~30 | -27 (pending verification) |

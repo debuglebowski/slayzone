@@ -1,0 +1,327 @@
+# SlayZone Chromium migration — session bootstrap
+
+A complete handoff document for any Claude Code session picking up this work. Read this first. Execute from here.
+
+---
+
+## What this project is
+
+**SlayZone** = desktop task-management app with integrated AI coding assistants (Claude Code, Codex, Gemini, etc.). Currently ships on **Electron 41** with React 19 / Tailwind 4 / Radix / SQLite / Convex / Bun+Node / node-pty / xterm.js. Codebase at `/Users/Kalle/dev/projects/slayzone-chromium` (monorepo; the `-chromium` suffix is aspirational — the directory hosts both the old Electron tree at `packages/apps/app/` and the new Chromium fork).
+
+**SlayZone Chromium** = ground-up migration of every SlayZone surface onto a **Chromium fork + Bun sidecar** architecture. The goal is to eliminate Electron's overhead, get a real browser engine per region, and gain native-level polish (real extensions, real tab lifecycle, inline browser panes, proper OS-level shortcuts).
+
+**Architecture target**:
+- Fork of Chromium 148.0.7778.40 with patches: ~15 foundation patches + ~25 region WebUI patches
+- All current app surfaces reborn as `chrome://slayzone-<name>/` WebUIs
+- Bun sidecar process (optional Node fallback) owns: SQLite, node-pty terminals, Convex browser, file watchers, OS proxies — everything Electron's main process used to do
+- Unix-socket JSON-RPC between fork's C++ `SlayzoneSidecarClient` and the sidecar daemon
+- Mojo interfaces between region JS and C++ host → typed TS bindings via `@slayzone/mojo-bindings`
+- Shared JS: design tokens, UI kit, RPC client, state transport — all in `packages/shared/*`
+- Existing Electron build runs unchanged during the whole migration via a parity shim
+
+**Runbook**: asset `49d1b20e` (orchestrator brief) · **Execution plan**: asset `1dce3dab` (phase-by-phase scope) · both on parent task `6a07e0b7`. Read both before Phase 7+ work.
+
+**Holy-shit path (Phase 7.1 spike)**: asset `488d7ef5`.
+
+---
+
+## Current state (end of Part I, Phases 1–6)
+
+**All 6 foundation phases are complete and on disk.** The fork builds, launches, and renders the layout shell with 10 placeholder regions. Scripted CDP verification: 22/22 pass.
+
+### Patch series (in `patches/chromium/`)
+
+```
+0001  branding (SlayZone identifiers, placeholder icons, zone.slay.SlayZone bundle id)
+0002  chrome:// scheme handler factory + empty slayzone-shell
+0003  SlayzoneSidecarClient C++ shim (Unix-socket JSON-RPC, keepalive, reconnect, id-correlated RPC map)
+0004  telemetry strip (UMA / Crashpad upload / Safe Browsing / field trials compiled out)
+0005  NTP override (chrome://newtab/ → chrome://slayzone-shell/)
+0006  kCGImageByteOrder32Little shim (Xcode 16→26 SDK bridge; can remove now that we're on 26)
+0007  NSScreen.CGDirectDisplayID shim (macOS 26 API bridge)
+0008  Phase 5.1 SlayzoneBrowserView scaffold + layout-shell feature flag (kSlayzoneLayoutShell, default on)
+0009  Phase 5.2 10-slot placeholder grid + PlaceholderUI + ChromeURLHosts allowlist for chrome://slayzone-placeholder
+0010  Phase 5.3 feasibility spike (inject WebContents into terminal slot via WebView::SetWebContents)
+0011  Phase 5.4 SlayzoneSplitView (draggable divider + snap + keyboard resize)
+0012  Phase 5.5 focus chain (Cmd+1..9 region focus accelerators)
+0013  Phase 5.6 layout intent API (layout.mojom + SlayzoneLayoutHost)
+0014  Phase 6.1 tabs.mojom + SlayzoneTabsHost
+0015  Phase 6.2 inline_tab_webview_ slot + TabStripModel wiring
+0016  Phase 6.3 C++ binder scaffold + dedicated SlayzoneTabbarUI/SlayzoneBrowserchromeUI WebUIs (Option C — JS deferred to Phase 7.8)
+```
+
+### Outer-repo packages
+
+```
+packages/sidecar/                      — Bun daemon, JSON-RPC 2.0 server, 468 handlers host-routed
+packages/shared/rpc-types/             — auto-generated JSON-RPC method registry + TS types
+packages/shared/rpc-client/            — typed client (Phase 4.5)
+packages/shared/design-tokens/         — CSS vars + Tailwind config (Phase 4.1)
+packages/shared/ui-kit/                — Radix wrappers facade over @slayzone/ui (Phase 4.2)
+packages/shared/mojo-bindings/         — .mojom → TS binding pipeline (Phase 4.3)
+packages/shared/state/                 — Zustand store + swappable transport (BroadcastChannel/ws/Mojo) (Phase 4.4)
+packages/shared/dev-harness/           — Vite serving chrome://slayzone-<name>/ in dev + ws fan-out hub (Phase 4.6)
+packages/shared/test-harness/          — jsdom + optional real-Chromium Vitest mode + CI wiring (Phase 4.7)
+packages/webui/demo-{a,b}/             — Phase 4 demo regions proving cross-origin state fan-out
+```
+
+### Scripts & docs
+
+```
+scripts/chromium/env.sh                — paths + depot_tools bootstrap (source me first)
+scripts/chromium/fetch.sh              — resumable Chromium source fetch (only run if you blow away chromium/src)
+scripts/chromium/apply-patches.sh      — apply patches/chromium/*.patch to chromium/src
+scripts/chromium/build.sh              — siso-based incremental build (~20min incremental, ~3-4h full)
+scripts/chromium/run.sh                — launch the built binary (accepts flags after `--`)
+scripts/chromium/smoke-shell.sh        — headless chrome://slayzone-shell/ render probe
+scripts/chromium/phase-6-verify.sh     — Phase 6 scripted verification harness
+scripts/chromium/daemonize.sh          — detach a shell process (used for nohup builds)
+scripts/chromium/args/release.gn       — GN build args (safe_browsing_mode=1, telemetry gn flags)
+scripts/chromium/args/release-mac-arm64.gn — arch-specific args
+tools/release/signing/{mac,win,linux}.sh — env-driven signing scripts (dry-run verified)
+tools/verify/part-i-final.js          — 22-test CDP final verification (Node, runs against headless fork)
+docs/chromium/phase-6-verification.md  — Phase 6 scripted + hands-on verification record
+```
+
+### Chromium fork state
+
+- **Pin**: `chromium/CHROMIUM_VERSION` = `148.0.7778.40`
+- **Source tree**: `chromium/src/` (~25GB). Git cache at `chromium/.git_cache/` (~29GB). **Never delete git_cache.**
+- **Build output**: `chromium/src/out/Default/` (~12GB). Binary at `chromium/src/out/Default/SlayZone.app/Contents/MacOS/SlayZone`.
+- **Toolchain**: Xcode 26.0 (SDK 26.0) at `/Applications/Xcode-26.0.0.app`, selected via `sudo xcode-select -s`.
+- **Target**: arm64 Mac only. No Intel, no Windows, no Linux (per user decision — Mac-only shipping).
+
+### Framework feature flags
+
+- `--slayzone-layout-shell` — activates `SlayzoneBrowserView` + 10-region grid (default on via `kSlayzoneLayoutShell` base::Feature)
+- `--slayzone-spike-url=<URL>` — used by Phase 5.3 feasibility spike; rarely needed post-Phase 5
+- `--allow-chrome-scheme-url` — needed for headless to reach `chrome://slayzone-*`
+
+---
+
+## Key architectural decisions already made
+
+1. **Chromium pin stays at 148.0.7778.40** unless a specific CVE forces a bump. Pin bumps require patch rebases + Xcode SDK sync.
+
+2. **Xcode 26 (SDK 26.0)** is the required toolchain. Xcode 16.2 (SDK 15.2) cannot build this — we learned this the hard way (fileport.h + DarwinFoundation1.modulemap + kIOMainPortDefault + kCGImageByteOrder32Host + NSScreen.CGDirectDisplayID drift). Patches 0006/0007 used to bridge Xcode 16 → SDK 26; they can be removed now that Xcode 26 is standard.
+
+3. **arm64 Mac only** for Part II. No Windows, no Linux, no Intel. If Intel users complain, revisit as universal binary (doubles build time).
+
+4. **Local-only builds + local releases**. No CI build infra. Developer runs `./scripts/release.sh` on their Mac to build → sign → notarize → staple → DMG → upload to GH release. Phase 1 Stage C is scoped down to Apple notarization API key + local release script + Sparkle updater (optional).
+
+5. **Bun with Node fallback** via `SLAYZONE_RUNTIME=node` env var. `better-sqlite3` blocks on [oven-sh/bun#4290](https://github.com/oven-sh/bun/issues/4290) — until upstream fix, tests + production run on Node via `@slayzone/sidecar`'s runtime selector.
+
+6. **Mojo is the transport** between region JS and C++ host. Not raw IPC, not postMessage, not chrome.send — Mojo. TS bindings auto-generated from `.mojom` files via Phase 4.3 pipeline.
+
+7. **Layout mojom lives in shared/** (`packages/shared/mojo-bindings/mojom/layout.mojom`) as a coordinated scope exception: Phase 4.3 owns TS binding generation, Phase 5.6 owns the C++ `SlayzoneLayoutHost` implementation.
+
+8. **State transport is Zustand + swappable adapter**. Current adapters: BroadcastChannel (same-origin), WebSocket (cross-origin dev), Mojo (production). Hook API is identical; transport is hot-swappable.
+
+9. **Feature flag**: `base::Feature kSlayzoneLayoutShell`, default on. Runtime togglable for A/B + bisect. Not compile-time.
+
+10. **`chrome://slayzone-*` WebUIs** must be added to `ChromeURLHosts()` in `chrome/common/webui_url_constants.cc` AND registered in `RegisterSlayzoneWebUIConfigs`. Missing from `ChromeURLHosts()` = silent ERR_FAILED with the placeholder URL pattern working but dedicated hosts failing.
+
+11. **Option C for Phase 6.3 JS deferred to Phase 7.8**. The SlayzoneBrowserchromeUI + SlayzoneTabbarUI WebUI controllers exist as C++ scaffolding; their JS consumers land in the Phase 7 surface port for browserchrome + tabbar regions. Do not ship ad-hoc JS for these in earlier phases.
+
+12. **Tab-switch <50ms benchmark deferred to Phase 7.2**. The JS TabsHost consumer needs to ship there; only then is the benchmark meaningful. CDP `Target.activateTarget` (~500ms) is a headless-mode artifact, not the product code path.
+
+13. **Extensions + SSO are user-hands-on** verifications. Scripted parts (pre-credential page loads, service-worker extension pipeline) are automated in `scripts/chromium/phase-6-verify.sh`. Full flows (1Password fill, Google OAuth credential entry, etc.) are documented as a 7-item user checklist in `docs/chromium/phase-6-verification.md`.
+
+14. **Commit convention**: Conventional Commits with scope. `feat(chromium):` for fork changes, `feat(shared):` for shared packages, `feat(sidecar):` for sidecar, `fix(<scope>):` for fixes, `chore(<scope>):` for non-functional. Subject prefix on patches: `slayzone:`.
+
+15. **Don't touch `chromium/.git_cache/`** — 29GB git mirror that reconstructs `chromium/src/` on fetch. Deleting means hours of re-download.
+
+16. **Don't bump the Chromium pin** — stay on 148.0.7778.40 until a specific reason forces it. Each bump = days of patch rebase + SDK drift chases.
+
+17. **No sccache / no RBE** for Part II. Sccache is a 1-2h agent task worth it if dev velocity hurts. RBE is risky and overkill. Current incremental ~20 min / full ~3-4h is acceptable for solo-dev tempo.
+
+18. **Electron path stays running** until Phase 18 parity exit. Phase 3.8 compat shim ensures the old Electron build talks to the new Bun sidecar; the existing Playwright suite still passes. Don't delete `packages/apps/app/` until then.
+
+19. **468 handlers, not 119**. Phase 3.1's parity ledger audit found 3.9× more `ipcMain.handle` calls than the plan estimated. All 468 are host-routed in `@slayzone/sidecar`. Consequences: every surface .T step (test port) is larger than the plan suggested.
+
+20. **GCM `DEPRECATED_ENDPOINT` leak** is a known harmless regression on every launch. Chromium still phones `android.clients.google.com/c2dm/register3` at startup even with Safe Browsing + UMA + Crashpad stripped. Server returns dead response; no data leaves, but the error lines are noise. Small Phase 2 follow-up or move to Phase 16 auth work.
+
+---
+
+## How to build, run, test
+
+### Build (incremental, ~20 min on warm caches)
+
+```bash
+./scripts/chromium/build.sh
+```
+
+Full rebuilds only when you `rm -rf chromium/src/out/Default` or bump Chromium pin. Expect ~3-4h.
+
+### Run (GUI window)
+
+```bash
+./scripts/chromium/run.sh -- --slayzone-layout-shell --user-data-dir=$(mktemp -d -t slayzone)
+```
+
+Add `--enable-logging=stderr --v=0` to see `[sidecar]`, `[layout]`, and C++ INFO lines in your terminal.
+
+### Run (headless + CDP for scripted tests)
+
+```bash
+APP=chromium/src/out/Default/SlayZone.app/Contents/MacOS/SlayZone
+"$APP" --headless=new --disable-gpu --no-first-run --no-default-browser-check \
+  --allow-chrome-scheme-url --slayzone-layout-shell \
+  --user-data-dir=$(mktemp -d) --remote-debugging-port=9666 \
+  --enable-logging=stderr --v=0 "chrome://slayzone-shell/" \
+  > /tmp/slayzone.log 2>&1 &
+```
+
+Drive via CDP at `http://localhost:9666/json` or `ws://localhost:9666/devtools/page/<id>`.
+
+### Verify
+
+```bash
+node tools/verify/part-i-final.js           # 22 Part I tests (expect 22/22)
+bash scripts/chromium/phase-6-verify.sh      # Phase 6 scripted sweep
+```
+
+### Patch workflow (when editing chromium/src)
+
+```bash
+# edit chromium/src/... directly
+./scripts/chromium/build.sh                  # verify builds
+# if the change should stick:
+cd chromium/src && git add -A && git commit -m "slayzone: <description>"
+cd ../..
+git -C chromium/src format-patch -1 HEAD \
+  --output-directory patches/chromium/ \
+  --start-number <NEXT> \
+  --subject-prefix="slayzone"
+git add patches/chromium/<NNNN>-*.patch
+git commit -m "feat(chromium): <description>"
+```
+
+### Outer-repo commits
+
+```bash
+git add <paths>
+git commit -m "feat(chromium): <description>"   # or feat(shared), feat(sidecar), fix(<scope>), chore(<scope>)
+```
+
+Never skip signing (`--no-gpg-sign`) unless 1Password SSH agent has genuinely lapsed — ask the user to unlock first.
+
+---
+
+## slay CLI conventions
+
+All orchestration happens via the `slay` CLI (SlayZone's own tooling for managing tasks, PTYs, projects). **You must invoke the `slay` skill before running any `slay` command** — the skill has the full reference.
+
+Key commands you'll need:
+
+```bash
+slay tasks view [id]                          # read full task details
+slay tasks assets read <asset-id>             # read an attached asset (e.g. the runbook)
+slay tasks open <id>                          # open a subtask, spawns a PTY with an agent
+slay pty list                                 # list active PTYs
+slay pty submit <id> "<prompt>"               # send a prompt to a PTY (AI or terminal)
+slay pty write <id> $'\r'                     # send raw carriage return (force submit)
+slay pty buffer <id>                          # dump the PTY terminal buffer
+slay tasks done <id>                          # mark task complete
+slay tasks subtask-add <parent-id> <title> --description <text>
+```
+
+Parent task for all migration subtasks: `6a07e0b7-a1eb-46e8-b1d9-f908ef29d292`.
+
+---
+
+## Memory system
+
+Long-lived notes at `~/.claude/projects/-Users-Kalle-dev-projects-slayzone-chromium/memory/`. Index at `MEMORY.md`. Persistent memories include:
+
+- `feedback_orchestrator_autonomy.md` — keep supervised agents moving; escalate only real blockers
+- `feedback_poll_cadence.md` — tight 1-min polls after answering an idle agent; lengthen to 10-min when agents are stably running
+- `project_phase_autocontinue.md` — phases 4→5→6 auto-continue chain (you're past this; it's here for reference)
+
+Write new memories as you learn new user preferences or project-specific patterns.
+
+---
+
+## Escalation rules
+
+Only bother the user for **real blockers**:
+- Exit criterion unachievable as written
+- Architectural decision contradicts the plan
+- Cross-phase conflict (two phases editing the same artifact)
+- Credentials / infra / purchase needed
+- Commit/push authorization
+- Plan change proposal
+
+**Do not escalate for**:
+- Default-option decisions (pick the momentum-preserving choice, document why)
+- Compile errors (fix them)
+- Patch rebase conflicts (resolve them)
+- Missing features in deferred scope (defer them further, note it)
+
+When in doubt, prefer momentum. The user explicitly said: "your job is to keep this process going."
+
+---
+
+## Pre-existing subtasks (parent 6a07e0b7)
+
+- `d77957d6` Phase 1 — Build infrastructure (in_progress; Stage A/B done, Stage C = local Mac release flow, user-decision-gated)
+- `30d7fa03` Phase 2 — Foundation patches (completed)
+- `9503e604` Phase 3 — Bun sidecar extraction (completed)
+- `e7c72d89` Phase 4 — Shared foundations (completed)
+- `f3e4499d` Phase 5 — Native layout shell (completed)
+- `dec3e866` Phase 6 — Inline tab widget (completed)
+- `44d42722` Scratch sandbox — temporary tweaks (user's playground, no migration scope)
+
+Phases 7–19 subtasks are created by THIS document's companion task creation. Each has full standalone context and can be executed in isolation.
+
+---
+
+## Part II order of operations
+
+**Strict dependencies**:
+- Phase 7.1 spike is the architectural proof — all of Phase 7 and beyond assumes the recipe from 7.1 works.
+- Phase 7.2 onwards can parallelize across regions once 7.1 is validated.
+- Phases 8–15 can largely parallelize across each other (each phase migrates distinct surfaces).
+- Phase 16 (auth/updates) can parallelize with any surface phase — it touches orthogonal concerns.
+- Phase 17 (keyboard/focus/zen) is a polish pass that needs the surface phases substantially done.
+- Phase 18 (test retarget) gates on all surfaces being migrated.
+- Phase 19 (distribution) gates on Phase 18 passing.
+
+**Recommended first move after Phase 6**: `Phase 7.1 — StatusBar spike` (standalone subtask in this batch). Read `holy-shit-path.md` (asset `488d7ef5`). ~1-3 days. Proves the architecture before committing to Phases 7.2-7.10.
+
+**Recommended parallel activity**: `C6 parity harness` — a screenshot+DOM+RPC side-by-side differ for Electron vs Fork. One-time build during Phase 7.1, pays back on every subsequent region port.
+
+---
+
+## When you start a session
+
+1. Invoke the `slay` skill (`Skill slay`) — load the CLI reference.
+2. Read `$SLAYZONE_TASK_ID` (env var auto-set in task terminals) to know which subtask you're in.
+3. Read **this asset** (you're reading it).
+4. Read your subtask description: `slay tasks view`.
+5. Read the execution plan asset `1dce3dab` for phase-by-phase scope.
+6. Read your subtask's listed prior-phase assets if cross-phase context is needed.
+7. Default mode: **bypass permissions on** (shift+tab 3x from default in Claude Code CLI). User has authorized autonomous execution.
+8. Start writing code. Report only at meaningful checkpoints (patches committed, tests passing, blockers surfaced).
+
+---
+
+## When you finish a phase
+
+1. Run its scripted verification (each phase has an exit criterion — usually includes a parity gate).
+2. Update the .T test-port status in the C5 test-coverage ledger (if touched).
+3. Commit all changes with the right Conventional Commit prefix.
+4. `slay tasks done <id>` to mark the subtask complete.
+5. Post a brief summary of what landed to the subtask as a task note or final PTY message.
+6. Stand down (attention state) — orchestrator will pick the next phase.
+
+---
+
+## Emergency contacts (debug recipes)
+
+- **Build wedged in spinner**: `pgrep -f siso | xargs kill -CONT 2>/dev/null` (resume SIGSTOPed workers), or `pkill -f siso && ./scripts/chromium/build.sh` (clean restart).
+- **Patch rebase conflict after pin bump**: apply patch → `git am --3way`, resolve hunks, `git add -u && git am --continue`, re-export patch via `format-patch`.
+- **Missing `chromium/src/out/Default/SlayZone.app`**: run `./scripts/chromium/build.sh`. First build from scratch is ~3-4h.
+- **Sidecar client retries forever**: normal in current state — sidecar daemon isn't auto-launched. Will be fixed when Phase 7.1 lands the dev-bootstrap helper.
+- **GCM DEPRECATED_ENDPOINT errors on launch**: ignore — server is dead, nothing leaks. Small Phase 2 follow-up.
+- **CDP /json/new returns "PUT only"**: use `httpRequest(path, "PUT")` not GET. Chromium 148 tightened this.

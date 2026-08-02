@@ -1,0 +1,55 @@
+# Email draft — to Digvijay (Normain roles & SharePoint access)
+
+**To:** <digvijay.singh.rajawat@kpmg.se>
+**Subject:** Normain — roles & SharePoint access overview
+
+***
+
+Hi Digvijay,
+
+As promised after our meeting, here's an overview of Normain's role/permission model and how SharePoint access works — so you can plan your access provisioning.
+
+**How the roles work:**
+
+* **Org owner** and **Org manager** are organization-level administrative roles. They are optional and held only by selected users — most users have neither, and a user can hold at most one.
+
+* For every team they belong to, a user has one **team-level** role — either **Team owner** or **Team member**.
+
+* So a typical user has no org-level role and is simply a Team owner or Team member in their teams; administrators additionally hold Org owner or Org manager.
+
+**Full permissions table:** attached *(Kalle to attach the catalog file)*.
+
+The permissions most relevant to your question — SharePoint access and member management (the second lever for SharePoint access, since a user reaches a connected site's files by being a member of a team linked to it):
+
+| Permission                                             | Org owner | Org manager | Team owner | Team member |
+| ------------------------------------------------------ | --------- | ----------- | ---------- | ----------- |
+| Setup SharePoint integration                           | ✓         | <br />      | <br />     | <br />      |
+| Assign SharePoint site to team                         | ✓         | <br />      | <br />     | <br />      |
+| Remove SharePoint site from team                       | ✓         | <br />      | <br />     | <br />      |
+| View any connected SharePoint site                     | ✓         | <br />      | <br />     | <br />      |
+| View connected SharePoint sites for team I'm a part of | ✓         | ✓           | ✓          | ✓           |
+| Disconnect SharePoint integration                      | ✓         | <br />      | <br />     | <br />      |
+| Add member to org                                      | ✓         | ✓           | <br />     | <br />      |
+| Remove member from org                                 | ✓         | ✓           | <br />     | <br />      |
+| Add member to any team                                 | ✓         | ✓           | <br />     | <br />      |
+| Add member to team I'm a part of                       | ✓         | ✓           | ✓          | <br />      |
+| Remove member from any team                            | ✓         | ✓           | <br />     | <br />      |
+| Remove member from team I'm a part of                  | ✓         | ✓           | ✓          | <br />      |
+| Resend / revoke invitation                             | ✓         | ✓           | ✓          | <br />      |
+
+**Recommended role setup for safe SharePoint access**
+
+The two organization-level roles serve distinct purposes — and both shape SharePoint exposure:
+
+* **Org owner — complete control.** The only role that governs the SharePoint integration: which sites Normain can access at all, and which sites are connected to which teams. Whoever holds Org owner defines Normain's entire SharePoint data surface.
+
+* **Org manager — user and team administration.** Manages who belongs to which team, team billing/usage statistics, and general org administration. Using this role is **optional** — Org owners can do everything an Org manager can, so KPMG may run with Org owners alone. An Org manager cannot touch the SharePoint integration — but since team membership grants access to a connected site, the Org manager indirectly controls who sees which SharePoint files.
+
+1. **Keep Org owner tightly held** — a small number of trusted KPMG administrators. This role alone wires SharePoint sites to teams, so it defines the whole exposure.
+2. **If you use Org manager, assign it to authorized access approvers** — they cannot change SharePoint connections, but they control team membership, the second access lever. Limit it to people entitled to make team-access decisions.
+3. **Team owner and Team member carry no SharePoint management permissions** — granting these roles does not widen exposure.
+
+Net: SharePoint exposure is set by two levers — site-to-team connections (**Org owner**) and team membership (**Org owner** or **Org manager**). Keep both org roles with trusted KPMG administrators; Team owner and Team member can be distributed freely. This fits the one-site-per-engagement model we discussed.
+
+Happy to walk through any of this or adjust the model to your governance requirements.
+

@@ -1,0 +1,61 @@
+# How to create the "Marketplace Customer Decommission" Linear issue template
+
+A standard issue template on the **Internal Workflows** team. Once created, operators pick it from the issue-create dialog and the structure below is pre-filled.
+
+Scoped to Marketplace customers only — Stripe self-serve customers should have a separate template if/when that flow needs one.
+
+## Steps in the Linear UI
+
+1. Open Linear → click the workspace name top-left → **Settings**.
+2. In the left nav, scroll to **Your teams** → click **Internal Workflows** → **Templates**.
+3. Click **New template** (top right). Choose **Standard template** (not Form template).
+4. Fill in:
+   - **Name**: `Marketplace Customer Decommission`
+   - **Description (internal)**: `Created when a Microsoft Marketplace customer winds down. Tracks the full decommission per the InfoSec runbook.`
+5. **Title** field (this becomes the issue title on creation):
+   `Marketplace Decommission: {customer} ({slug})`
+   Select the `{customer}` and `{slug}` text and click the `Aa` icon in the formatting toolbar → **Placeholder**. (Placeholder text shows greyed-out and prompts the creator to replace it.)
+6. **Description** field — paste the body from the next section. After pasting, mark the same `{slug}`, `{subscription-id}`, `{date}`, `{purge-date}` tokens as **Placeholder** the same way.
+7. Set default properties on the right-hand panel:
+   - **Priority**: `Medium`
+   - **Assignee**: leave empty (operator assigns themselves on creation)
+   - No project, no label.
+8. Click **Save template** (top right).
+
+## Verify
+
+- Press `Alt+C` (or `Option+C` on macOS) anywhere in Linear → the **Marketplace Customer Decommission** template appears in the list under Internal Workflows.
+- Selecting it pre-fills the title and description with the placeholder tokens.
+
+## Template description body (paste into step 6)
+
+```markdown
+**Customer:** {customer}
+**Tenant slug:** {slug}
+**Marketplace subscription ID:** {subscription-id}
+**Cancellation date:** {date}
+**Default retention end (T+90):** {purge-date}
+
+Reference: [Runbook - Microsoft Marketplace Customer Offboarding](https://docs.google.com/document/d/1xXZSmiKPX_3cCIiSkK2KYuCy6gisyr2iVNE4MvIrRek/edit)
+
+## Pre-flight
+- [ ] Proof of wind-down attached.
+- [ ] Security Delegate confirms no legal hold (link or comment).
+
+## Steps
+- [ ] **1. Cancellation recorded.** Customer wind-down reflected in Normain's records. Link or screenshot in comment.
+- [ ] **2. Access blocked (T+0).** Service access removed. Timestamp in comment.
+- [ ] **3. Retention hold (T+0 → T+90).** Hold start date in comment. Set ticket reminder for {purge-date}.
+- [ ] **4. Customer data destroyed (T+90).** Application data, supporting infrastructure, and tenant registry deletions confirmed in comment. Final encrypted snapshot location and planned snapshot purge date recorded.
+- [ ] **5. Closed out.** Vanta updated. Ticket marked Done.
+
+## Roles
+- Engineering Lead — owner; executes 2 and 4.
+- Security Delegate — legal-hold check, sign-off comment.
+- DPO — GDPR confirmation comment.
+```
+
+## Notes
+
+- Linear's MCP/API does not expose template creation, so this has to be done manually in the UI. After it exists, ticket creation from the template can be scripted via the API if useful.
+- If the runbook structure changes, edit this template under the same path: Settings → Teams → Internal Workflows → Templates → Marketplace Customer Decommission.

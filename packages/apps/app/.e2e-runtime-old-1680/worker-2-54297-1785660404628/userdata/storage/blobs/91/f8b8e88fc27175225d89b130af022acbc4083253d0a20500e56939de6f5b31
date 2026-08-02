@@ -1,0 +1,47 @@
+# System Description Rewrite — Plan
+
+## Context
+- Current: Normain System Description (Google Doc, shared drive `Normain`, ID `1-aa9Pa9vNNsf3ZE8pyGoA6oBAcOOOv-rCi1e03lJOZ0`, modified 2025-08-11)
+- Previously scoped SOC2 Type 2 Q2–Q3 2025; AICPA DC 1–9 structure
+- Built from Prescient V2 template (same folder)
+- Target: slim, concise replacement
+
+## Operating principle for the executor
+Exhaust available tools before asking the user. Only escalate when a real decision is needed (scope, sign-off, intent) or when authoritative info is genuinely missing. Tools available:
+- local git repo (history, IaC, CI workflows, code)
+- `gws` CLI (Drive: policies, contracts, prior reports; Docs/Sheets; Gmail)
+- Linear MCP (incidents, change tickets, access reviews, post-mortems)
+- Circleback CLI (meeting notes — ISMS Council, Board, retros)
+- Vanta (via EU portal; control register, vendor list, evidence)
+- Repo: `projects/normbrain/`, UCF artifacts, policy inventory
+Request additional tools if needed.
+
+## Sources of truth per section
+- DC 1, 2, 6, 7, 8: Drive (contracts, policies, scope decisions), Vanta vendor list
+- DC 3: repo + IaC (architecture, datastore, OS, tools, encryption, CI/CD)
+- DC 4: Linear incident log + post-mortems
+- DC 5: Vanta control register + policies; pipeline claims verified in repo
+- DC 9: git history + release notes + Linear change tickets
+
+## Open items the executor must resolve before drafting
+For each: attempt resolution via tools first; escalate to user only if unresolved.
+1. Audit period of new description (current was Q2–Q3 2025; today 2026-05-17)
+2. Trust Services Categories in scope (Security only? + Availability given uptime SLA? + Confidentiality?)
+3. Architecture + data-flow diagrams (reuse / regenerate from IaC / new from code)
+4. Control ID alignment vs current Vanta register (GOV-, HRS-, IAC-, CFG-, MON-, …)
+5. Approver / sign-off path before replacing current doc
+
+## Steps
+1. Resolve open items above using available tools; surface only unresolved ones to user
+2. Verify content against authoritative sources:
+   - Drive for policy/commitment/scope content
+   - Repo + IaC for DC 3 (architecture, datastore, tooling, encryption, scanners, CI/CD)
+   - Repo + Linear for DC 5 pipeline-touching claims (CodeQL, Dependabot, Grype, OWASP ZAP, Terraform)
+   - Linear for DC 4 incidents in the audit period
+   - Git history + Linear for DC 9 significant changes
+   - Circleback for governance-cadence claims (council/board meeting frequency, content)
+3. Keep DC 1–9 skeleton; drop template scaffolding not load-bearing
+4. CC1–CC9: state shared governance/review/tracking cycle once, reference thereafter — no repetition
+5. Prefer tight tables over bullet trees for: commitments, third-party access, system boundaries, CUECs, CSOCs
+6. Draft as new Google Doc alongside current; do not edit current in place
+7. Surface diff summary + unresolved items for user review and sign-off before any replacement

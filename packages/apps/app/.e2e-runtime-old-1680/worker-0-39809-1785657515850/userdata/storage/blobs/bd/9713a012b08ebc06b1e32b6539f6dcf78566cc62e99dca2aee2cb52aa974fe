@@ -1,0 +1,42 @@
+# UC08 — Batch 1 / 5 — Governance + Access Control (20 questions)
+
+**Format key.** Y/N = yes/no/N-A + justification with citation. FF = short free-form. CL = classification (in-scope / out-of-scope / partial). 🪤 = hallucination trap.
+
+**Depth key.**
+- **L1** — pure extraction (single literal fact from one doc)
+- **L2** — light synthesis (multi-part answer, qualifiers/caveats, restating)
+- **L3** — interpretation / scope judgment / cross-doc reasoning
+- **L4** — gap reasoning (trap: correct answer = "not addressed in our documentation")
+
+**Batch-1 mix.** Type: 9 Y/N, 8 FF, 3 CL, 1 🪤 (Y/N 45% · qual 55%). Depth: 6 L1, 7 L2, 6 L3, 1 L4.
+**Full-100 budget.** Type: 45 Y/N, 40 FF, 10 CL, 5 🪤 (≈ 50/50 Y/N vs qual). Depth: ~25 L1, ~35 L2, ~35 L3, ~5 L4. (L4 is structurally trap-only; capped at 5 per spec.) 5 consistency pairs marked once all 100 drafted.
+
+## Governance / ISMS
+
+| # | Type | Depth | Question |
+|---|---|---|---|
+| Q001 | Y/N | L1 | Is Normain's information security management system (ISMS) certified to ISO/IEC 27001:2022? If yes, name the certification body and the certificate issue date. |
+| Q002 | Y/N | L1 | Does Normain hold a current SOC 2 Type II report covering an audit period within the last 12 months? If yes, name the auditor and the period covered. |
+| Q003 | FF | L2 | What is the documented scope of Normain's ISMS — which business functions, locations, and departments are included? |
+| Q004 | FF | L3 | Describe Normain's risk assessment methodology — risk identification approach, scoring/criteria, treatment, and how residual risk is accepted by leadership. |
+| Q005 | CL | L3 | Is the physical security of the underlying cloud data-center facilities **in-scope, out-of-scope, or partial** within Normain's ISMS boundary? |
+| Q006 | Y/N | L1 | Has Normain designated a single executive role with documented overall accountability for the information security program? If yes, name the role. |
+| Q007 | FF | L2 | How often is the ISMS subject to formal management review, and who attends/owns the review? |
+| Q008 | Y/N | L2 | Does Normain maintain a Statement of Applicability (SoA) covering all ISO/IEC 27001:2022 Annex A controls with inclusion/exclusion rationale per control? |
+| Q009 | CL | L3 | Is **HIPAA compliance** in-scope, out-of-scope, or partial for Normain's ISMS? |
+| Q010 | FF | L3 | Which information security laws and regulations has Normain identified as applicable to its operations? List them. |
+
+## Access Control
+
+| # | Type | Depth | Question |
+|---|---|---|---|
+| Q011 | Y/N | L1 | Is least privilege enforced for access to production systems and customer data? |
+| Q012 | Y/N | L2 | Is multi-factor authentication (MFA) required for all privileged access to production infrastructure? State any documented exceptions. |
+| Q013 | FF | L3 | Describe Normain's policy on shared accounts — when shared accounts are permitted, and what compensating controls offset the loss of individual accountability. |
+| Q014 | FF | L2 | Describe Normain's user access review program — cadence, systems reviewed, who reviews, and what evidence is retained. |
+| Q015 | Y/N | L1 | Is access automatically removed within a documented SLA upon employee termination? If yes, state the SLA. |
+| Q016 | Y/N | L1 | Are remote connections from employee endpoints to production systems and networks encrypted in transit? |
+| Q017 | FF | L2 | Describe the approval workflow for granting a Normain employee new privileged access to a production system. |
+| Q018 | Y/N | L2 | Does Normain enforce SSO via a single corporate identity provider for all workforce access to production systems? Name the IdP and call out any systems exempt from SSO. |
+| Q019 | CL | L3 | Is **direct, interactive database access by Normain employees against production databases** in-scope, out-of-scope, or partial for Normain's access-review program? |
+| Q020 🪤 | FF | L4 | Can Normain offer customer-side IP allowlisting or private-link/private-endpoint connectivity to the application tier? Describe the supported options and limits. |

@@ -1,0 +1,79 @@
+# Git Diff Panel — Performance Optimizations
+
+## Bottlenecks (ranked)
+
+1. Continuous-flow mounts ALL files simultaneously — no virtualization
+2. Lezer tokenizer runs on main thread (TSX/TS parser = heavy)
+3. No line-level virtualization inside DiffView
+4. Poll fetches `contextLines: 'all'` every 5s — big patches
+5. `parseUnifiedDiff` re-parses on every poll (even identical content)
+6. `applyInlineHighlights` runs for every file in patch (even unopened)
+7. `buildSbsRows` not memoized
+8. `renderContent` emits many adjacent same-class `<span>`s
+9. Each open task tab = independent poll/parse/tokenize — zero sharing across tabs on same worktree
+
+## Per-panel fixes
+
+| # | Fix | Target | Impact | Effort |
+|---|-----|--------|--------|--------|
+| A | Virtualize continuous-flow file list | `GitDiffPanel.tsx:858-901` | High | M |
+| B | Virtualize lines in DiffView | `DiffView.tsx:346-354` | High | M |
+| C | Lezer tokenize → Web Worker | `highlight.ts:55` | High | M |
+| D | Lazy inline-highlights (only visible files) | `parse-diff.ts:202` | Med | S |
+| E | Memoize parseUnifiedDiff by patch string | `GitDiffPanel.tsx:271-278` | Med | S |
+| F | Two-phase poll (status → patch on change) | `GitDiffPanel.tsx:231-255` | Med | M |
+| G | Fetch `diffContextLines` not `'all'` | `GitDiffPanel.tsx:237` | Med | S |
+| H | Memoize `buildSbsRows` per chunk | `DiffView.tsx:312` | Low | XS |
+| I | Skip highlight for huge files (>200kb/5k lines) | `highlight.ts:44` | Low | XS |
+| J | Pause poll on `document.hidden` | `GitDiffPanel.tsx:261-269` | Low | XS |
+| K | Coalesce adjacent same-class spans | `DiffView.tsx:117-137` | Low | S |
+
+## Multi-tab fixes (shared state across panels)
+
+Current: each tab mounts own `GitDiffPanel` w/ own poll, snapshot, parse, tokenize. Hidden tabs stay mounted (`display:none`). Two tabs on same worktree → 2× everything.
+
+| # | Fix | Mechanism | Impact |
+|---|-----|-----------|--------|
+| M1 | Shared snapshot cache keyed by `(targetPath, params)` | Module-level Map + refcount subscribers (SWR-style) | High |
+| M2 | Main-process fs watcher per worktree → push updates | `chokidar` on `.git/index` + worktree; IPC broadcast | High |
+| M3 | Global tokenize cache (content-hash → HlSpan[][]) | LRU across all panels/tabs | Med |
+| M4 | Single shared Worker (pool of 1-2) across all panels | Worker module singleton | Med |
+| M5 | Global parsed-diff cache (patch string → FileDiff[]) | WeakMap/LRU, dedup across tabs | Med |
+| M6 | Unmount (or hard-pause) panels for hidden tabs | Verify `visible` prop truly false on `display:none` | Low |
+| M7 | Stagger/batch polls per worktree | Coordinator flushes once per interval | Low (obsolete if M2) |
+| M8 | Share untracked-file diffs cache across tabs | Same map as M5 | Low |
+
+## Recommended multi-tab arch
+
+Single source of truth per worktree:
+
+```
+main: GitWatcher(worktreePath) → chokidar(.git/index, .git/HEAD, tree)
+         ↓ debounced change event
+      compute snapshot once
+         ↓ IPC broadcast
+renderer: useGitDiff(targetPath) subscribes, shares parsed + tokenized data
+```
+
+- Removes polling entirely (M2)
+- One snapshot per worktree, N subscribers (M1)
+- Parse + tokenize once, cached globally (M3/M5)
+- Tabs on same worktree → near-zero marginal cost
+
+## Implementation order
+
+1. **A + C** — virtualize file list + worker tokenize (~90% of per-panel stall)
+2. **M1 + M5** — renderer-only shared caches, dedup across tabs
+3. **B** — line virtualization for huge files
+4. **M3 + M4** — global worker + tokenize cache
+5. **E, G** — parse memo + drop full-ctx fetch
+6. **M2** — fs watcher replaces polling (separate PR, touches main)
+7. **M6, D, I, H, K, J, M7, M8** — polish
+
+## Notes
+
+- A + C + M3 + M4 compose well: virtualized list → worker → global cache
+- G trade-off: context toggle requires re-fetch (cheap, acceptable)
+- I threshold tunable; log when highlight disabled
+- F obsolete if M2 ships
+- M6: verify `visible` prop actually false for hidden tabs — cheap bug check

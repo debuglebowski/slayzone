@@ -1,0 +1,59 @@
+# Normain Competitor Benchmark Report
+
+> **Status:** Draft. Companion outline: `report-outline.md`.
+
+***
+
+## Abstract
+
+_TBD_
+
+## Background
+
+AI tools marketed at knowledge workers have multiplied — chat assistants, workspace agents, research agents. Each claims to handle real work on real documents.
+
+Public benchmarks don't test that claim. MMLU and its successors measure model capability in isolation, not whether a compliance analyst can answer a vendor questionnaire from their own SOC 2 report, or whether an M&A counsel can sweep a 150-document data room for change-of-control clauses.
+
+For that work, "useful" is concrete. A tool must produce correct answers from the user's own documents, cite them, scale to realistic corpus sizes, and not fail silently. All four are testable.
+
+Many tools claim this space; few are usable by a non-developer at work:
+
+* **Normain** — workspace-based document analysis platform
+
+* **Claude Cowork** — Anthropic's knowledge-worker workspace surface
+
+* **NotebookLM** — Google's source-grounded notebook
+
+* **Claude** — Anthropic's standard chat surface
+
+* **ChatGPT Thinking** — OpenAI's reasoning-mode chat
+
+* **Gemini Deep Research** — Google's research-agent mode
+
+* **M365 Copilot** — Microsoft's enterprise assistant
+
+Developer surfaces (CLIs, IDE extensions, API-only products) are out of scope.
+
+### Purpose & Scope
+
+_TBD_
+
+## Method
+
+_TBD_
+
+## Results
+
+_TBD_
+
+## Discussion
+
+_TBD_
+
+### Limitations
+
+_TBD_
+
+## Conclusion
+
+_TBD_

@@ -1,0 +1,21 @@
+# UC01 — Claude
+
+## Setup
+
+1. Create a new Project: **`Benchmark UC01 - DD financial`**.
+2. Upload to Project knowledge: `msft-fy24-10k.htm` + `msft-fy24-proxy.htm` (from `data-sources/`).
+3. Open a new conversation in the Project.
+
+Claude doesn't fetch arbitrary URLs from prompts — files must be uploaded.
+
+## Run
+
+For each of the 15 questions in `../questions-only.md`:
+
+1. Start a **fresh conversation** in the same Project.
+2. Paste the question verbatim. No preamble.
+3. Capture the response (text + screenshot).
+
+## Output
+
+Fill the **Claude** column in `../competitor-comparison.md` with: brief answer + verdict emoji.

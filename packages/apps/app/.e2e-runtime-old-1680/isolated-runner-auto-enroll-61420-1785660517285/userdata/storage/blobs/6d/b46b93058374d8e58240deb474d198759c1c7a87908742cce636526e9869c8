@@ -1,0 +1,41 @@
+# Quick-edit · Option A — per-cell inline (toggle)  ★ recommended
+
+A **Quick edit** toggle in the toolbar flips table cells into inline editors. Off = today's
+behavior (click row → detail). On = click a cell to edit; each edit autosaves on blur/Enter.
+
+```
+TOOLBAR
+  Vendors                    Show archived   [ filter… ]   ◻ Quick edit       [ + Create ]
+
+
+READ MODE  (Quick edit OFF — unchanged; click anywhere on a row → detail page)
+  #  │ Name        │ Appr │ Risk Score │ Cost/mo │ Business owner   │ SSO
+ ────┼─────────────┼──────┼────────────┼─────────┼──────────────────┼─────
+  1  │ 1Password   │  ✓   │  Critical  │  20.95  │ Dennis Landfors  │  ✓
+  2  │ Anthropic   │  ✓   │  Medium    │   ···   │ Dennis Landfors  │  ✓
+  3  │ Cloudflare  │  ✓   │  High      │   ···   │ Dennis Landfors  │  –
+        └─ whole row is a link to the vendor detail
+
+
+QUICK-EDIT MODE  (Quick edit ON — cells editable; click the # to open detail)
+  #  │ Name        │ Appr │ Risk Score │ Cost/mo │ Business owner   │ SSO
+ ────┼─────────────┼──────┼────────────┼─────────┼──────────────────┼─────
+  1▸ │ 1Password   │ [✓]  │ Critical ▾ │  20.95  │ Dennis Land.. ▾  │ [✓]
+  2▸ │ Anthropic   │ [✓]  │ Medium   ▾ │[ 18.00█]│ Dennis Land.. ▾  │ [✓]   ← number cell focused
+ ────┼─────────────┼──────┼─────┬──────┴────┐────┼──────────────────┼─────
+  3▸ │ Cloudflare  │ [✓]  │ Hig │ • Critical │    │  ▒ saving… ▒     │ [ ]
+       click # to open ▲     │ • High     │    └─ autosave on blur / Enter
+                             │ • Medium   │
+                             │ • Low      │  ← enum = dropdown (keeps option colors)
+                             └────────────┘
+
+  Esc cancels · Enter commits · Tab → next cell
+```
+
+## Interaction
+- One field per edit → `updateInstance(id, version, { [fieldId]: value })`.
+- Optimistic local write, reconciles via the live SSE collection. Version clash → cell flags + refetch.
+- Editors reused from `InstanceForm.renderInput`: bool=checkbox · enum=dropdown · user=member picker
+  · number/text/date inputs. **computed** cells = read-only; **relation/file** aren't columns (edit in detail).
+
+**Fork this represents:** entry = dedicated *toggle* (resolves the row-click↔edit conflict) + per-cell autosave.

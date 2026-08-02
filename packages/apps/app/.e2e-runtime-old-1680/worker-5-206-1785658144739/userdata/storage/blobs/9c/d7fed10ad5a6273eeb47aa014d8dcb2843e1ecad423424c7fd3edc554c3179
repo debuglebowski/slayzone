@@ -1,0 +1,60 @@
+flowchart TB
+    subgraph TODAY["Today — Electron-coupled"]
+        R1[Renderer React]
+        P1[Preload window.api.*]
+        M1[Electron main]
+        IPC[ipcMain handlers]
+        D1[Domain logic<br/>imports electron]
+        DB1[(SQLite)]
+        R1 --> P1 --> IPC --> M1 --> D1 --> DB1
+    end
+
+    subgraph END["End state — server pkg, two host modes"]
+        direction TB
+
+        subgraph LOCAL["Local mode (embedded)"]
+            RL[Renderer React]
+            EL[Electron main<br/>thin wrapper]
+            SL["@slayzone/server<br/>embedded"]
+            DBL[(SQLite)]
+            RL -- "tRPC/WS<br/>ws://localhost" --> SL
+            EL -. embeds .-> SL
+            SL --> DBL
+        end
+
+        subgraph REMOTE["Remote mode (hosted)"]
+            RR[Renderer React]
+            SR["@slayzone/server<br/>plain Node"]
+            DBR[(SQLite / Postgres)]
+            RR -- "tRPC/WS<br/>wss://host" --> SR
+            SR --> DBR
+        end
+
+        ELECTRON_ONLY[Electron-only features<br/>browser panel, menus,<br/>dialogs, tray]
+        EL -. exposes .-> ELECTRON_ONLY
+    end
+
+    TODAY ==> SLICES
+
+    subgraph SLICES["Incremental slices on main — ship each to prod"]
+        direction TB
+        S1[1. Path + port hardening<br/>SLAYZONE_STORE_DIR / PORT / HOST]
+        S2[2. @slayzone/transport scaffold<br/>tRPC v11 + WS, empty router]
+        S3[3. Per-router migration<br/>tags → projects → diagnostics → ...]
+        S4[4. Domain split<br/>src/server/ + src/electron/<br/>guard: no electron in server/]
+        S5[5. Renderer cutover<br/>window.api.* → tRPC hooks]
+        S6[6. @slayzone/server package<br/>mounts appRouter, plain Node]
+        S7[7. Local/Remote toggle<br/>settings + supervisor + /health]
+        S8[8. Drop legacy IPC<br/>delete preload bridge]
+
+        S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8
+    end
+
+    SLICES ==> END
+
+    classDef today fill:#fee,stroke:#c66
+    classDef end_ fill:#efe,stroke:#6c6
+    classDef slice fill:#eef,stroke:#66c
+    class TODAY,R1,P1,M1,IPC,D1,DB1 today
+    class END,LOCAL,REMOTE,RL,EL,SL,DBL,RR,SR,DBR,ELECTRON_ONLY end_
+    class SLICES,S1,S2,S3,S4,S5,S6,S7,S8 slice

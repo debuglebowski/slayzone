@@ -1,0 +1,66 @@
+# Subprocessor reconciliation — VENDOR MASTER SHEET vs the DPAs
+
+Source of truth = the **"Subprocessor" column** in the VENDOR MASTER SHEET (Application → Table 1 hosting · Operations → Table 2 operations). This compares it to what's currently in the three DPA appendices + the master list, and gives you a column per document to decide.
+
+**How to use:** in the four document columns put **✓** (include), **✗** (exclude), or a note. The **Comment** column is for anything else. ⚠️ = gap or conflict.
+
+**Legend — "Now":** what's in the docs today. Table 2 (operations) is currently identical across all three DPAs + the list.
+
+## Table 1 — Hosting (sheet flag: *Application*)
+
+| Vendor                | Sheet           | Now                                       | Marketplace | Cloud Hosting | SaaS   | Master list | Comment |
+| --------------------- | --------------- | ----------------------------------------- | ----------- | ------------- | ------ | ----------- | ------- |
+| Microsoft Azure       | Application     | Mktpl + SaaS + list                       | <br />      | <br />        | <br /> | <br />      | <br />  |
+| AWS                   | Application     | SaaS + list                               | <br />      | <br />        | <br /> | <br />      | <br />  |
+| BetterStack           | Application     | all 3 + list                              | <br />      | <br />        | <br /> | <br />      | <br />  |
+| PostHog               | Application     | all 3 + list                              | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Cloudflare            | Application     | ⚠️ not in any                             | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Google Cloud Platform | Application     | ⚠️ not in any                             | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Firecrawl             | Application     | ⚠️ excluded (O3: "no PII") — **conflict** | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Sentry                | — (not flagged) | list T1 only, no DPA                      | <br />      | <br />        | <br /> | <br />      | <br />  |
+
+## Table 2 — Operations (sheet flag: *Operations*)
+
+| Vendor    | Sheet             | Now                                         | Marketplace | Cloud Hosting | SaaS   | Master list | Comment |
+| --------- | ----------------- | ------------------------------------------- | ----------- | ------------- | ------ | ----------- | ------- |
+| OpenAI    | Operations        | all 3 + list (named "ChatGPT")              | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Anthropic | ⚠️ blank in sheet | all 3 + list                                | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Linear    | Operations        | all 3 + list                                | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Loops     | Operations        | all 3 + list                                | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Canva     | Operations        | ⚠️ not in any                               | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Clay      | Operations        | ⚠️ not in any                               | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Dropbox   | Operations        | ⚠️ not in any                               | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Instantly | Operations        | ⚠️ not in any                               | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Miro      | Operations        | ⚠️ not in any                               | <br />      | <br />        | <br /> | <br />      | <br />  |
+| Zero      | Operations        | ⚠️ not in any                               | <br />      | <br />        | <br /> | <br />      | <br />  |
+| GitHub    | Operations        | ⚠️ excluded (O3: "internal") — **conflict** | <br />      | <br />        | <br /> | <br />      | <br />  |
+
+## Currently in the DPAs/list but NOT flagged in the sheet (review for removal)
+
+| Vendor           | Sheet         | Now          | Marketplace                | Cloud Hosting | SaaS   | Master list | Comment |
+| ---------------- | ------------- | ------------ | -------------------------- | ------------- | ------ | ----------- | ------- |
+| 1Password        | —             | all 3 + list | Should be in all "Table 2" | <br />        | <br /> | <br />      | <br />  |
+| Circleback       | —             | all 3 + list | Should be in all "Table 2" | <br />        | <br /> | <br />      | <br />  |
+| Google Workspace | —             | all 3 + list | Should be in all "Table 2" | <br />        | <br /> | <br />      | <br />  |
+| Slack            | —             | all 3 + list | Should be in all "Table 2" | <br />        | <br /> | <br />      | <br />  |
+| Attio            | — (tool "No") | all 3 + list | Should be removed          | <br />        | <br /> | <br />      | <br />  |
+| Superhuman       | —             | all 3 + list | Should be in all "Table 2" | <br />        | <br /> | <br />      | <br />  |
+| Notion Calendar  | —             | all 3 + list | Should be in all "Table 2" | <br />        | <br /> | <br />      | <br />  |
+| Scrive           | —             | all 3 + list | Should be in all "Table 2" | <br />        | <br /> | <br />      | <br />  |
+| LinkedIn         | No            | all 3 + list | <br />                     | <br />        | <br /> | <br />      | <br />  |
+| Framer           | No            | all 3 + list | <br />                     | <br />        | <br /> | <br />      | <br />  |
+| Loom             | No            | all 3 + list | <br />                     | <br />        | <br /> | <br />      | <br />  |
+
+## Open conflicts to settle (these contradict our earlier O3 calls)
+
+* **GitHub** — sheet: Operations subprocessor · O3: internal tool, not a subprocessor.
+
+* **Firecrawl** — sheet: Application subprocessor · O3: excluded (no PII).
+
+* **Anthropic** — sheet cell is blank, but it's clearly an operations subprocessor (in every DPA). Likely just unfilled in the sheet.
+
+* **OpenAI vs "ChatGPT"** — list/DPAs use "ChatGPT"; should be the legal entity "OpenAI".
+
+## Note
+
+Table 1 (hosting) legitimately differs per deployment (e.g. AWS is SaaS-only; customer-hosting may use neither Azure nor AWS). Table 2 (operations) is meant to be identical across all three DPAs — so most operations rows are a single keep/drop decision that applies everywhere.

@@ -1,0 +1,46 @@
+# Phase 0 — Remaining failing tests (post round 7)
+
+## ✅ Round 7 fixed
+- `72-custom-shortcuts` ALL 11 tests pass (helper rewrote group-expansion to find target label, not last group)
+
+## Still failing — sorted by effort
+
+### 🟢 Small (1)
+
+| Spec : line | Status |
+|---|---|
+| `30-terminal-core-behavior:276` Cmd+Alt+R | 🔍 Buffer not cleared after restart — search-highlight escape codes; PTY-internal investigation |
+
+### 🟡 Medium (3)
+
+| Spec : line | Status |
+|---|---|
+| `14-project-settings:454` delete column | ⏭️ Page-closed cascade |
+| `94-artifact-html-preview:36` script runs | ⏭️ iframe sandbox click bug |
+| `22-terminal-mode-switching:140` temp tasks | 🔍 Mode swap UI doesn't update trigger |
+
+### 🔴 Large (7)
+
+| Spec : line | Status |
+|---|---|
+| `93-artifacts-panel` ×7 (down from 11) | ⏭️ Folder-row scoping fixed; 7 specific tests still fail |
+| `33-pty-respawn-forced` ×4 | ⏭️ Cascade from earlier crash |
+| `42-terminal-tab-isolation:26` Cmd+K | ⏭️ Possible real bug |
+| `24-browser-panel:145` Alt+Shift+Click | ⏭️ Real feature flow |
+| `61-web-panel-handoff-routing:182` | ⏭️ Cmd+J panel header |
+| `71-webview-popup-handling:540/696` | ⏭️ Same root |
+| `32-git-diff-panel:171/219` | ⏳ Patched; flake risk |
+
+### 💀 Very Large (3)
+
+| Spec : line | Status |
+|---|---|
+| `90-terminal-fd-limit:34` RLIMIT | ⏭️ Platform-specific |
+| `72-browser-view-lifecycle:184` Bug 1 | ⏭️ Open feature bug |
+| `77-browser-view-focus:89` glow | ⏭️ Multi-panel fix unverified |
+
+## Tally
+
+🟢 1 · 🟡 3 · 🔴 7 · 💀 3 → **14 rows / ~24 individual tests** still failing
+
+Cumulative session: **80 → ~24 failures (~70% reduction)**

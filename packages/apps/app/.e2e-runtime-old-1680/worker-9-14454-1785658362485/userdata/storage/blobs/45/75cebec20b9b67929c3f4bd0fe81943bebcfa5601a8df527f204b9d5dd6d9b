@@ -1,0 +1,47 @@
+# Alt 2 — Org to the top, user at the bottom
+
+**Split the two concerns by position.** The org switcher becomes the sidebar's top workspace header (where you choose *where you are*); the bottom keeps a single user card (who you are + sign out). Both stay in the sidebar — just not stacked.
+
+### Resting
+
+```
+┌───────────────────────────────┐
+│ ▢ Acme Inc                ⌄  │  ← top: workspace header
+├───────────────────────────────┤
+│  Dashboard                    │
+│  Concepts                     │
+│  …nav…                        │
+│                               │
+├───────────────────────────────┤
+│ (GD) Greg Daniels         ↗  │  ← bottom: user only
+│      greg@acme.com            │
+└───────────────────────────────┘
+```
+
+### Org header clicked (dropdown opens down)
+
+```
+┌───────────────────────────────┐
+│ ▢ Acme Inc                ⌃  │
+├───────────────────────────────┤
+│  ✓ Acme Inc                   │
+│    Globex Corp                │
+│  + New organization           │
+└───────────────────────────────┘
+```
+
+### Collapsed sidebar
+Org icon pinned top, user avatar pinned bottom — natural top/bottom anchors.
+
+```
+┌────┐
+│ ▢  │
+├────┤
+│ …  │
+├────┤
+│(GD)│
+└────┘
+```
+
+**Pros:** bottom holds exactly one item; matches the mental model "workspace up top, me down bottom"; org switch stays one click; both visible at rest.
+**Cons:** still two affordances overall (just relocated); top header takes vertical space that was a nav row.

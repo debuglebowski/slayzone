@@ -1,0 +1,35 @@
+# Reopen-blank fix — PREVIOUS architecture (client-owned snapshot)
+
+> What we built first, then moved away from. Captured here so the contrast is clear.
+
+## Idea in one line
+The **client** (the renderer / xterm window) takes a picture of its own screen, stores it in **browser localStorage**, and paints it back on reopen.
+
+## Where the "last screen" lives
+```
+┌─────────────────────────── CLIENT (renderer) ───────────────────────────┐
+│   xterm  ──serialize()──►  localStorage  ──read──►  xterm                │
+│   (screen)                 (per-browser)            (restored screen)    │
+│        ▲                                                                 │
+│        │ reconcile logic (reset-on-reprint), provider table, fallback    │
+│        │ spinner — ALL on the client                                     │
+└──────────────┬──────────────────────────────────────────────────────────┘
+               │ thin pipe
+        ┌──────┴───────┐
+        │ MAIN / server │  ← owns the PTY + output buffer (source of truth)
+        └──────────────┘
+```
+
+## Flow
+- **Hibernate:** client serializes the xterm screen → saves to localStorage.
+- **Reopen:** client reads localStorage → writes it into a fresh xterm (instant) → CLI `--resume` reprints → client decides when/how to clear the old screen.
+
+## Why we moved away from it
+The terminal process is being **moved to a separate server**. That makes this design fight the direction:
+
+- 🔴 **State on the wrong side.** Session history lives in the *client's* localStorage. A reconnect, a second window, or a web client sees **nothing** — the server owns the session but not its screen.
+- 🔴 **Lossy copy.** The client re-derives a screen via xterm; the server already holds the **real output bytes**.
+- 🔴 **Logic drift.** "Which providers reprint on resume" lives in the **server's** adapters, but the client had its own copy.
+- 🔴 **Heavy client.** Capture + store + restore + reconcile + a fallback spinner — all pushed onto the renderer.
+
+**Verdict:** works in one desktop window, but accumulates responsibility on the client right as the architecture is trying to thin it. → replaced by the server-owned design (see the other artifact).

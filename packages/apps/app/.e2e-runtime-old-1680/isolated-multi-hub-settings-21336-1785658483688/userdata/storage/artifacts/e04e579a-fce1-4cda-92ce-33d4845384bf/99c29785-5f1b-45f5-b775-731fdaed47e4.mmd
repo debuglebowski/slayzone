@@ -1,0 +1,35 @@
+flowchart TD
+    Start([Round start]):::startNode
+    Agent[Agent decisions]
+    State[("`**Company state**
+    cash
+    capacity
+    brand
+    models
+    research`")]
+    Compute["`**Market & cash update**
+    share
+    revenue
+    burn`"]
+    Check{Continue?}
+    EndN([End]):::endNode
+
+    Situations(("`⚡ **Situations**`"))
+    Variables[("`**Variables**
+    market size
+    price sensitivity
+    base costs`")]
+
+    Situations ~~~ Start
+    Variables ~~~ State
+
+    Start --> Agent --> State --> Compute --> Check
+    Check -->|no| Start
+    Check -->|yes| EndN
+
+    Situations -.->|modify| Variables
+    Variables -.->|read| Compute
+    Situations -.->|modify| State
+
+    classDef startNode fill:#2d5a2d,stroke:#7fc97f,color:#e8f5e8
+    classDef endNode fill:#5a2d2d,stroke:#f97f7f,color:#f5e8e8

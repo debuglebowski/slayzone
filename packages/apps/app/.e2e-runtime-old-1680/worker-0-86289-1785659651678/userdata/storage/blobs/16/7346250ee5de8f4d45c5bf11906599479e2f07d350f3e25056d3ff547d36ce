@@ -1,0 +1,72 @@
+# Fork: Convex auth → unblock leaderboard — DONE (review)
+
+Wired real Convex + GitHub OAuth into the chromium fork. `convexConfigured` is now
+real, the leaderboard renders its live/configured state instead of the disabled gate,
+and the sidecar→renderer auth-state delivery is implemented + verified. Unblocks the
+feedback subtask (a846c186). **Not committed** (per instructions). Full design:
+`plans/fork-convex-auth.md`.
+
+## Both locked decisions honored
+1. `isConvexConfigured` is driven by `VITE_CONVEX_URL` (root `.env`), baked into the
+   fork bundle via `chromium-shell` vite `envDir: root`. Unset → degrades to today's
+   `LEADERBOARD_AUTH_DISABLED`.
+2. Renderer auth-state delivery = a **tRPC subscription** `app.auth.onCallback` over the
+   existing WS — the sidecar pushes the OAuth callback after the `slayzone://` deep-link.
+   Not polling, not a bespoke channel.
+
+## How it works (fork, mac)
+`signInWithGitHub` → `app.auth.githubSystemSignIn` mutation → **sidecar** runs the PKCE
+start (shared `requestGithubSignInStart`) + opens the browser, returns `{verifier,
+pending}`. The renderer stashes the verifier and waits. GitHub → `slayzone://auth/callback`
+→ chromium C++ shell → sidecar Unix socket (`auth:deep-link`) → `authEvents` →
+`app.auth.onCallback` sub → renderer `actions.signIn('github',{code})` completes the
+Convex session. The renderer owns the session (the leaderboard's Convex queries need it).
+
+Why the sidecar (not the renderer SDK) starts it: `@convex-dev/auth` does
+`window.location.href = <github-url>` on start, which would destroy the fork renderer +
+its subscription. So the start mirrors Electron's main-process flow.
+
+## Key finding (the "hard part")
+The chromium binary already has `auth:deep-link` + `sidecar.sock` compiled in (verified
+via `strings`), but the JS sidecar had **no socket server** to receive it — that was the
+missing piece. Built it: `packages/apps/server/src/sidecar-socket.ts` (LSP-framed
+JSON-RPC 2.0, the JS half of the C++ `SidecarClient`). **No chromium C++/patch change
+needed.**
+
+## Reuse (never reimplemented)
+`convexAuth.tsx` MOVED into `@slayzone/leaderboard` (Electron's copy is now a re-export
+shim — Electron behavior byte-identical, gated by an `oauthDelivery` prop defaulting to
+`'inline'`). `requestGithubSignInStart` extracted to `@slayzone/transport/server`, shared
+by both shells.
+
+## Verified
+- **Typecheck**: transport, leaderboard, server, renderer-app, chromium-shell, **Electron
+  app (both tsconfigs)** — all clean.
+- **Build (both shells)**: chromium-shell (Convex URL + ConvexAuthProvider + onCallback
+  baked) and **Electron app** (exit 0; convexAuth resolved via shim) — Electron NOT broken.
+- **Sidecar chain (deterministic integration test)**: isolated rebuilt sidecar →
+  `sidecar.hello`/`ping`/`auth:deep-link` over the socket → `authEvents` →
+  `app.auth.onCallback` delivers `{code}` and `{error}` to a WS subscriber; notifications
+  get no response. **PASS.**
+- **Renderer flip (REAL `chrome://slayzone-shell/` window, CDP)**: sidebar **trophy
+  appears**; leaderboard renders the **configured** state ("Sign in with GitHub" + tables),
+  NOT the disabled "Convex not wired" gate. No runtime provider error.
+- ⏳ The actual human GitHub login + real callback round-trip is inherently
+  human-in-the-loop; every machine-verifiable segment of that chain is covered above.
+
+## Dependencies / gaps (flagged)
+- **Ops**: the Convex deployment (`silent-emu-581`, URL present) must have the GitHub
+  provider configured (client id/secret). Graceful degrade if `VITE_CONVEX_URL` unset.
+- **Platform**: deep-link is macOS-only (`patches/chromium/0030`); Windows/Linux deferred.
+- **Minor**: fork has no sign-in timeout (Electron's 2-min waiter has no fork analog —
+  renderer stays "pending" if the user abandons GitHub).
+- **Adjacent**: `leaderboardGetLocalStats` still stubbed in the fork sidecar (own-stats
+  push deferred; others' rankings still display).
+
+## Files
+New: `transport/server/auth-github.ts`, `server/src/sidecar-socket.ts`,
+`leaderboard/src/convexAuth.tsx` (+ `vite-env.d.ts`), `plans/fork-convex-auth.md`.
+Changed: transport `app-deps.ts`/`index.ts`/`routers/app.ts`; server `composition.ts`/
+`server.ts`/`shell-native.ts`; leaderboard `index.ts`/`package.json`; renderer-app
+`main.tsx`/`OverlayViewRouter.tsx`/`HomeView.tsx`; chromium-shell `vite.config.ts`;
+Electron `lib/convexAuth.tsx` (shim) + `main/index.ts` (use shared start).

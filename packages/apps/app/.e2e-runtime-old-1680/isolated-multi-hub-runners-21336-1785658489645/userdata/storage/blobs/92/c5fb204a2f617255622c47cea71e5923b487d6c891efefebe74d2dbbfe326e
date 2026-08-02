@@ -1,0 +1,266 @@
+# SlayZone Environment Variables — Per Application
+
+Reference of env vars read (**R**) or set (**S**) by each of the 4 SlayZone apps, plus the shared/domain code each pulls in at runtime. `(dev)` = dev-only, `(test)` = test/e2e-only, `(build)` = build-time (Vite `loadEnv`, not runtime `process.env`).
+
+> **Standalone hard rule:** hub + runner must never use `~/.slayzone`. Enforced by seeding `SLAYZONE_ROOT=process.cwd()` at boot (unless supervised or an anchor is already set) → all state lives in CWD.
+
+---
+
+## 1. Electron app (`packages/apps/app`)
+
+The desktop host. Spawns the sidecar (hub-as-node), the local runner, and agent PTYs — so it **sets** many cross-process vars that the other apps read.
+
+### Storage / data paths
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_STORE_DIR` | R+S | Storage root (DB, artifacts, backups); injected → sidecar | platform state dir / `userData` | `data-paths.ts:26`, set `index.ts:2239` |
+| `SLAYZONE_DB_PATH` | S | Exact SQLite path handed to sidecar | derived | `index.ts:2240` |
+| `SLAYZONE_USER_DATA_DIR` | R | (test) Isolate Electron `userData` profile | — | `index.ts:204` |
+| `SLAYZONE_ROOT` | R | Home/root anchor (highest priority) | → `SLAYZONE_HOME_DIR`/`~/.slayzone` | `dirs.ts:41` |
+| `SLAYZONE_HOME_DIR` | R+S | Back-compat home alias; injected → hook agents | `~/.slayzone` | `dirs.ts:42`, set `mcp-env.ts:139` |
+
+### Server / sidecar / networking
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_HOST` | R+S | Local/sidecar bind host | `127.0.0.1` | `paths.ts:57`, set `sidecar-server-supervisor.ts:314` |
+| `SLAYZONE_PORT` | R+S | tRPC/sidecar port (0–65535) | auto-assign | `paths.ts:45`, set `sidecar-server-supervisor.ts:315` |
+| `SLAYZONE_SUPERVISED` | S | Marks child Electron-supervised | `1` | `sidecar-server-supervisor.ts:313` |
+| `SLAYZONE_HOST_CAP_URL` | S | Capability-bridge URL → sidecar | — | `index.ts:2243` |
+| `SLAYZONE_HOST_REST_URL` | S | Host REST reverse-proxy target → sidecar | — | `index.ts:2244` |
+| `SLAYZONE_SIDECAR_HOT_RESTART` | R | (dev) Relaunch sidecar on build change | off | `index.ts:2289` |
+
+### Local runner child
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_HUB_URL` | S | wss hub `/runners` URL → runner | — | `index.ts:669` |
+| `SLAYZONE_JOIN_TOKEN` | S | Auto-enroll token (embeds cert fp) | — | `index.ts:670` |
+| `SLAYZONE_RUNNER_NAME` | R+S | Local runner label | `DEFAULT_LOCAL_RUNNER_NAME` | `index.ts:591,671` |
+| `SLAYZONE_RUNNER_CREDENTIALS_DIR` | R+S | Runner creds dir | `<storageDir>/runner-creds` | `index.ts:672` |
+| `SLAYZONE_RUNNER_ALLOWED_ROOTS` | R+S | FS roots runner may touch | `homedir()` | `index.ts:674` |
+| `SLAYZONE_E2E_ALLOW_RUNNER` | R | (test) Actually spawn local runner under Playwright | off | `index.ts:2320` |
+
+### Agent hooks / MCP env injected into PTY & chat children (`mcp-env.ts`)
+| Var | R/S | Purpose | Site |
+|---|---|---|---|
+| `SLAYZONE_TASK_ID` | S | Current task id for `slay` CLI + MCP | `mcp-env.ts:114` |
+| `SLAYZONE_PROJECT_ID` | S | Current project id | `mcp-env.ts:124` |
+| `SLAYZONE_SESSION_ID` | S | Session id for pooled/warm agents | `mcp-env.ts:125` |
+| `SLAYZONE_MCP_PORT` | S | Loopback MCP port (local agents) | `mcp-env.ts:146` |
+| `SLAYZONE_AGENT_HOOK_URL` | S | URL agents POST lifecycle hooks | `mcp-env.ts:137` |
+| `SLAYZONE_AGENT_ID` | S | Agent mode, echoed in hook payload | `mcp-env.ts:138` |
+| `SLAYZONE_HUB_TOKEN` | S | Short-lived per-task bearer (remote) | `mcp-env.ts:135` |
+| `SLAYZONE_E2E_INSTALL_HOOKS` | R | (test) Force hook install, skip probes | `index.ts:2333` |
+
+### Agent CLI settings-path overrides (R; mostly test relocation) — `dirs.ts`
+`SLAYZONE_CLAUDE_SETTINGS_PATH` `:52` · `SLAYZONE_GEMINI_SETTINGS_PATH` `:62` · `SLAYZONE_CODEX_HOOKS_PATH` `:72` · `SLAYZONE_ANTIGRAVITY_HOOKS_PATH` `:84` · `SLAYZONE_OPENCODE_PLUGIN_PATH` `:96`
+
+### Boot / debug / dev / mode
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_DEBUG_BOOT` | R | (dev) Boot-timing debug logs | off | `index.ts:762` |
+| `SLAYZONE_BOOT_LOG_PATH` | R | (test) Early-boot log file sink | null | `index.ts:768` |
+| `SLAYZONE_REGISTER_DEV_PROTOCOL` | R | (dev) Register `slayzone://` in dev | off | `index.ts:698` |
+| `SLAYZONE_GC_THRESHOLD_MB` | R | Proactive-GC heap threshold | 1100 | `proactive-gc.ts:27` |
+| `SLAYZONE_GC_INTERVAL_MS` | R | Proactive-GC poll interval | 30000 | `proactive-gc.ts:28` |
+| `SLAYZONE_GC_COOLDOWN_MS` | R | Proactive-GC cooldown | 20000 | `proactive-gc.ts:29` |
+| `SLAYZONE_MODE` | R | `local`/`remote` hardening | `local` | `slayzone-mode.ts:24` |
+| `SLAYZONE_NONINTERACTIVE` | R | Disable interactive prompts | off | `config-prompt.ts:67` |
+| `SLAYZONE_DISABLE_CLONEFILE` | R | Force non-APFS-clone worktree copy | clone on | `git-worktree.ts:606` |
+
+### Build-time / Vite renderer (`electron.vite.config.ts`, via `loadEnv`)
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_PROFILE` | R (build) | (dev) React profiling build + `<Profiler>` | off | `:147,159` |
+| `SLAYZONE_REACT_DEV` | R (build) | (dev) Real dev React (opt out of prod-in-dev) | off | `:95` |
+| `POSTHOG_API_KEY` | R (build) | PostHog project key baked in | hardcoded `phc_…` | `:143` |
+| `POSTHOG_HOST` | R (build) | PostHog ingest host | `eu.i.posthog.com` | `:145` |
+| `POSTHOG_DISABLED` | R (build) | Blank the key → disable analytics | off | `:141` |
+
+### Electron / Node / toolchain
+| Var | R/S | Purpose | Site |
+|---|---|---|---|
+| `ELECTRON_RENDERER_URL` | R | Dev renderer dev-server URL (vs packaged loadFile) | `index.ts:1179` |
+| `ELECTRON_RUN_AS_NODE` | S | Run Electron as plain Node for sidecar/runner | `sidecar-server-supervisor.ts:312` |
+| `NODE_PATH` | S | Point sidecar at unpacked node_modules (packaged) | `index.ts:2251` |
+| `PLAYWRIGHT` | R | (test) Master under-Playwright flag | `index.ts:132` |
+| `NODE_ENV` | R | `test`/`development` toggles (cred bypass, dev flag) | `credentials.ts:56` |
+
+### PTY child env SET (`pty-manager.ts:1082`)
+`TERM`=`xterm-256color` · `COLORTERM`=`truecolor` · `COLORFGBG` (theme) · `TERM_BACKGROUND`=`dark`/`light`
+
+### OS / inherited (R) — shared/platform + PTY
+`HOME` · `USERPROFILE` · `APPDATA` · `LOCALAPPDATA` · `XDG_STATE_HOME` · `XDG_CONFIG_HOME` · `XDG_DATA_HOME` · `PATH` (R+S — Codex hook strips slayzone bin) · `SHELL` · `COMSPEC` · `USER`/`USERNAME`
+
+### Usage-analytics parsers (R)
+`CLAUDE_CONFIG_DIR` · `OPENCODE_DATA_DIR` · `QWEN_CONFIG_DIR`
+
+---
+
+## 2. Chromium fork / shell (`packages/apps/chromium-shell` + fork C++ + `scripts/chromium`)
+
+**Key insight:** the fork binary + shell bundle read almost no runtime env. WS ports are **build-time pinned** (dev 8766 / prod 8765). The fork reads `--slayzone-*` **command-line switches** (not env); the launcher `run.sh` converts env → switches.
+
+### Read by fork C++ binary at runtime — the ONLY one
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_RUNTIME_DIR` | R | Sidecar unix socket dir (`$DIR/sidecar.sock`) | macOS `~/Library/Application Support/SlayZone/run/`; Linux `$XDG_RUNTIME_DIR/slayzone/` or `/tmp/slayzone-$UID/` | `sidecar_client.cc:67` |
+
+### Build-time pinned into the Vite shell bundle (compiled, not runtime)
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_CHROMIUM_PROD` | R (build) | Bakes WS URL: `1`→prod `:8765`, else dev `:8766` | dev | `vite.config.ts:31`; `server-url.ts:11` |
+| `VITE_CONVEX_URL` | R (build) | Convex URL → leaderboard auth (only `VITE_*` exposed) | unset → auth off | `vite.config.ts:15` |
+
+### Launcher `scripts/chromium/run.sh` — env → switches / sidecar env
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_NO_SIDECAR` | R | Skip auto-spawning tRPC sidecar | `0` | `run.sh:49` |
+| `SLAYZONE_HOST` | S (forced) | Sidecar bind host | `127.0.0.1` | `run.sh:58` |
+| `SLAYZONE_PORT` | S (forced) | Sidecar bind port (matches pinned URL) | `8766` (dev) | `run.sh:59` |
+| `SLAYZONE_SUPERVISED` | S (unset) | Unset so bg sidecar survives stdin close | — | `run.sh:82` |
+| `SLAYZONE_WEBUI_BUNDLE_DIR` | R+S | → `--slayzone-webui-bundle-dir` | `$REPO_ROOT/packages/webui` | `run.sh:144` |
+| `SLAYZONE_SHELL_BUNDLE_DIR` | R+S | → `--slayzone-shell-bundle-dir` | `$REPO_ROOT/packages/apps/chromium-shell` | `run.sh:152` |
+| `SLAYZONE_REAL_KEYCHAIN` | R | If ≠1 add `--use-mock-keychain` | `0` (mock) | `run.sh:172` |
+| `SLAYZONE_REMOTE_DEBUG` | R | If set add `--remote-debugging-port` | unset | `run.sh:179` |
+| `SLAYZONE_SHELL_DEV_SERVER` | R | If set add `--slayzone-shell-dev-server` (HMR) | unset | `run.sh:189` |
+| `ELECTRON_RUN_AS_NODE` | S | Run sidecar under Electron-as-node (ABI) | `1` | `run.sh:82` |
+
+### Build-toolchain (`scripts/chromium/*.sh`, dev/build-only)
+`SLAYZONE_DEVELOPER_DIR` (Xcode override) `build.sh:13` · `REPO_ROOT` · `DEPOT_TOOLS_DIR` · `CHROMIUM_DIR` · `CHROMIUM_SRC` · `CHROMIUM_VERSION` · `PATCHES_DIR` · `GIT_CACHE_PATH` · `DEPOT_TOOLS_UPDATE`=0 · `DEPOT_TOOLS_METRICS`=0 · `DEVELOPER_DIR` (pinned Xcode 16.3.0) · `WORKDIR` — all in `env.sh` / `build.sh` / `daemonize.sh`
+
+### Test/verify-only (`scripts/chromium`)
+`SLAYZONE_SEED_DEMO` `seed-demo.sh:15` · `SIDECAR_SOCKET` `cap-02-verify.mjs:18` · `ELECTRON_SCREENSHOTS` `compare-with-electron.sh:10`
+
+> `renderer-app/src` reads **no** env. No `NODE_ENV`, no `import.meta.env`. Runtime WS override exists only via JS global `globalThis.__slayzoneServerUrl` (not env). Indirectly, the spawned sidecar (hub) reads `SLAYZONE_DB_PATH` / `SLAYZONE_PORT` / `SLAYZONE_HOST` / `SLAYZONE_RUNNER_TRANSPORT_PORT` / `SLAYZONE_SUPERVISED` — see Hub table.
+
+---
+
+## 3. Hub (`packages/apps/hub`)
+
+Runs supervised (Electron host) OR standalone. Central data authority; injects env into spawned agents/runners.
+
+### Core standalone state anchoring
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_SUPERVISED` | R | Master switch: `1`=host-supervised, unset=standalone; gates all standalone logic | unset | `standalone-config.ts:36`, `db.ts:30` |
+| `SLAYZONE_ROOT` | R+S | On-disk state anchor; seeded to `cwd()` if unset (keeps state out of `~/.slayzone`) | `process.cwd()` | `standalone-config.ts:64` |
+| `SLAYZONE_HOME_DIR` | R (+S test) | Back-compat alias for ROOT; sandbox knob | → `$HOME/.slayzone` | `standalone-config.ts:64` |
+| `SLAYZONE_STORE_DIR` | R+S | State dir (DB/logs/diag); standalone `<ROOT>/storage` | `<ROOT>/storage` | set `standalone-config.ts:77`, read `db.ts:43` |
+| `SLAYZONE_DB_PATH` | R+S | Exact SQLite path (supervised: host passes, hard-error if missing) | derived | `db.ts:31`, set `standalone-config.ts:79` |
+| `SLAYZONE_DEV` | R | Dev vs prod DB filename | `≠1`→prod | `db.ts:44` |
+
+### Networking / ports / mode
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_PORT` | R+S | Main tRPC/HTTP port | 0/stored | `paths.ts:45`, set `standalone-config.ts:80` |
+| `SLAYZONE_HOST` | R | Bind address (warns on non-loopback) | `127.0.0.1` | `paths.ts:57` |
+| `SLAYZONE_MODE` | R | `remote`=harden (public URL+TLS, bind 0.0.0.0, client auth) | `local` | `slayzone-mode.ts:24` |
+| `SLAYZONE_HUB_PUBLIC_URL` | R+S | External hub base URL (baked into join tokens); required in remote | loopback | `remote-mcp-env-provider.ts:72`, set `standalone-config.ts:82` |
+| `SLAYZONE_HUB_TLS_PORT` | R | TLS `/trpc` listener port (multi-hub) | 0 (OS) | `server.ts:364` |
+| `SLAYZONE_RUNNER_TRANSPORT_PORT` | R+S | https `/runners` listener port | 0 (OS) | `server.ts:417`, set `standalone-config.ts:81` |
+| `SLAYZONE_RUNNER_TRANSPORT_HOST` | R | Runner-listener bind host override | supervised/remote→`0.0.0.0` else `127.0.0.1` | `server.ts:425` |
+| `SLAYZONE_HOST_CAP_URL` | R | Supervised: Electron host capability bridge URL | none (standalone→null) | `composition.ts:265` |
+| `SLAYZONE_HOST_REST_URL` | R | Supervised: reverse-proxy for Electron-only REST | none→501 | `server.ts:179` |
+
+### Auth / secrets / runner identity
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_RUNNER_TRANSPORT_SECRET` | R+S | HMAC secret (session signing + per-task bearer); standalone generates+persists 0600 | standalone: generated; dev/supervised: `slayzone-dev-runner-secret` | `composition.ts:225`, set `standalone-config.ts:92` |
+| `SLAYZONE_RUNNER_NAME` | R | Co-located local runner name (identity-dedup) | `DEFAULT_LOCAL_RUNNER_NAME` | `composition.ts:919` |
+| `SLAYZONE_RUNTIME_DIR` | R | Chromium-fork sidecar socket dir | platform run dir | `sidecar-socket.ts:29` |
+
+### Env INJECTED into spawned agent PTYs (SET) — `mcp-env.ts`
+| Var | Purpose | Site |
+|---|---|---|
+| `SLAYZONE_HUB_URL` | Hub base URL → remote runner PTY | `:134` |
+| `SLAYZONE_HUB_TOKEN` | Per-task bearer (12h TTL) → remote PTY | `:135` |
+| `SLAYZONE_AGENT_HOOK_URL` | `POST /api/agent-hook` URL | `:137` |
+| `SLAYZONE_AGENT_ID` | Agent mode id in hook payload | `:138` |
+| `SLAYZONE_TASK_ID` | Task id | `:114` |
+| `SLAYZONE_PROJECT_ID` | Project id | `:124` |
+| `SLAYZONE_SESSION_ID` | Pooled (taskless) agent session id | `:125` |
+| `SLAYZONE_MCP_PORT` | Local loopback MCP port (local only) | `:146` |
+| `SLAYZONE_HOME_DIR` | `~/.slayzone` script-lookup base | `:139` |
+
+(Runner enrollment path also SETS `SLAYZONE_JOIN_TOKEN`, `SLAYZONE_RUNNER_CREDENTIALS_DIR`, `SLAYZONE_RUNNER_ALLOWED_ROOTS` — read by the runner, see Runner table.)
+
+### First-run / OS / domain gates
+| Var | R/S | Purpose | Site |
+|---|---|---|---|
+| `SLAYZONE_NONINTERACTIVE` | R | `1` disables first-run prompting | `config-prompt.ts:67` |
+| `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` | R | Home + Windows path fallbacks | `dirs.ts:43`, `cli-install.ts:24` |
+| `USER`/`USERNAME` | R | PTY shell `USER` | `pty-manager.ts:1083` |
+| `PATH` | R | CLI-install detection; inherited by children | `cli-install.ts:182` |
+| `SHELL`/`COMSPEC` | R | Preferred PTY shell | `shell.ts:59/43` |
+| `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME` | R | Linux dirs (socket, state, config, usage) | `sidecar-socket.ts:34`, `dirs.ts:18` |
+| `SLAYZONE_CLAUDE/GEMINI/CODEX/ANTIGRAVITY/OPENCODE_*_PATH` | R | Agent settings-path overrides (dev/test) | `dirs.ts:52–96` |
+| `NODE_ENV` | R | `test`=plaintext-cred fallback; `development`=`--dev` hint | `credentials.ts:56` |
+| `SLAYZONE_DISABLE_CLONEFILE` | R | `1` disables APFS clonefile for worktrees | `git-worktree.ts:606` |
+| `PLAYWRIGHT` | R | (test) PTY-create capture instrumentation | `pty-manager.ts:1217` |
+| `CLAUDE_CONFIG_DIR`/`QWEN_CONFIG_DIR`/`OPENCODE_DATA_DIR` | R | Usage-analytics parser dirs | `parsers/*.ts` |
+| `GITHUB_TEST_PROJECT_ID` | R | (test) GitHub Projects V2 id | `handlers.integration.github.test.ts:29` |
+
+> **Dead/removed** (comments only, not live): `SLAYZONE_RUNNER_TRANSPORT_BASE_URL`, `SLAYZONE_DB_DIR`, `SLAYZONE_DB_NAME`, `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS`.
+
+---
+
+## 4. Runner (`packages/apps/runner`)
+
+Connects to a hub over wss, spawns PTYs/processes. Runs supervised (Electron-spawned) OR standalone. **Copies its entire `process.env` into every child**, then layers hub-supplied `env` overrides on top.
+
+### Read (runtime)
+| Var | R/S | Purpose | Default | Site |
+|---|---|---|---|---|
+| `SLAYZONE_HUB_URL` | R | `ws(s)://…/runners` hub endpoint (highest precedence) | none (boot fails if unresolved) | `config.ts:40`, `bin.ts:49` |
+| `SLAYZONE_JOIN_TOKEN` | R | Enrollment token (embeds hub URL + cert pin) | none (optional post-enroll) | `config.ts:41`, `bin.ts:45` |
+| `SLAYZONE_RUNNER_NAME` | R | Runner name shown on hub | `hostname()` | `config.ts:46` |
+| `SLAYZONE_RUNNER_ALLOWED_ROOTS` | R | FS path-jail roots (path-delimiter-separated) | `[]`→`[SLAYZONE_ROOT]` | `config.ts:47` |
+| `SLAYZONE_HUB_CERT_SHA256` | R | sha256 pin of hub TLS leaf (errors on `ws://`) | none (usually from token) | `config.ts:48` |
+| `SLAYZONE_RUNNER_CREDENTIALS_DIR` | R | Credential-store dir override | `<ROOT>/runner` | `config.ts:49`, `bin.ts:52` |
+| `SLAYZONE_MODE` | R | `remote`→force `wss://` (hard error on `ws://`); `local`→loopback ok | `local` | `config.ts:231` |
+| `SLAYZONE_SUPERVISED` | R | `1`=Electron-host-spawned: skip CWD seeding, config.json, prompts | unset (standalone) | `bin.ts:104`, `config.ts:164` |
+| `SLAYZONE_ROOT` | R+S | State anchor (config/creds/default root); standalone SETS to `cwd()` | `cwd` when standalone | set `bin.ts:108`, read `dirs.ts:41` |
+| `SLAYZONE_HOME_DIR` | R | Back-compat anchor alias (E2E sandbox); suppresses CWD default | none | `bin.ts:106`, `dirs.ts:42` |
+| `SLAYZONE_NONINTERACTIVE` | R | `1` disables first-run setup prompt (CI/pipes) | unset | `config-prompt.ts:67` |
+| `HOME`/`USERPROFILE` | R | Home + Windows fallback for `$HOME/.slayzone` last-resort | OS home | `dirs.ts:43`, `credential-store.ts:26` |
+
+### Set
+| Var | Purpose | Site |
+|---|---|---|
+| `SLAYZONE_ROOT` | Seeded to `process.cwd()` for standalone boots | `bin.ts:108` |
+| `WORKTREE_PATH` | Injected into `.slay/worktree-setup.sh` child (worktree dir) | `handlers/git.ts:164` |
+| `REPO_PATH` | Worktree-setup child (repo dir) | `handlers/git.ts:165` |
+| `SOURCE_BRANCH` | Worktree-setup child (`''` if none) | `handlers/git.ts:166` |
+| (first-run) `SLAYZONE_JOIN_TOKEN` / `SLAYZONE_RUNNER_ALLOWED_ROOTS` / `SLAYZONE_RUNNER_NAME` | Interactive setup seeds accepted answers into `process.env` for this boot | `config-prompt.ts:170` |
+
+### Child-process env passthrough
+Runner spreads **entire `process.env`** into every PTY/proc/git-setup child, then applies hub-pushed `env` overrides (arbitrary keys — `PATH`, agent API keys, etc.). PTY sets child `TERM` via `name:'xterm-color'`.
+- PTY: `handlers/pty.ts:48` · proc: `handlers/proc.ts:58` · git: `handlers/git.ts:161`
+
+### Test-only
+`RUNNER_TEST_VAR` (proc env-override fixture) `proc.test.ts:149`. *(`RUNNER_VERSION` is a code constant `'0.0.0'`, not an env var.)*
+
+> **Scope note:** runner does NOT import `@slayzone/terminal` or the `@slayzone/platform` barrel at runtime — so `SLAYZONE_STORE_DIR`/`SLAYZONE_PORT`/`SLAYZONE_HOST` and the agent settings-path vars are **not** reached by the runner (they're hub/app-side). Only ROOT/HOME_DIR/HOME/USERPROFILE anchor it.
+
+---
+
+## Cross-app quick map (common vars)
+
+| Var | Electron | Chromium | Hub | Runner |
+|---|:--:|:--:|:--:|:--:|
+| `SLAYZONE_SUPERVISED` | S | S (unset) | R | R |
+| `SLAYZONE_ROOT` | R | — | R+S | R+S |
+| `SLAYZONE_HOME_DIR` | R+S | — | R | R |
+| `SLAYZONE_STORE_DIR` | R+S | — | R+S | — |
+| `SLAYZONE_DB_PATH` | S | (via sidecar) | R+S | — |
+| `SLAYZONE_HOST` | R+S | S (forced) | R | — |
+| `SLAYZONE_PORT` | R+S | S (forced) | R+S | — |
+| `SLAYZONE_MODE` | R | — | R | R |
+| `SLAYZONE_HUB_URL` | S | — | S | R |
+| `SLAYZONE_RUNNER_NAME` | R+S | — | R | R |
+| `SLAYZONE_RUNNER_ALLOWED_ROOTS` | R+S | — | (inject) | R |
+| `SLAYZONE_NONINTERACTIVE` | R | — | R | R |
+| `ELECTRON_RUN_AS_NODE` | S | S | — | — |
+| `PLAYWRIGHT` | R (test) | — | R (test) | — |
+
+*Generated 2026-07-19 via 4 parallel source scans. Line refs are representative usage sites, not exhaustive.*

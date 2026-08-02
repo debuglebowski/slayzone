@@ -1,0 +1,33 @@
+flowchart TD
+  All([All tasks]) --> Props[Task properties<br/>• Archived?<br/>• Priority<br/>• Status<br/>• Pinned?<br/>• Open tab?<br/>• Active session?<br/>• Temporary?]
+  Props --> F1{Archived?}
+  F1 -->|yes| D1[Drop]
+  F1 -->|no| F2{Priority<br/>matches filter?}
+  F2 -->|no| D2[Drop]
+  F2 -->|yes| F3{Status matches filter?}
+  F3 -->|yes| F4
+  F3 -->|no| B1{Pinned?}
+  B1 -->|yes| F4
+  B1 -->|no| B2{Active session?}
+  B2 -->|yes| F4
+  B2 -->|no| B3{Open tab<br/>and toggle on?}
+  B3 -->|yes| F4
+  B3 -->|no| D3[Drop]
+  F4{Temporary?} -->|no| F5
+  F4 -->|yes| B4{Temporary hidden?}
+  B4 -->|no| F5
+  B4 -->|yes| B5{Open tab<br/>and toggle on?}
+  B5 -->|yes| F5
+  B5 -->|no| D4[Drop]
+  F5{Only active on?} -->|no| Post
+  F5 -->|yes| B6{Pinned or<br/>active session?}
+  B6 -->|yes| Post
+  B6 -->|no| B7{Open tab<br/>and toggle on?}
+  B7 -->|yes| Post
+  B7 -->|no| D5[Drop]
+  Post[Pull in parents] --> Visible([Visible])
+
+  classDef drop fill:#7f1d1d,color:#fff
+  classDef state fill:#1e3a8a,color:#fff
+  class D1,D2,D3,D4,D5 drop
+  class B1,B2,B3,B4,B5,B6,B7 state

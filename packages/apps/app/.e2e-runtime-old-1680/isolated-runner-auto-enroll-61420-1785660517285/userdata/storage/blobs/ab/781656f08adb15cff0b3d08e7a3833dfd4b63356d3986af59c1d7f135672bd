@@ -1,0 +1,28 @@
+# Layout 2 — Full-width tabs (Linear/Jira style)
+
+Rich header carries identity + labels + actions. Everything else is a tab. One thing on screen at a time.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────┐
+│  Hammer drill                                           [Publish] [Edit] [⋮]   │
+│  Tools · v3 Draft · ◉ heavy ◉ rental [+]                                       │
+├────────────────────────────────────────────────────────────────────────────────┤
+│  Overview │ Connections (4) │ Versions (3) │ Notes (2) │ Tasks (1) │ Activity  │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  (Overview)                                                                    │
+│  Name          Hammer drill                                                    │
+│  Power         1100 W                                                          │
+│  Weight        2.9 kg                                                          │
+│  Description   Full-width text, no card chrome                                 │
+│                                                                                │
+│  (Connections tab → grouped relation lists, full width)                        │
+│  (Versions tab   → timeline w/ publish/discard/archive controls)               │
+│  (Notes/Tasks/Activity → existing panels, full width)                          │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Pros:** scales to many fields/relations; counts in tab labels give overview; dead simple responsive story.
+**Cons:** nothing co-visible — constant tab switching; hides connected items (often the point of a graph tool).
+**Best when:** instances are content-heavy and each section is used in isolation.

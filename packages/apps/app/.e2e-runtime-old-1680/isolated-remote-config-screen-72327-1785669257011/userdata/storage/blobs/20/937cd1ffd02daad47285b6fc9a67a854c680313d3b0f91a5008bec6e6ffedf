@@ -1,0 +1,82 @@
+# PES-78 — Clear desk and clear screen (Drive-only)
+
+**Control**: PES-78 · ISO 27001:2022 A.7.7 · Vanta · Domain: `PHYSICAL_ENVIRONMENTAL_SECURITY`
+**Owner (per Vanta sheet)**: unset → now Kalle
+**Cross-ref**: END-40 (User endpoint devices, A.8.1)
+*All findings below sourced from Google Drive only.*
+
+---
+
+## Drive sources
+
+### 1. Vanta controls export — `controls` sheet
+- **id**: `1n9ouTdoptTOYKq5tLRsJY1Y7xec1ljUPrLrnW4kkK9A`
+- **modified**: 2025-06-08
+- **link**: https://docs.google.com/spreadsheets/d/1n9ouTdoptTOYKq5tLRsJY1Y7xec1ljUPrLrnW4kkK9A/edit
+
+| Field | PES-78 | END-40 |
+|---|---|---|
+| Name | Clear desk and clear screen | User endpoint devices |
+| ISO 27001:2022 | A.7.7 | A.8.1 |
+| SOC 2 | *(empty — out of SOC 2 scope)* | *(empty)* |
+| Owner | *(empty)* | *(empty)* |
+| **Evidence status** | **OK** | **Needs evidence** |
+| "Fixed with training/encryption/ISMS/SOA?" | *(empty)* | Yes |
+
+The Drive snapshot says **PES-78 already has evidence**. Task brief says "Needs evidence" — sheet is from June 2025, may be stale vs. current Vanta state.
+
+### 2. AUP — `[Normain] Information Security Policy (AUP)`
+
+| Variant | Drive id | Modified | Status |
+|---|---|---|---|
+| Signed PDF | `1To3O2MgVbfdv1wISHBAQWimAmUNtbHMd` | 2025-11-05 | **v1.0.0**, Written by Ryan Rich, Approved by Sara Landfors. Auditor-accepted (ISO Nov-Dec 2025). |
+| Working docx | `1pN02_jni4Wm-cu0Buh2H4NES7Q_uBqey` | 2025-06-11 | Source-of-truth working doc. |
+| Copy docx | `1XZ1_FvCdcb5eeENwvGq1qHjwuROJQHSS` | 2025-10-15 | Stale copy; ignore. |
+
+**Verbatim from signed PDF (Drive-extracted)**:
+
+> **Mobile Device Policy**
+> – Devices must be locked with a password (or equivalent control such as biometric) protected screensaver or screen lock after 15 minutes of non-use.
+> – Devices must be locked whenever left unattended.
+>
+> **Clear Screen Clear Desk Policy**
+> Users shall not leave confidential materials unsecured on their desk or workspace and will ensure that screens are locked when not in use, especially in any public areas.
+>
+> **Remote Working and Access Policy**
+> – Company rules shall be followed while working remotely including clear desk protocols, printing, disposal of assets, and information security event reporting…
+
+Working docx wording matches signed PDF exactly.
+
+### 3. END-40 / Dennis screenlock test
+Drive search across all shared drives returned nothing — no screenlock policy doc, MDM screenshot, awareness-test artifact, or "Dennis" file related to screen lock. END-40 evidence is not in Drive (likely lives in Vanta itself or hasn't been collected yet).
+
+---
+
+## Absolutely minimal effort
+
+**If Vanta still says PES-78 needs evidence** (~2 min):
+1. In Vanta PES-78 → attach `[Normain] Information Security Policy (AUP).pdf` (Drive id `1To3O2MgVbfdv1wISHBAQWimAmUNtbHMd`, signed v1.0.0, Nov 2025). Done.
+
+**If Vanta now matches the Drive sheet (`OK`)** (~30 sec):
+1. Close the task.
+
+That's it.
+
+---
+
+## Skipped (not required for "minimal")
+- AUP wording tightening — auditor accepted v1.0.0 as-is.
+- Adding clear-desk para to Physical Security Policy — cosmetic.
+- Separate Dennis screenlock test artifact — overkill for a control already at "OK" in last snapshot.
+
+---
+
+## Actions taken (this session)
+- Searched Drive across all shared drives for AUP / ISMS / Clear / screenlock / Dennis evidence.
+- Downloaded signed AUP PDF + working docx from Drive; extracted clear-desk/screen wording to verify.
+- Read PES-78 + END-40 rows from Drive `controls` spreadsheet.
+- **No Drive files modified. No Vanta uploads. No browser interaction (slay panel still inaccessible).**
+
+## Open questions
+- Vanta UI: PES-78 still `OK` (matching Drive snapshot) or `Needs evidence` (per task brief)?
+- If needs evidence: signed AUP PDF accepted, or fresh artifact required (e.g. screenshot, training-completion log)?

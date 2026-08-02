@@ -1,0 +1,19 @@
+# Members
+
+Purpose: who's here — faces and reachability. Exists for orientation
+(new joiners, growing orgs), not administration; role management
+stays on /members.
+
+| Option | Category | Values / default | Notes |
+|---|---|---|---|
+| size / position | layout | x,y,w,h (default 6x4) | |
+| variant | layout | avatar grid / directory rows | |
+| grid columns | layout | auto / 3 / 4 | grid variant |
+| title | display | text | |
+| icon | display | icon name / none | |
+| showToolbar | display | on / off | search box |
+| fields | display | role / email / joined toggles | rows variant |
+| sort | display | name / role / joined | |
+| limit | display | none / n + "view all" | |
+| role | filter | all / role[] (proposed) | |
+| status | filter | active / invited / all (proposed) | |

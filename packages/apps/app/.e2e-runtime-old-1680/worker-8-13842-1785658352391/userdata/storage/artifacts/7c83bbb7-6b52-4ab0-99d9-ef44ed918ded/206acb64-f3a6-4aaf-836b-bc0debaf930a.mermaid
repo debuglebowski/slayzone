@@ -1,0 +1,27 @@
+flowchart TD
+    subgraph main["Electron Main Thread"]
+        ipc["ipcMain.handle 200+ handlers"]
+        rest["Express REST API"]
+        handlers["Domain Handlers"]
+        db["better-sqlite3 SYNCHRONOUS"]
+        ipc --> handlers
+        rest --> handlers
+        handlers --> db
+    end
+
+    subgraph diag["Diagnostics same thread"]
+        diagconn["better-sqlite3 diag"]
+        diagfile[("diagnostics.sqlite")]
+        diagconn --> diagfile
+    end
+
+    subgraph cli["CLI separate process"]
+        clidb["node:sqlite DatabaseSync"]
+        notify["POST /api/notify"]
+        clidb --> notify
+    end
+
+    db --> mainfile[("slayzone.sqlite")]
+    handlers --> diagconn
+    notify --> rest
+    clidb --> mainfile

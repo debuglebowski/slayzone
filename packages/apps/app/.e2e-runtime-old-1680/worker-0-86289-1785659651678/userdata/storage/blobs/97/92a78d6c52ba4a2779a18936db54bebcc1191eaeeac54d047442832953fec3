@@ -1,0 +1,135 @@
+# Attention widget — 5 design directions
+
+The current `attention` widget rolls up the **decay/momentum band** engine
+(`fresh · warm · cooling · cold`, or `heating · steady · cooling`) and lists a
+"stale queue" with `Nd quiet`. Two variants today: `bands` (badge rollup) and
+`strip` (heat bar). Below are 5 distinct takes on the same data.
+
+Shared data already available: per-band counts (`bandRollup`), `daysOf` quiet
+duration, the stale-instance queue, and optional pre-filter `conditions`.
+
+---
+
+## 1 · Heat Strip Rollup  *(evolves the current `strip`)*
+
+Proportional band bar across the top → instant read of overall health, then the
+worst-N below it. Pure variant — no new data needed.
+
+```
+┌─ ⚠ Needs attention ───────────────────────┐
+│ ████████████████░░░░░░░▓▓▓▓▒▒   48 total   │
+│ ●24 fresh  ●11 warm  ●8 cooling  ●5 cold   │
+│ ─────────────────────────────────────────  │
+│  Acme Corp renewal             18d quiet ● │
+│  Beta deal — Q3                14d quiet ● │
+│  Northwind onboarding          12d quiet ● │
+│  Zephyr pilot                   9d quiet ◐ │
+└────────────────────────────────────────────┘
+```
+
+**Best for:** a wide header tile. Glance = "mostly green, a few going cold."
+
+---
+
+## 2 · Triage Inbox  *(action-first)*
+
+Drop the rollup, lead with the queue. Each row = band dot + age + inline
+actions. Turns "things decaying" into "things to do now."
+
+```
+┌─ 🔥 Triage  ·  8 cooling, 5 cold ──────────┐
+│ ● Acme Corp renewal      18d  [nudge] [↪]  │
+│ ● Beta deal — Q3         14d  [nudge] [↪]  │
+│ ● Northwind onboarding   12d  [nudge] [↪]  │
+│ ◐ Zephyr pilot            9d  [nudge] [↪]  │
+│ ◐ Helix expansion         7d  [nudge] [↪]  │
+│ ──────────────────────────────────────────│
+│             ▸ 8 more cooling…              │
+└────────────────────────────────────────────┘
+```
+
+**Best for:** a daily-work tile. **Needs new wiring:** the inline `nudge`/snooze
+action implies a mutation (touch / assign-task), not just navigation.
+
+---
+
+## 3 · Pulse Score  *(single health number)*
+
+Collapse everything to one freshness % (share of items in healthy bands) with a
+30-day sparkline + delta, then a thin band legend. Reads like a `metric`/`goal`.
+
+```
+┌─ Pipeline health ──────────────────────────┐
+│     ╭───────╮                               │
+│     │  73%  │   fresh      ▁▂▄▆▅▇▇  30d      │
+│     ╰───────╯   ▲ +6% vs last week          │
+│                                             │
+│  ●24 fresh  ●11 warm  ●8 cooling  ●5 cold   │
+└─────────────────────────────────────────────┘
+```
+
+**Best for:** a small KPI tile next to other metrics. **Needs new data:** the
+sparkline/delta needs a band-history series (today's rollup is point-in-time).
+
+---
+
+## 4 · Band Columns  *(mini-kanban of states)*
+
+Spatialize the bands as columns; each is a short stack of names. Shows *which*
+items sit in *which* state without reading numbers — and hints at a future
+drag-to-touch.
+
+```
+┌─ Attention by band ────────────────────────┐
+│ FRESH 24 │ WARM 11  │ COOLING 8 │ COLD 5    │
+│ ──────── │ ──────── │ ───────── │ ────────  │
+│ Acme     │ Helix    │ Beta deal │ Vortex    │
+│ Globex   │ Zephyr   │ Northwind │ Initech   │
+│ Stark    │ Wayne    │ Umbrella  │ Tyrell    │
+│ +21 …    │ +8 …     │ +5 …      │ +2 …      │
+└─────────────────────────────────────────────┘
+```
+
+**Best for:** a wide tile where you scan by name. Degrades poorly when narrow
+(4 columns) — would need a stacked fallback.
+
+---
+
+## 5 · Neglect Leaderboard  *(ranked by staleness)*
+
+Forget bands as the frame; rank purely by `daysQuiet` descending, one bar per
+row scaled to the worst. A bar chart of neglect — the eye goes straight to the
+longest bar.
+
+```
+┌─ Most neglected ───────────────────────────┐
+│ Acme Corp renewal   ████████████████  18d  │
+│ Beta deal — Q3      █████████████     14d  │
+│ Northwind onboard   ███████████       12d  │
+│ Zephyr pilot        ████████           9d  │
+│ Helix expansion     ██████             7d  │
+│ Vortex account      ████               5d  │
+└─────────────────────────────────────────────┘
+```
+
+**Best for:** "who have we ignored longest." Bar color can still encode band.
+Pure variant — reuses `daysOf` + stale queue, no new data.
+
+---
+
+## At a glance
+
+| # | Direction          | Frame        | New work?                         |
+|---|--------------------|--------------|-----------------------------------|
+| 1 | Heat Strip Rollup  | health-first | none (variant)                    |
+| 2 | Triage Inbox       | action-first | mutation action (nudge/snooze)    |
+| 3 | Pulse Score        | one number   | band-history series for sparkline |
+| 4 | Band Columns       | spatial      | narrow fallback                   |
+| 5 | Neglect Leaderboard| ranking      | none (variant)                    |
+
+## Forks to resolve
+
+- Ship as more `variant` values on the existing widget, or split out a new type?
+- #2 wants a write action — in scope, or keep attention read-only?
+- #3 needs persisted band history — worth a tick-logged series, or skip?
+- Frame bands (1,3,4) vs frame raw staleness (2,5) — which matches the mental model?

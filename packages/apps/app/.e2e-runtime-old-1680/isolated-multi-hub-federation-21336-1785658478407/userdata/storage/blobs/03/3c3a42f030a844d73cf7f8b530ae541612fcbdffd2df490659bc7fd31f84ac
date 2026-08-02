@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.45 -apple-system,system-ui,sans-serif;color:#18181b;background:#f4f4f5;padding:28px}
+.caption{max-width:960px;margin:0 auto 10px;color:#52525b;font-size:12px}
+.caption b{color:#18181b}
+.app{max-width:960px;margin:0 auto;background:#fff;border:1px solid #e4e4e7;border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.titlebar{padding:14px 18px;border-bottom:1px solid #ececef;display:flex;align-items:center;gap:10px}
+h1{font-size:15px;font-weight:600}
+.count{color:#9ca3af;font-size:12px}
+.spacer{flex:1}
+.ghost{border:1px dashed #d4d4d8;background:#fff;border-radius:6px;padding:4px 10px;font-size:12px;color:#52525b}
+.toolbar{display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid #ececef;background:#fcfcfd;flex-wrap:wrap}
+.search{display:flex;align-items:center;gap:6px;border:1px solid #e4e4e7;border-radius:6px;padding:5px 10px;color:#a1a1aa;font-size:12.5px;background:#fff;width:200px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #dbe3f8;background:#eef2fe;color:#3b4f9e;border-radius:6px;padding:4px 8px;font-size:12px}
+.chip .x{color:#8896c9;font-weight:600;cursor:default}
+.chip b{font-weight:600}
+.match{margin-left:4px;display:inline-flex;border:1px solid #e4e4e7;border-radius:6px;overflow:hidden;font-size:11px}
+.match span{padding:4px 8px;color:#71717a;background:#fff}
+.match .on{background:#18181b;color:#fff}
+.clear{font-size:12px;color:#9ca3af;margin-left:2px}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#71717a;text-align:left;padding:8px 14px;border-bottom:1px solid #ececef;background:#fafafa;font-weight:500}
+td{padding:9px 14px;border-bottom:1px solid #f1f1f4}
+tr:last-child td{border-bottom:none}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:500}
+.active{background:#dcfce7;color:#166534}
+.nego{background:#fef9c3;color:#854d0e}
+.lbl{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#fae8ff;color:#86198f;margin-right:4px}
+.owner{display:inline-flex;align-items:center;gap:6px}
+.av{width:18px;height:18px;border-radius:999px;background:#e0e7ff;color:#4338ca;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center;font-weight:600}
+</style></head><body>
+<div class="caption"><b>Layout 1 — Inline chip bar</b> (Linear-style). "+ Filter" appends chips into a persistent toolbar row; all/any toggle inline; chips removable per-condition. Filter state mirrors into URL params.</div>
+<div class="app">
+  <div class="titlebar"><h1>Deals</h1><span class="count">3 of 7 shown</span><div class="spacer"></div><span class="ghost">⌕ search…</span></div>
+  <div class="toolbar">
+    <span class="chip"><b>Status</b> is Active <span class="x">×</span></span>
+    <span class="chip"><b>Amount</b> &gt; 50,000 <span class="x">×</span></span>
+    <span class="chip"><b>Labels</b> has priority <span class="x">×</span></span>
+    <span class="ghost">＋ Filter</span>
+    <span class="match"><span class="on">All</span><span>Any</span></span>
+    <span class="clear">Clear all</span>
+  </div>
+  <table>
+    <tr><th>Name</th><th>Status</th><th>Amount</th><th>Close date</th><th>Owner</th><th>Labels</th></tr>
+    <tr><td>Acme renewal</td><td><span class="pill active">Active</span></td><td>$82,000</td><td>Jul 1, 2026</td><td><span class="owner"><span class="av">M</span>Mia</span></td><td><span class="lbl">priority</span></td></tr>
+    <tr><td>Globex expansion</td><td><span class="pill active">Active</span></td><td>$54,500</td><td>Jun 18, 2026</td><td><span class="owner"><span class="av">T</span>Theo</span></td><td><span class="lbl">priority</span><span class="lbl">q3</span></td></tr>
+    <tr><td>Umbrella upsell</td><td><span class="pill active">Active</span></td><td>$61,200</td><td>Aug 9, 2026</td><td><span class="owner"><span class="av">R</span>Ravi</span></td><td><span class="lbl">priority</span></td></tr>
+  </table>
+</div>
+</body></html>

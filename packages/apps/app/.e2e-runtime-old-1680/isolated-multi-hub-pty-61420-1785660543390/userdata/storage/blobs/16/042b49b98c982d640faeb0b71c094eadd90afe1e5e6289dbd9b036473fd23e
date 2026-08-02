@@ -1,0 +1,31 @@
+flowchart TB
+    subgraph model["Shared filter model (engine/domain/types.ts)"]
+        COND["FilterCondition\nfield + op + value\n(extends SidebarCondition: eq, hasLabel)\nnew ops per field kind:\ntext: contains/empty · number,money,date: gt/lt/between\nenum,user: in/notIn · bool: is\nlabels: hasLabel/notHasLabel · computed: bandIs"]
+        GROUP["match: all | any\n(flat list, single level)"]
+    end
+
+    subgraph eval["One client-side evaluator (web/src/lib/filters.ts)"]
+        MATCH["matchInstance(instance, conditions, fields)\nextracted from widgetAggregations.ts\ntype-aware coercion, multiple:true array-aware"]
+    end
+
+    subgraph consumers["Consumers"]
+        CV["ConceptView FilterBar\nchips UI, replaces JSON.stringify filter\nstate in URL params"]
+        LW["Dashboard widgets\nList/Metric/Breakdown/Attention\n(today: own matchInstance, eq+hasLabel only)"]
+        SB["Sidebar list sources\n(conditions persisted in view body JSONB,\nopaque to server -> no migration)"]
+    end
+
+    COND --> MATCH
+    GROUP --> MATCH
+    MATCH --> CV
+    MATCH --> LW
+    MATCH --> SB
+
+    subgraph later["Deferred (separate decisions)"]
+        REL["relation-field filters\n(state lacks relation data;\nneeds relations join or relatedTo param)"]
+        SRV["server-side filtering + pagination\nQueryService state @> only does equality;\nrange ops need expr indexes - only worth it\nonce lists outgrow full-load (limit 100 today)"]
+        SAVED["saved named views per concept"]
+    end
+
+    MATCH -.-> REL
+    MATCH -.-> SRV
+    CV -.-> SAVED

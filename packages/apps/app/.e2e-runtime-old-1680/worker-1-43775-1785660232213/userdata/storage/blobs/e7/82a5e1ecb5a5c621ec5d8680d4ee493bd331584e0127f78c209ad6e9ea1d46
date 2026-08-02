@@ -1,0 +1,163 @@
+# Gantt Widget — 5 Design Suggestions
+
+Five distinct directions for the dashboard Gantt widget. Each lists the layout (ASCII),
+the data/config it leans on, and when to reach for it. They're not mutually exclusive —
+several could ship as `display` modes on the same widget config.
+
+Current baseline: grouped swimlane rows, 144px label rail, time axis (day/week/month),
+today line, milestone diamonds, optional progress fill, `window` fit/90d/quarter.
+
+---
+
+## 1. Classic Swimlane (refined)
+
+The current model, tightened: collapsible groups, inline progress %, a clear today
+marker, and light dependency hints. Safe default — most "what's happening when" reads.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Roadmap                                  [ Group: Owner ▾ ]  [ Week ▾ ]   ⚙   │
+├──────────────────┬──────────────────────────────────────────────────────────┤
+│                  │  Jun         Jul         Aug         Sep        ┊ now      │
+│                  │ ─────────────────────────────────────────────── ┊ ──────   │
+│ ▼ Alice          │                                                 ┊          │
+│    Design system │  ▓▓▓▓▓▓▓▓░░░░░  62%                              ┊          │
+│    Onboarding    │         ▓▓▓▓▓▓▓▓▓▓▓▓  done                       ┊          │
+│ ▼ Bob            │                                                 ┊          │
+│    API gateway   │             ▓▓▓▓▓▓░░░░░░░  40%                   ┊          │
+│    Beta launch   │                                    ◆ milestone  ┊          │
+│ ▶ Carol (3)      │                                                 ┊          │
+└──────────────────┴──────────────────────────────────────────────────────────┘
+   ▓ complete   ░ remaining   ◆ milestone   ┊ today
+```
+
+- **Data:** `startField`, `endField`, `groupBy`, `progressField`, `barLabelField`.
+- **New:** collapse/expand per group (`▼/▶` + count), progress % printed at bar end.
+- **Best for:** the general case — a handful of owners/phases, exact dates matter.
+
+---
+
+## 2. Now / Next / Later Roadmap Board
+
+Drops precise pixels-per-day for strategic bucketing. Items become cards in time
+columns. Great when stakeholders care about *sequence and theme*, not exact dates.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Product Roadmap                                       [ Buckets: Quarter ▾ ]  │
+├───────────────────┬───────────────────┬───────────────────┬──────────────────┤
+│  NOW · Q2         │  NEXT · Q3        │  LATER · Q4       │  BACKLOG         │
+├───────────────────┼───────────────────┼───────────────────┼──────────────────┤
+│ ┌───────────────┐ │ ┌───────────────┐ │ ┌───────────────┐ │ ┌──────────────┐ │
+│ │ Design system │ │ │ Billing v2    │ │ │ Mobile app    │ │ │ SSO          │ │
+│ │ ▓▓▓▓▓▓░░ 62%  │ │ │ ░░░░░░░░  0%   │ │ │ ░░░░░░░░  0%   │ │ │ —            │ │
+│ │ ● Alice       │ │ │ ● Bob         │ │ │ ● Carol       │ │ │ ● unassigned │ │
+│ └───────────────┘ │ └───────────────┘ │ └───────────────┘ │ └──────────────┘ │
+│ ┌───────────────┐ │ ┌───────────────┐ │                   │                  │
+│ │ API gateway   │ │ │ Beta launch ◆ │ │                   │                  │
+│ │ ▓▓▓░░░░░ 40%  │ │ │ Sep 14        │ │                   │                  │
+│ │ ● Bob         │ │ └───────────────┘ │                   │                  │
+│ └───────────────┘ │                   │                   │                  │
+└───────────────────┴───────────────────┴───────────────────┴──────────────────┘
+```
+
+- **Data:** bucket by `quarter(startField)`, or by an enum field ("Now/Next/Later").
+- **Config:** `bucketBy: "quarter" | "month" | enumField`; cards show owner + progress.
+- **Best for:** exec/roadmap dashboards, fuzzy dates, drag-between-columns later.
+
+---
+
+## 3. Compact Density Timeline
+
+One thin row per item, no group gaps — fits 30+ rows in the same height. A roadmap
+"heat strip" with a minimap for scrubbing. For concepts with *many* dated instances.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ All work (47)                                       [ Fit ▾ ]   [ Compact �... │
+├────────────┬────────────────────────────────────────────────────────────────┤
+│ Design sys ┃ ▓▓▓▓▓▓▓▓░░░                                          ┊           │
+│ Onboarding ┃      ▓▓▓▓▓▓▓▓▓▓▓                                     ┊           │
+│ API gatewy ┃          ▓▓▓▓▓░░░░░                                  ┊           │
+│ Search     ┃              ▓▓▓░░░░░░░                              ┊           │
+│ Billing v2 ┃                       ░░░░░░░░░                      ┊           │
+│ Mobile     ┃                            ▓▓▓▓▓▓▓░░░                ┊           │
+│ Beta ◆     ┃                                       ◆              ┊           │
+│ SSO        ┃                                          ░░░░░░░     ┊           │
+│  …39 more  ┃                                                      ┊           │
+├────────────┴────────────────────────────────────────────────────────────────┤
+│ minimap ▏▁▂▃▅▇█▇▅▃▂▁▁▂▃▂▁  [▒▒▒▒░░░░░░░░░░░░░░░░░░]  ◀ drag to scrub ▶          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Data:** same spans, row height ~50% of classic; labels truncated, full on hover.
+- **Config:** density toggle; minimap shows item-count-over-time + viewport window.
+- **Best for:** dense backlogs / large concepts where classic lanes overflow.
+
+---
+
+## 4. Dependency / Critical-Path
+
+Bars plus connector arrows; the critical path is highlighted and slack is dimmed.
+Answers "what's blocking what" rather than just "what's when".
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Launch plan — critical path 31d                          [ Deps: on ▾ ] [Day▾]│
+├──────────────────┬──────────────────────────────────────────────────────────┤
+│                  │  W1      W2      W3      W4      W5      W6     ┊ now       │
+│ Spec             │  ███┓                                          ┊           │
+│ Design           │     ┗━▶███████┓                                ┊           │
+│ Build API        │             ┗━▶█████████┓                      ┊           │
+│ Build UI         │             ┗━▶▒▒▒▒▒▒┄┄┄┄┊  (3d slack)         ┊           │
+│ Integrate        │                        ┗━▶██████┓              ┊           │
+│ Launch ◆         │                                 ┗━▶◆           ┊           │
+└──────────────────┴──────────────────────────────────────────────────────────┘
+   █ critical path   ▒ has slack   ┄ free float   ━▶ depends-on
+```
+
+- **Data:** needs a relation/dependency field (`dependsOn`); compute longest path.
+- **Config:** `dependencyField`; toggle arrows; auto-highlight critical chain.
+- **Best for:** projects where sequencing risk matters; fewer, well-linked items.
+
+---
+
+## 5. Resource Load (capacity view)
+
+Swimlanes = assignees; overlapping bars stack and an over-allocation strip flags
+when someone is double-booked. Turns the Gantt into a staffing/capacity read.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Team load                              [ Lane: Assignee ▾ ]   [ Week ▾ ]      │
+├──────────────────┬──────────────────────────────────────────────────────────┤
+│                  │  Jun        Jul        Aug        Sep       ┊ now          │
+│ ● Alice    ▓▓▓▓  │  ▓▓▓▓▓▓▓▓                                   ┊   load 1.0   │
+│            load  │      ▓▓▓▓▓▓▓▓▓▓                             ┊              │
+│            ⚠ over│  ◀══ overlap Jun 24–Jul 2 ══▶                ┊             │
+│ ● Bob      ▓▓    │           ▓▓▓▓▓▓                            ┊   load 0.6   │
+│            load  │                     ▓▓▓▓▓                   ┊              │
+│ ● Carol    ░     │                          ▓▓▓               ┊   load 0.3   │
+│ ● Unassigned     │  ▓▓▓   ▓▓     ▓▓▓▓                          ┊   3 items    │
+└──────────────────┴──────────────────────────────────────────────────────────┘
+   ▓ allocated   ⚠ over-allocated (overlapping bars)   load = Σ active / capacity
+```
+
+- **Data:** `groupBy` = user field; detect overlapping spans per lane.
+- **Config:** `capacityPerLane` (default 1 concurrent); `⚠` strip on overlap; load badge.
+- **Best for:** capacity planning, spotting double-booked owners across the timeline.
+
+---
+
+## Quick comparison
+
+| # | Direction          | Date precision | Density   | Killer use-case            |
+|---|--------------------|----------------|-----------|----------------------------|
+| 1 | Classic swimlane   | exact          | medium    | general "what's when"      |
+| 2 | Now/Next/Later     | bucketed       | low       | exec roadmap, fuzzy dates  |
+| 3 | Compact density    | exact          | very high | large backlogs             |
+| 4 | Dependency / CP    | exact          | low–med   | sequencing & blockers      |
+| 5 | Resource load      | exact          | medium    | capacity / staffing        |
+
+**Suggestion:** ship #1 as the refined default and add #2/#5 as `display` modes —
+both reuse the existing span computation, only the layout changes.

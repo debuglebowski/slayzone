@@ -1,0 +1,22 @@
+# Tasks
+
+Purpose: the work queue on the canvas — tasks where you already look,
+instead of a separate tab. Exists because dashboards that only inform
+get ignored; one that holds your todo gets opened every morning.
+
+| Option | Category | Values / default | Notes |
+|---|---|---|---|
+| size / position | layout | x,y,w,h (default 8x6) | hero-friendly |
+| variant | layout | full surface / checklist | checklist = no chrome |
+| title | display | text | |
+| icon | display | icon name / none | |
+| showToolbar | display | on / off | runtime assignee switcher |
+| showComposer | display | on / off | inline "+ add task" |
+| showDone | display | on / off | done group collapsed |
+| group by | display | status (default) / priority / none | |
+| row meta | display | due / priority / labels / assignee toggles | |
+| limit | display | none / n | checklist variant |
+| assignee | filter | all / me / none | default scope |
+| status | filter | status[] (proposed) | |
+| label | filter | label[] (proposed) | |
+| due | filter | any / overdue / this week (proposed) | |

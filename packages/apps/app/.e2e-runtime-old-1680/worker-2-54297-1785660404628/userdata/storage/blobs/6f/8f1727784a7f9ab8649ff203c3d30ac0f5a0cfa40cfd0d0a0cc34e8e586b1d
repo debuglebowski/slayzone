@@ -1,0 +1,15 @@
+# UC06 — Multimodal Evidence Extraction
+
+**Persona**: Advisory or forensic analyst working with messy, mixed-format source material.
+
+**Scenario**: Source material includes a scanned old annual report (image-only PDF), a photographed whiteboard with figures, an Excel workbook where charts are pasted images, and handwritten analyst notes. Pull specific facts from each.
+
+**Question types**:
+- OCR-grade text extraction from scans
+- Handwriting recognition
+- Image-only chart interpretation
+- Cross-modal reconciliation (handwritten notes vs typed report)
+
+**Sample docs**: Scanned 1990s annual report from a public archive, whiteboard photo, multi-tab Excel with chart-as-image, 2–3 pages of original handwritten analyst notes.
+
+**What this tests**: format coverage — exposes tools that can't ingest non-text inputs cleanly.

@@ -1,0 +1,32 @@
+# Runbook — Microsoft Marketplace Customer Offboarding
+
+Owner: Engineering Lead. Reviewer: Security Delegate. Reviewed: 2026-05-05.
+
+Triggered when a Private-Offer Marketplace customer winds down. Microsoft handles the customer-facing cancellation, billing, and notification. This runbook covers what's left: technical decommission and audit evidence.
+
+Default retention: **90 days** from cancellation (Data Management Policy).
+
+## Inputs
+- Customer identity (tenant slug, subscription).
+- Proof of wind-down.
+- Security Delegate confirms no legal hold.
+
+## Steps
+
+1. **Cancellation recorded.** The customer's wind-down is reflected in Normain's records.
+2. **Access blocked (T+0).** The customer can no longer reach the service. Timestamp recorded.
+3. **Retention hold (T+0 → T+90).** Customer data preserved, service offline. Reinstatement still possible.
+4. **Customer data destroyed (T+90).** All customer data is irrecoverably deleted from the application, supporting infrastructure, and the tenant registry. A final encrypted snapshot is filed in audit evidence with a planned purge date.
+5. **Audit evidence filed.** Proof of each step is collected in the audit folder.
+6. **Closed out.** Vanta updated.
+
+## Evidence
+Filed in `05 - InfoSec / 04 - Auditing / decommission-{slug}-{YYYYMMDD}/`: proof of wind-down, timestamps for each step, deletion confirmations, snapshot location and purge date, operator and reviewer signatures.
+
+## Roles
+- Engineering Lead — executes steps 2 and 4; assembles evidence.
+- Security Delegate — legal-hold check, sign-off.
+- DPO — GDPR confirmation.
+
+## Review
+Annual, or on change to the Data Management Policy or the tenant decommission process.

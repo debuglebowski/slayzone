@@ -1,0 +1,60 @@
+# #18 — Vulnerability scan (document) — investigation
+
+**Vanta doc:** [Vulnerability scan](https://app.eu.vanta.com/c/normain.com/documents/vulnerability-scan)
+**Frameworks:** ISO 27001:2022, SOC 2
+**Owner:** Kalle Hansson
+**Recurrence:** quarterly · **Time sensitivity:** Upload during SOC 2 observation window
+
+---
+
+## Overview
+
+**Doc is already current. No action required for the upcoming audit.**
+
+The Vanta "Vulnerability scan" doc was renewed by Kalle on 2026-04-30 (today) with a fresh GitHub Security → Dependabot alerts screenshot. Status: **OK**. Renew by: **Jul 30, 2026**. The parent task brief said "Overdue Dec 12 2025" — that was stale.
+
+## Situation
+
+Vanta's literal instruction for this slot:
+
+> Provide a screenshot of the findings from your most recent periodic vulnerability scans. This evidence should highlight any identified vulnerable assets within your system. Ensure the screenshot is clear and includes relevant details for audit purposes.
+
+Latest version on the doc (verified via slay browser at `/documents/vulnerability-scan?tab=results`):
+
+- **Title:** Screenshot 2026-04-30 at 15.36.16.png
+- **Description:** "Screenshot of GitHub Security → Dependabot alerts for normainofficial/normain on 2026-04-30, post PR #1986 merge. Source feed for Vanta's GitHub Repo vulnerability tests; ZAP and Trivy weekly scans (Mon 02:00/06:00 UTC) feed the same GitHub Security view."
+- **Completed by:** Kalle Hansson on Apr 30, 2026
+- **Expires:** Jul 30, 2026
+- 2 prior completed versions in history
+
+Evidence matches Vanta's instruction (screenshot of findings from recent scan). Quarterly cadence aligns with Ops Sec Policy v1.0.0 ("at least quarterly"). The underlying scan programs (ZAP, Trivy, CodeQL, Dependabot) are all live and verified — see [VPM-2 investigation](#) for full technical state.
+
+## Solution
+
+Nothing to do for the audit week. Doc is OK and audit-fresh.
+
+Optional follow-ups (not blocking #18):
+
+- Schedule a one-time agent for ~Jul 23, 2026 to renew before Jul 30 expiry (one week of slack).
+- Sibling docs in the same bucket — sanity-checked while here:
+  - **Penetration test report** — status: "Due soon", renew May 16, 2026 — owned by S (someone else). Not #18's scope but close to audit window.
+  - **Sample of remediated vulnerabilities** — OK, renew Jul 30, 2026.
+  - **A process exists to identify and prioritize security vulnerabilities** — OK, renew Jul 31, 2026.
+
+## Actions taken
+
+- Located actual Vanta doc via slay browser (search "scan" in Documents). Confirmed name = "Vulnerability scan", not "Vulnerability scan output" or similar.
+- Verified latest version metadata + uploader + expiry directly from Vanta UI.
+- Cross-checked Vanta's instruction text against the uploaded evidence — match.
+- Searched Drive for any newer scan artifacts that could replace/supplement (none needed; doc is already current).
+- **Did not modify** any Vanta doc, Drive file, or GitHub workflow.
+
+## Blocked on / open
+
+None for #18 itself.
+
+Adjacent items worth flagging separately (not part of this task):
+
+- **Penetration test report** doc owned by "S" is "Due soon" (May 16, 2026) — confirm with that owner before audit week.
+- ASTP doc in Drive is out of date (Gryve→Trivy, etc.) — separate Drive cleanup task.
+- GitHub `secret_scanning` and `dependabot_security_updates` (auto-PR) are disabled in repo settings — minor toggle, may surface in audit.

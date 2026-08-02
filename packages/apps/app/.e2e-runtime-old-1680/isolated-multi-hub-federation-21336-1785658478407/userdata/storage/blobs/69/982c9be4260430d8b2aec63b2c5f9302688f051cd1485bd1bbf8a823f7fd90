@@ -1,0 +1,62 @@
+# Sample of remediated vulnerabilities — investigation
+
+## Overview
+
+Pulled all `state=fixed` Dependabot alerts org-wide via `gh api` for the SOC 2 observation window (alerts span Jun 2025 – Apr 2026, single repo `normainofficial/normain`). 105 fixed alerts total: 4 Critical, 50 High, 37 Medium, 14 Low. Filtered High+Critical (n=54) into a CSV sample matching Vanta evidence-request fields (CVE, severity, repo, package, opened, remediated, alert URL). Existing Vanta doc version (Apr 30, 2026) is a single screenshot referencing PR #1986 / NOR-2603 — replacing/augmenting with a structured CSV strengthens audit evidence ahead of next-week audit start.
+
+## Situation — Vanta requirements
+
+Source: Vanta doc `/c/normain.com/documents/vulnerabilities-remediated-sample` (Instructions tab).
+
+- **Scope**: high-severity findings from the most recent periodic vulnerability scan
+- **Required fields**: timestamp, description, remediation owner, scan/ticket details, remediation actions
+- **Format**: tickets or report aggregating closed high-sev findings, audit-ready
+- **Frameworks mapped**: ISO 27001:2022, SOC 2
+- **Time sensitivity**: upload during SOC 2 observation window
+- **Recurrence**: renew quarterly (next renew: Jul 30, 2026)
+- **Current Vanta status**: OK (latest version submitted 2026-04-30 by Kalle, single screenshot ref'ing PR #1986)
+
+## Solution
+
+### Sample
+- **High+Critical sample**: `vuln_sample_high_critical.csv` (54 rows) — primary audit deliverable
+- **Full set (all severities)**: `vuln_sample_all_severities.csv` (105 rows) — supporting/context
+
+### Severity distribution (state=fixed, org-wide)
+| Severity | Count |
+|---|---|
+| Critical | 4 |
+| High | 50 |
+| Medium | 37 |
+| Low | 14 |
+| **Total** | **105** |
+
+### Remediation timing (High+Critical, n=54)
+- min days open: 0 · median: 24 · max: 125
+
+### CSV columns
+`#`, `CVE`, `GHSA`, `Severity`, `Repo`, `Package`, `Ecosystem`, `Manifest`, `Summary`, `Opened`, `Remediated`, `Days_open`, `Alert_URL`
+
+### Source / how to reproduce
+```
+gh api "/orgs/normainofficial/dependabot/alerts?state=fixed&per_page=100" --paginate
+```
+Filtered to `severity in (critical, high)`, sorted by `fixed_at desc`. PR linkage available per-alert via `Alert_URL`.
+
+## Actions taken / Blocked on
+
+### Done
+- Confirmed Vanta requirements (high-sev focus, SOC 2 observation window)
+- Pulled 105 fixed Dependabot alerts via `gh` CLI
+- Generated CSVs (H+C sample + full set) and saved as task assets
+- Sensitive-content scan: alert summaries are public CVE titles only; full descriptions excluded; no internal IP/credentials in CSV
+
+### Blocked / awaiting user decision
+- **Upload to Vanta**: current Vanta version is "OK" status (single screenshot from today). Adding a structured CSV as a new draft would replace satisfied evidence — confirm whether to:
+  1. Upload CSV as new draft (strengthens audit evidence; recommended given audit next week)
+  2. Keep current screenshot version, attach CSV only as supporting material in audit packet
+  3. Leave as-is (current Vanta state already shows OK)
+
+### Cross-refs
+- PR #1986 (NOR-2603, merged 2026-04-30) closed the bulk of recent High+Critical alerts
+- Sibling tasks: #11/#29/#33 (vuln waves), #6 (VPM-2), #18 (vuln scan doc)

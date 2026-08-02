@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure Marketplace Private Offer — Process Overview</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5b6577;
+    --line: #d9dee9;
+    --p1: #2563eb; --p1-soft: #eff4ff;
+    --p2: #7c3aed; --p2-soft: #f6f2ff;
+    --p3: #0d9488; --p3-soft: #effbf9;
+    --warn-bg: #fffbeb; --warn-line: #fde68a; --warn-ink: #92400e;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 12px rgba(16,24,40,.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    background: var(--bg); color: var(--ink);
+    padding: 48px 24px 72px; line-height: 1.5;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 14px; }
+  header h1 { font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  header p { color: var(--muted); margin-top: 6px; font-size: 15px; }
+
+  .legend {
+    display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 36px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; padding: 4px 12px;
+    border-radius: 999px; border: 1px solid var(--line); background: #fff;
+    color: var(--muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.you { background: #2563eb; } .dot.normain { background: #db2777; }
+  .dot.admin { background: #d97706; }
+
+  .phase {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; box-shadow: var(--shadow);
+    padding: 28px; position: relative;
+  }
+  .p1 { border-top: 4px solid var(--p1); }
+  .p2 { border-top: 4px solid var(--p2); }
+  .p3 { border-top: 4px solid var(--p3); }
+  .phase-label {
+    display: inline-block; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em; color: #fff;
+    padding: 5px 12px; border-radius: 999px; margin-bottom: 12px;
+  }
+  .p1 .phase-label { background: var(--p1); }
+  .p2 .phase-label { background: var(--p2); }
+  .p3 .phase-label { background: var(--p3); }
+  .phase h2 { font-size: 19px; font-weight: 700; }
+  .phase .goal {
+    font-size: 14px; color: var(--muted); margin: 6px 0 22px;
+    padding-left: 12px; border-left: 3px solid var(--line);
+  }
+  .phase .goal b { color: var(--ink); }
+
+  .step { display: flex; gap: 14px; }
+  .step-rail { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+  .step-num {
+    width: 30px; height: 30px; border-radius: 50%;
+    color: #fff; font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .p1 .step-num { background: var(--p1); }
+  .p2 .step-num { background: var(--p2); }
+  .p3 .step-num { background: var(--p3); }
+  .step-line { width: 2px; flex: 1; background: var(--line); margin: 4px 0; min-height: 18px; }
+  .step:last-child .step-line { display: none; }
+  .step-body { padding-bottom: 22px; flex: 1; min-width: 0; }
+  .step:last-child .step-body { padding-bottom: 0; }
+  .step-body h3 { font-size: 15.5px; font-weight: 700; padding-top: 4px; }
+  .step-body .what { font-size: 14px; color: var(--ink); margin-top: 4px; }
+
+  .meta { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .meta-row { display: flex; gap: 8px; font-size: 13px; align-items: baseline; }
+  .meta-key {
+    flex-shrink: 0; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); width: 52px;
+  }
+  .meta-val { color: var(--ink); }
+  .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #f1f4f9; border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; }
+  .who-chip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+    padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); background: #fff;
+  }
+
+  .callout {
+    margin-top: 10px; font-size: 13px;
+    background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-ink);
+    border-radius: 8px; padding: 8px 12px;
+  }
+  .callout b { font-weight: 700; }
+
+  .result {
+    margin-top: 4px; border-radius: 10px; padding: 14px 16px;
+    font-size: 14px; display: flex; gap: 10px; align-items: center;
+  }
+  .p1 .result { background: var(--p1-soft); }
+  .result .icon { font-size: 18px; }
+  .result b { font-weight: 700; }
+
+  .connector {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 14px 0;
+  }
+  .connector svg { width: 20px; height: 20px; color: #98a2b3; }
+
+  .shortcut {
+    background: var(--p2-soft); border: 1px solid #ddd3f7; border-radius: 10px;
+    padding: 12px 16px; font-size: 13.5px; margin-bottom: 22px;
+  }
+  .shortcut b { font-weight: 700; }
+
+  .howto { margin-top: 10px; background: #fafbfe; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .howto .howto-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
+  .howto ol { margin: 0 0 0 18px; font-size: 13px; }
+  .howto ol li { padding: 1.5px 0; }
+  .howto ol li b { font-weight: 600; }
+
+  .rolemap { margin-top: 8px; width: 100%; border-collapse: collapse; font-size: 13px; }
+  .rolemap th, .rolemap td { text-align: left; padding: 6px 10px; border: 1px solid var(--line); }
+  .rolemap th { background: #f1f4f9; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .rolemap td b { font-weight: 600; }
+
+  .links-to { display: inline-block; font-size: 11px; font-weight: 700; color: var(--p2); background: var(--p2-soft); border-radius: 999px; padding: 2px 10px; margin-left: 6px; vertical-align: middle; }
+
+  .outcomes { display: flex; gap: 12px; margin-top: 10px; }
+  .outcome { flex: 1; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 13px; }
+  .outcome .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px; margin-bottom: 6px; }
+  .outcome.good .tag { background: #dcfce7; color: #16a34a; }
+  .outcome.bad .tag { background: #fee2e2; color: #dc2626; }
+  .outcome.a .tag, .outcome.b .tag { background: #e0e7ff; color: #4338ca; }
+
+  .checklist {
+    margin-top: 22px; background: var(--p2-soft); border: 1px solid #ddd3f7;
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .checklist h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+  .checklist ul { list-style: none; }
+  .checklist li { font-size: 13.5px; padding: 4px 0; display: flex; gap: 10px; align-items: baseline; }
+  .checklist li::before { content: "☐"; font-size: 15px; color: var(--p2); }
+
+  .fork { margin-top: 10px; }
+  .fork-q { font-size: 13.5px; font-weight: 700; margin-bottom: 8px; }
+
+  .done {
+    margin-top: 18px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;
+    border-radius: 10px; padding: 14px 16px; text-align: center;
+    font-weight: 700; font-size: 15px;
+  }
+  @media (max-width: 640px) {
+    .outcomes { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Azure Marketplace Private Offer</h1>
+    <p>The full journey in 3 phases — what happens, who does it, and where</p>
+  </header>
+  <div class="legend">
+    <span class="chip"><span class="dot you"></span> You (the client)</span>
+    <span class="chip"><span class="dot normain"></span> Normain</span>
+    <span class="chip"><span class="dot admin"></span> An admin in your organization</span>
+  </div>
+
+  <!-- PHASE 1 -->
+  <section class="phase p1">
+    <span class="phase-label">Phase 1 · Before anything else</span>
+    <h2>Share Two IDs With Normain</h2>
+    <p class="goal"><b>Goal:</b> Normain needs two identifiers from your Azure account to create your private offer. Both take about a minute to look up.</p>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">1</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Look up your Billing Account ID</h3>
+        <p class="what">A number that identifies your organization's billing setup in Azure.</p>
+        <div class="meta">
+          <div class="meta-row"><span class="meta-key">Where</span><span class="meta-val"><span class="path">Azure Portal → Cost Management + Billing → Settings → Properties</span></span></div>
+          <div class="meta-row"><span class="meta-key">Who</span><span class="meta-val"><span class="who-chip"><span class="dot you"></span> You</span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">2</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Look up your Tenant ID</h3>
+        <p class="what">A number that identifies your organization's Azure directory.</p>
+        <div class="meta">
+          <div class="meta-row"><span class="meta-key">Where</span><span class="meta-val"><span class="path">Azure Portal → Microsoft Entra ID → Overview</span></span></div>
+          <div class="meta-row"><span class="meta-key">Who</span><span class="meta-val"><span class="who-chip"><span class="dot you"></span> You</span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">3</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Send both IDs to your Normain contact</h3>
+        <div class="meta">
+          <div class="meta-row"><span class="meta-key">Who</span><span class="meta-val"><span class="who-chip"><span class="dot you"></span> You</span></span></div>
+        </div>
+        <div class="result" style="margin-top:12px"><span class="icon">📨</span><span><b>Then Normain takes over:</b> we create the private offer and send you a link when it's ready.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="connector">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg>
+    While Normain prepares the offer, use the waiting time for Phase 2
+  </div>
+
+  <!-- PHASE 2 -->
+  <section class="phase p2">
+    <span class="phase-label">Phase 2 · While you wait</span>
+    <h2>Line Up the Right People</h2>
+    <p class="goal"><b>Goal:</b> Phase 3 contains three actions that each require specific Azure permissions — plus one prerequisite. Work through the four checks below <b>before the offer arrives</b>, so nothing blocks you later. For each one you'll answer: <i>do we have this, and who is it?</i></p>
+
+    <div class="shortcut">💡 <b>Shortcut — are you the owner of your Azure tenant?</b> Then you likely have all the permissions needed and can do every step yourself. Skim the checks below to confirm, and move on.</div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">1</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Confirm you have a usable Azure subscription</h3>
+        <p class="what"><b>Why:</b> the purchase in Phase 3 is placed <i>on</i> an Azure subscription — without a usable one, the purchase cannot complete. It must be <b>Active</b> and have a <b>valid payment method</b>.</p>
+        <div class="callout">⚠️ <b>Not every subscription qualifies:</b> MSDN, Visual Studio, free trial, and sponsorship subscriptions <b>cannot</b> be used for Marketplace purchases — even if they're active.</div>
+        <div class="howto">
+          <div class="howto-title">How to check</div>
+          <ol>
+            <li>In the Azure Portal, search for <b>Subscriptions</b> and open it</li>
+            <li>Is there a subscription with status <b>Active</b>?</li>
+            <li>Does it have a valid payment method? Check under <b>Cost Management + Billing → your subscription → Payment methods</b></li>
+          </ol>
+        </div>
+        <div class="outcomes">
+          <div class="outcome good"><span class="tag">✓ Have one</span>This is the subscription you'll select during purchase. Note its name — continue to check 2.</div>
+          <div class="outcome bad"><span class="tag">✗ Don't have one</span><b>Someone must create one first:</b> go to <b>Subscriptions → + Add</b> and follow the steps. Name it something recognizable, e.g. <span class="path">Normain</span> or <span class="path">Normain-&lt;plan-name&gt;</span>.<br><br>Who can create it depends on your agreement type — see the table under check 2.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">2</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Find who can <i>accept the offer</i> <span class="links-to">used in Phase 3 · Step 1</span></h3>
+        <p class="what"><b>Why:</b> accepting a private offer is a billing-level action — it needs someone with <b>billing admin permissions</b>. Which role that is depends on how your organization buys from Microsoft:</p>
+        <table class="rolemap">
+          <tr><th>Your agreement with Microsoft</th><th>Role that can accept (and create subscriptions)</th></tr>
+          <tr><td><b>Enterprise Agreement</b></td><td>Enterprise Administrator <span style="color:var(--muted)">(or Account Owner for subscriptions)</span></td></tr>
+          <tr><td><b>Microsoft Customer Agreement</b></td><td>Billing account Owner or Contributor</td></tr>
+          <tr><td><b>Pay-as-you-go</b></td><td>Account Administrator / account holder</td></tr>
+        </table>
+        <div class="howto">
+          <div class="howto-title">How to find this person</div>
+          <ol>
+            <li>In the Azure Portal, search for <b>Cost Management + Billing</b> and open it</li>
+            <li>Click <b>Access control (IAM)</b> in the left menu</li>
+            <li>Look for users holding one of the roles in the table above</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">3</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Find who can <i>complete the purchase</i> <span class="links-to">used in Phase 3 · Step 2</span></h3>
+        <p class="what"><b>Why:</b> the purchase is placed on the subscription from check 1 — so this person needs the <b>Owner</b> or <b>Contributor</b> role <i>on that specific subscription</i>. Billing permissions alone are not enough.</p>
+        <div class="howto">
+          <div class="howto-title">How to find this person</div>
+          <ol>
+            <li>In the Azure Portal, search for <b>Subscriptions</b> and open it</li>
+            <li>Select the subscription you plan to use (from check 1)</li>
+            <li>Click <b>Access control (IAM) → Role assignments</b></li>
+            <li>Look for users with the <b>Owner</b> or <b>Contributor</b> role</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">4</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Find who can <i>approve app access</i> <span class="links-to">used in Phase 3 · Step 4</span></h3>
+        <p class="what"><b>Why:</b> at first sign-in to the application, Microsoft may require an admin to approve it — but <b>only if</b> your organization requires admin approval for new apps. This happens <i>after</i> the purchase, not during it. The approver needs the <b>Global Administrator</b> role.</p>
+        <div class="howto">
+          <div class="howto-title">How to find this person</div>
+          <ol>
+            <li>In the Azure Portal, search for <b>Microsoft Entra ID</b> (or <b>Azure Active Directory</b>) and open it</li>
+            <li>Click <b>Roles and administrators</b></li>
+            <li>Look for users with the <b>Global Administrator</b> role</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="checklist">
+      <h3>Ready for Phase 3 when you can tick all four:</h3>
+      <ul>
+        <li>An <b>Active subscription with a valid payment method</b> exists (and you know which one to use)</li>
+        <li>You know <b>who accepts the offer</b> (billing admin)</li>
+        <li>You know <b>who completes the purchase</b> (Owner/Contributor on that subscription)</li>
+        <li>You know <b>who approves app access</b>, if your org requires it (Global Administrator)</li>
+      </ul>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">One person can hold all of these roles — in small organizations that's common.</p>
+    </div>
+  </section>
+
+  <div class="connector">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg>
+    Normain sends you the offer link — Phase 3 begins
+  </div>
+
+  <!-- PHASE 3 -->
+  <section class="phase p3">
+    <span class="phase-label">Phase 3 · The offer arrives</span>
+    <h2>Accept → Purchase → Activate → Sign In</h2>
+    <p class="goal"><b>Goal:</b> complete the purchase end-to-end. Four steps, strictly in this order.</p>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">1</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Accept the private offer</h3>
+        <p class="what">Open the link from Normain — it leads to your offer in the Azure Marketplace. Review what's included, the pricing, the start/end dates, and any attached terms. Then click <b>Accept private offer</b>.</p>
+        <div class="meta"><div class="meta-row"><span class="meta-key">Who</span><span class="meta-val"><span class="who-chip"><span class="dot admin"></span> Billing admin (Phase 2, check 2)</span></span></div></div>
+        <div class="callout">⏱ <b>Built-in wait:</b> after accepting, the Purchase button takes <b>15–60 minutes</b> to become available. Refresh the page to check. Greyed out? Hover over it — a tooltip explains why.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">2</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Purchase</h3>
+        <p class="what">Click <b>Purchase</b> once it's active. You'll make three choices, then confirm:</p>
+        <div class="meta">
+          <div class="meta-row"><span class="meta-key">a</span><span class="meta-val">Pick the <b>Azure subscription</b> and <b>resource group</b> (unsure? ask your Azure admin)</span></div>
+          <div class="meta-row"><span class="meta-key">b</span><span class="meta-val">Name the purchase, e.g. "Normain &lt;plan name&gt;" — just a label for your own reference</span></div>
+          <div class="meta-row"><span class="meta-key">c</span><span class="meta-val">Set <b>auto-renew to off</b> — Normain helps with renewal when the time comes</span></div>
+          <div class="meta-row"><span class="meta-key">d</span><span class="meta-val">Click <b>Review + subscribe → Subscribe</b> and wait for setup to finish</span></div>
+        </div>
+        <div class="meta" style="margin-top:8px"><div class="meta-row"><span class="meta-key">Who</span><span class="meta-val"><span class="who-chip"><span class="dot admin"></span> Subscription Owner / Contributor (Phase 2, check 3)</span></span></div></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">3</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Activate the subscription</h3>
+        <p class="what">When setup finishes, Azure redirects you to the Normain website (or shows a link). Follow the instructions there to confirm and activate.</p>
+        <div class="meta"><div class="meta-row"><span class="meta-key">Who</span><span class="meta-val"><span class="who-chip"><span class="dot you"></span> You</span></span></div></div>
+        <div class="callout">⚠️ <b>Don't skip this:</b> the purchase is <b>not complete</b> until you activate on the Normain side.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-rail"><div class="step-num">4</div><div class="step-line"></div></div>
+      <div class="step-body">
+        <h3>Sign in to the application</h3>
+        <p class="what">After activation you're redirected to the sign-in page automatically — or go to <b>&lt;your-instance&gt;.normain.com</b> directly. Sign in with your <b>Microsoft work email</b>.</p>
+        <div class="fork">
+          <p class="fork-q">First sign-in only — Microsoft asks you to approve the app. Two possibilities:</p>
+          <div class="outcomes">
+            <div class="outcome a"><span class="tag">You can approve yourself</span>Just click <b>Accept</b>. Done.</div>
+            <div class="outcome b"><span class="tag">Your org requires IT approval</span>Click <b>Request approval</b> → your IT department (Phase 2, check 4) gets the request in <span class="path">Enterprise applications → Admin consent requests</span> → once approved, sign in again.<br><br><span style="color:var(--muted)">For IT: it's a standard sign-in permission — only name + email are accessed.</span></div>
+          </div>
+        </div>
+        <div class="done">✓ Signed in — setup complete</div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

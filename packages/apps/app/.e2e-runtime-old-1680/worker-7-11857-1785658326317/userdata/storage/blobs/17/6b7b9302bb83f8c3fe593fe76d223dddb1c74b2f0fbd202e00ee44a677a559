@@ -1,0 +1,145 @@
+# Skill drafts
+
+Working doc — bullets per skill. Schema authority: `data/README.md` + `src/shared/types.ts`.
+
+---
+
+## uc--new
+
+Scaffold a new use-case folder under `data/<uc>/`.
+
+- pick `<uc>` id (folder name, e.g. `uc09`) + label + optional description
+- create:
+  - `use-case.json` = `{ label, description? }` (no id field — folder name wins)
+  - `structure.json` = `[]` (empty `StructureColumn[]`)
+  - `data-sources/` (empty)
+  - `runs/v1/run.json` = `{ date: <today>, notes? }`
+- competitor folders are not pre-created — added as runs are collected
+- `bun run check` after
+
+---
+
+## uc--edit-structure
+
+Edit `data/<uc>/structure.json` — add/remove/edit columns + cells.
+
+- `structure.json` is always a `StructureColumn[]`; cells align by row index across columns
+- column types: `input` (values = primitives) and `question` (values = `Question[]`)
+- single-`question`-column = simple Q&A UC; mixed `input`+`question` columns = spreadsheet-style UC
+- adding a question: append to a `question` column's `values`; enforce `id` unique within UC, `uc` field = folder name
+- `groundTruth` = `{ answer, sources: SourceRef[] }`; preserve `groundTruthHistory[]` on edits to canonical answer (append `{ date, value, reason }`)
+- warn if id renames/removals would orphan existing `answers.json` / `answers.verdicts.json` rows
+- `bun run check` after
+
+---
+
+## uc-run--new
+
+Create a new versioned run `data/<uc>/runs/v<N>/`.
+
+- auto-pick next `v<N>` from existing `runs/` siblings
+- write `run.json` = `{ date: <today>, notes? }` (id is implicit from folder)
+- do NOT snapshot ground truth — it lives in `structure.json` (+ history if changed)
+- do NOT pre-create per-competitor folders — created on-demand by register skill
+- `bun run check` after
+
+---
+
+## uc-run--register-competitor-answers
+
+Ingest raw competitor output into `runs/<run>/<cid>/`.
+
+- inputs: `<uc>`, `<run>`, `<competitorId>`, raw output (paste / file / artifact)
+- verify `<competitorId>` exists in `data/competitors.json`
+- create `runs/<run>/<cid>/` if missing
+- write/update:
+  - `answers.json` = `CompetitorAnswer[]` = `{ questionId, answerText, answerRaw?, citedSources? }[]`
+  - `instructions.md` — verbatim prompt + setup/upload steps used for this run
+  - `stats.json` (optional) = `RunStats` `{ model?, cost?, time?, tokens?, notes? }`
+- map raw output → per-question rows against current `structure.json`; preserve `answerRaw` for traceability
+- flag unmatched `questionId`s or missing questions
+- `bun run check` after
+
+---
+
+## uc-run--grade-competitor-answers
+
+Produce `answers.verdicts.json` for one competitor in a run.
+
+- inputs: `<uc>`, `<run>`, `<competitorId>`
+- read `structure.json` (ground truth) + `answers.json`
+- per question emit `AnswerVerdict` = `{ questionId, answer: VerdictEntry, sources?: VerdictEntry }`
+  - `VerdictEntry` = `{ verdict, reason? }`; `reason` recommended unless `correct`
+  - `verdict` ∈ `correct | partial | wrong | retrieval-fail | not-run`
+  - omit `sources` aspect if the question doesn't expect citations (empty `groundTruth.sources` + no `citedSources`)
+- write `runs/<run>/<cid>/answers.verdicts.json`
+- decide: skip already-graded, or overwrite? (see open questions)
+- `bun run check` after
+
+---
+
+## Per-competitor execution skills
+
+One skill per competitor in `data/competitors.json`. Each drives the competitor against `<uc>` structure + `data-sources/`, then hands raw output to `uc-run--register-competitor-answers`. Each should also emit `stats.json` fields it knows (model, time, tokens, cost) and the `instructions.md` body actually used.
+
+### uc-run--competitor--normain
+
+- drive Normain (own product) against `<uc>`
+- emit raw answers + `citedSources` if exposed by the product
+- capture model + timing
+
+### uc-run--competitor--claude
+
+- call Claude API w/ `data-sources/` attached (files API or inlined)
+- pin model id + system prompt per run
+- emit raw answers + token/cost stats
+
+### uc-run--competitor--claude-code
+
+- spawn Claude Code session w/ `data-sources/` mounted as working dir
+- feed questions, capture responses
+- emit raw answers + model + tokens
+
+### uc-run--competitor--claude-cowork
+
+- drive Claude Cowork flow against `<uc>`
+- likely manual paste step
+- emit raw answers + capture model/timing
+
+### uc-run--competitor--chatgpt-thinking
+
+- ChatGPT (Thinking mode) — manual paste loop
+- capture prompts + responses verbatim into `answerRaw`
+- emit raw answers
+
+### uc-run--competitor--m365-copilot
+
+- M365 Copilot — manual run, `data-sources/` uploaded to OneDrive/SharePoint
+- record source-exposure setup in `instructions.md`
+- emit raw answers
+
+### uc-run--competitor--gemini-dr
+
+- Gemini Deep Research — kick off research task, wait for report
+- map report sections → per-question answers
+- emit raw answers + time
+
+### uc-run--competitor--notebooklm
+
+- upload `data-sources/` to a NotebookLM notebook
+- ask each question, collect responses (+ NotebookLM-cited sources → `citedSources`)
+- emit raw answers
+
+---
+
+## Open questions
+
+- skill location: `.claude/skills/` (committed, shared) vs `.agents/skills/` (draft)?
+- naming: `uc--`/`uc-run--` double-dash intentional? keep as namespace separator?
+- grade skill: human-in-the-loop per question, or batch w/ LLM judge? overwrite vs skip-graded?
+- register skill input format: JSON paste, markdown table, CSV, screenshot+OCR?
+- structure-edit: safely support id renames (rewrite existing answers + verdicts), or refuse?
+- competitor skills: which are API-automatable today vs manual-paste only?
+- shared sub-skill for "ask N questions, collect answers" loop to dedupe across competitor skills?
+- who fills `stats.json`? execution skill (knows model/time/tokens) vs grade skill (knows nothing extra) vs both?
+- `groundTruthHistory` — should edit-structure skill auto-append on changes, or require explicit opt-in?

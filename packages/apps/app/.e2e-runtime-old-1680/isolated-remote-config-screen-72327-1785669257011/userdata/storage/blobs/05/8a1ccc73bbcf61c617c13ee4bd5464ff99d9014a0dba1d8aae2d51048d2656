@@ -1,0 +1,76 @@
+# Open Decisions — SLA / DPA / Subprocessor consolidation
+
+_Companion to the structure plan (`Drive structure proposal`). Tracks the content/legal decisions, not the folder layout. As of 2026-06-03._
+
+**Status:** 🟢 recommendation ready (needs your nod) · 🟡 needs your input · ⏸ deferred
+
+## Document relationships (reference — settles "is the SLA part of the DPA?")
+
+| Doc | Role | Notes |
+|---|---|---|
+| Main Agreement | Umbrella contract for direct/enterprise deals | |
+| Attachment 1 — Terms of Service | Commercial/service terms (enterprise) | |
+| **Attachment 2 — SLA** | Uptime commitment | **Separate document** |
+| **Attachment 3 — DPA** | Data-processing terms (GDPR Art. 28) | **Separate document; the subprocessor list is embedded *inside* it as an appendix** |
+| Terms of Use (Product) + Privacy + Cookie | Self-serve SaaS click-through terms | |
+
+→ **SLA is NOT part of the DPA** (sibling attachments). **Subprocessor list IS part of the DPA.** A whole-package snapshot holds the SLA and the DPA side by side.
+
+## Q4 — SLA versions ✅ resolved
+**Principle:** a template snapshot is cut when the **offer/agreements change materially** — not per customer, not per minor edit. (~23 "Attachment 2 – SLA" docs exist, but most are per-customer copies → excluded.)
+**Snapshots to keep** (the distinct content versions):
+- **2026-05-29 - DRAFT** — 99%, SOC2-aligned cleanup
+- **2025-12-17** — 99%, KPMG final → current `- LATEST`
+- one **90%** bare-date historical (the last 90% template)
+Per-customer copies stay frozen in their customer folders; older scattered copies → `99 - Old`. SLA = Attachment 2, bundled into each package snapshot alongside the DPA (not inside it).
+
+## Q3b — Cookie Policy: product vs website? ✅ resolved
+**Decision:** split into two — **Cookie Policy – Product** (→ `01 - SaaS default agreements / 03 - Cookie Policy`) and **Cookie Policy – Website** (→ `04 - Marketing`) — so the structure is uniform regardless of whether content currently differs. (Prompt: the single Aug-2024 policy claims to cover "website **and** platform," but every cookie it lists — Google, HubSpot, Intercom — is website/marketing.)
+
+## Q1 — Hosting DPA = two models, not three copies 🟡
+The 3 "hosting DPA" files are **two different contracts**, split by **who runs the servers**:
+
+| Model | Docs | Subprocessor clause | List incl. Azure? |
+|---|---|---|---|
+| **Normain-hosted** (Normain's Azure) | `11xa`, `1it8` (newest) | list-controlled — "shall not use subprocessors other than…" | Yes |
+| **Customer-hosted** (customer's own cloud) | `14JrU` | looser — "general consent, list on request" | No (it's the customer's infra) |
+
+`11xa` + `1it8` are two copies of the **same** (Normain-hosted) contract → keep the newest (`1it8`), populate its empty appendix. `14JrU` is the **other** contract (customer-hosted) → keep separately.
+**Needs:** does `02 - Customer Cloud Hosting` sell **Normain-hosted** (the Advisense-style direct deal), **customer-self-hosted** (`14JrU`), or **both** (→ two motion folders)? The folder name says customer-hosted, but your direct deals were Normain-hosted.
+
+## Q3 — Terms of Use vs DPA — what's praxis 🟢
+- **Self-serve SaaS:** customer click-accepts **Terms of Use (Product)** + Privacy + Cookie. Terms of Use *is* the contract.
+- **Enterprise/negotiated** (Marketplace, hosting): a **negotiated Main Agreement** (or Marketplace Order + Microsoft Standard Contract) is the contract, with its own commercial terms (your **Attachment 1 – Terms of Service**). The click-through Terms of Use does **not** apply — the negotiated agreement replaces it.
+- **The DPA does NOT fill the Terms role.** It's a separate **data-protection** layer (GDPR Art. 28) that sits *under* whichever contract applies. Terms/Main Agreement = the commercial+service deal; DPA = how personal data is processed.
+
+→ So Terms of Use is the self-serve contract; enterprise uses the Main Agreement (+ Attachment 1); the DPA is an annex in both, never a substitute for Terms.
+
+**Applicability matrix:**
+
+| Document | How it's accepted | Self-serve SaaS | Enterprise – Marketplace | Enterprise – Hosting |
+|---|---|---|---|---|
+| *Governing commercial contract* | Accepted by the org | Terms of Use (Product), click-accept | Order + Microsoft Standard Contract | Main Agreement + Attachment 1 |
+| **Terms of Use (Product)** | Contract | ✅ it *is* the contract | ❌ MS Standard Contract governs | ❌ Main Agreement governs |
+| **Privacy Policy (Product)** | **User notice — NOT a contract term** | ✅ | ✅ | ✅ |
+| **Cookie Policy** | **User/browser consent — NOT a contract term** | ✅ | ✅ | ✅ |
+| **DPA** | Legal requirement (GDPR Art. 28) | ✅ click-through DPA — create in `01/04 - DPA` (not plan-dependent) | ✅ Marketplace DPA (14-day notice) | ✅ Attachment 3 hosting DPA (30-day notice) |
+| *SLA (Attachment 2)* | Commercial promise — **plan-dependent** | ✅ create in `01/05 - SLA` (applies on eligible tiers; best-effort otherwise) | ✅ publisher SLA / Attachment 2 (99%) | ✅ Attachment 2 (99%) |
+
+Notes:
+- Privacy & Cookie are accepted by individual **users**, not the enterprise org — verified: the Main Agreement lists only Terms / SLA / DPA as the contract, and Attachment 1 routes all personal-data processing to the **DPA**. → both live in `01 - SaaS default agreements` as published notices, never inside a contract snapshot.
+- **DPA vs SLA differ in kind for SaaS:** the **DPA is a *legal* requirement** (needed whenever Normain processes personal data on a customer's behalf — independent of price/plan), so it applies to SaaS and just needs a click-through form. The **SLA is a *commercial* promise** (uptime + credits) — genuinely a **plan question**: typically paid tiers only; free/experimentation has none.
+- Privacy Policy – Website + Cookie Policy also apply to the marketing funnel for everyone (not motion-specific).
+- ⚠️ = assumption to confirm.
+
+## SaaS DPA & SLA ✅ resolved
+- **SaaS DPA** — create a click-through DPA in `01 - SaaS default agreements / 04 - DPA` (legally required; separate lineage from the enterprise DPAs).
+- **SaaS SLA** — create in `01 - … / 05 - SLA`, kept in place for when a tier needs it (separate from the enterprise SLA).
+- **Confirm:** does the open SaaS have a paid tier that should carry an SLA, or is it purely free/experimentation (SLA stays dormant)?
+
+## Q5 — what actually goes inside the subprocessor lists ⏸ (deferred from the mode-mapping)
+Parked content sub-items (from the parent task):
+- **Firecrawl** (Mendable AI) — in the data path (customer-URL ingestion); PII subprocessor → add, or confirm no PII?
+- **OpenAI** — add now (planned) or only on activation?
+- **Anthropic** — per-mode: SaaS list *with*, dedicated list *without*.
+- **Table 2 completeness** — Stripe, Loops, Zero, Cursor, GitHub, Vanta, MS Marketplace publisher: which belong on the customer-facing register vs internal-tools list?
+- **Mode↔list mapping** (original Q5): Marketplace/privacy-first = dedicated, *without* Anthropic; SaaS/experimentation = open multi-org, *with* Anthropic — confirm, incl. whether "Marketplace" (channel) = "dedicated tenant" (deployment) 1:1.

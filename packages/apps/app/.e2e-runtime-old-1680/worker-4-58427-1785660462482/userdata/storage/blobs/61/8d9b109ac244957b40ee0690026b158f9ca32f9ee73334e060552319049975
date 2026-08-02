@@ -1,0 +1,113 @@
+# PES-78 — Clear desk and clear screen (Drive-verified)
+
+**Control**: PES-78 · ISO 27001:2022 A.7.7 · Vanta · Domain: `PHYSICAL_ENVIRONMENTAL_SECURITY`
+**Owner (per Drive controls export)**: unset → now Kalle
+**Cross-ref**: END-40 (User endpoint devices, A.8.1)
+
+> All compliance claims below sourced from Google Drive only. Local repo files in `~/dev/projects/normain-ops/projects/current-ucf/` are explicitly **not** used as authority.
+
+---
+
+## Drive sources used
+
+### A. ISMS Master List of Documents (current)
+- **id**: `1gKWpD1akuolRiGb8qQ0pXZEWGXy2gnOV` · `[Normain] 00-ISMS Master List of Documents.docx`
+- **modified**: 2026-03-10 (v1.0.7, Philip Ngo / Sara Landfors)
+- Confirms current versions:
+
+| Policy | Current version |
+|---|---|
+| **Information Security Policy** (AUP) | **v1.0.0** |
+| Physical Security Policy | v1.0.0 |
+| Asset Management Policy | v1.0.0 |
+| Incident Response Plan | v1.0.2 |
+| Risk Management Policy | v1.0.3 |
+
+→ The signed AUP PDF (v1.0.0) **is** the current authoritative version. Master list confirms no update since initial.
+
+### B. AUP — `[Normain] Information Security Policy (AUP)`
+
+| Variant | Drive id | Modified | Folder | Notes |
+|---|---|---|---|---|
+| **Signed PDF** | `1To3O2MgVbfdv1wISHBAQWimAmUNtbHMd` | 2025-11-05 | `D - Privacy` | v1.0.0 (Initial Version, 2025-05-30, Written by Ryan Rich, Approved by Sara Landfors). Current per master list. |
+| Working docx | `1pN02_jni4Wm-cu0Buh2H4NES7Q_uBqey` | 2025-06-11 | — | Source-of-truth working doc; same wording. |
+| Copy docx | `1XZ1_FvCdcb5eeENwvGq1qHjwuROJQHSS` | 2025-10-15 | — | Stale; ignore. |
+
+**Verbatim from signed PDF** (extracted via `pdftotext`):
+
+> **Mobile Device Policy**
+> – Devices must be locked with a password (or equivalent control such as biometric) protected screensaver or screen lock after 15 minutes of non-use.
+> – Devices must be locked whenever left unattended.
+>
+> **Clear Screen Clear Desk Policy**
+> Users shall not leave confidential materials unsecured on their desk or workspace and will ensure that screens are locked when not in use, especially in any public areas.
+>
+> **Remote Working and Access Policy**
+> – Company rules shall be followed while working remotely including clear desk protocols, printing, disposal of assets, and information security event reporting…
+
+### C. Vanta controls export — `controls`
+- **id**: `1n9ouTdoptTOYKq5tLRsJY1Y7xec1ljUPrLrnW4kkK9A` (Sheet, modified 2025-06-08)
+
+| Field | PES-78 | END-40 |
+|---|---|---|
+| Name | Clear desk and clear screen | User endpoint devices |
+| ISO 27001:2022 | A.7.7 | A.8.1 |
+| SOC 2 | *(empty)* | *(empty)* |
+| Owner | *(empty)* | *(empty)* |
+| **Evidence status** | **OK** | **Needs evidence** |
+| "Fixed with training/encryption/ISMS/SOA?" | *(empty)* | Yes |
+
+### D. ISO 27001 audit reports (Drive)
+- `Normain AB - ISOIEC 27001 2022 Initial Certification Audit Report.pdf` — id `1361_JMRkEWYJFuJGVvMzAkAJColaPreG`, modified 2025-10-29.
+- `Normain AB - ISO IEC 27001 2022 Stage 1 Report.pdf` — id `1a4qGdsc9tT4042IaGBrDDsw5xyJUwI0Z`, modified 2026-03-25 (likely surveillance Stage 1).
+- *Reports not opened — content not yet checked for PES-78 / A.7.7 findings.*
+
+### E. Vanta evidence folders in Drive
+- `01 - Vanta` (`15aT0kSxDY5UrJDWEHynOHis98VYsf5c_`) → **only Vanta brand logos**, no evidence.
+- `07 - Sensitive evidence for Vanta/Compliance` (`1gEfWpA6EnZvnG998VD9mT-sU_gvOMmjQ`) → only one sanitized employment agreement.
+
+→ **PES-78 / END-40 evidence does NOT live in Drive**. Evidence (if any) lives inside Vanta itself.
+
+### F. Dennis screenlock test
+No file found in Drive matching screenlock / awareness test / END-40. Either lives in Vanta only, or hasn't been collected.
+
+---
+
+## What changed vs prior asset versions
+
+| Claim | v1–v3 | v4 (now) |
+|---|---|---|
+| Source of clear-desk/screen wording | Local repo extract `info_security_aup.txt` | **Signed PDF in Drive** (id `1To3O2MgVbfdv1wISHBAQWimAmUNtbHMd`) |
+| Source of UCF register / mapping | Local `control-register.csv`, `iso27001-view.csv` | **Drive `controls` sheet** (id `1n9ouTdoptTOYKq5tLRsJY1Y7xec1ljUPrLrnW4kkK9A`) |
+| AUP version authority | Inferred from filename | **Confirmed by ISMS Master List in Drive (v1.0.0 still current)** |
+| ISO audit timing | "Nov-Dec 2025" (task brief) | Initial certification audit report **2025-10-29**; surveillance Stage 1 **2026-03-25** |
+| Local UCF `register pointer mismatch` claim | Reported as a finding | **Withdrawn** — local register is non-authoritative; ignore. Drive is authority and shows no such mismatch. |
+
+---
+
+## Absolutely minimal effort
+
+**If Vanta currently shows PES-78 = `Needs evidence`** (~2 min):
+1. Attach `[Normain] Information Security Policy (AUP).pdf` (Drive id `1To3O2MgVbfdv1wISHBAQWimAmUNtbHMd`) as policy evidence on PES-78.
+
+**If Vanta now matches Drive sheet (`OK`)** (~30 sec):
+1. Confirm and close.
+
+Nothing else needed.
+
+---
+
+## Still unverified (need Vanta UI)
+- Current Vanta PES-78 evidence status (Drive snapshot says `OK` but is from 2025-06-08; task brief says `Needs evidence`).
+- Whether AUP PDF is already linked in Vanta for PES-78.
+- Whether PES-78 is in current SOC 2 scope (Drive sheet has empty SOC 2 column, but sheet may be incomplete).
+- Whether ISO surveillance Stage 1 (March 2026) raised any A.7.7 findings — audit report PDF not opened this session.
+
+Browser tooling (slay panel + chrome-devtools MCP) was unavailable this session, so Vanta UI was not reached.
+
+## Actions taken
+- Searched Drive across all shared drives for: AUP / ISMS / Clear desk / screenlock / END-40 / PES-78 / Dennis / Vanta evidence / audit reports.
+- Downloaded + extracted text from: signed AUP PDF, working AUP docx, current ISMS Master List docx.
+- Read PES-78 + END-40 rows from Drive Vanta `controls` sheet.
+- Listed contents of both Vanta-branded evidence folders in Drive.
+- **No Drive files modified. No Vanta uploads. No changes to shared artifacts.**

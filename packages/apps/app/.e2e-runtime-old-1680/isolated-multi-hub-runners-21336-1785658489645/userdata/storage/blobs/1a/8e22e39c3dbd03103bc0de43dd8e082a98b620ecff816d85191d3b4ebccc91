@@ -1,0 +1,32 @@
+# Vanta SOC2 — "Data encryption utilized" (CRY-4) — research
+
+**Control:** Data encryption utilized — *"The company's datastores housing sensitive customer data are encrypted at rest."*
+**Vanta ID:** CRY-4 · Source: Vanta · Domain: Cryptographic Protections · Owner: Kalle Hansson
+**Frameworks:** SOC 2 CC 6.1 · SOC 2 PI 1.4
+**Current status:** Needs evidence — **0/0**. Nothing mapped: 0 tests, 0 documents, 0 policies, 0 risk scenarios.
+
+---
+
+## (a) What Vanta requires
+A Vanta control passes once ≥1 piece of passing evidence is **mapped to it**. For this requirement the fitting evidence is either/both:
+- an **automated test** proving datastores are encrypted at rest, and/or
+- a **policy/document** stating the encryption-at-rest requirement.
+Control shows 0/0 purely because no evidence is associated to it.
+
+## (b) What already exists
+**Vanta (already passing, just not mapped here):**
+- `PostgreSQL encryption at rest enabled (Azure)` — Automated, **passing 1/1**. Directly evidences the requirement (prod customer data = Azure PostgreSQL).
+- `Personnel computer hard disk encryption` — Automated, OK (endpoint, not datastore).
+- `Removable media encryption` — Document, OK (endpoint, not datastore).
+
+**Drive — authoritative policies (05-InfoSec / 01 - Official InfoSec Policies):**
+- `[Normain] Cryptography Policy.docx` — id `11kse6sqwcwFAkzmnrr5T8a0lDH0knOTg`
+- `[Normain] Data Management Policy` — id `1FdpMf36-0l15iNVjB_-nudHBKQ7z2CWAajKRPpqjK0E` (.docx `1usz20wFySa6yth7ASfRqLlDTSp817pke`)
+
+## (c) The gap
+Mapping gap only — not a missing control. Passing encryption-at-rest evidence + authoritative policies exist, but none are linked to CRY-4, so it reads 0/0 "Needs evidence."
+
+## (d) Concrete steps to close it
+1. In Vanta → control CRY-4 → **Tests** → associate `PostgreSQL encryption at rest enabled (Azure)`. Flips 0/0 → 1/1 passing on its own.
+2. (Strengthen narrative) Map **Cryptography Policy** and/or **Data Management Policy** under the control's Policies/Documents.
+3. (Pre-audit check) Confirm datastore inventory — if any other store holds sensitive customer data (e.g. Azure Blob/object storage), ensure an encryption-at-rest test covers it too, then map.

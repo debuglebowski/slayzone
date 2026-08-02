@@ -1,0 +1,13 @@
+# Application (platform) Cookie Policy — 2026-06-07 DRAFT (rewrite)
+
+**App-specific cookie policy.** The prior copy was the *website* cookie policy wrongly duplicated in (now in `99 - old`).
+📄 Doc: https://docs.google.com/document/d/117nM566kUT8LH-Z9XBoKuIkrJTFaA5onRDEmYOO7h9E/edit
+
+## Changes (codebase-verified — what the product actually sets)
+- **Removed** the website-only trackers that don't exist in the app: Google, HubSpot, LinkedIn, Reddit, Salesloft, Intercom.
+- **Kept** Necessary cookies (auth / session / CSRF), reworded to platform scope.
+- **Added** Analytics — **PostHog only**, set **only after sign-in** (cookieless until login), EU-hosted.
+- Date → 7 June 2026; scope → platform (not website).
+
+**On sign-off:** rename `2026-06-07 - DRAFT/` → `- LATEST/`. (Stays a separate, unpublished doc per your call.)
+**To check:** PostHog-only matches reality (it does, per code).

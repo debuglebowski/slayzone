@@ -1,0 +1,24 @@
+# biotracker — screen wireframes
+
+Layout-only ASCII mocks for the design/token retake. 11 representative screens
+covering every distinct layout pattern. Settings CRUD list/one pairs are
+represented once each (datapoint list + datapoint one) since the others
+(chart, category, notification) share the same shell.
+
+## Shell primitives
+- **TabScreen**: SafeArea + ScrollView, `background`, 12px vertical pad. Bottom tab bar.
+- **StackScreen**: SafeArea + optional ScrollView, `background`. Native stack header w/ back arrow + title + headerRight.
+- **Bottom tabs**: Input | Charts. 2px top divider, active=`accent`, inactive=`text__label`.
+- **FAB (MenuButton)**: 56×56 circle, `primary`, bottom-right, white plus.
+
+## Screens
+1. 01-input-home         — Input tab dashboard (banner + card sections + FAB)
+2. 02-input-entry-list   — entries for one datapoint (calendar swipe header)
+3. 03-input-entry-one    — single entry form (value input + timestamp)
+4. 04-input-entry-all    — quick-log every datapoint (paged nav)
+5. 05-charts             — chart view + chart selector
+6. 06-settings-home      — settings menu (grouped list)
+7. 07-settings-appearance— theme picker (System/Light/Dark)
+8. 08-settings-profile   — profile info
+9. 09-settings-list      — generic CRUD list (datapoints, grouped by category)
+10. 10-settings-one      — generic CRUD detail/edit form

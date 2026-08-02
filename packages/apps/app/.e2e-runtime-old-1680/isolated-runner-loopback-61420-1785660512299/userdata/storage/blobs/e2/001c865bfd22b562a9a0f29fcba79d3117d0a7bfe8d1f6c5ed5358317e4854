@@ -1,0 +1,23 @@
+# AI Provider Tycoon — Implementation
+
+Locked technology and architecture decisions. The "how we build it" companion to the design assets (1–5).
+
+## Stack
+
+### LLM provider abstraction — Vercel AI SDK
+Multi-provider BYOK calls (Anthropic, OpenAI, Google, …) via the SDK's per-provider factories (e.g. `createAnthropic({ apiKey })`).
+
+- Structured action output via `generateObject` + Zod schema (uses native tool-calling under the hood).
+- Token usage returned per call → cost tracking.
+- AbortSignal-based timeout.
+
+**Still to wire ourselves:**
+- Per-tick wall-clock timeout (our own AbortController, not provider-side).
+- Error normalization → `{timeout, rate_limit, server_error, malformed, ok}` for the event log.
+- Pre-match key validation ping per player.
+
+***
+
+## Open
+
+Everything else from [98. Plan](asset:73927c8b) under the 🛠️ Engine, 🔄 Lifecycle, 🖥️ GUI, and 🔍 Observability rows. Decisions land here as they're made.

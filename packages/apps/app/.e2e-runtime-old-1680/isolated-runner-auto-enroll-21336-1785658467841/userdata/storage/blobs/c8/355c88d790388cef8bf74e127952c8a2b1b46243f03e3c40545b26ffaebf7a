@@ -1,0 +1,18 @@
+flowchart LR
+    Renderer["Renderer<br/>(React)"]
+    Electron["Electron host<br/>@slayzone/app"]
+    SideCar["Side-car<br/>@slayzone/server"]
+    DB[("SQLite<br/>WAL mode")]
+
+    Renderer == "tRPC over WS<br/>(new path)" ==> SideCar
+    Renderer -. "legacy IPC<br/>(unchanged)" .-> Electron
+    Electron -- "spawns + supervises" --> SideCar
+    Electron --> DB
+    SideCar --> DB
+
+    classDef new fill:#1e3a5f,stroke:#4a9eff,stroke-width:2px,color:#fff
+    classDef existing fill:#2a2a2a,stroke:#888,color:#ddd
+    classDef shared fill:#3a2f1e,stroke:#d4a04a,color:#fff
+    class SideCar new
+    class Renderer,Electron existing
+    class DB shared

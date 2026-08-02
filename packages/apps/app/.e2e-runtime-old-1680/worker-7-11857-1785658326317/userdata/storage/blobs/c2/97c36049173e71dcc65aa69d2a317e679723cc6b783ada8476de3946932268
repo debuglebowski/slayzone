@@ -1,0 +1,40 @@
+# Risk 6 — CUECs Expansion
+
+## Status
+**Closed** (2026-05-18). DC 6 expanded from 5 to 9 entries in Google Doc `1lnb6Lu4ZWnwuQTGjpH1ijteMgTS9olCz1et4LBEhbBs`.
+
+## Goal
+Expand the CUEC table in DC 6 to cover the standard SaaS SOC 2 set. Avoid a likely auditor "incomplete CUECs" comment.
+
+## Baseline (pre-update, 2026-05-18)
+5 entries: CC2.1, CC6.2, CC6.3, CC6.6 (a), CC6.6 (b). (Artifact previously said 2 — stale.)
+
+## Applicability decisions
+
+| TSC | Candidate | Decision | Rationale |
+|-----|-----------|----------|-----------|
+| CC1.4 | Customer screening of its own users | **Added** | Customer manages its own user base; vetting is the customer's responsibility. Standard SaaS CUEC. |
+| CC2.3 | Customer responsible for inputs/data submitted | **Added** | Distinct from CC2.1 (classification/protection). CC2.3 covers accuracy, completeness, authorization of inputs — relevant for an AI platform acting on customer-supplied prompts and data. |
+| CC6.1 | Customer logical access on its own side | **Added** | Distinct from CC6.2 (credential lifecycle) and CC6.3 (review). CC6.1 covers role/entitlement design within the platform. |
+| CC6.2 | Customer provisions/revokes user access | **Already present** | Existing entry covers credential lifecycle. |
+| CC6.3 | Customer periodically reviews access | **Already present** | Existing entry covers periodic review. |
+| CC8.1 | Customer-initiated configurations / integrations | **Added** | Core to Normain's storage-integration model (SharePoint / Google Drive / Box) — customer controls scope of credentials and accessible data. |
+
+## Final CUEC entries (9 total in DC 6)
+
+| TSC | CUEC |
+|-----|------|
+| CC1.4 | The customer is responsible for performing background or pre-employment screening of its own users granted access to the platform, where legally permitted. |
+| CC2.1 | The customer is responsible for the appropriate classification and protection of data submitted to the platform. |
+| CC2.3 | The customer is responsible for the accuracy, completeness, and authorization of inputs and instructions submitted to the platform by its users. |
+| CC6.1 | The customer is responsible for defining roles, entitlements, and authorization rules for its own users within the platform. |
+| CC6.2 | The customer is responsible for issuing, storing, rotating, and revoking platform user credentials and API keys belonging to its users. |
+| CC6.3 | The customer is responsible for periodically reviewing the access rights granted to its own users within the platform. |
+| CC6.6 (a) | The customer is responsible for protecting data in transit between its own systems and the platform endpoints. |
+| CC6.6 (b) | The customer is responsible for the physical and environmental security of end-user devices used to access the platform. |
+| CC8.1 | The customer is responsible for configuring its own platform integrations (e.g., SharePoint, Google Drive, Box), including the scope of credentials issued and the data made accessible to the platform. |
+
+## Output
+- [x] Applicability decided per candidate
+- [x] CUEC entries drafted
+- [x] DC 6 updated in the new doc

@@ -1,0 +1,37 @@
+# SlayZone Env Vars — Standalone Hub & Runner
+
+Deployment-relevant vars for standalone (non-supervised) hub + runner. Dev/e2e/electron-internal vars omitted.
+
+**Precedence everywhere:** `env var > SLAYZONE_RUNNER_CONFIG file (runner) > ~/.slayzone/config.json > generated/default`
+
+🗑️ = redundant surface; don't advertise for standalone (code stays — Electron app still needs `SLAYZONE_DB_DIR`).
+
+| Category | Var | Purpose | Default | config.json key | Anchored to | Remove? |
+|---|---|---|---|---|---|---|
+| Hub | `SLAYZONE_DB_PATH` | Exact SQLite file path (overrides dir+name) | — (composed from STORE_DIR + DB_NAME) | `dbPath` | — (absolute) | |
+| Hub | `SLAYZONE_STORE_DIR` | State root: DB, logs/, diagnostics | `getStateDir()` (`~/Library/…` mac) | — | **home** | |
+| Hub | `SLAYZONE_DB_DIR` | DB dir (dup of STORE_DIR, lower prio) | falls to STORE_DIR | — | home | 🗑️ |
+| Hub | `SLAYZONE_DB_NAME` | DB filename (rename — never used on server) | `slayzone[.dev].sqlite` | — | — | 🗑️ |
+| Hub | `SLAYZONE_PORT` | Client-facing tRPC/HTTP port | OS-assigned | `port` | — | |
+| Hub | `SLAYZONE_HOST` | Bind addr for /trpc (client) | `127.0.0.1` | — | — | |
+| Hub | `SLAYZONE_RUNNER_TRANSPORT_PORT` | `/runners` wss listener port | OS-assigned (stable via DB) | `runnerTransportPort` | — | |
+| Hub | `SLAYZONE_RUNNER_TRANSPORT_HOST` | `/runners` bind addr | `0.0.0.0` | — | — | |
+| Hub | `SLAYZONE_HUB_TLS_PORT` | TLS `/trpc` https port (opt-in) | OS-assigned | — | — | |
+| Hub | `SLAYZONE_RUNNER_TRANSPORT_SECRET` | HMAC secret; runner-auth + token mint | gen+persist 256-bit | `runnerTransportSecret` | home (config.json) | |
+| Hub | `SLAYZONE_HUB_PUBLIC_URL` | Public base URL advertised to remote MCP | derived loopback | `publicUrl` | — | |
+| Hub | `SLAYZONE_HUB_AUTH_REQUIRED` | Enforce client auth on /trpc (`=1`) | off | — | — | |
+| Hub | `SLAYZONE_HOME_DIR` | `~/.slayzone` root (config.json, hooks) | `$HOME/.slayzone` | — | **home** | |
+| Runner | `SLAYZONE_HUB_URL` | `ws(s)://…/runners` to dial | from join token | `hubUrl` | — | |
+| Runner | `SLAYZONE_JOIN_TOKEN` | First-contact enroll token | — | `joinToken` | — | |
+| Runner | `SLAYZONE_RUNNER_NAME` | Display name on hub | hostname | `runnerName` | — | |
+| Runner | `SLAYZONE_RUNNER_ALLOWED_ROOTS` | FS roots runner may touch (PATH-sep list) | **none → fs refused** | — | — | |
+| Runner | `SLAYZONE_RUNNER_CAPABILITIES` | Advertised caps (comma list) | `pty,git,fs,proc` | — | — | |
+| Runner | `SLAYZONE_HUB_CERT_SHA256` | TLS cert pin (needs wss) | from join token | — | — | |
+| Runner | `SLAYZONE_RUNNER_CREDENTIALS_DIR` | Post-enroll cred store dir | `~/.slayzone/runner` | — | **home** (raw os.homedir) | |
+| Runner | `SLAYZONE_RUNNER_CONFIG` | Path to per-host JSON config file | — | — | — | |
+| Runner | `SLAYZONE_RUNNER_HEARTBEAT_MS` | Heartbeat interval (ms) | — | — | — | |
+| Runner | `SLAYZONE_HOME_DIR` | config.json root (runner reads shared config) | `$HOME/.slayzone` | — | **home** | |
+| Control | `SLAYZONE_SUPERVISED` | `=1` → Electron host owns env; config.json untouched; parent-death watch on | unset (standalone) | — | — | |
+| Control | `SLAYZONE_ROOT` | *(proposed, not yet impl)* CWD-anchor knob | would default `process.cwd()` | — | — | |
+
+**Home-anchored (bold) = the 4 this task retargets to CWD:** `SLAYZONE_HOME_DIR`, `SLAYZONE_STORE_DIR`, `SLAYZONE_RUNNER_CREDENTIALS_DIR` (+ the raw-homedir credential-store gap).

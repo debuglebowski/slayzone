@@ -1,0 +1,39 @@
+flowchart LR
+    subgraph Actions["Player actions"]
+        direction TB
+        Marketing[Marketing spend]
+        ResearchSpend[Research spend]
+        ReliabilitySpend[Reliability spend]
+        BuyServer[Buy / sell servers]
+        SetPrice[Set price]
+        Publish[Publish model]
+        VC[VC raise]
+        Ops[Certs · Security · Privacy]
+        Inter[M&A · Messaging · Sabotage]
+    end
+
+    subgraph State["Player state"]
+        direction TB
+        BrandS[Brand]
+        QualityS[Model quality]
+        CapacityS[Servers · Capacity]
+        OpsS[Ops levels]
+        CashS[Cash]
+        BurnS[Burn rate]
+    end
+
+    Marketing --> BrandS
+    Marketing --> BurnS
+    ResearchSpend --> QualityS
+    ResearchSpend --> BurnS
+    ReliabilitySpend --> OpsS
+    ReliabilitySpend --> BurnS
+    BuyServer --> CapacityS
+    BuyServer --> CashS
+    SetPrice -.-> BrandS
+    Publish --> QualityS
+    VC --> CashS
+    Ops --> OpsS
+    Inter -.-> BrandS
+    Inter -.-> OpsS
+    BurnS -->|drains| CashS

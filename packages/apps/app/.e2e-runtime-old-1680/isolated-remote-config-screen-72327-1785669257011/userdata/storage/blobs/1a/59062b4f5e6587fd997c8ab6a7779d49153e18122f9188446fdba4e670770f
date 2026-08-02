@@ -1,0 +1,35 @@
+# UC08 — Batch 1 / 5 — Governance + Access Control (20 questions)
+
+**Format key.** Y/N = yes/no/N-A + justification with citation. FF = short free-form. CL = classification (in-scope / out-of-scope / partial). 🪤 = hallucination trap (correct answer = "not addressed in our documentation"). Question IDs are stable.
+
+**Batch-1 distribution.** 12 Y/N, 4 FF, 3 CL, 1 🪤. (Full-100 budget: 50 Y/N, 30 FF, 10 CL, 5 🪤, 5 consistency pairs — pair markers added once all 100 drafted.)
+
+## Governance / ISMS
+
+| # | Type | Question |
+|---|---|---|
+| Q001 | Y/N | Is Normain's information security management system (ISMS) certified to ISO/IEC 27001:2022? If yes, name the certification body and the certificate issue date. |
+| Q002 | Y/N | Does Normain hold a current SOC 2 Type II report covering an audit period within the last 12 months? If yes, name the auditor and the period covered. |
+| Q003 | FF | What is the documented scope of Normain's ISMS — which business functions, locations, and departments are included? |
+| Q004 | Y/N | Does Normain perform a risk assessment at least annually under a documented methodology, with risk treatment plans tracked to closure? |
+| Q005 | CL | Is the physical security of the underlying cloud data-center facilities **in-scope, out-of-scope, or partial** within Normain's ISMS boundary? |
+| Q006 | Y/N | Has Normain designated a single executive (e.g., CISO or equivalent) with documented overall accountability for the information security program? |
+| Q007 | FF | How often is the ISMS subject to formal management review, and who attends/owns the review? |
+| Q008 | Y/N | Does Normain maintain a Statement of Applicability (SoA) covering all ISO/IEC 27001:2022 Annex A controls with inclusion/exclusion rationale? |
+| Q009 | CL | Is **HIPAA compliance** in-scope, out-of-scope, or partial for Normain's ISMS? |
+| Q010 | Y/N | Does the documented ISMS scope cover all production infrastructure used to deliver the customer-facing service, regardless of cloud provider? |
+
+## Access Control
+
+| # | Type | Question |
+|---|---|---|
+| Q011 | Y/N | Is least privilege enforced for access to production systems and customer data? |
+| Q012 | Y/N | Is multi-factor authentication (MFA) required for all privileged access to production infrastructure? |
+| Q013 | Y/N | Are unique user identifiers assigned per individual (no shared user accounts) for routine system access? |
+| Q014 | Y/N | Does Normain perform recurring user access reviews of production systems? If yes, state the review cadence. |
+| Q015 | Y/N | Is access automatically removed within a documented SLA upon employee termination? If yes, state the SLA. |
+| Q016 | Y/N | Are remote connections from employee endpoints to production systems and networks encrypted in transit? |
+| Q017 | FF | Describe the approval workflow for granting a Normain employee new privileged access to a production system. |
+| Q018 | FF | Which corporate identity provider (IdP) does Normain use, and what authentication method(s) does it enforce for workforce SSO? |
+| Q019 | CL | Is **direct, interactive database access by Normain employees against production databases** in-scope, out-of-scope, or partial for Normain's access-review program? |
+| Q020 🪤 | FF | Can Normain offer customer-side IP allowlisting or private-link/private-endpoint connectivity to the application tier? Describe the supported options and limits. |

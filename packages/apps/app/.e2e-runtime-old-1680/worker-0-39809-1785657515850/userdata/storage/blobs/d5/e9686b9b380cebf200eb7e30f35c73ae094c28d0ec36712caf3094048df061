@@ -1,0 +1,71 @@
+# VPM-2 — Vulnerabilities scanned and remediated
+
+**Vanta control:** VPM-2
+**Frameworks:** SOC 2 CC 2.1, CC 4.1 (+4 more)
+**Status at start:** 15/17 tests passing — 2 failing
+**Investigated:** 2026-04-30
+
+---
+
+## Situation
+
+### Control intent (Vanta VPM-2 standard)
+- Recurring (typically quarterly) vulnerability scans of production / external-facing systems
+- Critical/high findings tracked to remediation within SLA
+- Documented vulnerability-management process
+
+### Current scanning posture at Normain
+Source: `Automated Security Testing Procedure` v1.0, CTO-owned, effective 2025-07-04 (Drive doc `1qHPB6W1lilVFo_gazrr6BOQA1_FG3U7gXjwBDzQ3mf4`).
+
+| Layer | Tool | Cadence |
+|---|---|---|
+| SAST | GitHub CodeQL | every PR |
+| SCA | Dependabot | daily + on PR |
+| DAST | OWASP ZAP Baseline (`analysis-dast.yml`) | weekly Sun 02:00 UTC, prod |
+| Container | Gryve | on image build |
+| Pen test | External (`Normain Penetration Test Report 20250516.pdf`) | annual |
+| Firewall/network | `Firewall and Network Security Assessment - 25-08-25` | one-off |
+
+Remediation SLA per ASTP: critical issues ≤ 30 days; MTTR tracked monthly via GitHub Security → Overview.
+
+### Gap vs VPM-2
+No **host-based / OS-level** vulnerability scanner on running production hosts. ASTP covers code, deps, container image at build time, and web-app DAST — not the running OS surface. Production runs on Azure (`deploy.azure.yml`); Defender for Cloud / Microsoft Defender Vulnerability Management is the natural fit but no evidence found of it being enabled or quarterly reports captured into Vanta.
+
+### 2 failing tests — could not confirm directly
+**Blocker:** Vanta UI is gated behind login. `slay tasks browser` requires the task tab to be active in slay (returns "Browser panel did not open within timeout. Is the task tab active?"). chrome-devtools MCP opens an isolated, unauthenticated session.
+
+Inferred from VPM-2's standard test set (verify in UI before acting):
+1. **Quarterly host-based vulnerability scan completed** — needs scan-report evidence uploaded
+2. **Critical/high vulnerabilities remediated within SLA** — Vanta auto-checks GitHub Security alerts; if open Critical/High exist past SLA, this fails. Likely tied to siblings #11 (Critical) and #29 (High).
+
+---
+
+## Solution
+
+| Failing test (likely) | Fix | Effort | Dedup w/ siblings |
+|---|---|---|---|
+| Quarterly host-based scan evidence | Enable Microsoft Defender Vulnerability Management on Azure prod subscription. Export Q2-2026 report PDF, upload to Vanta as VPM-2 evidence. Add recurring quarterly task. | ~1–2 h setup + ~15 min/quarter | Net-new — siblings only cover GitHub package alerts |
+| Critical/high remediation tracking | GitHub Security ↔ Vanta integration normally already wired. Closing #11 + #29 within ASTP SLA flips this test green automatically. | Owned by #11, #29 | **Full overlap** — VPM-2 passes once siblings ship |
+
+**Quickest path:** ship #11 + #29 first (already scoped). Then 1-evening Defender enable + screenshot. Marginal effort beyond siblings: **~2 hours**.
+
+**Bonus:** confirm `Automated Security Testing Procedure` is uploaded into Vanta's policy library — covers any "vuln-mgmt policy exists" sub-check.
+
+---
+
+## Actions taken
+
+- Read Drive policy `Automated Security Testing Procedure` to map current scan coverage.
+- Identified gap (no host-based / OS-level scanner) vs VPM-2 intent.
+- **Did not modify** any shared artefacts (Vanta, Drive, GitHub).
+- **Stopped** before uploading evidence — VPM-2 UI inspection blocked, and uploads are a shared change requiring confirmation.
+
+---
+
+## Unresolved questions
+
+- 2 failing tests in Vanta UI — confirm exact names; my list is inferred.
+- Defender for Cloud already enabled on Azure subscription? Free tier vs P2 cost.
+- Are siblings #11/#29 the exact alerts Vanta is failing on?
+- External pen test (May 2025) — accept as quarterly evidence, or insist on automated host scan?
+- ASTP already in Vanta policy library, or needs upload?

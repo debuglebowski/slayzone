@@ -1,0 +1,81 @@
+# Approved vendors × DPA coverage
+
+_All 60 vendors with "Normain approved tool = Yes" in the VENDOR MASTER SHEET (read 2026-06-12), against the three DRAFT DPA appendices. Legend: 1️⃣ = in Table 1 (hosting/product data path) · 2️⃣ = in Table 2 (operations) · ❌ = not in that DPA. Table 2 is identical across all 3 DPAs (11 entries); only Table 1 differs. The DPAs' "Google" entry groups Google Workspace + Google Cloud Platform. Each comment ends with my suggestion in parentheses._
+
+DPA columns: **MP** = Marketplace (`2026-06-05 - DRAFT`) · **CH** = Customer Cloud Hosting (`2026-06-05 - DRAFT`) · **SaaS** = SaaS DPA (`2026-06-04 - DRAFT`).
+
+| Vendor | MP | CH | SaaS | Comment |
+|---|:---:|:---:|:---:|---|
+| 1password | 2️⃣ | 2️⃣ | 2️⃣ | Customer trial passwords *(suggest: keep in T2)* |
+| Allshares (previously Bolago) | ❌ | ❌ | ❌ | Cap table — own equity, internal *(suggest: keep out)* |
+| Amazon Web Services (AWS) | ❌ | ❌ | 1️⃣ | SaaS-only by design — hosts Anthropic models; enterprise modes exclude it *(suggest: keep SaaS-only T1)* |
+| Anthropic | 2️⃣ | 2️⃣ | 2️⃣ | ⚠ Product calls the model on customer content *(suggest: move to T1 in all 3)* |
+| Apollo | ❌ | ❌ | ❌ | ⚠ Sales prospecting, prospect contact data *(suggest: add to T2)* |
+| Apple Business Connect | ❌ | ❌ | ❌ | Own company listing, internal *(suggest: keep out)* |
+| AquaVoice | ❌ | ❌ | ❌ | Personal dictation, internal *(suggest: keep out)* |
+| BetterStack | 1️⃣ | 1️⃣ | 1️⃣ | Product telemetry/logs *(suggest: keep in T1)* |
+| Boardeaser | ❌ | ❌ | ❌ | Board portal — own governance *(suggest: keep out)* |
+| Cacilian | ❌ | ❌ | ❌ | ⚠ Pentest provider *(suggest: keep out if pentest scope excludes production customer data — confirm scope)* |
+| Canva | ❌ | ❌ | ❌ | Marketing design, internal *(suggest: keep out)* |
+| CapCut | ❌ | ❌ | ❌ | Marketing video, internal *(suggest: keep out)* |
+| Circleback | 2️⃣ | 2️⃣ | 2️⃣ | Meeting notes (customer/prospect meetings) *(suggest: keep in T2)* |
+| Clay | ❌ | ❌ | ❌ | ⚠ Lead/prospect enrichment *(suggest: add to T2)* |
+| Cloudflare | ❌ | ❌ | ❌ | DNS only, not in data path *(suggest: keep out)* |
+| Crunchbase | ❌ | ❌ | ❌ | Public company research *(suggest: keep out)* |
+| Cursor | ❌ | ❌ | ❌ | AI code editor — own code only *(suggest: keep out)* |
+| Eleven Labs | ❌ | ❌ | ❌ | ⚠ T1 if used in product *(suggest: keep out — not seen in product code; re-add if productized)* |
+| Envato Elements | ❌ | ❌ | ❌ | Marketing templates, internal *(suggest: keep out)* |
+| Epidemic Sound | ❌ | ❌ | ❌ | Marketing music, internal *(suggest: keep out)* |
+| Figma | ❌ | ❌ | ❌ | Design, internal *(suggest: keep out)* |
+| Firecrawl | ❌ | ❌ | ❌ | Decided exclude — fetches customer-specified URLs only, no personal data *(suggest: keep out)* |
+| Fortnox | ❌ | ❌ | ❌ | ⚠ Customer billing/invoice data *(suggest: keep out — Normain-as-controller billing, same logic as the Stripe call)* |
+| Framer | ❌ | ❌ | ❌ | ⚠ T2 if site forms capture inbound leads *(suggest: keep out pending form check — site looked static)* |
+| GitHub | ❌ | ❌ | ❌ | Decided exclude — own code; internal tool *(suggest: keep out)* |
+| Google Ads | ❌ | ❌ | ❌ | ⚠ T2 if customer/prospect lists are uploaded *(suggest: keep out — confirm no list uploads)* |
+| Google Chrome | ❌ | ❌ | ❌ | Browser, internal *(suggest: keep out)* |
+| Google Cloud Platform | 2️⃣ | 2️⃣ | 2️⃣ | Covered by the grouped "Google" entry *(suggest: keep grouped)* |
+| Google Workspace | 2️⃣ | 2️⃣ | 2️⃣ | Covered by the grouped "Google" entry *(suggest: keep grouped)* |
+| HowdyGo | ❌ | ❌ | ❌ | ⚠ T2 if demos capture viewer/lead data *(suggest: keep out unless lead capture is on — verify)* |
+| Instantly | ❌ | ❌ | ❌ | ⚠ Cold-email outbound, prospect contacts *(suggest: add to T2)* |
+| iOS | ❌ | ❌ | ❌ | Operating system *(suggest: keep out)* |
+| Linear | 2️⃣ | 2️⃣ | 2️⃣ | Support/bug tickets *(suggest: keep in T2)* |
+| LinkedIn Normain page | ❌ | ❌ | ❌ | Social presence, marketing *(suggest: keep out)* |
+| Linkedin Sales Navigator | ❌ | ❌ | ❌ | ⚠ Prospecting, lead data *(suggest: add to T2)* |
+| Loops | 2️⃣ | 2️⃣ | 2️⃣ | Onboarding/marketing email *(suggest: keep in T2)* |
+| Luma | ❌ | ❌ | ❌ | ⚠ Event registrations (prospect/customer contacts) *(suggest: add to T2)* |
+| Microsoft 365 (Office) | ❌ | ❌ | ❌ | ⚠ Doc storage *(suggest: add to T2 — the 1Password entry says customer trials use a Normain SharePoint site, i.e. M365 holds customer data)* |
+| Microsoft Azure | 1️⃣ | ❌ | 1️⃣ | Core hosting; excluded from CH (customer hosts in own cloud) *(suggest: keep as is)* |
+| MyAccess (Apple Online Store) | ❌ | ❌ | ❌ | Device procurement, internal *(suggest: keep out)* |
+| Namecheap | ❌ | ❌ | ❌ | Domain, not in data path *(suggest: keep out)* |
+| Notion / Notion Calendar | 2️⃣ | 2️⃣ | 2️⃣ | In DPAs as "Notion Calendar" — customer/prospect meetings *(suggest: keep in T2)* |
+| OpenAI | 2️⃣ | 2️⃣ | 2️⃣ | ⚠ Product calls the model on customer content *(suggest: move to T1 in all 3)* |
+| Permånad | ❌ | ❌ | ❌ | HR/benefits — own employees *(suggest: keep out)* |
+| PostHog | 1️⃣ | 1️⃣ | 1️⃣ | Product analytics *(suggest: keep in T1)* |
+| Producthunt | ❌ | ❌ | ❌ | Launch platform, marketing *(suggest: keep out)* |
+| Revolut | ❌ | ❌ | ❌ | Banking — own finance *(suggest: keep out)* |
+| Scrive | 2️⃣ | 2️⃣ | 2️⃣ | E-signing (customer signatories) *(suggest: keep in T2)* |
+| Setapp | ❌ | ❌ | ❌ | Mac apps, internal *(suggest: keep out)* |
+| Simply | ❌ | ❌ | ❌ | Domain, not in data path *(suggest: keep out)* |
+| Slack | 2️⃣ | 2️⃣ | 2️⃣ | Team comms, may reference customer data *(suggest: keep in T2)* |
+| Spark | ❌ | ❌ | ❌ | ⚠ Email client *(suggest: add to T2 if used for customer/prospect mail — same rationale as Superhuman; else keep out)* |
+| Superhuman | 2️⃣ | 2️⃣ | 2️⃣ | Email client (customer/prospect mail) *(suggest: keep in T2)* |
+| Swedbank | ❌ | ❌ | ❌ | Bank — own finance *(suggest: keep out)* |
+| Telgea | ❌ | ❌ | ❌ | Mobile plans, internal *(suggest: keep out)* |
+| Tre (3) | ❌ | ❌ | ❌ | Mobile operator, internal *(suggest: keep out)* |
+| Vanta | ❌ | ❌ | ❌ | Decided exclude — compliance tool, own infra/vendor metadata *(suggest: keep out)* |
+| Vimeo | ❌ | ❌ | ❌ | Video, marketing *(suggest: keep out)* |
+| X | ❌ | ❌ | ❌ | Social, marketing *(suggest: keep out)* |
+| YouTube | ❌ | ❌ | ❌ | Video, marketing *(suggest: keep out)* |
+| Zero | ❌ | ❌ | ❌ | ⚠ CRM & sales automation, customer/prospect data *(suggest: add to T2)* |
+
+## Current DPA contents (for reference)
+- **Table 1 — MP:** Microsoft Azure · BetterStack · PostHog
+- **Table 1 — CH:** BetterStack · PostHog
+- **Table 1 — SaaS:** Microsoft Azure · AWS · BetterStack · PostHog
+- **Table 2 — all 3 (identical, 11):** 1Password · Circleback · Anthropic · Linear · Google · Slack · Superhuman · Notion Calendar · Loops · Scrive · OpenAI
+
+## Suggestions rolled up
+- **Add to T2:** Apollo · Clay · Instantly · LinkedIn Sales Navigator · Luma · Zero · Microsoft 365 (SharePoint trials) · Spark (if used for customer mail)
+- **Move T2 → T1:** OpenAI · Anthropic
+- **Keep out (after confirm):** Fortnox · Framer · Google Ads · HowdyGo · Eleven Labs · Cacilian
+- **Unclassified (O3-residual):** MS Marketplace publisher

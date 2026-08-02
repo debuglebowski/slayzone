@@ -1,0 +1,32 @@
+flowchart LR
+  subgraph NORMAIN
+    direction TB
+    n1["1. Pick protocol<br/>(SAML or OIDC)"]:::n
+    n2["2. Decide required claims<br/>(sub, email, name, UPN)"]:::n
+    n3["3. Pick SP Entity ID<br/>and callback URL"]:::n
+    n4["8. Wire auth library<br/>to KPMG's metadata"]:::n
+    n5["9. Implement sign-in and callback<br/>(validate sig, iss, aud)"]:::n
+    n6["10. Map claims to<br/>Normain user accounts"]:::n
+    n7["12. End-to-end test"]:::n
+
+    n1 --> n2 --> n3
+    n4 --> n5 --> n6 --> n7
+  end
+
+  subgraph KPMG
+    direction TB
+    k1["4. NITSO security review<br/>and approval"]:::k
+    k2["5. Create non-gallery<br/>enterprise app"]:::k
+    k3["6. Configure SSO and claim mapping"]:::k
+    k4["7. Assign KPMG Sweden users"]:::k
+    k5["11. Provide test user"]:::k
+    k6["13. Add remaining users<br/>— GO LIVE"]:::k
+
+    k1 --> k2 --> k3 --> k4 --> k5 --> k6
+  end
+
+  n3 ==>|"HAND-OFF<br/>Protocol / Claims /<br/>Entity ID / Callback URL"| k1
+  k4 ==>|"HAND-OFF<br/>App ID /<br/>Federation metadata"| n4
+
+  classDef n fill:#e1f5ff,stroke:#0066cc,color:#000
+  classDef k fill:#fff3e0,stroke:#e65100,color:#000

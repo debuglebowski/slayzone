@@ -1,0 +1,18 @@
+to: <support@linear.app>
+subject: EU data residency migration for workspace "normain"
+
+Hi!
+
+We need to move our workspace **Normain** (urlKey `normain`, org `db914369-04ee-495e-aeb9-f073e85f588d`) from US to EU residency. Normain is EU-based; our compliance program (GDPR, ISO 27001, EU AI Act, NIS2) requires it.
+
+Workspace was created 2024-01-15 — before EU region was offered — so defaulted to US.
+
+The following are my humble asks, in order of preference:
+
+1. Managed migration to an EU workspace, preserving issue IDs, history, attachments, comments, integrations.
+2. If not available: best-supported self-migration path for a workspace of our size.
+3. If neither: is EU migration for existing US workspaces on the roadmap?
+
+We are of course open to a freeze window, so let us know what you require around this if possible. . Preserving `NORM-123`-style IDs matters — they're referenced widely externally.
+
+Happy to jump on a call.

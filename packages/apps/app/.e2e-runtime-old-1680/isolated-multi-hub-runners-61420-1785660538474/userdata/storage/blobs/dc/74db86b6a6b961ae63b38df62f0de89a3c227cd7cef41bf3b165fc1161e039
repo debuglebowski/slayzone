@@ -1,0 +1,13 @@
+# Marketplace template — 2026-06-05 DRAFT
+
+**Package:** Order TEMPLATE + Marketplace DPA + 99% SLA
+📄 Folder: https://drive.google.com/drive/folders/13eKzRZFSJEnsZ8IV8MJklqo58uf7WpR9
+📄 DPA: https://docs.google.com/document/d/1hXlev3wfp2RajifWrkJmcVX8Guu9-XX8wmTziFWfIKM/edit
+
+## Changes vs `2026-04-20 - LATEST`
+- **DPA subprocessor appendix standardized.** Table 2 (operations) now includes **OpenAI** + **Anthropic**. Table 1 (hosting) = Azure, BetterStack, PostHog. All entries hyperlinked. Added a clause that subprocessor-list updates (under the 14-day notice) are a permitted modification, not a separate amendment.
+- **99% SLA added to the package** (the canonical 2026-05-29 SLA), cleaned: removed editorial banner, "Main Agreement" → generic "Customer Agreement" (so one SLA fits all motions), fixed a duplicated-phrase typo.
+- Subprocessor-change notice **unchanged (14 days)**.
+
+**On sign-off:** rename `2026-06-05 - DRAFT/` → `- LATEST/`; demote `2026-04-20 - LATEST` → `2026-04-20`.
+**To check:** OpenAI/Anthropic are correct subprocessors; 99% uptime terms.

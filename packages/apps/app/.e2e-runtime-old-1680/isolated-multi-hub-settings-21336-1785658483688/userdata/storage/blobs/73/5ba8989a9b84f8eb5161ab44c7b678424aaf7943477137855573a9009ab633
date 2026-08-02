@@ -1,0 +1,224 @@
+# Slice 2.5.1 — Status
+
+_As of 2026-05-22. Closes the deferred HARD GATES from slice 2.5 before the slice 2.6 renderer cutover. Branch `main` @ `ba5a9135` (working tree, uncommitted)._
+
+## Summary
+
+| Gate | Result |
+|------|--------|
+| GATE 1 — supervisor crash-recovery test | **CLOSED** ✓ |
+| GATE 2 — empirically close risk #1 (macOS Gatekeeper) | **NOT CLOSED** ✗ — cannot produce a notarized DMG in this environment (see below) |
+| GATE 3 — full `pnpm test:e2e`, confirm dark-launch regressed nothing | **CLOSED** ✓ — slice 2.5 + 2.5.1 regressed nothing |
+
+`pnpm typecheck` ✓ · `pnpm lint` ✓ · prod build (`pnpm build`) ✓.
+
+Changes are **left uncommitted** (3 files) per instruction — see "Working-tree changes".
+
+---
+
+## GATE 1 — supervisor crash-recovery test — CLOSED ✓
+
+TDD, as required: the test was written first and run **before** any supervisor
+change — 3 of 7 cases failed (the supervisor ignored the new timing override,
+so the backoff / 60s-reset / boot-timeout cases ran against the 60s production
+constants and timed out). The supervisor was then changed; all 7 pass.
+
+New test: `packages/apps/app/src/main/sidecar-server-supervisor.test.ts`.
+Drives `startSidecarServer()` against a controllable fake side-car script
+(deterministic crash / health behaviour) plus the **real built `dist/bin.js`**
+for the parent-death case. 7/7 green:
+
+```
+✓ /health probe drives the child to ready + exposes status
+✓ repeated crash → exponential-backoff restart → permanent failure
+✓ 60s healthy streak resets the backoff attempt counter
+✓ a ready child that exits respawns immediately — no backoff, no attempt++
+✓ boot-timeout kills a child that never reports healthy
+✓ stop() is graceful and idempotent
+✓ parent-death: the real built side-car self-exits when stdin closes
+7 passed, 0 failed
+```
+
+Coverage vs the gate's required behaviours:
+- **Exponential-backoff restart** — a permanently-crashing child is restarted
+  on a strictly-increasing schedule; after the schedule is exhausted (5
+  retries) `onPermanentFailure` fires with `attempts: 5` and `waitForReady()`
+  rejects. The test asserts the spawn count (6 = initial + 5) and that each
+  inter-spawn gap is ≥ its backoff slot and strictly increasing.
+- **60s healthy-streak reset** — after 2 crashes the attempt counter is 2;
+  once the child has been continuously healthy for the reset window the
+  counter returns to 0.
+- **Ready-child immediate respawn** — a child that crashes *after* reaching
+  `ready` is respawned with no backoff and no attempt increment (separate from
+  the crash-during-boot path).
+- **Boot-timeout** — a child that never answers `/health` is SIGKILLed after
+  the boot deadline and escalates to permanent failure.
+- **`/health` probe** — `ready` is reached only because `/health` answered
+  200; the test also probes `/health` directly.
+- **Parent-death self-exit** — spawns the real `packages/apps/server/dist/bin.js`
+  with `SLAYZONE_SUPERVISED=1`, waits for its listening banner, closes the
+  stdin pipe (exactly what happens when the Electron parent dies) and asserts
+  the side-car self-exits within 6s. (Skips gracefully if `dist/bin.js` is not
+  built.)
+
+### Supervisor change (required to make the test fast + deterministic)
+
+`packages/apps/app/src/main/sidecar-server-supervisor.ts` gained an **additive,
+optional** `timing?: SidecarTiming` field on `SidecarServerOpts`. Every field
+falls back to the existing production constant (`BACKOFF_MS`,
+`HEALTHY_RESET_MS`, `HEALTH_POLL_INTERVAL_MS`, `HEALTH_BOOT_TIMEOUT_MS`,
+`STOP_SIGTERM_GRACE_MS`). `main/index.ts` passes **no** `timing`, so production
+behaviour is byte-identical — the override exists solely so the test can shrink
+the 60s healthy-reset window and the backoff schedule. No functionality
+dropped; no production behaviour changed.
+
+### Test runner registration
+
+`run-all.sh` (`pnpm test:unit`) now runs the supervisor test. A new
+`run_test_electron_strict` runner was added because the existing
+`run_test` / `run_test_no_loader` helpers pipe through `grep` and count a suite
+PASS as long as *any* output is produced — a real failure would be hidden. The
+strict runner uses `set -o pipefail` so a non-zero test exit propagates and
+counts as FAIL. A HARD GATE test must actually gate.
+
+---
+
+## GATE 2 — risk #1 (macOS Gatekeeper) — NOT CLOSED ✗
+
+**The empirical Gatekeeper validation could not be performed in this
+environment. No result is faked.** Two independent blockers, either of which
+alone prevents it:
+
+**Blocker A — `electron-builder --mac` fails locally, before signing.**
+`pnpm build:mac` ran: the CLI build and `npm run build` (electron-vite)
+both succeeded, then `electron-builder --mac` aborted immediately with:
+
+```
+⨯ Cannot compute electron version from installed node modules — none of the
+  possible electron modules are installed and version ("^41.0.3") is not fixed
+  in project.
+```
+
+This is a pnpm-workspace hoisting issue (electron-builder cannot locate/resolve
+the `electron` module version under the pnpm symlink layout). It happens
+*before* any signing or packaging, so no `.app` / `.dmg` was produced this run.
+Pre-existing and environment-specific — the release CI (electron-builder
+`publish: github`) builds mac artifacts successfully, so CI's environment
+resolves this (typically via `electron-builder install-app-deps` or a pinned
+electron version). Not caused by slice 2.5 / 2.5.1.
+
+(Note: `packages/apps/app/dist/` contains stale DMG/zip artifacts from an old
+build — e.g. `SlayZone-0.1.66-arm64-mac.zip`, version 0.1.66 vs current
+0.32.0. These predate the side-car entirely and are useless for this gate.)
+
+**Blocker B — no notarization credentials.** Even with Blocker A resolved,
+`electron-builder.yml` has `notarize: true`, which requires Apple Developer
+credentials in the environment — none are present
+(`APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`, or an App Store
+Connect API key `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`).
+A signing identity *is* present in the keychain
+("Developer ID Application: Kahan Tech AB (DRAYKWYC94)"), but signing alone is
+not notarization — a signed-but-un-notarized app under quarantine is blocked by
+Gatekeeper at the *app* level, before the side-car ever spawns, so it would
+validate nothing about risk #1.
+
+### What was verified on paper (not a substitute for the empirical test)
+
+- `build/entitlements.mac.plist` contains exactly the four entitlements risk #1
+  expects: `com.apple.security.cs.allow-jit`,
+  `allow-unsigned-executable-memory`, `allow-dyld-environment-variables`,
+  `com.apple.security.network.client`. Nothing to add.
+- `electron-builder.yml`: `hardenedRuntime: true`, `gatekeeperAssess: false`,
+  `entitlements` + `entitlementsInherit` both point at the plist above.
+- `extraResources` ships the side-car as plain JS — `from: ../server/dist/bin.js`
+  → `to: server/bin.js` — i.e. `Contents/Resources/server/bin.js`, not an
+  executable, never Gatekeeper-inspected (as risk #1 designed).
+
+The structural mitigations are all in place; only the runtime confirmation is
+outstanding.
+
+### What is needed to close GATE 2
+
+1. A build host where `electron-builder --mac` can resolve electron (the
+   release CI already does — or pin `electron` to an exact version /
+   run `electron-builder install-app-deps`).
+2. Apple notarization credentials exported in the environment.
+3. `pnpm build:mac` → notarized + stapled `packages/apps/app/dist/SlayZone-arm64.dmg`.
+4. Install the app from that DMG (or `xattr -w com.apple.quarantine`-tag the
+   `.app`), launch it, and confirm: `ps -ef | grep '[s]erver/bin.js'` shows the
+   spawned side-car, `<dataRoot>/logs/sidecar.log` is being written, and
+   `curl http://127.0.0.1:<port>/health` returns 200 with a `dbPath` matching
+   Electron's DB file.
+
+**Recommended:** run this validation against the next release CI artifact (CI
+already produces notarized DMGs), or add it as a post-release smoke step.
+Risk #1 is rated Low with all structural mitigations confirmed present — but
+per the slice 2.5 learnings this gate stays formally **open** until the
+quarantined-DMG launch is observed.
+
+---
+
+## GATE 3 — full `pnpm test:e2e` — CLOSED ✓ (no regression)
+
+Full suite (requires `pnpm build` first — done): **765 passed, 2 failed,
+111 skipped** (7.1m).
+
+Neither failure is a regression from slice 2.5 (dark-launch) or slice 2.5.1:
+
+1. **`git/68-performance-profiling.spec.ts` › "tab switch latency"** —
+   **flake, confirmed.** The failure matched a hidden element (`getByText(...)`
+   resolved to a `display:none` element from another mounted tab — the known
+   shared-window test-isolation gotcha). Re-run in isolation: **passed**.
+
+2. **`browser/24-browser-panel.spec.ts` › "Alt+Shift+Click on a browser link
+   opens a prefilled task draft"** — **pre-existing failure, not a regression.**
+   Reproduces in isolation. The Create Task dialog never appears after an
+   Alt+Shift+Click-modified mouse dispatch on a browser link. The two sibling
+   prefilled-draft tests in the same file (link task-intent, line 110;
+   context-menu action, line 135) **pass** — only the Alt+Shift+Click modifier
+   path is broken.
+
+   This is a renderer / WebContentsView-IPC feature. The slice 2.5 side-car is
+   dark-launch — zero renderer or IPC dependency — and the slice 2.5.1 change
+   (`timing` override) is inert in production (`index.ts` passes no `timing`)
+   and the new `.test.ts` lives in `src/main/`, not `e2e/`, so Playwright never
+   collects it. Neither this work nor the side-car can reach this code path.
+   The slice 2.5 status artifact noted the full e2e suite was "not yet run for
+   this slice — unverified"; this failure was already latent on `main`.
+
+**Filed for follow-up (out of slice 2.5.1 scope):** the browser
+Alt+Shift+Click → prefilled-task-draft path is broken on `main` and should be
+triaged separately.
+
+`global-setup` was also observed reaping a stale side-car process
+(`[global-setup] Killed stale side-car process <pid>`) — the `pgrep -f` orphan
+backstop (risk #3) working as designed.
+
+---
+
+## Working-tree changes (uncommitted — left staged/unstaged per instruction)
+
+```
+ M packages/apps/app/src/main/sidecar-server-supervisor.ts   (+timing override; prod-inert)
+ M packages/shared/test-utils/run-all.sh                     (+strict runner; +test registration)
+?? packages/apps/app/src/main/sidecar-server-supervisor.test.ts  (new — crash-recovery test)
+```
+
+Verification run before reporting:
+- `pnpm --filter @slayzone/app typecheck` — ✓
+- lint — theme ✓, server-boundary guard ✓, biome ✓, eslint (changed files) ✓
+- `pnpm build` (prod) — ✓ exit 0
+- supervisor test (standalone + via `run-all.sh` strict runner) — ✓ 7/7
+
+---
+
+## Gate status going into slice 2.6
+
+- GATE 1 ✓ — the supervisor's crash-recovery logic is now under automated test;
+  the renderer may safely depend on the side-car in 2.6.
+- GATE 2 ✗ — risk #1 remains formally open. It does **not** block slice 2.6
+  *development*, but the quarantined-notarized-DMG launch must be observed
+  before a slice that ships the side-car as a renderer dependency reaches
+  production users on macOS. Track it against the release CI artifact.
+- GATE 3 ✓ — slice 2.5 dark-launch confirmed to regress nothing; the one
+  remaining red e2e (browser Alt+Shift+Click) is pre-existing and unrelated.

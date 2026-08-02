@@ -1,0 +1,141 @@
+# Shortcuts Widget — 5 Layout Variants
+
+Grounded in the current model: `items[]` (each `kind: instance|dashboard|url`, `ref`, optional `label`, `icon`), a `variant`, and `newTab`. Today only `list` + `grid` exist. Below are 5 distinct layout directions.
+
+Icon legend (lucide): ▣ instance (Box) · ▦ dashboard (LayoutDashboard) · ◍ url (Globe)
+
+---
+
+## 1. Compact List  (refines today's `list`)
+
+Dense single-column rows. Icon + label, kind-tinted icon, chevron + faint target on hover. Best when shortcuts are mixed and many.
+
+```
+┌──────────────────────────────┐
+│ Shortcuts                     │  ← widget.title
+├──────────────────────────────┤
+│ ▦  Q3 Pipeline            ›   │
+│ ▣  Acme Corp                  │
+│ ▣  Renewal — Globex           │
+│ ◍  Stripe Dashboard       ↗   │  ← ↗ = newTab url
+│ ▦  Team Overview              │
+└──────────────────────────────┘
+   hover row → bg-accent, › chevron fades in
+```
+
+- Uses: `label` (or resolved name), `icon`/kind icon, `newTab` → ↗ glyph on urls.
+- Cheap win: add a right-aligned chevron `›` (internal) / `↗` (new-tab url) so target type reads at a glance.
+
+---
+
+## 2. Icon Tiles  (refines today's `grid`)
+
+Responsive auto-fit cards, icon chip on top, label below, kind accent bar. Reads like a launchpad. Best for ≤8 hero links.
+
+```
+┌──────────────────────────────────────┐
+│ Shortcuts                             │
+├──────────────────────────────────────┤
+│ ┌────────┐ ┌────────┐ ┌────────┐     │
+│ │   ▦    │ │   ▣    │ │   ◍    │     │
+│ │ Q3 Pipe│ │  Acme  │ │ Stripe │     │
+│ └────────┘ └────────┘ └────────┘     │
+│ ┌────────┐ ┌────────┐ ┌────────┐     │
+│ │   ▣    │ │   ▦    │ │   ◍    │     │
+│ │ Globex │ │ Team   │ │ Docs ↗ │     │
+│ └────────┘ └────────┘ └────────┘     │
+└──────────────────────────────────────┘
+   auto-fit: cols flex with tile width (1→4), not fixed 2
+```
+
+- Uses: `icon`/kind icon (18px), `label`, kind color accent on chip.
+- Upgrade vs today: `grid-cols-2` → `auto-fill minmax()` so it adapts to the flexbox tile size.
+
+---
+
+## 3. Launchpad Buttons
+
+Full-width prominent rows. Icon in a rounded chip, bold label, optional subtitle = resolved target. Best when there are a few important jump-offs and the tile is wide.
+
+```
+┌────────────────────────────────────────┐
+│ Quick links                             │
+├────────────────────────────────────────┤
+│ ┌────────────────────────────────────┐ │
+│ │ ▦   Q3 Pipeline                  › │ │
+│ │     dashboard                      │ │
+│ └────────────────────────────────────┘ │
+│ ┌────────────────────────────────────┐ │
+│ │ ◍   Stripe                       ↗ │ │
+│ │     dashboard.stripe.com           │ │
+│ └────────────────────────────────────┘ │
+│ ┌────────────────────────────────────┐ │
+│ │ ▣   Acme Corp                    › │ │
+│ │     Account                        │ │
+│ └────────────────────────────────────┘ │
+└────────────────────────────────────────┘
+```
+
+- Uses: chip(`icon`), `label`, subtitle = host (url) / concept name (instance) / "Dashboard".
+- New behavior: subtitle line, derived — no new config field required.
+
+---
+
+## 4. Grouped Sections
+
+Auto-groups items by `kind` under subtle headers. Scales cleanly to many shortcuts; reads like a mini nav. Best for 10+ mixed items.
+
+```
+┌──────────────────────────────┐
+│ Shortcuts                     │
+├──────────────────────────────┤
+│ DASHBOARDS                    │
+│   ▦  Q3 Pipeline              │
+│   ▦  Team Overview            │
+│                               │
+│ RECORDS                       │
+│   ▣  Acme Corp                │
+│   ▣  Renewal — Globex         │
+│                               │
+│ LINKS                         │
+│   ◍  Stripe          ↗        │
+│   ◍  Notion HQ       ↗        │
+└──────────────────────────────┘
+```
+
+- Uses: groups by `kind`; headers only shown for non-empty groups (mirrors ConceptSelect Org/Integration grouping pattern).
+- Optional config: `grouped: boolean` to toggle vs flat list. Order preserved within group.
+
+---
+
+## 5. Chip Flow
+
+Wrapping flow of compact rounded chips (icon + label). Fills width, wraps to height — ideal for narrow OR wide tiles where a column wastes space. Best for short labels.
+
+```
+┌──────────────────────────────────────┐
+│ Shortcuts                             │
+├──────────────────────────────────────┤
+│  (▦ Q3 Pipeline) (▣ Acme) (◍ Stripe↗)│
+│  (▣ Globex) (▦ Team) (◍ Docs↗)        │
+│  (▣ Renewal) (◍ Notion↗)              │
+└──────────────────────────────────────┘
+   flex-wrap; chip = pill, bg-muted, hover bg-accent
+```
+
+- Uses: `icon`/kind icon (14px), `label`, `↗` suffix for new-tab urls.
+- Density king: most links per square inch; degrades gracefully at any tile size.
+
+---
+
+## Comparison
+
+| Variant      | Density | Best for                | New config?            |
+|--------------|---------|-------------------------|------------------------|
+| Compact List | High    | many mixed items        | none (chevron polish)  |
+| Icon Tiles   | Medium  | ≤8 hero links           | none (auto-fit cols)   |
+| Launchpad    | Low     | few important, wide tile| none (derived subtitle)|
+| Grouped      | Medium  | 10+ items, nav feel     | `grouped?: boolean`    |
+| Chip Flow    | V.High  | short labels, any shape | `variant: "chips"`     |
+
+All five reuse the existing `ShortcutItem` model and `newTab`. Only Grouped + Chip Flow imply an additive optional contract field; the rest are pure render changes.

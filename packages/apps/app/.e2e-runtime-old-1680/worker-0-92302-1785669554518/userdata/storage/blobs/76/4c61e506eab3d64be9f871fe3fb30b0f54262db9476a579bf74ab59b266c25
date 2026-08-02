@@ -1,0 +1,32 @@
+# Risk 6 — CUECs Expansion
+
+## Goal
+Expand the CUEC table in DC 6 to cover the standard SaaS SOC 2 set. Avoid a likely auditor "incomplete CUECs" comment.
+
+## Inputs
+- New draft: Google Doc `1lnb6Lu4ZWnwuQTGjpH1ijteMgTS9olCz1et4LBEhbBs` (DC 6)
+- Current CUECs: 2 entries, both CC6.6
+
+## Candidate additions
+For each candidate: confirm it is APPLICABLE given Normain's product (customer integration, role-based access, file-storage credentials). If not applicable, skip and note why.
+
+| TSC | Candidate CUEC | Applies? |
+|-----|----------------|----------|
+| CC1.4 | Customer runs background checks on its own users with access | |
+| CC2.3 | Customer responsible for inputs/data submitted | |
+| CC6.1 | Customer manages logical access to its own accounts | |
+| CC6.2 | Customer provisions/revokes user access on its side | |
+| CC6.3 | Customer periodically reviews its users' access | |
+| CC8.1 | Customer-initiated configurations / integrations are customer's responsibility | |
+
+## Drafting rule
+Match the voice and brevity of the existing CUECs. Reference the storage-integration model (SharePoint / Drive / Box) where relevant.
+
+## Output
+- Updated CUEC table written into DC 6 of the new doc
+- This artifact: final applicability decisions + final CUEC text
+
+## Status
+- [ ] Applicability decided per candidate
+- [ ] CUEC entries drafted
+- [ ] DC 6 updated in the new doc

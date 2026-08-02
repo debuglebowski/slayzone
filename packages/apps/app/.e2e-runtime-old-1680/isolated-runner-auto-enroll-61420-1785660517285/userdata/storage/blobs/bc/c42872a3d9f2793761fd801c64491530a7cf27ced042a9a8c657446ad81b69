@@ -1,0 +1,38 @@
+flowchart TD
+    subgraph Renderer["Renderer"]
+        UI_Chat[Chat Panel textarea]
+        UI_Diff[GitDiffPanel chip row]
+        UI_Hook[useAgentTurns hook]
+    end
+
+    subgraph Main["Main process"]
+        ChatH[chat-handlers.ts]
+        Bus[chat event bus]
+        Tracker[turn-tracker]
+        Git[git-worktree.ts]
+        DB[(SQLite agent_turns)]
+        Refs[(refs/slayzone/turns/*)]
+    end
+
+    UI_Chat -- chat:send IPC --> ChatH
+    ChatH -- user-message --> Bus
+    Bus --> Tracker
+    Tracker -- git stash create --> Git
+    Git -- SHA --> Tracker
+    Tracker -- git update-ref --> Refs
+    Tracker -- INSERT start_sha,prompt_preview --> DB
+
+    ChatH -. agent stream .-> Bus
+    Bus -- result --> Tracker
+    Tracker -- git stash create --> Git
+    Git -- SHA --> Tracker
+    Tracker -- diff empty? --> Git
+    Tracker -- if empty: DELETE row + refs --> DB
+    Tracker -- else: UPDATE end_sha + update-ref --> DB
+    Tracker -. prune oldest if >50 .-> DB
+    Tracker -. prune oldest if >50 .-> Refs
+
+    DB --> UI_Hook
+    UI_Hook --> UI_Diff
+    UI_Diff -- selected fromSha,toSha --> Git
+    Git -- diff --> UI_Diff

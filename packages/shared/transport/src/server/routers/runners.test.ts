@@ -28,11 +28,20 @@ h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(proj
 h.db.prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)').run(taskId, projectId, 'T')
 
 // Fake runner gateway registry — one connected runner + a bound hub URL + cert.
+// `usableRunnerIds` defaults to mirroring `liveRunnerIds`: the common case is a
+// healthy runner, where socket-open and usable agree. A test that needs them to
+// DIVERGE (silent-but-open runner) sets it explicitly.
 let liveRunnerIds: string[] = []
+let usableRunnerIds: string[] | null = null
+const asDescriptors = (ids: string[]): Array<{
+  runnerId: string
+  connectedAt: number
+  lastSeenAt: number
+}> => ids.map((runnerId) => ({ runnerId, connectedAt: 111, lastSeenAt: 222 }))
 const fakeDeps: RunnersDeps = {
   getGateway: () => ({
-    listRunners: () =>
-      liveRunnerIds.map((runnerId) => ({ runnerId, connectedAt: 111, lastSeenAt: 222 }))
+    listRunners: () => asDescriptors(liveRunnerIds),
+    listUsableRunners: () => asDescriptors(usableRunnerIds ?? liveRunnerIds)
   }),
   getHubUrl: () => 'ws://127.0.0.1:8788/runners',
   getCertFingerprint: () => 'abcdef0123456789'
@@ -123,4 +132,32 @@ test('runners: list degrades + mintJoinToken throws when the gateway is unwired'
 
   // Restore the fake gateway for any later runs (test order independence).
   setRunnersDeps(fakeDeps)
+})
+
+test('runners.list: `usable` is independent of `connected`', async () => {
+  const r = await registerRunner(h.slayDb, {
+    name: 'silent-box',
+    platform: 'linux-x64',
+    version: '0.35.0',
+    capabilities: { pty: true }
+  })
+  // Socket open, but the runner has gone quiet and its watchdog has not reaped it.
+  // Callers that gate work on `connected` would dispatch into a void here; `usable`
+  // is what tells them not to.
+  liveRunnerIds = [r.id]
+  usableRunnerIds = []
+  const rows = (await caller.list()) as Array<{
+    id: string
+    connected: boolean
+    usable: boolean
+  }>
+  const row = rows.find((x) => x.id === r.id)
+  expect(row?.connected).toBe(true)
+  expect(row?.usable).toBe(false)
+
+  // And they agree again once it is heard from.
+  usableRunnerIds = [r.id]
+  const healthy = (await caller.list()) as Array<{ id: string; usable: boolean }>
+  expect(healthy.find((x) => x.id === r.id)?.usable).toBe(true)
+  usableRunnerIds = null
 })

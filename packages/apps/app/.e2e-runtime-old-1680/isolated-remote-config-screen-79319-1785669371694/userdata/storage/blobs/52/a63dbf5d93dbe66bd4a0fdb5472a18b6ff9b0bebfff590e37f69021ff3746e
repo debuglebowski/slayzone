@@ -1,0 +1,55 @@
+# Slice 2.5 Risks
+
+Threat-model for the side-car shell. **Slice 2.5 is additive dark-launch** — the side-car is shadow infra (spawned, supervised, listening) with nothing depending on it.
+
+Risks #2, #5, #8 are **structurally eliminated** by this posture and are omitted from the table below — see "Why dark-launch collapses the risk surface". They return at the renderer cutover (slice 2.6); mitigate them there. Risk numbers are kept stable (gaps intentional) so cross-references to the plan stay valid.
+
+| # | Risk | Severity | Description | Mitigation |
+|---|---|---|---|---|
+| 1 | macOS Gatekeeper + hardened runtime blocks `ELECTRON_RUN_AS_NODE` child spawn | **Medium** | Notarized .app may refuse subprocess w/ `ELECTRON_RUN_AS_NODE=1` unless entitlements (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) + signature cover the child path. Dark-launch: spawn failure is non-fatal (log only, no user impact) — that is what downgrades this from Blocker. | Spawn-smoke spike on day 1 (dev + build:mac), before feature work. Add entitlements proactively. Fallback: bundle real node binary in extraResources. |
+| 3 | `pgrep slayzone-server` orphan cleanup targets wrong binary | **High** | Side-car runs as `process.execPath` (Electron binary, e.g. "SlayZone Dev"). pgrep doesn't match "slayzone-server". `e2e/global-setup.ts:11-14` has the same latent flaw. | Match by argv: `pgrep -f 'server/dist/bin.js'`. Fix global-setup too. |
+| 4 | Stdout/stderr back-pressure deadlock | **Medium** | Kernel pipe buffer (~64KB) fills if logger throws/stalls → side-car blocks on write → hang. | Supervisor always consumes `.on('data')`; wrap logger in try/catch. Validated by spawn-smoke spike. |
+| 6 | Vite bundles `@slayzone/server` into Electron main | **Medium** | `externalizeDepsPlugin({exclude: slayzoneDeps})` pulls all `@slayzone/*` into main bundle. Side-car is spawned by file path — should never be bundled. | `import type` only from `@slayzone/server` in main. Belt: add `@slayzone/server` to vite `external`. |
+| 7 | DB-name divergence between Electron + side-car | **Medium** | Future engineer changes Electron's DB-name selector but forgets `SLAYZONE_DB_NAME` env passthrough → side-car opens different file → silent two-DB divergence. | Extract `getDbName(isPackaged)` helper to `@slayzone/platform`. Electron `db/index.ts` + side-car `db.ts` both call it. |
+| 9 | Orphaned side-car after Electron `kill -9` | **Low** | Side-car may outlive parent process. | Keep child ref'd (no `unref()`). SIGTERM on `will-quit`. `pgrep -f` reap on next boot (per #3). |
+| 10 | Dual-writer SQLITE_BUSY under load | **Low** | Router empty → side-car never writes → zero contention this slice. Becomes Medium when slice 4+ procedures land. | Monitor under e2e once procedures migrate. `busy_timeout=5000` covers transient. Add retry-on-BUSY helper if persistent. |
+| 11 | `__trpcPort` globalThis leftover | **Low** | Dark-launch keeps the in-process tRPC path alive → leftover var stays. | Optional: rename to `__inProcessTrpcPort` so slice 2.6 cutover diff is unambiguous. |
+
+## Severity legend
+
+- **Blocker**: prevents shipping the slice — *none remain after dark-launch*
+- **High**: would cause a test flake or dev-tooling failure
+- **Medium**: silent foot-gun, hard to debug if hit
+- **Low**: monitored, mitigated by existing guards
+
+## Why dark-launch collapses the risk surface
+
+Three risks — **#2 test-reset port churn, #5 ~80s mount block, #8 WS reconnect race** — all require the renderer to *depend on* the side-car. Slice 2.5 ships the side-car as shadow infra: spawned, supervised, listening on `/trpc` + `/health`, holding a DB writer handle — but the renderer keeps using the in-process tRPC server. No dependency → those three cannot occur, so they are dropped from the table above.
+
+Risk #1 drops from Blocker to Medium for the same reason: a failed spawn is log-only noise, not a broken app.
+
+Net: **zero blockers, zero user-facing high-severity.** Remaining items are one High (test-tooling only), three Medium foot-guns, three Low — all with named fixes baked into the slice.
+
+## Structural mitigations (applied regardless)
+
+1. **Dark-launch** — side-car has no consumers this slice; renderer cutover deferred to slice 2.6.
+2. **Spawn-smoke spike day 1** — validate `ELECTRON_RUN_AS_NODE` spawn + stdio drain in dev + `build:mac` before building feature logic. De-risks #1 + #4 before sunk cost.
+3. **`getDbName()` shared helper** — single source of truth for DB filename (#7).
+4. **`pgrep -f` by script path** — correct orphan-reaping target (#3, #9).
+5. **`import type` only in Electron main** — keeps the side-car out of the main bundle (#6).
+
+## Verification hooks
+
+- After `pnpm build:mac`: launch packaged .app, confirm side-car spawned via `ps -ef | grep '[s]erver/bin.js'`. Validates #1 in the real notarized build.
+- `pnpm dev`: confirm log line `[supervisor] sidecar ready pid=X port=N`. App behaves exactly as before (renderer on in-process tRPC).
+- `kill -9 <side-car-pid>`: supervisor restarts within ~2s; renderer unaffected (no dependency).
+- All existing e2e specs pass unchanged — dark-launch touches no renderer/IPC surface.
+
+## Slice 2.6 — risks to re-address at renderer cutover
+
+When the renderer is flipped to the side-car, the three eliminated risks return:
+- **#2 test-reset port churn** — supervisor restart picks a new port, renderer's cached port goes stale.
+- **#5 ~80s mount block** — renderer awaiting `waitForReady` through full backoff on permanent failure.
+- **#8 WS reconnect race** — reconnect target port changes mid-restart.
+
+Slice 2.6 must ship with: sticky port across supervisor restart, renderer re-query of port on WS close, soft-fallback UI after 5s pending, and a permanent-failure screen. Slice 2.6 is small + reversible — if side-car telemetry from the dark-launch period looks bad, 2.6 simply doesn't ship.

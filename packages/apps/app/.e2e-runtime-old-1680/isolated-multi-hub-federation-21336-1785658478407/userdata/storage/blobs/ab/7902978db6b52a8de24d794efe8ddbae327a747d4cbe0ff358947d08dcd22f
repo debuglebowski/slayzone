@@ -1,0 +1,118 @@
+# Metric Widget — 5 design suggestions
+
+The Metric widget today renders one hero number (`count` / `sum` / `avg` of
+matching instances), an optional `delta` vs 7d/30d ago, a `format`
+(plain/compact/currency/percent), and two layouts (`tile` vertical, `bar`
+horizontal). Below are 5 distinct visual treatments to grow it. Each notes
+what existing config drives it and what *new* config it would need.
+
+---
+
+## 1 · Hero Tile  *(refined default)*
+
+Single big number, caption, delta line. Number scales to tile height.
+
+```
+┌──────────────────────────────┐
+│                              │
+│                              │
+│     1,284                    │
+│     Open Deals               │
+│     ▲ +112 vs 30d ago        │
+│                              │
+└──────────────────────────────┘
+```
+
+Drives from: `agg` + `field` → number · `label` → caption · `delta` → arrow line.
+New config: none — this is the current `variant:"tile"`, just the baseline.
+
+---
+
+## 2 · Stat Bar  *(dense header strip)*
+
+Short + wide tiles collapse to one line: number, label, delta pill on the
+right. Great for a row of KPIs across the top of a dashboard.
+
+```
+┌────────────────────────────────────────────────┐
+│  $4.2M   Pipeline value              ▲ +8.3%    │
+└────────────────────────────────────────────────┘
+```
+
+Drives from: current `variant:"bar"` (auto-picks on short/wide tiles).
+New config: `delta` could render as % pill instead of raw `+N`.
+
+---
+
+## 3 · Sparkline KPI  *(number + inline trend)*
+
+Hero number with a tiny sparkline of the value over the delta window, so the
+trend is visible at a glance — not just a single before/after diff.
+
+```
+┌──────────────────────────────┐
+│  New Signups            7d ▾  │
+│                              │
+│  342          ▁▂▃▅▆▇█        │
+│  ▲ +24%                      │
+└──────────────────────────────┘
+```
+
+Drives from: `agg`/`field` → number · `delta` window → sparkline span.
+New config: `variant:"spark"` + a `series` bucket (day/week) for the trail.
+
+---
+
+## 4 · Delta Spotlight  *(now vs then)*
+
+Inverts the emphasis: the *change* is the headline. Big % delta, with the
+current and baseline values shown small underneath.
+
+```
+┌──────────────────────────────┐
+│  Active Customers            │
+│                              │
+│    ▲ +6.4%                   │
+│    910   ·   was 855 (30d)   │
+└──────────────────────────────┘
+```
+
+Drives from: `delta` (required here) · `agg`/`field` → both endpoints.
+New config: `variant:"delta"` · `format:"percent"` on the change itself.
+
+---
+
+## 5 · Gauge Ring  *(value as proportional fill)*
+
+Radial ring filling toward a reference (a percent metric, or value/target).
+Reads as "how far along" rather than an absolute count.
+
+```
+┌──────────────────────────────┐
+│         ╭───────╮            │
+│        ╱  72%    ╲           │
+│       │ ███████   │          │
+│        ╲ on-track ╱          │
+│         ╰───────╯            │
+│      Win rate                │
+└──────────────────────────────┘
+```
+
+Drives from: `format:"percent"` value → fill fraction.
+New config: `variant:"gauge"` + optional `target` (overlaps Goal widget —
+decide whether Metric grows a ring or this stays Goal's job).
+
+---
+
+## At a glance
+
+| # | Variant   | Headline       | New config needed                 |
+|---|-----------|----------------|-----------------------------------|
+| 1 | Hero Tile | the number     | none (current)                    |
+| 2 | Stat Bar  | number + delta | delta-as-% pill (optional)        |
+| 3 | Sparkline | number + trend | `variant:"spark"` + series bucket |
+| 4 | Spotlight | the change     | `variant:"delta"`                 |
+| 5 | Gauge     | progress       | `variant:"gauge"` (+ target?)     |
+
+Suggest building 1–2 first (cheap, no schema change), then 3/4 as new
+`variant` literals on the existing widget. 5 overlaps Goal — needs a call.

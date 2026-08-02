@@ -1,0 +1,10 @@
+# 💳 Stripe
+
+| Area | Details |
+|---|---|
+| 🔐 Auth | 🔑 API key or OAuth app |
+| 🧾 Requirements | 📋 Stripe account; restricted keys/OAuth; webhook endpoint; signing secret |
+| 👁️ Read | 💳 Customers, subscriptions, invoices, payments |
+| ✍️ Write | 🧾 Customers, subscriptions, checkout/payment flows |
+| ⚡ Triggers | 🔔 Stripe webhooks |
+| ⚠️ Limits | 🔒 Payment correctness; idempotency; PCI boundaries |

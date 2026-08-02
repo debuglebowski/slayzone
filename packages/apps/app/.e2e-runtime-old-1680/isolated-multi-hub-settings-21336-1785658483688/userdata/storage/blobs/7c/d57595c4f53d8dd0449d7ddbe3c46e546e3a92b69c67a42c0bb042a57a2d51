@@ -1,0 +1,44 @@
+flowchart TD
+    subgraph A["What AI is, in plain terms"]
+        A1["'AI' is now the common word for what used to be LLMs / generative AI — say this once, don't go deeper"]
+        A2["No mechanism talk: skip neural networks, training, next-word prediction, fine-tuning"]
+        A3["Multiple concrete metaphors for what it does (Einstein-style, plural)"]
+        A1 --> A2 --> A3
+    end
+
+    subgraph B["What it's capable of"]
+        B1["Capability = what you observe from use: chat, tools, demonstrations — not theory"]
+        B2["'It's just autocomplete' is comforting rationalization, not a safe assumption — expect continued improvement on all fronts"]
+        B3["Open vs. closed models"]
+        B4["Where models keep getting smarter: execution (code, summaries, reports), orchestration, reasoning"]
+        B5["Emergent capabilities: complex behavior from simple primitives"]
+        B1 --> B2 --> B3 --> B4 --> B5
+    end
+
+    subgraph C["Where this is headed"]
+        C1["Human vs. AI capability trajectory — touched here, deep-dive in a later episode"]
+        C2["Broad spectrum of use cases"]
+        C3["Wave 1: replacing solo human tasks -> Wave 2: orchestrating swarms of agents (the collaboration problem)"]
+        C1 --> C2 --> C3
+    end
+
+    subgraph D["Cutting through the noise"]
+        D1["AI's money + fear pulls in a lot of voices — mostly genuine and passionate, some without deep background, all wanting a piece of it too"]
+        D2["Result: chaotic discourse, overwhelm rather than clarity (the LinkedIn-feed effect)"]
+        D3["Stated aim: bring clarity and a way forward, not more fear and confusion"]
+        D1 --> D2 --> D3
+    end
+
+    subgraph E["What's still needed from you"]
+        E1["'What's still needed' is meaningless without a time horizon (1/6/12/18/24/36/144 months)"]
+        E2["Personal stance: guessing past ~24 months is futile"]
+        E3["Core traits to lean into: human connection, clarity, being *more* technically enabled — probably more than these three"]
+        E4["Prompt engineering is dying as a skill — taste and judgment on what's correct stays essential"]
+        E1 --> E2 --> E3 --> E4
+    end
+
+    subgraph F["Close"]
+        F1["Glossary teaser: model, product, MCP, skills, API, CLI — dedicated video on demand"]
+    end
+
+    A --> B --> C --> D --> E --> F

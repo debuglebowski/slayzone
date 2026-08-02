@@ -1,0 +1,20 @@
+# Orchestration log
+
+| time | task | event | note |
+|------|------|-------|------|
+| 2026-04-24T13:26:00Z | 4925c0be | started | wave-0 dispatched |
+| 2026-04-24T13:26:00Z | babf9681 | started | wave-0 dispatched |
+| 2026-04-24T13:26:00Z | eb8cb244 | started | wave-0 dispatched |
+| 2026-04-24T13:29:33Z | babf9681 | plan-approved | wave-0 split-cli |
+| 2026-04-24T13:39:49Z | 4925c0be | plan-approved | wave-0 split-handlers |
+| 2026-04-24T13:40:19Z | eb8cb244 | plan-refined | answered 4 questions: subdirs+codegen barrel+broadcast extract+notify-renderer own file |
+| 2026-04-24T13:42:23Z | eb8cb244 | plan-approved | wave-0 split-rest-mcp, subscription near limit |
+| 2026-04-24T13:48:05Z | babf9681 | done | split-cli-tasks: 18 modules, typecheck green |
+| 2026-04-24T13:57:33Z | eb8cb244 | done | split-rest-mcp: 888→169 LoC, 26 REST + 3 MCP extracted, typecheck green |
+| 2026-04-24T14:00:01Z | 4925c0be | done | split-task-handlers: 23 ops + events.ts, typecheck green |
+| 2026-04-24T14:01:04Z | wave-0 | done | all 3 split subtasks done, repo typecheck green |
+| 2026-04-24T14:03:56Z | wave-1 | started | 8 subtasks dispatched parallel |
+| 2026-04-24T14:12:34Z | wave-1 | done | 8/8 subtasks closed; typecheck green; dual-emit live |
+| 2026-04-24T17:26:32Z | wave-2 | started | 13 subtasks: engine-swap + 6 REST + 6 MCP |
+| 2026-04-24T17:45:20Z | wave-2 | done | 13/13 subtasks done: engine swap + 6 REST routes + 6 MCP tools |
+| 2026-04-24T17:47:47Z | wave-3 | started | 6 CLI mutation swap subtasks |

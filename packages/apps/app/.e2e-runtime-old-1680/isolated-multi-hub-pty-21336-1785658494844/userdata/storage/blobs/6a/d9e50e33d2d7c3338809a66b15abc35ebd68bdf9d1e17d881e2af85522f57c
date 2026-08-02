@@ -1,0 +1,29 @@
+# Slice 3/8 — Menu router (P21) — DONE
+
+**Commit:** `24f59330` (direct to main, no PR)
+`feat(transport): menu router (P21 — 19 menu/app subscriptions, dual-emitted alongside legacy app:* webContents.send broadcasts; coexistence until slice 5)`
+
+## Approach (user-confirmed): DUAL-EMIT COEXISTENCE — not the prompt's full cutover
+Prompt's full-cutover DO/DONE-WHEN came from the **non-merged** phase-0 ref commit `21f1c3e3`. Current main convention (notify router + **P22 browser-view events, landed same day**) is dual-emit; P22 explicitly left `app:*` shortcuts to "the menu router slice... as IPC, coexistence until slice 5." Followed that. Template = `notify-renderer.ts` + `routers/notify.ts`.
+
+## What shipped (18 files, +336/-37; 2 new)
+- `app-deps.ts`: `MenuEventMap` (19 events) + `setMenuEvents`/`getMenuEvents` (mirrors `NotifyEventMap`). Barrel re-exports.
+- `menu-events.ts` (NEW): host-owned `menuEvents = new TypedEmitter<MenuEventMap>()`.
+- `routers/menu.ts` (NEW): `menuRouter`, 19 `observable<P>` subscriptions, `getMenuEvents()` lazy-in-factory. Registered `menu:` in appRouter.
+- `index.ts`: `mod.setMenuEvents(menuEvents)` wired at boot; **dual-emit** `menuEvents.emit(...)` added ALONGSIDE every kept `app:*` send (keyboard accel handler, native-menu clicks, emit helpers, zoom x2).
+- `auto-updater.ts` (update-status x2), `browser-view-manager.ts` (5 shortcuts), 8 rest-api/mcp files (open-task/close-task/open-artifact/browser-ensure/browser-create) — all dual-emit, legacy sends kept + `// slice 5: drop legacy send` markers.
+
+## Deliberately NOT touched (slice 5)
+preload listeners · `api.ts` types · **`broadcast-to-windows.ts`** (kept — still has non-menu callers: tasks/settings/agent/browser-touched) · renderer · Cmd+W chain · `update-drain-request`.
+
+## Cmd+W chain verification
+Chain UNCHANGED (still IPC): native menu "Close Tab" → `app:close-current-focus` send (now also `menuEvents.emit('close-current-focus')`) → App.tsx + TaskDetailPage IPC listeners → terminal/editor/browser/close priority. Secondary-window `focused.close()` branch preserved exactly. macOS accelerator → activeElement intact (no renderer change). Zero regression by construction (dual-emit is additive).
+
+## Verification — ALL GREEN
+- `pnpm typecheck`: all packages Done.
+- `pnpm lint`: my files = 0 diagnostics. 8 errors are pre-existing `noExplicitAny`/unused-var in e2e specs (untouched).
+- `pnpm build`: ✓ 36s (transport + apps/app bundle clean).
+- e2e `core/57-cmd-w-close` (7) + `terminal/22-terminal-mode-switching` incl. "switch back to Claude Code" (8) = **15/15 passed**.
+
+## Note
+menuRouter currently has NO renderer consumer (same as notify/P22 subs) — consumed at slice 5 renderer cutover.

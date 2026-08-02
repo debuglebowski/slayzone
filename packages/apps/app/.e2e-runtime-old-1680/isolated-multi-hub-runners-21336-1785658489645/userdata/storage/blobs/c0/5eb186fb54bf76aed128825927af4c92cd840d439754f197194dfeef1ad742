@@ -1,0 +1,45 @@
+# Vendor Review: OVH Cloud
+
+## URLs
+- Vendor Master Sheet (row 42): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=42:42
+- Cycle Drive folder: https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev
+- Vanta record: not checked (vendor decommissioned, Vanta-sourced cells already consistent: N=No need to add, P=Unscored)
+- Tool admin / login: N/A (decommissioned)
+
+## Status
+- Information complete?: blank
+- Decommissioned: Yes (E=No, O=Decommisioned, Q="Moved off of OVHCloud")
+- Duplicates: none
+- Access review flow does NOT apply — no login/screenshot/Linear ticket needed.
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Cycle context lookup | Done |
+| 3 | Vanta check | Skipped (decommissioned, cells consistent) |
+| 4 | First-pass questions to user | Pending |
+| 5 | Fill cells | Pending |
+| 6 | Flip Information complete? = Yes | Pending |
+
+## Cells
+| Col | Header | Current | Proposed | Source |
+|---|---|---|---|---|
+| G | Description | (blank) | Cloud hosting / VPS / bare-metal infrastructure provider | calculated |
+| I | Subprocessor | (blank) | N/A | user (rec) |
+| L | Business owner | kalle@normain.com | Kalle Hansson | calculated |
+| M | Security owner | kalle@normain.com | Kalle Hansson | calculated |
+| Q | Sync comment | Moved off of OVHCloud | Checked 2026-05-14 - Moved off of OVHCloud | calculated |
+| V | Cost per month | (blank) | 0.00 | calculated |
+| AA | Admin permissions through role | (blank) | N/A | user (rec) |
+| AE | Access review 2026-04-29 | (blank) | N/A - decommissioned | user (rec) |
+| AF | Screenshot completed? | (blank) | N/A | user (rec) |
+| AG | Responsible | gustav@normain.com | (see open question — Gustav not on current roster) | user |
+| AH | Link | Link (placeholder) | N/A | calculated |
+
+## Open questions (with recommendations)
+- **I Subprocessor (blank)**: rec = `N/A`. Alternatives: Application / Operations. Why: decommissioned — no data is being processed by OVH anymore.
+- **AG Responsible (gustav@normain.com)**: rec = `Kalle Hansson`. Alternatives: leave as Gustav / other name. Why: Gustav isn't on current team roster; Kalle is already Business + Security owner. Confirm replacement.
+- **AA Admin permissions through role (blank)**: rec = `N/A`. Alternatives: Yes / No / Unknown. Why: decommissioned, no admin access remaining.
+- **AE Access review 2026-04-29 (blank)**: rec = `N/A - decommissioned`. Alternatives: leave blank / `Done`. Why: no access exists to review.
+- **AF Screenshot completed? (blank)**: rec = `N/A`. Alternatives: leave blank. Why: nothing to screenshot.

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Architecture of Curiosity</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 720px; margin: 0 auto; padding: 3rem 1.5rem; line-height: 1.7; color: #1f2937; }
+  header { border-bottom: 2px solid #e5e7eb; padding-bottom: 1.5rem; margin-bottom: 2rem; }
+  h1 { font-size: 2.5rem; line-height: 1.2; margin-bottom: 0.5rem; }
+  .meta { color: #6b7280; font-size: 0.9rem; font-style: italic; }
+  blockquote { border-left: 4px solid #3b82f6; padding: 0.5rem 1.25rem; margin: 1.5rem 0; color: #374151; background: #f3f4f6; font-style: italic; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; font-family: 'SF Mono', Consolas, monospace; font-size: 0.9rem; }
+  code { background: #f3f4f6; padding: 0.1rem 0.35rem; border-radius: 3px; font-family: 'SF Mono', Consolas, monospace; font-size: 0.9em; }
+  pre code { background: transparent; padding: 0; color: inherit; }
+  figure { margin: 2rem 0; text-align: center; }
+  figcaption { font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem; }
+  .callout { border: 1px solid #fbbf24; background: #fef3c7; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+  .callout strong { color: #92400e; }
+  ul.tags { list-style: none; padding: 0; display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 2rem; }
+  ul.tags li { background: #dbeafe; color: #1e40af; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.8rem; }
+  details { margin: 1.5rem 0; border: 1px solid #e5e7eb; padding: 0.75rem 1rem; border-radius: 6px; }
+  summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>The Architecture of Curiosity</h1>
+  <div class="meta">By Jane Doe · April 2026 · 8 min read</div>
+</header>
+
+<p>Curiosity is not a personality trait. It is a <em>scaffolding</em>: a structure we build inside ourselves that determines what questions we are even able to ask.</p>
+
+<blockquote>"The art of being wise is the art of knowing what to overlook." — William James</blockquote>
+
+<h2>Three pillars</h2>
+<ol>
+  <li><strong>Surface area.</strong> Exposure to varied inputs.</li>
+  <li><strong>Tolerance for ambiguity.</strong> Living with unresolved questions.</li>
+  <li><strong>Time.</strong> The slow burn of follow-through.</li>
+</ol>
+
+<figure>
+  <svg width="320" height="120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="20" width="80" height="80" fill="#3b82f6" rx="8"/>
+    <rect x="120" y="20" width="80" height="80" fill="#10b981" rx="8"/>
+    <rect x="230" y="20" width="80" height="80" fill="#f59e0b" rx="8"/>
+    <text x="50" y="70" fill="white" text-anchor="middle" font-family="sans-serif" font-size="13">Surface</text>
+    <text x="160" y="70" fill="white" text-anchor="middle" font-family="sans-serif" font-size="13">Ambiguity</text>
+    <text x="270" y="70" fill="white" text-anchor="middle" font-family="sans-serif" font-size="13">Time</text>
+  </svg>
+  <figcaption>The three pillars, visualized.</figcaption>
+</figure>
+
+<div class="callout"><strong>Note:</strong> These pillars are necessary but not sufficient. Without a habit of <code>writing things down</code>, they collapse.</div>
+
+<h2>A code metaphor</h2>
+<pre><code>function curiosity(input) {
+  const questions = expand(input);
+  return questions
+    .filter(q =&gt; !alreadyAnswered(q))
+    .map(q =&gt; pursue(q, { patience: Infinity }));
+}</code></pre>
+
+<details>
+  <summary>Further reading</summary>
+  <ul>
+    <li><em>The Art of Asking</em> — Amanda Palmer</li>
+    <li><em>Range</em> — David Epstein</li>
+    <li><em>How to Take Smart Notes</em> — Sönke Ahrens</li>
+  </ul>
+</details>
+
+<ul class="tags">
+  <li>essay</li><li>thinking</li><li>habits</li><li>creativity</li>
+</ul>
+</body>
+</html>

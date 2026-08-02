@@ -1,0 +1,82 @@
+# 🟡 PR 2 — `vanta/hono-4.12.14` Brief
+
+## 📜 Background
+
+`hono` is a direct dependency in two server workspaces of `normainofficial/normain`:
+- `src/apps/server/api/package.json` (workspace `@normain/api`)
+- `src/apps/server/tenant-api/package.json` (workspace `@normain/tenant-api`)
+
+Both pin `hono@^4.12.4`. There are **7 open Vanta Medium alerts** against versions in this range:
+
+| 🆔 GHSA | 📊 CVSS | 🔖 Summary | 🎯 Affected feature |
+|---|---|---|---|
+| 26pp-8wgv-hjvm | 5.3 | Cookie name validation in `setCookie()` | `setCookie()` w/ user-controlled names |
+| 458j-xx4x-4375 | 4.3 | JSX SSR attribute injection | `hono/jsx` server-side rendering |
+| r5rp-j6wh-rvv4 | 4.8 | Non-breaking space cookie prefix bypass | `getCookie()` cookie-prefix protection |
+| v8w9-8mx6-g223 | 4.8 | Prototype pollution via `__proto__` | `parseBody({ dot: true })` |
+| wmmm-f939-6g9c | 5.3 | Middleware bypass via repeated slashes | `serveStatic` |
+| xf4j-xp2r-rqqx | n/a | Path traversal in `toSSG()` | static site generation |
+| xpcf-pg52-r92g | 5.3 | IPv4-mapped IPv6 in `ipRestriction()` | IP restriction middleware |
+
+**Reachability check (informational):** investigation showed our hono usage doesn't touch any of these features (bearer-auth, no JSX, no cookies, no serveStatic, no toSSG, no ipRestriction, plain JSON parsing). Bumping is still preferred over a reachability-based deferral because the patch is low-cost and audit optics favor active remediation.
+
+## 🎯 Mission
+
+🚀 Open and merge **PR 2: `vanta/hono-4.12.14`** in `normainofficial/normain`. After merge, all 7 hono Medium alerts auto-close.
+
+📜 **Standards covered:** ISO 27001 A.8.8 · SOC 2 CC7.1
+📜 **Internal compliance:** Operations Security Policy v1.0.0 → Change Management
+
+## 🔧 Changes
+
+| 📦 Package | ⏪ From | ⏩ To | 📍 Where | ⚙️ Action |
+|---|---|---|---|---|
+| 🔥 hono | `^4.12.4` | `^4.12.14` | `src/apps/server/api/package.json` | ⬆️ direct bump |
+| 🔥 hono | `^4.12.4` | `^4.12.14` | `src/apps/server/tenant-api/package.json` | ⬆️ direct bump |
+
+`4.12.4 → 4.12.14` is a patch-line within the same minor version. Hono follows semver strictly; route/middleware contracts intact.
+
+## 🪜 Execution steps
+
+| # | 🪜 Step | 💻 Command / action |
+|---|---|---|
+| 1 | 🌿 Branch off main | `git checkout -b vanta/hono-4.12.14` |
+| 2 | ✏️ Edit `src/apps/server/api/package.json` → bump `"hono": "^4.12.14"` | manual |
+| 3 | ✏️ Edit `src/apps/server/tenant-api/package.json` → bump `"hono": "^4.12.14"` | manual |
+| 4 | 📦 `yarn install` | verify lockfile diff touches only hono-related entries |
+| 5 | 🏗️ `yarn root:build --concurrency=75%` | full monorepo build |
+| 6 | 🧹 `yarn root:lint` | no new lint errors |
+| 7 | 🔬 `yarn root:ts` | no type errors |
+| 8 | 🧪 `yarn root:test` | all tests pass |
+| 9 | 🌐 Smoke-test API endpoints on a preview/staging deploy (auth + request validation paths) | curl a representative endpoint |
+| 10 | 🚀 Push branch + open PR via `gh pr create` | title: `Lift hono to ^4.12.14 to close 7 medium CVEs (Vanta)` |
+| 11 | 📝 Fill `.github/pull_request_template.md` — list the 7 GHSAs in Description | manual |
+| 12 | 👀 Wait for CODEOWNERS review | `@PhilipNgo` or `@redsuperbat` must approve |
+| 13 | 🔀 Merge after CI green + approval | per repo convention |
+| 14 | ✅ Verify alerts auto-close in GitHub Security tab | expected 7 closures |
+| 15 | 🔗 Paste merged PR URL into the parent Vanta task | mark progressed |
+
+## 📐 Repo facts
+
+- 📁 Path: `/Users/Kalle/dev/projects/normain`
+- 🧰 Yarn: berry v4.9.2
+- 🏗️ Tenant-API uses hono runtime; API uses hono via specific routes only (see workspace package.json)
+- 👥 CODEOWNERS: `@PhilipNgo` or `@redsuperbat` must approve PRs from `@debuglebowski`
+
+## ⚠️ Watch for
+
+- 🚨 Hono major-line is stable but middleware ordering / header parsing tweaks possible between 4.12.4 → 4.12.14. If integration tests fail, check release notes at https://github.com/honojs/hono/releases.
+- 🚨 If both workspaces resolve to slightly different transitive versions, that's normal — yarn berry handles it.
+
+## ✅ Definition of done
+
+- [ ] 🌿 Branch `vanta/hono-4.12.14` opened
+- [ ] ✏️ Both workspace `package.json` files updated
+- [ ] 🤖 CI green (build + lint + ts + test)
+- [ ] 🌐 Manual API smoke test passed
+- [ ] 👀 CODEOWNERS approval recorded
+- [ ] 🔀 PR merged into `main`
+- [ ] ✅ 7 Dependabot hono alerts auto-closed
+- [ ] 🔗 PR URL pasted into parent Vanta task
+
+**⏱️ Total effort:** ~30 min + reviewer cycle.

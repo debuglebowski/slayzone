@@ -1,0 +1,10 @@
+# 📐 Linear
+
+| Area | Details |
+|---|---|
+| 🔐 Auth | 🔑 OAuth app/API key |
+| 🧾 Requirements | 📋 Linear OAuth app or API key; GraphQL setup; webhook secret |
+| 👁️ Read | 🎫 Issues, comments, projects, teams, cycles |
+| ✍️ Write | 📝 Issues, comments, status/assignee/project fields |
+| ⚡ Triggers | 🔔 Linear webhooks |
+| ⚠️ Limits | 🧠 GraphQL modeling; workspace permissions |

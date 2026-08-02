@@ -1,0 +1,272 @@
+# Chat Rendering — Sustainability & Robustness Plan
+
+**Status**: Proposal
+**Owner**: TBD
+**Date**: 2026-05-02
+**Goal**: Make the agent chat history render pipeline world-class — robust under high-volume streaming, sustainable to evolve, and free of the layout/jank/format bugs that surface today.
+
+---
+
+## 1. Goals & Non-Goals
+
+### Goals
+- Zero layout jank during streaming (no scroll jumps, no item overlap, no flicker).
+- One render per animation frame max during streaming, regardless of token rate.
+- Bounded memory and CPU on long sessions (≥10k timeline items, hours-long streams).
+- Per-message-type rendering is isolated, memoized, and independently testable.
+- Tool output rendering survives malformed / partial / oversized payloads gracefully.
+- HTML in agent output is rendered safely (no XSS, no broken-DOM).
+- All scroll/follow behavior owned by a single subsystem — no fighting libraries.
+- Replayable golden fixtures for streaming sessions; regressions are caught in CI.
+
+### Non-Goals
+- Redesigning the chat *event protocol* (`AgentEvent`) — we keep the existing wire format.
+- Replacing the reducer with global state (Redux/Zustand) — the reducer model fits.
+- Changing tool semantics or what tools exist.
+- Rewriting the composer / autocomplete / loop-mode UX.
+
+---
+
+## 2. Current Architecture (snapshot)
+
+```
+PTY/agent stdout
+   └─► main process: agent event parser
+         └─► IPC: window.api.chat.onEvent
+               └─► useChatSession (renderer)
+                     └─► chatTimelineReducer (chat-timeline.ts)
+                           └─► state.timeline: TimelineItem[]
+                                 └─► ChatPanel (1011 LOC)
+                                       ├─► useStickToBottom(scrollRef, contentRef)
+                                       ├─► useVirtualizer(scrollRef, measureElement)
+                                       └─► renderTimelineItem switch
+                                             └─► renderers.tsx (per-kind components)
+                                                   └─► GhMarkdown → react-markdown + rehype-raw
+```
+
+### Observed pain points (verified in code)
+
+| # | Issue | Evidence |
+|---|---|---|
+| 1 | Three subsystems share `scrollRef`/`contentRef`: `useVirtualizer`, `useStickToBottom`, mutating reducer. ResizeObserver in stick-to-bottom fires on virtualizer total-size change → competing scroll commands. | ChatPanel.tsx:157,293,663–684 |
+| 2 | Reducer slices the entire timeline array on every text/thinking delta → new ref → React re-renders all subscribers. | chat-timeline.ts:387–395 |
+| 3 | No per-item `React.memo` in renderers.tsx. Every reducer dispatch re-renders all visible items. | renderers.tsx (no memo wrappers) |
+| 4 | `react-markdown` re-tokenizes the *entire* assistant message on every delta. O(N²) parse cost over a streamed message. | Markdown.tsx |
+| 5 | Single `estimateSize: () => 120` for all kinds (tool calls average ~300–600px). Initial layout error → measurable scroll jumps when `measureElement` corrects. | ChatPanel.tsx:296 |
+| 6 | `rehype-raw` + no sanitizer. Tool stdout / stderr containing literal `<...>` can break layout or inject DOM. | Markdown.tsx |
+| 7 | `max-h-64` nested scroll containers inside the virtualized list (Bash, Grep, Glob, Generic, Stderr). Causes wheel hijack and confuses the virtualizer's measurement. | renderers.tsx:322,372,393,418,500 |
+| 8 | Tool partial-JSON streaming: input renders as `null` until the block stops if JSON is mid-parse. User sees blank/jumping tool cards. | chat-timeline.ts:296–325, 378–393 |
+| 9 | `LinkifiedText` regex runs on every render for every tool result. No memo. | renderers.tsx (LinkifiedText) |
+| 10 | ChatPanel.tsx is 1011 LOC mixing layout, IPC bindings, autocomplete, image upload, loop, search, mode switching, scroll. Hard to reason about, harder to test. | ChatPanel.tsx |
+| 11 | No streaming debounce / batching. Each delta = full reducer dispatch + render. | useChatSession event listener |
+| 12 | Tool result `rawContent` is `string | string[]` and is handled inline with `.map().join('\n')`. Fragile under partial output. | renderers.tsx:350–356 |
+| 13 | ANSI / control-char output from shell tools is rendered as literal text (or stripped silently). Not normalized. | renderers.tsx Bash path |
+| 14 | No replayable test fixtures of real streaming sessions. Bugs are reported via screenshots. | (gap) |
+
+---
+
+## 3. Target Architecture
+
+### 3.1 Layered model — single owner per concern
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Transport layer — useChatSession                             │
+│  • IPC subscription, buffer replay, send/interrupt           │
+│  • Owns: event ordering, batching, dedup                     │
+└──────────────────────────────────────────────────────────────┘
+              │  (batched events, max 1/frame)
+              ▼
+┌──────────────────────────────────────────────────────────────┐
+│ State layer — chatTimelineReducer (immutable, structural)    │
+│  • Pure reducer; uses Immer for structural sharing           │
+│  • Stable item identity (id) + content version (rev)         │
+└──────────────────────────────────────────────────────────────┘
+              │  TimelineItem[]
+              ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Selector layer — useChatSelectors                            │
+│  • finalOnly filter, search-match indices, derived counts    │
+│  • Memoized per (timeline ref, options)                      │
+└──────────────────────────────────────────────────────────────┘
+              │  DisplayItem[]
+              ▼
+┌──────────────────────────────────────────────────────────────┐
+│ View layer — ChatTimeline (single owner of scroll + virt)    │
+│  • One library: react-virtuoso (or hand-rolled fallback)     │
+│  • Owns scroll position, follow-output, anchoring on prepend │
+└──────────────────────────────────────────────────────────────┘
+              │  visible items
+              ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Renderer layer — pure, memoized, per-kind                    │
+│  • <UserMessage>, <AssistantText>, <ToolCall*> …             │
+│  • React.memo with (item.id, item.rev) equality              │
+│  • Markdown rendered through cached AST cache (LRU)          │
+│  • Tool output passes through sanitize + ANSI normalize      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 3.2 Key invariants
+
+1. **Stable identity**: Every TimelineItem has `id` (stable) and `rev` (monotonic content version). Memo equality uses `(id, rev)` only — never deep compare.
+2. **One scroll owner**: `ChatTimeline` is the only place that reads or writes scroll position. No other component touches `scrollRef`.
+3. **One render per frame**: All deltas arriving within a frame are coalesced into a single dispatch. The reducer never sees more than one delta per `(messageId, blockIndex)` per frame.
+4. **Partial parse never blanks**: A tool whose JSON input is mid-stream renders a *progressive skeleton* (tool name + spinner + best-effort key list), never empty/null.
+5. **Bounded item height contributes bounded jank**: estimate is per-kind, not a global constant. Initial paint is within ±20% of measured size.
+6. **Output is sanitized at the boundary**: Tool output / stderr passes through ANSI-strip + DOMPurify allowlist before reaching markdown.
+7. **No nested scroll inside the virtual list**: Long tool output uses "Show all (N lines)" expand instead of an inner scroller.
+
+### 3.3 Library decision
+
+Two viable paths — both end with a single scroll/virt owner:
+
+| Option | Pros | Cons | Recommendation |
+|---|---|---|---|
+| **A. `react-virtuoso`** | Battle-tested chat virtualization. `followOutput` + `firstItemIndex` + `atBottomStateChange` integrated. Handles dynamic heights w/o measure conflicts. | New dep. Some streaming edge cases (rapid mutations of last item) need care. | **Chosen** for Phase 2. |
+| **B. Hand-roll** on top of tanstack-virtual + own follow-output | Zero new deps. Full control. | More code to own forever. Stick-to-bottom logic is subtle (anchor on prepend, smooth-follow, etc.). | Fallback if Virtuoso shows blockers. |
+
+Decision: start with Virtuoso. If we hit a blocker, we keep the layered architecture and swap the view layer only — the rest is library-agnostic.
+
+---
+
+## 4. Migration Plan (phases)
+
+Each phase ships independently, behind a feature flag (`chat.renderV2`) where useful, and lands on `main` without breaking existing behavior.
+
+### Phase 0 — Repro harness & baselines (≤1 day)
+- Capture 3 real streaming sessions to JSONL fixtures (short, medium, tool-heavy).
+- Build `<ChatPanelHarness>` dev page that replays a fixture at configurable rate.
+- Add `pnpm test:chat:perf` — measures: renders/sec, longest frame, scroll-jump count, parse time. Records baseline numbers.
+- **Exit criteria**: We can reproduce the screenshot bug class deterministically.
+
+### Phase 1 — Cheap wins (≤2 days, no architecture change)
+- Wrap each renderer in `renderers.tsx` with `React.memo` keyed on item identity.
+- Memoize `GhMarkdown` body on text content; cache markdown AST in a small LRU keyed by `(messageId, blockIndex)`.
+- Per-kind `estimateSize` map: `{ user: 80, text: 120, thinking: 100, tool: 280, result: 60, ... }`.
+- Memoize `LinkifiedText` regex output per `text` value.
+- Strip ANSI escapes at the renderer boundary (single util, well-tested).
+- Sanitize markdown via `rehype-sanitize` with a tight allowlist (drop `rehype-raw`, or run it then sanitize).
+- Add `'-uno'`-style guards for malformed `rawContent` shapes.
+- **Exit criteria**: Baseline perf numbers improve ≥40% without touching virt/scroll stack.
+
+### Phase 2 — View-layer rewrite (≤3 days)
+- Extract `<ChatTimeline>` from ChatPanel — owns Virtuoso, follow-output, anchoring, search-jump.
+- Remove `useStickToBottom`. Virtuoso owns scroll.
+- Remove `useVirtualizer`. Virtuoso replaces it.
+- Remove all nested `max-h-64` scrollers; replace with "Show all" expand.
+- Behind `chat.renderV2` flag — both implementations available, default off, enable for self-dogfood for a week.
+- **Exit criteria**: Replay harness shows zero scroll jumps and zero item overlap on tool-heavy fixture.
+
+### Phase 3 — Stream batching (≤1 day)
+- In `useChatSession`, queue events arriving within a frame; flush on `requestAnimationFrame`.
+- Coalesce `stream-block-delta` of the same `(messageId, blockIndex)` — concatenate text deltas, keep last partial JSON.
+- Reducer receives batched updates; at most one dispatch per frame.
+- **Exit criteria**: At 200 tokens/sec input rate, React renders ≤ 60/sec on the chat surface.
+
+### Phase 4 — Reducer hardening (≤2 days)
+- Adopt Immer in `chatTimelineReducer`. Replace `state.timeline.slice(); t[i] = next; return …` with `produce(state, draft => { draft.timeline[i].text += event.text })`.
+- Add `rev: number` to every TimelineItem; bump on mutation.
+- Memo equality in renderers becomes `(prev.item.id === next.item.id && prev.item.rev === next.item.rev)`.
+- Tool partial-JSON: introduce `parsePartialJson()` — best-effort parse, returns `{ keys: string[]; preview: Record<string, unknown> | null }`. Renderers use this for skeleton UI.
+- **Exit criteria**: Tool cards never blank during streaming. Reducer perf within 10% of pre-Immer baseline.
+
+### Phase 5 — Component split & API freeze (≤2 days)
+- Split ChatPanel into:
+  - `<ChatPanel>` — orchestrator (≤200 LOC)
+  - `<ChatHeader>` — mode pill, override notice, search bar, loop banner
+  - `<ChatTimeline>` — scroll + virt + render (Phase 2 output)
+  - `<ChatComposer>` — textarea, autocomplete, send, attachments
+  - `<ChatContextProvider>` — replaces deep prop drilling for actions/session
+- Public types frozen: `TimelineItem` discriminated union is the contract between layers.
+- **Exit criteria**: ChatPanel ≤200 LOC. Each child unit-testable in isolation.
+
+### Phase 6 — Observability & guardrails (≤1 day)
+- Dev-only render counter overlay (toggle via setting): items rendered, frames/sec, longest frame.
+- `pnpm test:chat:perf` wired into CI, fails build if perf regresses >15% vs baseline.
+- Golden fixture diff test: replay each fixture, snapshot final DOM, fail on diff.
+- **Exit criteria**: Regression in any of the above blocks merge.
+
+### Phase 7 — Flag flip & cleanup (≤1 day)
+- Default `chat.renderV2` ON. Remove old code paths.
+- Remove `useStickToBottom` dep.
+- Remove `tanstack-virtual` dep (if no other consumer).
+- Schedule cleanup agent to remove the flag in 2 weeks.
+
+**Total**: ~12 working days, shippable in increments. Phase 1 alone fixes the loudest issues.
+
+---
+
+## 5. Verification Strategy
+
+### 5.1 Replay fixtures (the single most important asset)
+Stored at `packages/domains/terminal/src/client/__fixtures__/chat-streams/`. Each fixture is a JSONL of `AgentEvent` records captured from a real session. Categories:
+- `short-text.jsonl` — single short assistant turn
+- `long-text.jsonl` — long streamed assistant turn
+- `tool-heavy.jsonl` — many tool calls with partial JSON
+- `mixed.jsonl` — full session with thinking, text, tools, results
+- `malformed.jsonl` — truncated / corrupted events to test resilience
+
+The harness can replay at any rate (real-time, 10×, 100×, instant).
+
+### 5.2 Performance budgets (CI-enforced)
+| Metric | Budget |
+|---|---|
+| Longest frame during streaming | ≤ 16ms (p99) |
+| Renders per second on chat surface during streaming | ≤ 60 |
+| Scroll-jump count during a tool-heavy fixture | 0 |
+| Markdown parse time per delta | ≤ 1ms (incremental cache hit) |
+| Memory growth over 10k items | ≤ linear, no leaks |
+
+### 5.3 Visual regression
+- Snapshot key DOM states (first paint, mid-stream, post-stream, after expand) per fixture.
+- Diff in CI; visual diffs require explicit approval.
+
+### 5.4 E2E (Playwright)
+- One streaming-chat e2e test: send a prompt, replay a fixture into the renderer, assert no `data-jank-detected` attribute appears.
+
+---
+
+## 6. Risks & Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Virtuoso has its own bugs with rapid item mutation | Phase 2 behind flag; replay fixtures stress-test before flip. Hand-roll fallback prepared. |
+| Immer overhead regresses reducer perf | Benchmark in Phase 4; if regression > 10%, fall back to manual structural sharing on hot paths. |
+| Stream batching introduces visible "chunkiness" | Make batch interval = animation frame, not fixed ms. Visually equivalent to continuous streaming. |
+| Sanitization breaks legitimate markdown | Tight test corpus of real agent output; allowlist tuned against it. |
+| Hidden consumer of `tanstack-virtual` removed in Phase 7 | Grep before remove; keep dep if other consumers found. |
+| Rebuild during a hot codebase invalidates fixtures | Fixtures live alongside code; events have a version field. |
+
+---
+
+## 7. Out-of-scope (intentionally deferred)
+
+- Switching markdown engine away from `react-markdown` (e.g. to `markdown-it` with manual incremental parse). Considered but rejected for now — Phase 1's AST cache buys most of the perf at a fraction of the cost.
+- Server-side rendering / pre-rendering of long historical messages.
+- Collaborative chat (multiple users in same session) — orthogonal.
+- Replacing the agent event protocol with a streaming JSON-RPC.
+
+---
+
+## 8. Open Questions
+
+- **Q1**: Do we care about supporting `<details>` / `<summary>` in agent markdown? Affects sanitize allowlist.
+- **Q2**: Tool output truncation — show "Show all (N lines)" or stream-truncate at K bytes server-side?
+- **Q3**: Keep `finalOnly` filter? If yes, plan how it interacts with Virtuoso's anchoring.
+- **Q4**: Is there appetite to drop virtualization entirely for sessions <500 items (fast path)?
+- **Q5**: ANSI colors — strip, render as styled spans, or surface as a rendering option?
+- **Q6**: Should partial-JSON skeleton show key names only, or also best-effort values?
+- **Q7**: Where do we draw the line between "agent rendering" and "terminal rendering" — is there shared sanitize/ANSI code worth extracting to `@slayzone/markdown`?
+
+---
+
+## 9. Definition of Done
+
+- All seven phases shipped and on by default.
+- All performance budgets met in CI.
+- Replay harness covers ≥5 fixtures including malformed.
+- ChatPanel ≤200 LOC.
+- Zero usages of `useStickToBottom`, `useVirtualizer` outside `<ChatTimeline>`.
+- One bug report from a user that reproduced reliably pre-V2 cannot be reproduced post-V2.
+

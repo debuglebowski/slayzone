@@ -1,0 +1,47 @@
+# Vendor Review: Google Cloud Platform
+
+## URLs
+- Vendor Master Sheet (row 39): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=A39
+- Cycle Drive folder: https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev
+- Cycle parent ticket: TBD (Linear MCP not authenticated — will surface when reaching access-removal step)
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/680257f24bec857db4be1618
+- Tool admin / login: https://console.cloud.google.com/iam-admin/iam (proposed)
+
+## Status
+- Information complete?: blank
+- Duplicates: none
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | First-pass questions to user | Pending |
+| 4 | Login + members screenshot in Drive folder | Pending |
+| 5 | Create access-removal Linear sub-issues (if any) | Pending |
+| 6 | Fill cells | Pending |
+| 7 | Flip Information complete? = Yes | Pending |
+
+## Cells
+| Col | Header | Current | Proposed | Source |
+|---|---|---|---|---|
+| G | Description | (blank) | Managed cloud infrastructure (compute, storage, databases, AI) | column-default |
+| I | Subprocessor | (blank) | Application (see open question) | user |
+| L | Business owner | kalle@normain.com | Kalle Hansson | column-default |
+| M | Security owner | kalle@normain.com | Kalle Hansson | column-default |
+| Q | Sync comment | Currently no customer deployments here\nChecked 2025-07-07 | Currently no customer deployments here\nChecked 2026-05-14 | column-default |
+| AE | Access review 2026-04-29 | (blank) | Done (after manual review) | user |
+| AF | Screenshot completed? | (blank) | Yes (after upload + rename) | user |
+| AH | Link | Link (placeholder) | https://console.cloud.google.com/iam-admin/iam | user |
+
+## Open questions
+- I Subprocessor (blank): rec = Application. Alternatives: Operations / N/A. Why: GCP is cloud infra (Vanta category = Cloud provider); even if currently no customer deployments per Q, classification reflects data-type capability. If GCP will host customer data → Application. If truly only ever internal/eng experiments → N/A. Operations unlikely (operational data lives in Workspace/Slack/Fortnox).
+- AH Link (placeholder "Link"): rec = https://console.cloud.google.com/iam-admin/iam. Alternatives: project-specific URL / org-level URL. Why: Standard GCP path for member management; access review will inspect IAM here.
+
+## Vanta capture
+- Status: Active
+- Inherent risk: Medium
+- Category: Cloud provider
+- Last assessment: 2025-06-13 by Sara Landfors → Approved
+- Summary: "GCP doesn't publish pentest results, but have significant controls and best practices in place for their infrastructure."
+- Business owner / Security owner: Kalle Hansson

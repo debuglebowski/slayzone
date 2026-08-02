@@ -1,0 +1,40 @@
+%% Normain network diagram — reconstructed from the existing Vanta evidence
+%% "Normain Network Diagram.pdf" (Azure, Sweden Central).
+flowchart TB
+    internet([Internet])
+    admin([Admin / Operator])
+
+    subgraph sub["Azure Subscription — region: Sweden Central"]
+        direction TB
+
+        subgraph rgprod["Resource Group: Production deployment"]
+            direction TB
+            subgraph vnet["Virtual network: vnet-normain"]
+                direction TB
+
+                subgraph snetapi["Subnet: snet-api-normain"]
+                    lb["Load Balancer"]
+                    web["Static web server"]
+                    api["API (Container App)"]
+                end
+
+                subgraph snetdb["Subnet: snet-db-normain"]
+                    db[("DB — Managed PostgreSQL")]
+                end
+
+                subgraph snetvm["Subnet: snet-vm-normain"]
+                    jump["Jump server (VM)"]
+                end
+            end
+        end
+
+        rgother["Additional resource groups (dev, demo)<br/>identical internal setup per deployment"]
+    end
+
+    internet -- HTTPS --> lb
+    lb -- HTTPS --> web
+    lb -- HTTPS --> api
+    api --> db
+    admin -- RDP --> jump
+    jump -. admin access .-> db
+    jump -. admin access .-> api

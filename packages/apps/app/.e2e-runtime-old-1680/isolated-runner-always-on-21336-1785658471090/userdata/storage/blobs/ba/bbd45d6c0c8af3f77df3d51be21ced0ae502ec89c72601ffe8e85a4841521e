@@ -1,0 +1,31 @@
+# Normain App — Permissions Catalog
+
+> Permissions in the Normain app, mapped to roles. Feeds the roles/permissions section of the KPMG deliverable.
+>
+> Checkmarks below are **suggested defaults** — review and adjust.
+>
+> **Scoped-variant note:** some team-level permissions (e.g. "Remove member from team") may split into "any team" vs "only teams the actor belongs to" — mirroring "Add member to team" vs "…team I'm a part of". Confirm whether that split is a general pattern.
+
+## Permissions
+
+| Category | Permission | Org owner | Org manager | Team owner | User |
+|---|---|---|---|---|---|
+| Org / tenant | Add member to org | ✓ | ✓ | | |
+| Org / tenant | Remove member from org | ✓ | ✓ | | |
+| Org / tenant | Edit org settings | ✓ | | | |
+| Teams | Create team | ✓ | ✓ | | |
+| Teams | Add member to team | ✓ | ✓ | | |
+| Teams | Add member to team I'm a part of | ✓ | ✓ | ✓ | |
+| Teams | Remove member from team | ✓ | ✓ | ✓ | |
+| Teams | Edit team | ✓ | ✓ | ✓ | |
+| Teams | Archive / delete team | ✓ | ✓ | ✓ | |
+| Teams | View teams | ✓ | ✓ | ✓ | ✓ |
+| Members / users | Resend / revoke invitation | ✓ | ✓ | ✓ | |
+| SharePoint / integrations | Setup SharePoint integration | ✓ | | | |
+| SharePoint / integrations | Assign SharePoint site to team | ✓ | | | |
+| SharePoint / integrations | Remove SharePoint site from team | ✓ | | | |
+| SharePoint / integrations | View connected SharePoint sites | ✓ | | | |
+| SharePoint / integrations | View connected SharePoint sites for team I'm a part of | ✓ | | | ✓ |
+| SharePoint / integrations | Disconnect SharePoint integration | ✓ | | | |
+| Audit & compliance | View audit log | ✓ | ✓ | | |
+| Audit & compliance | Export audit log | ✓ | ✓ | | |

@@ -1,0 +1,21 @@
+# Trend — Layout A: area chart
+
+Wide tile (6x3). Continuous shape over the window; weekends visible;
+total + window in header. For "is activity rising or dying".
+
+```
++------------------------------------------------------+
+| Event volume          312 events . last 30d . daily  |
++------------------------------------------------------+
+| 24|                                  x               |
+|   |                    x.          .x x.             |
+| 16|        .x.       .x  x.   .x..x    x             |
+|   |      .x   x..x..x      x.x                       |
+|  8|  x..x                                            |
+|   |_x________________________________________________|
+|    may 13        may 23         jun 2         jun 12 |
++------------------------------------------------------+
+```
+
+Config: bucket=day|week, since=7d|30d|90d, eventTypes[] filter
+(created/updated/...); conceptId scopes to one concept.

@@ -1,0 +1,9 @@
+# Resources & Attachments
+
+## Resources
+- **BC/DR Plan** — _<link>_ — the plan validated by this exercise (includes Appendix B RTO/RPO).
+
+## Attachments
+- **Calendar invite** — _<link>_ — date and invitees; evidences that the exercise took place and all in-scope staff were invited.
+- **Backup-restoration capture** — _<screenshot/log>_ — proof of an actual successful restore + data-integrity check (satisfies the plan's annual backup-restoration requirement).
+- **Linear tickets** — _<links>_ — the action items from Discussion & Conclusions.

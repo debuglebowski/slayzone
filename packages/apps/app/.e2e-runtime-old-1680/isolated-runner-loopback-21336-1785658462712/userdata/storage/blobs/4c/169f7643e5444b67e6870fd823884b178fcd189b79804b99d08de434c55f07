@@ -1,0 +1,37 @@
+# Phase 0 — Final state
+
+## Outcome
+**80 baseline → 3 architectural failures.** Phase 0 fs/env hardening complete.
+
+## Network-dependent tests — fixed via local fixture
+
+Switched 7 specs (73, 75, 76, 78, 79, 56, 59 + 1 test in 24, 82) off `https://example.com` onto a local Node `http.Server` fixture (`e2e/fixtures/test-server.ts`). Routes: `/` (instant), `/title-Example`, `/title-Other`, `/slow?ms=N` (delayed for loading-animation tests). Lazy start, single port-0 listener per worker, auto-close on `process.exit`.
+
+Why: this machine's resolver returns `127.0.0.1` for `example.com` (VPN/Pi-hole/etc.), which broke any test that actually navigated to it. Local fixture is also faster + deterministic for timing-sensitive tests (`82-browser-loading-animation`'s "during loading" assertion now uses `/slow?ms=2000`).
+
+Confirmed all 88 tests across 73/75/76/78/79/82/56/59/24 pass locally.
+
+## Remaining 3 architectural failures
+
+| Spec : line | Reason |
+|---|---|
+| `61-web-panel-handoff-routing:226` | `<webview>` `new-window` event doesn't exist in WebContentsView |
+| `71-webview-popup-handling:540` | `window.open` from inside WCV crashes Playwright bridge |
+| `71-webview-popup-handling:686` | Same |
+
+These need a WebContentsView popup-test fixture: capture `setWindowOpenHandler` decisions in main, expose via IPC, swap "watch the webview tag's URL" for "watch captured handler calls". ~1-2 hours.
+
+`30-terminal-core-behavior:222` — flake. Passes iso, fails in full sequence. ~15-30 min: replace `getBuffer()` polling with `getBufferSince(seq)` post-clear.
+
+## Source-level fixes shipped
+
+| File | Change |
+|---|---|
+| `apps/app/src/main/index.ts` | `__restorePtyHandlers` reset list expanded to all `chat:*`, `session:*`, `pty:*`, `terminalModes:*` handlers |
+| `domains/settings/src/client/tabs/PanelsSettingsTab.tsx` | `mergePanelOrder` after Add Panel — custom panels render immediately |
+| `domains/settings/src/client/tabs/TagsSettingsTab.tsx` | Listen to `slayzone:tag-{created,updated,deleted}` events for cross-window refresh |
+| `domains/worktrees/src/client/GitDiffPanel.tsx` | Drop `flatEntries.length > 0` from chip-row condition — chip persists across clean↔dirty |
+| `domains/task/src/client/TaskDetailPage.tsx` | IPC listener for `browser-view:focused` → `setFocusedPanel('browser')` |
+| `apps/cli/src/commands/tasks/list.ts` | Added `t.deleted_at IS NULL` to WHERE clause — soft-deleted tasks were appearing |
+
+Plus ~40 e2e specs updated for theme-token / panel-rename / settings-refactor mismatches, and the new local-server fixture for network-dependent specs.

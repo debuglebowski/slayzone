@@ -16,14 +16,23 @@ import { launchIsolatedElectron } from '../fixtures/electron'
  * resetApp/tRPC helpers) assumes a working server connection, which is exactly
  * what this spec must boot WITHOUT.
  */
+// Main reads the pre-boot config from `getTrpcDataRoot()` = `<ROOT>/storage`
+// (getStorageDir), NOT from ROOT itself — same path 100-server-settings-toggle
+// asserts on. Seeding one level up leaves the file unread, so the app boots
+// `local` and the recovery screen legitimately never renders.
+const bootConfigPath = (userDataDir: string): string =>
+  path.join(userDataDir, 'storage', 'boot-config.json')
+
 base.describe('RemoteConfigScreen fallback', () => {
   base('boots into the recovery screen and can fall back to local', async () => {
     base.setTimeout(120_000)
     const launched = await launchIsolatedElectron({
       name: 'remote-config-screen',
       seedUserData: (userDataDir) => {
+        const target = bootConfigPath(userDataDir)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
         fs.writeFileSync(
-          path.join(userDataDir, 'boot-config.json'),
+          target,
           JSON.stringify(
             // Port 1 is reserved/unassigned — guaranteed connection refused.
             { server_mode: 'remote', remote_server_url: 'ws://127.0.0.1:1/trpc' },
@@ -52,10 +61,7 @@ base.describe('RemoteConfigScreen fallback', () => {
         .poll(
           () => {
             try {
-              const raw = fs.readFileSync(
-                path.join(launched.userDataDir, 'boot-config.json'),
-                'utf8'
-              )
+              const raw = fs.readFileSync(bootConfigPath(launched.userDataDir), 'utf8')
               return (JSON.parse(raw) as { server_mode?: string }).server_mode
             } catch {
               return null

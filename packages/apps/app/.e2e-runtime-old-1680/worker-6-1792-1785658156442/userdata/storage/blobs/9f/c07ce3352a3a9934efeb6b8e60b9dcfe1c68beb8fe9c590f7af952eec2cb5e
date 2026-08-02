@@ -1,0 +1,30 @@
+# Renderer-kill fix — options comparison
+
+| # | Option | Severity¹ | Complexity² | Bug risk³ | Root-cause likelihood⁴ |
+|---|---|---|---|---|---|
+| **Q1a** | LRU cap + rehydrate | 🔴 High | 🟡 Med | 🟡 Med | 🔴 **High** |
+| Q1b | LRU cap only | 🔴 High | 🟢 Low | 🟢 Low | 🟠 Med-High (partial) |
+| Q1c | LRU + hide-dispose + rehydrate | 🔴 High | 🔴 High | 🔴 High | 🔴 High |
+| **Q2a** | Multicast dispatcher in preload | 🟡 Med | 🟢 Low | 🟢 Low | 🟡 Med (contributor) |
+| Q2b | Bump `setMaxListeners` | 🟢 Low | 🟢 Trivial | 🟢 None | 🟢 None |
+| Q2c | Skip | — | — | — | — |
+| **Q3a** | Renderer-side telemetry | 🟢 N/A (verifies) | 🟡 Med | 🟢 Low | — |
+| Q3b | No telemetry | — | — | — | — |
+| **Q4a** | Reload delay 500 ms → 2000 ms | 🟡 Med (cosmetic) | 🟢 Trivial | 🟢 Low | 🟢 Low (post-kill UX) |
+| Q4b | Keep 500 ms | — | — | — | — |
+
+## Legend
+
+1. **Severity** — how bad is the problem this option addresses (High = kills, Med = warnings/UX, Low = noise)
+2. **Complexity** — LOC + moving parts (trivial <20 LOC, low <100, med <300, high >300)
+3. **Bug risk** — chance of regression from the change itself (low = localized refactor, med = state touch, high = new caching/race surface)
+4. **Root-cause likelihood** — evidence that this is actually causing the SIGTERM kills
+
+## Reasoning
+
+- **Q1a (critical path)** — unbounded `terminal-cache` holding live WebGL2 contexts is the strongest root-cause candidate for macOS Jetsam kills. Rehydrate needed so eviction doesn't blank user's scrollback. Scaffold exists (unused `serializedState` field at `terminal-cache.ts:13`).
+- **Q2a** — 4 React hooks subscribe `tasks:changed` per tab; multiplexing via preload dispatcher eliminates the Node listener warning and reduces per-tab IPC churn. Not the root cause but a contributor.
+- **Q3a** — current diag captures **main-process** memory, not renderer's. Without renderer telemetry, we ship the fix blind. Lets us verify root cause + detect regression.
+- **Q4a** — cosmetic: stops the `WebGL2 not supported` post-kill spam by giving GPU helper time to respawn before WebGL init. Doesn't prevent kills.
+
+**Critical path = Q1a alone.** Q2–Q4 are low-cost complements.

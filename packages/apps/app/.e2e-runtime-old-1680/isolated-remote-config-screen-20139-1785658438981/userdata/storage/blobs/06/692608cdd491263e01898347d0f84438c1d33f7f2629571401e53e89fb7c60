@@ -1,0 +1,27 @@
+# Manual test plan — Activity per-panel wrap
+
+Check off each row by replacing `[ ]` with `[x]`.
+
+## Nothing breaks
+
+| ✓ | Test | Expected |
+|---|------|----------|
+| [ ] | Live agent stream — open task A w/ claude streaming, switch to B, switch back | Terminal scrollback caught up, no pause/glitch |
+| [ ] | Editor state — type cursor mid-line in tab A editor, switch to B, return | Cursor + scroll position unchanged |
+| [ ] | Git panel — stage a file in tab A, switch to B, return | Stage state intact |
+| [ ] | Settings preserved — open Description card + type, switch tab, return | Text + open state preserved |
+| [ ] | Browser WCV keeps painting — youtube/video tab in A, hit play, switch tab | Audio keeps playing, no reload flash on return |
+| [ ] | Processes catch up — start dev server in A processes, switch to B 30s, return | Logs visible up-to-current |
+| [ ] | Process kill on close — dev server running, Cmd+W tab A, `ps aux \| grep <cmd>` | Process gone |
+| [ ] | CLI to backgrounded tab — `slay pty respawn --task <A-id>` from external term while B focused | Switch to A → terminal respawned |
+| [ ] | Cmd+W chain — terminal/editor/browser focus then Cmd+W | Closes group/file/browser tab respectively |
+| [ ] | Explode mode — Shift+E w/ 3+ tasks | All cells render + interactive |
+
+## See benefits
+
+| ✓ | Test | Expected |
+|---|------|----------|
+| [ ] | Open 5+ tabs w/ git/settings/processes visible | App still snappy |
+| [ ] | Drag panel resize handle in tab 1 while tabs 2-5 hidden | Activity Monitor renderer CPU lower than before |
+| [ ] | React Profiler (`SLAYZONE_PROFILE=1 pnpm dev`) — record while dragging | Tabs 2-5 settings/git/etc subtrees = 0 commits |
+| [ ] | Many tabs w/ idle agents, click between rapidly | Feels snappier than before |

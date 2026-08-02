@@ -1,0 +1,56 @@
+# Vendor Review: Zero
+
+## URLs
+- Vendor Master Sheet (row 76): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=76:76
+- Cycle Drive folder: https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev
+- Cycle parent ticket: https://linear.app/normain/issue/INT-411
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/69a6d91a27a362af910ed7eb
+- Tool admin / login: TBD (likely https://app.zero.inc/)
+- Tool website: https://zero.inc/
+
+## Status
+- Information complete?: No
+- Duplicates: none
+- Vanta: added, **assessment not yet completed** (no logged assessments)
+- Vanta inherent risk: High
+- Vanta data types: Normain's metadata only
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | First-pass questions to user | Pending |
+| 4 | Login + members screenshot in Drive folder | Pending |
+| 5 | Create access-removal Linear sub-issues (if any) | Pending |
+| 6 | Fill cells | Pending |
+| 7 | Flip Information complete? = Yes | Pending |
+
+## Cells
+| Col | Header | Current | Proposed | Source |
+|---|---|---|---|---|
+| I | Subprocessor | Operations | Operations (confirm) | user |
+| N | Risk Review Status in Vanta | blank | (leave blank — Vanta assessment not completed) | Vanta |
+| Q | Sync comment | Checked 2026-05-04 | Checked 2026-05-12 | calculated |
+| T | Subscription type | blank | Per user | user |
+| U | Number of users | blank | (need count) | user |
+| V | Cost per month | blank | (need amount) | user |
+| W | Invoice Currency | blank | USD | user |
+| Y | Contract Renewal Date | blank | (need date or Monthly / Free plan) | user |
+| AA | Admin permissions through role | blank | Yes | tool-page |
+| AB | Uses SSO with Google? | blank | Yes | tool-page |
+| AC | Security comment | blank | (post-login trust center check) | user |
+| AE | Access review 2026-04-29 | blank | Done | calculated |
+| AF | Screenshot completed? | blank | Yes | calculated |
+| AH | Link | blank | https://app.zero.inc/ | user |
+
+## Open questions
+
+- **I Subprocessor** (Operations): rec = `Operations`. Alternatives: `Application` / `N/A`. Why: Vanta lists data type = "Normain's metadata only"; CRM holds sales pipeline data (Normain operational), not customer-product end-user data. You confirmed earlier — flagged here per workflow rule.
+- **N Risk Review Status in Vanta** (blank): rec = leave blank for now. Alternatives: schedule Vanta assessment now, then mark `Added, completed`. Why: Vanta has Zero added but "No logged assessments" — can't honestly mark completed. Blocks F flip until done.
+- **T Subscription type** (blank): rec = `Per user`. Alternatives: `Total` / `Not a subscription`. Why: standard CRM pricing model.
+- **U Number of users** (blank): rec = unknown. Why: depends on Customer Success + Marketing seat count.
+- **V Cost per month** (blank): rec = unknown. Why: needs billing access.
+- **W Invoice Currency** (blank): rec = `USD`. Alternatives: `SEK` / `EUR`. Why: zero.inc is US-based.
+- **Y Contract Renewal Date** (blank): rec = unknown. Alternatives: `YYYY-MM-DD` / `Monthly` / `Free plan`. Why: needs billing.
+- **AH Link** (blank): rec = `https://app.zero.inc/`. Why: typical SaaS admin pattern; needs confirmation from you.

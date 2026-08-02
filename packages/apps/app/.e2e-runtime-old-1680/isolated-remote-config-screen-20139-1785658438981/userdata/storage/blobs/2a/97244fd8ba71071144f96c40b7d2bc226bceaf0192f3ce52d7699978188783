@@ -1,0 +1,69 @@
+# Azure Defender — Lane B fixes for remediation
+
+Subscription `a9049f9f` (Normain). These are the **genuine + lower-urgency config fixes** from the Defender posture review — the real ISO-relevant hardening, separate from the dependency-CVE findings (handled via the existing Trivy/Dependabot + nor-28xx bump flow) and from the items we're exempting.
+
+**Status snapshot — 2026-07-01.** Secure score **39.6%** (9.9/25) — up from 15.48% on 2026-06-24, 36.16% on 2026-06-30. Lane B findings 480 → **413** (67 cleared net). Network + KV + Foundry + AKS-policy-add-on pass + quick wins landed. Remaining ≈ the AKS pod-security manifest chunk (the weighted block still open) + finishing the Foundry/storage partials + exemptions.
+
+**Note on AKS pod-security counts going UP:** enabling the Azure Policy add-on turned on Gatekeeper evaluation, so it now *sees* more (automount 57→59, read-only FS 43→45, limits 8→10, + new "run as root" ×2 and "allowed ports" ×2). Not a regression — audit-mode visibility. Fix the manifests, then flip the policy to enforce. **Drift:** "Audit diagnostic setting" crept 58→61 and VNet-firewall 1→2 as new resources landed uncovered — argues for doing diagnostic-logging as an Azure **Policy DeployIfNotExists** so new resources auto-comply.
+
+**Priority:** High = real exposure, do first · Med = should do, lower urgency.
+**Status:** ✅ Done · 🟡 Partial · ⬜ Not started.
+**Effort:** **S** ≤½ day (flag, low risk) · **M** ~1 day (needs caller-audit or coordinated change) · **L** multi-day (network design or per-workload manifest changes + testing).
+**Where:** mostly `terraform/modules/azure/` in the platform monorepo; AKS pod-security items are workload manifests/Helm enforced via the Azure Policy add-on.
+
+| Pri | Status | Effort | Defender recommendation | Affected | Resource | Concrete fix |
+|---|---|---|---|---|---|---|
+| **High** | ✅ | S | Storage public access should be disallowed | 0 (was 8) | `azurerm_storage_account` | Done — `allow_nested_items_to_be_public = false`; `public_network_access_enabled = false` |
+| **High** | ⬜ | M | Storage accounts should prevent shared key access | 13 | `azurerm_storage_account` | `shared_access_key_enabled = false` — audit callers first (Entra/SAS) |
+| **High** | ⬜ | S | Secure transfer to storage should be enabled | 2 | `azurerm_storage_account` | `https_traffic_only_enabled = true` |
+| **High** | 🟡 | M | Restrict storage network access (VNet rules + firewall) | 5+5 (was 11+11) | `azurerm_storage_account` | `network_rules { default_action = "Deny"; virtual_network_subnet_ids = [...]; ip_rules = [...] }` |
+| Med | 🟡 | L | Storage should use a private link connection | 7 (was 13) | `azurerm_private_endpoint` | Private endpoint + private DNS zone for blob/file |
+| **High** | 🟡 | M | Firewall should be enabled on Key Vault | 5 (was 6) | `azurerm_key_vault` | `network_acls { default_action = "Deny"; bypass = "AzureServices" }` |
+| **High** | ✅ | S | Key Vaults should have deletion protection | 0 (was 1) | `azurerm_key_vault` | Done — `purge_protection_enabled = true` |
+| Med | 🟡 | L | Key Vaults should use private link | 5 (was 6) | `azurerm_private_endpoint` | Private endpoint + private DNS zone |
+| Med | ✅ | M | RBAC should be used on Key Vault | 0 (was 1) | `azurerm_key_vault` | Done — `enable_rbac_authorization = true` |
+| Med | ⬜ | S | Diagnostic logs in Key Vault should be enabled | 1 | `azurerm_monitor_diagnostic_setting` | `AuditEvent` → Log Analytics |
+| **High** | 🟡 | M | Foundry (AI) key access disabled (local auth) | 3 (was 18) | `azurerm_ai_services`/`cognitive_account` | `local_authentication_enabled = false` — verify callers use Entra |
+| **High** | 🟡 | M | Foundry (AI) restrict network access | 16 (was 18) | same | `public_network_access_enabled = false` / `network_acls { default_action = "Deny" }` |
+| Med | 🟡 | L | Foundry (AI) use Azure Private Link | 16 (was 18) | `azurerm_private_endpoint` | Private endpoint + private DNS zone per resource |
+| Med | 🟡 | S | Diagnostic logs in Foundry should be enabled | 16 (was 18) | `azurerm_monitor_diagnostic_setting` | → Log Analytics (cover via policy) |
+| **High** | ✅ | M | AKS Azure Policy add-on installed | 0 (was 2) | `azurerm_kubernetes_cluster` | Done — `azure_policy_enabled = true`. Now in **audit** (surfacing pod findings); flip to enforce after manifests fixed |
+| **High** | ⬜ | M | AKS disable automounting API credentials | 59 (was 57) | manifests/Helm | `automountServiceAccountToken: false` |
+| **High** | ⬜ | L | AKS immutable (read-only) root filesystem | 45 (was 43) | manifests/Helm | `securityContext.readOnlyRootFilesystem: true` — needs writable-volume + app testing |
+| **High** | ⬜ | M | AKS avoid privilege escalation | 38 | manifests/Helm | `securityContext.allowPrivilegeEscalation: false` |
+| **High** | ⬜ | M | AKS running containers as root should be avoided | 2 (new) | manifests/Helm | `securityContext.runAsNonRoot: true` + `runAsUser` |
+| **High** | ⬜ | M | AKS services should listen on allowed ports only | 2 (new) | manifests/Helm | Constrain Service ports to the allowed set |
+| **High** | ⬜ | M | AKS API server restricted access | 2 | `azurerm_kubernetes_cluster` | `api_server_access_profile.authorized_ip_ranges` or private cluster |
+| Med | ⬜ | M | AKS enforce CPU/memory limits | 10 (was 8) | manifests/Helm | `resources.limits.cpu` / `.memory` — right-size |
+| Med | ⬜ | M | AKS should not use default namespace | 4 | manifests/Helm | Move workloads to named namespaces |
+| Med | ⬜ | S | AKS Defender profile enabled | 2 | `azurerm_kubernetes_cluster` | `microsoft_defender { log_analytics_workspace_id = ... }` (Containers plan already on) |
+| Med | ⬜ | M | Container images from trusted registries only | 59 (was 57) | Azure Policy / Gatekeeper | Allowed-registries constraint → ACR (add-on now in place) |
+| Med | ⬜ | M | Audit diagnostic setting for selected resource types | 61 (was 58, drifting up) | `azurerm_monitor_diagnostic_setting` | One Policy DeployIfNotExists → Log Analytics + backfill |
+| Med | ⬜ | S | Diagnostic logs in Kubernetes services | 2 | `azurerm_monitor_diagnostic_setting` | On AKS → Log Analytics |
+| Med | ✅ | M | Upgrade Azure Kubernetes Service | 0 (was 16) | `azurerm_kubernetes_cluster` | Done — `kubernetes_version` bumped |
+| Med | ✅ | S | Upgrade Kubernetes nodes | 0 (was 2) | node pool | Done — node images upgraded |
+| **High** | ⬜ | M | Privileged roles permanent access (sub/RG) | 3 | Entra PIM | Convert to PIM-eligible (folds into PIM rollout) |
+| **High** | ⬜ | M | Service Principals with admin roles (sub/RG) | 2 | role assignments | Investigate need, remove/scope down |
+| Med | ⬜ | M | VM/VMSS encryption at host | 2 | `azurerm_*virtual_machine*` | `encryption_at_host_enabled = true` — needs deallocate/recreate |
+| Med | ⬜ | M | PostgreSQL geo-redundant backups | 2 | `azurerm_postgresql_flexible_server` | `geo_redundant_backup_enabled = true` (set at create — may need recreate) |
+| Med | ⬜ | S | PostgreSQL connection_throttle = on | 2 | `..._configuration` | `connection_throttle.enable = on` |
+| Med | ⬜ | S | PostgreSQL logfiles.retention_days > 3 | 2 | `..._configuration` | `logfiles.retention_days = 7` |
+| **High (5-min)** | ✅ | S | Subscription security contact email | 0 (was 1) | `azurerm_security_center_contact` | Done — `email` set |
+| **High (5-min)** | ✅ | S | High-severity alert email (+ to sub owner) | 0 (was 1+1) | `azurerm_security_center_contact` | Done — `alert_notifications` + `alerts_to_admins` on |
+
+## Effort summary
+- **Remaining: ~4–5 engineer-days**, ~3–4 IaC PRs. (Quick wins + much of the network/KV/Foundry pass now done — score moved 15→40%.)
+- **Quick (S, mostly done):** ✅ email wins, ✅ storage public-access; left — secure transfer, KV diag logs, AKS Defender profile, PG connection_throttle + log retention.
+- **Medium (M, ~1–2 days):** shared-key removal (caller audit), finish the Foundry (3 key-auth + 16 network/PL/diag) + storage/KV partials, diagnostic-logging Policy, trusted-registry policy, governance/SP scope-down, VM encryption-at-host.
+- **Heavy (L, ~3–4 days, biggest chunk, untouched):** AKS pod-security manifests (automount / privesc / read-only-FS / run-as-root / ports / limits across workloads) → then flip Policy add-on to **enforce**; finish private link + private-DNS across storage/KV/Foundry.
+- **Leverage:** add-on is in (audit). Once the manifests are fixed and the policy is in enforce, the ~155 pod-security findings clear together — the remaining weighted block.
+
+## Not in this list (deliberately)
+- **Verify intent first, not blind-fix:** PostgreSQL Entra-only auth (2 — may break password-auth callers). *(Container Apps public-internet exposure — was here; now resolved, 9 → 0.)*
+- **Exempting, not fixing:** pgaudit recs (PIM activation-logging is our compensating control); Defender paid-plan upsells (cost decision, pending). **Exemptions not yet created.**
+- **Lane A overlap (dep-bump flow, not here):** AKS node vuln findings (2), ACR image vulnerabilities (1).
+
+## Done / progressed since 2026-06-24
+✅ AKS Azure Policy add-on (2→0) · ✅ KV deletion protection (1→0) · ✅ KV RBAC (1→0) · ✅ Upgrade AKS (16→0) · ✅ Upgrade K8s nodes (2→0) · ✅ Container Apps public exposure (9→0) · ✅ Storage public access (8→0) · ✅ Security contact email (1→0) · ✅ High-sev alert emails (1+1→0).
+🟡 Foundry key auth (18→3) · Foundry network/private-link/diag (18→16 each) · Storage network restrict (11+11→5+5) · Storage private link (13→7) · KV firewall (6→5) · KV private link (6→5).
+Secure score **15.48% (2026-06-24) → 36.16% (06-30) → 39.6% (07-01)**.

@@ -1,0 +1,48 @@
+# Chat Autocomplete — Command Sources
+
+Context: adding `/` command menu to chat composer (stream-json transport). Skills shipped as v1. This table tracks remaining sources + built-ins to layer on.
+
+## Sources
+
+| #   | Cmd                       | Source                                                             | Impl in chat                                                    | ROI        |
+| --- | ------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------- | ---------- |
+| 1   | **skills**                | `<cwd>/.claude/skills`, `<cwd>/.agents/skills`, `~/.claude/skills` | done                                                            | ✓          |
+| 2   | **custom cmds** `/<name>` | `<cwd>/.claude/commands`, `~/.claude/commands`                     | fs scan + inject md body as user msg                            | high       |
+| 3   | **agents** `/agents`      | `<cwd>/.claude/agents`, `~/.claude/agents`                         | fs scan, inject "use X agent"                                   | high       |
+| 4   | `@file`                   | glob cwd + respect `.gitignore`                                    | new `@` hook, debounced fs search                               | high       |
+| 5   | **/clear**                | built-in                                                           | kill chat session + reset timeline                              | high       |
+| 6   | **/help**                 | built-in                                                           | static text response                                            | low effort |
+| 7   | **/status**               | built-in                                                           | render `state` (model, sessionId, cwd, turn count)              | low effort |
+| 11  | **/permissions**          | built-in                                                           | open settings → permissions tab                                 | low effort |
+| 12  | **/hooks**                | built-in                                                           | open settings → hooks tab                                       | low effort |
+
+## Skipped
+
+| Cmd                  | Reason                                                  |
+| -------------------- | ------------------------------------------------------- |
+| `/compact`           | REPL internal — no headless API                         |
+| `/model`             | REPL internal — switches mid-session, no API            |
+| `/login` / `/logout` | CLI auth flow                                           |
+| `/resume`            | REPL internal (we already persist `chatConversationId`) |
+
+## UI Grouping
+
+- Skills (scan)
+- Custom commands (scan)
+- Agents (scan)
+- Built-ins (hardcoded list w/ handlers)
+
+## Architecture
+
+Hook-per-source pattern holds: each registry feeds one `AutocompleteMenu`. `ChatPanel.onKeyDown` iterates hooks first-returns-true. For 4+ hooks, move to explicit priority ordering.
+
+## Suggested Order
+
+1. **Custom commands** — reuses 80% of skills code (fs scan, frontmatter parse, autocomplete hook)
+2. **/clear** — cheap, high user expectation
+3. **Agents** — same pattern as skills/custom-cmds
+4. **@file** — own hook, biggest UX shift
+5. Built-ins that open settings/URLs (batch: `/config`, `/memory`, `/permissions`, `/hooks`, `/mcp`, `/bug`, `/release-notes`)
+6. Data-driven built-ins (`/status`, `/cost`, `/help`)
+7. Template injectors (`/init`, `/review`)
+8. `/doctor`

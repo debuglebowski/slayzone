@@ -1,0 +1,276 @@
+# Normain System Description
+
+**Revised version — proposed.** This artifact is the current Google Doc draft with the edits from `proposed-draft-edits.md` v2 applied. The Google Doc has **not** been modified; this is a proposal for the doc owner to review and copy across once the owner-decision items at the bottom are resolved.
+
+SOC 2 Type 2 examination period: **4 May 2026 – 4 August 2026**. Auditor: Prescient Assurance LLC.
+
+Inline markers used in this version:
+- `[NEEDS DRIVE VERIFICATION]` — claim depends on Main Agreement / SLA / DPA text that I have not opened.
+- `[DEFAULT — confirm or change]` — I picked the most sensible default for an owner-decision item from v2 of the proposed edits; flagged for explicit sign-off.
+
+---
+
+## DC 1 — Company and Services
+
+Normain AB (Sweden) provides an AI-powered automation platform that ingests customer content from connected file storage (SharePoint, Google Drive, Box), direct uploads in the platform UI, and customer-supplied URLs, processes it with AI models hosted in Microsoft Azure, and produces insights and structured outputs.
+
+**Hosting modes offered.** All four modes below are actively offered. Normain recommends Logical separation as the default; Physical separation is offered to customers with heightened data-isolation requirements; Customer-hosted is available but Normain advises against it.
+
+| Mode | Description |
+|---|---|
+| **SaaS — Open platform (Normain-managed)** | Customer organisation provisioned within Normain's multi-organisation platform tenant at `app.normain.com`, on Normain's shared Microsoft Azure environment. |
+| **Logical separation (Normain-managed)** | Customer receives a dedicated subdomain, Kubernetes namespace, PostgreSQL database, storage container, NFS share, and Entra ID integration. All resources run within Normain's shared Microsoft Azure environment (shared AKS cluster, PostgreSQL server, Key Vault, Container Registry, and AI services). |
+| **Physical separation (Normain-managed)** | Customer receives a dedicated Azure resource group operated by Normain, with dedicated AKS cluster, PostgreSQL server, Key Vault, storage accounts, and supporting Azure resources provisioned exclusively for the customer. |
+| **Customer-hosted (Microsoft Azure)** | Same architecture as Physical separation, deployed in a Microsoft Azure tenant provided and operated by the Customer using Normain-published Terraform modules. Available but not recommended by Normain. |
+
+During the examination period, customers operate under `[SCOPING — confirm which of the four modes have live customers in 4 May – 4 Aug 2026; code review found app-production IaC instantiates only SaaS Open-platform and Logical separation]`.
+
+**Customer input integrations**: SharePoint, Google Drive, Box (read-only, via OAuth or Microsoft Graph), plus direct UI upload and customer-supplied URL ingestion.
+
+---
+
+## DC 2 — Principal Service Commitments and System Requirements
+
+**Service-level commitments (SLA, signed 2025-12-17)**
+
+| Commitment | Value |
+|---|---|
+| Platform uptime | ≥ 99 % per calendar month |
+| Service credit — uptime 90.0 % – 98.9 % | 5 % of monthly fee |
+| Service credit — uptime < 90 % | 10 % of monthly fee |
+| Planned interruptions | Max 2 per month, ≤ 4 hours each |
+| Service window | Swedish non-holiday weekdays, 08:00 – 22:00 UTC+2 |
+| Claim window | 5 business days from end of affected month |
+
+Service credits do not apply to outages caused by force majeure, customer-attributable issues, or emergency maintenance (full exclusions in the SLA).
+
+**Regulatory and contractual commitments**
+
+- GDPR Article 32 technical and organizational measures.
+- Support for customer DPIAs.
+- Personal-data breach notification per DPA.
+- Subprocessor change notification: 30 days prior, with a 14-day customer objection right (DPA).
+- Data return or erasure on contract termination per DPA.
+
+System requirements (internal): adherence to the Information Security Policy, change-management process, and access-management policy approved by the ISMS Governance Council.
+
+---
+
+## DC 3 — System Components
+
+### 3.1 Infrastructure
+
+| Layer | Component |
+|---|---|
+| Cloud provider | Microsoft Azure |
+| Operating system | Linux (managed services) |
+| Container orchestration | Azure Kubernetes Service (`aks-normain-prod-01`) with Istio service mesh providing mTLS between workloads |
+| Container registry | Azure Container Registry (shared `acrnormain` plus per-environment `acrnormainprod01`) |
+| Primary database | Azure Database for PostgreSQL — Flexible Server (version 16, network-private) |
+| Object storage | Azure Blob Storage (per-tenant containers) |
+| Shared file storage | Azure Files — Premium FileStorage, NFS protocol, per-tenant share |
+| Email delivery | Azure Communication Services (`acs-email-normain-prod-01`) |
+| AI compute | Azure OpenAI Service (multiple EU regions — see 3.5) and Azure Document Intelligence (Sweden Central) |
+| Observability | Azure Log Analytics workspace (`law-normain-audit-prod-01`, 365-day retention) plus Azure Storage immutable tier for audit logs |
+| Secret management | Azure Key Vault (RBAC-authorised, soft-delete plus purge-protection enabled). Stores application secrets and OAuth credentials; encryption at rest of customer data uses Microsoft-managed keys, not Key Vault customer-managed keys. |
+| Edge / DNS | Cloudflare (DNS authoritative for `normain.com`; WAF [NEEDS DRIVE VERIFICATION — confirm dashboard ruleset or remove the word from this row]) |
+
+### 3.2 Software
+
+| Tier | Components |
+|---|---|
+| Application | Normain platform web UI, per-tenant API service (`api`), per-tenant background worker (`worker`), and platform Tenant API (`tenant-api`) which fronts Microsoft Marketplace subscription lifecycle and triggers tenant provisioning |
+| Data plane | Azure PostgreSQL Flexible Server (per-tenant database within a shared server), Azure Blob Storage (per-tenant container), Azure Files NFS (per-tenant share), per-tenant Redis (in-cluster) |
+| Customer input integrations | SharePoint, Google Drive, Box (read-only via OAuth), plus direct UI upload and customer-supplied URL ingestion (web content via Firecrawl) |
+
+### 3.3 People
+
+Functions: Engineering, Product, Customer Operations, Go-to-Market, Finance & Legal. ISMS roles assigned per the ISMS Roles & Responsibilities document. The Chief Technology Officer is designated as the Information Security Management Leader and the Data Protection Officer.
+
+### 3.4 Data
+
+| Data state | Protection |
+|---|---|
+| In transit (customer ↔ platform) | TLS 1.2 or higher. HTTPS is terminated at the Istio Gateway with per-tenant certificates issued via cert-manager and Let's Encrypt; HTTP is redirected to HTTPS at the route level. |
+| In transit (platform ↔ external subprocessor) | TLS 1.2 or higher. |
+| In transit (within the Azure VNet) | mTLS between pods via the Istio service mesh. The NFS share between worker pods and Azure Files runs unencrypted within the customer-isolated VNet, restricted by VNet network rules to API and AKS subnets. |
+| At rest (database, blob, NFS, audit log storage, backups) | AES-256, Azure platform-managed encryption with Microsoft-managed keys. |
+| Application-layer encryption | Selected sensitive fields are additionally encrypted with an application-managed key stored in Azure Key Vault. |
+| Application secrets | Stored in Azure Key Vault and mounted to workload pods via the Secrets Store CSI Driver and Azure Workload Identity (no long-lived secrets are stored in pods for Azure-resource access). |
+
+Customer content submitted to AI features is processed by Azure OpenAI Service and Azure Document Intelligence within the European Economic Area (Azure regions: Sweden Central, West Europe, France Central, Germany West Central, Norway East). These services are operated by Microsoft as part of the carved-out subservice (see DC 7) and do not use customer data to train third-party models. Audio inputs are transcribed by Azure Speech Service in Sweden Central. No prompts or content are transmitted to OpenAI Inc. or Anthropic PBC directly during the examination period.
+
+### 3.5 Third-Party Access — Production Data Path
+
+| Vendor | Role |
+|---|---|
+| Microsoft Azure | Primary cloud infrastructure (sole carved-out subservice organisation). Includes Azure OpenAI Service (LLM + embeddings), Azure Document Intelligence (OCR + layout), Azure Speech Service (audio transcription), and Azure Communication Services (transactional email send). |
+| Firecrawl (Mendable AI Inc.) | Web fetching, search, and content extraction for customer-supplied URL data sources. |
+| BetterStack (Better Stack Inc.) | Log and trace ingestion via OpenTelemetry (data region `eu-nbg-2`, 180-day retention). |
+| PostHog | Product analytics events (user, team, and organisation identifiers; event names). Collection is gated on user consent. |
+| Stripe `[DEFAULT — placed in DC 3.5 as it processes customer-organisation PII; DPO may relocate to DC 3.6]` | Subscription billing and payment processing for self-serve customer organisations (`app` tenant only). |
+| Loops `[DEFAULT — placed in DC 3.5 as it processes end-user contact data; DPO may relocate to DC 3.6]` | Transactional and marketing email delivery to end users (`app` tenant only). |
+
+Direct integrations with OpenAI Inc. and Anthropic PBC are available as deferred capabilities; neither receives customer data during the examination period. Application error tracking via Sentry is not currently deployed. Any future activation of additional subprocessors will be notified to customers under the DPA's 30-day subprocessor-change notice (DC 2).
+
+### 3.6 Operational Access — No Customer Production Data
+
+| Vendor | Role |
+|---|---|
+| GitHub | Source-code management, code scanning, dependency alerts. |
+| 1Password `[DEFAULT — confirm with Security; Terraform-secrets Key Vault now also holds operator-side secrets]` | Enterprise secrets and credentials vault. |
+| Cloudflare | Edge, DNS, WAF `[NEEDS DRIVE VERIFICATION — same as 3.1]`. |
+| Linear | Engineering ticketing and change tracking. |
+| Slack | Internal communication. |
+| Vanta | Continuous compliance monitoring (read access to admin consoles for evidence collection). |
+| Google Workspace | Corporate identity, document storage. |
+| Cursor | Engineering tooling. |
+| Microsoft Marketplace (publisher) | Subscription resolution and lifecycle for customers acquired via Azure Marketplace. |
+| Zero | Sales-lead notification webhook (receives signup name and email on platform self-serve signup). |
+
+### 3.7 Procedures
+
+System operation procedures are documented in the company's internal knowledge base and cover: access management, change management, vulnerability management, incident response, backup and restore, and vendor management.
+
+---
+
+## DC 4 — Incidents During the Period
+
+No qualifying security incidents (P1 or above, or any incident meeting the customer-notification threshold) have been identified during the audit period as of the draft cut-off date (2026-05-18). This section will be re-verified prior to issuance against the Linear "Security Incident Response" issue type for the full audit window.
+
+---
+
+## DC 5 — Controls Implemented (CC1 – CC9)
+
+Shared governance and review cadence — applies to CC1 – CC9 unless stated otherwise. All policies referenced below are owned by the ISMS Governance Council, reviewed at least annually, and approved by the CEO. Control operation is monitored continuously in Vanta, with evidence collected per control. Identified gaps and findings are tracked to closure as Linear tickets.
+
+### CC1 — Control Environment
+
+- Information Security Policy, Acceptable Use Policy, and Code of Conduct are acknowledged by all employees and contractors at onboarding.
+- The ISMS Governance Council is chaired by the CTO (also the Information Security Management Leader and DPO) and includes the COO, business-unit delegates, and engineering leadership.
+- Background checks are performed at hire where legally permitted.
+
+### CC2 — Communication and Information
+
+- Internal: information security policies, incident-response procedures, and the change-management process are published on the company intranet.
+- External: customer-facing commitments are published in the Terms of Service, SLA, and DPA. A security reporting channel (`security@normain.com`) is published on the Trust Center.
+
+### CC3 — Risk Assessment
+
+- Annual enterprise risk assessment performed by the ISMS Governance Council. Risks are recorded in the risk register with owners, treatment plans, and review dates.
+- Fraud risk and changes to the operating environment are considered within the same annual cycle.
+
+### CC4 — Monitoring Activities
+
+- Continuous control monitoring via Vanta covers all CC1 – CC9 controls.
+- Independent penetration test conducted at least annually (latest report: 2026 by Cacilian, received 2026-05-18; prior round: May 2025).
+- Backup restore tested at least annually (most recent exercise: 2025-07-22 disaster-recovery tabletop simulating production-database deletion, including full restore from Azure-managed automated backup).
+
+### CC5 — Control Activities
+
+- Control selection and design is documented and owned by the ISMS Governance Council. Technical controls are implemented in code, infrastructure-as-code, and SaaS configuration.
+
+### CC6 — Logical and Physical Access
+
+- Access is provisioned via a documented onboarding workflow with role-based permissions. Joiner / mover / leaver events trigger access changes within 1 business day.
+- User access is reviewed at least annually; vendor access reviews are performed quarterly (latest cycles: 2025-06-19, 2025-10-12, 2026-04-29).
+- End-user authentication into the platform is delegated to identity providers: Microsoft Entra ID (per-tenant) for all customers, Google Workspace OAuth for the platform tenant, and email-and-password for the platform tenant only `[DEFAULT — confirm password-login policy on app.normain.com]`. Multi-factor authentication is enforced at the identity-provider level. Sessions expire after seven days with one-day refresh intervals.
+- Engineer access to the Azure environment is delegated to Microsoft Entra ID with Privileged Identity Management (PIM). The AKS cluster has local admin accounts disabled and uses Entra-backed Kubernetes RBAC. PostgreSQL access requires Entra AD authentication; developer access to a customer-tenant database requires PIM activation of a per-tenant Entra group, and all developer queries are captured by `pgaudit` with the developer's user principal name recorded in the log line prefix.
+- Workloads authenticate to Azure resources using federated workload identities (per-tenant Kubernetes service accounts federated to per-purpose Azure user-assigned managed identities). Application secrets are mounted from Azure Key Vault via the Secrets Store CSI Driver.
+- Multi-factor authentication is enforced on all employee accounts and on all administrative access to production systems.
+- Encryption: TLS 1.2+ in transit; AES-256 at rest (Azure platform-managed encryption with Microsoft-managed keys); application secrets managed in Azure Key Vault. Selected sensitive fields are additionally encrypted at the application layer (see DC 3.4).
+
+### CC7 — System Operations
+
+| Activity | Tooling | Cadence |
+|---|---|---|
+| Static application security testing | GitHub CodeQL (default setup, configured in repository Code Security settings — evidence in GitHub Security tab) | Weekly + on push to default branch |
+| Dependency vulnerability detection | GitHub Dependabot alerts (default setup; auto-update PRs disabled; remediation prioritised via Linear) | Continuous |
+| Dynamic application security testing | OWASP ZAP baseline against production (`app.normain.com`) and the development environment (`app-dev.normain.com`) | Weekly |
+| Container image scanning | Trivy (scans `normain-api`, `normain-worker`, `normain-tenant-api`; severity floor: HIGH / CRITICAL; results uploaded to GitHub Security tab) | Weekly |
+| Pre-merge code quality | Lint, type-check, automated test suite, Terraform format check | Every pull request |
+| Production monitoring and alerting | Application logs and traces ingested into BetterStack via OpenTelemetry (180-day retention); availability and CPU saturation monitored via Azure Monitor metric alerts; uptime probing configured in BetterStack | 24/7 |
+| Security alert triage `[DEFAULT — confirm triage is manual; change wording if a GitHub→Linear automation exists]` | Findings from CodeQL, Dependabot, Trivy, and ZAP land in the GitHub Security tab and the repository's issues queue; remediation is tracked in Linear | Continuous |
+
+### CC8 — Change Management
+
+- All production code changes flow through a pull request with at least one independent reviewer prior to merge into the default branch.
+- Deployments are executed by GitHub Actions on every merge to the default branch `[DEFAULT — Option A from edits v2: matches reality; switch to Option B if release-notes automation is added before issuance]`. Release-relevant changes are captured in pull-request titles and descriptions and summarised in periodic release notes.
+- Infrastructure changes are managed via Terraform and follow the same review process as application code.
+- Customer-tenant configuration (per-tenant subdomain, environment variables, DNS) is provisioned via an authenticated tenant API and applied by Terraform automation triggered by `repository_dispatch`. The Terraform modules and the platform code remain change-controlled via the same pull-request and code-owner review process; only tenant inventory updates (driven by signed Marketplace and self-serve subscription events) are applied without manual review.
+
+### CC9 — Risk Mitigation: Business Disruption and Vendor Risk
+
+- The Business Continuity and Disaster Recovery Plan is reviewed annually. An annual tabletop exercise is performed (most recent IR tabletop: 2025-07-04; most recent DR tabletop: 2025-07-22).
+- Vendors are risk-assessed at onboarding and re-assessed annually or on material change. The vendor inventory is maintained in the Vendor Master Sheet.
+
+---
+
+## DC 6 — Complementary User Entity Controls (CUECs)
+
+User entities (customers) are expected to operate the following controls to complement the controls described above. Failure to operate any of these may impair the platform's ability to meet its commitments.
+
+| TSC | CUEC |
+|---|---|
+| CC1.4 | The customer is responsible for performing background or pre-employment screening of its own users granted access to the platform, where legally permitted. |
+| CC2.1 | The customer is responsible for the appropriate classification and protection of data submitted to the platform. |
+| CC2.3 | The customer is responsible for the accuracy, completeness, and authorization of inputs and instructions submitted to the platform by its users. |
+| CC6.1 | The customer is responsible for defining roles, entitlements, and authorization rules for its own users within the platform. |
+| CC6.2 | The customer is responsible for issuing, storing, rotating, and revoking platform user credentials and API keys belonging to its users. |
+| CC6.3 | The customer is responsible for periodically reviewing the access rights granted to its own users within the platform. |
+| CC6.6 (a) | The customer is responsible for protecting data in transit between its own systems and the platform endpoints. |
+| CC6.6 (b) | The customer is responsible for the physical and environmental security of end-user devices used to access the platform. |
+| CC8.1 | The customer is responsible for configuring its own platform integrations (e.g., SharePoint, Google Drive, Box), including the scope of credentials issued and the data made accessible to the platform. |
+
+---
+
+## DC 7 — Complementary Subservice Organization Controls (CSOCs)
+
+The system uses Microsoft Azure as the sole carved-out subservice organization for the production data path. Other named third parties listed in DC 3.5 either receive non-database telemetry (BetterStack), product-analytics events (PostHog), or per-request fetches against customer-supplied URLs (Firecrawl) and are not relied on for the trust services criteria below.
+
+Azure OpenAI Service, Azure Document Intelligence, Azure Speech Service, and Azure Communication Services are operated by Microsoft as part of the Azure subservice and are covered by the same Microsoft Azure SOC 2 Type 2 report.
+
+| TSC | CSOC expected of Microsoft Azure |
+|---|---|
+| CC6.4 | Physical access controls at Azure data centers. |
+| CC7.2 | Environmental controls — fire suppression, power redundancy, temperature, humidity — at Azure data centers. |
+
+Management receives and reviews the Microsoft Azure SOC 2 Type 2 report annually via the Microsoft Service Trust Portal.
+
+---
+
+## DC 8 — Trust Services Categories Not in Scope
+
+The following Trust Services Categories are not in scope for this examination:
+
+- Availability
+- Processing Integrity
+- Confidentiality
+- Privacy
+
+Physical security is carved out as part of the Microsoft Azure subservice organization (see DC 7); Normain operates fully remotely and maintains no on-premises infrastructure.
+
+---
+
+## DC 9 — Significant Changes During the Period
+
+No significant changes to the system have been identified during the audit period as of the draft cut-off date (2026-05-18). This section will be re-verified prior to issuance against (a) merges to the default branch of the product repository on or after 2026-05-04, (b) the Linear "Change" issue type for the same window, and (c) published release notes.
+
+No new subprocessors were introduced during the examination period; the lists in DC 3.5 and DC 3.6 reflect the active subprocessor set as of the draft cut-off date. To be re-confirmed at issuance against the Linear "Subprocessor Change" issue type and Vanta vendor inventory.
+
+---
+
+## Markers carried into this version — owner decisions outstanding
+
+| # | Where | What needs to be decided |
+|---|---|---|
+| 1 | DC 1 hosting modes table — `Customer-hosted` row | Drive verification: does the Main Agreement actually offer this mode? If no, delete the row. |
+| 2 | DC 3.1 Cloudflare row + DC 3.6 Cloudflare row — `WAF` | Drive / dashboard verification: confirm WAF rulesets are configured in Cloudflare, or remove the word. |
+| 3 | DC 3.5 — Stripe placement | DPO: keep in DC 3.5 (production data) or move to DC 3.6 (operational)? |
+| 4 | DC 3.5 — Loops placement | DPO: same as Stripe. |
+| 5 | DC 3.6 — 1Password row | Security: still in operational use, or superseded by the Terraform-secrets Key Vault? |
+| 6 | DC 5 CC6 — password-login on `app.normain.com` | Security: confirm `PASSWORD_LOGIN_ENABLED = "true"` for the `app` tenant is intentional. |
+| 7 | DC 5 CC7 security alert triage | Engineering: confirm triage is manual (no GitHub → Linear automation). If automation exists, restore the original wording. |
+| 8 | DC 5 CC8 — release notes | Engineering: keep Option A wording (matches reality), or commit to adding automation before issuance and switch to Option B? |
+
+Once these are answered, the inline `[DEFAULT — …]` and `[NEEDS DRIVE VERIFICATION]` markers can be stripped and the resulting text copied into the Google Doc.

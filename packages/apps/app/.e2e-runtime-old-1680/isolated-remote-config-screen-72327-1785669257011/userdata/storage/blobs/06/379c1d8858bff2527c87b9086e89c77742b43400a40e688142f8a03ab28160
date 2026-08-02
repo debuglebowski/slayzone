@@ -1,0 +1,12 @@
+flowchart TB
+  subgraph Data["data (exists)"]
+    REL[("relations<br/>fieldId / fromId / toItemId|toVersionId")]
+    INST[("instances")]
+  end
+  REL --> SG
+  INST --> SG
+  SG["subgraph builder (new, pure fn)<br/>seed = THE CURRENT INSTANCE<br/>expand recursively along configured relation fields (in+out)<br/>visited-set = cycle-safe · depth + node cap · archived target → ghost"]
+  SG --> TILE["'graph' tile content (new, 9th catalog entry)<br/>lives inside the instance page like details/connected/notes<br/>@xyflow/react canvas · READ-ONLY · click node → navigate<br/>reuses graphLayouts.ts + SelfLoopEdge"]
+  CFG[("per user+concept GraphConfig in DB<br/>(instance-view prefs row)<br/>fields to follow · depth · layout")] --> SG
+  CFG --> TILE
+  TILE -.-> EX["no org-chart code anywhere —<br/>Contact configured to follow only reports_to,<br/>dagre TB ⇒ looks like an org chart"]

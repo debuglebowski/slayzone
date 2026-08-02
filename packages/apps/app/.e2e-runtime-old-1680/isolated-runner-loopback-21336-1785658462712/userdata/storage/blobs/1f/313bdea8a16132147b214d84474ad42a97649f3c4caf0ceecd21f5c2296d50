@@ -1,0 +1,118 @@
+# CAP-7 — Capacity Management — Investigation
+
+**Control:** ISO 27001:2022 A.8.6 — monitor and adjust resource use to current/expected demand
+**Status:** 10/12 Vanta tests passing · 2 failing
+**Vanta:** https://app.eu.vanta.com/c/normain.com/controls (search CAP-7)
+**Investigated:** 2026-04-30
+
+> Vanta UI not reached — SlayZone task browser panel did not open during investigation. Findings below come from Azure CLI (3 subscriptions auth'd as kalle@normain.com), Drive search, and Gmail. The two failing tests are inferred from Azure-side gaps.
+
+---
+
+## Situation
+
+### Production estate (subscription `a9049f9f-3d1b-43f0-9278-7f1d603f6a00`, RG `rg-normain-prod-01`)
+
+| Resource | Type | Capacity alerts |
+|---|---|---|
+| `vmnormainprod01` (Standard_D8s_v3, Windows) — actual app server | VM | **NONE** |
+| `psql-normain-prod-01` | PostgreSQL Flexible | CPU, memory, storage, IOPS — all enabled |
+| `stwinvmnormainprod01` | Storage | capacity, transactions, errors, availability — all enabled |
+| `ufnormainprod01` | Storage (uploads) | availability only |
+| `sweden/germany/eu-west/norway/france-normain-prod-01` | AI Services (5 regions) | **NONE** |
+| `di-normain-prod-01` | Form Recognizer | **NONE** |
+| `aca-normain-backend-api-prod-01` | Container App | **resource does not exist**; 6 alerts target it (all disabled) |
+
+### Action groups
+- `ag-alerts-normain-prod-01` → `alerts@normain.com`
+- `AzureAlertsAction - normain-prod-01` → `alerts@normain.se`
+
+### Non-Azure context
+- **Drive:** zero capacity-planning docs (fulltext + filename search for `CAP-7`, `capacity management`, `autoscale`, `Azure Monitor`, `forecast`, `scaling`). Gustav left no handover artefact.
+- **Gmail:** only Microsoft auto-emails for AOAI quota increases (`text-embedding-3-large` Sweden Central 700 TPM May'25; Norway East revised to 700 TPM Nov'25). Pattern is reactive ad-hoc quota requests, no forecast.
+- **Repo (`projects/normbrain/` + policies):** no capacity docs.
+
+### Inferred failing tests
+1. **Production compute lacks capacity monitoring** — `vmnormainprod01` (the live prod app) has no CPU/memory/disk alert. Vanta auto-discovers the VM and flags missing metric alerts.
+2. **AI Services capacity not monitored** — 5 prod AOAI regions + Form Recognizer have no quota/latency/token-rate alerts. Capacity scaling is being done by emailing Microsoft for quota bumps (visible in Gmail), not by automated thresholds.
+
+Alternative read: one failure is the missing **Capacity Management Plan** document in Vanta's evidence slot. Both VM-and-AOAI-monitoring and the policy doc are required regardless — fixing all three closes the control even if my mapping is wrong on one.
+
+### Other anomalies (not failing tests, but should know)
+- 6 prod alerts (`ca-cpu-`, `ca-memory-`, `ca-response-time-`, `ca-high-traffic-`, `ca-error-rate-`, `ca-replica-count-alert-normain-prod-01`) target a non-existent Container App. Gustav started a Container Apps migration (alerts pre-wired), never deployed the app. Either delete the alerts or finish the migration.
+- Dev env (`rg-normain-dev-20`) has the same 6 disabled `ca-*` alerts; dev DB alerts are enabled. Probably out of audit scope but mirrors the unfinished migration.
+
+---
+
+## Solution
+
+### Fix 1 — Add capacity alerts on prod VM (≈ 30 min)
+```bash
+SUB=a9049f9f-3d1b-43f0-9278-7f1d603f6a00
+RG=rg-normain-prod-01
+VM_ID=$(az vm show -g $RG -n vmnormainprod01 --query id -o tsv --subscription $SUB)
+AG=$(az monitor action-group show -g $RG -n ag-alerts-normain-prod-01 --query id -o tsv --subscription $SUB)
+
+az monitor metrics alert create -n vm-cpu-alert-normain-prod-01 -g $RG --subscription $SUB \
+  --scopes $VM_ID --condition "avg Percentage CPU > 80" --window-size 15m --evaluation-frequency 5m --severity 2 --action $AG
+az monitor metrics alert create -n vm-memory-alert-normain-prod-01 -g $RG --subscription $SUB \
+  --scopes $VM_ID --condition "avg Available Memory Bytes < 1073741824" --window-size 15m --evaluation-frequency 5m --severity 2 --action $AG
+# Disk: per-data-disk metric "Data Disk Used Percentage" or guest-OS metrics if AMA installed
+```
+
+### Fix 2 — Add AOAI capacity alerts (≈ 45 min)
+Per AI Services account, alert on:
+- `ProcessedPromptTokens` rolling rate vs quota (>80% TPM)
+- `AzureOpenAIRequests` 429 count > 0 (rate-limit hit)
+- `Latency` p95 > threshold
+
+```bash
+for region in sweden germany eu-west norway france; do
+  AOAI_ID=$(az resource show --subscription $SUB -g $RG -n ${region}-normain-prod-01 \
+    --resource-type Microsoft.CognitiveServices/accounts --query id -o tsv)
+  az monitor metrics alert create -n aoai-throttle-${region}-prod-01 -g $RG --subscription $SUB \
+    --scopes $AOAI_ID --condition "total AzureOpenAIRequests where StatusCode includes 429 > 0" \
+    --window-size 5m --evaluation-frequency 1m --severity 2 --action $AG
+done
+```
+
+### Fix 3 — Capacity Management Plan doc + first review (≈ 30 min)
+1-page markdown:
+- **Scope:** prod VM, prod PSQL, prod Storage, prod AI Services (5 regions), Form Recognizer
+- **Metrics + thresholds:** mirror the alerts above
+- **Review cadence:** quarterly; owner = CTO
+- **Forecast inputs:** AOAI TPM growth from past quota bumps; user-count growth from product
+- **First review:** today's date, log of current utilization vs. capacity
+
+Upload as Vanta evidence under CAP-7. Schedule recurring quarterly Calendar event.
+
+### Cleanup — disabled `ca-*` alerts (≈ 10 min)
+Either:
+- (a) delete the 6 disabled `ca-*-normain-prod-01` alerts (no Container App exists), or
+- (b) re-point them to `vmnormainprod01` if you want VM-level versions (but then duplicates with Fix 1).
+
+Recommend (a).
+
+### Total effort: ≈ 2 h
+
+---
+
+## Actions taken
+
+- ✅ Inventoried 3 Azure subscriptions, mapped prod resources in `rg-normain-prod-01`
+- ✅ Listed all 16 metric alerts in prod, identified enabled/disabled + scope
+- ✅ Confirmed prod runs on VM `vmnormainprod01`, not on Container Apps as Gustav's alerts suggested
+- ✅ Confirmed 5 prod AOAI regions + 1 Form Recognizer have no capacity alerts
+- ✅ Searched Drive, Gmail, repo for capacity-planning docs — none exist
+- ❌ Could not read Vanta UI — task browser panel never opened (chrome-devtools MCP profile locked, slay tasks browser navigate timed out repeatedly with "Is the task tab active?")
+- ❌ No shared changes made — per task instructions, stopped before writing alerts / uploading evidence
+
+---
+
+## Open questions
+
+- Vanta UI: confirm the actual 2 failing test names (browser blocked all session)
+- Container Apps migration: finish or abandon? affects whether to delete `ca-*` alerts
+- Audit scope: is `rg-normain-dev-20` in scope for ISO/SOC2, or only `rg-normain-prod-01`?
+- VM disk capacity: is Azure Monitor Agent installed on `vmnormainprod01`? needed for guest-OS disk metrics
+- AOAI quota source-of-truth: where do current TPM allocations live (portal only)? needed for Plan doc

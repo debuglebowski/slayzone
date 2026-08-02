@@ -1,0 +1,27 @@
+# P17 — pty router (IPC → tRPC) — DONE
+
+## Commit
+- **b3fe5139** `feat(transport): pty router (P17 — 28 procs + 12 subs, dual-emit)` — direct to `main` (no PR), unsigned (matches peers), via temp-index + CAS (shared-tree safe). **1 commit only** (see "deferred drop").
+
+## What shipped
+- `createPtyOps(db)` factory — `terminal/src/main/pty-store.ts` (new). All pty/terminalModes/session/chat:list handler bodies, one impl.
+- `handlers.ts` → thin IPC wrappers over `createPtyOps` (kept self-tracking `PTY_HANDLER_CHANNELS` + `getPtyHandlerChannels` for e2e `__restorePtyHandlers`).
+- `ptyEvents` (`TypedEmitter<PtyEventMap>`, reuses P6) in `pty-manager.ts` + **DUAL-emit** at all 14 `webContents.send('pty:*')` sites (12 channels) — IPC events still fire for the IPC renderer; subs mirror them.
+- `routers/pty.ts` (new): **28 procedures + 12 subscriptions**; registered `pty:` in appRouter.
+- `app-deps.ts`: `PtyDeps` + `setPtyDeps`/`getPtyDeps`; injected in `apps/app/src/main/index.ts` next to `setChatDeps`. `registerPtyHandlers` KEPT.
+
+## Deviations from task card (card numbers were the divergent ref branch's)
+- **28 procs, not 27**: current handlers have `pty:touch`+`pty:interrupt` (ref lacked); ref's `ccsListProfiles` does not exist on main. `warm:setProjectTabCounts` stays IPC-only (needs deferred `ctx.windowId`) → 29 IPC handlers, 28 in router.
+- **12 subs, not 10**: current adds hibernate-warn/cancelled/hibernated + ensure-alive; ref had session-not-found/respawn-forced instead. `pty:ensure-alive:ack` (renderer→main) stays IPC.
+
+## Deferred: drop handlers.ts (the 2nd ref commit 61b31634)
+**NOT done — by design.** Parent d08d9adc done-when #6: delete IPC handlers only when the domain has zero `window.api.pty.*` calls (renderer cutover = **slice 5**). Renderer is still on IPC; dropping now breaks the terminal. Every committed sibling (task-terminals/settings/integrations) likewise keeps handlers. handlers.ts is deleted in the slice-5 pty renderer PR; preload bridge in slice 8.
+
+## Verification (all green)
+- typecheck: terminal, transport, app — clean.
+- lint: server-electron-free boundary PASS; eslint clean; biome only pre-existing `any` warnings (carried verbatim from old handlers.ts, net repo warnings unchanged).
+- prod build: electron-vite build OK (externalize/module-resolution + dynamic setPtyDeps import resolve).
+- e2e: terminal specs 30/31/32/54/58 — 10 passed, 2 pre-existing skips.
+
+## Shared-tree note
+Committed amid concurrent peer slices (ai-config P15, notify P20) uncommitted in the same working tree. Used temp-index (`GIT_INDEX_FILE`) + reconstructed HEAD+my-lines blobs for the 4 shared files (router.ts, app-deps.ts, transport index.ts, apps main index.ts) + CAS `update-ref`; guard confirmed commit touches exactly my 9 files, no peer leak. Not pushed (orchestrator batches).

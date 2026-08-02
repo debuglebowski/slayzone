@@ -1,0 +1,137 @@
+# Batch Wave 1 — Hub/Runner Split Foundations
+
+## Context
+
+Architecture decided (task artifact `runner-architecture.md` v10): split sidecar into **hub** (`@slayzone/hub`, owns DB/routers/auth/fan-out) + N **runners** (`@slayzone/runner`, exec: pty/agents/git/processes/fs) dialing out over one authed wss. Wave 1 = the 13 independently-mergeable foundation units: 7 behavior-preserving DB-decoupling refactors (exec code stops touching DB directly, goes behind injected ops interfaces) + 6 dark greenfield units (protocol, auth, schema, CLI plumbing, REST surface, TLS identity). Integration wave later.
+
+## Delivery model — NO PRs, NO pushed branches (waves 1-3 autonomous, user-authorized 2026-07-10)
+
+- Each worker runs in an **isolated git worktree** (harness-managed), implements its unit, verifies, **does NOT commit, push, or create PRs**. Worker exports its change as a binary patch (excluding pnpm-lock.yaml) to the session scratchpad + reports verification results.
+- Orchestrator applies patches to the main working tree unit-by-unit (path-disjoint by design), re-verifies, then **commits locally to main (never pushes)** — required so wave N+1 worktrees fork from a base containing wave N. Per-unit commits stage only patch-owned paths (pre-existing dirty files in the main tree are never swept in).
+- Lockfile: orchestrator re-runs `pnpm install` after applying package.json changes; workers never ship lockfile hunks.
+
+## Cutover strategy (wave 3 tail)
+
+Strangler flip: `fleet_mode: legacy | runner` boot setting. `legacy` = in-process exec (today, byte-identical); `runner` = composition wires runner-proxy impls over the fleet gateway to the auto-spawned local runner. Flip at boot only (live ptys can't migrate processes); rollback = flip back. Legacy path deleted in wave 4, not before.
+
+## Verification recipe (per worker, in its worktree)
+
+1. `pnpm install`
+2. `pnpm typecheck`
+3. Affected-package vitest (e.g. `pnpm --filter @slayzone/terminal test` / dir-local vitest)
+4. **Prod build** (`pnpm build`) — typecheck alone hides module-resolution bugs in this repo
+5. **Refactor units (1–7) only:** scoped e2e after build — run terminal/task Playwright specs (`pnpm test:e2e -- <spec>`), with `env -u ELECTRON_RUN_AS_NODE` (leaked var poisons e2e in dogfood terminals). Greenfield units (8–13) are dark (no runtime surface): unit tests + build suffice.
+
+## Units
+
+### Refactor (behavior-preserving; zero edits to composition.ts / app main index.ts / app-deps.ts; same SQL behind interfaces)
+
+1. **ChatDataOps** — terminal chat runtime stops touching tasks/chat_events/autocomplete tables.
+   New `packages/domains/terminal/src/server/runtime/chat-data-ops.ts`; edit `chat-handlers.ts`. Interface `ChatDataOps` (readProviderConfig, writeChatMode/Model/Effort/Collaboration/FastMode, clearChatConversationId, getModeDefaultFlags, recordConversation, bumpLastInteraction, persistChatEvent/loadChatEvents/getNextSeqForTab/clearChatEventsForTab, clearChatQueue, buildMcpEnv, bumpAutocompleteUsage/getAutocompleteUsage). `createChatOps(db, opts)` → `opts.dataOps ?? createDbChatDataOps(db)`. Keep `backfillChatModes(db)` db-based. Preserve persistEvent fire-and-forget ordering byte-for-byte. Existing `chat-handlers.test.ts` must pass unchanged; add `chat-data-ops.test.ts`.
+
+2. **ChatQueueData** — queue drain behind data interface.
+   New `runtime/chat-queue-data.ts`; edit `runtime/chat-queue-handlers.ts`. Interface: list/push/pop/requeue/remove/clear/getTabIdForItem delegating to `chat-queue-store.ts` + namedTxns (stores stay unchanged = hub-side impl). `createChatQueueOps(db, data?)`. Don't restructure the single-concurrent-drain guard. New `chat-queue-data.test.ts` (:memory: FIFO/requeue/clear).
+
+3. **PtySessionLedger + PtySpawnLookups** — pty-manager/pty-store runtime DB decoupling.
+   New `runtime/pty-data-ops.ts` (interfaces); edit `pty-manager.ts` (setDatabase:97, buildMcpEnv:1417, recordPendingSpawn:1519, bindSessionToTask:1614, prunePendingSpawns:1685) + `pty-store.ts` (ptyCreate lookups 304–331, ptyValidate 382–394). `setDatabase(db)` keeps signature, also sets module `ledger`; `if (db)` guards → `if (ledger)` (preserve null-before-init). Add `setPtySessionLedger()` for wave 2. terminal_modes CRUD keeps raw db (hub data). Preserve await-pre-spawn vs fire-and-forget prune split. Existing adopt-pty/createpty-resolver/session-registry tests pass unchanged.
+
+4. **WarmPoolDataOps** — warm-process-manager stops using deps.db.
+   Edit `runtime/warm-process-manager.ts` only. `WarmDeps` gains `ops?: WarmPoolDataOps` (getModeSpawnConfig, recordSessionSpawn, markSessionDead); default `createDbWarmPoolDataOps(d.db)` in-file. `db` stays required so both composition roots compile unchanged. Preserve exit-handler markSessionDead timing + `.catch(()=>{})`.
+
+5. **ProcessPersistence** — processes domain.
+   New `packages/domains/processes/src/server/process-persistence.ts`; edit `process-manager.ts` + domain barrel (`src/server/index.ts`, solely owned). Interface loadAll/insert/update/remove; module `db` → `persistence`; `initProcessManager(db)` keeps signature. Fire-and-forget semantics identical per site. Spawn/kill/stats separation NOT in scope.
+
+6. **WorktreePolicyOps** — worktrees composite-ops loses its only DB dependency.
+   Edit `packages/domains/worktrees/src/server/composite-ops.ts` + barrel. `resolveCopyBehavior(db,·)`/`resolveSubmoduleInitBehavior(db,·)`/`createWorktreeWithSetup(db,·)` keep signatures, delegate through `createDbWorktreePolicyOps(db)`; add `createWorktreeWithSetupWith(policy,·)`. Keep pre-v70 column try/catch fallback verbatim.
+
+7. **WorktreeExecAdapters** — task ops stop running git/fs directly.
+   Edit `packages/domains/task/src/server/ops/shared.ts` only. New `WorktreeExecAdapters` on `TaskRuntimeAdapters` (createWorktree, removeWorktree, runWorktreeSetupScript, copyIgnoredFiles, getCurrentBranch, isGitRepo, getWorktreeColor, ensureProjectWorktreeColors, pathExists, removeArtifactDir); default adapter wraps today's `@slayzone/worktrees/server` imports (build dep intentionally stays this wave). `resolveCopyBehavior(db,·)` at :516 stays direct (hub-side read). Neither composition root passes `worktrees` → default survives, zero composition edits. New test: maybeAutoCreateWorktree ordering + recovered-worktree branch + cleanupTaskFull shared-worktree guard. Highest blast radius — mechanical delegation only.
+
+### Greenfield (dark at merge; app behavior unchanged; lockfile churn OK)
+
+8. **Fleet duplex protocol + hub gateway + @slayzone/runner skeleton** (one unit deliberately).
+   New `packages/domains/fleet/` (`shared/rpc.ts` DuplexRpc generalizing CodexAppServerClient pattern — do NOT refactor codex client itself; `shared/frames.ts` zod frames; `shared/pinning.ts`; `server/hub-gateway.ts` `createHubFleetGateway({verifyEnrollment, verifyApiKey})`; `client/hub-dialer.ts`, `client/credential-store.ts` 0600 `~/.slayzone/runner/<hub-host>.json`) + new `packages/apps/runner/` (bin/main/config). Frames: runner→hub enroll/hello/heartbeat/pty.data{seq}/pty.exit/event/checkout.status; hub→runner pty.spawn|kill|resize|write/pty.getBufferSince/fs.*/git.*/ping/runner.shutdown — exec handlers stub `-32001 unimplemented`. protocolVersion in enroll. Cert pinning: tls checkServerIdentity, lowercase-hex sha256 of leaf DER. Loopback vitest (in-process ws pair): enroll happy/bad-token, reconnect backoff (fake timers), heartbeat loss, req/resp correlation, timeout, malformed frames. Nothing mounts the gateway.
+
+9. **BetterAuth hub-auth scaffold** — isolated sub-app, OWN sqlite file.
+   New `packages/domains/hub-auth/` (`server/auth.ts` createHubAuth({dbPath, baseURL, secret}) w/ bearer+jwt+organization+apiKey plugins; `server/app.ts` express mountable `/api/auth/*`; `server/verify.ts` requireSession/requireApiKey; `server/runner-keys.ts` mintRunnerApiKey; `shared/types.ts`). `hub-auth.sqlite` via better-auth's own migrations (better-sqlite3 driver) — NOT our migration registry, NOT SlayzoneDb. Nothing mounts it. Tests: temp sqlite, in-process auth.api signup/signin/bearer/apiKey mint+verify+revoke/org. Record pinned better-auth version + schema snapshot in pkg README. Open impl question: exact sqlite adapter form — verify against pinned version; fallback Kysely node:sqlite dialect.
+
+10. **Fleet schema migration + @slayzone/runners domain** — THE single schema unit (only unit allowed to touch migrations.ts).
+    One appended migration (author as 149; merge checklist: rebase, re-read tail, renumber to LATEST+1, merge early): `runners`, `join_tokens` (token_hash only at rest), `runner_project_checkouts`, `ALTER tasks ADD runner_id`, `ALTER projects ADD default_runner_id` (all nullable → dark). New `packages/domains/runners/` (`server/store.ts` CRUD over async SlayzoneDb; `server/join-tokens.ts` mintJoinToken({hubUrl, certFingerprint, ttlMs}) → `szjt1.<base64url>`, verify = hash lookup + expiry + single-use). NO tRPC router (integration wave — avoids router.ts collision). Tests: migration on temp DB, store CRUD, token mint/verify/expiry/single-use.
+
+11. **CLI hub plumbing (URL + token)** — only CLI change this wave.
+    New `packages/apps/cli/src/hub-config.ts` (`resolveHubTarget()`: SLAYZONE_HUB_URL/TOKEN env → 0600 `hub.json` in state dir → null = today's behavior byte-for-byte); small edit `src/api.ts` (hub baseUrl + `Authorization: Bearer` when configured); new `src/commands/hub.ts` (`slay hub set-url|status|logout`) + registration. Tests: precedence matrix, header injection vs throwaway http.Server, legacy fallback, 0600 perms.
+
+12. **Hub REST read/CRUD surface completion** — dark endpoints shaped 1:1 from CLI's embedded SQL (26 CLI files bypass server via openDb today; conversion itself = integration wave, would change offline behavior).
+    New routes under `packages/shared/transport/src/server/http/rest-api/` + registration in `rest-api/index.ts` (this unit's exclusive hotspot): tasks GET/list/search/subtasks/blockers/blocking/tags add-remove/reset-conversation/progress; tags CRUD; projects list/resolve-by-path; templates CRUD; panels list/create/delete; automations list/get/create/update/delete; artifacts list + content up/download (streaming). Reads use existing `deps.db`. Per-route sibling `.test.ts` w/ in-memory db, following existing pattern.
+
+13. **Hub TLS identity lib** — smallest.
+    New `packages/domains/hub-identity/`: `loadOrCreateHubIdentity(dir)` → {keyPem, certPem, fingerprintSha256Hex}; self-signed gen (dep `selfsigned` or `@peculiar/x509`), persist `<dataRoot>/identity/` 0600, stable reload, corruption regen; fingerprint spec matches unit 8's pinning string (spec-level contract, no code import). Tests: create→reload stability, perms, corruption recovery.
+
+## Cross-unit rules (every worker prompt)
+
+- Barrel imports only between packages; never deep paths.
+- Do NOT touch: `packages/apps/server/src/composition.ts`, `packages/apps/app/src/main/index.ts`, `packages/shared/transport/src/server/app-deps.ts`, `router.ts`; `migrations.ts` reserved for unit 10 only; `rest-api/index.ts` reserved for unit 12 only.
+- Zero behavior change (refactor units: same SQL, same ordering/async semantics; greenfield: dark).
+- Theme tokens / lint rules apply (`pnpm lint`).
+- NO commit, NO push, NO PR — leave the worktree dirty; report a summary + verification results + `git diff --stat`.
+
+## Worker instructions template (appended verbatim to each prompt)
+
+```
+After implementing:
+1. Invoke Skill tool skill:"code-review" — fix findings it surfaces.
+2. pnpm typecheck; run the affected package's vitest suite.
+3. pnpm build (prod build must pass).
+4. [refactor units only] Run scoped e2e: build outputs, then the terminal/task Playwright specs, with env -u ELECTRON_RUN_AS_NODE.
+5. DO NOT commit, push, or create any PR/branch. Leave changes uncommitted in the worktree.
+6. Final message: what changed, verification results (each step pass/fail with output tail on failure), `git diff --stat`, and any deviations from spec.
+```
+
+## Tracking
+
+Status table maintained as workers report; per-unit diff applied to main tree after verification review; final combined typecheck+build+e2e on main tree; commits only after user approval.
+
+---
+
+## WAVE 1 — COMPLETE (2026-07-11)
+
+14 local commits on `main` (base `9f25ec00f`), no push. All 13 units landed + 1 test-registration commit.
+
+CI gates all green on merged tree: `typecheck`, `pnpm build`, `lint:theme`, `lint:server-boundary` (new server pkgs electron-free), `@slayzone/platform` test 44/44, `app test:agent-hooks` 79/79.
+
+New-package tests: fleet 58/58, hub-auth 17/17, hub-identity 13/13, runner 14/14, runners 28/28, rest-api additions 16/16. Refactor-unit tests green via electron strict loader + vitest.
+
+Orchestrator fixed 2 latent test bugs stalled workers never caught: fleet disconnect-race (test awaited runner-disconnected), runner shutdown microtask-ordering assertion (assert sync-non-call before await).
+
+Commits:
+- bee7830d7 warm-pool / fe266ecbe processes / 97b62dd2e chat-queue / 63af5e9c4 chat-data / 76bfadd77 pty-ledger / 0e3fc0a7c worktree-policy / 98c5a83c0 worktree-exec (refactor seams)
+- fa45e0923 fleet schema v149 + runners domain / 44c8cc15f cli hub plumbing / d3e4dc6e9 rest surface / 1fbff6751 hub-auth / c15792f80 hub-identity / c11fb26e8 fleet protocol+runner (dark greenfield)
+
+Next: Wave 2 — runner exec impls + hub-RPC impls of the wave-1 seams + hub-side gateway/auth/TLS wiring + local-runner auto-spawn supervisor.
+
+---
+
+## WAVE 3 — COMPLETE (2026-07-12)
+
+6 commits `b60ff8572`..`1083f188e`. Cutover product surface. Total waves 1-3 = 28 commits, all LOCAL on main (base 9f25ec00f), NOTHING pushed.
+
+- **gate-bridge** `b60ff8572` — fleetEnvFor injects SLAYZONE_FLEET_MODE into sidecar env (the boot flag now actually lights the hub); setBootSettings carries fleet_mode.
+- **settings-ui** `5bca19e5e` — Fleet settings tab: toggle+relaunch, runner enrollment (mintJoinToken), runners list + revoke.
+- **task-ui** `080dd54a9` — per-task RunnerCard + project default-runner selector.
+- **pty-env** `0cf0c72ca` — remote-runner per-PTY env (SLAYZONE_HUB_URL + scoped token) + hub-auth mintTaskToken (seam unset by default).
+- **e2e** `73a65ef35` — **fleet-on loopback e2e proves the full chain: enroll → bind → PTY on runner → output streams back. 3/3, no flake.**
+- **cli** `1083f188e` — closed REST parity (projects/artifacts/blocked CRUD) + 16 CLI commands off direct-sqlite → hub REST.
+
+CI gates green: typecheck 0, build, lint:theme, lint:server-boundary, platform 44/44, agent-hooks 79/79. Fleet OFF (default) byte-identical throughout.
+
+**Architecture is proven working end-to-end.** Flip fleet_mode on → hub mints join tokens, runners connect over /fleet, a task's pty/process/git exec routes to its bound runner, output streams back.
+
+## Open deferrals (recommend a wave-3.5 before wave-4)
+- pty-env provider composition-wiring (mint real per-task token + hub base URL under fleet mode — seam exists, unset)
+- verifyTaskToken → request-auth middleware (enforcement)
+- TLS termination + cert-pinning ENFORCEMENT on /fleet (fingerprint wired, listener still plain ws)
+- boot join-token auto-mint (currently env-supplied; in-app supervisor spawns before fleet URL exists = circular)
+- CLI tasks/artifacts.ts (24 blob/disk-local sites) + done.ts
+
+## Wave 4 (NOT started — needs explicit go)
+Delete legacy in-process exec path; rename @slayzone/server→@slayzone/hub; dual-path CI (e2e fleet-on AND off).

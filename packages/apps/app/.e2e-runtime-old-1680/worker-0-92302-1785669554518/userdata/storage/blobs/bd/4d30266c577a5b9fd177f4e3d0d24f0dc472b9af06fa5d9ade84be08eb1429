@@ -1,0 +1,31 @@
+flowchart TD
+    ISO["ISO/IEC 27001:2022<br/>ISO/IEC 20000-1:2018"]:::external
+
+    ISO --> InfoSec["Information Security Policy"]:::policy
+    ISO --> AccessCtrl["Access Control Policy"]:::policy
+    ISO --> ThirdParty["Third-Party Management Policy"]:::policy
+
+    InfoSec --> CMProc["Change Management Procedure"]:::procedure
+    InfoSec --> EngOps["Engineering Operation Procedures"]:::procedure
+    InfoSec --> SDLC["SDLC Guidelines"]:::procedure
+    InfoSec --> IncMgmt["Incident Management Procedure"]:::procedure
+
+    CMProc --> LinearTpl["Linear 'Change' template<br/>(INT-251)"]:::exec
+    CMProc --> ArchReview["Runbook — Architecture Review"]:::runbook
+    EngOps --> PRs["GitHub PRs + staging validation"]:::exec
+
+    LinearTpl --> RetroCR["Retro CR:<br/>Q1 2026 Infra Rebuild"]:::q1
+    PRs --> RetroCR
+    RetroCR --> CABMin["CAB minutes"]:::exec
+    CABMin --> DataRoom["Normain data room"]:::exec
+
+    RetroCR -. gap + fix .-> FixPlan["change-mgmt-fix-plan.md"]:::q1
+    FixPlan -. update .-> CMProc
+    FixPlan -. update .-> EngOps
+
+    classDef external fill:#e8eaf6,stroke:#3f51b5
+    classDef policy fill:#fff3e0,stroke:#e65100
+    classDef procedure fill:#e8f5e9,stroke:#2e7d32
+    classDef runbook fill:#f3e5f5,stroke:#6a1b9a
+    classDef exec fill:#fce4ec,stroke:#ad1457
+    classDef q1 fill:#ffebee,stroke:#c62828,stroke-width:3px

@@ -1,0 +1,10 @@
+# Vanta evidence note — "Intrusion detection system alerts"
+
+**Tool:** Microsoft Defender for Cloud (NORMAIN tenant). Captured 2026-06-16.
+
+Threat detection is actively enabled across our production environment, but there are **no real IDS/IPS alerts to show because no security incidents have occurred to date.** The attached screenshots evidence that monitoring and alerting are configured and live:
+
+1. **defender-plans-normain-2026-06-16.png** — Defender for Cloud plans for the production subscription "Normain" are enabled (Status = On): Defender CSPM, Defender for Servers (Plan 2, 5 servers), plus Storage, Databases, Containers, Key Vault, App Service, Resource Manager and APIs, with monitoring coverage shown. Confirms active threat detection is enabled for production resources.
+2. **defender-environment-settings-2026-06-16.png** — Environment settings across all 3 subscriptions, confirming Defender plan coverage at the tenant level.
+
+The Security alerts dashboard currently shows "No alerts found," which reflects that Defender is actively monitoring and no harmful activity has been detected — not that monitoring is inactive. Should any incident occur, Defender generates alerts and notifications per the enabled plans above.

@@ -1,0 +1,28 @@
+# System Description Rewrite — Plan
+
+## Context
+- Current: Normain System Description (Google Doc, shared drive `Normain`, ID `1-aa9Pa9vNNsf3ZE8pyGoA6oBAcOOOv-rCi1e03lJOZ0`, modified 2025-08-11)
+- Previously scoped SOC2 Type 2 Q2–Q3 2025; AICPA DC 1–9 structure
+- New audit period: 2026-05-04 to 2026-08-04 (Prescient Assurance LLC), Security TSC only
+- Approver: Sara Landfors (CEO & Co-founder)
+- Target: slim, concise replacement; auditor-ready before any approval routing
+
+## Operating principle for the executor
+Exhaust available tools before asking the user. Only escalate when a real decision is needed (scope, sign-off, intent) or when authoritative info is genuinely missing. Tools: local git, gws CLI, Linear MCP, Circleback CLI, Vanta EU. Request additional tools if needed.
+
+## Sources of truth per section
+- DC 1, 2, 6, 7, 8: Drive (contracts, policies, scope decisions), Vanta vendor list
+- DC 3: repo + IaC (architecture, datastore, OS, tools, encryption, CI/CD)
+- DC 4: Linear incident log + post-mortems
+- DC 5: Vanta control register + policies; pipeline claims verified in repo
+- DC 9: git history + release notes + Linear change tickets
+
+## Steps
+1. Resolve open scoping items (period, TSC, diagrams, control IDs, approver) — DONE
+2. Verify current doc's claims against authoritative sources; produce per-DC findings — DONE
+3. Draft new doc applying findings; placeholders allowed only where step 4 will resolve them — DONE
+4. **Close all remaining open items; finalize the draft to be auditor-ready** — IN PROGRESS
+5. Internal approval (Sara) on the finalized draft; then route to Prescient
+
+## Sequencing rule
+Approval (step 5) does NOT happen until step 4 is fully closed. No external send. No request for review of a draft with placeholders or unverified claims.

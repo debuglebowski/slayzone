@@ -1,0 +1,97 @@
+# Drive home for SLA / Subprocessor lists / DPAs — structure analysis
+
+_Checked live against the **Normain** shared drive (`0ADHH7JidkICFUk9PVA`), 2026-06-01._
+
+## TL;DR
+These docs are split across **two** top-level departments, and the "authoritative" copies are buried in customer deal folders. We do **not** need a new top-level home, and we should **not** migrate folders now. Each document type already has a correct home — the problem is staleness, duplication, and no declared source-of-truth pointer between the two homes. Recommendation = **Alt 3** below: keep the two homes, fix the in-place staleness, add ONE source-of-truth index.
+
+---
+
+## Where things live today
+
+### Home A — `02 - Sales & CS / 04 - Contracts & Agreements` (commercial side)
+
+| Doc / folder | Type | Status / issue |
+|---|---|---|
+| `00 - Customer agreements` (~28 customer folders) | Signed + draft deals | Per-customer; correct home |
+| ↳ `Customer Agreement Timings` (sheet) | Tracker | Feeds the per-customer SLA-version map |
+| `01 - Customer agreement Templates` | Template home | See rows below |
+| ↳ Main Agreement / Attachment 1 Terms / NDA | Master templates | OK |
+| ↳ **Attachment 2 SLA (`1gI6…`)** | SLA template | ⚠️ **OLD 90%** — stale |
+| ↳ `[DRAFT — proposed update 2026-05-29] SLA` | SLA draft | Mid-update, floating separately |
+| ↳ Attachment 3 hosting DPA (×2 variants) | DPA templates | ⚠️ Duplicated |
+| ↳ `Microsoft Marketplace Templates/` | Marketplace DPA + Order template | OK home, but see Home C |
+| ↳ `SLA calculator` (sheet) | Tool | Pairs with SLA |
+
+### Home B — `05 - InfoSec` (governance / ISMS; readme: _"don't create new folders unless rethinking structure"_)
+
+| Doc / folder | Type | Status / issue |
+|---|---|---|
+| `02 - Official Other Policies / 2. DPA` → Hosting DPA (`1it8…`) + signed PDF | DPA | ⚠️ **3rd copy** of hosting DPA |
+| `03 - Procedures & Runbooks` → `Add subprocessor`, `Start Using a New Vendor`, MS Marketplace Offboarding | Runbooks | Should point at canonical list |
+| `05 - Vendor Management / VENDOR MASTER SHEET` (`1r2Boh…`, upd. 2026-05-31) | Register of record | Cited by system description |
+| ↳ `00 - PII Sub-processor Management / List of preapproved subprocessors_2026-04-28` (`10q7h…`) | Subprocessor list | ✅ Live, latest |
+| ↳ `99 - Archive` (2024-11-20, 2025-06-04, 2025-09-04, 2026-01-07) | Old versions | ✅ **Versioning already disciplined** |
+| ↳ `Signed DPAs with subprocessors/` | Evidence | OK |
+
+### Home C — buried "authoritative" copies (the real problem)
+
+| What | "Authoritative" because | Actually lives in | Should be |
+|---|---|---|---|
+| **Appendix B** (subprocessor register) | Cited by the DPA as the list of record | Embedded in Marketplace DPA → **Newground Alliance** customer folder | A reference to the InfoSec list, not a buried restatement |
+| **Canonical 99% SLA** (`18ov…`) | Latest signed (KPMG final, 2025-12-17) | **KPMG / Final agreements 2025-12-17** customer folder | In the templates folder as the current SLA |
+
+---
+
+## The 4 structural problems
+
+| # | Problem | Evidence |
+|---|---|---|
+| 1 | Subprocessor list = 3 representations, 2 departments, out of sync | Standalone list **2026-04-28** (InfoSec) is *newer* than "authoritative" Appendix B **2026-02-25** (in a customer's DPA); VENDOR MASTER SHEET is a 3rd form |
+| 2 | Templates ≠ latest | SLA "template" = retired **90%**; canonical **99%** sits in KPMG folder; a draft floats separately |
+| 3 | DPA duplication | Hosting DPA in InfoSec `2. DPA` + Sales&CS templates (2 variants) + per-customer; Marketplace DPA "template" vs authoritative copy in a customer folder |
+| 4 | No declared source-of-truth pointer | Nothing links the two departments' copies; no "this is canonical" marker |
+
+---
+
+## Alternatives
+
+| Alt | Approach | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| **1** | Consolidate all under **InfoSec** (governance-led) | Governance, versioning, master sheet, auditor evidence already here | SLA/DPA templates are commercial artifacts sales edits daily; readme says don't add folders | Partial |
+| **2** | Consolidate all under **Sales & CS / Contracts** (commercial-led) | Templates + sales workflow already here | Splits governance: master sheet, archive, signed-DPA store, auditor evidence live in InfoSec | Partial |
+| **3** | **Split by document *nature*** — each artifact one home by what it is | Sustainable, **zero migration**, no broken links/Vanta refs, respects readme; index = future move checklist | Still two physical homes (mitigated by index + fixing staleness) | ✅ **Recommended** |
+| **4** | New top-level **"Legal & Contracts"** home | One clean home | Heavy migration, breaks links + Vanta/auditor refs, violates readme, splits governance from ISMS | ❌ Rejected |
+
+### Alt 3 in detail (no migration now)
+
+| Artifact | Owning home | Action |
+|---|---|---|
+| Subprocessor lists (all variants) + VENDOR MASTER SHEET | `InfoSec / 05 - Vendor Management / 00 - PII Sub-processor Management` | Make this THE single list; **DPA references it** (or Appendix B generated from it) instead of restating |
+| Canonical templates (Main Agreement, Terms, SLA, both DPAs, Marketplace Order) | `Sales & CS / 01 - Customer agreement Templates` | Fix in place: 90%→**99% SLA**, promote 2026-05-29 draft to "current," retire dupes to `old/` |
+| Executed/signed per-customer docs | `Sales & CS / 00 - Customer agreements / <Customer>` | No change |
+| **NEW: "Contract Source of Truth" index** | One Google Doc, or a tab on VENDOR MASTER SHEET | Lists canonical SLA / Marketplace DPA / Hosting DPA / subprocessor list + live links + "last updated" |
+
+---
+
+## More documents in scope (beyond the original 4)
+
+| Doc | Why it matters | Action |
+|---|---|---|
+| `Customer Agreement Timings` (sheet) | Feeds "which SLA version each customer holds" | Use as input to the per-customer map |
+| `Advisense preapproved subprocessors_Normain` | Per-customer subprocessor variant | Precedent for SaaS vs dedicated-tenant split |
+| `subprocessors-list-2026-04-28.docx` (in `data-sources/`) | Looks like a stray repo export | Confirm + retire; not authoritative |
+| Main Agreement / Terms / NDA / Marketplace Order templates | Travel with the SLA/DPA bundle | Govern as one set |
+| Runbooks `Add subprocessor` / `Start Using a New Vendor` | Operational governance | Point at canonical list once settled |
+| `SLA calculator` (sheet) | Pairs with canonical SLA | Keep with templates |
+
+---
+
+## Open decisions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| 1 | One home or split-by-nature? | Split (Alt 3) |
+| 2 | Subprocessor list: DPA *references* one list, or keep restating Appendix B per DPA? | Reference one list |
+| 3 | Who owns the "Contract Source of Truth" index? | _Open — InfoSec vs Sales&CS_ |
+| 4 | Fix template staleness (90%→99%) now, or wait for full decision? | _Open_ |

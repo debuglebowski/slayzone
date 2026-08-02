@@ -1,0 +1,8 @@
+# uuid Risk Acceptance — Steps
+
+1. Vanta → vuln task → mark Risk Accepted, re-eval 2026-08-15, paste acceptance note
+2. Vanta → Risk Register → new entry: Accept, owner Kalle, approver Sara, next review 2026-08-15, link to step 1
+3. Ping Sara → she comments approval on Vanta task; fill approval dates
+4. Trash Drive Doc (1ojoDY1Acg4oqVvt9eYA6FGhPzvsh8tHjsD53OceReDU)
+5. Edit 2026-08-15 calendar event → swap Drive URL for Vanta URL
+6. Add to Q3 2026 ISMS MR agenda under "Open vulnerabilities"

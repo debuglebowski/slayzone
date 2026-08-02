@@ -1,0 +1,164 @@
+# 🛡️ Vanta — Medium GitHub Vuln Findings (42 alerts)
+
+**📅 Investigation date:** 2026-04-28
+**📋 Task:** Medium vulnerabilities identified in packages are addressed (GitHub Repo)
+**⏰ Due:** 2026-05-25
+**📜 Frameworks:** ISO 27001:2022, SOC 2
+
+**🎯 Repo scope:** All 42 medium alerts live in `normainofficial/normain` (yarn monorepo, single root `yarn.lock`). Other Normain repos have only routine 3-low-effort medium alerts (3 each, not in the failing-entity count).
+
+**⚠️ Sibling SLAs:** 🔴 Critical due 2026-05-18 · 🟠 High overdue · 🟡 Medium due 2026-05-25.
+
+---
+
+## 1️⃣ Situation Overview — 42 Medium alerts grouped by package
+
+**📏 Effort scale:** ⚡ XS = <1h · 🟢 S = 1–4h · 🟡 M = 4h–1d · 🔴 L = 1–2d
+**📏 Risk scale:** 🟢 Low (patch/minor, transitive-safe) · 🟡 Med (active service / build tool / pre-1.0 SDK / cross-major within transitive) · 🔴 High (major version, parents pin older API)
+
+| # | 📦 Package | 🔢 Cnt | 📄 Manifest | 🕰️ Oldest → Newest (age) | 🔧 Min fix to clear all | ⚠️ Risk | ⏱️ Effort | 🆔 GHSAs |
+|---|---|---|---|---|---|---|---|---|
+| 1 | **dompurify** 🧼 | 8 | `yarn.lock` | 2026-03-04 → 2026-04-22 (1–8w) | **3.4.0** | 🟢 Low | ⚡ XS | 39q2-94rc-95cp, cj63-jhhr-wcxv, cjmm-f4jc-qw8r, crv5-9vww-q3g8, h7mw-gpvr-xq4m, h8r8-wccr-v5f2, v2wj-7wpq-c8vv, v9jr-rg53-9pgp |
+| 2 | **hono** 🔥 | 7 | `yarn.lock` | 2026-03-11 → 2026-04-16 (2–7w) | **4.12.14** | 🟡 Med | 🟢 S | 26pp-8wgv-hjvm, 458j-xx4x-4375, r5rp-j6wh-rvv4, v8w9-8mx6-g223, wmmm-f939-6g9c, xf4j-xp2r-rqqx, xpcf-pg52-r92g |
+| 3 | **@fastify/static** ⚡ | 4 | `server/api/package.json` + lock | 2026-04-16 (1.5w) | **9.1.1** | 🟢 Low | ⚡ XS | pr96-94w5-mx2h, x428-ghpx-8j92 (2× each from manifest+lock) |
+| 4 | **@anthropic-ai/sdk** 🤖 | 2 | `server/worker/package.json` + lock | 2026-04-14 (2w) | **0.81.0** | 🟡 Med | 🟢 S | 5474-4w2j-mq4c |
+| 5 | **langsmith** 🔗 | 2 | `yarn.lock` | 2026-04-10 → 04-16 (2w) | **0.5.19** | 🟢 Low | ⚡ XS | fw9q-39r9-c252, rr7j-v2q5-chgv |
+| 6 | **lodash** 🐍 | 2 | `yarn.lock` | 2026-01-22 → 04-02 (4–14w) | **4.18.0** ⚠️ also High | 🟢 Low | ⚡ XS | f23m-r3pf-42rh, xxjr-mmjv-4gpg |
+| 7 | **picomatch** 🎯 | 2 | `yarn.lock` | 2026-03-26 (5w) | **2.3.2 + 4.0.4** ⚠️ also High | 🟢 Low | 🟢 S | 3v7f-55p6-f55p (×2 ranges) |
+| 8 | **vite** ⚡ | 2 | `yarn.lock` | 2025-10-21 → 2026-04-07 (3w–27w! 🐌) | **6.4.2** ⚠️ also High & Low | 🟢 Low | ⚡ XS | 4w7w-66w2-5vf9, 93m4-6634-74q7 |
+| 9 | @hono/node-server 🔥 | 1 | `yarn.lock` | 2026-04-08 (3w) | 1.19.13 | 🟢 Low | ⚡ XS | 92pp-h63x-v22m |
+| 10 | ajv ✅ | 1 | `yarn.lock` | 2026-02-22 (9w) | 8.18.0 (major 7→8) | 🔴 High | 🟡 M | 2g4f-4pwh-qvx6 |
+| 11 | **axios** 🌐 | 1 | `yarn.lock` | 2026-04-17 (1.5w) | **1.15.0** ⚠️ also Critical | 🟢 Low | ⚡ XS | 3p68-rc4w-qgx5 |
+| 12 | brace-expansion 🔣 | 1 | `yarn.lock` | 2026-03-27 (4w) | 2.0.3 | 🟢 Low | ⚡ XS | f886-m6hf-6m8v |
+| 13 | esbuild 📦 | 1 | `yarn.lock` | 2026-03-05 (8w) | 0.25.0 | 🟡 Med | ⚡ XS | 67mh-4wv8-2f99 |
+| 14 | fast-xml-parser 📄 | 1 | `yarn.lock` | 2026-04-23 (5d) | 5.7.0 (major 4→5) | 🟡 Med | 🟢 S | gh4j-gqv2-49f6 |
+| 15 | follow-redirects ↩️ | 1 | `yarn.lock` | 2026-04-14 (2w) | 1.16.0 (auto via axios) | 🟢 Low | ⚡ XS | r4q5-vmmm-2653 |
+| 16 | markdown-it 📝 | 1 | `yarn.lock` | 2026-02-13 (11w) | 14.1.1 | 🟢 Low | ⚡ XS | 38c4-r59v-3vqw |
+| 17 | mdast-util-to-hast 🌲 | 1 | `yarn.lock` | 2025-12-02 (21w 🐢) | 13.2.1 | 🟢 Low | ⚡ XS | 4fh9-h7wg-q85m |
+| 18 | **path-to-regexp** 🛣️ | 1 | `yarn.lock` | 2026-03-28 (4w) | **8.4.0** ⚠️ also High | 🟢 Low | ⚡ XS | 27v5-c462-wpq7 |
+| 19 | postcss 🎨 | 1 | `yarn.lock` | 2026-04-28 (today) | 8.5.10 | 🟢 Low | ⚡ XS | qx2v-qp2m-jg93 |
+| 20 | **qs** ❓ | 1 | `yarn.lock` | 2026-01-01 (17w) | **6.14.2** ⚠️ also Low | 🟢 Low | ⚡ XS | 6rw7-vpxm-498p |
+| 21 | uuid 🆔 | 1 | `yarn.lock` | 2026-04-23 (5d) | 14.0.0 (major! ⚠️) | 🔴 High | 🔴 L | w5hq-g745-h8pq |
+| | **🧮 Total** | **42** | | | | | | |
+
+**📊 Risk distribution:** 🟢 Low **17 pkgs / 28 alerts** · 🟡 Med **4 pkgs / 12 alerts** (hono, @anthropic-ai/sdk, esbuild, fast-xml-parser) · 🔴 High **2 pkgs / 2 alerts** (uuid, ajv)
+**📊 Effort distribution:** ⚡ XS **15 pkgs / 25 alerts** · 🟢 S **4 pkgs / 14 alerts** · 🟡 M **1 pkg / 1 alert** (ajv) · 🔴 L **1 pkg / 1 alert** (uuid)
+
+### 🔄 Cross-cohort overlap (1 bump → multiple severities)
+
+| 📦 Package | 🔧 Bump | 🟡 Medium | 🟠 High | 🔴 Critical | 🟢 Low |
+|---|---|---|---|---|---|
+| **axios → 1.15.0** | 1 | 1 | — | **1** | — |
+| **vite → 6.4.2** | 1 | 2 | 1 | — | 2 |
+| **lodash → 4.18.0** | 1 | 2 | 1 | — | — |
+| **picomatch → 2.3.2** (+4.0.4) | 2 | 2 | 1 | — | — |
+| **path-to-regexp → 8.4.0** | 1 | 1 | 1 | — | — |
+| **qs → 6.14.2** | 1 | 1 | — | — | 1 |
+
+**💥 Net:** 5 bumps clear **9 medium + 4 high + 1 critical + 3 low**.
+
+### 📌 Notable
+- 🐌 `vite` 6.4.0 is the **oldest** open alert in the repo (2025-10-21, ~6 months) — flag this in audit log.
+- 👯 `@fastify/static` and `@anthropic-ai/sdk` show as 2× each because Dependabot reports both the workspace `package.json` and root `yarn.lock`. Single edit per package clears both rows.
+- 🚧 `uuid 14.0.0` is a major-version bump — needs API check. All others are minor/patch.
+
+---
+
+## 2️⃣ Solution Overview
+
+### 🎯 Strategy: 3 sequential bump waves, all on the root `yarn.lock` of `normainofficial/normain`
+
+Most fixes are transitive. Use `yarn up <pkg>@<ver>` (or `resolutions` in root `package.json`) — direct deps live in workspace packages, so prefer `resolutions` for transitives, `yarn up -R` for direct.
+
+### 🌊 Wave 1 — Cross-cohort bumps (clear Critical + overdue High while killing Medium dupes)
+**🗓️ Target: this week (before May 5)** — also makes the May-18 Critical SLA.
+
+| Order | 🔧 Action | ✅ Closes |
+|---|---|---|
+| 1️⃣ | `axios` → 1.15.0 | 1 🔴 Critical + 1 🟡 Medium |
+| 2️⃣ | `vite` → 6.4.2 | 1 🟠 High + 2 🟡 Medium + 2 🟢 Low |
+| 3️⃣ | `lodash` → 4.18.0 | 1 🟠 High + 2 🟡 Medium |
+| 4️⃣ | `path-to-regexp` → 8.4.0 | 1 🟠 High + 1 🟡 Medium |
+| 5️⃣ | `picomatch` → 2.3.2 & 4.0.4 (resolutions both ranges) | 1 🟠 High + 2 🟡 Medium |
+| 6️⃣ | `qs` → 6.14.2 | 1 🟡 Medium + 1 🟢 Low |
+
+⏱️ Effort: ~½ day. Single PR. CI runs catch breakage.
+
+### 🌊 Wave 2 — High-multiplicity Medium-only bumps
+**🗓️ Target: next week (May 5–12).** Each is a one-line bump, big alert reduction.
+
+| 🔧 Action | ✅ Closes |
+|---|---|
+| `dompurify` → 3.4.0 (resolution) | 8 🟡 Medium |
+| `hono` → 4.12.14 (direct in worker; `yarn up -R hono`) | 7 🟡 Medium |
+| `@fastify/static` → 9.1.1 (direct in `server/api`) | 4 🟡 Medium (2 GHSA) |
+| `langsmith` → 0.5.19 | 2 🟡 Medium |
+| `@anthropic-ai/sdk` → 0.81.0 (direct in `server/worker`) | 2 🟡 Medium |
+
+⏱️ Effort: ~1 day. Hono major-line is stable; verify route/middleware compat. Anthropic SDK 0.79→0.81 may shift types.
+
+### 🌊 Wave 3 — Singletons (mop-up)
+**🗓️ Target: May 12–22.** All low-risk transitive bumps, batch into one PR.
+
+@hono/node-server, ajv, brace-expansion, esbuild, fast-xml-parser, follow-redirects, markdown-it, mdast-util-to-hast, postcss, **uuid (defer — major bump, separate PR with API audit)**.
+
+⏱️ Effort: ~½ day for the 9 transitives; **uuid 14.0.0 = separate ½-day spike** (API surface review).
+
+### 📅 Ordering vs sibling SLAs
+
+```
+Now ─┬─ 🌊 Wave 1 (May 1–5) ──── kills overdue 🟠 High items + 1 🔴 Critical + 9 🟡 Medium
+     ├─ 🌊 Wave 2 (May 5–12) ─── kills 23 🟡 Medium (dompurify+hono+fastify+langsmith+sdk)
+     └─ 🌊 Wave 3 (May 12–22) ── mops up 10 singletons
+                                                         │
+            🔴 Critical SLA 2026-05-18 ──────────────── ✅ cleared in Wave 1
+            🟡 Medium SLA   2026-05-25 ──────────────── ✅ cleared by Wave 3 end
+```
+
+**⏱️ Rough total effort:** ~2 dev-days across 3 PRs over ~3 weeks. Wave 1 is highest leverage — do first. 🚀
+
+### ⚠️ Risks
+- 🚧 `uuid 14` major bump — needs API audit, isolate in own PR.
+- 🔥 `hono` and `@fastify/static` are direct deps in actively-running services — Wave 2 PRs need integration test pass before merge.
+- 🔄 Any `resolutions` entry should be revisited after upstream direct dep catches up to avoid stale pins.
+
+---
+
+## 3️⃣ Easy vs Hard breakdown
+
+| Bucket | 🔢 Count | 💬 What it means |
+|---|---|---|
+| 🟢 Easy — direct dep bump | **23** | Listed in a workspace `package.json`. One-line edit + `yarn install`. |
+| 🟡 Easy — transitive, `resolutions`-safe | **17** | Sub-dep, but minor/patch bump within parents' accepted semver. |
+| 🔴 Hard — major-version breakage risk | **2** | Parents pin older major; forcing fix likely breaks runtime. |
+| | **42** | |
+
+### 🟢 Easy direct (23 alerts)
+hono 🔥 (7), @fastify/static ⚡ (4), lodash 🐍 (2), vite ⚡ (2), @anthropic-ai/sdk 🤖 (2), esbuild 📦 (1), markdown-it 📝 (1), brace-expansion 🔣 (1), fast-xml-parser 📄 (1), postcss 🎨 (1), @hono/node-server 🔥 (1).
+
+### 🟡 Easy transitive (17 alerts)
+| 📦 Package | 🔢 Alerts | 🌳 Pulled in by |
+|---|---|---|
+| dompurify 🧼 | 8 | posthog-js |
+| langsmith 🔗 | 2 | @langchain/core |
+| picomatch 🎯 | 2 | vite, micromatch, readdirp, anymatch, tinyglobby (v2 + v4 trees) |
+| axios 🌐 | 1 | @slack/bolt, @slack/web-api, firecrawl-js |
+| follow-redirects ↩️ | 1 | axios (clears with axios bump) |
+| mdast-util-to-hast 🌲 | 1 | hast-util-to-html, hast-util-to-mdast |
+| path-to-regexp 🛣️ | 1 | @slack/bolt, router |
+| qs ❓ | 1 | express 5, body-parser, stripe, googleapis-common |
+
+### 🔴 Hard (2 alerts) — defer or risk-accept
+| 📦 Package | 💥 Why hard |
+|---|---|
+| **uuid 🆔** → 14.0.0 | Major bump. 7 parents (bullmq, bullmq-pro, @azure/msal-node, @langchain/core, langsmith, box-typescript-sdk-gen) on v7–v11 API. Global resolution would crash runtime. → ⏳ Wait for upstream OR 📝 risk-accept. |
+| **ajv ✅** → 8.18.0 | Major 7→8. Pulled by @fastify/ajv-compiler, MCP SDK, fast-json-stringify, table. Mixed trees may break Fastify validators. → 🔬 ½ day spike to verify; else 📝 risk-accept. |
+
+**🎯 Bottom line:** 40/42 (95%) are mechanical bumps via 3 PRs over ~2 dev-days. 2/42 may need formal Vanta exception before May 25. ✅
+
+---
+
+## ❓ Unresolved Questions
+- 🤔 Vanta failing-entity count: scope to `normain` only, or include alerts in `normain-alpha/beta/sandbox/code-test/insights-demo/standard-legacy` (3 each, not in 42)?
+- 🤔 `uuid 14` API breakage acceptable now or push past May 25 with risk-acceptance note?
+- 🤔 `resolutions` strategy OK for transitives, or prefer waiting on upstream parents?

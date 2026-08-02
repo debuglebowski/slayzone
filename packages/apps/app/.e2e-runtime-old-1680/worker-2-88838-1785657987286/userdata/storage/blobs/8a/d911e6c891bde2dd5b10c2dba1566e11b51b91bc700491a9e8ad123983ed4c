@@ -1,0 +1,38 @@
+# Slice 3/8 — usage-analytics tRPC router (P9)
+
+**Commit:** `4d5de6d5` — `feat(transport): usage-analytics router (P9)` → main (signed, NO PR)
+**Ref:** `26c140ae`
+
+## Done
+3 IPC sigs mirrored 1:1 to tRPC `usageAnalyticsRouter`:
+- `query` (q) → `queryAnalytics(db, range)`
+- `refresh` (m) → try `refreshUsageData(db)` (swallow err) → `queryAnalytics(db, range)`
+- `taskCost` (q) → `queryTaskCost(db, taskId)`
+
+## Files (5)
+- NEW `packages/shared/transport/src/server/routers/usage-analytics.ts`
+- `…/transport/src/server/router.ts` — import + register `usageAnalytics`
+- `…/transport/package.json` — dep `@slayzone/usage-analytics`
+- `packages/domains/usage-analytics/src/main/index.ts` — barrel widen: export `queryAnalytics`, `queryTaskCost`
+- `pnpm-lock.yaml` — workspace edge
+
+## Deltas from ref (forced + 1 sustainability)
+- Pkg reorganized: ref's `@slayzone/usage-analytics/server` gone → import `/main` (forced).
+- Barrel lacked `queryAnalytics`/`queryTaskCost` → added (barrel-only rule, no deep import).
+- **`z.enum(['7d','30d','90d','all'])`** over ref's `z.unknown() as unknown as z.ZodType<DateRange>` — real runtime validation, no type-lie cast, matches sibling routers (tags/history). 3 sigs unaffected.
+
+## Scope (slice 5 = renderer)
+IPC handlers RETAINED. No handler-deletion, no preload/api.ts/renderer change. **ipcMain.handle count unchanged this slice** (additive coexistence).
+
+## externalizeDepsPlugin
+No edit. `electron.vite.config.ts` builds exclude dynamically from app `@slayzone/*` deps; both `@slayzone/transport` + `@slayzone/usage-analytics` already app deps → already excluded. Verified.
+
+## Verification
+- `pnpm install` — lockfile OK
+- `pnpm typecheck` — GREEN (transport + usage-analytics + app)
+- `pnpm lint` — my 5 files clean (eslint exit 0). Repo-wide red is PRE-EXISTING/sibling: 1 err `terminal/useTerminalStateStore.ts:242` (no-restricted-syntax) + 309 react-hooks warns across dirty in-flight tree. None mine.
+- `pnpm build` — GREEN (27.3s); new dep bundles + externalizes
+- `pnpm test:e2e` — 779 passed, 9 failed, 110 skipped. 9 failures ALL pre-existing/sibling (browser WCV: 85/86/87; core/03-projects ×4; terminal/101-scramble). All in domains with uncommitted sibling-slice work (sidebar/projects/terminal/browser). NONE touch usage-analytics/transport; router not yet renderer-consumed → causally isolated.
+
+## DONE WHEN ✓
+3 sigs mirrored ✓ · registered in appRouter ✓ · my-slice green ✓ · committed `4d5de6d5` ✓

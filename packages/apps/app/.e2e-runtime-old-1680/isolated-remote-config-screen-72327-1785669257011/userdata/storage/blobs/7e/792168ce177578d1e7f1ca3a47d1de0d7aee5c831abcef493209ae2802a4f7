@@ -1,0 +1,24 @@
+# Timeline / Gantt (new)
+
+Purpose: duration and overlap — instances as bars between two date
+fields. Exists because calendars show points; projects are spans, and
+collisions/dead zones only show on a horizontal time axis.
+
+| Option | Category | Values / default | Notes |
+|---|---|---|---|
+| size / position | layout | x,y,w,h (default 12x5) | wants width |
+| scale | layout | day / week / month | |
+| row height | layout | compact / comfortable | |
+| title | display | text | |
+| icon | display | icon name / none | |
+| startField / endField | data | date fields | end optional -> milestone diamond |
+| group by | display | none / enum / user field | swimlane rows |
+| collapse groups | display | on / off | |
+| bar label | display | field (default name) | |
+| progress | display | off / number field 0-100 | fill inside bar |
+| today line | display | on / off | |
+| color by | display | group / enum field / fixed | |
+| concept | filter | conceptId | |
+| conditions | filter | SidebarCondition[] | |
+| match | filter | all / any | |
+| date window | filter | auto-fit / rolling 90d / quarter | |

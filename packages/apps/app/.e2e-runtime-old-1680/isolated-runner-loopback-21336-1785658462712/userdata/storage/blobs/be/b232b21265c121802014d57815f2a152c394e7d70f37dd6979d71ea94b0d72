@@ -1,0 +1,17 @@
+# Lint Overview
+
+`pnpm lint` → **0 errors, 309 warnings** in 129 files. All warnings = `react-hooks/*` (React Compiler rules). Grouped by rule, ordered easiest → hardest to fix.
+
+**Effort:** 🟢 trivial · 🟡 medium · 🟠 high · 🔴 very high
+**Risk if left** (cost of NOT fixing) & **Risk to fix** (chance the fix breaks behavior): 🟢 low · 🟡 medium · 🟠 high · 🔴 severe
+
+| # | Rule | Count | Effort | Risk if left | Risk to fix | Description |
+|---|------|------:|:------:|:----:|:----:|-------------|
+| 1 | `react-hooks/static-components` | 11 | 🟢 | 🟠 | 🟡 | Component defined inside another's render → new type each render, **remounts subtree** = lost state/focus, flicker. Fix = hoist to module scope; risk = closed-over props/state must become explicit props. |
+| 2 | `react-hooks/purity` | 5 | 🟢 | 🟠 | 🟡 | Impure work during render (mutation, `Date.now`/random, side effect) → breaks Compiler memo, tearing. Fix = move to effect/handler; risk = timing/order shift. |
+| 3 | `react-hooks/preserve-manual-memoization` | 10 | 🟡 | 🟢 | 🟢 | Manual `useMemo`/`useCallback` deps Compiler can't preserve. Bail-out = **perf only**. Fix = drop manual memo (Compiler auto-memoizes) → safe. |
+| 4 | `react-hooks/immutability` | 14 | 🟡 | 🔴 | 🟡 | Mutating props/state/hook returns → silent stale UI, skipped renders. Fix = clone-then-set; risk = shared refs elsewhere, shallow vs deep clone. |
+| 5 | `react-hooks/refs` | 104 | 🟠 | 🟡 | 🟠 | Read/write `ref.current` during render (valid only in effects/handlers). Subtle stale reads; high volume, each fix can shift render timing → regression-prone. |
+| 6 | `react-hooks/set-state-in-effect` | 165 | 🔴 | 🟡 | 🔴 | `setState` in `useEffect` → cascade re-render, extra paints, loops. Fix = derive during render / lift state / `useMemo`; biggest redesign per site → highest break chance. |
+
+**Hot files:** `App.tsx` (19) · `TaskDetailPage.tsx` (15) · `rich-text-editor.tsx` (15, all refs) · `ArtifactsPanel.tsx` (14) · `BrowserPanel.tsx` (12) · `LayoutPreviews.tsx` (11, all static-components).

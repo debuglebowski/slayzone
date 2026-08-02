@@ -1,0 +1,25 @@
+# Members — Layout A: avatar grid
+
+Card per member, 3-4 up. Faces-first; for welcome/home dashboards
+where the goal is "who is here", not admin.
+
+```
++------------------------------------------------------+
+| Members (14)                              [search...] |
++------------------------------------------------------+
+|  +-----------+   +-----------+   +-----------+       |
+|  |   (AN)    |   |   (JE)    |   |   (MI)    |       |
+|  |   Anna    |   |   Jens    |   |   Mia     |       |
+|  |   admin   |   |   member  |   |   member  |       |
+|  +-----------+   +-----------+   +-----------+       |
+|  +-----------+   +-----------+   +-----------+       |
+|  |   (KA)    |   |   (SO)    |   |   (LU)    |       |
+|  |   Kalle   |   |   Sofia   |   |   Lukas   |       |
+|  |   owner   |   |   member  |   |   guest   |       |
+|  +-----------+   +-----------+   +-----------+       |
++------------------------------------------------------+
+| + 8 more                                view all ->   |
++------------------------------------------------------+
+```
+
+Config: showToolbar toggles search row. Card click -> member page.

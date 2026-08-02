@@ -108,7 +108,36 @@ export interface HubRunnerGateway {
   request<T = unknown>(runnerId: string, method: string, params?: unknown, timeoutMs?: number): Promise<T>
   /** Fire-and-forget notification to a connected runner (no-op if absent). */
   notify(runnerId: string, method: string, params?: unknown): void
+  /**
+   * Every runner with an authenticated, open connection. Says nothing about
+   * liveness — a runner whose socket is open but which has gone silent still
+   * appears here until the heartbeat watchdog reaps it (up to
+   * `heartbeatTimeoutMs`). Use {@link listUsableRunners} to decide whether work
+   * can actually be dispatched.
+   */
   listRunners(): RunnerDescriptor[]
+  /**
+   * ── The single authority on "can this runner do work right now?" ───────────
+   *
+   * Authenticated + open + heard from within `heartbeatTimeoutMs`. This is the
+   * ONLY question a dispatch decision should ask.
+   *
+   * It exists because three different signals were being used as proxies for it,
+   * and all three lie in a different direction:
+   *   - the `runners` DB row — means "was enrolled once". Survives everything,
+   *     including a runner that never connected during this boot at all.
+   *   - the raw `byRunnerId` map (i.e. `listRunners`) — means "socket is open".
+   *     Wiped whenever the hub process restarts, and includes a runner that has
+   *     stopped responding but not yet been reaped.
+   *   - a last-known-runner cache — means "was connected recently". Can name a
+   *     runner that is now gone.
+   *
+   * Anything that must not dispatch into a void (see the no-in-process-fallback
+   * work) resolves through here, not through those.
+   */
+  listUsableRunners(): RunnerDescriptor[]
+  /** {@link listUsableRunners} for one runner. */
+  isRunnerUsable(runnerId: string): boolean
   readonly events: TypedEventEmitter<RunnerGatewayEvents>
   /** Terminate every connection and reject all in-flight requests. */
   close(): void
@@ -171,6 +200,29 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
       conn.ws.terminate()
     }, delayMs)
     conn.heartbeatTimer.unref?.()
+  }
+
+  /**
+   * Backs {@link HubRunnerGateway.listUsableRunners}: authenticated, open, and
+   * heard from within the heartbeat window.
+   *
+   * The staleness check is deliberately independent of the watchdog rather than
+   * trusting it. The watchdog reaps on a timer, so between a runner going silent
+   * and its timer firing there is a window (up to `heartbeatTimeoutMs`) where the
+   * connection is still in `byRunnerId` — dispatching into that window is exactly
+   * the failure this predicate exists to prevent. Computing staleness on read
+   * closes it without making the watchdog more aggressive (which would tear down
+   * healthy runners on a slow link).
+   *
+   * `heartbeatTimeoutMs <= 0` disables the watchdog entirely (tests), so treat any
+   * authenticated open connection as usable in that mode.
+   */
+  function isUsable(
+    conn: RunnerConnection
+  ): conn is RunnerConnection & { descriptor: RunnerDescriptor } {
+    if (conn.closed || conn.descriptor === null) return false
+    if (heartbeatTimeoutMs <= 0) return true
+    return Date.now() - conn.descriptor.lastSeenAt < heartbeatTimeoutMs
   }
 
   /** Any valid inbound frame from an authenticated runner counts as liveness. */
@@ -439,6 +491,13 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
       return [...byRunnerId.values()]
         .filter((conn): conn is RunnerConnection & { descriptor: RunnerDescriptor } => conn.descriptor !== null)
         .map((conn) => ({ ...conn.descriptor }))
+    },
+    listUsableRunners(): RunnerDescriptor[] {
+      return [...byRunnerId.values()].filter(isUsable).map((conn) => ({ ...conn.descriptor }))
+    },
+    isRunnerUsable(runnerId: string): boolean {
+      const conn = byRunnerId.get(runnerId)
+      return conn !== undefined && isUsable(conn)
     },
     close(): void {
       closed = true

@@ -1,0 +1,30 @@
+# Secure Configuration Baselines — 2026 Renewal Action Items
+
+**Vanta test:** Secure configuration baselines developed (ISO 27001:2022 · A.8.9 CFG-44, A.8.27 SEA-56)
+**Source:** Google Sheet "Secure Configuration Baselines" (111 rows / 34 systems · 85 Yes / 22 No / 4 N/A)
+**Status:** Renewal due — current evidence expires Jul 14, 2026. Last edited 2025-07-30.
+
+## Bottom line
+Doc is sound; no rebuild. Clearing the Vanta test = re-upload non-expired file. Passing the ISO audit *cleanly* = address only the rows below. The other 15 "No" rows are already defensible plan-limitations (Enterprise-tier / no-MDM, justified in comments) → no work.
+
+## Action items
+
+| # | System · Config | State | Issue | Minimal action | Type | Owner |
+|---|---|---|---|---|---|---|
+| 1 | GitHub · Secret scanning alerts | No | Comment "Should be evaluated" | Enable (free on GitHub) → flip to Yes; verify not already on | Trivial fix | Gustav |
+| 2 | Microsoft 365 · Conditional access | No | Justification blank | Add one-line risk decision / compensating control | Comment edit | Dennis |
+| 3 | Microsoft 365 · DLP for sensitive data | No | Justification blank | Add one-line justification (e.g. requires E-tier / risk-accepted) | Comment edit | Dennis |
+| 4 | Normain SaaS App · strong-password + MFA auth | No | Blank — and it's our own product | Clarify real state (SSO/passkey?) + comment | Decision (you) | Kalle |
+| 5 | Managed PostgreSQL · query/access logs | No | Comment "Todo" — production DB | Enable Azure Postgres logging OR document compensating controls + risk acceptance | Possible engineering | Kalle |
+| 6 | GitHub · org audit-log review | No | "Process or automation not in place" | Define light quarterly review OR risk-accept | Decision | Gustav |
+| 7 | Microsoft Azure · Security Center recs | No | "Some remaining to handle" | Clear remaining recs OR note tracked + risk-accept | Decision | Kalle |
+
+## Already-fine "No"/"N/A" rows (no action)
+1Password (req. 1P Business), ChatGPT usage logs (Enterprise only), iOS passcode/wipe/app-block (no MDM → policy + offboarding), Linear/Miro integrations & activity (Enterprise), Slack file sharing (business need, ext. users approved), Superhuman MDM (Enterprise), Google Workspace external sharing (business need, monitored) & DLP (req. GW Enterprise), OpenAI API logs (prod via Azure). N/A: ChatGPT & Cloudflare API keys, Linear & Slack audit logs.
+
+## Sequence to renew
+1. Re-review + re-date doc for 2026 (~1 hr desk).
+2. Close items 1–7 above (mostly comment edits; #5 only possible real engineering).
+3. Re-export sheet → PDF → upload to Vanta → re-attest.
+
+**Estimated effort: ~half a day**, gated only by the PostgreSQL logging decision.

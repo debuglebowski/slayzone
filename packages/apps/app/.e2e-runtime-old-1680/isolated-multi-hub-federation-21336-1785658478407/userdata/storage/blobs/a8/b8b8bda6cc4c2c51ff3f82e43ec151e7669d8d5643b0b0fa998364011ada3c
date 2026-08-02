@@ -1,0 +1,33 @@
+# Change-management verification — AWS Bedrock / Anthropic introduction
+
+_v3, 2026-06-11. Corrections after CTO review: Security Delegate = CTO (Kalle); new SaaS DPA includes AWS; Sara sends DPAs. Sources: Linear (MCP), GitHub, Gmail (Kalle mailbox), Drive (Change Management Procedure doc, SaaS DPA, KPMG DPA attachment)._
+
+## The change
+AWS Bedrock to host Anthropic models, SaaS open-platform mode.
+- **PR #2180** merged **2026-06-09** (Max authored, independently approved).
+- `bedrock.tf` (eu-west-1, EU inference profiles) + migration `shouldUseAnthropic BOOLEAN NOT NULL DEFAULT false`.
+- **Dormant**: code requires per-org flag + API key. No customer data flows to AWS until an org is enabled (prod flag values unconfirmed).
+
+## Verification matrix
+| Control | Status | Evidence |
+|---|---|---|
+| Peer-reviewed implementation | ✅ | PR #2180 independent approval, CI/CD |
+| IaC + EU residency | ✅ | Terraform, eu-west-1 only |
+| Risk assessment approved by Security Delegate | ✅ | INT-408 (Max, 2026-04-21; thorough). "Approved" comment by Kalle = CTO = Security Delegate, same day. Creator ≠ approver ✅. Pre-dates impl. by 7 weeks. **Cosmetic gap: status still Todo — move to Done.** |
+| Linear CR ticket before implementation | ❌ | Procedure: "All changes must begin with the creation of a CR ticket in Linear… risk assessment is handled in a separate issue." INT-408 IS the separate risk issue, not the CR. No `Change:` issue exists for AWS/Bedrock (only INT-251/409/421). PR #2180 cites no ticket. |
+| CAB approval recorded in CR | ❌ | No CR to host it. Procedure: "All approvals must be recorded in the corresponding Linear CR ticket before implementation." |
+| Rollback plan | ⚠️ | Covered substantively in INT-408 (per-org flag = rollback mechanism; account teardown) but procedure wants it in the CR. |
+| New-DPA subprocessor list includes AWS | ✅ | "SaaS DPA" Google Doc `1TYVTisENNzIuJR8…` (created 2026-06-04, rev 2026-06-05): AWS row — "Customer files, prompts and instructions / Search and model infra / EEA-EU; SCC; AWS EMEA SARL, Luxembourg". Sent to new prospects (Deloitte, 2026-06-04, by Sara). Earlier artifact claim "Appendix B not updated" was stale — superseded by the new SaaS DPA format. |
+| Notice to EXISTING customers (DPA §8.1, 14-day) | ❓ | Sara sends DPAs (not Kalle) — evidence likely in her mailbox. Kalle's mailbox: KPMG updated DPA 2026-05-19 verified to contain **no AWS** (attachment grepped); nothing to Advisense/Miljögiraff since. AWS-bearing DPA text exists only since 2026-06-04. **Need from Sara: send date + recipients of AWS-bearing DPA/notice to active customers.** |
+
+## Timeline logic
+- AWS DPA text born 2026-06-04; merge 2026-06-09; activation not yet.
+- "Implementation" for DPA purposes = customer data flowing = flag enablement, which hasn't happened. So the §8.1 14-day window can still be satisfied: confirm/send notice → enable flag ≥14 days later.
+- DC 9's "deferred more than 30 days after notice" is stronger than the DPA requires (14) and currently unevidenced — soften to "in accordance with the DPA's 14-day subprocessor-change notice" unless 30 days is genuinely observed.
+
+## Remaining actions
+1. **Create CR ticket** for AWS/Bedrock now, with a Process Deviation note per procedure ("deviation… must be explicitly documented in the CR ticket, including rationale and risk acceptance"); link PR #2180 + INT-408; record CAB approval in it. No backdating.
+2. **Move INT-408 → Done** to match the recorded approval.
+3. **Get from Sara**: date + recipients of AWS-bearing DPA/notice to active customers. If none sent → send §8.1 notice before any org flag is enabled.
+4. **Prod check**: confirm no org has `shouldUseAnthropic=true`.
+5. **DC 9 rewrite**: effective date = activation (not merge); 14-day (not 30) unless evidenced; "followed change-management process" only after CR exists with deviation note.

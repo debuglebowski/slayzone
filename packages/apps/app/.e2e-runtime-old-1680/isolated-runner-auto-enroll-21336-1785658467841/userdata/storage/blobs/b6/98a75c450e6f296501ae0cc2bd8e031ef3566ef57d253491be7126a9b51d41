@@ -1,0 +1,32 @@
+flowchart TB
+  subgraph NORMAIN
+    direction LR
+    n1["1. Protocol: OIDC<br/>(already implemented)"]:::n
+    n2["2. Confirm OIDC claims<br/>OK: email (req), name,<br/>preferred_username, sub<br/>Config needed: upn<br/>Not emitted by Entra:<br/>email_verified, picture"]:::n
+    n3["3. Register callback /<br/>redirect URL"]:::n
+    n4["8. Wire OIDC client<br/>to KPMG's discovery URL"]:::n
+    n5["9. Implement sign-in and callback<br/>(validate sig, iss, aud)"]:::n
+    n6["10. Map claims to<br/>Normain user accounts"]:::n
+    n7["12. End-to-end test"]:::n
+
+    n1 --> n2 --> n3
+    n4 --> n5 --> n6 --> n7
+  end
+
+  subgraph KPMG
+    direction LR
+    k1["4. NITSO security review<br/>and approval"]:::k
+    k2["5. Create non-gallery<br/>enterprise app"]:::k
+    k3["6. Configure OIDC SSO<br/>+ claim mapping (incl. upn optional claim)<br/>+ grant User.Read Graph permission<br/>(OPTIONAL — for profile image)"]:::k
+    k4["7. Assign KPMG Sweden users"]:::k
+    k5["11. Provide test user"]:::k
+    k6["13. Add remaining users<br/>— GO LIVE"]:::k
+
+    k1 --> k2 --> k3 --> k4 --> k5 --> k6
+  end
+
+  n3 ==>|"HAND-OFF<br/>Claim list / Redirect URL<br/>User.Read Graph permission<br/>(OPTIONAL — for profile image)"| k1
+  k4 ==>|"HAND-OFF<br/>Client ID (App ID)<br/>Client secret<br/>Tenant ID — also needed for<br/>Marketplace private offer<br/>OIDC discovery URL (v2.0)"| n4
+
+  classDef n fill:#e1f5ff,stroke:#0066cc,color:#000
+  classDef k fill:#fff3e0,stroke:#e65100,color:#000

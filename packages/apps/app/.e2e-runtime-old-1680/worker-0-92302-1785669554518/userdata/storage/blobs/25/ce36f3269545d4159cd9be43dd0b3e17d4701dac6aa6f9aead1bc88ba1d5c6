@@ -1,0 +1,5 @@
+# Slack
+
+- Auth method: OAuth app
+- Requirements: Slack app; scopes; event subscriptions; signing secret
+- Capabilities: Bot messages, slash commands, events, notifications, channel/user sync

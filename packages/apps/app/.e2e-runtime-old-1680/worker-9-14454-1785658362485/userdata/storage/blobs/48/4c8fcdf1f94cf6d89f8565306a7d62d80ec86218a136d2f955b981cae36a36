@@ -1,0 +1,41 @@
+flowchart TD
+    subgraph Main["Electron Main Thread (non-blocking)"]
+        IPC["ipcMain.handle\n200+ handlers — fully async"]
+        REST["Express REST API\nfully async"]
+        Handlers["Domain Handlers\nawait db.get / all / run\nawait db.batchTxn / namedTxn"]
+        Bridge["DbBridge\nasync proxy · postMessage RPC"]
+
+        IPC -->|await| Handlers
+        REST -->|await| Handlers
+        Handlers -->|Promise| Bridge
+    end
+
+    subgraph DBWorker["DB Worker Thread"]
+        WorkerLoop["Message loop\nparentPort.on('message')"]
+        TxnRegistry["txn-registry.ts\nchat-queue:push · pop · requeue\n(logic stays in domain files)"]
+        MigRunner["Startup sequence\nlegacy migration → pragmas\n→ backup → runMigrations v1–v140\n→ normalizations → 'ready'"]
+        BSQ["better-sqlite3\nsingle connection"]
+        WorkerLoop --> TxnRegistry
+        WorkerLoop --> BSQ
+        MigRunner --> BSQ
+    end
+
+    subgraph DiagWorker["Diag Worker Thread"]
+        DiagLoop["Message loop"]
+        DiagBSQ["better-sqlite3\ndiag connection"]
+        DiagLoop --> DiagBSQ
+        DiagBSQ --> DiagFile[("slayzone.dev\n.diagnostics.sqlite")]
+    end
+
+    Bridge <-->|MessageChannel\nget · all · run · batchTxn · namedTxn| WorkerLoop
+    Main -->|DiagBridge| DiagLoop
+    BSQ -->|WAL| SQLiteFile[("slayzone.dev.sqlite")]
+
+    subgraph CLI["CLI (separate process) — unchanged"]
+        CLIDb["node:sqlite\nDatabaseSync"]
+        Notify["POST /api/notify"]
+        CLIDb -->|close first| Notify
+        Notify -->|HTTP| REST
+    end
+
+    CLIDb -->|direct WAL write| SQLiteFile

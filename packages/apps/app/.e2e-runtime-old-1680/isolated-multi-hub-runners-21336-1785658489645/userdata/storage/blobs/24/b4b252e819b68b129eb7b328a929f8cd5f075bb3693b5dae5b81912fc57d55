@@ -1,0 +1,161 @@
+# Caveman — Implementation Plan
+
+## Context
+Open-source Gmail-only email client. Convex backend, React frontend. ~10 users. Inbox zero + team collaboration.
+
+---
+
+## Phase 1: Foundation
+
+### 1.1 Project Setup
+- Init monorepo (pnpm or just flat)
+- `npx create-convex` + React (Vite)
+- TailwindCSS setup
+- Deploy to Vercel or similar
+
+### 1.2 Google OAuth
+- Create GCP project + OAuth consent screen
+- Configure Convex auth with Google provider
+- Store Google refresh token in Convex `users` table on first login
+- Scopes: `gmail.readonly`, `gmail.send`, `gmail.modify`
+
+### 1.3 Convex Schema
+```
+users        — id, email, name, googleRefreshToken, settings
+threads      — id, userId, gmailThreadId, subject, snippet, labelIds, lastMessageAt, isRead, isMuted, snoozedUntil
+messages     — id, threadId, gmailMessageId, from, to, cc, body, date, attachments
+labels       — id, userId, gmailLabelId, name, type (system/user)
+syncState    — id, userId, historyId (for delta sync)
+```
+
+### 1.4 Initial Gmail Sync
+- Convex action: exchange refresh token → access token
+- Fetch all threads (paginated, most recent first)
+- Store thread metadata + messages in Convex
+- Save `historyId` for future delta sync
+
+---
+
+## Phase 2: Core Email
+
+### 2.1 Inbox View
+- Reactive query: threads where `INBOX` in labelIds, ordered by lastMessageAt
+- Thread list component (sender, subject, snippet, time)
+- Read/unread visual state
+
+### 2.2 Thread View
+- Click thread → show all messages in order
+- Render HTML email bodies (sandboxed iframe or sanitized HTML)
+- Mark as read on open (mutation + Gmail API call)
+
+### 2.3 Compose & Reply
+- Rich text editor (TipTap or similar)
+- Compose new email → Gmail API `messages.send`
+- Reply / Reply All / Forward
+- Attachments upload
+
+### 2.4 Basic Actions
+- Archive (remove INBOX label)
+- Delete (move to TRASH)
+- Star / Unstar
+- Label management
+
+---
+
+## Phase 3: Inbox Zero
+
+### 3.1 Split Inbox
+- User-configurable rules (by label, sender domain, etc.)
+- Tab UI: Primary / Updates / Newsletters / etc.
+- Each tab = filtered reactive query
+
+### 3.2 Snooze
+- `snoozedUntil` field on thread
+- Hide from inbox view (query filter)
+- Convex scheduled function: at snooze time → re-add INBOX label + clear snoozedUntil
+
+### 3.3 Send Later
+- Compose → store draft in Convex with `sendAt` timestamp
+- Convex scheduled function: at sendAt → call Gmail API send → delete draft
+
+### 3.4 Undo Send
+- On send, delay actual Gmail API call by ~5 seconds
+- Show undo toast → cancel the scheduled send
+- If no undo → send fires
+
+### 3.5 Mute
+- `isMuted` flag on thread
+- Muted threads hidden from inbox
+- New messages in muted threads stay hidden
+
+### 3.6 Reminders
+- Set follow-up reminder on sent email
+- Convex scheduled function: check if reply received → if not, resurface thread
+
+---
+
+## Phase 4: Real-time Sync
+
+### 4.1 Pub/Sub Webhook
+- Set up Google Cloud Pub/Sub topic + subscription
+- Convex HTTP action as push endpoint
+- On webhook: call `users.history.list(startHistoryId)` → apply deltas
+
+### 4.2 Delta Sync
+- Parse history response: messagesAdded, messagesDeleted, labelsAdded, labelsRemoved
+- Apply changes to Convex tables
+- Update syncState.historyId
+- UI updates reactively (no polling)
+
+### 4.3 Fallback Polling
+- Convex cron: every 2 min, check history for each user
+- Catches missed Pub/Sub events
+
+---
+
+## Phase 5: Collaboration
+
+### 5.1 Schema Additions
+```
+teams        — id, name
+teamMembers  — id, teamId, userId
+sharedThreads — id, teamId, threadId, sharedBy
+comments     — id, threadId, userId, body, createdAt
+presence     — id, userId, threadId, isTyping, lastSeen
+```
+
+### 5.2 Shared Threads
+- Share button → create sharedThread record
+- Team members see shared threads in a "Shared" split
+- Reactive: new messages appear for all team members
+
+### 5.3 Comments
+- Internal comment thread on any email thread
+- Reactive query: all comments for a thread
+- Not sent to email recipients
+
+### 5.4 Typing Indicators
+- Presence mutation: set isTyping when composing a reply
+- Reactive query: show "X is replying..." in thread view
+- Auto-expire after 5s of inactivity
+
+---
+
+## Implementation Order
+
+```
+Phase 1 (week 1-2)    → Foundation: setup, auth, schema, initial sync
+Phase 2 (week 3-4)    → Core email: inbox, threads, compose, actions
+Phase 3 (week 5-6)    → Inbox zero: split inbox, snooze, send later, mute
+Phase 4 (week 7)      → Real-time sync: Pub/Sub, delta sync
+Phase 5 (week 8-9)    → Collaboration: shared threads, comments, presence
+```
+
+---
+
+## Open Questions
+- Rich text editor choice? TipTap vs Plate vs Lexical
+- HTML email rendering approach? iframe sandbox vs DOMPurify
+- Host on Vercel or something else?
+- Repo structure: monorepo (web + future CLI) or single app?
+- Design system / component library? Radix + Tailwind?

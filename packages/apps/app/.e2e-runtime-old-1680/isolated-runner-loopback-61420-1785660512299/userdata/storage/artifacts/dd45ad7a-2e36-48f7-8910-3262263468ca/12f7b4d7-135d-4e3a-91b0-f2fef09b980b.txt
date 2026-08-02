@@ -1,0 +1,30 @@
+# Security Incident Response — example (filled in)
+
+> Example of how the **Security Incident Response** ticket (Linear, Internal Workflows / INT) should look once filled in, for the 2026-05-21 exercise. This is where the response is *tracked*; it mirrors last year's INT-74.
+
+## Status summary
+
+* [x] Security Event ticket: Security Event Report (linked)
+
+* [x] Assign leadership for incident response — Philip Ngo (Security Delegate)
+
+* [x] Slack thread created in #security
+  * [x] Sitting in the same room, skipping
+
+* [x] Triage & Analysis (determine urgency)
+  * Priority: Urgent
+
+* [x] Investigation (what/why has gone wrong?)
+  * ExtractionInsightResult row stuck in WAITING (\~3h); assertExtractionNotRunning blocked new runs; the original job had been OOM-killed
+
+* [x] Containment (how do we avoid additional damage)
+  * Manually moved the stuck row to CANCELED; cleared a few other extractions in the same state
+
+* [x] Neutralization (what is the solution to the problem?)
+  * Make the guard ignore stale rows + add alerting — logged as a follow-up ticket
+
+* [x] System recovery (how do we make the system work as normal again / recover data / etc?)
+  * Confirmed affected customers' retries completed end-to-end; incident marked contained
+
+* [x] Hardening & Detection improvements (lessons learned, long-term response)
+  * Lessons captured in the exercise report: simplify the IR Plan; add a runbook for clearing stuck rows

@@ -1,0 +1,17 @@
+# AI Provider Tycoon — Ideas
+
+Parking lot for concepts not yet in scope.
+
+## Talent
+
+People as a resource: research velocity multiplier, salary line, hire/fire, poaching between players.
+
+Possible mechanics:
+- Hire / fire by role + count + salary
+- Talent count as private state
+- Salaries contribute to burn
+- Talent poaching: offer above-market salary to take a competitor's employee
+- Talent market shift events (supply/cost shocks)
+- Research output = f(research compute, talent, time)
+
+Punted because: adds an entire resource axis + inter-player action surface before the core loop is proven.

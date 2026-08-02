@@ -1,0 +1,121 @@
+# VPM-2 — Vulnerabilities scanned and remediated
+
+**Vanta control:** VPM-2
+**Frameworks:** SOC 2 CC 2.1, CC 4.1 (+4 more)
+**Status at start:** 15/17 tests passing — 2 failing
+**Last revised:** 2026-04-30 (v3 — re-sourced from Drive after audit)
+**Sources:**
+- Compliance facts → Drive only (per project rule)
+- Technical state (workflows, schedules) → `gh api` against `normainofficial/normain`
+
+---
+
+## Drive sources used
+
+| Doc | Drive ID | Purpose |
+|---|---|---|
+| `[Normain] Operations Security Policy.pdf` v1.0.0, signed Sara Landfors 2025-05-30 | `1hHUDDPPLSAMCgHtI2auuvgQ51yDFR1py` | Authoritative policy |
+| `Automated Security Testing Procedure` v1.0, CTO-owned, eff. 2025-07-04 | `1qHPB6W1lilVFo_gazrr6BOQA1_FG3U7gXjwBDzQ3mf4` | Procedure (out of date — see below) |
+| `[Normain] Risk Acceptance — uuid GHSA-w5hq-g745-h8pq` | `1ojoDY1Acg4oqVvt9eYA6FGhPzvsh8tHjsD53OceReDU` | Tracking pattern evidence |
+| `Normain Penetration Test Report 20250516.pdf` | `1UgXlLdiRAwlQzBscAsPkHnK3Mqbuf8et` | Annual external pen test |
+| `Firewall and Network Security Assessment - 25-08-25` | `1gQ9sd7Net4aQF8m8cGuIh5trrkE5dH3g2LSlmKsYlHE` | One-off network assessment |
+
+No host-based scanner doc found in Drive (Defender / Qualys / Tenable / Rapid7).
+
+---
+
+## Situation
+
+### Authoritative policy (Drive)
+
+Operations Security Policy v1.0.0 → Technical Vulnerability Management:
+> "Vulnerability scans shall be performed on public-facing systems in the production environment at least quarterly."
+
+Per-severity remediation SLAs:
+
+| Severity | SLA |
+|---|---|
+| Critical | 30 days |
+| High | 60 days |
+| Medium | 120 days |
+| Low / Info | As needed |
+
+Out-of-SLA → risk-acceptance plan or documented remediation timeline (Security Delegate signs off).
+
+### Actual technical state (verified via `gh api`)
+
+`normainofficial/normain` → `.github/workflows/`:
+
+| Layer | Workflow | Schedule | Targets |
+|---|---|---|---|
+| DAST | `zap-scan.yml` | weekly Mon 02:00 UTC | `app.normain.com` + `app-dev.normain.com` |
+| Container | `trivy-scan.yml` | weekly Mon 06:00 UTC | normain-api, normain-worker, normain-tenant-api images in ACR; uploads SARIF to GitHub Security |
+| SAST/SCA | (not yet inspected — Drive ASTP says CodeQL + Dependabot via GitHub native) | — | — |
+
+ZAP weekly easily exceeds policy "at least quarterly". Trivy scans 3 prod container images weekly with results in GitHub Security.
+
+### Tracking is operational
+
+Risk-acceptance memo for `GHSA-w5hq-g745-h8pq` (uuid Medium, drafted 2026-04-30) — proper Ops Sec Policy escalation pattern, awaiting Security Delegate sign-off. Demonstrates VPM-2's "tracked to remediation" requirement is live.
+
+### Sibling Vanta subtasks (separate tickets)
+
+| # | Severity | Ops Sec Policy SLA |
+|---|---|---|
+| #11 | Critical | 30d |
+| #29 | High | 60d |
+| #33 | Medium | 120d |
+| #5 | Low | As needed |
+
+---
+
+## What changed since v1 (and what was wrong)
+
+| v1/v2 claim | Corrected |
+|---|---|
+| "No host-based scanner — recommend enable Defender for Cloud" | **Wrong framing.** Policy requires quarterly scans of *public-facing systems*, not OS-level host scans. ZAP weekly already satisfies that. No new tooling needed. |
+| ASTP says container tool is "Gryve" | Actual tool in repo is **Trivy** (`trivy-scan.yml`). ASTP doc in Drive is out of date — separate cleanup item, not part of VPM-2. |
+| ASTP says DAST workflow is `analysis-dast.yml`, Sun 02:00 UTC | Actual is `zap-scan.yml`, **Mon** 02:00 UTC. Cadence still weekly. |
+| ASTP says Gryve runs "on image build" via `deploy.azure.yml` | Trivy runs on a **schedule** (Mon 06:00 UTC), and prod deploys are k8s (`deploy-k8s-prod.yml`), not `deploy.azure.yml`. |
+| v1 SLA table cited ASTP "≤30d critical, others by severity" | **Wrong source.** Authoritative SLAs are in Ops Sec Policy: Crit 30 / High 60 / Med 120 / Low as-needed. |
+| v1 cited a repo `vulnerability-disclosure-policy.md` | **Removed.** Repo policy files are not authoritative per project rule. (That doc covers external researcher disclosure, not VPM-2 scope anyway.) |
+
+---
+
+## Solution
+
+### 2 failing tests — still not directly observed
+
+Vanta UI access blocked: `slay tasks browser` requires the slay task tab to be active (panel-open timeout); chrome-devtools MCP is off-limits per direction.
+
+Most likely causes given the mature posture:
+
+| Likely failing test | Fix | Effort | Sibling overlap |
+|---|---|---|---|
+| Open Critical/High past Ops Sec Policy SLA (Crit >30d, High >60d) | Close #11 / #29 within SLA, or draft risk-acceptance memos in the same shape as the uuid one | Owned by #11 / #29 | Full overlap — VPM-2 flips green when siblings ship |
+| Stale scan-evidence upload in Vanta | Pull latest ZAP run artifact from `zap-scan.yml`; export to PDF; attach to VPM-2 evidence slot. Same for latest Trivy SARIF if applicable. | ~30 min | Net-new |
+
+**Total marginal effort beyond siblings: ~30 min.**
+
+No host-scanner deployment, no Defender for Cloud, no new tooling.
+
+---
+
+## Actions taken
+
+- Pulled Ops Sec Policy PDF + ASTP from Drive (authoritative). Pulled risk-acceptance memo for uuid GHSA. Searched Drive for Defender / Qualys / Tenable / Rapid7 docs (none).
+- Verified actual scan workflows via `gh api repos/normainofficial/normain/contents/.github/workflows`.
+- Identified Drive ASTP is out of date vs actual repo (Gryve→Trivy, workflow filename, deploy file).
+- **Did not modify** any Drive doc, Vanta evidence, GitHub workflow, or shared state.
+- **Stopped** before any upload — shared change requiring confirmation, and need actual Vanta UI to identify the right slot.
+
+---
+
+## Unverified / open
+
+- Names of the 2 failing tests in Vanta — slay task tab needs to be active in UI for browser to mount, or share screenshots.
+- Are siblings #11 / #29 currently past Ops Sec Policy SLA (30d / 60d)? Linear tickets would show first-detected date.
+- Last ZAP / Trivy / pen test artifact uploaded to Vanta — when? Vanta typical evidence freshness window is 90 days.
+- ASTP drift (Gryve vs Trivy, wrong filename, wrong deploy file) — separate cleanup task, not blocking VPM-2.
+- Pen test next renewal — last report 2025-05-16, due mid-2026; not VPM-2's concern but worth flagging.
+- CodeQL + Dependabot enablement on `normainofficial/normain` — not yet verified via `gh api`.

@@ -1,0 +1,22 @@
+# Mermaid Demo
+
+Flow:
+
+```mermaid
+graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Do thing]
+    B -->|No| D[Skip]
+    C --> E[End]
+    D --> ED
+```
+
+Sequence:
+
+```mermaid
+sequenceDiagram
+    User->>App: click button
+    App->>DB: query
+    DB-->>App: rows
+    App-->>User: render
+```

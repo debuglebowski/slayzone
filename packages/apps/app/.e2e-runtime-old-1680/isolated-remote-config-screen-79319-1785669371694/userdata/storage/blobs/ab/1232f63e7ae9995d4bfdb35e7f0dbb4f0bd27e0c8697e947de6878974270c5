@@ -1,0 +1,199 @@
+# Phase 0 — Path & port hardening
+
+> **Master plan**: `server-mode-implementation-plan.md` on parent task `1f788452-581e-429f-9427-a1d61e8a349b` (artifact id `1eecca69-7d62-4763-8300-a5e9e4fcf894`).
+>
+> **Read first** (in master): §1 Context, §2 Decisions, §3 Audit Findings, §7 Conventions, §9 Boundaries, §11 Deferred. Then this phase.
+>
+> Master is canonical for cross-cutting decisions; this artifact is the tactical home for this phase only.
+
+---
+
+## Phase scope
+
+Make every fs root and bound port honor environment variables. Process-level multi-tenancy depends on it.
+
+**Tasks:**
+- [ ] Create `getDataRoot()` utility. Likely lives in `packages/shared/paths/` (new) or an existing `@slayzone/shared` package — check first.
+- [ ] Replace ~12 sites of `process.env.SLAYZONE_DB_DIR || app.getPath('userData')` with `getDataRoot()`.
+- [ ] Fix hardcoded `Extensions/` and `browser-extensions.json` paths (browser domain).
+- [ ] Audit `app.getPath()` call sites. Electron-only packages may keep them; any code destined for the server package must not depend on Electron.
+- [ ] Confirm `SLAYZONE_PORT`, `SLAYZONE_MCP_PORT` honored at every bind site. Add `SLAYZONE_HOST` (default `localhost`).
+- [ ] Smoke test: run two `pnpm dev` instances side-by-side with different `SLAYZONE_DB_DIR` + `SLAYZONE_PORT`. Verify zero data crossover.
+
+**Done criteria:** can spin up two isolated dev instances on one machine.
+
+---
+
+## Cross-phase dependencies
+
+- **Upstream**: none. This phase has no prerequisites and is the foundation everything else depends on.
+- **Downstream**: Phase 1 uses `getDataRoot()` to replace remaining `app.getPath()` calls in domain code.
+
+---
+
+## Phase-specific notes
+
+(Add findings, decisions, deviations, links, sub-PR references here as work progresses. Initially empty — populate during execution.)
+
+---
+
+## Verification checklist
+
+- [ ] Done criteria met (two isolated dev instances run side-by-side w/ zero crossover)
+- [ ] Tests added per §5 of master ("fs/env hardening" row)
+- [ ] No regression in existing E2E suite
+- [ ] Cross-phase deps satisfied (none upstream)
+
+### Sub-plan (drafted 2026-05-06, awaiting approval)
+
+**Findings from audit:**
+- `@slayzone/platform` package already exists w/ `getStateDir()` (mac=`~/Library/Application Support/slayzone`, win=`%APPDATA%/slayzone`, linux=`$XDG_STATE_HOME/slayzone`). Pure Node, no Electron dep. Natural home for `getDataRoot()`. Do NOT create `packages/shared/paths/`.
+- Pattern `process.env.SLAYZONE_DB_DIR || app.getPath('userData')` confirmed at 8 sites. Bare `app.getPath('userData')` (no env override) at 4 more sites. Total = 12, matches master §3b.
+- `SLAYZONE_PORT` does **NOT** exist in code today. `SLAYZONE_MCP_PORT` exists but is only read by CLI + injected into PTY env — **not honored at the MCP server bind**. MCP bind today reads `mcp_preferred_port` from DB settings only. `SLAYZONE_HOST` does not exist.
+- MCP server hardcodes `'127.0.0.1'` at `mcp-server.ts:157,162`.
+- Browser extension paths (`Extensions/`, `browser-extensions.json`) hardcoded at `apps/app/src/main/index.ts:1450,1476`.
+
+**Ordered task list:**
+1. Extend `@slayzone/platform`: add `getDataRoot()` (env override → `getStateDir()`), `getMcpPort()` (env → DB → 0), `getServerHost()` (env → `127.0.0.1`). New file `src/paths.ts`. Re-export via `src/index.ts`.
+2. Unit tests in platform pkg: env honored, fallback works, host default.
+3. Replace 8 `SLAYZONE_DB_DIR || app.getPath('userData')` sites with `getDataRoot()`:
+   - `packages/apps/app/src/main/db/index.ts:12,21`
+   - `packages/apps/app/src/main/index.ts:830,845`
+   - `packages/apps/app/src/main/backup.ts:22`
+   - `packages/domains/projects/src/main/handlers.ts:23`
+   - `packages/domains/task/src/main/handlers.ts:168`
+   - `packages/domains/task/src/main/ops/shared.ts:202`
+4. Replace 4 bare `app.getPath('userData')` sites:
+   - `packages/apps/app/src/main/lifecycle/sentinel.ts:22,26`
+   - `packages/apps/app/src/main/lifecycle/single-instance.ts:63`
+   - `packages/apps/app/src/main/index.ts:1450` (Extensions/)
+   - `packages/apps/app/src/main/index.ts:1476` (browser-extensions.json)
+   - Skip `db/index.ts:65` (legacy `appData` migration target — pre-rebrand, keep).
+5. Wire MCP bind: `mcp-server.ts` uses `getMcpPort()` for port arg + `getServerHost()` for bind addr.
+6. Vite externalization: confirm `@slayzone/platform` already in `electron.vite.config.ts` `externalizeDepsPlugin({ exclude })`. Add if missing (per CLAUDE.md memory).
+7. Smoke test: write `scripts/smoke-multi-instance.sh` — boots two `pnpm dev` instances w/ distinct `SLAYZONE_DB_DIR` + `SLAYZONE_MCP_PORT`, verifies two separate DBs created, two ports bound, no file overlap.
+8. Manual smoke: run script, confirm zero data crossover.
+
+**Files to touch:**
+- `packages/shared/platform/src/paths.ts` (new)
+- `packages/shared/platform/src/paths.test.ts` (new)
+- `packages/shared/platform/src/index.ts` (re-exports)
+- `packages/apps/app/src/main/index.ts`
+- `packages/apps/app/src/main/db/index.ts`
+- `packages/apps/app/src/main/backup.ts`
+- `packages/apps/app/src/main/mcp-server.ts`
+- `packages/apps/app/src/main/lifecycle/sentinel.ts`
+- `packages/apps/app/src/main/lifecycle/single-instance.ts`
+- `packages/domains/projects/src/main/handlers.ts`
+- `packages/domains/task/src/main/handlers.ts`
+- `packages/domains/task/src/main/ops/shared.ts`
+- `electron.vite.config.ts` (only if `@slayzone/platform` not already excluded)
+- `scripts/smoke-multi-instance.sh` (new)
+
+**Smoke-test approach:**
+- Script spawns two `pnpm dev` w/ distinct `SLAYZONE_DB_DIR=/tmp/slay-a` + `/tmp/slay-b`, distinct `SLAYZONE_MCP_PORT=4848` + `4849`.
+- After 30s warmup: assert `/tmp/slay-a/slayzone.dev.sqlite` exists, `/tmp/slay-b/slayzone.dev.sqlite` exists, sizes independent (touch one DB via CLI → other unchanged).
+- Assert ports bound: `lsof -iTCP:4848` + `lsof -iTCP:4849` both return Electron PIDs.
+- Assert Extensions dirs separate: `ls /tmp/slay-{a,b}/Extensions/`.
+- Cleanup: kill both PIDs.
+- Single-instance lock concern: see Open Questions #1 below — likely need to gate `requestSingleInstanceLock()` when `SLAYZONE_DB_DIR` is set, otherwise smoke test cannot run two instances at all.
+
+**Test additions (per master §5 "fs/env hardening"):**
+- Unit: `paths.test.ts` covers env override + fallback + host default.
+- Smoke script as above (not E2E — long-running multi-instance, doesn't fit Playwright harness cleanly).
+
+**Open questions (require user answer before implementing):**
+1. Single-instance lock — `apps/app/src/main/lifecycle/single-instance.ts` uses `app.requestSingleInstanceLock()`. With `SLAYZONE_DB_DIR` set, second instance dies. Gate the lock on env-var-present, or re-key the lock on data-dir hash? Smoke test impossible without one.
+2. `SLAYZONE_PORT` — no tRPC bind exists yet (Phase 2/3). Reserve env var name + helper now (no consumer), or defer until tRPC lands?
+3. `SLAYZONE_HOST` default — `127.0.0.1` (localhost-only) or `localhost` literal? Trusted-net warning when host != loopback — defer to Phase 3 banner per master §11b, or add stderr warning now?
+4. CLI `SLAYZONE_DB_PATH` (file path) — different env var than `SLAYZONE_DB_DIR` (dir). Touch in Phase 0 or leave for CLI rework later?
+5. `db/index.ts:65` `app.getPath('appData')` legacy migration — confirmed to skip (pre-rebrand path), correct?
+
+---
+
+### Sub-plan revision (2026-05-06, post-decisions)
+
+Decisions in `phase-0-open-questions.md` v3 (artifact `0fa9ee0d`) reshape this phase:
+
+**Key shifts from the original sub-plan:**
+- `app.setPath('userData', getDataRoot())` early in Electron main → many `process.env.X || app.getPath('userData')` sites simplify to `app.getPath('userData')` (now returns `getDataRoot()` automatically). Some sites can stay as-is post-`setPath`.
+- Rename `SLAYZONE_DB_DIR` → `SLAYZONE_STORE_DIR`. Hard rename, no compat.
+- Drop `SLAYZONE_DB_PATH` from CLI + tests. CLI derives file from `STORE_DIR + SLAYZONE_DEV`.
+- Single-instance lock skip from original Q1: **dropped**. `setPath` solves it.
+- New 13th site found: `apps/app/src/main/rest-api/artifacts/shared.ts:5` (uses `electronApp.getPath('userData')`).
+
+**Revised ordered task list:**
+
+1. **Extend `@slayzone/platform`** (`src/paths.ts` new):
+   - `getDataRoot()` reads `SLAYZONE_STORE_DIR`, falls back to `getStateDir()`.
+   - `getMcpPort()` reads `SLAYZONE_MCP_PORT`, returns `undefined` if unset (caller falls back to DB-stored port).
+   - `getServerHost()` reads `SLAYZONE_HOST`, defaults `127.0.0.1`, `console.warn` on non-loopback.
+   - Re-export from `src/index.ts`.
+2. **Unit tests** in `paths.test.ts` covering env honored, fallback, host default + warn.
+3. **`app.setPath('userData', getDataRoot())`** at top of `apps/app/src/main/index.ts`, before any code reads userData. Verify `app.getPath('userData')` returns expected after.
+4. **Audit the 13 sites** post-`setPath`. For each, decide: keep `app.getPath('userData')` (now correct) OR migrate to direct `getDataRoot()` (for code that should be Electron-free per Phase 1 prep).
+   - Domain pkgs (`projects/handlers.ts`, `task/handlers.ts`, `task/ops/shared.ts`) → `getDataRoot()` directly (Phase 1 wants these Electron-free).
+   - App-process code (`apps/app/src/main/db/index.ts`, `index.ts`, `backup.ts`, `mcp-server.ts`, `lifecycle/sentinel.ts`, `lifecycle/single-instance.ts`, `rest-api/artifacts/shared.ts`) → `app.getPath('userData')` OK (Electron-bound anyway).
+   - Hardcoded extension paths (`apps/app/src/main/index.ts:1450, 1476`) → `app.getPath('userData')` after `setPath`. No longer hardcoded relative to wrong root.
+5. **`mcp-server.ts`** wires `getMcpPort()` (env > existing DB lookup) + `getServerHost()` for bind addr. Replace hardcoded `'127.0.0.1'`.
+6. **CLI rename + simplification** (`packages/apps/cli/src/db.ts`):
+   - Drop `SLAYZONE_DB_PATH` branches (L26, L48, L116).
+   - `getDbPath`: `path.join(STORE_DIR, dev ? 'slayzone.dev.sqlite' : 'slayzone.sqlite')`.
+   - Rename `SLAYZONE_DB_DIR` → `SLAYZONE_STORE_DIR` (L27, L106, L149).
+7. **E2E spec sweep**:
+   - Rename env key in fixture: `apps/app/e2e/fixtures/electron.ts:247`.
+   - Rename in spec evaluations (6 specs reading the env back).
+   - Rename + drop `SLAYZONE_DB_PATH` in `runCli` env (10 call sites across 7 files): `core/91-cli-automation-trigger.spec.ts`, `core/95-task-progress.spec.ts`, `browser/84-browser-cli-multi-tab.spec.ts`, `git/46-web-panels.spec.ts`, `git/60-cli.spec.ts` (×6), `cli/test/tasks-rest.test.ts`.
+   - Each `SLAYZONE_DB_PATH: dbPath` → `SLAYZONE_STORE_DIR: dbDir, SLAYZONE_DEV: '1'` (where `dbDir = path.dirname(dbPath)`).
+8. **Vite externalization** sanity check: confirm `@slayzone/platform` in `electron.vite.config.ts` `externalizeDepsPlugin({ exclude })`. Add if missing.
+9. **Smoke script** `scripts/smoke-multi-instance.sh`:
+   - Spawn two `pnpm dev` w/ `SLAYZONE_STORE_DIR=/tmp/slay-{a,b}` + `SLAYZONE_MCP_PORT={4848,4849}`.
+   - With `setPath` working, no lock skip needed.
+   - Assert: 2 DBs created, 2 ports bound, Extensions dirs separate, no file overlap.
+   - Cleanup: kill both PIDs.
+10. **Memory + docs sweep**: update CLAUDE.md memory entries referencing `SLAYZONE_DB_DIR` / `SLAYZONE_DB_PATH`. Likely files: `memory/MEMORY.md`, any feedback notes mentioning these names.
+
+**Files to touch (revised, 13 src + ~7 test + 1 script + memory):**
+
+Source (Electron app):
+- `packages/apps/app/src/main/index.ts` (setPath at top, 2 existing sites at L830/L845, 2 extension sites at L1450/L1476)
+- `packages/apps/app/src/main/db/index.ts` (L12, L21)
+- `packages/apps/app/src/main/backup.ts` (L22)
+- `packages/apps/app/src/main/mcp-server.ts` (port + host + bind addr)
+- `packages/apps/app/src/main/lifecycle/sentinel.ts` (L22, L26 — auto-correct via setPath, no edit needed if leaving as `app.getPath`)
+- `packages/apps/app/src/main/lifecycle/single-instance.ts` (L63 — same)
+- `packages/apps/app/src/main/rest-api/artifacts/shared.ts` (L5 — newly found)
+
+Source (domains, Phase 1 prep):
+- `packages/domains/projects/src/main/handlers.ts` (L23)
+- `packages/domains/task/src/main/handlers.ts` (L168)
+- `packages/domains/task/src/main/ops/shared.ts` (L202)
+
+Source (CLI):
+- `packages/apps/cli/src/db.ts` (drop `_PATH`, rename `_DIR`)
+
+Source (platform):
+- `packages/shared/platform/src/paths.ts` (new)
+- `packages/shared/platform/src/paths.test.ts` (new)
+- `packages/shared/platform/src/index.ts` (re-exports)
+
+Tests:
+- `packages/apps/app/e2e/fixtures/electron.ts`
+- `packages/apps/app/e2e/core/91-cli-automation-trigger.spec.ts`
+- `packages/apps/app/e2e/core/95-task-progress.spec.ts`
+- `packages/apps/app/e2e/core/95-automation-catchup.spec.ts`
+- `packages/apps/app/e2e/browser/84-browser-cli-multi-tab.spec.ts`
+- `packages/apps/app/e2e/git/46-web-panels.spec.ts`
+- `packages/apps/app/e2e/git/60-cli.spec.ts`
+- `packages/apps/cli/test/tasks-rest.test.ts`
+
+Other:
+- `electron.vite.config.ts` (only if `@slayzone/platform` not excluded)
+- `scripts/smoke-multi-instance.sh` (new)
+- `~/.claude/projects/-Users-Kalle-dev-projects-slayzone/memory/MEMORY.md` + relevant feedback files
+
+**Done criteria (revised):**
+- Two `pnpm dev` instances side-by-side w/ distinct `SLAYZONE_STORE_DIR` + `SLAYZONE_MCP_PORT`. Zero data crossover. No single-instance-lock collision (verified via `setPath`).
+- Full e2e suite passes (`pnpm test:e2e`).
+- `pnpm typecheck` + `pnpm lint` clean.
+- No `SLAYZONE_DB_PATH` references remain in repo. No `SLAYZONE_DB_DIR` references remain.

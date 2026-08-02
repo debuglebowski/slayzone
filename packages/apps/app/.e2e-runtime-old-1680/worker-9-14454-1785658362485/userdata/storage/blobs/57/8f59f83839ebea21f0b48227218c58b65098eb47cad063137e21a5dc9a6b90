@@ -1,0 +1,42 @@
+# Vendor Review: OpenAI
+
+## URLs
+- Vendor Master Sheet (row 41): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=41
+- Cycle Drive folder: https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev
+- Cycle parent ticket: (Linear MCP not yet authenticated — pending)
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/67fad24b15d3aabfd9994064
+- Tool admin / login: rec `https://platform.openai.com/settings/organization/users` — confirm
+
+## Status
+- Information complete?: blank → goal `Yes`
+- Duplicates: none
+- Vanta: Active, Critical risk, Approved security review 2025-06-21, no ISO 27001 cert (SOC 2 Type 2 + pentests on file), data types include Customer metadata + Normain's sensitive data
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | First-pass questions to user | Pending |
+| 4 | Login + members screenshot in Drive folder | Pending |
+| 5 | Create access-removal Linear sub-issues (if any) | Pending |
+| 6 | Fill cells | Pending |
+| 7 | Flip Information complete? = Yes | Pending |
+
+## Cells (only changes shown)
+| Col | Header | Current | Proposed | Source |
+|---|---|---|---|---|
+| G | Description | (blank) | `AI model APIs (GPT family); used by Engineering via ChatGPT for coding/dev assistance` | calculated |
+| I | Subprocessor | (blank) | `Application` (Vanta lists Customer metadata + sensitive data in types) — confirm | user |
+| Q | Sync comment | `Checked 2025-07-07` | `Checked 2026-05-14` | calculated |
+| V | Cost per month | (blank) | `0.00` (T = Not a subscription) | calculated |
+| AC | Security comment | (blank) | `No ISO 27001 cert; relies on SOC 2 Type 2 + pentest reports + policy docs (per Vanta security review 2025-06-21)` | Vanta |
+| AE | Access review 2026-04-29 | (blank) | `Done` (+ comment if removals pending) | tool-page |
+| AF | Screenshot completed? | (blank) | `Yes` (after screenshot uploaded + renamed) | tool-page |
+| AH | Link | `Link` | `https://platform.openai.com/settings/organization/users` — confirm | user |
+
+## Open questions
+- **I Subprocessor** (blank): rec = `Application`. Why: Vanta lists data types = Customer metadata, Normain's data, Normain's metadata, Normain's sensitive data — customer data flows through. Alternatives: `Operations` / `N/A`.
+- **AH Link** (`Link` placeholder): rec = `https://platform.openai.com/settings/organization/users`. Alternatives: paste preferred admin URL / `N/A`.
+- **AC Security comment**: rec = note about missing ISO 27001 cert. Confirm or override.
+- **G Description** rec = `AI model APIs (GPT family); used by Engineering via ChatGPT for coding/dev assistance`. Confirm.

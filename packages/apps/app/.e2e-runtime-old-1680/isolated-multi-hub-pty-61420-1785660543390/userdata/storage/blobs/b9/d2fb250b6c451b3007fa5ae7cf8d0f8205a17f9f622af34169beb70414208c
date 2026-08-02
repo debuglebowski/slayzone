@@ -1,0 +1,268 @@
+# Phase 6.2 — react-query cleanup
+
+Follow-up to Phase 6 (mechanical client rename, 22 commits) and Phase 6.1
+(declarative conversion, 58 commits). Branch: `phase-0-path-port-hardening`,
+80 commits ahead of origin.
+
+## Where Phase 6.1 ended
+
+- Started: 224 useEffect-imperative tRPC calls (`trpcClient.x.y.query/mutate/subscribe()` inside `useEffect`)
+- Now:      76 (66% reduction)
+- 148 call sites converted across ~70 files in 14 domains
+
+Of the remaining 76:
+
+```
+ 31  packages/apps/app/src/renderer/src/App.tsx        ← own session
+ 23  packages/domains/task/src/client/TaskDetailPage.tsx ← own session
+ 10  packages/domains/settings/src/client/ThemeContext.tsx ← INTENTIONAL
+  7  packages/domains/terminal/src/client/Terminal.tsx ← INTENTIONAL (xterm lifecycle)
+  2  packages/domains/terminal/src/client/useLoopMode.ts ← INTENTIONAL (controller)
+  2  packages/domains/worktrees/src/client/WorktreesTab.tsx ← INTENTIONAL (isDirty stagger)
+  1  packages/domains/worktrees/src/client/useConsolidatedGeneralData.ts ← leftover
+```
+
+54 of 76 are in App.tsx + TaskDetailPage. The other 22 are intentionally
+imperative — converting would harm clarity, not improve it.
+
+## The three real debts
+
+### 1. Cross-process settings invalidation gap (BUG — fix first)
+
+Only `PanelsSettingsTab.tsx` invalidates the settings cache when the server
+fires `app.notify.onSettingsChanged`. Every other settings consumer is blind
+to settings changes made by the CLI or another renderer process.
+
+**Symptom:** Edit a setting via `slay` CLI → renderer doesn't refresh until
+the user manually triggers something that re-reads the setting.
+
+**Fix (~1 commit, ~15 lines):** Lift the invalidation handler into the
+`TrpcProvider` (or a sibling provider mounted at the app root) so all
+`useSetting`/`useSettings` consumers get refresh-on-remote-change for free.
+Sketch:
+
+```tsx
+// In packages/shared/transport/src/client/provider.tsx (or a new sibling)
+function SettingsInvalidationBridge() {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  useSubscription(
+    trpc.app.notify.onSettingsChanged.subscriptionOptions(undefined, {
+      onData: () => queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() }),
+    }),
+  )
+  return null
+}
+```
+
+After lifting: remove the duplicate subscription from `PanelsSettingsTab`.
+
+### 2. ~30 `queryClient.fetchQuery` escape hatches
+
+Phase 6.1 reached for `queryClient.fetchQuery(trpc.x.y.queryOptions(...))`
+whenever `useQuery` would have required restructuring local state. They get
+cache dedup but bypass the declarative pattern. Future devs will reach for
+them first because they're now the path of least resistance.
+
+**Files with the most fetchQuery uses (rough survey):**
+
+```
+packages/domains/task/src/client/useArtifacts.ts                 (5+ versions/diff/list)
+packages/domains/tasks/src/client/useTasksData.ts                (loadBoardData, getAllBlockedTaskIds)
+packages/apps/app/src/renderer/src/hooks/useTabLifecycle.ts      (taskTerminals.list)
+packages/domains/ai-config/src/client/ContextManagerSettings.tsx (legacy contextmanager)
+packages/domains/projects/src/client/IntegrationsTab.tsx         (7+ provider listings)
+packages/domains/task-browser/src/client/BrowserPanel.tsx        (4+ task/extension queries)
+packages/domains/file-editor/src/client/useFileEditor.ts         (4× readFile)
+packages/domains/task-terminals/src/client/TerminalContainer.tsx (getSubTasks)
+packages/domains/task-terminals/src/client/ManagerSidebar.tsx    (getSubTasksRecursive)
+packages/domains/task-terminals/src/client/useTaskTerminals.ts   (taskTerminals.list)
+packages/domains/task/src/client/ProcessesPanel.tsx              (listForTask × 2)
+packages/domains/ai-config/src/client/McpFlatSection.tsx         (config rescan)
+packages/domains/projects/src/client/ProjectIntegrationSetupWizard.tsx (3+ listings)
+packages/domains/worktrees/src/client/useConsolidatedGeneralData.ts (worktreeBranch, PR, metadata)
+packages/domains/task/src/client/ArtifactsPanel.tsx              (5× artifactsGetMtime)
+```
+
+**Decision criteria for each:**
+- Inside a render-time hook body or top-level useEffect → convert to `useQuery`
+- Inside a click/event handler with one-shot semantics → keep `fetchQuery` (it's correct there)
+- Inside a sequential pipeline where each fetch's input depends on the previous result → keep `fetchQuery`
+
+Don't blanket-convert. Each call site is a judgment call.
+
+### 3. Local state mirrors of query data
+
+Multiple converted files have a triple-source-of-truth shape:
+
+```tsx
+const [pr, setPr] = useState(null)              // local mirror
+const prQuery = useQuery(...)                    // canonical
+useEffect(() => setPr(prQuery.data), [...])     // imperative bridge
+```
+
+**Files (rough survey):**
+- `packages/domains/worktrees/src/client/PullRequestTab.tsx`     (`pr` state mirrors `prQuery.data`)
+- `packages/domains/ai-config/src/client/ProjectInstructions.tsx` (providerHealth state mirrors instructionsQuery.data)
+- `packages/domains/worktrees/src/client/UnifiedGitPanel.tsx`     (ConflictPhaseContent: mergeContext, conflictedFiles override)
+- `packages/domains/usage-analytics/src/client/useUsageAnalytics.ts` (rawData via setQueryData)
+- `packages/domains/ai-config/src/client/McpServersPanel.tsx`    (favorites mirrors mcp_favorites query)
+- `packages/apps/app/src/renderer/src/hooks/useHomePanelVisibility.ts` (state mirrors stored setting)
+- `packages/apps/app/src/renderer/src/components/usage/BoostPill.tsx` (mode → state)
+- `packages/domains/settings/src/client/ThemeContext.tsx`        (8 state vars mirror settings reads)
+
+**Sustainable pattern:** read directly from `query.data`, drop the local
+`useState`. For inputs with onBlur-write semantics (text fields), keep a
+local *draft* state seeded from `query.data` — that's a different pattern
+and is fine.
+
+## The big two — App.tsx + TaskDetailPage
+
+Don't tackle these as part of 6.2. Each is 1500+ lines with unique
+architectural concerns:
+- App.tsx: global keyboard shortcuts (Cmd+W focus chain), task tab
+  lifecycle, multi-window IPC, leaderboard sync
+- TaskDetailPage: 11+ subscriptions, panel ownership, terminal/browser/
+  editor coordination
+
+They warrant their own dedicated tasks when someone is touching those files
+for other reasons. Standalone "convert this huge file" sessions tend to drift.
+
+## Recommended order
+
+1. **Fix the cross-process invalidation gap** (debt #1) — small, real bug
+2. **Run `pnpm test:e2e`** to verify the 80 already-shipped commits don't regress
+3. **Push to origin and open PR for the 80 commits** — get review before adding more
+4. Defer debts #2 and #3 to opportunistic cleanup (when touching the file
+   for another reason) unless a specific instance bites
+
+## Working agreement (per memory)
+
+- **Branch:** stay on `phase-0-path-port-hardening`. Don't create a new
+  branch without explicit ask.
+- **Commits:** one logical unit per commit. Conventional Commits format
+  (`refactor(<domain>): ...`). Co-Authored-By trailer.
+- **GPG:** use `git -c commit.gpgsign=false commit` (1Password signing
+  conflicts in CI/dev).
+- **Don't push** without explicit approval.
+- **Typecheck must stay green.** Pre-existing baseline errors (5 of them)
+  are acceptable; new errors are not.
+
+### Pre-existing baseline typecheck errors (acceptable)
+
+```
+packages/shared/editor/src/milkdown-mermaid-render.tsx(21,30):
+  TS2307: Cannot find module '@slayzone/markdown/client'
+
+packages/domains/task/src/client/ArtifactsPanel.tsx(1391,43|1398,43|1431,43):
+  TS2339: Property 'settings' does not exist on type 'ElectronAPI'
+
+packages/domains/projects/src/client/ProjectIntegrationSetupWizard.tsx(187,85):
+  TS2345: Argument of type 'ProjectIntegrationProvider' is not assignable
+  to parameter of type 'void | { provider?: string | undefined; } | undefined'
+
+packages/domains/task/src/client/TaskDetailPage.tsx(879,181):
+  TS7006: Parameter 'taskId' implicitly has an 'any' type
+
+packages/apps/app/src/renderer/src/components/dialogs/SearchDialog.tsx(1,30) +
+packages/domains/file-editor/src/client/FileEditorView.tsx(*) +
+packages/domains/task/src/client/ArtifactsPanel.tsx(4,*):
+  TS6133: unused-import noise
+```
+
+### Verification commands
+
+```bash
+# Workspace typecheck (parallel, no-bail)
+pnpm -r --workspace-concurrency=4 --no-bail typecheck
+
+# E2E (requires build first)
+pnpm build && pnpm test:e2e
+
+# Imperative-call audit (the metric Phase 6.1 used)
+node -e '
+const fs = require("fs"); const { execSync } = require("child_process");
+const files = execSync("find packages/domains/*/src/client packages/apps/app/src/renderer -type f \\( -name \"*.ts\" -o -name \"*.tsx\" \\) 2>/dev/null", { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+let total = 0;
+for (const f of files) {
+  if (f.endsWith(".test.ts") || f.endsWith(".test.tsx")) continue;
+  const src = fs.readFileSync(f, "utf8");
+  if (!/useTRPCClient\(\)/.test(src)) continue;
+  const lines = src.split("\n");
+  let depth = 0, modeDepth = 0, mode = null;
+  for (const line of lines) {
+    if (mode === null && /\buseEffect\s*\(/.test(line)) { mode = "effect"; modeDepth = depth }
+    for (const ch of line) {
+      if (ch === "{") depth++;
+      else if (ch === "}") { depth--; if (mode && depth <= modeDepth) mode = null }
+    }
+    if (mode === "effect") {
+      const m = line.match(/[a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)+\.(query|mutate|subscribe)\(/g);
+      if (m) total += m.length;
+    }
+  }
+}
+console.log(`useEffect-imperative: ${total}`);
+'
+```
+
+## Patterns established (apply uniformly)
+
+These patterns are now consistent across ~70 converted files. Use them in 6.2:
+
+```tsx
+// useEffect+query → useQuery
+const { data } = useQuery(trpc.x.y.queryOptions(input))
+
+// Conditional fetch → enabled flag
+const { data } = useQuery({ ...trpc.x.y.queryOptions(input ?? defaultInput), enabled: !!input })
+
+// Polling → refetchInterval
+const { data } = useQuery({
+  ...trpc.x.y.queryOptions(input),
+  enabled: visible,
+  refetchInterval: visible ? 5000 : false,
+})
+
+// Subscription onData → invalidate
+useSubscription(trpc.x.onChanged.subscriptionOptions(undefined, {
+  onData: () => queryClient.invalidateQueries({ queryKey: trpc.x.y.queryKey() }),
+}))
+
+// Mutation with refresh → useMutation w/ onSuccess
+const m = useMutation(trpc.x.update.mutationOptions({
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.x.list.queryKey() }),
+}))
+
+// Settings (per-key)
+import { useSetting, useSetSettingMutation } from '@slayzone/settings/client'
+const value = useSetting(key)         // returns string | null | undefined
+const setSetting = useSetSettingMutation()
+setSetting.mutate({ key, value })
+
+// Settings (batch)
+import { useSettings } from '@slayzone/settings/client'
+const KEYS = ['k1', 'k2', 'k3'] as const
+const s = useSettings(KEYS)            // s.k1, s.k2, s.k3
+
+// Imperative inside event handler / sequential pipeline → fetchQuery (legitimate)
+const data = await queryClient.fetchQuery(trpc.x.y.queryOptions(input))
+```
+
+## Memories that apply
+
+- `feedback_react_query_migration_full_conversion.md` — convert imperative
+  useEffect+query, not just rename client. (The lesson that triggered Phase 6.1.)
+- `feedback_sustainability_priority.md` — pick the most sustainable solution.
+- `feedback_no_destructive_git.md` / `feedback_never_destructive_git_v2.md` — no destructive git.
+- `feedback_never_create_branch_without_asking.md` — stay on this branch.
+- `feedback_no_auto_commit_v2.md` — never commit without explicit approval.
+- `feedback_implement_without_asking.md` — when told to implement, just do it.
+
+## Status before starting 6.2
+
+- 80 commits on `phase-0-path-port-hardening` (22 Phase 6 + 58 Phase 6.1)
+- Workspace state: clean (no uncommitted changes)
+- Latest commit: `f214d151 refactor(projects): convert ProjectIntegrationSetupWizard remaining 2`
+- Typecheck: green except 5 pre-existing baseline errors (listed above)
+- E2E: not run yet — verify before/during 6.2

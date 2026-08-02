@@ -1,0 +1,66 @@
+# Spark (Readdle) — Vendor Security Review: Risk Acceptance Assessment
+
+**Date:** 2026-06-18 · **Owner:** Kalle Hansson · **Classification: MEDIUM · Verdict: KEEP — normal onboarding, effort small.**
+
+## TL;DR
+
+Classified **Medium**, Spark **meets Normain's required documentation** once one item is signed. Per the Third-Party Mgmt Policy treatment table, a **Medium** vendor requires only: **Public Privacy Policy** (✔ have) + **one of {security questionnaire, DPA}** (✔ Spark Mail Limited publishes a DPA). **SOC 2 / ISO 27001, pen test, security policies, IR plan, BC docs are NOT required at Medium** — so the earlier "gap" disappears. No risk-acceptance/exception memo is strictly needed; this is **standard vendor onboarding**. The EU→US transfer is closed by the same DPA + Google Cloud's DPF/SCCs (no server move needed). Effort ≈ half a day. **Do not switch clients.**
+
+## Current status in the review
+
+Vendor Master row 71: approved tool = **Yes**, but ISO27001/SOC2 col = **"Decommissioned"**, risk score = **"Unscored"**, Vanta = "No need to add", info-complete = **blank**, last checked 2025-07-07. Re-activating, scoring Medium, and signing the DPA closes this final review item.
+
+## Classification: MEDIUM — required vs. have
+
+| Required doc (Medium)                            | Status                                                |
+| ------------------------------------------------ | ----------------------------------------------------- |
+| Public Privacy Policy                            | ✔ Have (published)                                    |
+| One of: Security Questionnaire **or** DPA        | ✔ DPA available from Spark Mail Limited — **sign it** |
+| SOC 2 / ISO 27001                                | ❌ Not required at Medium                              |
+| Pen test / security policies / IR plan / BC docs | ❌ Not required at Medium                              |
+
+Rationale for Medium: single user (Kalle), Operations access; originals stay in Google Workspace; Spark server-side storage is minimal + encrypted + short-lived. (Would be High/Critical only if treated as full mailbox/PII processor.)
+
+## What Spark does with our data (per privacy policy)
+
+* **Operator entity:** **Spark Mail Limited** (Readdle = parent brand).
+
+* **Auth:** OAuth token (Gmail/Workspace) — **no password stored**.
+
+* **Email content:** originals stay in Google Workspace. Spark servers hold only: notification subject + snippet (encrypted, **deleted \~4h**); Send Later / shared drafts / templates (encrypted, deleted after send).
+
+* **Hosting:** Google Cloud, **US region** (Google Cloud SOC 2 + ISO 27001 certified).
+
+* **Compliance:** GDPR + CCPA; DPO <dpo@sparkmailapp.com>; self-serve "Remove My Data"; **customer DPA published**.
+
+## EU→US transfer — RESOLVED, no server relocation needed
+
+EU data residency was never required (Spark US hosting is fixed/immovable). The US data importer is **Google Cloud, which IS DPF-certified + provides SCCs**; Spark Mail Limited is a non-US "Limited" entity. **Signing Spark's DPA** (Art. 28 + SCC flow-down) + Google's DPF/SCCs makes the transfer lawful as-is. Minor: the main privacy page still cites the dead **Privacy Shield** (a newer Spark KB page already says "Data Privacy Framework") — superseded by the executed DPA; low concern.
+
+## Optional compensating control — shrink the server-side footprint
+
+**Not required at Medium.** Keeping push notifications ON is an accepted choice — the encrypted subject+snippet (deleted \~4h, Google Cloud US) is governed by the DPA + SCCs. If you keep them on, just record "server-side notifications enabled, covered by DPA" in the vendor row. The footprint-reducers below are available only if you want them:
+
+* **Re-add the account declining push notifications at first setup** → Spark "will not send your account information to servers" (also disables Send Later / shared drafts / sync). Cost: no push notifications.
+
+* **Purge existing server data:** Spark Classic → Settings → **Remove My Data From Spark** (or email <dpo@sparkmailapp.com>).
+
+* **Mac per-account:** Settings → Notifications → account → **No Notifications** (reduces snippet syncing).
+
+* Avoid Send Later / shared drafts / templates if footprint must stay minimal.
+
+## Suggested actions (to enable Spark)
+
+* [ ] **Retain Spark Mail Limited's DPA on file** — published at <https://sparkmailapp.com/legal/data-processing-agreement>. **No signature needed**: it's incorporated by reference into the Terms of Service (accepting the ToS executes the DPA + full EU SCCs controller→processor; Google named as sub-processor). Satisfies the Medium "DPA" requirement **and** closes EU→US transfer. Save a dated copy in `02 - Signed DPAs with subprocessors` — that's enough. 
+
+* [ ] **Complete Vendor Master row 71:** flip "Decommissioned" → active, Information complete = Yes, risk score = **Medium**, business/security owner = Kalle, sync date.
+
+* [ ] **Add to Vanta** as a managed vendor; score **Medium**; upload evidence: Spark **public privacy policy** (✔) + **signed DPA** (✔). Mark SOC2/ISO27001 **N/A at Medium**; note Google Cloud DPF/SCCs as US-leg transfer basis.
+
+* [ ] (Optional) Apply a server-side-footprint compensating control above. Skipping it (keeping notifications on) is acceptable at Medium.
+
+* [ ] **Confirm with Security Delegate (Sara Landfors)** the Medium classification + that no exception memo is needed (docs complete at Medium). No "vendor red list" entry required if docs are complete.
+
+## Open questions
+
+* None — classification (Medium) and footprint-reduction method resolved.

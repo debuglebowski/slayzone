@@ -1,0 +1,35 @@
+flowchart TD
+    EP1["Episode 1 — the map<br/>(a brief pass over every theme below)"]
+
+    subgraph T1["What AI actually is"]
+        T1a["What happens when you prompt an AI"]
+        T1b["How models learn: patterns, not rules"]
+        T1c["Why AI is confidently wrong (hallucination)"]
+        T1d["Narrow AI vs. general intelligence"]
+        T1e["It's not one thing: generative vs. recommender vs. decision systems"]
+    end
+
+    subgraph T2["Where it already touches your life"]
+        T2a["AI you already interact with without knowing it"]
+        T2b["Generative tools: real uses, real limits"]
+        T2c["AI at work: automation vs. augmentation"]
+    end
+
+    subgraph T3["The risks"]
+        T3a["Bias in automated decisions"]
+        T3b["Deepfakes and misinformation"]
+        T3c["Privacy: what happens to what you type"]
+        T3d["AI-enabled scams and fraud"]
+    end
+
+    subgraph T4["The big implications"]
+        T4a["Jobs and the economy: hype vs. realistic"]
+        T4b["EU AI Act: what it actually means for you"]
+        T4c["Who controls this, and why that matters"]
+        T4d["The AGI / superintelligence debate"]
+    end
+
+    EP1 --> T1
+    EP1 --> T2
+    EP1 --> T3
+    EP1 --> T4

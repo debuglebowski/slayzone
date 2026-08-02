@@ -1,0 +1,133 @@
+# Normain – July 2025 Commit Review
+**Total commits: 114**
+
+## Summary
+
+| Metric            | Value  |
+|-------------------|--------|
+| Avg Complexity    | 2.17   |
+| Avg Effort        | 2.14   |
+| Avg Thought       | 2.30   |
+| Total Est. Hours  | 103.2  |
+
+---
+
+## Commit Table
+
+| Hash      | Date       | Subject                                                       | CX | Eff | Thought | Hrs  |
+|-----------|------------|---------------------------------------------------------------|----|-----|---------|------|
+| 471d4a9d6 | 2025-07-31 | Include iterations updatedAt to show updated frameworks       |  4 |  4  |    4    |  2.5 |
+| 60b4530c7 | 2025-07-31 | Merge pull request #248 fix/mentions                          |  1 |  1  |    1    |  0.1 |
+| d5ba8fb9c | 2025-07-31 | Add back description                                          |  1 |  1  |    1    |  0.2 |
+| 6e8d6f37a | 2025-07-31 | Fix mentions for regex identification on RAG                  |  3 |  2  |    4    |  1.0 |
+| 3e4c1e7f9 | 2025-07-30 | Merge pull request #176 nor-1467 start indexing on add files  |  1 |  1  |    1    |  0.1 |
+| aa48f8300 | 2025-07-30 | Fix arguments to be a config object instead                   |  3 |  2  |    3    |  0.5 |
+| c8a554bf2 | 2025-07-30 | Fix framework settings card to fill only space needed         |  2 |  1  |    2    |  0.5 |
+| a357013f3 | 2025-07-30 | Merge branch main into feature/nor-1405 accordion expand      |  1 |  1  |    1    |  0.1 |
+| 8a53c44a3 | 2025-07-30 | Merge with main                                               |  1 |  1  |    1    |  0.1 |
+| 78d3dfa7c | 2025-07-30 | Add parse instead of type casting, remove unnecessary casting |  2 |  2  |    2    |  0.5 |
+| c88f55dab | 2025-07-30 | Merge pull request #246 nor-1536 email case-sensitive fix     |  1 |  1  |    1    |  0.1 |
+| d14f1fec6 | 2025-07-29 | Review changes                                                |  2 |  2  |    2    |  0.5 |
+| 4bb254043 | 2025-07-29 | Create users with email address lowercased                    |  3 |  2  |    3    |  0.5 |
+| f541e33f9 | 2025-07-29 | Find credentials by lowercased email                          |  3 |  2  |    3    |  0.5 |
+| d0302dbbf | 2025-07-18 | Merge pull request #233 fix/tooltip                           |  1 |  1  |    1    |  0.1 |
+| ede39ad96 | 2025-07-16 | Change root color to initial                                  |  1 |  1  |    1    |  0.2 |
+| f6e61264a | 2025-07-15 | Add solid color for attention, update tooltip with new color  |  2 |  2  |    2    |  0.5 |
+| 2e7fa6154 | 2025-07-15 | Merge pull request #213 nor-1461 assign cols by header name   |  1 |  1  |    1    |  0.1 |
+| 8f10ceb33 | 2025-07-15 | Merge pull request #224 nor-1514 add sorting to entity tables |  1 |  1  |    1    |  0.1 |
+| 8ebf230f3 | 2025-07-15 | Remove duplicate DatabaseIcon, change type to interface       |  1 |  1  |    1    |  0.3 |
+| ebe9582dc | 2025-07-15 | Merge with main                                               |  1 |  1  |    1    |  0.1 |
+| d705b287c | 2025-07-15 | Merge branch main into nor-1514 add sorting entity tables     |  1 |  1  |    1    |  0.1 |
+| ad049ee63 | 2025-07-15 | Use Mentions type in Input__Mention, new type in context.sheet|  2 |  2  |    3    |  0.5 |
+| 1afd04a08 | 2025-07-15 | Merge branch main into nor-1461 assign cols by header name    |  1 |  1  |    1    |  0.1 |
+| 32de61aed | 2025-07-15 | Merge pull request #231 nor-1446 guess header row via LLM     |  1 |  1  |    1    |  0.1 |
+| eb20d429d | 2025-07-15 | Move table prop, break out SortIndicator to components        |  2 |  2  |    2    |  0.5 |
+| 10993f3e0 | 2025-07-15 | Merge with main, improve prompt + remove unnecessary code     |  3 |  3  |    4    |  1.0 |
+| 2e4996ffd | 2025-07-15 | Fix lint (#232)                                               |  1 |  1  |    1    |  0.2 |
+| 79934c043 | 2025-07-15 | Adjust log retention (#194)                                   |  2 |  1  |    2    |  0.5 |
+| 8dd53349b | 2025-07-15 | Merge pull request #229 nor-1528 fix header row readability   |  1 |  1  |    1    |  0.1 |
+| a0ab81fb3 | 2025-07-15 | Merge pull request #221 nor-1519 better empty state home      |  1 |  1  |    1    |  0.1 |
+| 75e7c734c | 2025-07-15 | Add LayoutMain to early return for breadcrumb/sidebar trigger |  3 |  2  |    3    |  0.5 |
+| ff43c2fd3 | 2025-07-14 | Add LLM call to guess header row for spreadsheets             |  7 |  7  |    8    |  6.0 |
+| bd44dcf20 | 2025-07-14 | Add ability to resize header row                              |  4 |  4  |    4    |  2.0 |
+| 807f7ead7 | 2025-07-14 | Merge branch main into nor-1514 add sorting entity tables     |  1 |  1  |    1    |  0.1 |
+| 4817534ad | 2025-07-14 | Merge branch main into nor-1519 better empty state home       |  1 |  1  |    1    |  0.1 |
+| 17415f733 | 2025-07-14 | Merge branch main into nor-1461 assign cols by header name    |  1 |  1  |    1    |  0.1 |
+| 3e822026f | 2025-07-14 | Merge with main                                               |  1 |  1  |    1    |  0.1 |
+| d1ede108f | 2025-07-14 | Merge pull request #228 fix/fix_lint_for_config_row           |  1 |  1  |    1    |  0.1 |
+| b45ade64e | 2025-07-14 | Have early return instead for empty state                     |  2 |  2  |    2    |  0.5 |
+| 6139258fe | 2025-07-14 | Fix lint                                                      |  1 |  1  |    1    |  0.2 |
+| 68fd30568 | 2025-07-14 | Move icon to the beginning                                    |  1 |  1  |    1    |  0.2 |
+| 0c3bc2512 | 2025-07-14 | Fix readability                                               |  2 |  3  |    2    |  1.0 |
+| e5f8b1525 | 2025-07-14 | Merge branch main into nor-1514 add sorting entity tables     |  1 |  1  |    1    |  0.1 |
+| c57e028a6 | 2025-07-14 | Fix lint                                                      |  1 |  1  |    1    |  0.2 |
+| 6c39c4d9c | 2025-07-14 | Fix lint                                                      |  1 |  1  |    1    |  0.2 |
+| 2c1dc3190 | 2025-07-14 | Merge branch main into nor-1467 start indexing on add files   |  1 |  1  |    1    |  0.1 |
+| 1cdb5613b | 2025-07-14 | Rerun jobs                                                    |  1 |  1  |    2    |  0.3 |
+| 7d2f927ae | 2025-07-14 | Break out into service, rename isLoading to isReindexing      |  5 |  5  |    5    |  3.0 |
+| f942c42dc | 2025-07-14 | Merge pull request #187 nor-1472 option to show all rows      |  1 |  1  |    1    |  0.1 |
+| df16b594a | 2025-07-14 | Merge pull request #158 nor-1332 make top-prompt row resizable|  1 |  1  |    1    |  0.1 |
+| 9517ad601 | 2025-07-14 | Fixed ts bugs (#227)                                          |  2 |  2  |    2    |  0.5 |
+| 138383e6d | 2025-07-14 | Add shortcut, move iterations out, use toggleLayoutItem       |  5 |  5  |    5    |  3.0 |
+| 79bd2c86c | 2025-07-14 | Move constant to separate file, code housekeeping             |  3 |  4  |    3    |  1.5 |
+| 41d9ca4e1 | 2025-07-14 | Move padding into Row__Number__Button component               |  2 |  1  |    2    |  0.3 |
+| e23bccf22 | 2025-07-14 | Merge pull request #216 nor-1515 make tooltip more pleasant   |  1 |  1  |    1    |  0.1 |
+| d24720f7a | 2025-07-11 | Add cap to generated search queries (#225)                    |  3 |  2  |    3    |  1.0 |
+| 4c6e1dd1b | 2025-07-11 | Add sorting option to EntityList                              |  6 |  7  |    6    |  5.0 |
+| ade007263 | 2025-07-10 | Add better empty state for home screen                        |  3 |  4  |    4    |  2.0 |
+| f4f27049a | 2025-07-09 | Merge pull request #191 nor-1516 circled question marks index |  1 |  1  |    1    |  0.1 |
+| b85930087 | 2025-07-09 | Update tooltip copy, break Row__Number__Button to separate    |  3 |  3  |    3    |  1.5 |
+| ef76f09a7 | 2025-07-07 | Add subtle attention color to tooltip background              |  2 |  2  |    3    |  1.0 |
+| 6312d357d | 2025-07-07 | Bring back async worker for triggering sourceDocument creation|  5 |  4  |    6    |  3.0 |
+| fd8ce75fc | 2025-07-04 | Move functionality into service and break out into files      |  5 |  6  |    5    |  3.5 |
+| a56b22736 | 2025-07-04 | Infra/dynamic application security testing (#203)             |  7 |  7  |    7    |  6.0 |
+| dd20e140b | 2025-07-04 | Break out to own component for the cell tooltip               |  3 |  3  |    3    |  1.5 |
+| e969d4556 | 2025-07-04 | Add database icon and output icon for dropdown                |  2 |  3  |    2    |  1.0 |
+| 3a981ae7e | 2025-07-03 | Merge pull request #215 nor-1499 change GHA workflows         |  1 |  1  |    1    |  0.1 |
+| fe4986918 | 2025-07-03 | Revert: insert test failure                                   |  2 |  1  |    2    |  0.5 |
+| 7ab0ff107 | 2025-07-03 | Revert: insert lint issue                                     |  2 |  1  |    2    |  0.5 |
+| ad4ffdce3 | 2025-07-03 | fix                                                           |  2 |  2  |    2    |  0.3 |
+| ac5617d18 | 2025-07-03 | fixes                                                         |  2 |  2  |    2    |  0.3 |
+| 328557181 | 2025-07-03 | Revert: insert test failure                                   |  2 |  1  |    2    |  0.3 |
+| d588c6763 | 2025-07-03 | Revert: insert lint issue                                     |  2 |  1  |    2    |  0.3 |
+| 7f2cf4e2b | 2025-07-03 | Merge pull request #214 nor-1524 sidebar border-radius fix    |  1 |  1  |    1    |  0.1 |
+| 499df6d76 | 2025-07-03 | Fix lint                                                      |  1 |  1  |    1    |  0.2 |
+| 05d65aaf6 | 2025-07-03 | Make tooltip less intrusive                                   |  2 |  2  |    2    |  0.5 |
+| 3752ded60 | 2025-07-03 | Add pr-check workflow                                         |  5 |  5  |    6    |  3.0 |
+| c79cd94e5 | 2025-07-03 | Make sidebar only have radius on the right                    |  2 |  2  |    2    |  0.5 |
+| 02295e1d9 | 2025-07-03 | Make meta optional                                            |  2 |  2  |    2    |  0.5 |
+| c8cc86985 | 2025-07-03 | Add name to dropdown and highlight of the mentions            |  5 |  5  |    6    |  3.5 |
+| b5f0c5a44 | 2025-07-03 | Fixed linting                                                 |  1 |  2  |    1    |  0.3 |
+| 4ef84cd56 | 2025-07-03 | Trying to fix the excel export bug (#202)                     |  5 |  4  |    5    |  3.0 |
+| c39c3da97 | 2025-07-03 | Add disabled state                                            |  3 |  3  |    3    |  1.0 |
+| 4c4e3a761 | 2025-07-03 | Remove unused outer div                                       |  1 |  2  |    1    |  0.5 |
+| 00a2a29f8 | 2025-07-03 | Add on same line instead                                      |  3 |  3  |    3    |  1.0 |
+| 78c90e49f | 2025-07-03 | First try of DAST (#197)                                      |  5 |  4  |    6    |  3.0 |
+| 53d6bb528 | 2025-07-03 | Decrease size of cell index tooltip icon                      |  1 |  1  |    1    |  0.2 |
+| d432a807a | 2025-07-03 | Merge with main                                               |  1 |  1  |    1    |  0.1 |
+| da3a53d5c | 2025-07-03 | Merge pull request #190 nor-1490 change icon for file group   |  1 |  1  |    1    |  0.1 |
+| dd9ecc7bd | 2025-07-03 | Change accordions into checkboxes                             |  3 |  3  |    4    |  1.5 |
+| a0ea32dce | 2025-07-03 | Fix/sr-bugs (#196)                                            |  5 |  4  |    5    |  3.0 |
+| a78bf5dd9 | 2025-07-02 | WIP                                                           |  6 |  8  |    6    |  5.0 |
+| 99f04cf3e | 2025-07-02 | Added eslint-plugin-security and fixed the issues (#195)      |  5 |  6  |    5    |  4.0 |
+| 07ac634bb | 2025-07-02 | Fix/2050 gap analysis finalize similarity search container    |  3 |  3  |    3    |  1.5 |
+| 54b62a514 | 2025-07-02 | Merge with main                                               |  1 |  1  |    1    |  0.1 |
+| 846adce67 | 2025-07-02 | Add description and better icons                              |  3 |  4  |    3    |  1.5 |
+| 9e37553b1 | 2025-07-02 | Always allow export (#192)                                    |  2 |  2  |    2    |  0.5 |
+| a161b0b9d | 2025-07-02 | Merge with main                                               |  1 |  1  |    1    |  0.1 |
+| 2b38e7132 | 2025-07-02 | Add question mark icon on index rows for header/config        |  3 |  3  |    3    |  1.5 |
+| 556a38377 | 2025-07-02 | Merge pull request #172 nor-1460 dropdown items not visible   |  1 |  1  |    1    |  0.1 |
+| 1c493707b | 2025-07-02 | Merge pull request #186 nor-1169 empty states for tables      |  1 |  1  |    1    |  0.1 |
+| ddbcddbeb | 2025-07-02 | Rename empty states for better grouping                       |  1 |  2  |    2    |  0.5 |
+| 3b94f9130 | 2025-07-02 | Move empty state to shared, rename to EmptyState__TableRow    |  2 |  3  |    2    |  1.0 |
+| 95acf0a52 | 2025-07-02 | Add navigation from logo (#167)                               |  2 |  2  |    2    |  0.5 |
+| 64e9a59db | 2025-07-02 | Change Spreadsheets to Spreadsheet Frameworks (#188)          |  1 |  1  |    1    |  0.3 |
+| 418ad16b9 | 2025-07-02 | Merge pull request #174 nor-1484 add icon to home/teams       |  1 |  1  |    1    |  0.1 |
+| 37e224cf2 | 2025-07-02 | Merge pull request #184 nor-1489 spreadsheet feels like sheet |  1 |  1  |    1    |  0.1 |
+| 236217437 | 2025-07-02 | Merge pull request #189 nor-1173 fix multiple open dropdowns  |  1 |  1  |    1    |  0.1 |
+| 4e4f68eb7 | 2025-07-02 | Merge pull request #173 nor-1504 fix glib vulnerability       |  1 |  1  |    1    |  0.1 |
+| 7096c06df | 2025-07-01 | Add better icons                                              |  2 |  4  |    3    |  1.5 |
+| 8445e5dd6 | 2025-07-01 | Fix multiple dropdowns shown by changing to non-modal         |  3 |  2  |    4    |  1.0 |
+| ccad2bf4d | 2025-06-26 | Update base image                                             |  2 |  1  |    2    |  0.5 |
+| 8e8e4459d | 2025-07-01 | Add show all button for visible rows                          |  3 |  3  |    3    |  1.0 |
+

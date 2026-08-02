@@ -1,0 +1,41 @@
+# AI Provider Tycoon — Action Schema
+
+The contract between the LLM and the simulation. Every tick, an agent returns a list of actions; this asset defines what's legal.
+
+## What it specifies
+
+- What actions exist (categories: capacity, research, marketing, pricing, M&A, messaging, sabotage, …)
+- Parameter constraints per action (ranges, types, target IDs)
+- Mutual exclusion / dependencies between actions
+- Behavior on illegal actions (clamp? reject with feedback? hard fail?)
+
+Bigger schema = more tokens per call = more cost per player per tick. Worth designing tightly.
+
+## Starter sketch
+
+```
+- set_marketing_spend(amount)
+- set_research_spend(amount)
+- set_reliability_spend(amount)
+- allocate_compute(inference_servers, research_servers)   // capacity, not spend
+- start_research(target_quality: 1..10, est_cost)
+- buy_server(tier)
+- upgrade_server(server_id, target_tier)
+- set_price(model_id, price_per_token)
+- publish_model(model_id)
+- offer_to_buy(player_id, price)
+- solicit_buyer(player_id)
+- accept_offer(offer_id)
+- send_message(player_id, body)
+- attempt_hack(player_id)
+- throw_dirt(player_id)
+- tip_off(player_id)
+```
+
+## Open
+
+- Final action set (must reconcile with **2. Actions** asset).
+- Parameter ranges and units.
+- Dependencies (e.g. can `publish_model` reference an in-progress research job?).
+- Illegal-action policy: silent clamp, reject with reason in next tick's history, or hard fail the tick.
+- JSON shape of the response (one envelope vs. flat list).

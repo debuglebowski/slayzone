@@ -1,0 +1,36 @@
+# Slice 5 — Renderer tRPC cutover — progress
+
+Mode: autonomous, live tree, direct-to-main per verified batch (signed commits).
+Verify: scoped tsgo (domain+transport+app) + scoped eslint + targeted tests; build checkpoints green (leaf, mid, terminal). Full pnpm lint/typecheck unusable (chromium/ fork pollution).
+
+## Pushed batches
+P0 infra 34f40031 | P1 tags 97447fe1 | P2 agent-turns 4e948ee7 | P3 usage-analytics 2fed684f |
+P4 automations / P5 test-panel / P6 task-artifacts / P7 file-editor — c32bc599 |
+P8 settings / P9 projects / P10 task-browser / P11 worktrees — 80d7595e |
+P12 ai-config / P13 task-terminals — 42298c9d |
+P14+P15 terminal (PtyContext subs + getTrpcClient module-scope accessor) — 0a282703
+
+## Remaining
+- [ ] task domain (34 files — TaskDetailPage etc.)  [in progress]
+- [ ] tasks domain (useTasksData + __slayzone_refreshData, dual-mirror)  [in progress]
+- [ ] telemetry, onboarding  [in progress]
+- [ ] P6b feedback router (server) + FeedbackDialog
+- [ ] P17 app renderer (~109 files)
+- [ ] P18 leftover small domains
+- [ ] P19 e2e vanilla-client swap
+
+## Infra added beyond plan
+- getTrpcClient() module-scope singleton (transport) — for non-React zustand stores.
+- TrpcProvider now wraps floating-panel + secondary-window entrypoints (ThemeContext needs tRPC).
+- Server-side type fixes at worker-DB boundary: artifact-store version methods, integrations.applyStatusSync, marketplace install/unlink/updateSkill.
+
+## Residuals on bridge (allowlist: no router / electron-native / boot-before-client)
+files.getDropPaths/getPastePaths; automations.onChanged; pty.onStats/onResizeNeeded;
+tabs.listHibernatedSessions; app.isPlaywright; browser.* native WCV ops; app.focusRenderer;
+module-scope stores useTabStore/useContextManagerStore (settings at boot).
+
+## Unclarities (final report)
+1. pnpm lint + pnpm typecheck (root) broken by chromium/ fork — need chromium/ ignored.
+2. Slice-3 router gaps surfaced: no subscriptions for automations.onChanged, pty.onStats, pty.onResizeNeeded; no feedback router (P6b builds it).
+3. Full e2e (hours) deferred to final consolidated checkpoint.
+4. Live terminal verification recommended (PtyContext data-spine cutover — typecheck+build+review done, runtime not yet smoke-tested).

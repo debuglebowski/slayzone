@@ -1,0 +1,133 @@
+# Skill drafts
+
+Working doc — bullets per skill, expand as we go.
+
+---
+
+## uc--new
+
+Create a new use-case folder under `data/<uc>/`.
+
+- ask/derive `<uc>` id (folder name, e.g. `uc09`) + label + description
+- scaffold: `use-case.json`, empty `structure.json`, `data-sources/`, `runs/`
+- `use-case.json` = `{ label, description }` (id = folder name)
+- pick initial structure type: `questions` or `spreadsheet` (empty either way)
+- run `bun run check` after to verify integrity
+
+---
+
+## uc--edit-structure
+
+Edit `data/<uc>/structure.json` — add/remove/edit questions or spreadsheet cells.
+
+- detect type (`questions` vs `spreadsheet`) before editing
+- questions: append/modify `{ id, uc, type, depth, text, groundTruth, trap?, pair? }`
+- enforce id format + uniqueness within uc
+- keep `uc` field matching folder name
+- warn if edits invalidate existing run answers (id renames, deletions)
+- `bun run check` after
+
+---
+
+## uc-run--new
+
+Create new versioned run `data/<uc>/runs/<vN>/`.
+
+- auto-pick next `v<N>` from existing runs
+- scaffold `run.json` (`{ id, date, notes? }`) — date = today
+- snapshot ground truth into run.json per data model
+- create empty per-competitor folders from `data/competitors.json`? or on-demand?
+- no answers/verdicts files yet — those land via the register skill
+
+---
+
+## uc-run--grade-competitor-answers
+
+Produce `answers.verdicts.json` for one competitor in a run.
+
+- inputs: `<uc>`, `<run>`, `<competitorId>`
+- read structure (ground truth) + competitor `answers.json`
+- per question: assign `verdict` ∈ {correct, partial, wrong, retrieval-fail, not-run} + optional `verdictReason`
+- write `data/<uc>/runs/<run>/<cid>/answers.verdicts.json`
+- skip questions already graded? or always overwrite?
+- `bun run check` after
+
+---
+
+## uc-run--register-competitor-answers
+
+Ingest raw competitor output into `answers.json` for a run.
+
+- inputs: `<uc>`, `<run>`, `<competitorId>`, raw output (paste / file)
+- map raw output → `{ questionId, answerText }[]` against current structure
+- write `data/<uc>/runs/<run>/<cid>/answers.json`
+- also drop/update `instructions.md` for what the competitor was told?
+- flag unmatched questions / extra answers
+- `bun run check` after
+
+---
+
+## Per-competitor execution skills
+
+One skill per competitor — runs the use-case against that competitor and produces the raw output to feed into `uc-run--register-competitor-answers`.
+
+### uc-run--competitor--normain
+
+- drive Normain (own product) against `<uc>` structure + `data-sources/`
+- emit raw answers → hand off to register skill
+- capture `instructions.md` used
+
+### uc-run--competitor--claude
+
+- run questions via Claude API w/ `data-sources/` attached
+- model + system prompt pinned per run
+- emit raw answers
+
+### uc-run--competitor--claude-code
+
+- spawn Claude Code session in a sandbox w/ `data-sources/` mounted
+- feed questions, collect responses
+- emit raw answers
+
+### uc-run--competitor--claude-cowork
+
+- drive Claude Cowork flow against `<uc>`
+- manual vs scripted? (likely manual paste step)
+- emit raw answers
+
+### uc-run--competitor--chatgpt-thinking
+
+- run via ChatGPT (Thinking mode) — likely manual paste loop
+- capture prompts + responses
+- emit raw answers
+
+### uc-run--competitor--m365-copilot
+
+- M365 Copilot — manual run, data-sources uploaded to OneDrive/SharePoint?
+- capture how sources were exposed
+- emit raw answers
+
+### uc-run--competitor--gemini-dr
+
+- Gemini Deep Research — kick off research task, wait for report
+- map report → per-question answers
+- emit raw answers
+
+### uc-run--competitor--notebooklm
+
+- upload `data-sources/` to a NotebookLM notebook
+- ask each question, collect responses
+- emit raw answers
+
+---
+
+## Open questions
+
+- skill location: `.claude/skills/` (committed) vs `.agents/skills/` (draft)?
+- naming: `uc--new` double-dash intentional? keep as-is?
+- grade skill: human-in-the-loop per question, or batch w/ LLM judge?
+- register skill: input format — JSON paste, markdown, CSV, screenshot?
+- run-new: pre-create per-competitor folders, or lazy?
+- structure-edit: support renames safely (rewrite existing verdicts), or refuse?
+- competitor skills: API-driven vs manual-paste — which are automatable today?
+- shared sub-skill for "ask N questions, collect answers" to dedupe across competitors?

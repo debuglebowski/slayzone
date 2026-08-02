@@ -1,0 +1,122 @@
+# Plan — Consolidate SLA / DPA / Subprocessor structure (Drive)
+
+_Live state as of 2026-06-03. Shared drive: **Normain** (`0ADHH7JidkICFUk9PVA`). No file is deleted: moves within the shared drive preserve file ID, link, and version history; superseded versions keep their bare-date folder or go to `99 - Old/`. Already-signed agreements in customer folders are frozen historical records — never edited or moved._
+
+## Agreed design decisions
+
+| # | Decision |
+|---|---|
+| 1 | All official **published/SaaS docs** live in **`05 - InfoSec / 02 - Official Other Policies`** under a flat numbered scheme — `01. SaaS - Terms of Use`, `02. SaaS - DPA`, `11/12/13. Website - Privacy/Cookie/Terms of Use`, `21/22. Application - Privacy/Cookie`. (The SLA is a contract attachment, not a policy → deferred, not here.) Each is a folder holding its dated `- LATEST` file. _(Supersedes earlier placements: SaaS-default-agreements, Marketing, Product&Tech Published-policies — all reverted to this.)_ |
+| 2 | **Marketplace (privacy-first) and SaaS (experimentation-first) are separate lineages** — kept apart even while currently identical. |
+| 3 | **Version unit = the whole contract package**, snapshotted together. A snapshot is cut when the **offer/agreements change materially** — not per customer, not per minor edit. To change: copy the latest snapshot forward into a new dated folder and edit there. |
+| 4 | Templates split by motion: **`01 - Microsoft Marketplace Template`** + **`02 - Customer Cloud Hosting Template`** (singular). All package content lives **inside dated snapshot subfolders**. |
+| 5 | **Every document carries its own in-doc effective/version date** (DPA + SLA header; each subprocessor appendix its own "last updated"). That date **MUST equal the snapshot folder name** (`YYYY-MM-DD`). The signed copy in a customer folder is therefore self-describing — it *is* the per-customer version record; no external sheet is the source of truth. |
+| 6 | **All DPA templates embed the subprocessor list as an appendix** (the embedded appendix is the customer-facing source of truth; the InfoSec standalone list is the internal working master that feeds them). Appendix structure standardized across templates; the empty appendix populated. Any template change is **dated today** and created in **`… - DRAFT`** first, promoted to `… - LATEST` on finalisation. Already-signed DPAs are not changed. |
+
+## Snapshot naming convention
+
+- Suffix marks status: `… - LATEST` = active · `… - DRAFT` = work in progress · (no suffix) = superseded history. ISO date sorts chronologically.
+- **Container depends on content:**
+  - **Packages** (multi-file, e.g. the enterprise template motions) → dated **subfolders**: `YYYY-MM-DD - LATEST/`.
+  - **Single documents** (subprocessor list, SaaS policies, SaaS DPA/SLA) → dated **files**: `<Name> - YYYY-MM-DD - LATEST`. No subfolder, no separate archive folder — superseded versions are just bare-date files alongside.
+- **Lifecycle:** `… - DRAFT` → finalize (rename to `… - LATEST`, drop `- LATEST` from the prior active) → superseded (drop suffix → bare date).
+- **Invariant:** exactly **one** `- LATEST` per folder; zero-or-more `- DRAFT`; all others bare-date.
+- The in-doc effective date (decision 5) must match the folder/filename date.
+- This convention + the copy-forward / never-edit-a-used-snapshot rule lives **once** in `05 - InfoSec / 03 - Procedures & Runbooks` (extend the existing policy-update runbook) — not duplicated per folder.
+
+## Snapshot contents (per motion)
+
+| Motion | Each dated snapshot contains |
+|---|---|
+| Microsoft Marketplace | The Order TEMPLATE · Marketplace DPA (with embedded subprocessor appendix) · SLA copy |
+| Customer Cloud Hosting | Normain - Main Agreement · Attachment 1 Terms · Attachment 2 SLA · Attachment 3 DPA (with embedded subprocessor appendix) |
+
+The subprocessor list is embedded **inside** the DPA (decision 6), so it is not a separate file in the snapshot. The **NDA** lives in its own versioned folder `03 - NDA/`; the **SLA calculator** (a tool) in `98 - Tools/`.
+
+## Subprocessor embedding — current variance (to standardize)
+
+| DPA | Clause | Appendix | Content |
+|---|---|---|---|
+| Marketplace (`1ticl`) | "attached … (Appendix B)" | **Appendix B** | Full: Table 1 (BetterStack, Azure, PostHog) + Table 2 (14 company subs incl. Anthropic) |
+| Cloud Hosting template (`14JrU`) | "provided … upon request" | **Appendix A** | Reduced: Table 1 only (BetterStack, PostHog — no Azure) |
+| InfoSec hosting (`1it8`) | "attached … (Appendix A)" | **Appendix A** | **Empty / placeholder — no table populated** |
+
+Plus a standalone `List of preapproved subprocessors_2026-04-28` (InfoSec) = a 4th, non-embedded copy. Cloud-Hosting having fewer subprocessors is legitimate (Azure is the customer's). Problems to fix: the **empty appendix**, the **drifting standalone**, and the inconsistent appendix **letter**.
+
+## Structure (as built, 2026-06-05)
+
+```
+Normain/  (shared drive)
+├── 02 - Sales & CS/
+│   └── 04 - Contracts & Agreements/
+│       ├── Contracts & Agreements — Structure & Conventions   (root guide — to place, step 11)
+│       ├── 00 - Customer agreement Templates/
+│       │   ├── 01 - Microsoft Marketplace Template/
+│       │   │   ├── 2026-04-20 - LATEST/   → Marketplace DPA + Order TEMPLATE         (current)
+│       │   │   ├── 2026-06-05 - DRAFT/    → Marketplace DPA (OpenAI) + Order + SLA copy   (standardized)
+│       │   │   └── 00 - old/
+│       │   ├── 02 - Customer Cloud Hosting Template (possible future use)/
+│       │   │   ├── 2025-10-29 - LATEST/   → Main Agreement + Att 1 + Att 2 SLA (90%) + Att 3 DPA (14JrU)
+│       │   │   └── 2026-06-05 - DRAFT/    → Main Agreement + Att 1 + Att 2 SLA (99%) + Att 3 DPA (full Table 2)
+│       │   ├── 03 - NDA/                  → NDA mutual TEMPLATE
+│       │   ├── 98 - Tools/                → SLA calculator
+│       │   └── 99 - Old/                  → .docx originals + 11xa (retired Normain-hosting DPA)
+│       ├── 01 - Customer agreements (drafts and signed)/   (~28 customer folders + Customer Agreement Timings sheet)
+│       ├── 02 - SaaS default agreements/   → 05 - SLA (placeholder only — SLA deferred, O1)
+│       └── old/
+└── 05 - InfoSec/
+    ├── 02 - Official Other Policies/        ← ALL published/SaaS docs (consolidated)
+    │   │   (PUBLISHED policy = `00 - Published/` [live publish source] + dated snapshot folders. UNPUBLISHED = dated folders only. Dated folders follow the Marketplace Template convention: `YYYY-MM-DD - LATEST/`/`- DRAFT/`/bare/`99 - old/`, docs inside clean-named.)
+    │   ├── 01. SaaS - Terms of Use/          → 00 - Published/Terms of Use (→ /product-terms) + 2026-04-21 - LATEST/ snapshot
+    │   ├── 02. SaaS - DPA/                   → 2026-06-04 - DRAFT/SaaS DPA   (unpublished — contract-delivered)
+    │   ├── 11. Website - Privacy Policy/     → 00 - Published/Privacy Policy (→ /privacy-policy) + 2026-04-23 - LATEST/ snapshot
+    │   ├── 12. Website - Cookie Policy/      → 00 - Published/Cookie Policy (PUBLISHED → /cookie-policy) + 2024-08-05 - LATEST/ snapshot + 99 - old/…pdf
+    │   ├── 13. Website - Terms of Use/       → 00 - Published/Terms of Use (→ /terms) + 2026-01-31 - LATEST/ snapshot
+    │   ├── 21. Application - Privacy Policy/  → 00 - Published/Privacy Policy (→ /product-privacy-policy) + 2026-04-28 - LATEST/ snapshot
+    │   ├── 22. Application - Cookie Policy/   → 2026-06-07 - DRAFT/Cookie Policy + 99 - old/(origin)  (separate doc; unpublished)
+    │   └── 99. Archive/                       (old "1. Terms…" + "2. DPA" folders)
+    ├── 03 - Procedures & Runbooks/           (document the snapshot/copy-forward convention; update the InfoSec Folder Structure readme)
+    └── 05 - Vendor Management/
+        ├── VENDOR MASTER SHEET
+        └── 02 - Pre-approved subprocessor list/
+            ├── 01 - Pre-approved subprocessor list/   → … - 2026-04-28 - LATEST + bare-date history
+            └── 02 - Signed DPAs with subprocessors/   (vendor Art. 28 DPAs)
+```
+
+**Pending:** DRAFT packages + SaaS DPA await **sign-off → promote to LATEST** (step 15); **web-team cookie wiring** (Framer repoint `/cookie-policy` off the old PDF + add footer "Cookies" link → then delete the PDF in `12. / 99 - old`); SLA placement (O1); O3-residual (Loops/Zero/Cursor + MS Marketplace publisher). _(All `02 - Official Other Policies` folders now use the Marketplace dated-folder convention.)_
+
+**Canonical 99% SLA** (reference) → `01 - Customer agreements / KPMG / Final agreements 2025-12-17`.
+
+## Steps
+
+_Executed together, step by step, on your guidance — not run autonomously. Tick the Done box as each completes._
+
+| Done | # | Step |
+|:---:|---|---|
+| ✅ | 1 | Rename motion folders to singular: `01 - Microsoft Marketplace Template`, `02 - Customer Cloud Hosting Template`. _(done 2026-06-03)_ |
+| ✅ | 2 | Rename folder → `02 - Pre-approved subprocessor list`; live list → `Pre-approved subprocessor list - 2026-04-28 - LATEST`. `Signed DPAs with subprocessors/` stays. _(done 2026-06-03)_ |
+| ✅ | 2b | Archive cleanup: 4 old versions → bare-date in `01 - Pre-approved subprocessor list`; PDF kept (`… - 2025-06-04.pdf`). PostHog `.docx` left in `99 - Archive` (old/draft copy; archive kept). _(done 2026-06-04)_ |
+| ✅ | 3 | Master checked: **current** (28 Apr 2026), broader than appendices (adds AWS, Sentry) — but **not a clean superset**: master lists OpenAI, Appendix B lists Anthropic. Reconcile in step 4 + O3. _(done 2026-06-04)_ |
+| ✅ | 3c | **Anthropic added** to the master (Table 2) — master now complete (contains everything any DPA lists). Per-mode OpenAI/Anthropic *selection* still O3. _(done 2026-06-04)_ |
+| ✅ | 4 | DPA appendices standardized in DRAFT copies of all 3 DPAs. **Table 2 = same 15** everywhere (incl. OpenAI + Anthropic). **Table 1 per-mode:** SaaS = Azure/AWS/BetterStack/PostHog; Marketplace = Azure/BetterStack/PostHog; Cloud Hosting = BetterStack/PostHog. **No Sentry.** All links applied. Appendix-letter alignment deferred. _(done 2026-06-05)_ |
+| ✅ | 5 | `11xa` (Normain-hosted-on-Azure DPA) **moved to `99 - Old`** — obsolete (now via Marketplace). `14JrU` stays as the Cloud Hosting DPA; `1it8` content → SaaS DPA draft; signed PDF in InfoSec `2. DPA` untouched. _(done 2026-06-05)_ |
+| ✅ | 6 | Marketplace template now dated-snapshot structured: **`2026-04-20 - LATEST/`** (current active = in-use DPA + Order) + **`2026-06-05 - DRAFT/`** (standardized = DPA+OpenAI + Order + draft SLA copy). Nothing loose. _(done 2026-06-05)_ |
+| ✅ | 7 | Cloud Hosting template dated-snapshot structured: **`2025-10-29 - LATEST/`** (current: Main Agreement + Att 1 Terms + Att 2 SLA 90% + Att 3 customer-hosting DPA `14JrU`) + **`2026-06-05 - DRAFT/`** (standardized: Main Agreement + Att 1 + Att 2 SLA 99% draft + Att 3 DPA w/ full Table 2). Nothing loose. _(done 2026-06-05)_ |
+| ✅ | 8 | SLA: the 99% `2026-05-29` draft is the canonical SLA — copied into both enterprise DRAFT packages + **cleaned** (removed editorial banner; `Main Agreement` → generic **`Customer Agreement`** so one SLA serves all motions; fixed duplicated-phrase typo). Loose source retired to `99 - Old`. Old 90% sits in the `LATEST` packages → bare-date on finalisation (step 15). _(done 2026-06-05)_ |
+| ✅ | 9–10 | **Consolidated all published/SaaS docs into `05 - InfoSec / 02 - Official Other Policies`** with a flat numbered scheme: `01. SaaS - Terms of Use`, `02. SaaS - DPA`, `11/12/13. Website - Privacy/Cookie/Terms of Use`, `21/22. Application - Privacy/Cookie`. Old `1. Terms…` + `2. DPA` subfolders → `99. Archive`. `02 - SaaS default agreements` now holds only an `05 - SLA` placeholder → **to be dissolved** (disposal pending); future SaaS SLA = published policy → Official Other Policies `03. SaaS - SLA`. Transient `04 - Published policies` (Product&Tech) removed. (Supersedes the earlier SaaS-folder / Marketing / Published-policies placements.) _(done 2026-06-05)_ |
+| ✅ | 9c | Application cookie split done — codebase-verified (only **PostHog**; no Intercom/Google/HubSpot/LinkedIn/Reddit/Salesloft). Copied `2024-08-05` → **`Cookie Policy - 2026-06-07 - DRAFT`** in `22. Application`; stripped Performance/Functional/Advertising/Third-Party sections + provider bullets; added **Analytics (PostHog, signed-in only, EU-hosted)**; reworded Necessary + intro to platform-scope. Legacy copy **demoted** (`- LATEST` dropped → bare `2024-08-05`) since it was only the website doc copied in — `22.` now has **no published version**, only the DRAFT; promotion pending sign-off (step 15). _(done 2026-06-07)_ |
+| ✅ | 11 | Root guide created as Google Doc **`Agreements & Policies — Structure & Conventions (readme)`** at the `04 - Contracts & Agreements` root (markdown-imported — 3 tables incl. the three-DPAs table + applicability matrix). **Shortcut** placed in `05 - InfoSec / 02 - Official Other Policies` (guide spans both areas). Naming mirrors `InfoSec Folder Structure (readme)` — no prefix, `(readme)` suffix. Undated living doc. _(done 2026-06-08)_ |
+| ✅ | 12 | InfoSec cleanup confirmed — old `1. Terms…` + `2. DPA` already archived in `02 - Official Other Policies / 99. Archive` (no shortcuts needed). **`InfoSec Folder Structure (readme)` updated:** OOP-row purpose rewritten to the consolidated agreements/policies + **hyperlinked** to the new structure readme; stale list reconciled — added `07 - Internal meetings & targets` & `11 - Recurring reviews & Exercises`, renamed `08 - Incident Management` → `08 - Incidents & Disaster Recovery`. Convention recorded by linking the new readme (not duplicated into runbooks). _Open: Drive has two `07 -` folders — renumbering left to user._ _(done 2026-06-08)_ |
+| ✅ | 13 | Verified all dated snapshots. **Exact** in-doc match: SaaS Terms (Apr 21), App Privacy (Apr 28), App Cookie DRAFT (7 Jun), both subprocessor lists. **N/A** (templates, no internal date — filled at signing): all 3 DPAs, all SLAs, Order / Main Agreement / Att.1 Terms. **Fixed** 3 Website docs that were month-only → aligned to full date: Website Terms → January 31, 2026; Website Privacy → April 23, 2026; Website Cookie → August 5, 2024. _(done 2026-06-08)_ |
+| ✅ | 14 | Verified published legal links — **4 resolve & point to current canonical** (Google Docs publish-to-web behind `normain.com` 308 redirects): `/product-privacy-policy`→App Privacy (Apr 28), `/product-terms`→SaaS Terms (Apr 21), `/privacy-policy`→Website Privacy (Apr 23), `/terms`→Website Terms (Jan 31). Confirmed same-doc auto-sync (step-13 date edits show live). **Cookie:** `normain.com/cookie-policy` exists (2024-08-05, old combined) but is **orphaned** (unlinked) **and not synced** to canonical `12.` (separate/legacy source). No public DPA/SLA links (contract-delivered) — expected. Publishing mapping + re-publish rule added to the structure readme. _Follow-ups: **`12.` Doc now published to web** (auto-syncs), in `2024-08-05 - LATEST/`; **remaining = Framer-only** (repoint `/cookie-policy` to the published URL + add footer "Cookies" link → then delete the PDF). Optional: reconcile vendor list (live trackers = Google + Framer only; HubSpot/LinkedIn/Reddit/Salesloft/Intercom not observed; Framer missing). Hand-off artifact updated with the published URL. **App cookie decision:** keep `22.` as a **separate** Application Cookie Policy — distinct legal regime (ePrivacy/consent vs GDPR), future-proofs added trackers, consistent with the website; do not fold/retire._ _(done 2026-06-08)_ |
+| ☐ | 15 | **Finalize snapshots (on sign-off)** — when a standardized `… - DRAFT` is approved: rename it → `… - LATEST` and demote the prior `- LATEST` → bare-date. Applies to all 3 DPAs + the SLA. **Pending sign-off** — until then the *current* version stays `- LATEST` and the standardized package stays `- DRAFT` (e.g. Marketplace: `2026-04-20 - LATEST` active, `2026-06-05 - DRAFT` proposed). |
+
+## Unresolved questions
+
+_Resolved: Q1 (hosting DPA), Q3 (SaaS DPA/SLA home), Q3b (Terms of Use; Product/Website split), Q4 (99% canonical), O1 (SaaS SLA — see below), O2 (Website variants → `04 - Marketing / 01 - Website`), O3 core (subprocessor content — Anthropic/OpenAI/AWS/Sentry/Firecrawl/Stripe/GitHub/Vanta decided, see Open Decisions)._
+
+**O1 — SaaS SLA ✅ resolved 2026-06-06.** No SaaS SLA today, but one is planned. It will be a **published policy, not signed per customer** — incorporated by reference into the SaaS Terms of Use and applied by tier (per-customer signing only happens enterprise-side, as Attachment 2). → future home: `05 - InfoSec / 02 - Official Other Policies / 03. SaaS - SLA`. Consequently **`02 - SaaS default agreements` is dissolved** (its only content was an SLA placeholder).
+
+| # | Question |
+|---|---|
+| O3-residual | Classify the leftovers: Loops / Zero / Cursor + MS Marketplace publisher (customer-facing list vs internal-tools). |

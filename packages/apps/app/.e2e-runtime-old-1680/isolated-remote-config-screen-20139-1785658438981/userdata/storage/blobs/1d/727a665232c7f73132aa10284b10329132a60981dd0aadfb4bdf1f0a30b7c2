@@ -1,0 +1,33 @@
+**To:** Slack Sales / Support (via slack.com/contact-sales or normain.slack.com/help/requests/new)
+**From:** kalle@normain.com (Workspace Primary Owner)
+**Subject:** Data residency request — EU (Frankfurt) for workspace normain.slack.com
+
+---
+
+Hi Slack team,
+
+We'd like to set up data residency in the EU for our workspace and migrate our existing data there.
+
+**Workspace details:**
+- Workspace: normain.slack.com
+- Plan: Business+
+- Requester: Kalle Hansson, Primary Owner (kalle@normain.com)
+- Requested region: **Frankfurt, Germany**
+
+**Our requests:**
+1. Enable data residency for the workspace in the Frankfurt region, so all newly generated data is stored in the EU.
+2. Migrate all existing data (currently stored in the US) to the Frankfurt region — messages, files, canvases, and any other customer data covered by data residency.
+
+**Before scheduling, please confirm:**
+- That all existing content migrates intact (no data loss), and whether any data categories are excluded from residency coverage.
+- Expected timeline for both enablement and the historical migration.
+- Any expected downtime or user-facing impact during the migration.
+- Any cost implications on our current Business+ plan.
+
+Context: we're an EU-based company (Sweden) and the migration supports our GDPR compliance posture toward our customers.
+
+Happy to schedule a call if that's easier.
+
+Best regards,
+Kalle Hansson
+Normain

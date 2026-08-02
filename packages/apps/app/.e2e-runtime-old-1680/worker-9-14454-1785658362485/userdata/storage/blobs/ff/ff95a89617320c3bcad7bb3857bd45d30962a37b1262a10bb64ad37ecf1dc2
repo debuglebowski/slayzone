@@ -1,0 +1,56 @@
+# Handoff: Satisfy the IDS/IPS control (Vanta + SOC 2 MON-1)
+
+## Goal
+Close the Vanta test **"Intrusion detection system installation"** (`ids-ips-enabled-in-cde`), which maps to SOC 2 control **MON-1 "Intrusion detection system utilized"** (CC6.6, CC7.2, A1.3). It's a **Document** evidence test — currently *Needs remediation*, no evidence uploaded, and no functional detection layer exists yet.
+
+**Primary action: wire up Microsoft Sentinel** so it actually detects and alerts. A functioning SIEM is an accepted "intrusion detection" mechanism for this SOC 2 control — a Premium firewall/IDPS is **not** required for compliance (see fallback at the end).
+
+## Environment (verified)
+- Subscription: **Normain** `a9049f9f-3d1b-43f0-9278-7f1d603f6a00`, region **swedencentral**.
+- Architecture: **serverless — 0 VMs**, runs on Azure Container Apps + 2 AKS clusters.
+- **Azure Firewall** `afw-normain-prod-01` (policy `afwp-normain-prod-01`, `rg-normain-prod-01`): **Standard** SKU, inline as AKS ingress/egress chokepoint, `threat_intelligence_mode = Deny`, diagnostic logging on. Codified in `terraform/modules/azure/firewall.tf`. **Standard = no IDPS.**
+- **Microsoft Sentinel**: onboarded on audit workspaces `law-normain-audit-prod-01` and `law-normain-audit-dev-20` (via `terraform/modules/azure/audit.tf` → `azurerm_sentinel_log_analytics_workspace_onboarding`). **Currently inert: 0 data connectors, only the default Fusion rule.** Onboarding alone satisfies nothing.
+- Defender for Cloud: Containers + CSPM on Standard; security contact `engineering@normain.com`. NSG flow logs on, **Traffic Analytics off**.
+
+## Why Sentinel isn't done yet
+It's turned on but has no data flowing in and no detection rules → it detects nothing. It needs connectors + analytics rules + verified incidents.
+
+---
+
+## Instructions — wire up Sentinel (primary)
+
+Target workspace: `law-normain-audit-prod-01` (repeat for dev if desired). **Codify in Terraform** (`terraform/modules/azure/` — extend `audit.tf` or add `sentinel.tf`); don't configure only in the portal or it becomes drift.
+
+1. **Connect data sources** (`azurerm_sentinel_data_connector_*` / diagnostic settings):
+   - Azure Activity logs
+   - Microsoft Defender for Cloud (alerts)
+   - Microsoft Entra ID sign-in + audit logs (needs Entra P1/P2)
+   - **Azure Firewall logs** — point `azurerm_monitor_diagnostic_setting.firewall` at the Sentinel/audit workspace so firewall traffic (incl. threat-intel hits) is analyzed. Verify current destination first.
+   - Optional: enable **Traffic Analytics** on the NSG flow logs, targeting the Sentinel workspace.
+
+2. **Enable analytics (detection) rules** (`azurerm_sentinel_alert_rule_scheduled` / `_ms_security_incident` / templates):
+   - Keep Fusion; enable a meaningful set of scheduled/near-real-time rules tied to the connectors above.
+   - Aim for rules that will actually raise incidents on suspicious network/identity/workload activity.
+
+3. **Verify it operates** (this is what makes it count, not just "enabled"):
+   - Confirm telemetry is landing in the workspace tables.
+   - Confirm an incident can be generated (simulate/test).
+
+## Evidence capture → close the Vanta test
+The test is manual. Once Sentinel is operating, capture **real screenshots/exports with timestamps**:
+- Data connectors page (connected sources)
+- Analytics rules (enabled)
+- An incident/alert (with timestamp) + a query showing monitored traffic
+
+Then upload to the Vanta test and **Submit** (upload alone leaves it a draft). Owner: Kalle. Renews annually.
+Vanta test: https://app.eu.vanta.com/c/normain.com/tests/ids-ips-enabled-in-cde
+
+---
+
+## Fallback — only if Sentinel can't satisfy the requirement
+If Sentinel can't be made to work/evidence this, **or** a customer/auditor insists on an actual **IDPS** (not just a firewall), upgrade the firewall:
+- `terraform/modules/azure/firewall.tf`: `sku_tier = "Premium"` and add an `intrusion_detection` block (`mode = "Alert"` or `"Deny"`).
+- Traffic is already routed through the firewall, so no routing changes needed.
+- ~€1,200–1,500/mo. This gives a literal signature-based IDS/IPS.
+
+**Note:** Standard firewall + threat-intel Deny ≠ IDPS. IDPS is Premium-only. If the need is a real IDPS, Sentinel (detection-only) does **not** cover inline *prevention* — only Premium IDPS in Deny mode does.

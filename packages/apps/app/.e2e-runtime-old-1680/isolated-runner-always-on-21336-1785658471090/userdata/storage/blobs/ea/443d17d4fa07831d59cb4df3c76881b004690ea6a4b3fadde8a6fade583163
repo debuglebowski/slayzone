@@ -1,0 +1,191 @@
+# CAP-7 — Capacity Management — Investigation
+
+**Control:** ISO 27001:2022 A.8.6 — monitor and adjust resource use to current/expected demand
+**Status:** 10/12 (tests 7/9 + docs 3/3) · 2 failing tests
+**Vanta:** https://app.eu.vanta.com/c/normain.com/controls?controlId=fpa4156z
+**Investigated:** 2026-04-30 (revised after Drive re-sourcing)
+
+---
+
+## Sourcing rules used
+
+- **Compliance / evidence / policies:** Drive only via `gws drive files list` — local repo files explicitly NOT trusted.
+- **Vanta state (controls, tests, results, owners, document slots):** Vanta UI via `slay tasks browser`.
+- **Technical / Azure infra state:** `az` CLI direct.
+
+---
+
+## Situation — the 2 failing tests
+
+### Test 1 — `Virtual machine scale set CPU monitored (Azure)`
+URL: https://app.eu.vanta.com/c/normain.com/tests/servers-monitored-and-alarmed-config-cpu-azure-vm-scaleset
+Owner: Kalle Hansson
+Required: every Azure VMSS instance has a `Percentage CPU` metric alert in Azure Monitor.
+
+**3 VMSS instances flagged** (source: Vanta test results page):
+| Instance | Resource group (AKS node RG) | Due |
+|---|---|---|
+| `aks-default-25586624-vmss_0` | `MC_RG-NORMAIN-DEV-20_AKS-NORMAIN-DEV-20_SWEDENCENTRAL` | Mar 6, 2026 (overdue) |
+| `aks-default-31982391-vmss_2` | `MC_RG-NORMAIN-PROD-01_AKS-NORMAIN-PROD-01_SWEDENCENTRAL` | Mar 25, 2026 (overdue) |
+| `aks-default-31982391-vmss_51` | `MC_RG-NORMAIN-PROD-01_AKS-NORMAIN-PROD-01_SWEDENCENTRAL` | May 12, 2026 |
+
+Both AKS clusters confirmed running via `az aks list` (k8s 1.33, Standard_B4as_v2).
+
+### Test 2 — `Storage Accounts health monitored (Azure)`
+URL: https://app.eu.vanta.com/c/normain.com/tests/storage-accounts-monitored-availability-azure
+Owner: Max Netterberg
+Required: each storage account has at least one health-metric alert (e.g. Availability).
+
+**10 storage accounts flagged** (source: Vanta test results page):
+| Account | RG | Due |
+|---|---|---|
+| `rpsnormaindev20` | rg-normain-dev-20 | Dec 3, 2025 (overdue) |
+| `rpsnormainprod01` | rg-normain-prod-01 | Dec 4, 2025 (overdue) |
+| `dssnormaindev20` | rg-normain-dev-20 | Jan 27, 2026 (overdue) |
+| `dssnormainprod01` | rg-normain-prod-01 | Jan 28, 2026 (overdue) |
+| `normaintfappdevelopment` | normain-tf-app-development | Mar 4, 2026 (overdue) |
+| `normaintfappproduction` | normain-tf-app-production | Mar 6, 2026 (overdue) |
+| `normainfglobal` | normain-tf-global | Mar 9, 2026 (overdue) |
+| `normaintfidentity` | normain-tf-identity | Apr 3, 2026 (overdue) |
+| `auinormainprod01` | rg-normain-prod-01 | Apr 8, 2026 (overdue) |
+| `auinormaindev20` | rg-normain-dev-20 | Apr 8, 2026 (overdue) |
+
+Existing storage availability alerts already in place for `stwinvmnormainprod01` and `ufnormainprod01` (template to copy).
+
+---
+
+## Near-term doc-renewal risk (NEW)
+
+The 3 CAP-7 documents currently passing in Vanta were all completed by **Gustav Lidén** in early June 2025 with annual recurrence. **All three expire in ~5 weeks** and Vanta is already showing the "Submit evidence before the latest version expires in 1 month" banner:
+
+| Vanta doc slot | Last evidence | Format | Renew by | Owner |
+|---|---|---|---|---|
+| Autoscaling | 2025-06-02 | `Screenshot 2025-06-02 at 16.22.25.png` | **2026-06-02** | Kalle Hansson |
+| Capacity increase request | 2025-06-05 | `quotarequest.jpg` + `quotaapproved.jpg` | **2026-06-05** | Kalle Hansson |
+| Capacity monitoring dashboard | 2025-06-04 | `MetricsDashboard.jpg` | **2026-06-04** | Kalle Hansson |
+
+If these expire, CAP-7 will go from 10/12 → 7/12 (3 more failing items).
+
+---
+
+## Solution
+
+### Fix 1 — VMSS CPU alerts (≈ 20 min)
+Add `Percentage CPU` metric alert per VMSS, route to existing action group.
+
+```bash
+SUB=a9049f9f-3d1b-43f0-9278-7f1d603f6a00
+AG_PROD=$(az monitor action-group show -g rg-normain-prod-01 -n ag-alerts-normain-prod-01 --query id -o tsv --subscription $SUB)
+
+# Prod VMSS
+PROD_VMSS=$(az vmss show -g MC_rg-normain-prod-01_aks-normain-prod-01_swedencentral -n aks-default-31982391-vmss --query id -o tsv --subscription $SUB)
+az monitor metrics alert create -n vmss-cpu-alert-normain-prod-01 \
+  -g rg-normain-prod-01 --subscription $SUB --scopes $PROD_VMSS \
+  --condition "avg Percentage CPU > 80" \
+  --window-size 15m --evaluation-frequency 5m --severity 2 --action $AG_PROD
+
+# Dev VMSS — only if dev is in audit scope
+DEV_VMSS=$(az vmss show -g MC_rg-normain-dev-20_aks-normain-dev-20_swedencentral -n aks-default-25586624-vmss --query id -o tsv --subscription $SUB)
+az monitor metrics alert create -n vmss-cpu-alert-normain-dev-20 \
+  -g rg-normain-dev-20 --subscription $SUB --scopes $DEV_VMSS \
+  --condition "avg Percentage CPU > 80" \
+  --window-size 15m --evaluation-frequency 5m --severity 2 --action $AG_PROD
+```
+Alert scoped at the VMSS resource covers all instances (`_0`, `_2`, `_51`, future).
+
+### Fix 2 — Storage account availability alerts (≈ 30 min)
+
+```bash
+SUB=a9049f9f-3d1b-43f0-9278-7f1d603f6a00
+AG_PROD=$(az monitor action-group show -g rg-normain-prod-01 -n ag-alerts-normain-prod-01 --query id -o tsv --subscription $SUB)
+
+declare -A ACCOUNTS=(
+  [rpsnormainprod01]=rg-normain-prod-01
+  [dssnormainprod01]=rg-normain-prod-01
+  [auinormainprod01]=rg-normain-prod-01
+  [normaintfappproduction]=normain-tf-app-production
+  [normainfglobal]=normain-tf-global
+  [normaintfidentity]=normain-tf-identity
+  [rpsnormaindev20]=rg-normain-dev-20
+  [dssnormaindev20]=rg-normain-dev-20
+  [auinormaindev20]=rg-normain-dev-20
+  [normaintfappdevelopment]=normain-tf-app-development
+)
+for acc in "${!ACCOUNTS[@]}"; do
+  rg=${ACCOUNTS[$acc]}
+  id=$(az storage account show -n $acc -g $rg --query id -o tsv --subscription $SUB)
+  az monitor metrics alert create -n "storage-availability-alert-${acc}" \
+    -g $rg --subscription $SUB --scopes $id \
+    --condition "avg Availability < 99" \
+    --window-size 15m --evaluation-frequency 5m --severity 2 --action $AG_PROD
+done
+```
+
+### Fix 3 — Renew the 3 Vanta docs before Jun 2-5, 2026 (≈ 30 min)
+Per Vanta doc instructions, evidence is screenshot-based. Capture fresh screenshots and upload as new drafts in Vanta:
+- **Autoscaling:** screenshot from Azure portal showing AKS / Container App / VMSS scaling configuration
+- **Capacity increase request:** screenshot of a recent infra scaling ticket/request (e.g. an Azure quota-bump email — Gmail has several recent ones for AOAI text-embedding-3-large in Norway East / Sweden Central)
+- **Capacity monitoring dashboard:** screenshot of Azure Monitor dashboard or Log Analytics workbook showing live CPU / memory / utilization metrics
+
+Reassign owner from Gustav (offboarded) → Kalle if not already done.
+
+### After applying Fix 1 + 2
+- Click "Sync now" on Vanta's Azure integration (or wait up to 24 h) to re-run the tests.
+- Both should flip to green within 1 evaluation window.
+
+---
+
+## Drive verification log
+
+What was searched (gws drive files list as `kalle@normain.com`):
+
+| Query | Result |
+|---|---|
+| `name contains 'capacity' or 'Capacity' or 'autoscal' or 'MetricsDashboard' or 'quotarequest' or 'quotaapproved'` | 0 files |
+| `fullText contains 'capacity management' or 'capacity planning' or 'autoscaling' or 'CAP-7'` | 5 files, none capacity-related (DR tabletop docs, website wishlist, training video) |
+| `name contains 'Operations Security' or 'Operational Security'` / fullText for Operations Security Policy | 0 files matching the policy name |
+
+**Conclusion:** no Drive-resident capacity-management artefacts found. The 3 Vanta document slots are populated by direct uploads to Vanta (screenshots), not by Drive references. **Caveat:** my OAuth scope is `kalle@normain.com`'s personal Drive view; policy/evidence may live in shared drives I cannot enumerate. If a "Capacity Management Plan" or "Operations Security Policy" doc exists in a shared drive, this search would not have surfaced it — flag for verification by someone with broader scope.
+
+---
+
+## What changed from v2 → v3
+
+- **Added** the doc-renewal risk section (3 docs expire Jun 2-5, 2026). v2 missed this.
+- **Added** Fix 3 (renew Vanta docs).
+- **Added** explicit Drive verification log to make Drive-vs-not-Drive sourcing auditable.
+- **Removed** any implicit reliance on local repo files for compliance content. v1's earlier claim "no Drive capacity docs found" had been correct as a *Drive* finding but had been mixed with a repo `find` that should not have been cited; the Drive-only search re-confirms the same negative result.
+- **No change** to the 2 failing-test analysis or the Fix 1/2 commands — those came from Vanta + Azure CLI, both authoritative.
+
+---
+
+## Still unverified
+
+- **Operations Security Policy** approval state: the CAP-7 drawer shows `Operations Security Policy` with `fa-circle-xmark` and "Control depends on policy approval". My Drive search did not surface this policy as `kalle@normain.com`. Either it is in a shared drive I cannot see, or it is approved within Vanta directly, or it is genuinely missing. Needs verification by user.
+- **Whether dev (`rg-normain-dev-20`) is in audit scope**: affects whether to apply Fix 1/2 to dev or only prod.
+- **Shared-drive enumeration**: if Normain has a "Compliance" shared drive, the gws CLI search above would not have hit it without `corpora=allDrives includeItemsFromAllDrives=true supportsAllDrives=true`. Worth re-running with shared-drive params if the user confirms a shared compliance drive exists.
+
+---
+
+## Actions taken (cumulative)
+
+- ✅ Read CAP-7 control drawer in Vanta (controlId `fpa4156z`); confirmed 7/9 tests + 3/3 documents
+- ✅ Identified the 2 failing tests by name and Vanta URL
+- ✅ Pulled exact remediation list from each test page: 3 VMSS + 10 Storage Accounts
+- ✅ Read all 3 passing Vanta document slots; recorded last-evidence dates, file names, expiry dates, owner
+- ✅ Verified via `gws drive files list` (name + fullText) that no capacity-related artefacts live in `kalle@normain.com` accessible Drive
+- ✅ Inventoried Azure: 2 AKS clusters (prod+dev), action group `ag-alerts-normain-prod-01` → `alerts@normain.com`
+- ✅ Drafted `az monitor metrics alert create` commands for Fixes 1+2
+- ❌ No Azure writes performed
+- ❌ No Vanta evidence uploaded
+- ❌ Shared-drive search not performed (would need `--corpora allDrives` flag and confirmation that a compliance shared drive exists)
+
+---
+
+## Open questions
+
+- Dev in audit scope?
+- Shared compliance drive exists? If yes, share its ID — re-run Drive search there
+- "Needs reassignment" on 5 tests (Gustav's old assignments) — batch reassign to Kalle/Max?
+- After Fix 1+2 applied, OK to delete the 6 dangling `ca-*` alerts targeting the non-existent Container App `aca-normain-backend-api-prod-01`?
+- Operations Security Policy: where is the authoritative approved version?

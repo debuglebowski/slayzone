@@ -1,0 +1,78 @@
+flowchart TD
+    subgraph EXT["External standards"]
+        ISO27001["ISO/IEC 27001:2022"]
+        ISO20000["ISO/IEC 20000-1:2018"]
+    end
+
+    subgraph POL["Policies (what must be true)"]
+        InfoSec["Information Security Policy"]
+        AccessCtrl["Access Control Policy"]
+        ThirdParty["Third-Party Management Policy"]
+    end
+
+    subgraph PROC["Procedures (how we operate)"]
+        CMProc["Change Management Procedure"]
+        EngOps["Engineering Operation Procedures"]
+        SDLC["SDLC Guidelines"]
+        IncMgmt["Incident Management Procedure"]
+        SecTesting["Automated Security Testing Procedure"]
+    end
+
+    subgraph RUN["Runbooks (how we do specific tasks)"]
+        ArchReview["Runbook — Internal Architecture Review"]
+        AddSub["Runbook — Add subprocessor"]
+        DelCust["Runbook — Delete customer data"]
+        DataRestore["Runbook — Data Restore Testing"]
+        UpdatePolicy["Runbook — Update InfoSec policies"]
+    end
+
+    subgraph EXEC["Execution artifacts (evidence)"]
+        LinearTpl["Linear 'Change' template<br/>(INT-251)"]
+        PRs["GitHub PRs"]
+        CABMin["CAB minutes"]
+        DataRoom["Normain data room"]
+    end
+
+    subgraph Q1["Q1 2026 infra rebuild — this CR"]
+        RetroCR["Retro CR:<br/>Change: Q1 2026 Infra Rebuild"]
+        FixPlan["change-mgmt-fix-plan.md"]
+    end
+
+    ISO27001 --> InfoSec
+    ISO27001 --> AccessCtrl
+    ISO27001 --> ThirdParty
+    ISO20000 --> CMProc
+
+    InfoSec --> CMProc
+    InfoSec --> EngOps
+    InfoSec --> SDLC
+    InfoSec --> IncMgmt
+    AccessCtrl --> EngOps
+
+    CMProc --> LinearTpl
+    EngOps --> PRs
+    CMProc --> ArchReview
+    IncMgmt --> DataRestore
+
+    LinearTpl --> RetroCR
+    PRs --> RetroCR
+    CMProc --> RetroCR
+    RetroCR --> CABMin
+    CABMin --> DataRoom
+    RetroCR -. gap + fix .-> FixPlan
+    FixPlan -. feeds update to .-> CMProc
+    FixPlan -. feeds update to .-> EngOps
+
+    classDef external fill:#e8eaf6,stroke:#3f51b5
+    classDef policy fill:#fff3e0,stroke:#e65100
+    classDef procedure fill:#e8f5e9,stroke:#2e7d32
+    classDef runbook fill:#f3e5f5,stroke:#6a1b9a
+    classDef exec fill:#fce4ec,stroke:#ad1457
+    classDef q1 fill:#ffebee,stroke:#c62828,stroke-width:3px
+
+    class ISO27001,ISO20000 external
+    class InfoSec,AccessCtrl,ThirdParty policy
+    class CMProc,EngOps,SDLC,IncMgmt,SecTesting procedure
+    class ArchReview,AddSub,DelCust,DataRestore,UpdatePolicy runbook
+    class LinearTpl,PRs,CABMin,DataRoom exec
+    class RetroCR,FixPlan q1

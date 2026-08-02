@@ -1,0 +1,124 @@
+# Welcome Widget — 5 design suggestions
+
+All mockups reuse data the widget already has: a **rotating greeting** with the user's
+first name, the optional **org pulse** (`N members · M events this week`), optional
+**quick-link chips**, and the `hero` / `card` variant switch. Ideas marked **NEW** need a
+small capability add (noted inline).
+
+Sample data used throughout: name `Kalle`, `12 members`, `87 events this week`.
+
+---
+
+## 1 · Hero Banner  (the classic, tightened)
+
+Big rotating greeting, pulse underneath, link chips at the bottom. The default `hero`
+look, just with clearer rhythm between the three rows.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                                │
+│   The prophecy foretold your login, Kalle.                     │
+│                                                                │
+│   12 members  ·  87 events this week                           │
+│                                                                │
+│   ⟨ ⚡ Pipeline ⟩   ⟨ 📋 My Tasks ⟩   ⟨ 🔗 Vendor Sheet ⟩      │
+│                                                                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+`variant: hero` · `showPulse: true` · `links: [...]`
+
+---
+
+## 2 · Split — greeting left, pulse tiles right
+
+Greeting and links keep the left column; the org pulse becomes two right-aligned stat
+tiles so the numbers actually read as numbers. Collapses to stacked when narrow.
+
+```
+┌────────────────────────────────────┬──────────────────────────┐
+│                                     │   ┌────────────────────┐ │
+│  Welcome back, Kalle.               │   │  12                │ │
+│  You again? Excellent choice.       │   │  MEMBERS           │ │
+│                                     │   └────────────────────┘ │
+│                                     │   ┌────────────────────┐ │
+│  ⟨ ⚡ Pipeline ⟩  ⟨ 📋 Tasks ⟩      │   │  87                │ │
+│                                     │   │  EVENTS / WEEK     │ │
+│                                     │   └────────────────────┘ │
+└────────────────────────────────────┴──────────────────────────┘
+```
+
+`variant: hero` · `showPulse: true` (rendered as tiles) · `links: [...]`
+
+---
+
+## 3 · Terminal / Console  (leans into the snark)
+
+Plays directly to the 107-message comedic tone. Monospace "session" frame; the rotating
+line lands as a command output, quick links as runnable commands.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ● ● ●        kingsmaker — session                             │
+├──────────────────────────────────────────────────────────────┤
+│  $ whoami                                                      │
+│  → Kalle                                                       │
+│  $ status                                                      │
+│  → The kingdom awaits your command, Kalle.                     │
+│  → 12 members online · 87 events logged this week              │
+│  $ open _                                                      │
+│    ▸ pipeline      ▸ my-tasks      ▸ vendor-sheet              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+`variant: hero` · `showPulse: true` · `links: [...]` — **NEW** terminal skin (a third
+`variant`, e.g. `"console"`).
+
+---
+
+## 4 · Stat Strip  (dashboard header bar)
+
+Reads as the top banner of a dashboard: time-of-day greeting on the left, a row of metric
+tiles + a primary action on the right. Quick links double as the tiles.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ☀  Good evening, Kalle.                          Fri · Jun 16 │
+│ ───────────────────────────────────────────────────────────── │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
+│  │ 12       │  │ 87       │  │ 5        │  │      +       │   │
+│  │ MEMBERS  │  │ EVENTS/WK│  │ MY TASKS │  │  New record  │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────┘   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+`variant: hero` · `showPulse: true` · **NEW** time-of-day greeting + date line, and a
+"primary action" link kind.
+
+---
+
+## 5 · Minimal Ticker  (the `card` variant)
+
+One line, no chrome. Fits a narrow column or sits quietly above denser widgets. Greeting +
+pulse on a single row, trailing `›` to expand into links on hover/click.
+
+```
+┌────────────────────────────────────────────────────────┐
+│  👑  The prophecy foretold your login, Kalle.            │
+│      12 members · 87 events this week                  › │
+└────────────────────────────────────────────────────────┘
+```
+
+`variant: card` · `showPulse: true` · `links` revealed on expand.
+
+---
+
+### At a glance
+
+| # | Name           | Variant         | Pulse        | Best for                    |
+|---|----------------|-----------------|--------------|-----------------------------|
+| 1 | Hero Banner    | `hero`          | inline line  | top of a dashboard          |
+| 2 | Split          | `hero`          | stat tiles   | wide hero with real numbers |
+| 3 | Terminal       | `console` (new) | command line | playful / personal home     |
+| 4 | Stat Strip     | `hero`          | tile row     | metrics-forward header      |
+| 5 | Minimal Ticker | `card`          | inline line  | narrow column / quiet top   |

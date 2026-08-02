@@ -1,0 +1,10 @@
+# 📝 Circleback
+
+| Area | Details |
+|---|---|
+| 🔐 Auth | API key/webhook/fallback |
+| 🧾 Requirements | Confirm public API/webhooks; workspace access; fallback via Zapier/Make/email |
+| 👁️ Read | Notes, transcripts, summaries, action items |
+| ✍️ Write | Likely limited; export/follow-up workflows |
+| ⚡ Triggers | Meeting processed/export webhooks if available |
+| ⚠️ Limits | Public API availability unclear |

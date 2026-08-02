@@ -1,0 +1,74 @@
+# Use Cases
+
+## UC01 — Due Diligence Financial Review
+
+- **Persona**: PE / corp dev analyst reviewing a target
+- **Scenario**: Verify financials, spot red flags, cross-check numbers between annual report, proxy, and Excel model
+- **Question types**: numerical calc; cross-doc (10-K vs proxy); Excel step-by-step logic; reasoning on covenants/warning signs
+- **What it tests**: numeric extraction + cross-doc consistency + chained reasoning
+- **Sample docs**:
+    - Microsoft FY24 10-K + proxy
+    - Volvo annual 2024
+    - Maersk annual 2024
+    - SVB last 10-Q
+    - Synthesized Excel model deck with planted logic errors
+
+## UC02 — ESG / Sustainability Audit
+
+- **Persona**: sustainability lead prepping CSRD, or auditor
+- **Scenario**: extract every Scope 3 category, every material topic, every emissions figure; verify against CSRD/ESRS
+- **Question types**: exhaustive search; numerical aggregation; multi-doc cross-reference (report vs framework)
+- **What it tests**: long-doc exhaustive extraction + framework alignment
+- **Sample docs**:
+    - Unilever sustainability report 2024
+    - Ørsted sustainability report 2024
+    - H&M sustainability report 2024
+    - CSRD ESRS standards
+
+## UC03 — Regulatory vs Policy Gap Check
+
+- **Persona**: GRC / internal audit
+- **Scenario**: enumerate every obligation in a regulation; assess if internal policy addresses each yes/partial/no with citations on both sides
+- **Question types**: cross-doc (reg vs policy); exhaustive requirements enumeration; classification; reasoning on partial coverage
+- **What it tests**: cross-doc reasoning + exhaustiveness + citation fidelity
+- **Sample docs**:
+    - EU AI Act consolidated
+    - GDPR
+    - NIS2 directive
+    - Repo's `ops_security.docx`
+    - Repo's `secure_dev_policy.docx`
+    - Synthesized policy with planted gaps
+
+## UC04 — Contract Clause Sweep
+
+- **Persona**: legal ops / M&A counsel
+- **Scenario**: across a bundle of contracts, find every change-of-control, LoL, IP assignment, termination-for-convenience clause; classify each
+- **Question types**: exhaustive (find every X); classification; clause-level citation fidelity
+- **What it tests**: exhaustive search across many docs + accurate clause-level citation
+- **Sample docs**:
+    - 5–10 SEC EDGAR public material contracts
+    - Synthesized MSA bundle with planted clauses
+
+## UC05 — Board / Committee Composition Audit
+
+- **Persona**: corporate secretariat
+- **Scenario**: identify every board member + committee assignment; reconcile across proxy, governance HTML, scanned meeting minutes
+- **Question types**: exhaustive person extraction; cross-doc identity resolution; mixed formats
+- **What it tests**: exhaustive person extraction + identity reconciliation across formats
+- **Sample docs**:
+    - 3 cos' DEF 14A proxy statements
+    - Frozen governance HTML
+    - Board photo / org-chart PDF
+    - Handwritten meeting-minutes scan
+
+## UC06 — Multimodal Evidence Extraction
+
+- **Persona**: advisory / forensic analyst
+- **Scenario**: pull facts from scanned old report, whiteboard photo, Excel with chart-as-image, handwritten notes
+- **Question types**: OCR-grade text from scans; handwriting recognition; image-only chart interpretation; cross-modal reconciliation
+- **What it tests**: format coverage — exposes tools that can't ingest non-text inputs
+- **Sample docs**:
+    - Scanned 1990s annual report
+    - Whiteboard photo
+    - Multi-tab Excel with chart-as-image
+    - Original handwritten analyst notes

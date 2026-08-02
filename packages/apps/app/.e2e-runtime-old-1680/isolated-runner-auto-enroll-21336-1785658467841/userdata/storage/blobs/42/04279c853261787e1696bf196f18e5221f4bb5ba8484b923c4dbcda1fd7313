@@ -1,0 +1,10 @@
+# 🧱 Clay
+
+| Area | Details |
+|---|---|
+| 🔐 Auth | API key/webhook |
+| 🧾 Requirements | Clay workspace; API key or webhook setup; defined table/action flow |
+| 👁️ Read | Table rows, enrichment results |
+| ✍️ Write | Rows, fields, enrichment inputs |
+| ⚡ Triggers | Webhook-triggered table/actions |
+| ⚠️ Limits | Workflow/table model; API surface may vary |

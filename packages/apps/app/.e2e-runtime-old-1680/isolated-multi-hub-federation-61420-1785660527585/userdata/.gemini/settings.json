@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-multi-hub-federation-61420-1785660527585/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-multi-hub-federation-61420-1785660527585/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-multi-hub-federation-61420-1785660527585/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-multi-hub-federation-61420-1785660527585/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-multi-hub-federation-61420-1785660527585/userdata/hooks/notify.sh",
+            "_slayzoneManaged": true
+          }
+        ],
+        "matcher": "*"
+      }
+    ]
+  }
+}

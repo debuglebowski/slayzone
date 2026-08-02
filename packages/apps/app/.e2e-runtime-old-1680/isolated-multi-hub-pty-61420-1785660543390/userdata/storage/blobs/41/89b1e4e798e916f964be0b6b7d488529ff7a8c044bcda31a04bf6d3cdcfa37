@@ -1,0 +1,57 @@
+# Vendor Review: PostHog
+
+## URLs
+- Vendor Master Sheet (row 73): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=A73
+- Cycle Drive folder (2026-04-29): https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev
+- Cycle parent ticket: TBD (Linear MCP needs auth — ask user if access removals come up)
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/69970330a7ccb6a8e827b598
+- Tool admin / login: https://eu.posthog.com/settings/organization-members (to be confirmed)
+- Tool trust center: https://posthog.com/handbook/company/security
+
+## Vanta facts
+- Status: Active
+- Inherent risk: High
+- Last assessment: 2026-02-19 by Philip Ngo, Approved
+- Summary: "PostHog's SOC 2 Audit Report and trust center contains all relevant information that we need."
+- Auth method: Google Workspace
+- Types of data processed: Customer metadata, Normain's data
+- Sub-processor flag in Vanta: not surfaced (Vanta record approved, no concerns)
+
+## Status
+- Information complete?: blank (target = Yes after fill)
+- Duplicates: none
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | First-pass questions to user | Pending |
+| 4 | Login + members screenshot in Drive folder | Pending |
+| 5 | Create access-removal Linear sub-issues (if any) | Pending |
+| 6 | Fill cells | Pending |
+| 7 | Flip Information complete? = Yes | Pending |
+
+## Cells (only rows needing change)
+| Col | Header | Current | Proposed | Source |
+|---|---|---|---|---|
+| F | Information complete? | (blank) | Yes (flip last) | calculated |
+| I | Subprocessor | (blank) | Application | user |
+| Q | Sync comment | Checked 2026-02-19 | Checked 2026-05-14 | calculated |
+| S | Contract details status | Incomplete | Complete (after T-W filled) | calculated |
+| T | Subscription type | (blank) | Not a subscription | user |
+| V | Cost per month | (blank) | 0.00 | user |
+| W | Invoice Currency | (blank) | (blank — V=0) | calculated |
+| Y | Contract Renewal Date | (blank) | Free plan | user |
+| AA | Admin permissions through role | (blank) | Yes | tool-page |
+| AB | Uses SSO with Google? | (blank) | Yes | Vanta |
+| AE | Access review 2026-04-29 | (blank) | Done | calculated |
+| AF | Screenshot completed? | (blank) | Yes (after upload+rename) | calculated |
+| AH | Link | (blank) | https://eu.posthog.com/settings/organization-members | user |
+
+## Open questions for user (with recommendations)
+- **I Subprocessor** (blank): rec = **Application**. Alternatives: Operations / N/A. Why: Vanta shows "Types of data processed: Customer metadata, Normain's data" — PostHog ingests product-analytics events about Normain's customers, so it processes customer-related data.
+- **T Subscription type** (blank): rec = **Not a subscription**. Alternatives: Total / Per user. Why: V=0.00 already in sheet → free plan. Pick Per user / Total only if Normain is actually on a paid tier.
+- **V Cost per month** (blank): rec = **0.00** (already 0.00 in X). Confirm we're on the free tier.
+- **Y Contract Renewal Date** (blank): rec = **Free plan**. Alternative: `YYYY-MM-DD` if on annual paid. Why: free tier → no renewal.
+- **AH Link** (blank): rec = **https://eu.posthog.com/settings/organization-members**. Alternative: `https://app.posthog.com/...` if you're on US cloud. Why: PostHog EU is the standard for Normain (GDPR posture); members page is the canonical admin URL. Confirm exact URL when you open the tool.

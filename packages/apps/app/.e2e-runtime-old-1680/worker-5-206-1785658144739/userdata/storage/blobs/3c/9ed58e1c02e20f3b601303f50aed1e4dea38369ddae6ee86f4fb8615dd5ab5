@@ -1,0 +1,20 @@
+# PR #1 (zabealbe) vs v0.32.3
+
+PR: https://github.com/zabealbe/slayzone/pull/1 · +253/−0 · 2 files
+
+## What it ships
+- `isActive` false→true → `fit()` + `scheduleAtlasCorrection()` (instant task-switch atlas refresh)
+- E2E smoke `100-task-switch-atlas-stability.spec.ts` (10 switches × 3 tabs, dirty=0)
+
+## What it claims but doesn't ship
+- Per-frame rAF cell-key drift watchdog — not in diff
+- `cellKey` export + `readTermCellKey()` — not in diff
+
+## New vs known
+- **NEW**: instant task-switch reactivate. v0.32.3 heartbeat catches it ≤30 s; PR catches same frame. Take it.
+- **NEW**: smoke spec. Useful regression guard. Take it.
+- **Doesn't cover**: long-idle GPU eviction (the 54-min gap on `c0190f30`). v0.32.3 heartbeat still load-bearing.
+
+## Take
+
+Cherry-pick the `isActive` effect + smoke spec into v0.32.3. Ignore the unshipped watchdog. End state = v0.32.3 heartbeat + PR's reactivate edge = both gaps covered.

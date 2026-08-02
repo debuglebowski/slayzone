@@ -456,10 +456,13 @@ export function composeServer(opts: {
   let execGateway: HubRunnerGateway | null = null
   const resolveExecRunner = (specRunnerId: string | null | undefined): string | null => {
     if (specRunnerId != null) return specRunnerId
-    const connected = execGateway?.listRunners() ?? []
-    if (connected.length === 0) return null
-    if (connected.length === 1) return connected[0].runnerId
-    const local = connected.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+    // `listUsableRunners`, NOT `listRunners`: usable = authenticated + heard from
+    // inside the heartbeat window. An open-but-silent socket would otherwise be
+    // picked and every dispatch to it would hang until the watchdog reaped it.
+    const usable = execGateway?.listUsableRunners() ?? []
+    if (usable.length === 0) return null
+    if (usable.length === 1) return usable[0].runnerId
+    const local = usable.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
     return local ? local.runnerId : null
   }
   /** Effective runner for a task: explicit binding, else connected default. */

@@ -1,0 +1,39 @@
+# Slice 3/8 — IPC → tRPC: app-level routers (P19a–f) — DONE
+
+All 6 commits landed on `main`, each direct (no PR), each typecheck + lint clean with **zero new type/lint errors** introduced.
+
+## Commits (in order)
+
+| # | SHA | Title |
+|---|-----|-------|
+| C1 | `e93b1e16` | feat(transport): app-level router (P19 — backup/clipboard/screenshot/leaderboard/export-import/usage, 22 handlers) |
+| C2 | `a49e7be7` | feat(transport): files+shell routers (P19b — 4 handlers) |
+| C3 | `94b0e639` | feat(transport): db:feedback router (P19c — 6 handlers) |
+| C4 | `2e03b33c` | feat(transport): processes router (P19d — 9 handlers + 4 streaming subs) |
+| C5 | `f60aa802` | feat(transport): app.meta router (P19e — 6 metadata handlers) |
+| C6 | `81ec8e12` | feat(transport): app meta+window+auth (P19f — 9 handlers) |
+
+## What shipped
+
+- New `appLevelRouter` (`routers/app.ts`) with nested groups: backup, clipboard, screenshot, leaderboard, exportImport, usage, files, shell, feedback, meta, window, auth — registered as `app` in appRouter.
+- New `processesRouter` (`routers/processes.ts`): 9 lifecycle ops + 4 streaming subs (onLog/onStatus/onTitle/onStats) over a `processEvents` TypedEmitter.
+- `app-deps.ts`: `AppDeps` + `setAppDeps/getAppDeps`; `ProcessesDeps` + `setProcessesDeps/getProcessesDeps`. Barrel-exported; wired in the main host's tRPC setImmediate block.
+- `ProcessEventMap` added to `@slayzone/types`; `@slayzone/types` added to transport deps.
+
+## Key decisions / divergences from the reference branch
+
+- **Coexistence preserved**: every IPC handler stays live; ops were **extracted** (buildBackupOps / captureBrowserViewScreenshot / getLocalLeaderboardStats / buildExportImportOps / buildUsageOps / files pathExists+saveTempImage / shell-open.ts / buildFeedbackOps / githubSystemSignIn) and BOTH transports delegate to them — no logic duplication. NO renderer changes, NO IPC/preload/api.ts deletion (those are slice 5).
+- **Async DB adaptation**: all `AppDeps` DB signatures are Promise-typed (main's `SlayzoneDb` is worker_thread-backed), unlike the sync reference branch.
+- **Processes dual-emit**: `process-manager.ts` emits on the new TypedEmitter ALONGSIDE the existing `win.webContents.send(...)` — legacy IPC stream stays live for the renderer until slice 5.
+- **Router structure**: single `app.ts` (nested groups) + `processes.ts`, matching the reference commits (user-confirmed).
+- **Main-specific fixes**: `appIsJiraIntegrationEnabled` omitted (no such lab/handler exists on main — `getProtocolClientStatus` took the 6th meta slot); `checkCliInstalled`→`{installed,path?}`, `installCli`→`CliInstallResult`, restart/checkForUpdates async, window getters nullable.
+
+## Verification
+
+- Per commit: dir-local `tsgo` typecheck + scoped `eslint` — clean for all touched files.
+- Final consolidated typecheck: `@slayzone/types`, `@slayzone/feedback`, `@slayzone/transport`, `@slayzone/app` — **0 errors attributable to this slice**.
+- Each commit staged with file/hunk-level isolation (partial `git apply --cached` where a file was co-edited) so none of the other in-flight agents' working-tree changes were captured.
+
+### Caveat — full `pnpm build` + `test:e2e` not run
+
+The shared working tree currently holds other agents' **incomplete** concurrent WIP (a conversation-origins feature touching `task/*` and `terminal/*`, which independently fails typecheck because terminal's `@slayzone/task` dep was mid-add). A full prod build / e2e right now would exercise their unfinished work, not this slice. This slice's contribution is verified green in isolation; recommend a full `pnpm build && pnpm test:e2e` once the concurrent slices settle on main.

@@ -1,0 +1,40 @@
+# Spark (Readdle) — Vendor Security Review: Risk Acceptance Assessment
+
+**Date:** 2026-06-18 · **Owner:** Kalle Hansson · **Verdict: KEEP — accept the risk. Effort is small.**
+
+## TL;DR
+Spark can be enabled via Normain's **documented risk-acceptance (exception) path**. Readdle itself holds **no SOC 2 / ISO 27001** (only its Google Cloud infra is certified) — that is the one missing item. The Third-Party Management Policy explicitly covers "required documentation missing": accept alternate evidence + compensating controls + logged exception signed off by the Security Delegate. This is the same lightweight route already used for risk R-14 (~1-page memo + Vanta entry + calendar reminder). **Switching email clients is not warranted** — the compliance work is roughly half a day.
+
+## Current status in the review
+Vendor Master row 71: approved tool = **Yes**, but ISO27001/SOC2 column = **"Decommissioned"**, risk score = **"Unscored"**, Vanta = "No need to add", info-complete = **blank**, last checked 2025-07-07. So it was parked, not properly assessed. Re-activating + scoring it is what closes this final review item.
+
+## What Spark actually does with our data (per privacy policy)
+- **Auth:** OAuth token for Gmail/Workspace — **no password stored**. (Password only for raw IMAP/Exchange, then encrypted.)
+- **Email content:** originals stay on Google Workspace. Spark servers store only: notification subject + snippet (encrypted, **deleted in ~4h**); "Send Later" / shared drafts / templates (encrypted, deleted after send).
+- **Hosting:** Google Cloud, **US region** (Google Cloud is SOC 2 + ISO 27001 certified).
+- **Compliance:** states GDPR + CCPA compliant; DPO at dpo@sparkmailapp.com; self-serve "Remove My Data".
+- **Single user:** only Kalle; mailbox = company Workspace (Operations access).
+
+## The gap & the one real concern
+1. **No SOC 2 / ISO 27001 for Readdle.** This is the doc our policy "requires" for High/Critical vendors → triggers the missing-documentation path (acceptable, see below).
+2. **EU→US transfer.** Limited email data sits on US Google Cloud. Privacy policy cites **US-EU Privacy Shield — invalid since Schrems II (2020)**. No signed DPA/SCCs with Readdle on file. This is the only thing that could enlarge the effort if compliance insists on a signed DPA before acceptance.
+
+## Why this is the small-effort path (policy basis)
+- **Risk Mgmt Policy:** "Accept" is a valid risk response; CEO / Engineering Leadership / Security Delegate can approve acceptance of a register risk.
+- **Third-Party Mgmt Policy → "If Required Documentation Is Missing":** (1) accept alternate evidence (NDA + gap letter), (2) apply compensating controls, (3) log + approve the exception via ISMS Governance Council / Security Delegate, (4) escalate/replace only if high & unmitigable.
+- **Precedent R-14:** one-page acceptance memo, residual L×I score, Security Delegate sign-off, Vanta register entry, calendar re-review date.
+
+## Suggested actions (to enable Spark)
+- [ ] **Classify** Spark in Vanta per Third-Party Mgmt Policy (likely **High** — Workspace mailbox access; arguably Medium given single-user + minimal server-side storage). Record rationale.
+- [ ] **Complete Vendor Master row 71:** flip "Decommissioned" → active, set Information complete = Yes, fill risk score, business/security owner (Kalle), sync date.
+- [ ] **Add to Vanta** as a managed vendor; run the security review; upload available evidence: Spark **public privacy policy** (✔ have) + Google Cloud SOC 2/ISO 27001 (infra). Mark Readdle-level SOC 2/ISO 27001 as **N/A — gap**.
+- [ ] **Write a 1-page risk-acceptance memo** (use R-14 as template): context, why no SOC2/ISO27001, compensating controls, residual L×I, approver, next review date.
+- [ ] **Compensating controls:** single user only; minimise OAuth scopes; optionally disable Spark's server-side features (notifications / Send Later / shared drafts) so no content leaves Workspace; avoid handling highly-sensitive customer PII in Spark.
+- [ ] **Request a DPA / SCCs from Readdle** (dpo@sparkmailapp.com) to close the EU→US transfer point. If unobtainable, document it explicitly in the acceptance memo as a known residual.
+- [ ] **Get Security Delegate (Sara Landfors) sign-off**; log the exception; add to the monitored "vendor red list" for ISMS Management Review.
+- [ ] **Set calendar reminder** for the next review date (e.g. 2026-12-15).
+
+## Open questions
+- Risk classification: **High** or **Medium**? (drives whether SOC2/ISO27001 is "required" vs "not required").
+- Is a signed DPA with Readdle a hard prerequisite for acceptance, or accept-with-noted-residual?
+- OK to disable Spark's server-side features to shrink the footprint?

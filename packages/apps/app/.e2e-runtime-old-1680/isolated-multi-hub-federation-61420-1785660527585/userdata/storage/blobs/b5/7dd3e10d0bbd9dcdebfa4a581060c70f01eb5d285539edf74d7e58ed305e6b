@@ -1,0 +1,122 @@
+# Peka — Level Design: Act 2 (Test — "The Climb Begins")
+
+> Companion to `game-design.md` / `story.md`. Follows `level-act1.md`.
+> The pair leaves the nadir and starts **climbing**. Act 2 *tests* the Act-1
+> verbs in harder combinations, separates the players more, and adds environmental
+> elements that compose with gravity. No new core mechanics (kit stays run/jump/flip).
+> Every room **impossible solo**; every hazard **deterministic & telegraphed**
+> (death = full restart, GDD §3).
+
+**Legend** (see `level-act1.md` for base symbols)
+```
+═══ surface   · · · lethal gap   ▒ shadow (lethal)   P player
+▭ plate-held platform   ◇ switch   ⊟ crusher (fixed rhythm)
+║ pulley/linked platform   ✦ light (far above)
+```
+
+---
+
+## 2.1 "Counterweight Ascent" — linked geometry (NEW)
+
+A vertical shaft. A pulley links two platforms: weight on the floor platform
+**raises** the ceiling platform, and vice-versa. The halves ride opposite ends,
+lifting *each other* up the shaft in stages.
+
+```
+═══╗   [▭ceiling]~~pulley~~        ║ as P1 weighs down the floor pad,
+   ║        ↑                      ║ the ceiling pad rises with P2 on it
+   ║        ║linked                ║ — then they swap to climb the next stage
+   ║        ↓                      ║
+═══╝   [▭floor, P1]                ║
+```
+- **Solve:** P1 rides the floor platform down → lifts P2 (ceiling) up; P2 dismounts higher, takes a floor-pad above, lifts P1; leapfrog upward.
+- **Impossible solo:** the pulley needs weight on *both* ends, alternately.
+- **Tests:** coordinated weight + flip + trust; introduces linked geometry cleanly.
+
+---
+
+## 2.2 "The Long Reach" — asymmetric reach under separation
+
+A wall splits the shaft into two parallel channels — P1 left, P2 right — climbing
+in tandem. Each can't see... no, each **can** see the *other's* lane and the
+hazards in it; each player's switches clear the **partner's** path, never their own.
+
+```
+═══════════════╗ ╔═══════════════
+   P1 lane   ◇──╫─╫──▒  hazard in P2's lane, cleared by P1's switch ◇
+            ▒──╫─╫──◇  hazard in P1's lane, cleared by P2's switch ◇
+   (climb)     ║ ║     (climb)
+```
+- **Solve:** ascend together; at each band, the player *not* endangered hits the switch that clears the other's hazard — mistimed = partner dies = restart.
+- **Impossible solo:** your own hazards are only clearable from the far lane.
+- **Tests:** asymmetric reach + reading your partner's lane + sustained tandem timing.
+
+---
+
+## 2.3 "Crusher Rhythm" — rhythmic hazard + simultaneity
+
+Pistons (⊟) compress the tunnel on a **fixed, readable beat**. A held lever on one
+surface freezes the crushers on the *other* surface. The lever-holder can't move
+while holding → the two take turns covering each other through.
+
+```
+═══◇held by P2═══════════════════  P2 holds → floor crushers (below) freeze
+══════⊟══⊟══⊟══════[exit band]═══  P1 sprints the frozen gauntlet, then
+                                    grabs the floor ◇ to freeze P2's ceiling run
+```
+- **Solve:** P2 holds lever → P1 runs the gauntlet → P1 holds the matching lever → P2 runs. Reciprocal.
+- **Impossible solo:** can't hold the freeze and run the gauntlet at once.
+- **Tests:** simultaneity + rhythm reading + lethal-timing nerve.
+- **Story beat:** first **frozen failed-pair silhouette** embedded in the wall here — two shapes reaching, never reunited.
+
+---
+
+## 2.4 "Shadow Tide" — Act 2 capstone (combine)
+
+A wide void to cross by **flip-redirect**, while **multiple surface-bound shadows**
+patrol fixed loops on both surfaces, and the only landings are **partner-held**
+platforms (▭). Pure synthesis of Act-2 + Act-1 verbs.
+
+```
+═══╗  ▒→→→→▒  [▭ held by P2]      ╔═══
+   ║              · void ·        ║
+   ║   [▭ held by P1]  ▒←←←←▒     ║
+═══╝  P1 flip-jumps across, landing only where P2 extends a platform,
+      threading the shadow loops — then roles reverse for P2.
+```
+- **Solve:** one crosses via flip-redirect while the other extends each landing a beat early and both read the shadow loops; then swap.
+- **Impossible solo:** mid-air you can't hold your own landing *and* the shadows deny a static route.
+- **Tests:** flip-redirect + be-the-landing + multi-threat timing — everything so far, at once.
+
+---
+
+## 2.5 "First Light" — landmark / breather (story)
+
+A low-stakes vantage: a thin shaft reveals **✦ light, far above** for the first
+time — the exit, impossibly distant. Minimal challenge (one easy shared flip).
+Lets the pair feel the goal and the scale of the climb left.
+
+```
+                    ✦  (a far, thin crack of light)
+═══╗            ╔═══
+   ║   P1 ▲ P2  ║   one gentle paired flip up onto the ledge to look
+═══╝            ╚═══
+```
+- **Purpose:** hope-as-a-gradient beat; reset tension before Act 3. Not soloable-gated (it's a rest), but takes both to step up.
+
+---
+
+## Act 2 — escalation summary
+
+| # | Adds / tests | New element |
+|---|--------------|-------------|
+| 2.1 Counterweight | coordinated weight + flip | linked pulley platforms |
+| 2.2 Long Reach | asymmetric reach, separation | parallel lanes |
+| 2.3 Crusher Rhythm | simultaneity + rhythm | timed crushers |
+| 2.4 Shadow Tide | full synthesis | multi shadow loops |
+| 2.5 First Light | story / breather | distant light (✦) |
+
+## Open (Act 2)
+- [ ] Crusher beat speed — readable but tense.
+- [ ] How many shadow loops in 2.4 before it's unfair vs. brutal-but-learnable.
+- [ ] Exact placement of the failed-pair silhouette (2.3 vs 2.2).

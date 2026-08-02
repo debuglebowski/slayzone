@@ -1,0 +1,156 @@
+# Breakdown widget — 5 design suggestions
+
+The Breakdown widget groups instances by a field (enum / user / label) and shows
+the counts. Today `chart` = `"bar" | "pie"`. Below are 5 distinct directions —
+each is a new `chart`/`variant` value (#5 also adds one config field).
+
+All share the existing config: `conceptId`, `conditions[]` + `match`, `groupBy`,
+`sort` (count / label / field-order), `values`, `maxGroups → "Other"`.
+
+---
+
+## 1. Ranked bars (horizontal)
+
+Sorted descending, one row per group: label · bar · count · share. Beats the
+current vertical bars when labels are long or there are many groups (vertical
+axis truncates "Negotiation" → "Nego…"). The everyday default.
+
+```
+┌─ Deals by Stage ──────────────────────────────┐
+│                                                │
+│  Negotiation  ████████████████████   42   35% │
+│  Qualified    ██████████████         29   24% │
+│  Discovery    █████████              19   16% │
+│  Proposal     ███████                14   12% │
+│  Closed Won   █████                  10    8% │
+│  Closed Lost  ███                     6    5% │
+│                                                │
+│                               Total: 120 deals │
+└────────────────────────────────────────────────┘
+```
+
+`chart: "bars-h"` — reuses `values` (count / percent / both), `sort`, `maxGroups`.
+
+---
+
+## 2. Donut with center total
+
+The pie, upgraded: thicker ring, total in the hole, legend with swatch · count ·
+share to the right. Reads as a KPI ("60 open") and a composition at once.
+
+```
+┌─ Tickets by Priority ─────────────────────────┐
+│                                                │
+│        ╭─────────╮          ● Urgent   18  30% │
+│      ╭─╯ ▓▓▓▓▓▓▓ ╰─╮        ● High      22  37%│
+│     │ ▓▓▓       ▓▓ │        ● Medium    14  23%│
+│     │ ▓▓   60    ▓ │        ● Low        6  10%│
+│     │ ▓▓  open   ▓ │                           │
+│      ╰─╮ ▓▓▓▓▓▓ ╭─╯                            │
+│        ╰─────────╯                             │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+`chart: "donut"` — center shows `total` (or a chosen agg later); legend uses `values`.
+
+---
+
+## 3. Composition bar (100% stacked)
+
+One full-width segmented bar = share of total, legend underneath. The most
+compact form — fits a wide, short tile (h=1). Great for "what's the mix" when
+exact per-group counts matter less than proportions.
+
+```
+┌─ Pipeline Composition ────────────────────────┐
+│                                                │
+│  ████████████▓▓▓▓▓▓▓▓▒▒▒▒▒▒░░░░░░░░░░          │
+│                                                │
+│  ██ New 35%   ▓▓ Active 25%   ▒▒ Won 18%       │
+│  ░░ Lost 22%                                   │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+`chart: "stacked"` — single bar; `values` toggles inline % vs counts in legend.
+
+---
+
+## 4. Breakdown table
+
+Text-first, precise, sortable. Columns: group · count · share · mini-trend ·
+Δ vs prior period. Borrows `delta` ("7d"/"30d") from the Metric widget so each
+row says not just "how many" but "which way". Best when numbers must be exact.
+
+```
+┌─ Leads by Source ─────────────────────────────┐
+│  Source        Count   Share   Trend    Δ 7d   │
+│  ────────────────────────────────────────────  │
+│  Referral        48     32%   ▁▂▃▅▆█    +12%   │
+│  Organic         37     25%   ▃▃▄▄▅▅     +4%   │
+│  Paid Ads        29     19%   █▆▅▃▂▁    −18%   │
+│  Outbound        21     14%   ▂▃▃▄▄▅     +6%   │
+│  Event           15     10%   ▁▁▂▂▃▃     +2%   │
+│  ────────────────────────────────────────────  │
+│  Total          150    100%                     │
+└────────────────────────────────────────────────┘
+```
+
+`chart: "table"` — adds optional `delta` ("off"/"7d"/"30d") + `showTrend`.
+
+---
+
+## 5. Cross-tab heatmap (two-dimensional)
+
+The one new *capability*: break down by **two** fields at once. Rows = `groupBy`,
+columns = a new `splitBy`, cells = count shaded by magnitude. Answers "which
+owner is stuck in which stage" — impossible with any single-axis chart.
+
+```
+┌─ Deals: Stage × Owner ────────────────────────┐
+│               Alice   Bob   Cara   Dan         │
+│  Discovery    ░  3    ▒  6   ░  2   ░  4        │
+│  Qualified    ▓  9    █ 12   ▒  5   ░  3        │
+│  Proposal     ▒  4    ░  2   ▓  8   ▒  5        │
+│  Negotiation  █ 11    ▓  7   ▒  6   ░  1        │
+│  Closed Won   ░  2    ░  3   ▒  5   ░  2        │
+│                                                │
+│   ░ low   ▒ med   ▓ high   █ peak              │
+└────────────────────────────────────────────────┘
+```
+
+`chart: "matrix"` + new `splitBy` (second enum/user field). Cells optionally
+show count, percent-of-row, or percent-of-total.
+
+---
+
+## At a glance
+
+| # | Variant          | New config            | Best for                          |
+|---|------------------|-----------------------|-----------------------------------|
+| 1 | Ranked bars      | `chart:"bars-h"`      | many groups / long labels (default)|
+| 2 | Donut + total    | `chart:"donut"`       | KPI + mix in one glance           |
+| 3 | Composition bar  | `chart:"stacked"`     | wide short tile, proportions only |
+| 4 | Breakdown table  | `chart:"table"`,`delta`| exact numbers + direction         |
+| 5 | Cross-tab heatmap| `chart:"matrix"`,`splitBy`| two-dimensional breakdown      |
+
+#1–#3 are pure recharts/render swaps. #4 reuses the Metric `delta` machinery.
+#5 is the only one needing a query/aggregation change (group by two keys).
+
+---
+
+## Status — built 2026-06-18
+
+Implemented #1–4 as new `chart` values on the existing Breakdown widget:
+- #1 ranked bars → `chart:"bars-h"` (CSS)
+- #2 donut + center total → `chart:"donut"` (recharts ring + custom HTML legend)
+- #3 composition bar → `chart:"stacked"` (CSS)
+- #4 table → `chart:"table"` + optional `delta` ("off"/"7d"/"30d") trend column (sparkline + Δ)
+
+Contract `chart` literal extended + `delta` added; engine type mirrored; new
+`groupSeries` aggregation helper (per-group created-at series) + tests; editor
+chart picker now lists all 6 + table-only Trend select. typecheck (web+engine) +
+285 web tests + biome all green. PENDING: commit + API restart (old API rejects
+the new `chart` values on save; existing bar/pie dashboards keep working).
+#5 (cross-tab heatmap) not built.

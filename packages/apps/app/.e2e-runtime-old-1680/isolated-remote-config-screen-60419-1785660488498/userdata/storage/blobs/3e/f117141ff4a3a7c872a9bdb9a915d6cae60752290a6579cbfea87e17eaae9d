@@ -1,0 +1,217 @@
+# Markdown Showcase
+
+A reference document exercising every common markdown construct, plus combinations that stress paragraph rhythm, list density, and inline formatting.
+
+This second paragraph exists so you can see vertical breathing room between adjacent prose blocks. Adjust `--mk-p-mt` / `--mk-p-mb` until it feels right at this body size.
+
+A third paragraph — short.
+
+---
+
+## Headings & prose
+
+### H3 inside H2
+
+#### H4 inside H3
+
+Paragraph after a heading should sit closer to its heading than to the previous block. Notion-style stacked-heading collapse is handled by `.mk-doc h1 + h2` rules.
+
+A long paragraph to test line-height and wrapping: Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+
+Another paragraph immediately after, no heading between — this is the gap your `--mk-p-mt` / `--mk-p-mb` controls.
+
+---
+
+## Inline formatting
+
+Plain text with **bold**, *italic*, ***bold-italic***, ~~strikethrough~~, `inline code`, and a [link to example.com](https://example.com).
+
+You can mix: a sentence with **bold containing `inline code`** and *italics containing [a link](https://example.com)* — useful for spotting baseline drift.
+
+Keyboard-style: press <kbd>Cmd</kbd> + <kbd>K</kbd> to open the command palette.
+
+---
+
+## Lists
+
+### Unordered
+
+- First item
+- Second item with **bold** and `code`
+- Third item
+  - Nested level 1
+  - Nested level 1
+    - Nested level 2
+- Fourth item
+
+### Ordered
+
+1. Step one
+2. Step two
+   1. Sub-step
+   2. Sub-step
+3. Step three
+
+### Task list
+
+- [x] Implement paragraph spacing tokens
+- [x] Add compact readability variant
+- [ ] Add cozy variant
+- [ ] Wire to user settings UI
+
+### List with paragraphs inside items
+
+- Item with a single line.
+
+- Item containing a full paragraph that should respect list-item spacing rather than paragraph spacing. The renderer must distinguish between `<li><p>` and bare `<li>`.
+
+  Continuation paragraph inside the same list item.
+
+- Final item.
+
+---
+
+## Blockquotes
+
+> Single-line quote.
+
+> Multi-line quote.
+> Second line of the same quote.
+>
+> New paragraph inside the quote, with **bold** and `inline code`.
+
+> Nested:
+>
+> > Inner quote.
+> >
+> > > Deepest.
+
+---
+
+## Code
+
+Inline: `const x = 42;` or a path like `packages/shared/editor/src/rich-text-editor.tsx`.
+
+Fenced, no language:
+
+```
+plain preformatted block
+preserves    whitespace
+```
+
+TypeScript:
+
+```ts
+type Mode = 'compact' | 'default' | 'cozy'
+
+function paragraphMargin(mode: Mode): string {
+  switch (mode) {
+    case 'compact': return '0.7em'
+    case 'default': return '1.25em'
+    case 'cozy':    return '1.75em'
+  }
+}
+```
+
+Bash:
+
+```bash
+pnpm dev
+pnpm typecheck
+pnpm test:e2e
+```
+
+JSON:
+
+```json
+{
+  "readability": "default",
+  "tokens": {
+    "p-mt": "1.25em",
+    "p-mb": "1.25em"
+  }
+}
+```
+
+---
+
+## Tables
+
+| Token         | Default   | Compact   | Notes                       |
+| ------------- | --------- | --------- | --------------------------- |
+| `--mk-p-mt`   | `1.25em`  | `0.7em`   | Paragraph top margin        |
+| `--mk-p-mb`   | `1.25em`  | `0.7em`   | Paragraph bottom margin     |
+| `--mk-li-mt`  | `0.1em`   | `0`       | List item top margin        |
+| `--mk-h1-mt`  | `1.4em`   | `0.5em`   | H1 top margin               |
+
+Alignment:
+
+| Left   | Center  | Right |
+| :----- | :-----: | ----: |
+| a      |    b    |     c |
+| long   |    m    |  9999 |
+
+---
+
+## Horizontal rule
+
+Above the rule.
+
+---
+
+Below the rule.
+
+---
+
+## Combinations
+
+A heading directly followed by a list:
+
+### Shortcuts
+
+- `Cmd+W` — close active panel
+- `Cmd+Shift+W` — close window
+- `Cmd+,` — open settings
+
+A heading directly followed by a code block:
+
+### Snippet
+
+```ts
+const greet = (name: string) => `hello, ${name}`
+```
+
+A blockquote containing a list and code:
+
+> **Heads up**
+>
+> Run these in order:
+>
+> 1. `pnpm install`
+> 2. `pnpm build`
+> 3. `pnpm test:e2e`
+>
+> If step 2 fails, check `electron.vite.config.ts`.
+
+A paragraph followed by a table followed by a paragraph — checks that table top/bottom margins match paragraph rhythm.
+
+| key | value |
+| --- | ----- |
+| a   | 1     |
+| b   | 2     |
+
+After-table paragraph. Spacing here should match the gap above the table.
+
+---
+
+## Long-form prose stress
+
+Paragraph one. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.
+
+Paragraph two. Pack my box with five dozen liquor jugs. Pack my box with five dozen liquor jugs. Pack my box with five dozen liquor jugs.
+
+Paragraph three. Sphinx of black quartz, judge my vow. Sphinx of black quartz, judge my vow.
+
+Paragraph four. How vexingly quick daft zebras jump. How vexingly quick daft zebras jump.
+
+Paragraph five — final. If gaps look right across paragraphs 1–5, the spacing token is dialed in.

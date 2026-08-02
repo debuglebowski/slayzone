@@ -1,0 +1,85 @@
+# December 2025 — 56 Commits
+
+## Summary
+
+| Metric | Value |
+|---|---|
+| Total commits | 56 |
+| Average complexity | 3.5 |
+| Average effort | 3.4 |
+| Average thought | 3.7 |
+| Total estimated hours | 182.0 |
+
+---
+
+## Commit Table
+
+| Hash | Date | Subject | CX | Eff | Thought | Hrs |
+|---|---|---|---|---|---|---|
+| 9a82db304 | 2025-12-19 | NOR-noticket: Also Generate Name | 3 | 2 | 3 | 1.5 |
+| d066cbe35 | 2025-12-18 | Make prompt clearer, remove raw markdown, fix sources | 3 | 3 | 4 | 2.0 |
+| 459623cd1 | 2025-12-18 | Add predefined feedback + fix quick extraction bugs | 5 | 5 | 5 | 4.0 |
+| cd38577be | 2025-12-16 | NOR-noticket: Duplicate Add Of Files | 2 | 2 | 2 | 0.5 |
+| 2c73e384b | 2025-12-16 | NOR-noticket: Deleting Iterations Deletes Too Many | 3 | 2 | 3 | 1.0 |
+| 1fb7091cd | 2025-12-16 | NOR-noticket: Try Agentic Insights | 8 | 8 | 9 | 16.0 |
+| 0be73eaa7 | 2025-12-16 | Remove iterationRunUid from url when run is removed | 3 | 2 | 3 | 1.0 |
+| 44f5bde85 | 2025-12-16 | Fix quick extraction and small fix in personal team | 6 | 6 | 6 | 5.0 |
+| 7f449c69c | 2025-12-16 | Make charts stacked instead of layered | 1 | 1 | 2 | 0.5 |
+| 62619811c | 2025-12-16 | Fix fetching issue for Daily Customer Usage chart | 1 | 1 | 2 | 0.5 |
+| 82e4d9eb0 | 2025-12-15 | Add so we see every column with setting in the ui | 2 | 2 | 2 | 0.5 |
+| 78ddcc122 | 2025-12-15 | NOR-noticket: Update Source Document Model | 7 | 7 | 7 | 8.0 |
+| 333db311a | 2025-12-12 | Add more logs | 1 | 1 | 1 | 0.5 |
+| f09c2192c | 2025-12-12 | Fix sync issue | 3 | 2 | 3 | 1.0 |
+| 2cf7c171c | 2025-12-12 | Add logs for bug | 2 | 2 | 2 | 0.5 |
+| bbc20fbbf | 2025-12-12 | Add validation to mitigate forbidden state for runs | 7 | 7 | 7 | 8.0 |
+| f9ca3212c | 2025-12-12 | Fix references for uploadedFile and running logic for input | 4 | 3 | 4 | 2.0 |
+| dfdf128d5 | 2025-12-12 | NOR-noticket: Try Factuality Scorer | 5 | 5 | 6 | 4.0 |
+| 16efa6836 | 2025-12-12 | Fix firecrawl + bulk variants | 4 | 4 | 4 | 2.5 |
+| 9a2fb94f6 | 2025-12-12 | Fix admin panel | 2 | 2 | 2 | 0.5 |
+| 1694bd136 | 2025-12-11 | Fix yarn root:sync | 2 | 2 | 2 | 0.5 |
+| 33c972110 | 2025-12-11 | NOR-noticket: Start Testing Framework | 7 | 7 | 8 | 10.0 |
+| bcbfe663d | 2025-12-11 | Remove ais service | 2 | 2 | 2 | 0.5 |
+| 4b92eafe1 | 2025-12-11 | Send email for specific events for quick extractions | 4 | 4 | 5 | 3.0 |
+| e6ef0d2ca | 2025-12-10 | NOR-noticket: Name Personal Teams To My Workspace | 3 | 3 | 3 | 1.5 |
+| d94b4bb67 | 2025-12-10 | Add better ux for jobs / sf | 5 | 6 | 5 | 4.0 |
+| 0275df0bb | 2025-12-10 | Fix org query | 3 | 3 | 3 | 1.5 |
+| b184fcfa2 | 2025-12-10 | NOR-noticket: Remove Dead Code To Make Root Build Run | 6 | 7 | 5 | 6.0 |
+| 6db6101fd | 2025-12-10 | NOR-noticket: User Org Id Team | 6 | 6 | 6 | 6.0 |
+| 56c604b32 | 2025-12-09 | NOR-noticket: Make Insights View Less Cluttered | 2 | 2 | 3 | 0.5 |
+| 33fb3d46e | 2025-12-09 | NOR-1892: Export as Excel instead of CSV | 4 | 4 | 4 | 2.5 |
+| 626cae1b0 | 2025-12-09 | NOR-noticket: Handle Rerunning With Additional Context | 4 | 4 | 5 | 3.0 |
+| 2ab1fe958 | 2025-12-09 | Fix alignment issue | 1 | 1 | 1 | 0.5 |
+| dee88815f | 2025-12-09 | NOR-noticket: Add Gpt 5 To Tf | 2 | 2 | 2 | 1.0 |
+| dbbbeba8e | 2025-12-08 | Add check for teamuid for source documents | 2 | 1 | 2 | 0.5 |
+| dcf7653bb | 2025-12-05 | Create tables for toolcall + source references | 7 | 7 | 7 | 7.0 |
+| b892cf165 | 2025-12-05 | NOR-noticket: Bump Vector Search | 2 | 2 | 2 | 0.5 |
+| 1c8527a33 | 2025-12-05 | Fix ui. Prevent duplicate callbacks to worker | 5 | 5 | 5 | 4.0 |
+| 858ee62c9 | 2025-12-05 | NOR-noticket: Add Confidence Level | 4 | 4 | 5 | 3.0 |
+| 6f2166dfe | 2025-12-05 | NOR-noticket: Limit Keyword Search To Documents In Extraction | 3 | 3 | 4 | 1.5 |
+| b42f90a6f | 2025-12-05 | Use normains logger | 2 | 2 | 2 | 1.0 |
+| 529a8b4d4 | 2025-12-05 | Expose logger | 1 | 1 | 1 | 0.5 |
+| 952540df2 | 2025-12-05 | Create an azure sweden model instead | 2 | 1 | 2 | 0.5 |
+| a6d6f544e | 2025-12-05 | Use rmz | 1 | 1 | 1 | 0.5 |
+| a14712ab0 | 2025-12-05 | Try another free build space action | 2 | 2 | 2 | 0.5 |
+| 848223467 | 2025-12-05 | Remove stuff | 1 | 1 | 1 | 0.5 |
+| fd2b5ead7 | 2025-12-05 | Maximize build space | 1 | 1 | 1 | 0.5 |
+| 66929884e | 2025-12-04 | Fix version | 1 | 1 | 1 | 0.5 |
+| accffef82 | 2025-12-04 | Replace container scan with trivy | 2 | 2 | 2 | 1.0 |
+| bd71d0715 | 2025-12-04 | FEATURE/EXTRACT-insights: Backend | 10 | 10 | 10 | 40.0 |
+| 1ffcde29b | 2025-12-04 | Add pagination to datagroups | 4 | 4 | 4 | 2.5 |
+| 3d0f63a19 | 2025-12-04 | Fix jobs export. Fix mentions. Add progress to jobs | 5 | 5 | 5 | 3.5 |
+| f05990347 | 2025-12-03 | NOR-noticket: Fix Invalid Cell Creation | 7 | 7 | 8 | 8.0 |
+| 313886021 | 2025-12-02 | Convert buffer to uint8 | 2 | 2 | 2 | 0.5 |
+| c06e5c991 | 2025-12-02 | Pass orgUid as parameter, add better logs | 2 | 2 | 2 | 0.5 |
+| 40117a457 | 2025-12-01 | NOR-noticket: Fix Race Conditions | 6 | 6 | 7 | 5.0 |
+
+---
+
+## Notes
+
+- **bd71d0715** is the single largest commit by a wide margin: a full-stack feature introducing the agentic insights extraction pipeline (71 files, 8,021 insertions). It includes a new Prisma schema, worker, multiple AI agent steps, evaluation harness scaffolding, and a complete React UI flow. Estimated at 40 hours reflecting weeks of iterative development squashed into one PR.
+- **1fb7091cd** (Try Agentic Insights) represents a major architectural pivot from a multi-step workflow to a single agent with tool calls, accompanied by new evaluation data and source-reference deduplication.
+- **33c972110** introduces a bespoke evaluation framework (eval package, scorers, vitest config) requiring substantial design work.
+- **f05990347** replaces a tree-based dependency algorithm with a proper directed acyclic graph implementation, deleting ~1,400 lines and re-testing thoroughly.
+- **b184fcfa2** and **6db6101fd** are large primarily due to deletion of dead code, legacy seed files, and dropped database tables — high file counts but lower design complexity than insertion-heavy PRs.
+- Several commits on 2025-12-05 (maximize build space, remove stuff, use rmz, expose logger) are CI/DevOps housekeeping tasks with negligible complexity and under 30 minutes of effort each.

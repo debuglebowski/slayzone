@@ -1,0 +1,76 @@
+# AI Provider Tycoon — Implementation
+
+Locked technology and architecture decisions. The "how we build it" companion to the design assets (1–5).
+
+## Stack
+
+- **Runtime:** Bun
+- **Backend / persistence:** Convex (reactive DB, real-time subscriptions, scheduled functions)
+- **LLM provider abstraction:** Vercel AI SDK
+- **Realtime / live UI:** WebRTC (spectator streams, peer-to-peer where applicable)
+
+### LLM provider abstraction — Vercel AI SDK
+Multi-provider BYOK calls (Anthropic, OpenAI, Google, …) via the SDK's per-provider factories (e.g. `createAnthropic({ apiKey })`).
+
+- Structured action output via `generateObject` + Zod schema (uses native tool-calling under the hood).
+- Token usage returned per call → cost tracking.
+- AbortSignal-based timeout.
+
+**Still to wire ourselves:**
+- Per-tick wall-clock timeout (our own AbortController, not provider-side).
+- Error normalization → `{timeout, rate_limit, server_error, malformed, ok}` for the event log.
+- Pre-match key validation ping per player.
+
+***
+
+## Match config
+
+- **Default player count:** 4
+- **Max player count:** 8
+- **Default tick interval:** 60s (configurable per match)
+- **Default rounds:** 100 (configurable per match)
+
+## Lifecycle
+
+### Post-match export
+At match-end: serialize the full event log + final state snapshot to a single JSON bundle. One zip per match. Sufficient for v0.1 "scrub the log" replay.
+
+## Testing
+
+### Stub agents
+For CI / smoke tests without API costs:
+- `random` — uniform legal action choice each tick.
+- `idle` — emits no actions.
+
+Drive the tick loop with stubs in tests; reserve real BYOK calls for live matches.
+
+## Observability
+
+### Per-tick decision log
+Each inference is recorded as an event:
+
+```
+{
+  tick,
+  player_id,
+  raw_response,          // full string from provider
+  parsed_actions,        // validated action list
+  validation_errors,     // illegal actions dropped
+  request_duration_ms,
+  token_usage            // {input, output}
+}
+```
+
+Replay viewer is **deferred** — v0.1 ships JSON export only; build a UI in v0.2 if matches are fun enough to scrub.
+
+## GUI (throwaway)
+
+- **Match creation form** — single page; player count, tick interval, rounds, seed, scenario. Defaults populated.
+- **Per-player setup** — tabbed, one tab per slot. Each tab: prompt, model picker, API-key field. Validates key on tab-blur. Match locks when all tabs are valid + prompts entered.
+- **Match-over screen** — leaderboard, top-5 highlighted situations, one-click event-log download.
+
+***
+
+## Open
+
+Everything else from [98. Plan](asset:73927c8b) under the 🛠️ Engine, 🔄 Lifecycle, 🤖 Agent input rows. Decisions land here as they're made.

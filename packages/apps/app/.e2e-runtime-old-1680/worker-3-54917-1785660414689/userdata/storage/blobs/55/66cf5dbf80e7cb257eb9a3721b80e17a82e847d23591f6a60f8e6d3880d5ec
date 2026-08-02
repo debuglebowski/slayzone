@@ -1,0 +1,75 @@
+# 📋 Vanta Tasks — Kalle's full list (post-redistribution)
+
+👤 **Owner:** Kalle Hansson (`67f96437791c8f1bc494287d`)
+🔗 **Source:** [Vanta › My work](https://app.eu.vanta.com/c/normain.com/my-work)
+📅 **Updated:** 2026-04-28 (synced w/ Vanta)
+🎯 **Audit window:** ✅ ISO 27001:2022 done; ongoing SOC 2 + ISO continuous compliance.
+
+> ✅ **27 confirmed mine in Vanta** (13 original + 12 unassigned + 2 Gustav)
+> ⏳ **6 pending Vanta reassignment** (CHG-39 + 4 GitHub tests + 1 VM scale set test)
+
+## 📊 Summary
+
+- 🧪 **Failing tests — 9** (4 confirmed, 5 pending)
+- 📎 **Controls — 18** (17 confirmed, 1 pending CHG-39)
+- 📑 **Documents — 5** (4 overdue + 1 needs remediation)
+- 🚩 **33 total**
+
+---
+
+## 🧠 My tasks (33) — sorted by effort
+
+| # | Item | Type | Framework | Due / Status | Effort | From | Vanta |
+|---|------|------|-----------|--------------|--------|------|-------|
+| 1 | IAC-11 — Password policy enforced | 📎 Control | SOC 2 CC 6.1 | 1/2 | 🟢 S | — | ✅ |
+| 2 | IAC-199 — Authentication information | 📎 Control | ISO A.5.17 | 2/3 | 🟢 S | 🕳️ Unassigned | ✅ |
+| 3 | CAP-7 — Capacity management | 📎 Control | ISO A.8.6 | 10/12 | 🟢 S | 🏗️ Gustav | ✅ |
+| 4 | CHG-39 — Change management | 📎 Control | ISO A.8.32 | 9/10 | 🟢 S | 🏗️ Gustav | ⏳ pending |
+| 5 | VPM-1 — Service infrastructure maintained | 📎 Control | SOC 2 (+4) | 18/20 | 🟢 S | — | ✅ |
+| 6 | VPM-2 — Vulnerabilities scanned & remediated | 📎 Control | SOC 2 (+5) | 15/17 | 🟢 S | — | ✅ |
+| 7 | AST-71 — Secure disposal/re-use of equipment | 📎 Control | ISO | Needs evidence | 🟢 S | 🕳️ Unassigned | ✅ |
+| 8 | END-40 — User endpoint devices | 📎 Control | ISO A.8.1 | 5/6 | 🟢 S | 🕳️ Unassigned | ✅ |
+| 9 | HRS-52 — Competence | 📎 Control | ISO C.7.2 | 8/10 | 🟢 S | 🕳️ Unassigned | ✅ |
+| 10 | PES-78 — Clear desk and clear screen | 📎 Control | ISO | Needs evidence | 🟢 S | 🕳️ Unassigned | ✅ |
+| 11 | 🐙 Critical vulnerabilities — GitHub (1) | 🧪 Test | ISO, SOC 2 | 📆 May 18 2026 | 🟢 S | ⚠️ Needs reassignment | ⏳ pending |
+| 12 | 🟢 Low vulnerabilities — GitHub (4) | 🧪 Test | ISO, SOC 2 | 📆 May 15 2026 | 🟢 S | — | ✅ |
+| 13 | IRO-3 — Incident management procedures followed | 📎 Control | SOC 2 (+8) | 6/7 | 🟢🟡 S–M | — | ✅ |
+| 14 | MON-4 — Infrastructure performance monitored | 📎 Control | SOC 2 (+2) | 7/9 | 🟢🟡 S–M | — | ✅ |
+| 15 | ☁️ Subnets flow logs (Azure) | 🧪 Test | — | ⏳ Overdue 9 mo, 12 subnets | 🟡 M | — | ✅ |
+| 16 | ☁️ VM scale set CPU monitored (Azure) | 🧪 Test | ISO, SOC 2 | ⏳ Overdue ~2 mo, 4 VMs | 🟡 M | 🕳️ Unassigned | ⏳ pending |
+| 17 | 📄 Process to identify/prioritize vulns | 📑 Doc | ISO | ⏳ Overdue Sep 29 2025 | 🟡 M | — | ✅ |
+| 18 | 📄 Vulnerability scan | 📑 Doc | ISO, SOC 2 | ⏳ Overdue Dec 12 2025 | 🟡 M | — | ✅ |
+| 19 | 📄 Sample of remediated vulnerabilities | 📑 Doc | ISO, SOC 2 | ⏳ Overdue Jan 8 2026 | 🟡 M | — | ✅ |
+| 20 | CPL-46 — Compliance w/ policies review | 📎 Control | ISO | Needs evidence | 🟡 M | 🏗️ Gustav | ✅ |
+| 21 | HRS-55 — Segregation of duties | 📎 Control | ISO A.5.3 | 3/5 | 🟡 M | 🕳️ Unassigned | ✅ |
+| 22 | IAC-200 — Access rights | 📎 Control | ISO A.5.18 | 14/16 | 🟡 M | 🕳️ Unassigned | ✅ |
+| 23 | IAC-201 — Privileged access rights | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ |
+| 24 | IAC-202 — Information access restriction | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ |
+| 25 | NET-91 — Networks security | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ |
+| 26 | THR-13 — Threat intelligence | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ |
+| 27 | VPM-75 — Mgmt of technical vulnerabilities | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ |
+| 28 | ⚠️ SOC 2 incident-logging inquiry | 📑 Doc remediation | SOC 2 | 🔧 Needs remediation | 🟡🔴 M–L | — | ✅ |
+| 29 | 🐙 High vulnerabilities — GitHub (17) | 🧪 Test | ISO, SOC 2 | 🔥 **OVERDUE Apr 27** | 🔴 L | — | ✅ |
+| 30 | 🐙 GitHub PR approval/justification | 🧪 Test | ISO | ⏳ Overdue ~1 mo, 47 PRs | 🔴 L | 🕳️ Unassigned | ⏳ pending |
+| 31 | 🐙 GitHub auto-checks enabled (Overdue) | 🧪 Test | — | ⏳ Overdue ~1 mo, 78 PRs | 🔴 L | 🕳️ Unassigned | ⏳ pending |
+| 32 | 🐙 GitHub auto-checks enabled (Upcoming) | 🧪 Test | — | 🔮 Upcoming, 78 PRs | 🔴 L | 🕳️ Unassigned | ⏳ pending |
+| 33 | 🟡 Medium vulnerabilities — GitHub (42) | 🧪 Test | ISO, SOC 2 | 📆 May 25 2026 | 🔴 L | — | ✅ |
+
+---
+
+## 🏷️ Effort legend
+
+- 🟢 **S** = ≤1h
+- 🟡 **M** = 2–4h
+- 🔴 **L** = ≥half day
+
+## 🗺️ Next steps
+
+1. ⏳ **Finish reassigns in Vanta** — CHG-39 (Gustav→you), VM scale set CPU + 3 GitHub PR/auto-checks tests (Unassigned→you), Critical-vulns GitHub (Needs reassignment→you).
+2. 🔥 **Today** — start GitHub High-vuln backlog (overdue Apr 27).
+3. 📤 Capture Gustav offboarding as access-review evidence.
+
+## 🔎 Drive cross-check
+
+- ✅ 🚨 `Annual ISO 27001 Incident-Response Table-Top Test - 2025/07/04` ([open](https://docs.google.com/document/d/1Dx_5gp8r99Pg9YwevWQwoXISVjcjhPdSJYIAHePBGnE/edit?usp=drivesdk)) — supports IRO-3 + #28.
+- ❌ No vulnerability/scan/patch docs in Drive — items #17–19 need fresh authoring.

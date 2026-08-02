@@ -1,0 +1,38 @@
+flowchart TD
+  Start([task t]) --> A{archived?}
+  A -->|yes| Hide([HIDE])
+  A -->|no| P{priority in filter?<br/>or filter empty}
+  P -->|no| Hide
+  P -->|yes| O{treeShowAllOpen<br/>AND open tab?}
+  O -->|yes| Show([SHOW])
+  O -->|no| T{!showTemporary<br/>AND is_temporary?}
+  T -->|yes| Hide
+  T -->|no| OA{showOnlyActive<br/>AND not session<br/>AND not pinned?}
+  OA -->|yes| Hide
+  OA -->|no| F{status in filter<br/>OR pinned<br/>OR active session?}
+  F -->|yes| Show
+  F -->|no| Hide
+
+  Show -.->|adds to set| V[visibleTaskIds]
+
+  subgraph VTI [visibleTaskIds build]
+    direction TB
+    M{showSubtasks<br/>AND<br/>showAllSubtasks<br/>OR<br/>showAllUndoneSubtasks?}
+    M -->|yes| SAS[show-all-subtasks branch]
+    M -->|no| NORMAL[normal branch]
+
+    SAS --> SAS1[for each ROOT:<br/>strict status + priority match<br/>NO bypass allowed]
+    SAS1 --> SAS2[walk subtree<br/>add descendants<br/>excludeDone filter<br/>priority filter]
+    SAS2 --> SAS3[for each task NOT yet added:<br/>passesFilter check<br/>includes bypasses]
+    SAS3 --> SAS4[add task + parent chain ONLY<br/>no extra subtree]
+
+    NORMAL --> N1[for each task:<br/>passesFilter check]
+    N1 --> N2[if pass:<br/>add task + climb parents]
+  end
+
+  classDef hide fill:#ef4444,color:#fff
+  classDef show fill:#10b981,color:#fff
+  classDef bypass fill:#f59e0b,color:#000
+  class Hide hide
+  class Show show
+  class O,F bypass

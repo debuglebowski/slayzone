@@ -1,0 +1,48 @@
+# Normain App — Permissions Catalog
+
+> Working list of every permission available in the Normain app. Feeds the roles/permissions section of the KPMG deliverable.
+
+## Confirmed permissions
+
+| Permission                       | Description                                               | Scope |
+| -------------------------------- | --------------------------------------------------------- | ----- |
+| Create team                      | Create a new team within the organization                 | Org   |
+| Add member to org                | Add a new user to the Normain organization                | Org   |
+| Add member to team               | Add a user to any team                                    | Org   |
+| Add member to team I'm a part of | Add a user to a team the acting user is a member of       | Team  |
+| Setup SharePoint integration     | Configure the SharePoint integration for the organization | Org   |
+| Assign SharePoint site to team   | Connect a SharePoint site to a specific team              | Team  |
+
+## Prospects (not yet confirmed)
+
+> Brainstormed candidates — confirm which actually exist, then promote to the table above.
+> **Scoped-variant note:** rows marked `Team (any / own)` likely split into two permissions — acting on *any* team vs only teams the actor belongs to (mirroring "Add member to team" vs "…team I'm a part of"). Confirm whether that split is a general pattern.
+> **Relevance** = relevance to the KPMG deliverable (access provisioning, SharePoint, admin roles, audit): 🟢 high · 🟡 medium · 🔴 low
+> **Include?** — fill in (✅ / ❌) whether to include in the catalog.
+
+| Category                  | Permission                        | Description                                 | Scope            | Relevance | Include? |
+| ------------------------- | --------------------------------- | ------------------------------------------- | ---------------- | --------- | -------- |
+| Org / tenant              | Remove member from org            | Remove a user from the Normain organization | Org              | 🟢        | Yes      |
+| Teams                     | Remove member from team           | Remove a user from a team                   | Team (any / own) | 🟢        | Yes      |
+| Members / users           | Deactivate / suspend user         | Disable a user account                      | Org              | 🟢        | No       |
+| Roles & permissions       | Assign role to user               | Assign a role to a user                     | Org              | 🟢        | No       |
+| Roles & permissions       | Create / edit custom role         | Define or modify roles                      | Org              | 🟢        | No       |
+| SharePoint / integrations | Remove SharePoint site from team  | Disconnect a site from a team               | Team (any / own) | 🟢        | Yes      |
+| SharePoint / integrations | View connected SharePoint sites   | See which sites are connected               | Org / Team       | 🟢        | Yes      |
+| Content & documents       | View documents                    | View documents in a team                    | Team (any / own) | 🟢        | No       |
+| Audit & compliance        | View audit log                    | View the activity / audit trail             | Org              | 🟢        | N        |
+| Audit & compliance        | Export audit log                  | Export audit log data                       | Org              | 🟢        | <br />   |
+| Audit & compliance        | View access reports               | See "who can access what" reports           | Org              | 🟢        | <br />   |
+| Org / tenant              | Edit org settings                 | Change organization-level settings          | Org              | 🟡        | <br />   |
+| Org / tenant              | Configure SSO / identity provider | Set up and manage SSO / external IdP        | Org              | 🟡        | <br />   |
+| Org / tenant              | Manage org security settings      | MFA policy, session rules, etc.             | Org              | 🟡        | <br />   |
+| Teams                     | Edit team                         | Rename / change team settings               | Team (any / own) | 🟡        | <br />   |
+| Teams                     | Archive / delete team             | Archive or delete a team                    | Team (any / own) | 🟡        | <br />   |
+| Teams                     | View teams                        | See teams (all teams vs only own)           | Team (any / own) | 🟡        | <br />   |
+| Members / users           | Resend / revoke invitation        | Manage pending invitations                  | Org              | 🟡        | <br />   |
+| Roles & permissions       | View role catalog                 | See available roles and their permissions   | Org              | 🟡        | <br />   |
+| SharePoint / integrations | Disconnect SharePoint integration | Remove the org SharePoint integration       | Org              | 🟡        | <br />   |
+| SharePoint / integrations | Trigger / configure sync          | Run or configure SharePoint sync            | Team (any / own) | 🟡        | <br />   |
+| Content & documents       | Upload / import files             | Add files to a team                         | Team (any / own) | 🟡        | <br />   |
+| Content & documents       | Export / download deliverable     | Download a processed deliverable            | Team (any / own) | 🟡        | <br />   |
+| Content & documents       | Process document                  | Run a document through Normain              | Team (any / own) | 🔴        | <br />   |

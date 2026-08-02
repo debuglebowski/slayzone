@@ -1,0 +1,47 @@
+# SSO with KPMG — plain English
+
+## The setup
+
+Two companies, two separate employee databases:
+
+- **Normain's database** — has Normain employees, plus the *definition* of the Normain app itself.
+- **KPMG's database** — has KPMG employees (all 250k of them, globally).
+
+When KPMG employees want to log into Normain, Normain has to ask KPMG's database "is this person real, are they who they say?" That requires the two databases to **trust each other**.
+
+## Two records have to exist before that trust works
+
+| In Normain's database | In KPMG's database |
+|---|---|
+| "Hi, I'm an app called Normain. Here's my ID." | "We know an outside app called Normain. We let it talk to us." |
+
+- The Normain-side record = **app registration**.
+- The KPMG-side record = **service principal** (a.k.a. enterprise application, a.k.a. "SPN" in casual Microsoft talk).
+
+Both records have to exist. They reference each other by ID. Neither one alone is enough.
+
+## The two ways to create the KPMG-side record
+
+### The normal way — Microsoft's default flow
+
+> A KPMG admin clicks "Accept" on Normain's app once. Microsoft automatically creates the KPMG-side record. Done.
+
+**The problem:** the "Accept" click happens at the *global* level — KPMG Global, all 250k employees. KPMG Global has a rule: nobody clicks Accept on outside apps. Ever. So this path is dead.
+
+### KPMG's proposal — manual creation
+
+> Skip Microsoft's auto-creation. A KPMG admin opens KPMG's database and *manually creates* the KPMG-side record. They configure it themselves: "this record is for the Normain app, and only these specific Swedish employees can use it." Then they tell Normain "here's the ID we used."
+
+Same end result (both records exist, they reference each other), but KPMG controls every detail of the KPMG-side record instead of Microsoft auto-filling it from a generic "Accept" click.
+
+## So what is an "SPN" / service principal, really?
+
+It's just **KPMG's record about Normain's app.** A row in their database that says:
+
+- "Yes, we know an app called Normain."
+- "Here's the list of our employees who are allowed to use it."
+- "Here's the audit log of every login it's done."
+
+That's it. It's not a copy of Normain's code. It's not running anywhere. It's a *permission record* in KPMG's directory.
+
+The whole argument with Digvijay was just: **who writes that record, and how?** Microsoft's auto-pilot (blocked by policy) or KPMG's hand (allowed).

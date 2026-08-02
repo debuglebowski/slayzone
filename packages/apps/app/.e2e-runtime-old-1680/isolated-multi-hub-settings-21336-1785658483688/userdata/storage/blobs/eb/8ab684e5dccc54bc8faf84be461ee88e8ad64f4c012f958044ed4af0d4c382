@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Analytics Dashboard</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#38bdf8; --text:#e2e8f0; --muted:#94a3b8; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+  .card { background: var(--card); border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .card h3 { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric { font-size: 2.5rem; font-weight: 700; color: var(--accent); margin-top: 0.5rem; }
+  .delta { font-size: 0.9rem; color: #4ade80; }
+  .delta.neg { color: #f87171; }
+  table { width: 100%; border-collapse: collapse; margin-top: 2rem; background: var(--card); border-radius: 12px; overflow: hidden; }
+  th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #334155; }
+  th { background: #0b1220; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+  .bar { display: inline-block; height: 8px; background: var(--accent); border-radius: 4px; vertical-align: middle; }
+</style>
+</head>
+<body>
+  <h1 style="margin-bottom:1.5rem">Q1 2026 Analytics</h1>
+  <div class="grid">
+    <div class="card"><h3>Revenue</h3><div class="metric">$284K</div><div class="delta">+12.4% MoM</div></div>
+    <div class="card"><h3>Active Users</h3><div class="metric">18,420</div><div class="delta">+8.1% MoM</div></div>
+    <div class="card"><h3>Churn</h3><div class="metric">2.3%</div><div class="delta neg">+0.4% MoM</div></div>
+    <div class="card"><h3>NPS</h3><div class="metric">62</div><div class="delta">+5 pts</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Channel</th><th>Sessions</th><th>Conv. Rate</th><th>Share</th></tr></thead>
+    <tbody>
+      <tr><td>Organic Search</td><td>42,100</td><td>3.8%</td><td><span class="bar" style="width:140px"></span></td></tr>
+      <tr><td>Direct</td><td>28,400</td><td>5.2%</td><td><span class="bar" style="width:95px"></span></td></tr>
+      <tr><td>Paid Social</td><td>16,800</td><td>2.1%</td><td><span class="bar" style="width:56px"></span></td></tr>
+      <tr><td>Referral</td><td>9,200</td><td>4.6%</td><td><span class="bar" style="width:30px"></span></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

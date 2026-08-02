@@ -1,0 +1,18 @@
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > Should extract properties from error objects 2ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > should extract nested properties 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > should extract custom properties on functions 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > should handle circular references in objects 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > should handle circular references in arrays 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > should handle deeply nested circular references 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > should not crash on properties backed by throwing getters 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > should handle circular references in functions 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > secret redaction > should redact top-level credential keys 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > secret redaction > should redact credentials nested deep inside an error-like graph 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > secret redaction > should match keys case-insensitively 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > secret redaction > should NOT redact non-secret keys that merely contain a secret-like substring 0ms
+ ✓ src/shared/logging/src/JsonSerializable.test.ts > JsonSerializableValue > secret redaction > should redact credential static props on functions 0ms
+ ✓ src/shared/logging/src/createLogger.test.ts > NormainLogger redaction (end-to-end) > redacts top-level secret properties while preserving ids and counters 5ms
+ ✓ src/shared/logging/src/createLogger.test.ts > NormainLogger redaction (end-to-end) > redacts secrets nested inside a logged error graph 3ms
+ ✓ src/shared/logging/src/createLogger.test.ts > NormainLogger redaction (end-to-end) > preserves Date values and non-secret fields 1ms
+ Test Files  2 passed (2)
+      Tests  16 passed (16)

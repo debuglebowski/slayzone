@@ -1,0 +1,41 @@
+# Layout 5 — Single-column document (Notion style)
+
+No cards, no grid. One readable column: title, labels as chips under it, properties as inline rows (relations are just another property), divider, annotations. Versions live in a header dropdown.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ Tools / Hammer drill                            [v3 Draft ▾]  [Publish] [⋮]      │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│      Hammer drill                                                                │
+│      ◉ equipment  ◉ heavy  ◉ rental  [+]                                         │
+│                                                                                  │
+│      Power         1100 W                                                        │
+│      Weight        2.9 kg                                                        │
+│      Description   Long text reads like a document at comfortable                │
+│                    measure, wrapping naturally.                                  │
+│      kit of        → Site kit A                                                  │
+│      stored in     ← Depot 7 [v2]                                                │
+│      ▸ 2 empty properties                                                        │
+│                                                                                  │
+│      ────────────────────────────────────────────────────────                    │
+│      Notes │ Tasks │ Activity                                                    │
+│                                                                                  │
+│      ▸ "Check chuck wear" — Kalle · 2d                                           │
+│      ▸ ☐ Order spare batteries · due Fri                                         │
+│                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```
+[v3 Draft ▾] dropdown:          ┌────────────────────┐
+                                │ ● v3 Draft         │
+                                │ ○ v2 Latest        │
+                                │ ○ v1               │
+                                │ ── New version ──  │
+                                └────────────────────┘
+```
+
+**Pros:** calmest read; relations unified into the property list (one mental model); versions out of the way until needed.
+**Cons:** version state less visible (buried in dropdown); long relation lists awkward as property rows; everything below the fold w/ many fields.
+**Best when:** instances read like records/specs; version ops are rare.

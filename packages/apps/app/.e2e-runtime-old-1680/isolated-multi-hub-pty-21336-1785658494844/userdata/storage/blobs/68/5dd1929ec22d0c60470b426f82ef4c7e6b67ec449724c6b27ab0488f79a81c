@@ -1,0 +1,28 @@
+# Phase 0 — Final state (post round 15)
+
+## E2e cumulative (excluding network-dependent tests)
+| Round | Failures | Δ |
+|---|---|---|
+| Baseline | ~80 | — |
+| Round 14 | 26 | −54 (67%) |
+| Round 15 | 4 (real) | −96% from baseline |
+
+## ✅ Round 15 fixed
+- `93-artifacts-panel` — ALL 24 pass (made tests self-contained, .ts for code mode, expand folders before nested checks)
+- `90-chat-mode-toggle` — ALL 4 pass (right-click chat panel timeline; menu item is "Disable chat" not "Disable chat view")
+
+## Still failing (4 real)
+- `61-web-panel-handoff-routing:226` — needs WebContentsView popup IPC simulation (synthetic webview new-window)
+- `71-webview-popup-handling:540/686` — window.open in WebContentsView crashes Playwright page bridge mid-call
+- `30-terminal-core-behavior:222` — flaky clear-buffer (markerA persists in serialized buffer between clears)
+
+## Network-dependent (~13)
+Browser tests using `https://example.com` (73, 75, 76, 82, 83). Pass when network is up; fail when blocked. Currently `curl example.com` → 000.
+
+## All source-level fixes applied this session
+- `apps/app/src/main/index.ts` — `__restorePtyHandlers` covers all terminal-pkg handlers (chat:*, session:*, pty:*, terminalModes:*)
+- `domains/settings/src/client/tabs/PanelsSettingsTab.tsx` — `mergePanelOrder` after Add Panel (custom panels now render immediately)
+- `domains/settings/src/client/tabs/TagsSettingsTab.tsx` — listen to `slayzone:tag-{created,updated,deleted}` for cross-window refresh
+- `domains/worktrees/src/client/GitDiffPanel.tsx` — drop `flatEntries.length > 0` from chip-row condition (chip persists across clean↔dirty)
+- `domains/task/src/client/TaskDetailPage.tsx` — IPC listener for `browser-view:focused` → `setFocusedPanel('browser')`
+- `apps/cli/src/commands/tasks/list.ts` — `t.deleted_at IS NULL` filter (real bug — soft-deleted tasks were appearing)

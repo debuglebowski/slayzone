@@ -1,0 +1,76 @@
+# AI Provider Tycoon — Action Catalog
+
+**Status key:** Locked = confirmed in design discussion · New = proposed, not yet confirmed · Deferred = explicitly punted
+
+***
+
+## Brand
+
+| Action                        | Status | Note                                               |
+| :---------------------------- | :----- | :------------------------------------------------- |
+| Marketing spend               | Locked | Volume knob already in                             |
+| Positioning choice            | New    | Frontier / efficient / safety / enterprise posture |
+| Open-source / community moves | New    | Brand boost without ad spend                       |
+
+## Capacity
+
+| Action                            | Status | Note                                     |
+| :-------------------------------- | :----- | :--------------------------------------- |
+| Buy / sell servers                | Locked | Tier variants sketched but not confirmed |
+| Inference vs research split       | Locked | Core allocation lever                    |
+| Efficiency upgrades               | New    | Capex to reduce unit cost                |
+
+## Research / models
+
+| Action                        | Status | Note                               |
+| :---------------------------- | :----- | :--------------------------------- |
+| Research compute allocation   | Locked | Linear throughput                  |
+| Publish completed model       | Locked | Implied — release to market        |
+
+## VC round
+
+| Action                         | Status | Note                                    |
+| :----------------------------- | :----- | :-------------------------------------- |
+| Attempt raise                  | Locked | Brand × share odds, cooldown gated      |
+| Round size                     | New    | Size × odds tradeoff                    |
+
+## Operations *(restructured into sub-areas)*
+
+| Action                      | Status | Note                                  |
+| :-------------------------- | :----- | :------------------------------------ |
+| Reliability investment      | New    | Reduce self-inflicted incident odds   |
+| Incident response readiness | New    | Mitigate event impact                 |
+| Overhead reduction          | New    | Process automation, lower fixed costs |
+| Security level 1-5 | New    |          |
+| Certifications                   | New    | SOC 2, ISO 27001, HIPAA — unlock customer segments |
+| Privacy stuff | New    | Enable regional hosting (EU / US / customer cloud)                |
+
+
+### Compliance
+
+| Action                           | Status | Note                                               |
+| :------------------------------- | :----- | :------------------------------------------------- |
+
+### Privacy / data handling *(new sub-area)*
+
+| Action                    | Status | Note                                                              |
+| :------------------------ | :----- | :---------------------------------------------------------------- |
+| Customer isolation tier   | New    | Shared / logical / physical separation offerings                  |
+| Training data policy      | New    | Pledge re: training on customer data — trust vs research velocity |
+| Retention controls        | New    | Customer-controlled retention, zero-retention modes               |
+
+## M\&A
+
+| Action                    | Status | Note                             |
+| :------------------------ | :----- | :------------------------------- |
+| Acquire competitor        | New    | Buy weaker player outright       |
+| Acqui-hire / IP licensing | New    | Pay for a model without research |
+| Sell self                 | New    | Voluntary exit, convert to score |
+
+***
+
+## Meta note
+
+Every action expands the schema and per-tick token cost for every player. Strategic richness probably peaks around 8–12 distinct action types — beyond that, prompt authors can't reason about all of them in a single paragraph, and play converges to "use these three." For each New row, the question is not just "is this fun?" but "is this fun *enough* to crowd out something else?"
+
+Currently 9 actions are Locked, which is in the sweet spot. Promoting more than 3–4 of the New rows starts to crowd the schema.

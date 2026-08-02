@@ -1,0 +1,54 @@
+# Reopen-blank — ① BASELINE (before this session): no restore
+
+> The actual starting point — what the system did before any of this work. This is the bug as reported.
+>
+> Progression: **① baseline (this doc) → ② rejected client attempt → ③ shipped server design.**
+
+## Idea in one line
+**Nothing is saved.** Hibernate throws the output away; reopen just restarts the CLI and you stare at a **blank screen** until it finishes re-printing.
+
+## What exists — only an in-memory buffer that dies on hibernate
+
+```mermaid
+flowchart TB
+  subgraph CLIENT["CLIENT (renderer)"]
+    XT["xterm<br/>(blank on reopen<br/>until reprint lands)"]
+  end
+  subgraph SERVER["MAIN (terminal still in-process)"]
+    PTY["PTY"] --> RB["RingBuffer<br/>(in memory ONLY)"]
+    RB -. "freed on hibernate" .-> X["✗ gone"]
+  end
+  SERVER -->|"live output only"| CLIENT
+  classDef bad fill:#5b2330,stroke:#e0506a,color:#ffd7df;
+  class X,RB bad
+```
+
+There is no persistence anywhere — not on the client, not on disk. The history lives only in RAM, and hibernation frees it.
+
+## Flow
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant C as Client (xterm)
+  participant S as Server (PTY)
+  rect rgb(48,40,42)
+  note over C,S: Hibernate
+  S->>S: kill PTY + free RingBuffer (history lost)
+  end
+  rect rgb(48,40,42)
+  note over C,S: Reopen
+  U->>C: click Reopen
+  S->>S: spawn CLI --resume
+  Note over C: BLANK SCREEN (no spinner)
+  Note over C,S: ...seconds while CLI boots + re-prints...
+  S-->>C: reprint transcript (live)
+  C->>C: finally shows content
+  end
+```
+
+## Why it's a problem
+- 🔴 **Blank, no loading state.** The overlay clears in a microtask, but the resumed transcript takes seconds → you watch a blank background.
+- 🔴 **Nothing to fall back on.** The buffer is gone; the *only* way to get content back is to wait for the CLI to re-stream it.
+
+➡️ The rest of the session was about fixing this. First attempt put the fix on the client (② — rejected); the shipped fix puts it on the server (③).

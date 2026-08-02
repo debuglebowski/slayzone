@@ -1,0 +1,4 @@
+<!DOCTYPE html><html><body>
+      <div id="x">before</div>
+      <script>document.getElementById('x').textContent = 'after';</script>
+    </body></html>

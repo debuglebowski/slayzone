@@ -1,0 +1,55 @@
+# AI Provider Tycoon — Action Catalog
+
+**Status key:** Locked = confirmed in design discussion · New = proposed, not yet confirmed · Deferred = explicitly punted
+
+***
+
+## Brand
+
+| Action                        | Status | Note                                               |
+| :---------------------------- | :----- | :------------------------------------------------- |
+| Marketing spend               | Locked | Volume knob already in                             |
+| Positioning choice            | New    | Frontier / efficient / safety / enterprise posture |
+| Open-source / community moves | New    | Brand boost without ad spend                       |
+| Website | New    | A website that can be visited in-game                       |
+
+## Capacity
+
+| Action                            | Status | Note                                     |
+| :-------------------------------- | :----- | :--------------------------------------- |
+| Buy / sell servers                | Locked | Tier variants sketched but not confirmed |
+| Inference vs research split       | Locked | Core allocation lever                    |
+| Efficiency upgrades               | New    | Capex to reduce unit cost                |
+
+## Research / models
+
+| Action                        | Status | Note                               |
+| :---------------------------- | :----- | :--------------------------------- |
+| Research compute allocation   | Locked | Linear throughput                  |
+| Publish completed model       | Locked | Implied — release to market        |
+
+## VC round
+
+| Action                         | Status | Note                                    |
+| :----------------------------- | :----- | :-------------------------------------- |
+| Attempt raise                  | Locked | Brand × share odds, cooldown gated      |
+| Round size                     | New    | Size × odds tradeoff                    |
+
+## Operations *(restructured into sub-areas)*
+
+| Action                      | Status | Note                                  |
+| :-------------------------- | :----- | :------------------------------------ |
+| Reliability investment      | New    | Reduce self-inflicted incident odds   |
+| Incident response readiness | New    | Mitigate event impact                 |
+| Overhead reduction          | New    | Process automation, lower fixed costs |
+| Security level 1-5 | New    |          |
+| Certifications                   | New    | SOC 2, ISO 27001, HIPAA — unlock customer segments |
+| Privacy stuff 1-5 | New    |                 |
+
+## M\&A
+
+| Action                    | Status | Note                             |
+| :------------------------ | :----- | :------------------------------- |
+| Acquire competitor        | New    | Buy weaker player outright       |
+| Acqui-hire / IP licensing | New    | Pay for a model without research |
+| Sell self                 | New    | Voluntary exit, convert to score |

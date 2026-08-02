@@ -1,0 +1,15 @@
+# Scenario
+
+Two customers within 5 minutes report that nothing happens when they press Run Extraction on a run page — the button enters its loading state and stays. No error toast appears. CSM raises it in #security. CTO files a Security Event Report. One engineer recognises it as a potential urgent issue and calls a virtual meeting.
+
+## Ground truth
+
+An earlier extraction job for the affected extraction was OOM-killed mid-run (~3 hours prior) and never wrote a terminal status, leaving its ExtractionInsightResult row stuck in **WAITING**. The `assertExtractionNotRunning` guard treats that ghost row as an in-flight run and silently rejects every new Run Extraction for that extraction — so the worker never starts and the button does nothing, with no error shown. This is a non-malicious availability bug: **no security breach and no data exfiltration**.
+
+Recovery path: manually move the stuck row to **CANCELED** so the queue drains and new runs start, confirm a fresh run completes, then ship a fix so a dead job can't wedge an extraction again (the guard ignores stale rows) plus alerting on stuck-row buildup.
+
+## Assumptions & scope
+
+- **Affected:** Run Extraction for the impacted extractions; the extraction queue / worker pipeline (Normain web app, production).
+- **Unaffected / available:** the rest of the app, Slack, Linear, the Azure portal, application logs and Bull Board — recovery tooling and channels remain usable.
+- **Assume:** no security breach; no personal data processed or exposed; engineering staff available; database access available to clear the stuck row.

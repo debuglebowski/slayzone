@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.45 -apple-system,system-ui,sans-serif;color:#18181b;background:#f4f4f5;padding:28px}
+.caption{max-width:960px;margin:0 auto 10px;color:#52525b;font-size:12px}
+.caption b{color:#18181b}
+.app{max-width:960px;margin:0 auto;background:#fff;border:1px solid #e4e4e7;border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.titlebar{padding:14px 18px;border-bottom:1px solid #ececef;display:flex;align-items:center;gap:10px}
+h1{font-size:15px;font-weight:600}
+.count{color:#9ca3af;font-size:12px}
+.body{display:flex}
+aside{width:228px;border-right:1px solid #ececef;background:#fcfcfd;padding:14px 16px}
+.fhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.fhead b{font-size:12px}
+.fhead span{font-size:11px;color:#9ca3af}
+.group{margin-bottom:16px}
+.group h3{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#71717a;font-weight:500;margin-bottom:7px}
+.row{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12.5px;color:#3f3f46}
+.cb{width:13px;height:13px;border:1px solid #d4d4d8;border-radius:3px;background:#fff;display:inline-block}
+.cb.on{background:#18181b;border-color:#18181b;position:relative}
+.cb.on:after{content:"✓";color:#fff;font-size:9px;position:absolute;left:2px;top:-1px}
+.n{margin-left:auto;color:#a1a1aa;font-size:11px}
+.range{display:flex;gap:6px;align-items:center}
+.range input{width:74px;border:1px solid #e4e4e7;border-radius:5px;padding:4px 7px;font-size:12px;color:#18181b}
+.preset{display:inline-block;border:1px solid #e4e4e7;border-radius:999px;padding:2px 9px;font-size:11.5px;color:#52525b;margin:0 4px 4px 0;background:#fff}
+.preset.on{background:#eef2fe;border-color:#c7d4f8;color:#3b4f9e}
+main{flex:1}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#71717a;text-align:left;padding:8px 14px;border-bottom:1px solid #ececef;background:#fafafa;font-weight:500}
+td{padding:9px 14px;border-bottom:1px solid #f1f1f4}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:500}
+.active{background:#dcfce7;color:#166534}
+.lbl{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;background:#fae8ff;color:#86198f;margin-right:4px}
+</style></head><body>
+<div class="caption"><b>Layout 2 — Faceted side panel</b> (Airtable/e-commerce style). Persistent collapsible panel; every filterable field always visible with live counts; best for browse-heavy concepts, costs horizontal space.</div>
+<div class="app">
+  <div class="titlebar"><h1>Deals</h1><span class="count">3 of 7 shown</span></div>
+  <div class="body">
+    <aside>
+      <div class="fhead"><b>Filters</b><span>Clear (3)</span></div>
+      <div class="group"><h3>Status</h3>
+        <div class="row"><span class="cb on"></span>Active<span class="n">5</span></div>
+        <div class="row"><span class="cb"></span>Negotiation<span class="n">1</span></div>
+        <div class="row"><span class="cb"></span>Closed<span class="n">1</span></div>
+      </div>
+      <div class="group"><h3>Amount</h3>
+        <div class="range"><input value="50,000"><span style="color:#a1a1aa">–</span><input placeholder="max"></div>
+      </div>
+      <div class="group"><h3>Close date</h3>
+        <span class="preset">This month</span><span class="preset on">Next 90d</span><span class="preset">Overdue</span>
+      </div>
+      <div class="group"><h3>Labels</h3>
+        <div class="row"><span class="cb on"></span>priority<span class="n">4</span></div>
+        <div class="row"><span class="cb"></span>q3<span class="n">2</span></div>
+      </div>
+      <div class="group"><h3>Owner</h3>
+        <div class="row"><span class="cb"></span>Mia<span class="n">3</span></div>
+        <div class="row"><span class="cb"></span>Theo<span class="n">2</span></div>
+        <div class="row"><span class="cb"></span>Ravi<span class="n">2</span></div>
+      </div>
+    </aside>
+    <main>
+      <table>
+        <tr><th>Name</th><th>Status</th><th>Amount</th><th>Close date</th><th>Labels</th></tr>
+        <tr><td>Acme renewal</td><td><span class="pill active">Active</span></td><td>$82,000</td><td>Jul 1, 2026</td><td><span class="lbl">priority</span></td></tr>
+        <tr><td>Globex expansion</td><td><span class="pill active">Active</span></td><td>$54,500</td><td>Jun 18, 2026</td><td><span class="lbl">priority</span><span class="lbl">q3</span></td></tr>
+        <tr><td>Umbrella upsell</td><td><span class="pill active">Active</span></td><td>$61,200</td><td>Aug 9, 2026</td><td><span class="lbl">priority</span></td></tr>
+      </table>
+    </main>
+  </div>
+</div>
+</body></html>

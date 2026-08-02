@@ -458,22 +458,28 @@ export async function launchIsolatedElectron(opts: {
  * chat before enrollment completes would race it. Gating once per worker — after
  * launch, before any test body — removes that race for the whole suite.
  *
+ * Gates on `usable`, NOT `connected`. `connected` is derived from a persisted
+ * `runners` row joined against live gateway state, so it can be true for a runner
+ * that is not actually reachable — this gate once passed in 14ms in a run where the
+ * runner never connected at all, which is worse than having no gate. `usable`
+ * means authenticated + heard from inside the heartbeat window.
+ *
  * Returns false (rather than throwing) when no runner appears: a suite-wide throw
  * here would convert an infrastructure hiccup into ~70 confusing failures, and
  * specs that legitimately boot runner-less (SLAYZONE_E2E_NO_RUNNER=1) call this
  * too. The individual spec still fails loudly on its own assertion.
  */
-async function waitForConnectedRunner(page: Page, timeoutMs = 120_000): Promise<boolean> {
+async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boolean> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const connected = await page.evaluate(async () => {
+      const usable = await page.evaluate(async () => {
         const rows = (await window.getTrpcVanillaClient().runners.list.query()) as Array<{
-          connected?: boolean
+          usable?: boolean
         }>
-        return rows.some((r) => r.connected === true)
+        return rows.some((r) => r.usable === true)
       })
-      if (connected) return true
+      if (usable) return true
     } catch {
       // Renderer mid-reload / tRPC not ready yet — keep polling.
     }
@@ -545,11 +551,11 @@ export const test = base.extend<ElectronFixtures>({
         sharedWorkerArtifactsDir = workerArtifactsDir
 
         // Runner-ready gate: agents only run on runners, so no spec may start
-        // before the auto-enrolled local runner is connected. Recorded in the
+        // before the auto-enrolled local runner is USABLE (not merely listed). Recorded in the
         // worker artifacts so a suite-wide agent failure is diagnosable from the
         // run output instead of looking like N unrelated spec failures.
         const runnerReadyStartedAt = Date.now()
-        const runnerReady = await waitForConnectedRunner(launched.page)
+        const runnerReady = await waitForUsableRunner(launched.page)
         if (!runnerReady) {
           console.warn(
             `[e2e] no connected runner after ${Date.now() - runnerReadyStartedAt}ms — ` +

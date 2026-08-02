@@ -1,0 +1,25 @@
+OPTION E — Three-zone single row
+=================================
+
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│  (tree content above)                                   │
+│                                                         │
+├─────────────────────────────────────────────────────────┤
+│  [Boost]  [██░░ Claude]  [██░░ Codex]                   │  ← usage
+├─────────────────────────────────────────────────────────┤
+│  [+task]      [agent●3] [panel] [⊟]      [···] [≡] [⚙] │  ← 3 zones
+│   primary       runtime state              meta         │
+└─────────────────────────────────────────────────────────┘
+
+· Left zone = primary action (new task)
+· Center zone = runtime indicators (clickable)
+· Right zone = meta + view switch + settings
+· "···" = workspace toggles (zen/explode/folder), update,
+   leaderboard, usage analytics, onboarding, what's new,
+   keyboard, feedback
+· Settings = last
+· Pros:  spatially balanced, intent-driven left→right
+         flow (do → observe → configure)
+· Cons:  workspace toggles (zen/explode) buried in dropdown
+         even though they're frequent

@@ -1,0 +1,38 @@
+# Vanta test: "Production data not used for dev or test" — investigation
+
+**Framework:** ISO 27001:2022 · **Type:** manual Document evidence · **Owner:** Kalle Hansson
+**Recurrence:** annual · **Status:** Due soon — current evidence expires **Jul 21, 2026** (renewal needed, ~26 days)
+**Link:** https://app.eu.vanta.com/c/normain.com/tests/production-data-not-used-in-test-dev-environment
+
+## Mapped controls
+- **TDA-41** — Separation of development, test and production environments (ISO 27001:2022 A.8.31)
+- **TDA-42** — Test information (ISO 27001:2022 A.8.33)
+
+## Current evidence
+- One file: `QAAndTesting.jpg` — uploaded by **Gustav Lidén, Jul 21 2025**.
+- It's a screenshot of a self-authored "QA and Testing" memo. Its "Test Data Management" section states: *"Under no circumstances shall production data be used in development or testing environments… We keep entire deployment architectures fully separate (e.g. no shared networks or database servers)."*
+- Recent comment — **Sara Landfors, Jun 23: "Update engineering guidelines."**
+
+## Findings
+
+1. **Evidence is a self-authored memo, not a system capture.** Acceptable per Vanta's worded description ("process documents"), but weak — it asserts a state rather than demonstrating it.
+
+2. **Evidence is factually stale.** The memo claims an **End-to-End (E2E) test** layer. The real engineering doc `docs/testing.md` (monorepo `normainofficial/normain`) explicitly says: *"No E2E or Playwright setup currently exists (references in old docs were inaccurate)."* So the current evidence overstates the testing setup. This is what Sara's comment targets.
+
+3. **The policy lives only in the memo, not in the guidelines.** The "no production data in dev/test" / test-data-seeding statement is NOT present in the actual engineering docs (`docs/testing.md`, `docs/development.md`). `development.md` does show local dev runs on local Docker Postgres/Redis (not prod). To renew credibly, the statement should be added to the real guidelines, then captured.
+
+4. **Environment separation (A.8.31) is real and verifiable in Terraform.** `terraform/environments/` has exactly two: `app-development` and `app-production`, separated by:
+   - Separate TF state backends / storage accounts (`normain-tf-app-development` vs `normain-tf-app-production`)
+   - Separate DB-access PIM groups (`sg_normain_dev_db_accessor` vs `sg_normain_prod_db_accessor`)
+   - Separate resource groups, `-dev-`/`-prod-` naming, `environment` tags, separate Azure OpenAI deployments
+   - **Caveat:** both environments share the same Azure subscription (`a9049f9f-…`). Separation is by resource group / network / access control, not by separate subscriptions — so the memo's "entire deployment architectures fully separate" is broadly true but not literally separate subscriptions.
+
+## To renew (suggested, not executed)
+- Update engineering guidelines (`docs/testing.md` + a test-data section) so they (a) drop the inaccurate E2E claim and (b) contain the no-production-data / seeding policy.
+- Use the updated guideline **plus** a Terraform-environments capture (separate state/RG/PIM groups) as the renewed evidence — real source docs, not a fresh screenshot memo.
+- Then renew in Vanta before Jul 21, 2026.
+
+## Open questions
+- Update guidelines in monorepo myself, or hand to eng (Sara/Gustav)?
+- Renew now or wait for guidelines update first?
+- Is the "proprietary seeding solution" claim accurate? Not found in docs/testing.md.

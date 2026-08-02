@@ -1,0 +1,75 @@
+# SSO with KPMG — for engineers new to Azure
+
+## A few terms first
+
+- **Entra ID** — Microsoft's cloud identity service (used to be called Azure AD). It's where org accounts, groups, app permissions, and SSO live.
+- **Tenant** — one organization's slice of Entra. Each company gets a tenant when they sign up for Microsoft 365 / Azure. It's the container for that org's users, groups, app registrations, and service principals. Normain has a tenant. KPMG has a tenant. They're isolated from each other unless explicitly federated.
+
+## The setup
+
+Two companies → two tenants:
+
+- **Normain's tenant** — small, mostly exists to host the *app registration* (the definition of the Normain SaaS app).
+- **KPMG Global tenant** — the giant one, holds ~250k KPMG employees worldwide.
+
+When a KPMG employee logs into Normain, Normain has to verify their identity against KPMG's tenant. That requires a trust relationship between the two tenants.
+
+## Two records have to exist before that trust works
+
+| In Normain's tenant | In KPMG's tenant |
+|---|---|
+| **App registration** — "I'm an app called Normain, App ID `xyz`, here are the permissions I need, here's my redirect URI." | **Service principal** — "We know an outside app called Normain (App ID `xyz`). It's allowed to talk to us. These specific users can use it." |
+
+Both records have to exist. They reference each other by Normain's App ID. Neither alone is enough.
+
+- The Normain-side record is the **app registration**.
+- The KPMG-side record is the **service principal** — same thing Microsoft calls an **enterprise application** in the Entra admin UI, same thing Digvijay called an **SPN** (loose carryover from on-prem AD terminology).
+
+## The two ways to create the KPMG-side record
+
+### The normal way — Microsoft's default consent flow
+
+> A KPMG admin (a Global Admin in the KPMG Global tenant) clicks "Accept" on Normain's app once. Entra auto-creates the service principal in KPMG's tenant, pre-filled with whatever permissions Normain's app requested.
+
+**The problem:** the "Accept" click is performed by a Global Admin against KPMG's *global* tenant — covering all 250k employees across 120+ member firms. KPMG Global has a blanket policy: no third-party apps get consented in the global directory. Ever. So this path is dead.
+
+### KPMG's proposal — manual creation
+
+> A KPMG admin opens the Entra portal and *manually creates* the service principal as a "non-gallery enterprise application." They configure SSO themselves (SAML or OIDC), set the user assignment list to only the relevant KPMG Sweden users, and hand Normain the federation details (app ID, issuer URL, signing cert / OIDC metadata).
+
+Same end state — both records exist and reference each other — but every detail of the KPMG-side record is set by KPMG, not auto-filled by Microsoft from a generic "Accept" click. The trust is configured *on KPMG's terms*, scoped *by KPMG's assignment list*, and revocable *by KPMG alone*.
+
+## So what is an "SPN" / service principal, really?
+
+Think of Entra as the security desk at the entrance to KPMG's offices. To get in, you have to be on KPMG's approved-guest list. **The service principal is one row on that list** — KPMG's official record that they've agreed to let Normain in.
+
+The row says, in plain terms:
+
+- "We've agreed to let in an app called Normain. Here's its ID so we know which one we mean."
+- "These specific KPMG employees are allowed to use it. Nobody else."
+- "Here's what Normain is allowed to ask us about — only the identity of the person signing in, nothing about the rest of the directory."
+- "Here's a log of every time someone tried to use this app."
+- "Anyone using this app has to satisfy our normal security rules (MFA, company laptop, etc.)."
+
+Without that row, the security desk turns Normain away — sign-in fails before Normain even sees the request. The desk doesn't decide whether Normain *seems* trustworthy; it just looks at the list.
+
+What this means in practice:
+
+- **Normain doesn't go anywhere.** The row is just KPMG's internal record about Normain. Normain's code, infrastructure, data — all stay in Normain's hands.
+- **KPMG owns the row completely.** They can edit it, remove names, narrow permissions, or delete the row entirely. The next sign-in attempt fails instantly, without KPMG having to tell Normain anything.
+- **The fight with Digvijay is about who writes the row.** Microsoft's default flow: Global Admin clicks Accept once → Entra auto-fills the row with whatever Normain asked for. KPMG's proposal: Global Admin doesn't sign off on third parties at all → KPMG writes the row by hand, every field set deliberately.
+
+## What this argument was really about
+
+Both flows produce the same two records linked by the same App ID. The fight was just **who writes the KPMG-side record, and how**:
+
+- Microsoft's auto-pilot via admin consent → blocked by KPMG Global policy.
+- KPMG's hand, via manual non-gallery SSO setup → allowed, but requires NITSO security sign-off.
+
+## What Normain needs to deliver to KPMG
+
+To let KPMG configure the SP correctly:
+
+- The exact claims/permissions Normain's SaaS needs from the token (likely just `sub`, `email`, `preferred_username` — nothing requiring `Directory.Read.All`).
+- Confirmation that Normain's app can federate against an externally-owned IdP app (i.e., accept KPMG's SP, not push Normain's app reg in).
+- Protocol preference: SAML or OIDC. Non-gallery enterprise apps in Entra default to SAML; OIDC is also supported. Marketplace SaaS typically OIDC.

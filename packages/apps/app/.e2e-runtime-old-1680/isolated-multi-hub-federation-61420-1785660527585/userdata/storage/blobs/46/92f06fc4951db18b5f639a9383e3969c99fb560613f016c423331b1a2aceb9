@@ -1,0 +1,39 @@
+flowchart TB
+  subgraph TODAY["Electron app — today, keeps shipping"]
+    direction TB
+    R1["Renderer (canonical React app)<br/>~856 tRPC vs ~80 window.api call sites"]
+    P["Preload window.api<br/>~48 namespaces"]
+    M["Electron main<br/>node-pty · WebContentsView · menus/dialogs · DB worker"]
+    R1 --> P --> M
+  end
+
+  subgraph SIDECAR["@slayzone/server sidecar — slice 2.5 dark-launch"]
+    direction TB
+    T["tRPC over WS — 25+ routers<br/>app-deps composition root"]
+    DB[("SQLite<br/>own better-sqlite3 conn")]
+    PTYS["PTY ops — MUST move here<br/>(today electron-main only)"]
+    T --> DB
+    T -.-> PTYS
+  end
+
+  subgraph FORK["Chromium fork — target shell"]
+    direction TB
+    RA["renderer-app (stub)<br/>import canonical features 1-by-1<br/>layout engine done"]
+    SHIM["window-api-shim<br/>8 namespaces real / 16 stubbed"]
+    BP["Chromium browser process<br/>EmbeddedTabHost (13 mojom, in binary)<br/>windows · menus · 78 patches"]
+    RA --> SHIM
+    SHIM -->|mojo| BP
+  end
+
+  M ==>|"Track 1: extract host-agnostic logic<br/>slices 2.6 → 5 → 8 + PTY"| T
+  R1 ==>|"Track 2: drain window.api → tRPC<br/>(~20 convertible sites left)"| T
+  M ==>|"native-only bucket reimplemented:<br/>browser.* → EmbeddedTabHost"| BP
+  RA ==>|"WS — wire sidecar,<br/>drop SLAYZONE_NO_SIDECAR"| T
+
+  subgraph PHASES["Phases"]
+    direction LR
+    PH1["1 sidecar cutover<br/>+ PTY → server"] --> PH2["2 drain convertible<br/>window.api"] --> PH3["3 wire sidecar<br/>into fork"] --> PH4["4 shim native<br/>over mojo"] --> PH5["5 import features<br/>into renderer-app"] --> PH6["6 parity →<br/>cutover"]
+  end
+
+  TODAY -.->|"Electron ships until parity"| PHASES
+  PHASES -.-> FORK

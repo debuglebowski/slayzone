@@ -1,0 +1,15 @@
+{
+  "attempt": 1,
+  "startedAt": "2026-08-02T11:16:11.696Z",
+  "userDataDir": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-remote-config-screen-79319-1785669371694/userdata",
+  "workerArtifactsDir": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/isolated-remote-config-screen-79319-1785669371694/artifacts",
+  "mainJsPath": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/out/main/index.js",
+  "executablePath": "/Users/Kalle/dev/projects/slayzone/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+  "success": true,
+  "observedWindowUrls": [
+    "file:///Users/Kalle/dev/projects/slayzone/packages/apps/app/out/renderer/index.html"
+  ],
+  "rootReadyMs": 630,
+  "endedAt": "2026-08-02T11:16:14.238Z",
+  "durationMs": 2542
+}

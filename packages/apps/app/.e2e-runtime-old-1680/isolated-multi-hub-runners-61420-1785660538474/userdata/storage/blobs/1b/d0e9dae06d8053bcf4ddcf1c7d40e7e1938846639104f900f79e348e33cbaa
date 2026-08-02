@@ -1,0 +1,139 @@
+# Activity Widget — 5 design directions
+
+Data per event (`FeedItem`): `occurredAt`, `actor` (member|sys), `eventType`, `subjectKind` (instance/note/task/attachment/concept), `subjectId`, `payload`, `previous`. Helpers give `eventLabel` (verb), `eventSnippet` (≤80c), `eventDetails` (diff rows). Instance events click → `/instances/:id`.
+
+Today shipped: `timeline` (avatar rail) + `log` (dense table), auto-picked by width. Below = 5 alternative directions, not cosmetic tweaks.
+
+---
+
+## 1 — Timeline rail (narrow / story)
+
+Vertical connector, avatar nodes, verb + snippet stacked. Best in a tall narrow column.
+
+```
+┌─ Activity ─────────────────────────┐
+│                                     │
+│  (JS)──● Jane Smith        · 5m     │
+│   │     edited fields               │
+│   │     Name, Status                │
+│   │                                 │
+│  (JD)──● John Doe          · 2h     │
+│   │     added a note                │
+│   │     "Quick check on the Q3…"    │
+│   │                                 │
+│  (sy)──● system            · 3h     │
+│   │     synced 12 Linear issues     │
+│   │                                 │
+│  (MK)──● Maya K.           · 1d     │
+│         status  Open → In Progress  │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+## 2 — Dense log table (wide / scan)
+
+Fixed columns, one line per event, snippet truncated. Best in a wide tile — maximize events per pixel.
+
+```
+┌─ Activity ──────────────────────────────────────────────────┐
+│ WHEN  WHO          DID            WHAT                        │
+│ ───────────────────────────────────────────────────────────  │
+│  5m   Jane Smith   edited         Name, Status                │
+│  2h   John Doe     + note         "Quick check on the Q3…"    │
+│  3h   system       synced         12 Linear issues            │
+│  1d   Maya K.      status →       Open → In Progress          │
+│  1d   Jane Smith   assigned       jane@ → john@               │
+│  2d   system       + attachment   contract-v3.pdf             │
+│  2d   John Doe     created        Acme Corp                   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3 — Grouped digest (day buckets)
+
+Events bucketed under Today / Yesterday / date headers; collapsible. Best for catching up over days, not minutes.
+
+```
+┌─ Activity ─────────────────────────────────┐
+│ ▼ TODAY                            6 events │
+│    5m · Jane edited Name, Status            │
+│    2h · John added a note                   │
+│    3h · system synced 12 Linear issues      │
+│                                             │
+│ ▼ YESTERDAY                        9 events │
+│    Maya moved 3 tasks → In Progress         │
+│    Jane assigned 2 items to John            │
+│                                             │
+│ ▶ JUN 14                          14 events │
+│ ▶ JUN 13                           3 events │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## 4 — Diff cards (before → after focus)
+
+Each event is a card; field edits render the actual prev→next diff inline, not just field names. Best for audit / "what exactly changed".
+
+```
+┌─ Activity ──────────────────────────────────┐
+│ ┌──────────────────────────────────────────┐│
+│ │ (JS) Jane Smith · edited Acme Corp   5m  ││
+│ │  Stage     Lead      →   Negotiation     ││
+│ │  Owner     —         →   John Doe        ││
+│ │  Value     $40,000   →   $52,000         ││
+│ └──────────────────────────────────────────┘│
+│ ┌──────────────────────────────────────────┐│
+│ │ (JD) John Doe · added a note     2h      ││
+│ │  "Quick check on the Q3 renewal — they   ││
+│ │   want to revisit seat count before…"    ││
+│ └──────────────────────────────────────────┘│
+│ ┌──────────────────────────────────────────┐│
+│ │ (sy) system · task status        3h      ││
+│ │  Open ───────────────────► In Progress   ││
+│ └──────────────────────────────────────────┘│
+└──────────────────────────────────────────────┘
+```
+
+---
+
+## 5 — Pulse / heatmap (aggregate, not feed)
+
+Not a raw list — a rollup: contribution heatmap by day, top actors, event-type mix. Best as a small "is this area alive?" health tile.
+
+```
+┌─ Activity · last 4 weeks ───────────────────┐
+│  M T W T F S S                               │
+│  ▢ ▤ ▦ ▩ ▣ ▢ ▢   ▩ heavy  ▦ med  ▤ light    │
+│  ▤ ▩ ▣ ▣ ▦ ▢ ▢                               │
+│  ▦ ▣ ▩ ▩ ▣ ▤ ▢      218 events ▲ 23% vs prev │
+│  ▣ ▩ ▣ ▦ ▤ ▢ ▢                               │
+│ ───────────────────────────────────────────  │
+│  Top actors          Event mix               │
+│   Jane   ████████ 64   edits      ███████ 41%│
+│   John   █████ 38       notes      ████ 22%  │
+│   Maya   ███ 21         tasks      ███ 19%   │
+│   system █████████ 95   syncs      ███ 18%   │
+└──────────────────────────────────────────────┘
+```
+
+---
+
+## Compare
+
+| # | Direction      | Density | Strength                      | Reuses today's |
+|---|----------------|---------|-------------------------------|----------------|
+| 1 | Timeline rail  | low     | narrative, narrow columns     | ✅ ships now    |
+| 2 | Dense log      | high    | scan many events fast         | ✅ ships now    |
+| 3 | Grouped digest | med     | multi-day catch-up            | snippet only   |
+| 4 | Diff cards     | low     | audit, real before→after      | `eventDetails` |
+| 5 | Pulse/heatmap  | n/a     | health-at-a-glance, analytics | new agg query  |
+
+## Build forks
+- 1+2 already exist — want NEW variants (3/4/5) added, or these as redesigns of existing?
+- 5 needs a server-side aggregate (counts/day, by-actor, by-type) — others are client-side over existing `listEvents`. OK to add an RPC?
+- 4 diff-cards need value resolvers for non-text fields (enum/user/money/relation) — reuse `eventDetails` per-kind rendering?
+- Add as new `variant` values on the one `activity` widget, or split into separate widget types?

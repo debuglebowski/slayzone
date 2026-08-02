@@ -1,0 +1,56 @@
+# Terminal-only features — chat port analysis
+
+## UI / shortcuts / capabilities
+
+| Feature                       | Relevancy | Should implement | Note                                                          |
+| ----------------------------- | --------- | ---------------- | ------------------------------------------------------------- |
+| Loop mode                     | 🟢 High   | ✅ Yes            | Automated iter w/ pass/fail criteria — biggest functional gap |
+| Search bar (Cmd+F)            | 🟢 High   | ✅ Yes            | Long convo find essential; reuse SearchAddon UX               |
+| Web link Cmd+Click            | 🟢 High   | ✅ Yes            | File paths + URLs in tool output need clickable handling      |
+| SlayNudge banner              | 🟢 High   | ✅ Yes            | Setup prompt provider-agnostic — port verbatim                |
+| Right-click context menu      | 🟢 High   | ✅ Yes            | Copy msg / copy code / clear — chat lacks affordances         |
+| Zoom font 8–32px              | 🟢 High   | ✅ Yes            | Trivial port, readability win                                 |
+| Scroll to top/bottom shortcut | 🟢 High   | ✅ Yes            | `Cmd+↑/↓` — long chats need it                                |
+| Copy selection / select all   | 🟢 High   | Yes              | Browser native works; add "copy msg" button                   |
+| Clear buffer (Shift+K)        | 🟡 Med    | No               | Chat already has "reset chat" — bind shortcut for parity      |
+| Link hover tooltips           | 🟡 Med    | Yes              | File path preview nice-to-have                                |
+| Terminal status popover       | 🟡 Med    | No               | No PTY proc — show session/token/cost stats analog            |
+| Split pane                    | 🔴 Low    | ❌ No             | Chat = single stream; multi-session belongs to tabs           |
+| New group / rename tab        | 🔴 Low    | ❌ No             | Tab mgmt lives outside panel                                  |
+| Close pane                    | 🔴 Low    | ❌ No             | Same                                                          |
+| Trim trailing WS on copy      | 🔴 Low    | ❌ No             | Msgs already clean                                            |
+| Ctrl+Shift+C/V                | 🔴 Low    | ❌ No             | Browser clipboard sufficient                                  |
+| Kitty Shift+Enter newline     | ✅ Done    | —                | Already in chat input                                         |
+| ANSI rendering / xterm.js     | ⚫ N/A     | ❌ No             | No PTY stream in chat                                         |
+| Scrollback buffer             | ⚫ N/A     | ❌ No             | DB stores full msg history                                    |
+| OSC 8 hyperlinks              | ⚫ N/A     | ❌ No             | ANSI-escape mechanism, irrelevant                             |
+| Option+arrow word nav         | ⚫ N/A     | ❌ No             | Native input behavior                                         |
+| Codex viewport→scrollback     | ⚫ N/A     | ❌ No             | Terminal-only provider                                        |
+| Raw PTY shell access          | ⚫ N/A     | ❌ No             | Defines terminal mode                                         |
+
+## Operating / permission modes
+
+Terminal cycles `plan` / `auto-accept` / `normal` via **Shift+Tab** keystroke passed to PTY. Chat has no mode UI — only warnings if non-interactive flag missing.
+
+| Mode                          | Relevancy | Should implement     | Note                                                                                                  |
+| ----------------------------- | --------- | -------------------- | ----------------------------------------------------------------------------------------------------- |
+| Plan mode                     | 🟢 High   | ✅ Yes                | Read-only investigation phase — strong fit for chat (preview before exec)                             |
+| Auto-accept / acceptEdits     | 🟢 High   | ✅ Yes                | Chat needs explicit toggle — currently relies on `--allow-dangerously-skip-permissions` flag w/ no UI |
+| Normal mode (per-tool prompt) | 🟢 High   | ✅ Yes                | Tool-call confirm UI — chat lacks interactive prompt path                                             |
+| Mode cycle indicator          | 🟢 High   | ✅ Yes                | Pill/badge showing current mode + click-to-cycle (replace Shift+Tab)                                  |
+| Shift+Tab cycle shortcut      | 🟡 Med    | Yes                  | Keystroke parity w/ terminal — but chat input may swallow Tab                                         |
+| bypassPermissions             | 🟡 Med    | 🟡 Maybe             | The task agent flags should be                                                                        |
+| `dontAsk`                     | 🔴 Low    | ❌ No                 | Subset of acceptEdits — collapse into auto-accept                                                     |
+| `--yolo` (gemini/qwen)        | 🟡 Med    | 🟡 Provider-specific | Map to acceptEdits-equivalent in unified mode UI                                                      |
+| `--full-auto` (codex)         | ⚫ N/A     | ❌ No                 | Codex = terminal-only provider                                                                        |
+
+## Top priorities
+
+1. **Loop mode** — automated iter w/ pass/fail criteria
+2. **Mode UI (plan / auto-accept / normal)** — currently terminal-only via Shift+Tab; chat needs explicit toggle + tool-call confirm flow
+3. **Search** — Cmd+F over msg history
+4. **Right-click menu** — copy msg/code, reset, clear
+5. **Font zoom** — readability
+6. **Cmd+Click links** — file paths + URLs
+7. **Scroll-to-top/bottom shortcut**
+8. **SlayNudge banner**

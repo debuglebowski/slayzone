@@ -1,0 +1,46 @@
+flowchart LR
+    subgraph OS["OS Layer"]
+        shell["Shell or claude-code child process"]
+        kernel["Kernel pipe buf ~64 KB"]
+    end
+
+    subgraph Main["Main process Electron Node"]
+        pty["node-pty master fd, negligible RAM"]
+        ring["RingBuffer per session, max 5 MB raw bytes, drop oldest"]
+        sm["StateMachine idle running"]
+        listeners["dataListeners REST follow endpoints"]
+        ipc["IPC channel pty:data"]
+    end
+
+    subgraph Renderer["Renderer process browser"]
+        cache["terminal-cache per session, persists across mount unmount"]
+        subgraph xterm["xterm.js Terminal per tab"]
+            vt["VT parser, handles alt-screen, resume picker, vim, lazygit"]
+            screen["Active screen plus alt-screen buf"]
+            scrollback["Scrollback ring, 50000 lines default, ~16-48 MB per tab, BufferLine Uint32Array, 12 B per cell"]
+        end
+        webgl["WebglAddon GPU textures, ~few MB"]
+        serialize["SerializeAddon stateless snapshot tool"]
+        search["SearchAddon"]
+    end
+
+    shell -->|stdout| kernel
+    kernel --> pty
+    pty -->|data event| ring
+    ring -->|getBufferSince on mount| ipc
+    ring -.live chunks.-> ipc
+    ring -->|broadcast| listeners
+    pty -->|activity| sm
+    ipc -->|pty:data| vt
+    vt --> screen
+    screen -.scroll off top.-> scrollback
+    cache -.holds.-> xterm
+    xterm <--> webgl
+    xterm <--> serialize
+    xterm <--> search
+
+    classDef mem fill:#ffe4b5,stroke:#d4860d,color:#000
+    classDef proc fill:#cfe2ff,stroke:#1e4d8b,color:#000
+
+    class ring,scrollback,webgl,kernel mem
+    class shell,pty,vt proc

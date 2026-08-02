@@ -1,0 +1,122 @@
+# Peka — Level Design: Act 3 (Twist + Climax — "Into the Light")
+
+> Companion to `game-design.md` / `story.md`. Follows `level-act2.md`.
+> The final ascent toward the exit. Act 3 *twists* the core mechanic (gravity is
+> no longer fully yours), brings the two halves physically **together** for the
+> first time, and ends on the **merge into the light** — the story payoff.
+> Still no new movement verbs; the twist is environmental. Impossible solo +
+> deterministic/telegraphed throughout (death = full restart, GDD §3).
+
+**Legend** (+ Act 1/2 symbols)
+```
+⇅ gravity-storm zone (ambient pull inverts on a fixed beat)
+✦ light shaft / the exit   ⊕ convergence flip-zone (puts both on one surface)
+✜ frozen failed-pair silhouette
+```
+
+---
+
+## 3.1 "Gravity Storm" — the twist
+
+Zones where the **ambient pull forcibly inverts both players on a fixed rhythm**
+(telegraphed by a visual/audio swell). You can still flip — but the floor you
+trusted becomes the ceiling under you. You must *plan around* the storm beat.
+
+```
+═══════════════════════════  ⇅⇅⇅ on the beat, "down" flips for BOTH ⇅⇅⇅
+   P1 ───jump───▶                 land timing must account for the coming flip
+═══════════════════════════
+```
+- **Solve:** both read the storm beat and pre-commit jumps/flips so the forced inversion lands them safely; one often must be positioned to catch/bridge for the other across an inversion.
+- **Impossible solo:** several landings only exist *after* a forced flip, and need a partner-built platform on the surface you'll fall toward.
+- **Tests:** mastery of the core mechanic when it's no longer fully under control.
+
+---
+
+## 3.2 "Mirror Lock" — simultaneity gauntlet (peak difficulty)
+
+A chained sequence of **paired switches** that must be struck in **mirrored
+timing** across both surfaces; each correct pair shifts geometry to open the next.
+The hardest "two bodies, one place, same instant" test in the game.
+
+```
+═══◇1══════◇3══════◇5═══   ceiling chain (P2)
+═══◇1══════◇3══════◇5═══   floor chain (P1)   hit matching pairs in sync;
+   (mistime → geometry resets the sequence; a slip → death → full restart)
+```
+- **Solve:** P1 & P2 hit ◇1 together, then ◇3, then ◇5, flipping/moving in mirror, no desync.
+- **Impossible solo:** simultaneous mirrored input on two surfaces.
+- **Tests:** the simultaneity verb at its absolute ceiling; deep partner sync.
+
+---
+
+## 3.3 "Convergence" — the halves meet (story + co-op)
+
+For the **first time**, a flip-zone (⊕) places both halves on the **same surface**.
+A stretch they cross *literally together* — adjacent, one boosting/catching the
+other in close quarters — foreshadowing the merge. Tonal shift: intimate, quieter.
+
+```
+═══════════════════════════
+   P1⊕P2 ──together──▶  one short section, side by side / stacked,
+═══════════════════════════   close-quarters boosts & catches
+```
+- **Solve:** stay adjacent; use close boosts/catches that only work shoulder-to-shoulder.
+- **Impossible solo:** the section is built for two bodies in contact.
+- **Beat:** the wound starting to close — they're nearly whole.
+
+---
+
+## 3.4 "The Failed" — theme peaks (darkest stretch)
+
+A corridor lined with **✜ frozen failed pairs** and the **densest shadow presence**
+in the game (the most lost halves). The last and most dangerous gauntlet before
+the light — everything the pair has learned, under maximum pressure.
+
+```
+✜      ▒   ▒        ✜            walls of reaching silhouettes;
+═══════════════════════════     shadows thick on both surfaces;
+   P1 ◀threads▶  ▒   ▒   P2      flip-redirect + reach + simultaneity, combined
+═══════════════════════════
+✜          ▒          ✜
+```
+- **Solve:** synthesis of all verbs at peak density; the failed pairs telegraph exactly the mistakes that kill.
+- **Impossible solo:** layered two-surface dependencies with no static safe route.
+- **Theme:** *this is what you become if you let go.* Then — light ahead.
+
+---
+
+## 3.5 "The Light" — CLIMAX & ENDING
+
+The exit. A final **two-body gate**: both halves must stand in opposing
+**✦ light-shafts** (one per surface) **at the same moment** to widen the crack.
+They step into the light together — and **fold back into one**.
+
+```
+              ✦  (the widening crack — the way out)
+═══════[P2 in ceiling light-shaft]═══════
+              ‖ both lit at once → the crack opens ‖
+═══════[P1 in floor light-shaft]═════════
+   → both step in → the two halves merge → one being walks out under the sky.
+```
+- **Solve:** simultaneous presence in both light-shafts (the simultaneity verb, one last time, made sacred).
+- **Impossible solo:** the crack needs both lights held at once.
+- **Payoff:** the merge (whole again, gravity normal, walks into daylight).
+- **Eerie alt:** in the light, **one** shadow where two stood (ambiguous — GDD/story open hook).
+
+---
+
+## Act 3 — escalation summary
+
+| # | Adds / tests | New element |
+|---|--------------|-------------|
+| 3.1 Gravity Storm | core mechanic, out of your hands | forced timed inversion (⇅) |
+| 3.2 Mirror Lock | simultaneity at its ceiling | mirrored switch chains |
+| 3.3 Convergence | close-quarters co-op + story | convergence flip-zone (⊕) |
+| 3.4 The Failed | full synthesis, max pressure | dense shadows + ✜ silhouettes |
+| 3.5 The Light | climax / merge | dual light-shafts (✦) |
+
+## Open (Act 3)
+- [ ] Storm beat length in 3.1 (the most novel mechanic — needs careful tuning).
+- [ ] Ending: commit to **merge** vs. **single-shadow** (also tracked in `story.md`).
+- [ ] Does 3.3 "Convergence" reduce difficulty too much right before the peak? (pacing)

@@ -1,0 +1,37 @@
+flowchart LR
+    Renderer["Renderer (React)"]
+
+    subgraph App["@slayzone/app (Electron host)"]
+        Supervisor["Supervisor<br/>EmbeddedServerHandle"]
+    end
+
+    subgraph Server["@slayzone/server (side-car)"]
+        StartServer["startServer()<br/>StartServerConfig → ServerHandle"]
+        Router["appRouter (empty this slice)"]
+    end
+
+    subgraph Transport["@slayzone/transport"]
+        Context["TrpcContext<br/>{ db, dataRoot }"]
+    end
+
+    subgraph Platform["@slayzone/platform"]
+        DbAlias["SlayzoneDb<br/>(type alias, swap point)"]
+    end
+
+    DB[("SQLite (WAL)")]
+
+    Renderer == "tRPC over WS" ==> Router
+    Supervisor -- "spawns + supervises" --> StartServer
+    StartServer --> Router
+    Router --> Context
+    Context --> DbAlias
+    StartServer --> DB
+    App -. "legacy IPC (unchanged)" .- Renderer
+    App --> DB
+
+    classDef new fill:#1e3a5f,stroke:#4a9eff,stroke-width:2px,color:#fff
+    classDef existing fill:#2a2a2a,stroke:#888,color:#ddd
+    classDef shared fill:#3a2f1e,stroke:#d4a04a,color:#fff
+    class Server,StartServer,Router,Supervisor,DbAlias new
+    class App,Transport,Context,Renderer,Platform existing
+    class DB shared

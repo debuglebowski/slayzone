@@ -1,0 +1,120 @@
+# SlayZone YouTube Series — Episode Content
+
+Demo project: **Hatable** (like Lovable, but creates bad applications)
+
+---
+
+## Ep 0 — What is Claude Code?
+
+**Goal**: Someone who's never seen an AI coding agent understands what Claude Code is and why it matters.
+
+### Outline
+
+1. **The problem** — You're a developer. You have an idea. The gap between idea and working code is massive: boilerplate, debugging, reading docs, context-switching. Autocomplete helps but doesn't *think*.
+
+2. **What Claude Code is** — A coding agent that lives in your terminal. Not autocomplete — it reads your entire codebase, plans an approach, makes changes across multiple files, runs commands, iterates on errors. You describe what you want, it does the engineering.
+
+3. **Demo: First taste** — Install Claude Code. Open a Hatable project (briefly explain: intentionally bad app generator, our guinea pig). Ask Claude Code to fix something obvious — e.g. "the submit button submits the form to itself." Show: it reads the code, finds the bug, fixes it, done.
+
+4. **Demo: Going deeper** — Ask for something bigger. "Refactor the auth flow to use proper session tokens instead of... whatever this is." Show: it reads multiple files, understands the architecture, makes coordinated changes. This is the aha moment.
+
+5. **What makes it different** — Context-aware (reads your repo), agentic (plans + acts), iterative (runs tests, fixes errors, retries). Not a chatbot that spits code snippets.
+
+6. **Tease** — "Claude Code is powerful on its own. But when you're running multiple agents, juggling branches, previewing changes live... you need a command center. Next episode."
+
+---
+
+## Ep 1 — SlayZone: Your AI Command Center
+
+**Goal**: Viewer understands what SlayZone is and sees the core task workflow.
+
+### Outline
+
+1. **The problem** — AI agents are powerful but chaotic. You've got terminals everywhere, no overview of what's running, context scattered across tools. It's like having a team of brilliant interns with no project manager.
+
+2. **What SlayZone is** — Desktop app. Task management + integrated AI terminals + browser preview + context management. One screen, everything connected.
+
+3. **Demo: Setup** — Install SlayZone, create a project pointing to the Hatable repo. Create a task: "Fix the homepage layout." Show the kanban board, task detail view, integrated terminal.
+
+4. **Demo: The workflow** — Open the task, terminal launches with Claude Code ready. Give it the fix. Show how the task tracks everything — status, terminal output, the work is *attached* to the task, not floating in some random terminal window.
+
+5. **Demo: Task lifecycle** — Create a few tasks, move them through the board, show priorities, show how closing a task keeps the history.
+
+6. **Why this matters** — AI agents do the coding. You do the thinking and directing. SlayZone is where you direct.
+
+---
+
+## Ep 2 — Multiple AI Agents, One Screen
+
+**Goal**: Show multi-agent workflows — different agents for different jobs.
+
+### Outline
+
+1. **The setup** — Hatable generated a new disaster. Multiple things wrong: broken API, ugly frontend, no tests. Too much for one pass.
+
+2. **Agent intro** — SlayZone supports Claude Code, Codex, Gemini, and more. Each has strengths. Show terminal mode switching.
+
+3. **Demo: Divide and conquer** — Create tasks for each problem. Assign different agents. Show them running side by side in split terminals.
+
+4. **Demo: Compare approaches** — Give the same small bug to two different agents. Show how they approach it differently. Not "which is better" — which fits your style/task.
+
+5. **The point** — You're not locked in. Pick the right tool for the job. SlayZone makes switching frictionless.
+
+---
+
+## Ep 3 — See Changes Instantly (Browser Panel)
+
+**Goal**: Show the browser panel and real-time feedback loop.
+
+### Outline
+
+1. **The problem** — Agent makes changes, you alt-tab to browser, refresh, check. Repeat 50 times. Slow feedback loop.
+
+2. **Demo: Browser panel** — Open browser panel alongside terminal. Agent fixes Hatable's CSS disaster. Watch it update in real-time. No tab switching.
+
+3. **Demo: Responsive** — Show device presets, resize. Agent breaks mobile layout, catches it immediately because you can *see* it.
+
+4. **The point** — Tight feedback loop = better results. You catch problems as they happen, not after 20 more changes pile on top.
+
+---
+
+## Ep 4 — Teaching Your Agents (Skills & Context)
+
+**Goal**: Show how project context and skills make agents dramatically better.
+
+### Outline
+
+1. **The problem** — Out-of-the-box agent knows nothing about your project's conventions, architecture, or quirks. It works but makes generic choices.
+
+2. **Demo: Before** — Ask Claude Code to add a feature to Hatable with zero context. It works but ignores project patterns, uses wrong conventions.
+
+3. **Demo: Add context** — Write a SKILL.md, set up project context in SlayZone. Same prompt, dramatically better result. It follows patterns, uses the right abstractions.
+
+4. **Demo: MCP** — Connect a tool (e.g. browser, database). Agent can now query the actual DB, check the live app. Goes from guessing to knowing.
+
+5. **The point** — 5 minutes of setup saves hours of correcting. Context is the multiplier.
+
+---
+
+## Ep 5 — Parallel Branches (Worktrees)
+
+**Goal**: Show git worktrees and parallel task execution.
+
+### Outline
+
+1. **The problem** — Two features in flight, one branch. Stashing, switching, merge conflicts. Or waiting for one to finish before starting the next.
+
+2. **Demo: Worktrees** — Create two Hatable tasks. Each gets its own worktree — isolated branch, isolated directory. Two agents working simultaneously, zero conflicts.
+
+3. **Demo: The merge** — Both done. Show how the branches merge cleanly because they were isolated from the start.
+
+4. **The point** — Parallelism isn't just for CPUs. Your workflow can be parallel too.
+
+---
+
+## Open Questions
+
+- Ep 0 standalone or does it reference SlayZone at all?
+- How much do we show of Hatable's bad output? (more = funnier but longer)
+- Do we script exact prompts to give the agents or improvise on camera?
+- Screen recording software/setup?

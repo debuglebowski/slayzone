@@ -1,0 +1,9 @@
+# GitHub
+
+- Auth method: GitHub App/OAuth app
+- Requirements: GitHub App or OAuth app; repo/org permissions; webhook secret
+- Capabilities:
+  - Read: Repos, issues, PRs, checks, actions
+  - Write: Issues, comments, PR metadata, checks
+  - Triggers: Repo/org webhooks
+  - Limits: Installation permissions; org approval

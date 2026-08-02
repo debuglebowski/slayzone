@@ -1,0 +1,80 @@
+# Mascot — Visual Design Brief
+
+How the series mascot *looks*. Appearance only.
+
+---
+
+## Decided traits
+These apply to every variant below.
+
+- **Cute & cartoonish** — but not childish; must carry adult tone/language and deadpan delivery.
+- **Simple** — few elements, easy to redraw and animate.
+- **Hand-doll / puppet** base form (puppet cues: big expressive mouth, simple body, "held" posture).
+- **Flat vector** render — crisp lines, flat color fills, no felt/fabric texture.
+- **Reads at thumbnail size** — silhouette must survive as a small black blob.
+- **Works on light + dark backgrounds.**
+
+---
+
+## Variants
+Same decided traits, three fully-specced takes. React, tweak, or reject.
+
+### Variant A — "Bit" · abstract blob-monster
+- **Form:** rounded bean/egg body, no neck, two small side nubs for arms. One big horizontal puppet mouth splits the lower third.
+- **Silhouette / proportions:** ~60% head-blob, 40% body — chunky, bottom-heavy, sits low. Side fuzz tuft (2–3 vector spikes) breaks the plain oval.
+- **Color:** warm coral/tangerine body · off-white mouth interior · single dark accent for eyes · optional cream belly patch.
+- **Eyes:** two plain black dots, small, set high and close — tiny eyes over a huge mouth = deadpan engine.
+- **Mouth:** oversized lower-jaw puppet mouth, off-white/pink interior; range from thin closed line to wide gape.
+- **Line/shading:** medium uniform outline, one flat shadow tone max.
+- **Signature detail:** the fuzz tuft + oversized mouth combo.
+- **Poses to support:** neutral host, wide-mouth talk, deadpan side-eye, surprised gape, small nub gesture.
+- **Why it works:** zero real-world baggage, cleanest thumbnail blob, most "original IP."
+- **Risk:** generic if tuft/color aren't distinctive enough.
+- **Image prompt:**
+  > Flat vector mascot character, cute cartoon hand-puppet monster. A chunky rounded bean-shaped body in warm coral-orange, bottom-heavy, no neck, with two tiny side nubs for arms and a small tuft of 2–3 spiky fuzz on top. Big horizontal puppet mouth splitting the lower third of the face, off-white interior. Two small black dot eyes set high and close together, giving a deadpan, dry-humored expression. Simple flat color fills, crisp medium-weight outlines, one soft flat shadow, no gradients, no texture. Friendly but not childish, capable of adult deadpan delivery. Centered front view, plain neutral light-grey background, clean negative space, strong readable silhouette. Character mascot design, sticker style, high contrast.
+
+### Variant B — "Fox" · recognizable animal
+- **Candidate animal:** fox (clever/curious, sharp silhouette). Other animals under consideration listed at bottom.
+- **Form:** triangular ears carry recognizability. Head + small held body, big puppet mouth under the snout.
+- **Silhouette / proportions:** big head, ears ~⅓ of total height, compact body. Pointed snout adds a directional read.
+- **Color:** muted rust/terracotta (not neon) · cream muzzle + belly · dark ear tips + dark nose accent.
+- **Eyes:** almond/leaf-shaped, slightly angled — reads sly without effort; black with tiny highlight.
+- **Mouth:** puppet mouth opens under the snout; snout tip stays fixed so it still reads "fox" when open.
+- **Line/shading:** medium outline, flat two-tone (body + belly), dark tips as third value.
+- **Signature detail:** the two triangle ears — readable even as a black blob.
+- **Poses to support:** neutral host, talking, ears-perked curious, ears-flat skeptical, sly grin.
+- **Why it works:** instant relatability, strongest small-size silhouette.
+- **Risk:** "clever fox mascot" is well-trodden; needs a twist.
+- **Image prompt:**
+  > Flat vector mascot character, cute cartoon fox hand-puppet. Big head with two large pointed triangular ears (dark tips) making up about a third of the height, compact held body, pointed snout. Muted rust-terracotta fur with a cream muzzle and belly, small dark nose. Almond-shaped, slightly angled black eyes with tiny highlights, giving a clever, sly-but-friendly look. Big puppet mouth opening beneath the snout. Simple flat two-to-three tone color fills, crisp medium-weight outlines, no gradients, no texture. Cute and approachable yet able to deliver dry adult humor. Centered front view, plain neutral light-grey background, clean negative space, strong readable silhouette. Character mascot design, sticker style, high contrast.
+
+### Variant C — "Sock-bot" · object / soft-robot
+- **Form:** soft/plush robot as a puppet — rounded rectangular head, puppet mouth as a slot/speaker grille, antenna nub on top.
+- **Silhouette / proportions:** boxy-but-rounded head dominates; short soft body; antenna gives a distinct top point.
+- **Color:** soft slate/blue-grey body · one warm accent (mustard OR teal) on antenna/visor · off-white grille.
+- **Eyes:** either a single visor band (two glowing dots inside) OR two simple dot eyes — pick per mock.
+- **Mouth:** horizontal slot/grille that opens like a puppet jaw; glows faintly in the accent color when "talking."
+- **Line/shading:** clean outline, flat fills, small accent glow only (no gradients).
+- **Signature detail:** antenna + visor band; the warm accent keeps it friendly not corporate.
+- **Poses to support:** neutral host, talking (grille lit), head-tilt curious, glitch/confused, thumbs-up nub.
+- **Why it works:** on-theme for AI literacy, "AI as a helpful little device."
+- **Risk:** closest to generic-AI cliché; a robot also hints at *mechanism*, which the series deliberately skips.
+- **Image prompt:**
+  > Flat vector mascot character, cute cartoon soft-robot hand-puppet. Rounded rectangular head in soft slate blue-grey dominating the silhouette, short soft body, a single short antenna nub on top. A dark visor band across the eyes with two small glowing dots inside, and a horizontal speaker-grille slot for a puppet mouth. One warm accent color (mustard yellow) on the antenna tip and visor glow keeping it friendly, not corporate. Off-white grille. Simple flat color fills, clean medium-weight outlines, subtle accent glow only, no gradients, no metallic texture. Cute and approachable, plush not mechanical, able to deliver dry adult humor. Centered front view, plain neutral light-grey background, clean negative space, strong readable silhouette. Character mascot design, sticker style, high contrast.
+
+### Variant D — (open slot)
+-
+
+## Open questions
+- Original-IP creature (A) vs. instantly-readable animal (B) vs. on-theme device (C) — which trade-off matters most?
+
+---
+
+## Animal alternatives (for Variant B)
+Fox is the current pick. Fallbacks if fox feels too stock:
+- **Axolotl** — frilly external gills = unique silhouette, inherently cute, almost no mascot competition. Playful/friendly read.
+- **Fennec fox** — oversized ears carry the thumbnail read; cuter and less stock than a regular fox. Curious energy.
+- **Bat** — big ears + wing shape, strong silhouette, nocturnal/curious; needs cute-ifying so it doesn't read spooky.
+- **Octopus** — expressive, "many hands helping," great for gesture poses; busy silhouette + tentacles = more animation work.
+- **Raven** — clever connotation, sharp beak silhouette; can read dark/ominous, needs softening to stay cute.
+- **Parrot** — mimics/repeats speech (sly nod to how LLMs echo language), colorful, beak = strong read; risk of being too on-the-nose.

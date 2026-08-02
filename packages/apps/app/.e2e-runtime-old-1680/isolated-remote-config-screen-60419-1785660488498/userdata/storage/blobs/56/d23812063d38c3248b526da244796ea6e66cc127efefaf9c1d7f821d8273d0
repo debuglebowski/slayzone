@@ -1,0 +1,147 @@
+# Kanban widget — 5 design suggestions
+
+Grounded in today's widget: enum-field columns, cards = title + up to 2 scalar
+fields, drag-to-update writes the column value, plus config for column
+subset/order, card fields, `includeArchived`, `showEmptyColumns`, `orderBy`.
+Each suggestion below says what changes and which config it needs.
+
+---
+
+## 1 — Classic+ (polished evolution of today's board)
+
+Same model, tighter chrome: colored dot from the enum's `optionColor`, count
+chip right-aligned, drop-target glow on hover, inline "+ Add" that creates an
+instance pre-set to that column.
+
+```
+╭──────────────╮ ╭──────────────╮ ╭──────────────╮ ╭──────────────╮
+│ ● To Do    4 │ │ ● Doing    3 │ │ ● Review   2 │ │ ● Done     5 │
+├──────────────┤ ├──────────────┤ ├──────────────┤ ├──────────────┤
+│ ┌──────────┐ │ │ ┌──────────┐ │ │ ┌──────────┐ │ │ ┌──────────┐ │
+│ │Fix login │ │ │ │Auth flow │ │ │ │API audit │ │ │ │Logo set  │ │
+│ │acme · P1 │ │ │ │normain   │ │ │ │acme      │ │ │ │shipped   │ │
+│ └──────────┘ │ │ └──────────┘ │ │ └──────────┘ │ │ └──────────┘ │
+│ ┌──────────┐ │ │ ┌──────────┐ │ │              │ │              │
+│ │Onboarding│ │ │ │Billing   │ │ │   (drop ↓)   │ │              │
+│ └──────────┘ │ │ └──────────┘ │ │ ┌╌╌╌╌╌╌╌╌╌╌┐ │ │              │
+│  + Add       │ │              │ │ ╎ glow zone╎ │ │              │
+╰──────────────╯ ╰──────────────╯ ╰──────────────╯ ╰──────────────╯
+```
+
+- **New:** inline add-card per column; header dot uses `optionColors`.
+- **Config:** none beyond today. Lowest-effort, safest default.
+
+---
+
+## 2 — Rich cards (Trello-style detail)
+
+Cards grow a structured face that reads field *kinds* the app already has:
+label/relation chips, user → avatar, enum → priority badge, date → due,
+number/checklist → progress.
+
+```
+╭─ In Progress ──────────── 3 ╮
+│ ┌─────────────────────────┐ │
+│ │ ▮▮▮ bug   ▮▮ frontend    │ │  ← label / relation chips
+│ │ Redesign checkout flow   │ │
+│ │ ◔ 3/5   📅 Jun 18        │ │  ← progress · due date
+│ │ ⬤ KA    ⚑ High           │ │  ← assignee · priority
+│ └─────────────────────────┘ │
+│ ┌─────────────────────────┐ │
+│ │ ▮▮ infra                 │ │
+│ │ Migrate billing service  │ │
+│ │ ◑ 2/4   📅 Jun 22        │ │
+│ │ ⬤ TM    ⚑ Med            │ │
+│ └─────────────────────────┘ │
+╰─────────────────────────────╯
+```
+
+- **New:** layout-aware card that renders each `cardField` by its kind, not as
+  a plain text line; top label strip; avatar + badge footer.
+- **Config:** reuse `cardFields`; optional `coverField`/`avatarField` picks.
+
+---
+
+## 3 — Pipeline (value rollups + WIP limits)
+
+For CRM/deal/vendor boards. Column header sums a money/number field and shows a
+WIP bar; a board footer totals the pipeline. Limits are visual (warn, don't
+block).
+
+```
+┌ Lead ─────────────┐ ┌ Qualified ────────┐ ┌ Negotiation ──────┐ ┌ Won ──────────────┐
+│ 6 · $48k          │ │ 4 · $120k         │ │ 3 · $310k         │ │ 9 · $1.2M         │
+│ WIP ███████░ 6/8  │ │ WIP ████░░░░ 4/10 │ │ WIP ██████ 3/3 ⚠  │ │ ─                 │
+├───────────────────┤ ├───────────────────┤ ├───────────────────┤ ├───────────────────┤
+│ Acme Corp    $12k │ │ Globex      $40k  │ │ Initech    $180k  │ │ Hooli      $600k  │
+│ Umbrella     $8k  │ │ Stark       $35k  │ │ Wayne       $90k  │ │ Pied Piper $300k  │
+│ Soylent      $6k  │ │ Cyberdyne   $25k  │ │ Tyrell      $40k  │ │ Massive    $180k  │
+└───────────────────┘ └───────────────────┘ └───────────────────┘ └───────────────────┘
+  Σ pipeline $1.68M  ·  open $478k  ·  won $1.2M
+```
+
+- **New:** `sumField` (money/number) → per-column total + board footer;
+  `wipLimit` per column → bar + ⚠ over limit.
+- **Config:** `sumField`, optional `wipLimits: Record<value, number>`.
+
+---
+
+## 4 — Swimlanes (2D matrix)
+
+Add a secondary grouping as horizontal lanes; enum stays the columns. Cross-tab
+view of two dimensions at once. Drag across columns updates the enum (today);
+drag across lanes updates the swimlane field.
+
+```
+                 │ To Do      │ Doing      │ Review     │ Done
+─────────────────┼────────────┼────────────┼────────────┼────────────
+ ⬤ Kalle      3  │ ┌────────┐ │ ┌────────┐ │            │ ┌────────┐
+                 │ │Fix auth│ │ │Billing │ │            │ │Logo    │
+                 │ └────────┘ │ └────────┘ │            │ └────────┘
+─────────────────┼────────────┼────────────┼────────────┼────────────
+ ⬤ Tom        2  │ ┌────────┐ │            │ ┌────────┐ │
+                 │ │Imports │ │            │ │Audit   │ │
+                 │ └────────┘ │            │ └────────┘ │
+─────────────────┼────────────┼────────────┼────────────┼────────────
+ ▢ No owner   1  │ ┌────────┐ │            │            │
+                 │ │Triage  │ │            │            │
+                 │ └────────┘ │            │            │
+```
+
+- **New:** lane axis; collapsible lanes; per-lane counts.
+- **Config:** `swimlaneBy` (enum / user / relation field id).
+
+---
+
+## 5 — Compact + collapsible (high-density spine)
+
+One-line cards (no detail rows) and per-column collapse to a vertical title
+spine. Built for many columns or a huge "Done" pile you want out of the way.
+Collapsed state persists in the widget config.
+
+```
+ Expanded ─────────────────────────────────────   Collapsed ┐
+┌ Backlog 12 ┐ ┌ Doing 5 ┐ ┌ Review 3 ┐ ┌─▸ Done ─┐
+│ • Fix login│ │• Auth    │ │• Audit   │ │ D       │
+│ • Onboard  │ │• Billing │ │• Perf    │ │ o       │
+│ • Search   │ │• Imports │ │• i18n    │ │ n   28  │
+│ • Export   │ │• Search  │ │          │ │ e       │
+│ • Reports  │ │          │ │          │ │ ▸ click │
+│ • …(7 more)│ │          │ │          │ │   to    │
+└────────────┘ └──────────┘ └──────────┘ └─ open ──┘
+```
+
+- **New:** `density: "compact" | "comfortable"`; per-column collapse toggle.
+- **Config:** `density`, `collapsedColumns: string[]`.
+
+---
+
+## Quick compare
+
+| # | Direction        | Best for                     | New config                    | Effort |
+|---|------------------|------------------------------|-------------------------------|--------|
+| 1 | Classic+         | general task boards          | none                          | S      |
+| 2 | Rich cards       | detail-heavy work items      | coverField/avatarField        | M      |
+| 3 | Pipeline         | CRM / deals / vendors        | sumField, wipLimits           | M      |
+| 4 | Swimlanes        | owner × status, team views   | swimlaneBy                    | L      |
+| 5 | Compact+collapse | many columns / big backlogs  | density, collapsedColumns     | S–M    |

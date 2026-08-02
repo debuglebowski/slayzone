@@ -1,0 +1,81 @@
+# Approved vendors × DPA coverage
+
+_All 60 vendors with "Normain approved tool = Yes" in the VENDOR MASTER SHEET (read 2026-06-12), against the three DRAFT DPA appendices. Legend: 1️⃣ = in Table 1 (hosting/product data path) · 2️⃣ = in Table 2 (operations) · ❌ = not in that DPA · **`❌ → 2️⃣` = added to all 3 DRAFTs 2026-06-12**. Table 2 is identical across all 3 DPAs; only Table 1 differs. The DPAs' "Google" entry groups Google Workspace + Google Cloud Platform._
+
+DPA columns: **MP** = Marketplace (`2026-06-05 - DRAFT`) · **CH** = Customer Cloud Hosting (`2026-06-05 - DRAFT`) · **SaaS** = SaaS DPA (`2026-06-04 - DRAFT`).
+
+| Vendor | MP | CH | SaaS | Comment |
+|---|:---:|:---:|:---:|---|
+| 1password | 2️⃣ | 2️⃣ | 2️⃣ | Customer trial passwords |
+| Allshares (previously Bolago) | ❌ | ❌ | ❌ | Cap table — own equity, internal |
+| Amazon Web Services (AWS) | ❌ | ❌ | 1️⃣ | Hosts Anthropic models (SaaS); enterprise modes exclude it |
+| Anthropic | 2️⃣ | 2️⃣ | 2️⃣ | **Decided 2026-06-12: stays T2** — T1 is about the hosting provider; AWS covers model hosting |
+| Apollo | ❌ → 2️⃣ | ❌ → 2️⃣ | ❌ → 2️⃣ | **Added 2026-06-12** — sales prospecting, prospect contact data |
+| Apple Business Connect | ❌ | ❌ | ❌ | Own company listing, internal |
+| AquaVoice | ❌ | ❌ | ❌ | Personal dictation, internal |
+| BetterStack | 1️⃣ | 1️⃣ | 1️⃣ | Product telemetry/logs |
+| Boardeaser | ❌ | ❌ | ❌ | Board portal — own governance |
+| Cacilian | ❌ | ❌ | ❌ | Pentest provider — keep out if scope excludes production customer data (confirm) |
+| Canva | ❌ | ❌ | ❌ | Marketing design, internal |
+| CapCut | ❌ | ❌ | ❌ | Marketing video, internal |
+| Circleback | 2️⃣ | 2️⃣ | 2️⃣ | Meeting notes (customer/prospect meetings) |
+| Clay | ❌ → 2️⃣ | ❌ → 2️⃣ | ❌ → 2️⃣ | **Added 2026-06-12** — lead/prospect enrichment |
+| Cloudflare | ❌ | ❌ | ❌ | DNS only, not in data path |
+| Crunchbase | ❌ | ❌ | ❌ | Public company research |
+| Cursor | ❌ | ❌ | ❌ | AI code editor — own code only |
+| Eleven Labs | ❌ | ❌ | ❌ | Not seen in product code — keep out; re-add as 1️⃣ if productized |
+| Envato Elements | ❌ | ❌ | ❌ | Marketing templates, internal |
+| Epidemic Sound | ❌ | ❌ | ❌ | Marketing music, internal |
+| Figma | ❌ | ❌ | ❌ | Design, internal |
+| Firecrawl | ❌ | ❌ | ❌ | Decided exclude — fetches customer-specified URLs only, no personal data |
+| Fortnox | ❌ | ❌ | ❌ | Billing is Normain-as-controller — keep out, same logic as the Stripe call |
+| Framer | ❌ | ❌ | ❌ | Keep out pending form check (T2 only if site forms capture inbound leads) |
+| GitHub | ❌ | ❌ | ❌ | Decided exclude — own code; internal tool |
+| Google Ads | ❌ | ❌ | ❌ | Keep out — confirm no customer/prospect list uploads |
+| Google Chrome | ❌ | ❌ | ❌ | Browser, internal |
+| Google Cloud Platform | 2️⃣ | 2️⃣ | 2️⃣ | Covered by the grouped "Google" entry |
+| Google Workspace | 2️⃣ | 2️⃣ | 2️⃣ | Covered by the grouped "Google" entry |
+| HowdyGo | ❌ | ❌ | ❌ | Keep out unless demo lead-capture is on (verify) |
+| Instantly | ❌ → 2️⃣ | ❌ → 2️⃣ | ❌ → 2️⃣ | **Added 2026-06-12** — cold-email outbound, prospect contacts |
+| iOS | ❌ | ❌ | ❌ | Operating system |
+| Linear | 2️⃣ | 2️⃣ | 2️⃣ | Support/bug tickets |
+| LinkedIn Normain page | ❌ | ❌ | ❌ | Social presence, marketing |
+| Linkedin Sales Navigator | ❌ → 2️⃣ | ❌ → 2️⃣ | ❌ → 2️⃣ | **Added 2026-06-12** — prospecting, lead data |
+| Loops | 2️⃣ | 2️⃣ | 2️⃣ | Onboarding/marketing email |
+| Luma | ❌ | ❌ | ❌ | **Decided 2026-06-12: keep out** — not a subprocessor |
+| Microsoft 365 (Office) | ❌ → 2️⃣ | ❌ → 2️⃣ | ❌ → 2️⃣ | **Added 2026-06-12** — trials use Normain SharePoint. entry named **"Microsoft"** (grouped, mirrors "Google"); Azure separate in T1 |
+| Microsoft Azure | 1️⃣ | ❌ | 1️⃣ | Core hosting + hosts OpenAI models; excluded from CH (customer hosts in own cloud) |
+| MyAccess (Apple Online Store) | ❌ | ❌ | ❌ | Device procurement, internal |
+| Namecheap | ❌ | ❌ | ❌ | Domain, not in data path |
+| Notion / Notion Calendar | 2️⃣ | 2️⃣ | 2️⃣ | In DPAs as "Notion Calendar" — customer/prospect meetings |
+| OpenAI | 2️⃣ | 2️⃣ | 2️⃣ | **Decided 2026-06-12: stays T2** — T1 is about the hosting provider; Azure covers model hosting |
+| Permånad | ❌ | ❌ | ❌ | HR/benefits — own employees |
+| PostHog | 1️⃣ | 1️⃣ | 1️⃣ | Product analytics |
+| Producthunt | ❌ | ❌ | ❌ | Launch platform, marketing |
+| Revolut | ❌ | ❌ | ❌ | Banking — own finance |
+| Scrive | 2️⃣ | 2️⃣ | 2️⃣ | E-signing (customer signatories) |
+| Setapp | ❌ | ❌ | ❌ | Mac apps, internal |
+| Simply | ❌ | ❌ | ❌ | Domain, not in data path |
+| Slack | 2️⃣ | 2️⃣ | 2️⃣ | Team comms, may reference customer data |
+| Spark | ❌ → 2️⃣ | ❌ → 2️⃣ | ❌ → 2️⃣ | **Added 2026-06-12** — email client, customer/prospect mail (same rationale as Superhuman) |
+| Superhuman | 2️⃣ | 2️⃣ | 2️⃣ | Email client (customer/prospect mail) |
+| Swedbank | ❌ | ❌ | ❌ | Bank — own finance |
+| Telgea | ❌ | ❌ | ❌ | Mobile plans, internal |
+| Tre (3) | ❌ | ❌ | ❌ | Mobile operator, internal |
+| Vanta | ❌ | ❌ | ❌ | Decided exclude — compliance tool, own infra/vendor metadata |
+| Vimeo | ❌ | ❌ | ❌ | Video, marketing |
+| X | ❌ | ❌ | ❌ | Social, marketing |
+| YouTube | ❌ | ❌ | ❌ | Video, marketing |
+| Zero | ❌ → 2️⃣ | ❌ → 2️⃣ | ❌ → 2️⃣ | **Added 2026-06-12** — CRM & sales automation, customer/prospect data |
+
+## Decisions 2026-06-12
+- **Luma stays out** of all subprocessor lists.
+- **OpenAI + Anthropic stay in Table 2.** Table 1 reflects the hosting provider, not the model provider: Anthropic runs on AWS (SaaS T1), OpenAI on Azure (T1).
+- **Table 2 adds applied 2026-06-12 (all 3 DPA DRAFTs):** Apollo · Clay · Instantly · LinkedIn Sales Navigator · Microsoft 365 · Spark · Zero → Table 2 goes 11 → 18 entries.
+- **Open:** Fortnox/Framer/Google Ads/HowdyGo/Eleven Labs/Cacilian confirms · MS Marketplace publisher (O3-residual).
+
+## Current DPA contents (after 2026-06-12 edits)
+- **Table 1 — MP:** Microsoft Azure · BetterStack · PostHog
+- **Table 1 — CH:** BetterStack · PostHog
+- **Table 1 — SaaS:** Microsoft Azure · AWS · BetterStack · PostHog
+- **Table 2 — all 3 (identical, 18):** 1Password · Circleback · Anthropic · Linear · Google · Slack · Superhuman · Notion Calendar · Loops · Scrive · OpenAI · **Apollo · Clay · Instantly · LinkedIn Sales Navigator · Microsoft · Spark · Zero**

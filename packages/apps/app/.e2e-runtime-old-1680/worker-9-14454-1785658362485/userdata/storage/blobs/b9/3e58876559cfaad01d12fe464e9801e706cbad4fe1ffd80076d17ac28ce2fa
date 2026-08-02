@@ -1,0 +1,90 @@
+# Slice 3/8 — IPC→tRPC: browser umbrella (P19g–P19n + P22) — DONE
+
+All commits landed direct to `main`, additive coexistence (IPC kept; renderer
+cutover is slice 5). 9 functional commits (10th = cc372ee3 pre-satisfied).
+
+## Commits (in order)
+
+| # | SHA | Commit |
+|---|-----|--------|
+| 1 | `3a9294b6` | feat(transport): browser router (P19g — 47 handlers) |
+| 2 | `fa556572` | feat(transport): floating-agent router (P19h — 10 handlers + 3 streaming subs) |
+| 3 | `3e6a342e` | feat(transport): webview tab registry router (P19i — 3 handlers) |
+| 4 | `1a4bdbe7` | feat(transport): task-windows + panel ownership router (P19j — 12 handlers + 5 streaming subs, per-WS windowId on context) |
+| 5 | `13b6f404` | feat(transport): webview devtools (P19k — 3 simple webview handlers) |
+| 6 | `c0df121d` | feat(transport): dialog router (P19l — 1 handler) |
+| 7 | `bc3961a5` | feat(transport): full webview router (P19m — 6 webview handlers + onShortcut sub) |
+| 8 | `c5e5589b` | feat(transport): window.close router (P19n — uses ctx.windowId) |
+| 9 | `5ab0a67b` | feat(transport): browser-view events router (P22 — onEvent/onShortcut/onFocused/onCreateTaskFromLink subs) |
+
+(Note: unrelated commit `50ccc575` "feat(terminal): auto-classify xterm focus-loss" from a
+parallel agent interleaved between #3 and #4 — not part of this slice.)
+
+## ctx.windowId implementation (the key unlock, P19j)
+
+Per-window panel ownership / primary-active needs the server to know which window a
+WS connection belongs to. Three pieces:
+
+1. `packages/shared/transport/src/server/context.ts` — added optional field to `TrpcContext`:
+   `windowId?: number | null` (nullable — null on standalone CLI/agent connections).
+2. `packages/shared/transport/src/server/ws-server.ts` — `createContext({ req })` now parses
+   `?windowId=N` from `req.url` (try/catch around `new URL(...)`, coerce via `Number.isFinite`,
+   else `null`), returns `{ ...baseContext, req, windowId }`.
+3. Per-procedure handling in `routers/app.ts`:
+   - `taskWindows.setPrimaryActive` → passes `ctx.windowId ?? null` (primary-only check inside op).
+   - `taskWindows.claimPanel / releasePanel / releaseAllForTask / claimAndCloseOther / claimSession`
+     and `window.close` → `if (ctx.windowId == null) throw new Error('windowId required')`.
+   - `taskWindows.getWindowId` → returns null when `ctx.windowId == null` (null-safe).
+   - `taskWindows.onPanelCloseRequest` (sub) → filters `if (ctx.windowId !== targetWindowId) return`
+     so the close-request is delivered only to the matching window's connection.
+
+windowId === webContents.id (same value IPC uses via `event.sender.id`), so IPC and tRPC stay
+consistent when the renderer migrates in slice 5. **Backward-compat:** current renderer connects
+WITHOUT `?windowId` → `ctx.windowId === null`; the windowId-requiring procedures throw, but no
+tRPC client calls them yet (renderer still on IPC). Inert for every existing router.
+
+## Sustainability (one impl, two adapters)
+
+Every commit: IPC handler + tRPC procedure both delegate to ONE shared thing — no duplicated
+behavior. Shared ops extracted where the IPC handler held inline logic:
+- `browserExtensionOps` (index.ts) — 6 chrome-extension ops.
+- `webviewOps` (index.ts, module scope) — devtools + shortcuts + emulation; lifted
+  `registeredWebviews`/`keyboardPassthroughWebviews`/`webviewEvents` to module scope.
+- `taskWindowsOps` + `taskWindowsEvents` (task-windows.ts); `primaryActiveTaskId` lifted to module scope.
+- `floatingGlobalAgentPanelOps` + `floatingGlobalAgentPanelEvents` (floating-global-agent-panel.ts).
+- `browserViewEvents` (browser-view-manager.ts).
+- Browser view ops delegate to the existing `browserViewManager` singleton; dialog to electron `dialog`.
+
+**Dual-emit:** every subscription source keeps its existing `webContents.send(...)` AND adds
+`emitter.emit(...)`, tagged `// legacy IPC (slice 5 drops)` so slice 5 can grep-and-kill. The tRPC
+emitters fan out to zero subscribers until slice 5 — pure no-op now, cannot break the live IPC renderer.
+
+## Scope adaptations (deliberate)
+
+- **Webview router redistributed** across P19g/P19i/P19k/P19m so each commit matches its message
+  (the reference branch front-loaded the whole webview router into P19g then deleted IPC piecemeal —
+  doesn't fit additive-only). End state === reference branch's server-side surface.
+- **P22 excludes `menuEvents`** — the reference P22 also rerouted `app:*` shortcuts to `menuEvents`
+  (menu router = a different slice; `menu-events.ts` doesn't exist on main). Those `webContents.send('app:reload-app')`
+  etc. are left untouched as IPC. P22 here = `browserViewEvents` dual-emit only.
+- **cc372ee3 pre-satisfied → 9 commits, not 10.** Per Q1=B, swept all of `main/` for
+  `webContents.send('tasks:changed')`: all 3 sites (export-import.ts ×2, index.ts ×1) already pair with
+  `notifyEvents.emit('tasks-changed')`. No stray sends → 10th commit has no work.
+
+## Verification (per Q2=A)
+
+- Per commit: scoped `tsgo --noEmit` (transport + app node) + `eslint` on changed files — all clean.
+- After windowId (commit 4): full prod build ✓ + targeted e2e smoke (01-smoke, 19-panel-toggles,
+  72-browser-view-lifecycle) = **26 passed / 0 failed** (tRPC/windowId context, panels, browser-view healthy).
+- Final: full monorepo `pnpm typecheck` ✓ (all packages incl `@slayzone/server`), `pnpm lint` ✓
+  (226 warnings / 0 errors, under the 301 cap — all pre-existing renderer react-hooks), full `pnpm build` ✓.
+- Final e2e (full `core` + `browser` suites): **509 passed / 5 failed**. All 5 failures are
+  PRE-EXISTING, unrelated to this slice (verified, not assumed):
+  - 4× sidebar project-creation (03-projects.spec.ts) — open a pure-renderer dialog + click Create
+    (projects router, not this slice); path typed directly (no folder-picker).
+  - 1× panel-gap (25-panel-resize.spec.ts) — asserts renderer CSS layout (`boundingBox` of React panel
+    divs + `panel-gap` spacer); no WebContentsView/`browser:*` involvement.
+  Proof: **all 9 commits touch ZERO renderer/.tsx/client files** (only `main/*` + `transport/server/*`),
+  so renderer behavior is byte-identical to pre-slice; the app boots and 509 tests (incl tRPC-heavy)
+  pass, so the main-process/transport changes are sound. Failures reproduce in isolation (deterministic,
+  not flaky-under-load) → they live on main independent of this work.

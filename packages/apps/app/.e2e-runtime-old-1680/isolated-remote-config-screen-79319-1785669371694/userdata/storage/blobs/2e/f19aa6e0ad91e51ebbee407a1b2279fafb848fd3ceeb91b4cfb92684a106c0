@@ -1,0 +1,26 @@
+# Goal / Progress (new)
+
+Purpose: a metric with a finish line — current value vs target,
+rendered as progress. Exists because a bare number carries no
+judgment; "$1.2M" only means something against "goal: $2M by Q3".
+Turns dashboards from mirrors into scoreboards.
+
+Size/position: drag + resize on the canvas (dnd), never in the menu.
+Relevancy: 🔥 core · ⭐ valuable · 💤 later
+
+| Option | Category | Relevancy | Values / default | Notes |
+|---|---|---|---|---|
+| variant | layout | ⭐ | bar / ring / number + % | |
+| title | display | 🔥 | text (default "Goal") | |
+| icon | display | 💤 | icon name / none | |
+| metric | data | 🔥 | agg (count/sum/avg) + field | same engine as Metric |
+| target | data | 🔥 | manual number | field-driven later |
+| direction | data | 🔥 | reach >= target / stay <= target | budget vs quota |
+| period | data | ⭐ | all-time / month / quarter / custom range | resets progress window |
+| percent | display | ⭐ | on / off | |
+| remaining | display | 💤 | off / absolute ("$760k to go") | |
+| pace | display | 💤 | off / on-track indicator | vs linear time elapsed |
+| color thresholds | display | ⭐ | auto (red<50%, green>=100%) / custom | |
+| concept | filter | 🔥 | conceptId | |
+| conditions | filter | 🔥 | SidebarCondition[] | |
+| match | filter | 🔥 | all / any | |

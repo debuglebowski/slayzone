@@ -1,0 +1,94 @@
+# AI Provider Tycoon — Situation Catalog
+
+Concrete list of situations injected by the simulation. See **Situation Rules** asset for the underlying rules (frequency, severity, polarity, counters, telegraphing).
+
+## Frontier model release (NPC)
+An NPC publishes a model that raises the public quality bar. Your relative quality drops; demand shifts.
+
+| | |
+|---|---|
+| **Polarity** | Global-Negative |
+| **Severity** | Minor → Critical |
+| **Targeting** | Global |
+| **Telegraphed** | No |
+| **Counters** | High recent research spend (reduced severity) · Frontier positioning (smaller brand hit) |
+
+## GPU price spike
+Server costs increase for some duration.
+
+| | |
+|---|---|
+| **Polarity** | Global-Negative; flips to Conditional-Positive for stockpile holders |
+| **Severity** | Minor → Major |
+| **Targeting** | Global |
+| **Telegraphed** | No |
+| **Counters** | Efficiency upgrades (reduced cost increase) · Pre-bought server stockpile (sell into the spike) |
+
+## Regulatory action
+Compliance cost imposed, or a market geo restricted. Hits players without certifications/privacy.
+
+| | |
+|---|---|
+| **Polarity** | Conditional-Negative |
+| **Severity** | Minor → Critical |
+| **Targeting** | Global or targeted |
+| **Telegraphed** | Yes |
+| **Counters** | Certifications (unlock gated segment) · High Privacy level (null, or flip to Conditional-Positive) |
+
+## Viral incident
+A public failure triggers a brand hit. Biased toward low-reliability players.
+
+| | |
+|---|---|
+| **Polarity** | Conditional-Negative |
+| **Severity** | Minor → Major |
+| **Targeting** | Targeted |
+| **Telegraphed** | No |
+| **Counters** | High Reliability spend (reduced fire probability) · Incident response readiness (reduced brand impact) |
+
+## Open-source release
+A free model floods a quality tier. Demand at that tier collapses for paid offerings.
+
+| | |
+|---|---|
+| **Polarity** | Global-Negative; flips to Conditional-Positive for OSS movers |
+| **Severity** | Major |
+| **Targeting** | Global |
+| **Telegraphed** | No |
+| **Counters** | Frontier positioning (above the affected tier) · Open-source / community moves (absorb brand halo) |
+
+## Hardware breakthrough
+A new hardware tier becomes available at favorable cost.
+
+| | |
+|---|---|
+| **Polarity** | Conditional-Positive |
+| **Severity** | Minor → Major |
+| **Targeting** | Global |
+| **Telegraphed** | No |
+| **Counters / conditions** | Cash on hand (required to capitalize) · Efficiency upgrades (larger savings) |
+
+## Demand surge
+A new use case lifts demand at a quality tier. Spills to competitors if you can't serve it.
+
+| | |
+|---|---|
+| **Polarity** | Conditional-Positive |
+| **Severity** | Minor → Major |
+| **Targeting** | Global |
+| **Telegraphed** | No |
+| **Counters / conditions** | Inference capacity headroom (required to capture) |
+
+## Whistleblower / leak
+A leak surfaces an internal weakness. Fires meaningfully only against low Security/Privacy.
+
+| | |
+|---|---|
+| **Polarity** | Conditional-Negative |
+| **Severity** | Major |
+| **Targeting** | Targeted |
+| **Telegraphed** | No |
+| **Counters** | High Security level · High Privacy level (immune above threshold) |
+
+## Talent market shift
+*Deferred — depends on Talent being in scope; currently in Ideas.*

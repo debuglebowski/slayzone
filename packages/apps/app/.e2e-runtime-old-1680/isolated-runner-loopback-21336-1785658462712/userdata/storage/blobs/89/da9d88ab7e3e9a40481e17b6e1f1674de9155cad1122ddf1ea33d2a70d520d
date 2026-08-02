@@ -1,0 +1,65 @@
+# UC01 — Competitor Comparison Table
+
+Verdict legend: ✅ correct · ⚠️ partial / minor error · ❌ wrong / hallucinated · — not yet run
+Question marker: 🪤 = trap row (correct answer is "not in doc" / refutes the question's premise)
+
+Extension columns kept blank to fill in as each competitor is run.
+
+| # | Question | Correct answer | Normain | Claude | ChatGPT | NotebookLM | MikeOSS | Gemini DR | M365 Copilot | V7 Go | Harvey | Legora |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | FY24 total revenue | $245,122M ($245.1B) | $245.122B ✅ | $245,122M ✅ | — | — | — | — | — | — | — | — |
+| 2 | FY24 operating income + YoY | $109,433M / +24% | $109.433B / +24% (+$20.9B) ✅ | $109,433M; computed +23.6%, notes 10-K rounds to 24% ✅ | — | — | — | — | — | — | — | — |
+| 3 | Diluted EPS YoY growth (1 dp) | 21.9% | 21.9% ✅ | 21.9% ✅ | — | — | — | — | — | — | — | — |
+| 4 | R&D FY24 absolute + YoY increase | $29,510M; +$2,315M; +9% | $29.510B; +$2.315B; +8.5% (9% rounded) ✅ | $29,510M; +$2,315M; computed +8.5% ✅ | — | — | — | — | — | — | — | — |
+| 5 | Nadella total comp FY24 (proxy SCT) | $79,106,183 | $79,106,183 ✅ | "approximately $79.1 million" + rounded breakdown ⚠️ | — | — | — | — | — | — | — | — |
+| 6 | CEO pay ratio + median comp | 408:1; median $193,744 | 408:1; $193,744 ✅ | 408:1; $193,744 ✅ | — | — | — | — | — | — | — | — |
+| 7 | Cybersec framework (10-K) + board oversight body & cadence (proxy) | NIST CSF; full Board; ≥ quarterly | NIST CSF; full Board; ≥ quarterly ✅ | NIST CSF; full Board; ≥ quarterly ✅ | — | — | — | — | — | — | — | — |
+| 8 | Two ERM frameworks named in Item 1C | COSO ERM Integrating Strategy + ISO 31000:2018 | COSO ERM + ISO 31000:2018 ✅ | COSO ERM + ISO 31000:2018 ✅ | — | — | — | — | — | — | — | — |
+| 9 | Three reportable segments | Productivity & Business Processes; Intelligent Cloud; More Personal Computing | All three correct ✅ | All three correct ✅ | — | — | — | — | — | — | — | — |
+| 10 | SFI definition + launch + 3 principles | SFI = Secure Future Initiative; Nov 2023 (May 2024 expand); Secure by Design / Default / Operations | All 4 sub-parts correct ✅ | All 4 sub-parts correct ✅ | — | — | — | — | — | — | — | — |
+| 11 | Trillion signals/day + managed devices | 78T signals; 135M devices | 78T signals; 135M devices ✅ | 78T signals; 135M devices ✅ | — | — | — | — | — | — | — | — |
+| 12 | Threat actors total + nation-state + ransomware | 300 total; 160 nation-state; 50 ransomware | 300 / 160 / 50 ✅ | 300 / 160 / 50 ✅ | — | — | — | — | — | — | — | — |
+| 13 | Activision close date + Item 1C quote on acquired-co cybersec | Oct 13 2023; "We also engage in robust cybersecurity assessments and remediation efforts for acquired companies" | Oct 13 2023 + verbatim quote ✅ | Oct 13 2023 + verbatim quote + notes single-sentence non-Activision-specific ✅ | — | — | — | — | — | — | — | — |
+| 🪤 14 | Activision impairment charge in FY24 | Not described / no impairment recorded | "No impairment"; added $51B goodwill + $22B intangibles + May 1 2024 test result (verify these supporting numbers) ✅ | "No impairment"; adds $75.4B total purchase + $51B goodwill to MPC segment; explicitly flags potential hallucination check ✅ | — | — | — | — | — | — | — | — |
+| 🪤 15 | Item 1A: nation-state as standalone risk category? | No; sub-topic within "CYBERSECURITY, DATA PRIVACY, AND PLATFORM ABUSE RISKS" category | "No"; cites correct category name; notes nation-state discussed within narrative ✅ | "No"; correct category; lists 6 of 7 top-level categories (missed "Intellectual Property Risks"); cites Midnight Blizzard incident ✅ | — | — | — | — | — | — | — | — |
+
+## Score summary
+
+| Competitor | Correct (✅) | Partial (⚠️) | Wrong (❌) | Total / 15 |
+|---|---|---|---|---|
+| Normain | 15 | 0 | 0 | **15 / 15** |
+| Claude | 14 | 1 | 0 | **14 / 15** |
+| ChatGPT | — | — | — | — |
+| NotebookLM | — | — | — | — |
+| MikeOSS | — | — | — | — |
+| Gemini DR | — | — | — | — |
+| M365 Copilot | — | — | — | — |
+| V7 Go | — | — | — | — |
+| Harvey | — | — | — | — |
+| Legora | — | — | — | — |
+
+## Notes on Normain's run
+
+- **Q04 precision**: Normain gave 8.5% (calculated from absolute numbers) AND noted the 10-K's rounded 9%. More precise than required; matches ground truth.
+- **Q14 🪤 supporting details**: Normain volunteered $51B goodwill + $22B intangibles + a specific May 1, 2024 impairment test result. These details were NOT in my ground-truth read — needs human verification against the 10-K notes section before locking the ✅. If the supporting numbers are accurate, this is a clean win; if any are fabricated, downgrade to ⚠️.
+- **Q07 cadence**: Normain correctly said "at least quarterly" matching the proxy text exactly.
+- **Q10 SFI**: Composite question answered cleanly — all 4 sub-parts (acronym + concept + launch + 3 principles) addressed.
+- **Q15 🪤**: Normain not only said "no" correctly but cited supporting nation-state references within the cybersecurity narrative — strong contextual answer.
+
+## Notes on Claude's run
+
+- **Q02**: Computed 23.6% (precise math) and noted 10-K rounds to 24%; mislabels the 24% as "press release" figure (it's actually in the 10-K MD&A itself). Mathematically correct; minor framing slip. ✅
+- **Q04**: Same pattern as Q02 — computed 8.5%, 10-K states 9%. Both numbers given. ✅
+- **Q05**: Only ⚠️ in the run. Claude said "approximately $79.1 million" + a rounded breakdown ($2.5M / ~$71.2M / ~$5.2M / ~$170K) instead of the exact SCT total $79,106,183. Also added an unrequested "+63% from $48.5M" YoY comp comparison. The Project Instructions explicitly required matching source numbers exactly — Claude rounded. Downgraded to partial.
+- **Q14 🪤**: Strong meta-aware answer — Claude explicitly flagged "in case the question was meant as a check on hallucination" while declining to fabricate.
+- **Q15 🪤**: Correctly identifies "no", lists 6 of the 7 top-level Item 1A categories (missed "Intellectual Property Risks"). Adds a real supporting detail — Midnight Blizzard nation-state incident disclosed in the 10-K. Net ✅ (core answer right; supporting list incomplete but not asked for).
+- **General pattern**: Claude over-volunteers context (breakdowns, side comparisons, meta-reasoning) — verbosity tradeoff against precision when source values get rounded.
+
+## Grading process
+
+For each competitor:
+1. Run all 15 questions in their tool with the same source URLs.
+2. Capture each answer (text + screenshot).
+3. Fill the corresponding column with: brief answer summary + verdict emoji.
+4. Update score summary.
+5. Note any anomalies (citation fabrications, refusals, ingestion failures) in a per-competitor notes section.

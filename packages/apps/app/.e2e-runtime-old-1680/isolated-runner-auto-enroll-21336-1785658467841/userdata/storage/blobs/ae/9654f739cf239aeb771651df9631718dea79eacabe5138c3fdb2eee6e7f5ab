@@ -1,0 +1,20 @@
+# UC08 — DDQ / Questionnaire Response
+
+**Persona**: Sales engineer, compliance lead, IR ops, or RFP coordinator responding to a heavy customer/investor/auditor questionnaire.
+
+**Scenario**: A buyer, auditor, investor, or regulator sends a 100-question structured questionnaire — operational due diligence (ODD), SIG / SIG-Lite, CAIQ, vendor security questionnaire, RFP, or LP investor DDQ. Every question must be answered from the responding organization's own documentation pack: policies, SOC2 report, ISO certificates, prior questionnaire responses, product documentation, security architecture docs.
+
+This is a flagship Normain use case — high-volume, structured, citation-required, often compliance-graded. Real Normain customers run these monthly.
+
+**Question types**:
+- Structured answer generation (often Yes/No/N/A + free-text justification)
+- Citation from own corpus (where in our policies/SOC2 is this answered?)
+- Classification (in-scope / out-of-scope / partial)
+- Consistency across related questions (does our answer to Q23 contradict Q47?)
+- Mapping between control frameworks (SIG question → SOC2 control reference)
+
+**Sample docs (~25)**: Normain's own publicly-available materials would work as a faithful proxy — `ops_security.docx`, `secure_dev_policy.docx`, SOC2 Type II report, ISO 27001 cert + Statement of Applicability, sub-processor list, BCP/DR docs, product security whitepaper, prior-year SIG response (if available). Could also use a publicly-available company's full trust portal contents (e.g. via a vendor like Vanta/Drata trust pages of a real public company).
+
+**Question count**: 100 — this is the use case where the question volume genuinely is the test. SIG-Lite has ~125 questions; CAIQ has ~261. 100 is a realistic mid-size DDQ.
+
+**What this tests**: Question-volume ceiling on a single corpus. Structured response generation with consistent voice + accurate self-citation. Many competitors degrade past 30-40 questions in a single session — context bleed, repetition drift, contradictory answers across the same questionnaire. Normain's repeatability story plays hardest here.

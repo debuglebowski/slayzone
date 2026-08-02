@@ -1,0 +1,80 @@
+# 📋 Vanta Tasks — Kalle's full list (post-redistribution)
+
+👤 **Owner:** Kalle Hansson (`67f96437791c8f1bc494287d`)
+🔗 **Source:** [Vanta › My work](https://app.eu.vanta.com/c/normain.com/my-work)
+📅 **Updated:** 2026-04-30 — subtask sweep complete
+🎯 **Audit window:** ✅ ISO 27001:2022 done; ongoing SOC 2 + ISO continuous compliance.
+
+> ✅ **17 subtasks dispatched** — investigation + work complete (some ⏳ awaiting Vanta agent refresh).
+> 🟦 16 remaining items have no subtask yet.
+
+## 📊 Summary
+
+- 🧪 Failing tests — 9 (4 confirmed mine in Vanta, 5 reassign-pending)
+- 📎 Controls — 18 (17 confirmed, 1 pending CHG-39)
+- 📑 Documents — 5 (4 overdue + 1 needs remediation)
+- 🚩 33 total
+
+## 🏷️ Subtask column legend
+
+- ✅ — subtask reported work complete (waiting for Vanta agent re-scan)
+- 🟦 — no subtask dispatched yet
+
+---
+
+## 🧠 My tasks (33) — sorted by effort
+
+| # | Item | Type | Framework | Due / Status | Effort | From | Vanta | Subtask |
+|---|------|------|-----------|--------------|--------|------|-------|---------|
+| 1 | IAC-11 — Password policy enforced | 📎 Control | SOC 2 CC 6.1 | 1/2 | 🟢 S | — | ✅ | ✅ `b375a6a6` |
+| 2 | IAC-199 — Authentication information | 📎 Control | ISO A.5.17 | 2/3 | 🟢 S | 🕳️ Unassigned | ✅ | ✅ `00f6f83e` |
+| 3 | CAP-7 — Capacity management | 📎 Control | ISO A.8.6 | 10/12 | 🟢 S | 🏗️ Gustav | ✅ | ✅ `97fb6cf5` |
+| 4 | CHG-39 — Change management | 📎 Control | ISO A.8.32 | 9/10 | 🟢 S | 🏗️ Gustav | ⏳ pending | ✅ `f2e47adc` |
+| 5 | VPM-1 — Service infrastructure maintained | 📎 Control | SOC 2 (+4) | 18/20 | 🟢 S | — | ✅ | ✅ `b18bf243` |
+| 6 | VPM-2 — Vulnerabilities scanned & remediated | 📎 Control | SOC 2 (+5) | 15/17 | 🟢 S | — | ✅ | ✅ `47b1c2e2` |
+| 7 | AST-71 — Secure disposal/re-use of equipment | 📎 Control | ISO | Needs evidence | 🟢 S | 🕳️ Unassigned | ✅ | ✅ `b2089ca3` |
+| 8 | END-40 — User endpoint devices | 📎 Control | ISO A.8.1 | 5/6 | 🟢 S | 🕳️ Unassigned | ✅ | ✅ `49f68bf9` |
+| 9 | HRS-52 — Competence | 📎 Control | ISO C.7.2 | 8/10 | 🟢 S | 🕳️ Unassigned | ✅ | ✅ `2e9a497a` |
+| 10 | PES-78 — Clear desk and clear screen | 📎 Control | ISO | Needs evidence | 🟢 S | 🕳️ Unassigned | ✅ | ✅ `0b876504` |
+| 11 | 🐙 Critical vulnerabilities — GitHub (1) | 🧪 Test | ISO, SOC 2 | 📆 May 18 2026 | 🟢 S | ⚠️ Needs reassignment | ⏳ pending | ✅ `31c01dcd` |
+| 12 | 🟢 Low vulnerabilities — GitHub (4) | 🧪 Test | ISO, SOC 2 | 📆 May 15 2026 | 🟢 S | — | ✅ | 🟦 |
+| 13 | IRO-3 — Incident management procedures followed | 📎 Control | SOC 2 (+8) | 6/7 | 🟢🟡 S–M | — | ✅ | 🟦 |
+| 14 | MON-4 — Infrastructure performance monitored | 📎 Control | SOC 2 (+2) | 7/9 | 🟢🟡 S–M | — | ✅ | 🟦 |
+| 15 | ☁️ Subnets flow logs (Azure) | 🧪 Test | — | ⏳ Overdue 9 mo, 12 subnets | 🟡 M | — | ✅ | 🟦 |
+| 16 | ☁️ VM scale set CPU monitored (Azure) | 🧪 Test | ISO, SOC 2 | ⏳ Overdue ~2 mo, 4 VMs | 🟡 M | 🕳️ Unassigned | ⏳ pending | 🟦 |
+| 17 | 📄 Process to identify/prioritize vulns | 📑 Doc | ISO | ⏳ Overdue Sep 29 2025 | 🟡 M | — | ✅ | 🟦 |
+| 18 | 📄 Vulnerability scan | 📑 Doc | ISO, SOC 2 | ⏳ Overdue Dec 12 2025 | 🟡 M | — | ✅ | 🟦 |
+| 19 | 📄 Sample of remediated vulnerabilities | 📑 Doc | ISO, SOC 2 | ⏳ Overdue Jan 8 2026 | 🟡 M | — | ✅ | 🟦 |
+| 20 | CPL-46 — Compliance w/ policies review | 📎 Control | ISO | Needs evidence | 🟡 M | 🏗️ Gustav | ✅ | 🟦 |
+| 21 | HRS-55 — Segregation of duties | 📎 Control | ISO A.5.3 | 3/5 | 🟡 M | 🕳️ Unassigned | ✅ | 🟦 |
+| 22 | IAC-200 — Access rights | 📎 Control | ISO A.5.18 | 14/16 | 🟡 M | 🕳️ Unassigned | ✅ | 🟦 |
+| 23 | IAC-201 — Privileged access rights | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ | 🟦 |
+| 24 | IAC-202 — Information access restriction | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ | 🟦 |
+| 25 | NET-91 — Networks security | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ | 🟦 |
+| 26 | THR-13 — Threat intelligence | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ | 🟦 |
+| 27 | VPM-75 — Mgmt of technical vulnerabilities | 📎 Control | ISO | Needs evidence | 🟡 M | 🕳️ Unassigned | ✅ | 🟦 |
+| 28 | ⚠️ SOC 2 incident-logging inquiry | 📑 Doc remediation | SOC 2 | 🔧 Needs remediation | 🟡🔴 M–L | — | ✅ | ✅ `3a62dee5` |
+| 29 | 🐙 High vulnerabilities — GitHub (17) | 🧪 Test | ISO, SOC 2 | 🔥 **OVERDUE Apr 27** | 🔴 L | — | ✅ | ✅ `ea96ec37` |
+| 30 | 🐙 GitHub PR approval/justification | 🧪 Test | ISO | ⏳ Overdue ~1 mo, 47 PRs | 🔴 L | 🕳️ Unassigned | ⏳ pending | ✅ `71c440c3` |
+| 31 | 🐙 GitHub auto-checks enabled (Overdue) | 🧪 Test | — | ⏳ Overdue ~1 mo, 78 PRs | 🔴 L | 🕳️ Unassigned | ⏳ pending | ✅ `319649be` |
+| 32 | 🐙 GitHub auto-checks enabled (Upcoming) | 🧪 Test | — | 🔮 Upcoming, 78 PRs | 🔴 L | 🕳️ Unassigned | ⏳ pending | ✅ `52c407e0` |
+| 33 | 🟡 Medium vulnerabilities — GitHub (42) | 🧪 Test | ISO, SOC 2 | 📆 May 25 2026 | 🔴 L | — | ✅ | ✅ `4f1fff23` |
+
+---
+
+## 🏷️ Effort legend
+
+- 🟢 **S** = ≤1h
+- 🟡 **M** = 2–4h
+- 🔴 **L** = ≥half day
+
+## 🗺️ Next steps
+
+1. ⏳ **Wait for Vanta agent re-scan** — most failing tests will auto-clear once agent picks up new state. Some need 24h.
+2. ⏳ **Finish Vanta reassignments** — CHG-39 (Gustav→you), VM scale set CPU, GitHub PR/auto-checks tests, Critical-vulns GitHub.
+3. 🟦 **Dispatch subtasks for remaining 16 items** when ready (rows 12–27 except 28).
+4. 📑 Read each subtask's `investigation.md` asset for blockers/handoffs (e.g. Paul's 1Password seat for IAC-11, Azure CPU alerts for CAP-7, policy-renewal for CHG-39).
+
+## 🔎 Drive cross-check
+
+- ✅ 🚨 `Annual ISO 27001 Incident-Response Table-Top Test - 2025/07/04` ([open](https://docs.google.com/document/d/1Dx_5gp8r99Pg9YwevWQwoXISVjcjhPdSJYIAHePBGnE/edit?usp=drivesdk)) — supports IRO-3 + #28.

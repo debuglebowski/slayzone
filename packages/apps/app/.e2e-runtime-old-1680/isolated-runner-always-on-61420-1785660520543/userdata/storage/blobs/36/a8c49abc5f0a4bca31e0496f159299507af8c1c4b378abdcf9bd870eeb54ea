@@ -1,0 +1,61 @@
+# Vanta finding: "GitHub code changes has automated checks enabled"
+
+**Cohorts:** 78 PRs Overdue + 78 PRs Upcoming (sibling task) — same root cause, same fix.
+**Date investigated:** 2026-04-28
+
+## Scope
+
+- GitHub org: `normainofficial`
+- Active code repos: `normain` (only one with meaningful PR volume), `normain-infra`, `normain-frontend-libraries`, `normain-insights-demo`, `normain-standard-legacy`, `normain-sandbox`, `normain-beta`, `normain-alpha`
+- Method: branch protection / rulesets queried per repo; PRs queried via `gh pr list` with status check rollup
+
+## Key facts
+
+| Fact | Value |
+|---|---|
+| PR checks workflow (`🔍 Lint & Test`) added | **2025-07-03** (commit `3752ded60`) |
+| Ruleset on `main` enforcing it as required | **created 2026-03-11**, last updated 2026-04-01 |
+| Gap window (workflow ran but not enforced) | **2025-07-03 → 2026-03-11** (~8 months) |
+| PRs merged in gap window with `🔍 Lint & Test` = SUCCESS | 400/400 sampled (100%) |
+| PRs merged post-ruleset with check passing | 200/200 sampled (100%) |
+| Bypass actors on the ruleset | admin role + 1 integration (id 3114741) + 2 users (ids 34343658, 44667637) |
+
+## 1. Situation overview
+
+The 78 failing PRs (and the 78 in the sibling Upcoming cohort) are essentially all from `normainofficial/normain`. None of the other Normain repos had any merged PR volume during Vanta's lookback window.
+
+| Repo | Merged PRs (lookback) | Branch protection / ruleset | Likely contribution to the 78 |
+|---|---:|---|---:|
+| `normain` | very high (~150/30d) | Ruleset since 2026-03-11; required check `🔍 Lint & Test` | ~all 78 |
+| `normain-infra` | 0 | none | 0 |
+| `normain-frontend-libraries` | 0 | none | 0 |
+| `normain-insights-demo` | 1 | none | ≤1 |
+| `normain-standard-legacy` | 0 | none | 0 |
+| `normain-sandbox` / `-beta` / `-alpha` | 0 | none | 0 |
+
+**Reason flagged:** *CI was running but not required at merge time.*
+
+The `pr-checks.yml` workflow has been in place since July 2025 and has passed on 100% of sampled PRs, but the ruleset that *requires* `🔍 Lint & Test` to pass before merge was only created on 2026-03-11. PRs merged before that date had no enforced status-check requirement — the check ran, succeeded, but no rule was blocking merges on it. Vanta evaluates "automated checks enabled" by inspecting branch protection at merge time, so all of those pre-2026-03-11 PRs are flagged. The Overdue cohort is the older slice; the Upcoming cohort is the newer slice of the same window. **Same root cause → same fix.**
+
+Secondary concern: the active ruleset still has 4 bypass actors (`always` mode). Any future PR merged via bypass will reproduce this finding going forward.
+
+## 2. Solution overview
+
+| Step | Action | Effort | Order |
+|---|---|---|---|
+| 1 | **Mark Overdue + Upcoming cohorts as remediated in Vanta** with a memo: ruleset `Main branch rules` (id 13779853) on `normainofficial/normain` enforces required `🔍 Lint & Test` since 2026-03-11; flagged PRs predate the control. Attach: ruleset JSON + workflow link. | 30 min | now |
+| 2 | **Tighten ruleset bypass actors** — change the 2 user bypass entries from `always` → `pull_request` or remove; keep admin/integration only if justified (document the integration id 3114741). Prevents future findings. | 30 min | this week |
+| 3 | Verify `required_review_thread_resolution`; consider `require_code_owner_review` if a `CODEOWNERS` exists. Optional. | 1 h | optional |
+| 4 | **Apply ruleset** (or a minimal one with required PR + status check) to `normain-infra`, `normain-frontend-libraries`, `normain-insights-demo`, `normain-standard-legacy`. Easiest via an org-level ruleset. | 1–2 h | this week |
+| 5 | **Archive truly inactive repos** (`normain-alpha`, `normain-beta`, `normain-sandbox`) so they're excluded from Vanta scope. | 15 min | optional |
+
+**Ordering vs Upcoming-cohort sibling task:** clear together — step 1 closes both cohorts in a single submission. Steps 2–4 are forward-looking and don't need to wait on the cohort split.
+
+**Total effort:** ~2 hours; only 30 min is critical-path to clear the Overdue cohort.
+
+## Unresolved questions
+
+- Bypass user ids `34343658` / `44667637` — keep, downgrade, or remove? (need names; `admin:org` scope required to resolve)
+- Integration id `3114741` — which app? Renovate, Dependabot, or other?
+- Apply ruleset org-wide or per-repo? Org-wide cleaner but needs `admin:org`.
+- Archive `-alpha` / `-beta` / `-sandbox`?

@@ -1,0 +1,10 @@
+# 💬 Slack
+
+| Area | Details |
+|---|---|
+| 🔐 Auth | 🔑 OAuth app |
+| 🧾 Requirements | 📋 Slack app; scopes; event subscriptions; signing secret |
+| 👁️ Read | 💬 Users, channels, messages where scoped |
+| ✍️ Write | 🤖 Bot messages, slash command responses |
+| ⚡ Triggers | 🔔 Events API, slash commands, interactivity |
+| ⚠️ Limits | 🏢 Workspace install/admin approval; scopes |

@@ -1,0 +1,158 @@
+# Orchestrate Skill Set — Key Points
+
+3-tier autonomous orchestration. User hands mission to L1. Everything below runs headless.
+
+## Topology
+
+```
+User
+ └─ L1 (slay-mission) — root slay task
+     └─ L2 (slay-exec) — sub-task, own PTY
+         ├─ L3 (slay-impl) — sub-sub-task, own PTY
+         ├─ L3 (slay-impl) — sub-sub-task, own PTY
+         └─ L3 commit-agent — sub-sub-task, own PTY (L3 w/ commit prompt)
+```
+
+All inter-level comm = PTY messages. Sole channel. No shared files, no locks.
+
+---
+
+## L1 — slay-mission
+
+**Role.** Mission lead. Keeps op on track.
+
+**Tempo.** Continuous observer, non-intrusive. Interferes only when:
+- Detects direction drift in L2 reports
+- Has concrete tip that materially helps
+- L2 escalates up
+
+Default = silent.
+
+**Does.**
+- Receive free-format mission from user
+- Translate → big picture + scoped mission for L2
+- Spawn exactly one L2 sub-task (`slay task new`)
+- Send initial PTY msg (format below)
+- Observe L2 progress reports
+- Send course-correction PTY msg down only when criteria met
+- Final review on L2 "done"
+- Mark root task done after approval
+
+**Does NOT.**
+- Spawn L3s directly
+- Touch code
+- Commit
+- Micromanage L2's plan
+
+**Intervention gate (ask before sending msg).**
+- Is L2 off-track, or just different-but-valid? Uncertain → silent
+- Does tip change outcome materially? No → silent
+
+---
+
+## L2 — slay-exec
+
+**Role.** Executor. Coordinates L3s.
+
+**Does.**
+- Receive mission + big picture from L1
+- Decompose into independent work units
+- Decide parallelism: parallel iff units independent
+- Spawn L3s via `slay task new`, one per unit
+- Send initial PTY msg per L3 (format below)
+- Monitor L3 replies
+- Handle L3 escalations — resolve at L2 level or escalate up
+- Spawn commit-agents serially, near end
+- Report progress + completion to L1
+
+**Parallelism rules.**
+- Parallel only if L3 scopes don't overlap
+- Overlap → sequence them
+- Commit-agents always serial — never parallel
+
+**Commit orchestration.**
+- L3s never commit
+- L2 spawns commit-agent L3s at chosen points (usually near end)
+- One commit-agent at a time. Wait for done before next
+- Commit scope + message guidance given in PTY msg
+
+**Escalation handling.**
+- L3 escalates → L2 decides: in-scope (replan/reassign/fix) or escalate to L1
+
+---
+
+## L3 — slay-impl
+
+**Role.** Execute one scoped mission. Nothing more.
+
+**Does.**
+- Receive scope + big picture + chain position from L2
+- Execute scoped mission, stay in bounds
+- Report outcome to L2
+- Escalate to L2 when: blocker outside scope, mission unclear, conflict found
+
+**Does NOT.**
+- Commit to git (hard rule)
+- Spawn sub-tasks
+- Decide own scope
+- Talk to L1 directly
+
+**Escalation criteria.**
+- "Inside my specific mission?" Yes → handle. No → escalate
+- Uncertain → escalate (cheap)
+
+---
+
+## L3 commit-agent variant
+
+Same skill (`slay-impl`), different initial PTY msg. Prompt specialization:
+- Role = commit agent
+- Mission = commit scope X, message Y
+- Big picture = brief
+- Flow: stage → verify → commit → report
+- Nothing else
+
+---
+
+## Cross-cutting
+
+### Initial PTY message format (every spawn)
+
+1. **Role** — L2 / L3 / commit-agent
+2. **Big picture** — 2-5 lines, mission context
+3. **Your mission** — scoped, precise, bounded
+4. **Chain position** — parent task ID, child spawn allowed y/n
+5. **Escalation protocol** — when + how to PTY-msg up
+6. **Hard rules** — what you must not do
+
+### Chain awareness
+
+Every agent knows:
+- Place in chain
+- Big picture (only enough to understand WHY its mission exists)
+- Narrow mission non-negotiable — zero scope creep
+
+### Failure + escalation
+
+Each level self-judges:
+- In-role → fix
+- Out-of-role → escalate up
+- Retry that changes scope = escalate, not retry
+
+### Mission lifecycle
+
+1. User → L1 (mission)
+2. L1 → spawn L2
+3. L2 → plan + spawn L3s
+4. L3s → execute, report
+5. L2 → run commit-agents at chosen points
+6. L2 → signal done to L1
+7. L1 → review, approve or request change
+8. L1 → mark root task done
+
+### Out of scope
+
+Skills do NOT touch:
+- Worktrees (handled elsewhere by slay)
+- User interaction past mission handoff
+- Cross-level comms other than PTY msg

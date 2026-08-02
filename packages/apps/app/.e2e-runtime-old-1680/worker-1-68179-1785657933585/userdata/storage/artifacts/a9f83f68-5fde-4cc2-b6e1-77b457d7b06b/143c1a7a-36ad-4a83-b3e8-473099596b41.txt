@@ -1,0 +1,92 @@
+# Vanta Vendors vs Master Sheet — Comparison Table
+
+Captured 2026-05-14.
+- Vanta: app.eu.vanta.com, All tab (54 rows; Revolut duplicated)
+- Master sheet: Drive "VENDOR MASTER SHEET" → "Vendor Master" tab (71 rows)
+
+## Summary
+
+| Status | Count |
+|---|---|
+| In both | 50 |
+| Only in Vanta | 2 |
+| Only in master sheet | 21 |
+
+## Vendor matrix
+
+| Vendor (canonical) | In Vanta | In Master Sheet | Notes |
+|---|---|---|---|
+| 1Password | ✓ | ✓ | sheet: "1password" |
+| Amazon Web Services (AWS) | ✓ | ✓ | vanta: "AWS" |
+| Anthropic | ✓ | ✓ |  |
+| Apple Business Connect |  | ✓ |  |
+| Attio | ✓ | ✓ |  |
+| BetterStack | ✓ | ✓ | vanta: "Better Stack" |
+| Boardeaser | ✓ | ✓ |  |
+| Bolago |  | ✓ |  |
+| Calendly |  | ✓ |  |
+| CapCut |  | ✓ |  |
+| Carta | ✓ | ✓ |  |
+| ChatGPT | ✓ |  | sheet has OpenAI separately |
+| Circleback | ✓ | ✓ |  |
+| Cloudflare | ✓ | ✓ | vanta: "Cloudflare Dashboard" |
+| Crunchbase |  | ✓ |  |
+| Cursor | ✓ | ✓ |  |
+| Doodle |  | ✓ |  |
+| Dropbox |  | ✓ |  |
+| Envato Elements |  | ✓ |  |
+| Epidemic Sound |  | ✓ |  |
+| Figma | ✓ | ✓ |  |
+| Firecrawl | ✓ | ✓ |  |
+| Fortnox | ✓ | ✓ |  |
+| Framer | ✓ | ✓ |  |
+| GitHub | ✓ | ✓ |  |
+| Google Ads | ✓ | ✓ |  |
+| Google Chrome | ✓ | ✓ |  |
+| Google Cloud Platform | ✓ | ✓ | vanta: "Google Cloud Platform (GCP)" |
+| Google Drive | ✓ |  | sheet only lists Google Workspace |
+| Google Workspace | ✓ | ✓ |  |
+| iOS | ✓ | ✓ |  |
+| Linear | ✓ | ✓ |  |
+| LinkedIn Normain page | ✓ | ✓ |  |
+| LinkedIn Recruiter Lite |  | ✓ |  |
+| LinkedIn Sales Navigator | ✓ | ✓ |  |
+| Loom | ✓ | ✓ |  |
+| Loops | ✓ | ✓ |  |
+| Luma | ✓ | ✓ |  |
+| Medium | ✓ | ✓ |  |
+| Meetup |  | ✓ |  |
+| Microsoft 365 | ✓ | ✓ | sheet: "Microsoft 365 (Office)" |
+| Microsoft Azure | ✓ | ✓ |  |
+| Miro | ✓ | ✓ |  |
+| MyAccess (Apple Online Store) |  | ✓ |  |
+| Namecheap | ✓ | ✓ |  |
+| Notion | ✓ | ✓ | sheet: "Notion / Notion Calendar" (combined) |
+| Notion Calendar | ✓ | ✓ | same sheet row as Notion |
+| OpenAI | ✓ | ✓ |  |
+| OVH Cloud | ✓ | ✓ | vanta: "OVHCloud" |
+| Permånad |  | ✓ |  |
+| Perplexity Ask | ✓ | ✓ |  |
+| Pleo.io |  | ✓ |  |
+| PostHog | ✓ | ✓ |  |
+| Producthunt |  | ✓ |  |
+| Revolut | ✓ | ✓ | vanta lists twice |
+| Sana AI |  | ✓ |  |
+| Scrive | ✓ | ✓ |  |
+| Sendify |  | ✓ |  |
+| Setapp | ✓ | ✓ |  |
+| Simply | ✓ | ✓ |  |
+| Slack | ✓ | ✓ |  |
+| Spark | ✓ | ✓ |  |
+| Superhuman | ✓ | ✓ |  |
+| Swedbank | ✓ | ✓ |  |
+| Teamtailor | ✓ | ✓ |  |
+| Telgea | ✓ | ✓ | vanta: "Telgea Mobile Portal" |
+| Tre (3) |  | ✓ |  |
+| Typeform |  | ✓ |  |
+| Vanta | ✓ | ✓ |  |
+| Vimeo | ✓ | ✓ |  |
+| X | ✓ | ✓ |  |
+| YouTube |  | ✓ |  |
+| Zapier |  | ✓ |  |
+| Zero | ✓ | ✓ |  |

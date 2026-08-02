@@ -1,0 +1,80 @@
+# Feature Roadmap — Source Material
+
+Pulled from [Google Sheet](https://docs.google.com/spreadsheets/d/1jyhQ4TIQhNDboM7oEsYvCm6UznEYisYFEthRHXpPIek/edit) on 2026-04-14.
+
+---
+
+## 1. Product Vision (raw)
+
+**Vision/mission draft**
+> Let humans do human work, by making it super easy to package your expertise into an AI copy while keeping you in the loop.
+
+- **Who?** Person that has expertise
+- **Goal?** Package that expertise into AI so it can be applied limitlessly
+- **Blocker?** No AI interface that makes it easy and useful
+- **Vision =** the above is solved, and expert can now focus on human-to-human interaction
+
+**Open questions (row 18–19, cols B / I / J):**
+- What is our vision and how do we build towards it?
+- Humans that do human work?
+- How do we help our customers sell outcomes instead of selling hours?
+- Publish extractions
+- Self-improving data on a repetitiveness level?
+- Improve on org/team/extraction level?
+
+---
+
+## 2. Solution Pillars (D2:G6) — score in col H
+
+| # | Pillar | Notes | Score |
+|---|---|---|---|
+| 1 | **Embed expertise / self-improve** | onboarding flow (how to get MY expertise into Normain?); improvement based on feedback; judgement calls → how to package into AI?; memory? | **8.5** |
+| 2 | **Iterate / collaborate / approve** | collaboration internal & with client; approval flows / logs; how does it work when new data is added?; project planning across all four flows — visibility to client; AI asks for input proactively (no "human reviews everything") | **1** |
+| 3 | **Audit log / traceability / security** | lock approvals; thinking steps; exportability; system of records; versioning | **2** |
+
+(4th pillar slot in the grid is empty.)
+
+---
+
+## 3. Customer Workflow (D8:G9) — score in row 10
+
+> "How our customers work ----->"
+
+| Stage | Features / thoughts | Score |
+|---|---|---|
+| **Understand client** | meeting notes (written + video); market research & news monitoring; regulatory monitoring; emails?; where does this data live? sometimes in the head of the expert | — |
+| **Collect data** | external data sources (integrations, e.g. Mercia); web search; files collection; client uploads themselves | **2** |
+| **Extract insights** | workflows; sequencing / controlled via chat ("turn into workflow?"); exhaustive search | **6** |
+| **Present to client** | current: ppt, pdf, excel (nice to have an artefact the client receives/owns — website doesn't really give this); future: totally dynamic dashboard? (or static/timestamped); whitelabeled / branded | **10.5** |
+
+---
+
+## 4. Old Roadmap (status column is NOT reliable)
+
+Legend: CV = Customer Value (1–3), EA = Expected Adoption (1–3), TI = Total Impact (CV×EA), CX = Normain Complexity (1=high, 3=low), Prio = Sara's prio.
+
+| # | Job | Scope | CV | EA | TI | CX | Prio | Status (sheet) | Likely customers |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Microsoft Marketplace + SaaS w/ audit logs | Hosting + marketplace (ISV). Legora-style secure-by-default, no VPC hassle. | 3 | 3 | 9 | 1 | 1 | **DONE** | All enterprise |
+| 2 | Extraction Templates | (1) add extraction to TEAM library (2) lock static files/prompts | 3 | 3 | 9 | 2 | 2 | 1 DONE; 2 tbd vs publish extractions | Klara, KPMG, Black Sun |
+| 3 | Import Excel template / Spreadsheet mode | (1) import columns from Excel (2) as prompts then input columns | 3 | 3 | 9 | 2 | 3 | **DONE** | 2050, U&We, Miljögiraff, PwC, KPMG |
+| 4 | Team invites 2.0 | share extraction via link; request access; reduce friction | 3 | 3 | 9 | 2 | 4 | **DONE** | Most |
+| 5 | SSO & enterprise stuff | SSO; Azure firewall; audit logs | 3 | 2 | 6 | 2 | 5 | SSO DONE; firewall waiting KPMG; audit DONE | KPMG |
+| 6 | URL 2.0 & websearch | crawl/search entire page | 3 | 3 | 9 | 1 | 6 | TBD — need feedback | URL users |
+| 7 | Workflows | chain extractions; output becomes next input | 3 | 2 | 6 | 1 | 7 | Find customers to use chat | KPMG |
+| 8 | Publish Extractions | simple UI for customer's clients (upload/validate/export); brandable; invite mgmt | 3 | 2 | 6 | 1 | 8 | Find use cases, generalize | KPMG, Miljögiraff, Klara |
+| 9 | Credit system for insights | user-chosen search depth; Normain recommends | 2 | 3 | 6 | 3 | 9 | DONE (token-based, capped at 1) | All |
+| 10 | Trust Panel 2.0 | render more file types (xlsx, jpeg, docx, png, website?) | 2 | 2 | 4 | 2 | 10 | — | — |
+| 11 | Collaboration features | discuss insights; tag/assign members | 3 | 1 | 3 | 2 | 11 | **DONE** (assign + comments) | Pollen Street Cap |
+| 12 | Import Document template | word/pdf → auto-detect questions vs example results | 3 | 2 | 6 | 1 | 12 | Done-ish (bulk create via file) | Pollen Street, Advisense |
+| 13 | Import Insights from document | list of requirements (CSRD, IFRS, AI-strat) → agentic ideally | 3 | 2 | 6 | 2 | 13 | Done-ish | KPMG, 2050, Pollen Street |
+| 14 | Excel exporting 2.0 | export to Excel template; complex mapping modal | 3 | 1 | 3 | 2 | 14 | **CANCELED** | 2050, Klara |
+| 15 | API | Normain as backend in other products | 2 | 1 | 2 | 1 | 15 | TBD until May | Maybe KPMG |
+
+---
+
+## 5. Working notes
+
+- Status col in "Old" not trusted — will re-verify when synthesizing.
+- "Ideas 1" and "Ideas 2" tabs exist but not pulled yet — ask Kalle if in scope.
+- Goal: make sense of these three inputs → a roadmap Kalle can act on.

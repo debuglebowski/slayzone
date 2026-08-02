@@ -1,0 +1,15 @@
+{
+  "attempt": 1,
+  "startedAt": "2026-08-02T08:46:54.809Z",
+  "userDataDir": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/worker-3-54917-1785660414689/userdata",
+  "workerArtifactsDir": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/.e2e-runtime/worker-3-54917-1785660414689/artifacts",
+  "mainJsPath": "/Users/Kalle/dev/projects/slayzone/packages/apps/app/out/main/index.js",
+  "executablePath": "/Users/Kalle/dev/projects/slayzone/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+  "success": true,
+  "observedWindowUrls": [
+    "file:///Users/Kalle/dev/projects/slayzone/packages/apps/app/out/renderer/index.html"
+  ],
+  "rootReadyMs": 1233,
+  "endedAt": "2026-08-02T08:46:57.815Z",
+  "durationMs": 3006
+}

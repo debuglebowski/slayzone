@@ -1,0 +1,13 @@
+flowchart TD
+    P1[Phase 1: Source docs and write 100 questions]
+    P2[Phase 2: Humans write the correct answers]
+    P3[Phase 3: Pick competitors and set up accounts]
+    P4[Phase 4: Run the same questions through every tool]
+    P5[Phase 5: Grade each answer against the correct answer]
+    P6[Phase 6: Publish the benchmark report]
+
+    P1 --> P2
+    P2 --> P3
+    P3 --> P4
+    P4 --> P5
+    P5 --> P6

@@ -1,0 +1,207 @@
+# UC08 — Competitor Comparison Table
+
+Full questions + ground-truth answers + citations in [`questions-and-answers.md`](artifact:?). This file tracks each competitor's response with a verdict per row.
+
+Verdict legend: ✅ correct · ⚠️ partial / minor error · ❌ wrong / hallucinated · 🛑 retrieval failure (tool couldn't fetch source) · — not yet run
+
+Row markers: 🪤 = trap (correct answer is "Not addressed in our documentation") · ↔P# = consistency pair — answers must not contradict their partner.
+
+**Consistency pairs**: P1 Q002↔Q091 · P2 Q008↔Q095 · P3 Q021↔Q024 · P4 Q051↔Q054 · P5 Q061↔Q064.
+
+**Category ranges**: Governance Q001–010 · Access Q011–020 · Data Protection Q021–030 · App Sec/SDLC Q031–040 · Infra Q041–050 · Vendor Q051–060 · Incident Q061–070 · BC/DR Q071–080 · Privacy Q081–090 · Compliance Q091–100.
+
+| # | Type/Depth | Question (abridged) | Correct answer (summary) | Normain | Claude | Claude Cowork | Claude Code | ChatGPT | NotebookLM | MikeOSS | M365 Copilot | Gemini DR | Harvey | Legora |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Q001 | Y/N · L1 | Is Normain's ISMS certified to ISO/IEC 27001:2022? | **Yes.** Certification body **Prescient Security**. | "Cannot confirm formally certified yet" — but names Prescient Security and audit recommendation. Disagrees with ground truth's "Yes"; arguably more accurate (cert recommendation ≠ issued cert). ⚠️ ground-truth review needed | — | — | — | — | — | — | — | — | — | — |
+| Q002 ↔P1 | Y/N · L1 | Does Normain hold a current SOC 2 Type II report covering an audit period within the last 12 months? | **Yes.** Auditor: **Prescient Assurance LLC** (Nashville, TN). | "Yes." Auditor Prescient Assurance LLC, period Jul 15–Oct 15 2025, issued Nov 24 2025 ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q003 | FF · L2 | What is the documented scope of Normain's ISMS — which business functions, locations, a… | Scope is the ISMS for Normain AB — a web-based AI-automation SaaS hosted on Microsoft Azure. | Scope answer matches verbatim: Normain AB SaaS on Azure; departments Engineering, HR, IT, InfoSec, Legal, Finance; remote-only ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q004 | FF · L3 | Describe Normain's risk assessment methodology — risk identification approach, scoring/… | Methodology aligned with **NIST SP 800-30**. | Aligned to "ISO 27005, NIST 800-30 AND NIST 800-37" (ground truth says only NIST 800-30); scoring buckets Low 1–4 / Med 5–12 / High 15–25 (ground truth says crit/high/med/low); CEO accepts org-risk, Engineering Leadership approves treatment (ground truth says ISMS Governance Council) — partial alignment, may indicate ground-truth needs refinement ⚠️ | — | — | — | — | — | — | — | — | — | — |
+| Q005 | CL · L3 | Is the physical security of the underlying cloud data-center facilities in-scope, out-o… | **Out-of-scope.** The cloud-provider (Microsoft Azure) is responsible for physical security and environmental controls at the data-center facilities; these a… | "Out-of-scope." Cloud-provider responsible for DC physical security; Normain still does vendor oversight ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q006 | Y/N · L1 | Has Normain designated a single executive role with documented overall accountability for the information security program? | **Yes.** The **CTO** holds the role of **Information Security Management Leader and Data Protection Officer** and chairs the ISMS Governance Council, with do… | "Yes. CTO designated as Information Security Management Leader." (Didn't volunteer "and DPO" but core answer correct) ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q007 | FF · L2 | How often is the ISMS subject to formal management review, and who attends/owns the rev… | The ISMS Management Review is owned by the ISMS Governance Council (chaired by the CTO; members: COO, business-unit delegates, engineering leadership) and he… | Cadence "at least annually" per policy; ISMS Governance Council ownership w/ correct membership. Missed quarterly-in-practice review records (2025-06-09, 2025-09-09, etc) cited in ground truth ⚠️ | — | — | — | — | — | — | — | — | — | — |
+| Q008 ↔P2 | Y/N · L2 | Does Normain maintain a Statement of Applicability (SoA) covering all ISO/IEC 27001:202… | **Yes.** SoA v1.0.1 dated **2025-07-17** covers the ISO/IEC 27001:2022 Annex A control set with applicability decision and rationale per control. | "Yes." SoA v1.0.1 dated July 17 2025; Annex A coverage A.5.1–A.8.34 with per-control fields and exclusion rationale ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q009 | Y/N · L4 | Does Normain offer a Business Associate Agreement (BAA) for processing of HIPAA-regulat… | **No.** HIPAA is listed only as an external regulatory factor considered when assessing context — it is **not within the ISMS certification scope** nor refer… | "Does not appear to offer a BAA." HIPAA not in DPA/privacy/scope; privacy policy explicitly tells customers not to input health data without GDPR lawful basis ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q010 | Y/N · L4 | Does Normain currently hold a FedRAMP authorization (Low, Moderate, or High)? | **No.** FedRAMP is not referenced in any corpus document. | "No. Does not evidence FedRAMP" Low/Moderate/High. Lists actual attestations (SOC 2 + ISO 27001) ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q011 | Y/N · L1 | Is least privilege enforced for access to production systems and customer data? | **Yes.** Access type and level granted on **principle of least privilege**; permissions and rights not expressly granted are prohibited by default; RBAC is t… | "Yes." Cites Access Control Policy least-privilege + RBAC, MFA for privileged production, Customer Data classified Confidential, annual reviews, SOC 2 "No exceptions noted" ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q012 | FF · L2 | Describe Normain's MFA requirements for privileged access — accepted factor types and d… | All privileged access to production infrastructure requires MFA "when available" (i.e., where the target system supports it). | MFA "when available" per policy; system description says all employee + admin accounts; factor types listed (keyfobs, OTP, smartphones); surfaces ISO audit observation that Vanta MFA not recorded for ALL personnel — strong nuanced answer ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q013 | FF · L3 | Describe Normain's policy on shared accounts — when permitted and what compensating con… | Unique user identifiers are required for routine access and **credentials must not be shared**. **Exception**: root, service, and administrator accounts may … | Default no shared user accounts; exception for root/service/admin via password manager for business continuity only; lists compensating controls (privileged access governance, reviews, logging, password protections) ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q014 | FF · L2 | Describe Normain's user access review program — cadence, systems reviewed, who reviews,… | Administrators perform access-rights reviews of user, administrator and service accounts on a **yearly** basis to verify access is limited to job-function ne… | Tabular answer: yearly cadence + role-change-triggered; covers user/admin/service accounts; administrators perform reviews; Vanta evidence + Linear tracking of gaps ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q015 | Y/N · L1 | Is access automatically removed within a documented SLA upon employee termination? | **Yes.** Maximum allowable time for access termination is **24 business hours**. | "Yes. Within 24 business hours" per documented SLA ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q016 | Y/N · L1 | Are remote connections from employee endpoints to production systems and networks encry… | **Yes.** Policy: "Remote connections to company production systems and networks must be encrypted." | "Yes." Remote connections required encrypted per policy; SOC 2 confirms no exceptions ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q017 | FF · L2 | Describe the approval workflow for granting a Normain employee new privileged access to… | User provisioning requests must include **approval from the system owner, data owner, or authorized management party**. | 6-step workflow: HR onboarding prereqs → ticketed request → owner approval → least-privilege validation → authorized-admin provisioning → privileged controls (MFA, time-bound, logging) ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q018 | Y/N · L4 | Does Normain mandate FIDO2 hardware security keys (e.g., YubiKey) as the sole permitted… | **No.** Policy mandates MFA for privileged access but does not restrict the second factor to FIDO2/hardware keys; multiple factor types are acceptable per th… | "No." MFA required "when available"; no FIDO2-only mandate. Correct negative-answer L4 ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q019 | CL · L3 | Is direct, interactive database access by Normain employees against production database… | **In-scope.** Access-control policy applies to "all company information systems that process, store, or transmit confidential company data" — production data… | "In-scope." Production DB listed as in-scope component; annual access reviews per policy; SOC 2 confirms ✅ | — | — | — | — | — | — | — | — | — | — |
+| Q020 🪤 | FF · L4 | Can Normain offer customer-side IP allowlisting or private-link/private-endpoint connectivity to the application tier? | **Not addressed in our documentation.** No corpus document describes customer-side IP allowlisting or private-link/private-endpoint options. | Not yet provided (20-answer batch contained only 19 responses; Q020 🪤 trap response missing) — | — | — | — | — | — | — | — | — | — | — |
+| Q021 ↔P3 | Y/N · L1 | Is customer data encrypted at rest using AES-256 (or equivalent strength)? | **Yes.** Confidential data at rest is encrypted using **AES-256**; database, blob storage and backups use Azure platform-managed AES-256. | — | — | — | — | — | — | — | — | — | — | — |
+| Q022 | Y/N · L1 | Is data in transit between customer endpoints and the Normain application encrypted wit… | **Yes. | — | — | — | — | — | — | — | — | — | — | — |
+| Q023 | FF · L1 | List Normain's data classification levels and the criteria distinguishing them. | Three classes: **Confidential** (highly sensitive, access restricted to specific employees/roles; e.g., vulnerability reports, secrets, private keys), **Rest… | — | — | — | — | — | — | — | — | — | — | — |
+| Q024 ↔P3 | Y/N · L2 | Does Normain enforce a maximum lifetime for symmetric encryption keys protecting confidential data at rest? | **Yes.** Max key expiration for **Confidential Data at Rest (AES-256)** is **1 year**. | — | — | — | — | — | — | — | — | — | — | — |
+| Q025 | FF · L3 | Describe how Normain protects production data backups — encryption, isolation from prim… | Backups are configured to run on an ongoing basis on in-scope systems; **stored separately from the production data location** using Azure-managed backup cap… | — | — | — | — | — | — | — | — | — | — | — |
+| Q026 | CL · L3 | Is customer-managed encryption keys (BYOK / HYOK) for production data at rest in-scope,… | **Out-of-scope.** Production data at rest uses **Azure platform-managed AES-256** with keys held in Azure Key Vault by Normain. | — | — | — | — | — | — | — | — | — | — | — |
+| Q027 | FF · L2 | Describe Normain's secure data disposal / media sanitization process at end of life. | Company devices and media that store or process confidential company data must be sanitized at end of life in accordance with **NIST SP 800-88 Rev. 1** guide… | — | — | — | — | — | — | — | — | — | — | — |
+| Q028 | Y/N · L4 | Does Normain provide a dedicated hardware security module (HSM) per customer for crypto… | **No.** Production keys are managed in **Azure Key Vault** (shared, Normain-controlled). | — | — | — | — | — | — | — | — | — | — | — |
+| Q029 | Y/N · L4 | Does Normain support customer-supplied / customer-controlled key material (e.g., via Az… | **No.** Encryption at rest is Azure platform-managed; corpus contains no BYOK/customer-managed-key provision. | — | — | — | — | — | — | — | — | — | — | — |
+| Q030 🪤 | FF · L4 | Describe Normain's post-quantum cryptography migration roadmap and current status. | **Not addressed in our documentation.** No corpus document references post-quantum cryptography, PQC migration, NIST PQC algorithms, or a related roadmap. | — | — | — | — | — | — | — | — | — | — | — |
+| Q031 | Y/N · L1 | Is mandatory peer code review required before code can be merged to a production branch? | **Yes.** "All production code changes flow through a pull request with at least one independent reviewer prior to merge into the default branch." Secure Deve… | — | — | — | — | — | — | — | — | — | — | — |
+| Q032 | Y/N · L2 | Are automated security scans (SAST, dependency vulnerability scanning, container scanni… | **Yes.** SAST via **GitHub CodeQL** (every push to PR), SCA via **GitHub Dependabot** (daily + PR push), DAST via **OWASP ZAP Baseline** (weekly against prod… | — | — | — | — | — | — | — | — | — | — | — |
+| Q033 | FF · L2 | Describe Normain's penetration testing program — cadence, scope, and tester independence. | **Annual** independent external penetration test. | — | — | — | — | — | — | — | — | — | — | — |
+| Q034 | Y/N · L1 | Does every production change require formal approval before deployment? | **Yes.** All change types (Standard / Normal / Emergency) follow the Change Management Procedure; Standard changes are pre-approved; Normal changes require r… | — | — | — | — | — | — | — | — | — | — | — |
+| Q035 | FF · L2 | Describe Normain's SDLC stage gates — testing and approvals required for development, s… | Pre-merge: lint + type-check + automated test suite + peer code review + CodeQL/Dependabot. | — | — | — | — | — | — | — | — | — | — | — |
+| Q036 | FF · L2 | State Normain's vulnerability remediation SLAs by severity (critical / high / medium / … | Per Automated Security Testing Procedure: **Critical (CodeQL/Gryve/ZAP) target fix time ≤ 30 days**; other issues prioritised by severity and complexity. | — | — | — | — | — | — | — | — | — | — | — |
+| Q037 | Y/N · L1 | Are production and non-production environments segregated, with no shared credentials a… | **Yes.** Operations Security Policy mandates environment segregation (development, testing, production). | — | — | — | — | — | — | — | — | — | — | — |
+| Q038 | CL · L3 | Is third-party open-source license / SBOM management in-scope, out-of-scope, or partial… | **Partial.** SBOM is generated on image build (Automated Security Testing Procedure); SCA via GitHub Dependabot covers vulnerability tracking of OSS dependen… | — | — | — | — | — | — | — | — | — | — | — |
+| Q039 | Y/N · L4 | Does Normain operate a public bug bounty program with disclosed scope and rewards? | **No.** No public bug bounty program is referenced in any corpus document. | — | — | — | — | — | — | — | — | — | — | — |
+| Q040 | FF · L3 | Describe Normain's threat-modeling practice — when threat models are produced, by whom,… | Threat modelling is not enumerated as a standalone procedure. | — | — | — | — | — | — | — | — | — | — | — |
+| Q041 | Y/N · L1 | Is Normain's production infrastructure hosted entirely on a single cloud provider? | **Yes — Microsoft Azure.** Sole carved-out subservice organisation in SOC 2 scope; ISMS scope "includes infrastructure hosted on Azure". | — | — | — | — | — | — | — | — | — | — | — |
+| Q042 | Y/N · L2 | Are production networks segmented to isolate customer data planes from internal corpora… | **Yes.** Operations Security Policy requires firewalls and network access controls; production hosted on Azure with separation between corporate identity (Go… | — | — | — | — | — | — | — | — | — | — | — |
+| Q043 | FF · L1 | Identify the WAF and/or DDoS-protection layer in front of Normain's customer-facing end… | **Cloudflare** — provides edge, DNS, and **WAF** in front of customer-facing endpoints. | — | — | — | — | — | — | — | — | — | — | — |
+| Q044 | Y/N · L1 | Is endpoint detection and response (EDR) deployed on all employee endpoints with access… | **Yes.** Operations Security Policy mandates endpoint protection (anti-malware/EDR) on all company devices; HR/onboarding workflow provisions secured endpoin… | — | — | — | — | — | — | — | — | — | — | — |
+| Q045 | FF · L2 | Describe Normain's patch management cadence for production OS and container base images. | Critical and High security patches must be **applied within defined timeframes** per Operations Security Policy § "Vulnerability Management" / "Patching" (li… | — | — | — | — | — | — | — | — | — | — | — |
+| Q046 | CL · L3 | Is multi-region active-active production deployment in-scope, out-of-scope, or partial … | **Out-of-scope.** No corpus document describes a multi-region active-active deployment topology; production is on Azure with backup-restore-based DR (annual … | — | — | — | — | — | — | — | — | — | — | — |
+| Q047 | FF · L3 | Describe Normain's logging and security event monitoring — what is captured, where stor… | Production logging and uptime monitoring via **BetterStack**; application errors via **Sentry**; product analytics via **PostHog**. **GitHub Security Center … | — | — | — | — | — | — | — | — | — | — | — |
+| Q048 | Y/N · L4 | Does Normain offer a dedicated single-tenant infrastructure deployment as a standard pr… | **Yes (qualified).** "Dedicated (Normain-managed)" hosting mode is documented in the Main Agreement: customer tenant in a dedicated Microsoft Azure environme… | — | — | — | — | — | — | — | — | — | — | — |
+| Q049 | Y/N · L4 | Does Normain provide FIPS 140-3 validated cryptographic modules for the customer-facing… | **No.** No corpus document references FIPS 140-2 / 140-3 validation. | — | — | — | — | — | — | — | — | — | — | — |
+| Q050 | Y/N · L1 | Does Normain maintain documented secure configuration baselines for production systems? | **Yes.** "Secure Configuration Baselines" folder + documented Secure System Engineering Principles. | — | — | — | — | — | — | — | — | — | — | — |
+| Q051 ↔P4 | Y/N · L1 | Does Normain maintain a current publicly available sub-processor list for hosted-servic… | **Yes.** Pre-approved sub-processor list dated **2026-04-28**, two tables: (1) production data hosting & processing — Azure, AWS, Sentry, PostHog, BetterStac… | — | — | — | — | — | — | — | — | — | — | — |
+| Q052 | FF · L2 | Describe Normain's sub-processor onboarding due-diligence — security review precedes en… | Proper due diligence is performed prior to onboarding any third party with access to confidential data: risk assessment, review of security posture (certific… | — | — | — | — | — | — | — | — | — | — | — |
+| Q053 | FF · L2 | Describe how Normain notifies customers prior to engaging a new sub-processor that proc… | Per DPA: Normain shall send notification of sub-processor changes **at least thirty (30) days in advance**. | — | — | — | — | — | — | — | — | — | — | — |
+| Q054 ↔P4 | Y/N · L1 | Are signed DPAs (or equivalent contractual safeguards) in place with every sub-processo… | **Yes.** The sub-processor list shows a "DPA with subprocessor" column populated with a link for **every** entry in both Table 1 (Azure, AWS, Sentry, PostHog… | — | — | — | — | — | — | — | — | — | — | — |
+| Q055 | FF · L3 | Describe Normain's recurring vendor / sub-processor security review process — cadence, … | Suppliers regularly monitored, reviewed, and audited; **service review at least annually**; **cloud-service agreements for inherently high-risk providers rev… | — | — | — | — | — | — | — | — | — | — | — |
+| Q056 | CL · L3 | Is vendor management of business-critical SaaS that does not process personal data (e.g… | **In-scope.** Policy applies to "all data and information systems… that are business critical and/or process, store, or transmit Confidential data." Engineer… | — | — | — | — | — | — | — | — | — | — | — |
+| Q057 | FF · L2 | Identify every Normain sub-processor whose primary data-processing location is outside … | All Table 1 production-data sub-processors process within the EEA/EU (Azure via MS Ireland; AWS EMEA SARL Luxembourg; Sentry stated EEA/EU; PostHog stated EE… | — | — | — | — | — | — | — | — | — | — | — |
+| Q058 🪤 | FF · L4 | Provide the most recent customer-attestation letter Normain has issued regarding a sub-… | **Not addressed in our documentation.** No corpus document references a sub-processor breach event or any related customer-attestation letter. | — | — | — | — | — | — | — | — | — | — | — |
+| Q059 | Y/N · L4 | Does Normain operate any sub-processor whose primary processing location is in mainland… | **No.** Sub-processor list shows EEA/EU, US (Google Workspace), and Global (Google) locations only. | — | — | — | — | — | — | — | — | — | — | — |
+| Q060 | Y/N · L2 | Has Normain put EU SCCs or an equivalent transfer mechanism in place with each sub-proc… | **Yes.** Sub-processors that handle EU personal data with US/global processing rely on **EU-U.S. | — | — | — | — | — | — | — | — | — | — | — |
+| Q061 ↔P5 | Y/N · L1 | Does Normain maintain a documented Incident Response Plan covering security events affe… | **Yes.** IR Plan exists; scope: "all information security or data privacy events or incidents impacting non-public Company data." | — | — | — | — | — | — | — | — | — | — | — |
+| Q062 | FF · L2 | Describe Normain's incident severity classification scheme — distinguishing severity le… | Four levels assigned by the Security Delegate: **P0 Critical** (active exploitation / confirmed major impact — immediate escalation to senior management; clo… | — | — | — | — | — | — | — | — | — | — | — |
+| Q063 | Y/N · L1 | Is the IR plan tested at least annually via tabletop or technical exercise? | **Yes.** Annual IR tabletop performed; most recent **2025-07-04**. | — | — | — | — | — | — | — | — | — | — | — |
+| Q064 ↔P5 | FF · L2 | State Normain's customer-notification commitment for a confirmed security incident affe… | When acting as data processor for a customer, Normain notifies the customer (data controller) of a personal data breach **within 48 hours of becoming aware**… | — | — | — | — | — | — | — | — | — | — | — |
+| Q065 | Y/N · L1 | Does Normain operate a 24×7 on-call rotation for security incidents? | **Yes.** Production monitoring and alerting is 24/7 (BetterStack); on-call engineers respond to alerts continuously. | — | — | — | — | — | — | — | — | — | — | — |
+| Q066 | FF · L2 | Describe Normain's forensic / evidence-preservation steps when a confirmed security inc… | The Security Delegate documents the incident in the security incident report template (Drive: "Security Incident Report Template"); evidence and logs capture… | — | — | — | — | — | — | — | — | — | — | — |
+| Q067 | CL · L3 | Is regulatory reporting to non-EU authorities (e.g., US state breach notification laws)… | **Partial.** IR Plan commits to notifying "consumers, data subjects, and regulators without undue delay and in accordance with all contractual commitments an… | — | — | — | — | — | — | — | — | — | — | — |
+| Q068 | Y/N · L1 | Are all Normain employees required to complete security and incident-reporting training… | **Yes.** All personnel complete security awareness training **at time of hire and annually thereafter**; management monitors completion. | — | — | — | — | — | — | — | — | — | — | — |
+| Q069 | Y/N · L4 | Has Normain experienced a publicly disclosed material security incident or data breach … | **No.** Latest SOC 2 system description: "No qualifying security incidents (P1 or above, or any incident meeting the customer-notification threshold) have be… | — | — | — | — | — | — | — | — | — | — | — |
+| Q070 | FF · L3 | Describe how Normain ensures incident learnings feed into the corrective-action registe… | Non-conformities (including those identified through incidents) are addressed via the ISMS Corrective Action and Continual Improvement Procedure (09-ISMS): r… | — | — | — | — | — | — | — | — | — | — | — |
+| Q071 | Y/N · L1 | Does Normain maintain a documented BC/DR plan covering the customer-facing service? | **Yes.** Business Continuity and Disaster Recovery (BC_DR) plan covers all business-critical company information systems. | — | — | — | — | — | — | — | — | — | — | — |
+| Q072 | Y/N · L1 | Is the BC/DR plan, including backup-restoration testing, exercised at least annually? | **Yes.** A disaster recovery test, including a test of backup restoration processes, "shall be performed on an annual basis." Most recent DR tabletop: **2025… | — | — | — | — | — | — | — | — | — | — | — |
+| Q073 | FF · L2 | State Normain's documented RTO for restoring the customer-facing service after a major … | RTO documented in **Appendix B** of the BC/DR plan; the plan also references service-level commitments of ≥99% monthly platform uptime (signed 2025-12-17) wi… | — | — | — | — | — | — | — | — | — | — | — |
+| Q074 | FF · L2 | State Normain's documented RPO for customer data. | RPO documented in **Appendix B** of the BC/DR plan. | — | — | — | — | — | — | — | — | — | — | — |
+| Q075 | Y/N · L2 | Are production backups stored in a separate geographic region from primary production d… | **Partial Yes — separation: yes; immutability not stated explicitly.** Operations Security Policy requires backups stored separately from production data loc… | — | — | — | — | — | — | — | — | — | — | — |
+| Q076 | CL · L3 | Is automated cross-region DR failover in-scope, out-of-scope, or partial for Normain's … | **Out-of-scope.** The current BC/DR design relies on backup-restore (annual tabletop) and SaaS-vendor availability; the plan does not commit to automated cro… | — | — | — | — | — | — | — | — | — | — | — |
+| Q077 | Y/N · L4 | Does Normain offer customer-specific RTO / RPO commitments in its standard hosted-servi… | **No.** Standard hosted-service contract commits to platform uptime (≥99% monthly) and service-credit remedies, not to customer-specific RTO/RPO. | — | — | — | — | — | — | — | — | — | — | — |
+| Q078 | FF · L3 | Describe the trigger criteria and decision authority for declaring a disaster and invok… | Plan is **automatically activated** in the event of loss/unavailability of the company office or a natural disaster (severe weather, regional power outage, e… | — | — | — | — | — | — | — | — | — | — | — |
+| Q079 | Y/N · L4 | Does Normain provide customers with a cyber-insurance certificate naming them as additi… | **No.** No corpus document references cyber-insurance certificates, additional-insured coverage, or insurance-on-behalf-of-customer provisions. | — | — | — | — | — | — | — | — | — | — | — |
+| Q080 🪤 | FF · L4 | Provide the results of Normain's most recent chaos-engineering / game-day exercise, inc… | **Not addressed in our documentation.** No corpus document describes chaos-engineering or game-day exercises. | — | — | — | — | — | — | — | — | — | — | — |
+| Q081 | Y/N · L1 | Does Normain operate as a data processor under GDPR for customer-controlled personal da… | **Yes.** "Normain processes Personal Data on behalf of the Customer… the DPA shall apply… Normain is the Processor of the Customer." | — | — | — | — | — | — | — | — | — | — | — |
+| Q082 | FF · L2 | State Normain's legal basis(es) under GDPR Art. 6 for processing personal data of users… | Per the (controller-mode) Privacy Policy, Normain processes personal data under GDPR and the Swedish Data Protection Act; legal bases include **performance o… | — | — | — | — | — | — | — | — | — | — | — |
+| Q083 | Y/N · L1 | Does Normain offer a signed customer-facing DPA to every customer that processes person… | **Yes.** DPA is the standard customer-facing template (signed PDF dated 2026-02-08). | — | — | — | — | — | — | — | — | — | — | — |
+| Q084 | FF · L2 | Describe Normain's procedure for handling data subject rights requests — for its own co… | When Normain is **controller** (website/marketing users), Normain handles DSR requests directly under the Privacy Policy procedure (access, rectification, er… | — | — | — | — | — | — | — | — | — | — | — |
+| Q085 | Y/N · L2 | Has Normain designated a DPO or equivalent privacy lead, with a public point of contact? | **Yes.** The **CTO** holds the Data Protection Officer role. | — | — | — | — | — | — | — | — | — | — | — |
+| Q086 | CL · L3 | Is direct marketing using personal data of customer end-users in-scope, out-of-scope, o… | **Out-of-scope.** Per the DPA, Normain processes customer personal data only on the customer's documented instructions for service delivery; direct marketing… | — | — | — | — | — | — | — | — | — | — | — |
+| Q087 | Y/N · L1 | Has Normain contractually committed to notifying customer-controllers without undue del… | **Yes.** DPA § 6: "Normain shall notify the Customer without undue delay after Normain has learned of a Personal Data Breach." | — | — | — | — | — | — | — | — | — | — | — |
+| Q088 | FF · L1 | State Normain's data residency arrangement — where customer personal data is stored and… | Customer personal data is stored on **Microsoft Azure within the EEA/EU**. | — | — | — | — | — | — | — | — | — | — | — |
+| Q089 | Y/N · L4 | Is Normain certified under the EU-U.S. Data Privacy Framework as a direct participant (… | **No.** No corpus document indicates Normain is itself a DPF-listed participant. | — | — | — | — | — | — | — | — | — | — | — |
+| Q090 | FF · L3 | Describe Normain's GDPR international-transfer safeguards — legal mechanism(s) and thir… | Transfers outside the EEA rely on **SCCs** (AWS) and the **EU-U.S. | — | — | — | — | — | — | — | — | — | — | — |
+| Q091 ↔P1 | Y/N · L1 | Has Normain undergone an external penetration test within the past 12 months? | **Yes.** External pen test by **Cacilian** in **May 2025**; next round scoped April 2026. | — | — | — | — | — | — | — | — | — | — | — |
+| Q092 | Y/N · L1 | Does Normain undergo an annual ISMS internal audit prior to external certification audits? | **Yes.** ISMS internal audits are performed **annually** per the ISMS Internal Audit Procedure (07-ISMS). | — | — | — | — | — | — | — | — | — | — | — |
+| Q093 | FF · L2 | State Normain's process for sharing audit reports (SOC 2, pen test, ISO) with customers… | SOC 2 Type II report is marked "Restricted Use & Distribution" and shared under appropriate access controls; customer-facing artifacts (ISO 27001 certificate… | — | — | — | — | — | — | — | — | — | — | — |
+| Q094 | Y/N · L2 | Are findings from external audits and pen tests tracked in a documented corrective-acti… | **Yes.** Findings tracked to closure as Linear tickets; Nonconformity and Corrective Action Log maintained ("Nonconformity and Corrective Action Log - Normai… | — | — | — | — | — | — | — | — | — | — | — |
+| Q095 ↔P2 | FF · L3 | Describe how Normain's controls map to ISO/IEC 27001:2022 Annex A — which controls (if … | The **Statement of Applicability v1.0.1 (2025-07-17)** maps Normain's controls to all 93 Annex A controls of ISO/IEC 27001:2022, recording applicability and … | — | — | — | — | — | — | — | — | — | — | — |
+| Q096 | CL · L3 | Is PCI-DSS in-scope, out-of-scope, or partial for Normain's compliance program? | **Out-of-scope.** PCI-DSS is not referenced in the ISMS scope, the SoA, the system description, or the audit reports. | — | — | — | — | — | — | — | — | — | — | — |
+| Q097 | Y/N · L4 | Does Normain hold a current ISO/IEC 27017 (cloud security) or ISO/IEC 27018 (cloud PII)… | **No.** Only **ISO/IEC 27001:2022** certification is documented; no 27017 or 27018 certification referenced. | — | — | — | — | — | — | — | — | — | — | — |
+| Q098 | Y/N · L4 | Has Normain completed a SOC 1 Type II audit covering financial reporting controls? | **No.** Only **SOC 2 Type II (Security TSC)** is documented; SOC 1 is not referenced anywhere in the corpus. | — | — | — | — | — | — | — | — | — | — | — |
+| Q099 🪤 | FF · L4 | List every regulatory enforcement action, supervisory fine, or consent decree Normain h… | **Not addressed in our documentation.** No corpus document references regulatory enforcement actions, supervisory fines, consent decrees, or related disclosu… | — | — | — | — | — | — | — | — | — | — | — |
+| Q100 | FF · L2 | Describe how Normain demonstrates ongoing compliance with the laws and regulations iden… | Continuous control monitoring via **Vanta** (all CC1–CC9 controls); **annual** ISMS internal audit and external certification audits; **annual** pen test (la… | — | — | — | — | — | — | — | — | — | — | — |
+
+## Score summary
+
+| Competitor | Correct (✅) | Partial (⚠️) | Wrong (❌) | Retrieval-failed (🛑) | Total / 100 | Time (total run) |
+|---|---|---|---|---|---|---|
+| Normain | 16 | 3 | 0 | 0 | **19 / 19 graded** (Q020 pending; full 100 not yet run) | not yet recorded |
+| Claude | — | — | — | — | — | — |
+| Claude Cowork | — | — | — | — | — | — |
+| Claude Code | — | — | — | — | — | — |
+| ChatGPT | — | — | — | — | — | — |
+| NotebookLM | — | — | — | — | — | — |
+| MikeOSS | — | — | — | — | — | — |
+| M365 Copilot | — | — | — | — | — | — |
+| Gemini DR | — | — | — | — | — | — |
+| Harvey | — | — | — | — | — | — |
+| Legora | — | — | — | — | — | — |
+
+## Sub-scorecards
+
+Track these alongside the headline 100-question total — they expose specific failure modes the headline number hides.
+
+### Trap pass rate (out of 5)
+
+Correct answer is "Not addressed in our documentation" on Q020, Q030, Q058, Q080, Q099. A ✅ means the competitor refused to fabricate evidence.
+
+| Competitor | Q020 | Q030 | Q058 | Q080 | Q099 | Total ✅ / 5 |
+|---|---|---|---|---|---|---|
+| Normain | — | — | — | — | — | — |
+| Claude | — | — | — | — | — | — |
+| Claude Cowork | — | — | — | — | — | — |
+| Claude Code | — | — | — | — | — | — |
+| ChatGPT | — | — | — | — | — | — |
+| NotebookLM | — | — | — | — | — | — |
+| MikeOSS | — | — | — | — | — | — |
+| M365 Copilot | — | — | — | — | — | — |
+| Gemini DR | — | — | — | — | — | — |
+| Harvey | — | — | — | — | — | — |
+| Legora | — | — | — | — | — | — |
+
+### Consistency pairs (out of 5)
+
+A pair scores ✅ when both halves give answers that don't contradict (factually align on the same control area).
+
+| Competitor | P1 Q002↔Q091 | P2 Q008↔Q095 | P3 Q021↔Q024 | P4 Q051↔Q054 | P5 Q061↔Q064 | Total ✅ / 5 |
+|---|---|---|---|---|---|---|
+| Normain | — | — | — | — | — | — |
+| Claude | — | — | — | — | — | — |
+| Claude Cowork | — | — | — | — | — | — |
+| Claude Code | — | — | — | — | — | — |
+| ChatGPT | — | — | — | — | — | — |
+| NotebookLM | — | — | — | — | — | — |
+| MikeOSS | — | — | — | — | — | — |
+| M365 Copilot | — | — | — | — | — | — |
+| Gemini DR | — | — | — | — | — | — |
+| Harvey | — | — | — | — | — | — |
+| Legora | — | — | — | — | — | — |
+
+### Depth breakdown
+
+Score per depth bucket — exposes whether a competitor degrades on harder questions or only handles L1 lookups.
+
+| Competitor | L1 (30 Qs) | L2 (30 Qs) | L3 (20 Qs) | L4 (20 Qs incl. 5 traps) |
+|---|---|---|---|---|
+| Normain | — | — | — | — |
+| Claude | — | — | — | — |
+| Claude Cowork | — | — | — | — |
+| Claude Code | — | — | — | — |
+| ChatGPT | — | — | — | — |
+| NotebookLM | — | — | — | — |
+| MikeOSS | — | — | — | — |
+| M365 Copilot | — | — | — | — |
+| Gemini DR | — | — | — | — |
+| Harvey | — | — | — | — |
+| Legora | — | — | — | — |
+
+## Notes on Normain's run (partial — 19 of 20 first batch graded)
+
+- **Strong overall**: 16 ✅ / 3 ⚠️ / 0 ❌ on Q001–Q019. Every question got a substantive answer with citations; no refusals, no hallucinations spotted.
+- **Q001 — potential ground-truth refinement**: Normain answered "cannot confirm formally certified yet" because the corpus only contains the audit recommendation, not an issued certificate. Ground-truth says "Yes" but the cited evidence is the same audit-recommendation language. Normain may be more accurate here. Worth re-reading the iso27001-certification-audit-report.pdf to confirm whether the corpus actually evidences issued certification or only recommendation.
+- **Q004 — methodology overshoot**: Normain cited ISO 27005 + NIST 800-30 + NIST 800-37; ground truth has only NIST 800-30. Scoring buckets (Low 1–4 / Med 5–12 / High 15–25) and acceptance owner (CEO / Engineering Leadership) also differ from ground truth (crit/high/med/low + ISMS Governance Council). Likely Normain extracted from a fuller/more recent version of the risk-management-policy than the ground-truth author worked from. Re-check the policy file.
+- **Q007 — missed quarterly practice**: Normain answered "at least annually per policy." Ground truth combined policy minimum (annual) with the actual quarterly review records cited from `folder 00 - ISMS`. If those review-record artifacts aren't ingested as a corpus file, this difference is unavoidable.
+- **Q012 — surfaced an audit finding**: Volunteered the ISO audit observation that Vanta MFA was recorded for SOME but not all personnel on Linear/Notion/Slack. This is the kind of nuance most competitors will miss.
+- **Q020 🪤 missing**: The 20-answer batch contained 19 responses. Q020 (customer IP allowlisting trap) wasn't included.
+- **Time**: not yet recorded for the partial batch.
+
+## Grading process
+
+For each competitor:
+1. Ingest the 29 documents from `data-sources/` per `competitors/<tool>.md`.
+2. Run all 100 questions verbatim. Capture full response + screenshot/PDF.
+3. Grade each row against ground truth in `questions-and-answers.md` — verdict emoji per question.
+4. Fill all three sub-scorecards (trap, consistency, depth) plus the headline score summary.
+5. Add per-competitor notes section below capturing failure patterns (citation drift, fabrication, refusals, ingestion limits, depth fall-off).

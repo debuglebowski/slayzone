@@ -1,0 +1,22 @@
+# UC01 — ChatGPT
+
+## Setup
+
+1. Create a new Project: **`Benchmark UC01 - DD financial`**.
+2. Upload to Project: `msft-fy24-10k.htm` + `msft-fy24-proxy.htm` (from `data-sources/`).
+   - If ChatGPT refuses `.htm`, convert to PDF first.
+3. Open a new conversation in the Project.
+
+If using URL ingestion instead of file upload (web browsing on), use the two URLs from `../questions-only.md` and flag answers 🌐.
+
+## Run
+
+For each of the 15 questions in `../questions-only.md`:
+
+1. Start a **fresh conversation** in the same Project.
+2. Paste the question verbatim. No preamble.
+3. Capture the response. If the model browsed the web mid-answer, note it.
+
+## Output
+
+Fill the **ChatGPT** column in `../competitor-comparison.md` with: brief answer + verdict emoji (+ 🌐 if web-browsed).

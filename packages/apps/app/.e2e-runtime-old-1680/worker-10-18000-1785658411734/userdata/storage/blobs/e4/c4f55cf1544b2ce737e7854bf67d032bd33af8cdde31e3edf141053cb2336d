@@ -1,0 +1,52 @@
+# Phase 0 — Remaining failing tests (sorted by effort)
+
+Snapshot: 2026-05-06 — live-updated as I work through items.
+
+## Effort key
+🟢 5-15 min · 🟡 15-30 min · 🔴 30+ min · 💀 1 h+
+
+## 🟢 Small (4)
+
+| Spec : line | Status |
+|---|---|
+| `01-smoke:8` empty state | ⏳ Cascade — see if r4 clears |
+| `11-create-task-dialog:78` change priority | ⏳ Cascade from :49 (fixed) |
+| `72-custom-shortcuts:84` rebind search | ⏳ Page-closed cascade |
+| `30-terminal-core-behavior:276` Cmd+Alt+R | 🔍 Investigated — buffer shows search-highlight escape codes; needs deeper dive |
+
+## 🟡 Medium (5)
+
+| Spec : line | Status |
+|---|---|
+| `93-resume-command:300` provider flags | ⏳ `chat:list` fix landed in main; pending verify |
+| `94-session-invalidation:252` | ⏳ Same `chat:list` fix |
+| `14-project-settings:454` delete column | ⏭️ Page-closed cascade |
+| `94-artifact-html-preview:36` script runs | ⏭️ iframe sandbox click bug |
+| `22-terminal-mode-switching:140` temp tasks | 🔍 Mode swap UI bug — trigger shows "Claude" after Codex select |
+
+## 🔴 Large (7)
+
+| Spec : line | Status |
+|---|---|
+| `93-artifacts-panel` ×11 | ⏭️ Deep cascade |
+| `33-pty-respawn-forced` ×4 | ⏭️ Cascade from earlier crash |
+| `42-terminal-tab-isolation:26` Cmd+K | ⏭️ Possible real bug |
+| `24-browser-panel:145` Alt+Shift+Click | ⏭️ Real feature flow |
+| `61-web-panel-handoff-routing:182` | ⏭️ Cmd+J panel header |
+| `71-webview-popup-handling:540/696` | ⏭️ Same root as #61 |
+| `32-git-diff-panel:219` polling | ⏳ Timeout increased; flake risk |
+
+## 💀 Very Large (2)
+
+| Spec : line | Status |
+|---|---|
+| `90-terminal-fd-limit:34` RLIMIT | ⏭️ Platform-specific |
+| `72-browser-view-lifecycle:184` Bug 1 | ⏭️ Open feature bug |
+
+## Tally
+
+🟢 4 · 🟡 5 · 🔴 7 · 💀 2  → **18 rows / ~38 individual tests**
+
+⏳ = expected to clear once running r4 completes  
+🔍 = investigated, needs more time  
+⏭️ = deeper investigation required

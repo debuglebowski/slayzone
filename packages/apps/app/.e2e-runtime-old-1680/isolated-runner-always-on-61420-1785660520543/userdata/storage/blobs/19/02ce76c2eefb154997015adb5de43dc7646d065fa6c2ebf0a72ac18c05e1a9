@@ -1,0 +1,52 @@
+# Vendor Review: Zero
+
+## URLs
+- Vendor Master Sheet (row 74): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=74:74
+- Cycle Drive folder: https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev
+- Cycle parent ticket: https://linear.app/normain/issue/INT-411
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/69a6d91a27a362af910ed7eb
+- Tool admin / login: https://app.zero.inc/
+- Tool website: https://zero.inc/
+- Screenshot in Drive: Zero Screenshot 2026-05-14 at 13.56.png
+
+## Status
+- Information complete?: **No** (blocked on N + Y)
+- Duplicates: none
+- Vanta: added, assessment in progress, no files / no findings logged
+- Vanta inherent risk: High
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | First-pass questions to user | Done |
+| 4 | Login + members screenshot in Drive folder | Done (Kalle manual) |
+| 5 | Create access-removal Linear sub-issues (if any) | Done (none needed) |
+| 6 | Fill cells | Done (11 cells written; AG left as-is per external edit to "Dennis Landfors") |
+| 7 | Flip Information complete? = Yes | **Blocked**: N (Vanta assessment incomplete) + Y (renewal date deferred) |
+
+## Cells written (row 74)
+| Col | Header | Value |
+|---|---|---|
+| Q | Sync comment | Checked 2026-05-14 |
+| T | Subscription type | Per user |
+| U | Number of users | 3 |
+| V | Cost per month | 43.75 |
+| W | Invoice Currency | USD |
+| AA | Admin permissions through role | Yes |
+| AB | Uses SSO with Google? | Yes |
+| AC | Security comment | No public SOC 2 / ISO 27001 cert; DPA + sub-processor list available via privacy policy. Vendor: Zero Technologies Oy (Finland). |
+| AE | Access review 2026-04-29 | Done |
+| AF | Screenshot completed? | Yes |
+| AH | Link | https://app.zero.inc/ |
+
+X (Total monthly SEK) auto-computed → 1,279.69. S (Contract details status) auto-flipped → Complete.
+
+## Open items blocking F=Yes
+1. **N Risk Review Status in Vanta** — Vanta has Zero added but assessment is in progress (no files, no findings). To complete: upload SOC 2 / ISO docs (none public) or run questionnaire-based review. Deferred this session.
+2. **Y Contract Renewal Date** — deferred by Kalle.
+
+## Notes
+- AG (Responsible) currently set to "Dennis Landfors" externally; left untouched.
+- Sheet rows shifted during session (Zero moved: 77 → 76 → 74) due to external sorts.

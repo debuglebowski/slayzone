@@ -1,0 +1,21 @@
+OPTION A — Minimal "More" everything
+=====================================
+
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│  (tree content above)                                   │
+│                                                         │
+├─────────────────────────────────────────────────────────┤
+│  [Boost]  [██░░ Claude]  [██░░ Codex]                   │  ← usage
+├─────────────────────────────────────────────────────────┤
+│  [📁] [zen] [explode] [+task]  [···]  [⚙]               │  ← single icon row
+└─────────────────────────────────────────────────────────┘
+
+· Inline:    workspace toggles + new task + ··· + settings
+· In "···":  agent status, agent panel, terminals, update,
+             leaderboard, usage analytics, onboarding,
+             what's new, keyboard shortcuts, feedback,
+             sidebar view switcher
+· Settings = last as requested
+· Pros:  cleanest, lowest visual weight
+· Cons:  many things behind one click — discoverability hit

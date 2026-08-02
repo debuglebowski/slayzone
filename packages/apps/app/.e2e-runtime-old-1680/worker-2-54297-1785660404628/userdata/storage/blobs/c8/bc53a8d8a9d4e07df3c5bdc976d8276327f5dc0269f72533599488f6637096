@@ -1,0 +1,48 @@
+# P19 Slice 5 — e2e cutover-regression triage + fixes
+
+## TL;DR
+- **3 real fixes committed to main** (signed). 2 named (terminal/22, git/46) + 1 proactive (notify gap, you approved "fix now").
+- All **named** failures triaged: real ones fixed, ENV/baseline ones documented.
+- The "lower-priority remainders" (routers, 4 unit tests) were **already done on main** — the first survey was stale.
+- Discovered **4 browser failures** (not named): one shared root cause = WebContentsView keyboard-focus + shortcut-bridge **test-infra** gap (cutover-related; **product is correct**). Documented + recommended fix; not implemented (needs production test-bridge in a file other agents are actively churning).
+
+## Fixes committed (direct-to-main, signed)
+| Commit | Test | Root cause | Fix |
+|--------|------|-----------|-----|
+| `a4f82a8c` | terminal/22:208 temp-task auto-delete | test sent legacy `app:close-active-task` webContents IPC; renderer cut over to tRPC `menu.onCloseActiveTask` (fed by menuEvents) → close handler never fired → temp task never deleted | invoke the real "Close Task" menu item (mirrors `browser/83`) |
+| `5a1a41a0` | git/46:530 CLI panel not shown in settings | `usePanelSettings` settings query used the global 5s staleTime; the dialog unmounts on close so the `onSettingsChanged` refetch was inactive when `slay panels create` wrote → re-open showed a cached-stale snapshot | `staleTime:0` on `settings.getAll` (mirrors the `getWorkingDiff` fix) |
+| `048d77d5` | (proactive) cross-window refresh after a tRPC task mutation | tRPC task ops ran `NO_DEPS` → never fired `notify.onTasksChanged`; only the legacy IPC handlers passed `onMutation:notifyTasksChanged` | thread `onMutation` through `setTaskDeps` into the task router's per-call `deps()` |
+
+## e2e triage (full build + per-dir run)
+**git** — 180 pass / 1 fail → git/46 FIXED. git/35 (auto-worktree diff) GREEN (the earlier `staleTime:0` already handled it — no further fix). git/97 (real CLIs) pass-or-skip.
+
+**terminal** — 111 pass / **7 fail, ALL ENV/baseline** (no cutover regressions; terminal/22 GREEN):
+- 28:145 / 28:175 — codex + gemini session detect → session-id `null` (needs real codex/gemini CLI)
+- 34:72 / 34:122 — slay CLI cold-spawn main PTY → exit 1 (needs agent binary)
+- 41:160 codex / 45:147 antigravity — hooks persist conversationId (**documented baseline**; needs real agent + hooks)
+- 50:56 — screenshot→terminal → false (needs real browser view)
+
+**browser + perf** — 165 pass / 29 skip / **4 fail**. perf GREEN.
+
+## Browser failures (NOT named — root-caused, documented)
+All 4 share one root cause: the browser **WebContentsView captures native keyboard focus**, so renderer search/find shortcuts rely on the main→renderer shortcut-forwarding bridge. Post-cutover the renderer consumes shortcuts via the tRPC subscription **`app.browser.onShortcut`** (`useAppIpcListeners.ts:224`), not the legacy `browser-view:shortcut` IPC (still *sent* by `browser-view-manager` for coexistence, but it has **no renderer consumer**). The test harness can't drive the tRPC source:
+- **77:65** (Cmd+K search) + **77:94** (Cmd+F find): use `testEmit('browser-view:shortcut', …)` → the **dropped legacy IPC channel** → never reaches the renderer. *Same class as the named terminal/22.*
+- **77:117** (focus glow) + **86:167** (orphan WCV on reopen): fail at `openTaskViaSearch` because a leftover focused WCV swallows the real Cmd+K.
+- browser/86 is additionally a deliberately **failing-first** suite documenting a known WCV-registry leak (by design).
+
+**Product is correct** (dual-emit; renderer on tRPC). This is a TEST-INFRA gap. **Recommended fix:** add a PLAYWRIGHT-guarded main bridge — `ipcMain.handle('browser:__test-emit-shortcut', (_, p) => browserViewEvents.emit('shortcut', p))` — and switch browser/77 from `testEmit('browser-view:shortcut')` to `testInvoke('browser:__test-emit-shortcut')`. **Not done here:** `browser-view-manager.ts` is being heavily edited by parallel chromium-fork agents (merge risk), and it's outside the named scope.
+
+## Already done on main (verified — first survey was stale)
+- `projectGroups` / `telemetry` / `automations` routers EXIST + are registered in the root router; `pty.onResizeNeeded` / `ackEnsureAlive` / `onStats` exist.
+- Renderer already calls `trpcClient.projectGroups.*` (`useTasksData`).
+- The 4 client unit tests (TaskDetailPage / TaskMetadataSidebar / TaskHistoryPanel / taskDetailCache) PASS 24/0 with tRPC mocks.
+
+## Done-criteria
+- e2e `window.api.` grep → documented listeners only (agentLifecycle, pty.on*, chatQueue, browser native view ops, shell.openExternal) ✓
+- My changes pass: biome-lint (0 err), eslint (0 err, 2 pre-existing warns), trpc-deps, server-boundary, theme, typecheck (transport/app/settings) ✓
+- app build green ✓
+- Repo-wide lint not used as a gate — tree is churned by parallel agents; verified own files per project convention.
+
+## Remaining (beyond the named scope — flagged, not done)
+1. **browser/77 test-infra bridge** (above) — completes the browser shortcut-bridge test migration.
+2. **~10–15 migratable `window.api.*` calls** in renderer src (`settings.get/set`, `db.updateTask/updateProject/getTasks`, `taskDependencies.getBlockers`, `history.getAutomationActionRuns`, `diagnostics.*`) — the zero-window.api aspiration. Routers exist; this is renderer-consumer migration, a separate effort.

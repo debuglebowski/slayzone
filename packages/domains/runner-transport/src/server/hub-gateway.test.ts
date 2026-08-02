@@ -319,4 +319,51 @@ describe('heartbeat-loss detection (hub side)', () => {
     expect(lost).toBe(false)
     expect(hub.gateway.listRunners()).toHaveLength(1)
   })
+
+  it('usability tracks the heartbeat window, and agrees with the watchdog at its edge', async () => {
+    // The watchdog tears down at `lastSeenAt + heartbeatTimeoutMs`, which is the
+    // same instant staleness begins — so in NORMAL operation `listRunners` and
+    // `listUsableRunners` do not diverge, and this test pins that.
+    //
+    // The read-time staleness check is still not redundant: `setTimeout` fires
+    // late under load (and the timer is `unref`'d), so the watchdog's teardown can
+    // lag the window it enforces. Computing usability on read is exact regardless
+    // of when the timer actually runs — which matters because a routed dispatch
+    // into that lag is precisely what fails.
+    vi.useFakeTimers()
+    const hub = await startHub({ heartbeatTimeoutMs: 5_000 })
+    const dialer = makeDialer(hub.url, { heartbeatIntervalMs: 0 }) // never heartbeats
+    dialer.start()
+    await dialer.events.once('connected')
+
+    expect(hub.gateway.listUsableRunners()).toHaveLength(1)
+    expect(hub.gateway.isRunnerUsable('runner-1')).toBe(true)
+
+    // Inside the window: still usable.
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(hub.gateway.isRunnerUsable('runner-1')).toBe(true)
+
+    // Past it: unusable, and the watchdog has also reaped the connection.
+    await vi.advanceTimersByTimeAsync(1_001)
+    expect(hub.gateway.listUsableRunners()).toEqual([])
+    expect(hub.gateway.listRunners()).toEqual([])
+    expect(hub.gateway.isRunnerUsable('runner-1')).toBe(false)
+  })
+
+  it('isRunnerUsable is false for an unknown runner id', async () => {
+    const hub = await startHub()
+    expect(hub.gateway.isRunnerUsable('never-enrolled')).toBe(false)
+    expect(hub.gateway.listUsableRunners()).toEqual([])
+  })
+
+  it('a heartbeating runner stays usable, not just listed', async () => {
+    const hub = await startHub({ heartbeatTimeoutMs: 250 })
+    const dialer = makeDialer(hub.url, { heartbeatIntervalMs: 50, heartbeatTimeoutMs: 200 })
+    dialer.start()
+    await dialer.events.once('connected')
+
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(hub.gateway.listUsableRunners()).toHaveLength(1)
+    expect(hub.gateway.isRunnerUsable('runner-1')).toBe(true)
+  })
 })

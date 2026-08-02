@@ -1,0 +1,63 @@
+# SlayZone Env Vars — Standalone Hub & Runner
+
+Deployment-relevant vars for standalone (non-supervised) hub + runner, plus every var surfaced by the full 4-cluster deep-dive. Dev/build/e2e/internal vars summarized at bottom.
+
+**Precedence everywhere:** `env var > SLAYZONE_RUNNER_CONFIG file (runner) > ~/.slayzone/config.json > generated/default`
+
+**Verdict legend:**
+- ✅ **keep** — operator-facing, load-bearing
+- 🗑️ **don't-advertise** — code stays; hide from standalone docs (dup / token-subsumed / not a deploy knob)
+- ☠️ **dead** — never read in prod (verified); safe to remove from code
+- 🐛 **bug** — latent defect, needs follow-up (not a deploy knob)
+
+## Operator-facing + deploy-adjacent
+
+| Category | Var | Purpose | Default | config.json key | Anchored to | Verdict |
+|---|---|---|---|---|---|---|
+| Hub | `SLAYZONE_DB_PATH` | Exact SQLite file path (overrides dir+name); REQUIRED in supervised | — (composed from STORE_DIR+DB_NAME) | `dbPath` | — (absolute) | ✅ |
+| Hub | `SLAYZONE_STORE_DIR` | State root: DB, logs/, diagnostics, artifacts | `getStateDir()` (`~/Library/…` mac) | — | **home** | ✅ |
+| Hub | `SLAYZONE_DB_DIR` | DB dir — dup of STORE_DIR (lower prio). ⚠️ precedence inverted vs artifacts/shared.ts | falls to STORE_DIR | — | home | 🗑️ |
+| Hub | `SLAYZONE_DB_NAME` | DB filename — subsumed by DB_PATH, 1 read site | `slayzone[.dev].sqlite` | — | — | 🗑️ |
+| Hub | `SLAYZONE_PORT` | Client-facing tRPC/HTTP port | OS-assigned | `port` | — | ✅ |
+| Hub | `SLAYZONE_HOST` | Bind addr for /trpc (client) | `127.0.0.1` | — | — | ✅ |
+| Hub | `SLAYZONE_RUNNER_TRANSPORT_PORT` | `/runners` wss listener port (stable across reboots) | OS-assigned (stable via DB) | `runnerTransportPort` | — | ✅ |
+| Hub | `SLAYZONE_RUNNER_TRANSPORT_HOST` | `/runners` bind addr | `0.0.0.0` | — | — | ✅ |
+| Hub | `SLAYZONE_HUB_TLS_PORT` | TLS `/trpc` https port (multi-hub, opt-in) | OS-assigned | — | — | ✅ |
+| Hub | `SLAYZONE_RUNNER_TRANSPORT_SECRET` | HMAC secret; runner-auth + token mint | gen+persist 256-bit | `runnerTransportSecret` | home (config.json) | ✅ |
+| Hub | `SLAYZONE_RUNNER_TRANSPORT_BASE_URL` | better-auth `baseURL` — runners use bearer not cookies | `http://127.0.0.1:8788` | — | — | 🗑️ |
+| Hub | `SLAYZONE_HUB_PUBLIC_URL` | Public base URL advertised to remote MCP/hooks | derived loopback | `publicUrl` | — | ✅ |
+| Hub | `SLAYZONE_HUB_AUTH_REQUIRED` | Enforce client auth on /trpc (`=1`) | off | — | — | ✅ |
+| Hub | `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` | Store integration creds w/o OS keychain (headless hub HAS none) | off (on if NODE_ENV=test) | — | — | ✅ |
+| Hub | `SLAYZONE_HOME_DIR` | `~/.slayzone` root (config.json, hooks) | `$HOME/.slayzone` | — | **home** | ✅ |
+| Runner | `SLAYZONE_JOIN_TOKEN` | First-contact enroll token — embeds hubUrl+cert+secret | — | `joinToken` | — | ✅ |
+| Runner | `SLAYZONE_RUNNER_ALLOWED_ROOTS` | FS roots runner may touch (PATH-sep list) | **none → fs refused** | — | — | ✅ |
+| Runner | `SLAYZONE_RUNNER_NAME` | Display name on hub (dedup key) | hostname | `runnerName` | — | ✅ |
+| Runner | `SLAYZONE_RUNNER_CREDENTIALS_DIR` | Post-enroll cred store dir | `~/.slayzone/runner` | — | **home** (raw os.homedir) | ✅ |
+| Runner | `SLAYZONE_HUB_URL` | `ws(s)://…/runners` to dial — embedded in join token | from token | `hubUrl` | — | 🗑️ |
+| Runner | `SLAYZONE_HUB_CERT_SHA256` | TLS cert pin — embedded in join token | from token | — | — | 🗑️ |
+| Runner | `SLAYZONE_RUNNER_CAPABILITIES` | Advertised caps — stored, NEVER enforced | `pty,git,fs,proc` | — | — | 🗑️ |
+| Runner | `SLAYZONE_RUNNER_CONFIG` | Path to per-host JSON config file | — | — | — | ✅ |
+| Runner | `SLAYZONE_RUNNER_HEARTBEAT_MS` | Heartbeat interval (ms) — wired end-to-end, low-priority | transport default | — | — | ✅ |
+| Runner | `SLAYZONE_HOME_DIR` | config.json root (runner reads shared config) | `$HOME/.slayzone` | — | **home** | ✅ |
+| Control | `SLAYZONE_SUPERVISED` | `=1` → Electron host owns env; THE standalone discriminator | unset (standalone) | — | — | ✅ |
+| Control | `SLAYZONE_ROOT` | *(proposed, not yet impl)* CWD-anchor knob | would default `process.cwd()` | — | — | ✅ |
+
+## Dead / bug (verified — remove or fix, NOT deploy knobs)
+
+| Var | Finding | Verdict |
+|---|---|---|
+| `SLAYZONE_SERVER_PORT` | `getServerPort()` defined + barrel-exported, zero callers. Superseded by SLAYZONE_PORT | ☠️ remove var+helper |
+| `SLAYZONE_MCP_HOST` | Only written to docker/ssh child env; no reader (CLI hardcodes 127.0.0.1). No-op | ☠️ remove 2 write lines |
+| `SLAYZONE_RUNNERS_ENABLED` | Only set in one test; never read in prod. Hub always runs gateway | ☠️ remove from test |
+| `SLAYZONE_HOOK_NAME` | Not an env var — JS `const='slayzone-notify'`. Mis-catalogued | ☠️ drop from list |
+| `SLAYZONE_AGENT_MODE` | 1 reader (`cliAuthor()`), 0 setters → CLI artifacts always tag `user`. Likely should read SLAYZONE_AGENT_ID | 🐛 bug |
+| `SLAYZONE_DB_DIR` ↔ `STORE_DIR` | Precedence inverted: hub `STORE_DIR ?? DB_DIR`, artifacts `DB_DIR ‖ STORE_DIR` → split dirs if both set | 🐛 bug |
+
+## Not operator-facing (code stays, omit from deploy docs)
+
+- **Machine-injected per-run** (agent/hooks/session): `SLAYZONE_HUB_TOKEN` (per-task bearer, ≠ JOIN_TOKEN), `SLAYZONE_AGENT_HOOK_URL`, `SLAYZONE_AGENT_ID`, `SLAYZONE_SESSION_ID`, `SLAYZONE_PROJECT_ID`, `SLAYZONE_TASK_ID`, `SLAYZONE_MCP_PORT`
+- **Fork sidecar only:** `SLAYZONE_RUNTIME_DIR`, `SLAYZONE_HOST_CAP_URL`, `SLAYZONE_HOST_REST_URL` (supervised host bridge)
+- **e2e-only:** `SLAYZONE_USER_DATA_DIR`, `SLAYZONE_BOOT_LOG_PATH`, `SLAYZONE_E2E_ALLOW_RUNNER`, `SLAYZONE_E2E_INSTALL_HOOKS`, `*_SETTINGS_PATH`/`*_HOOKS_PATH`/`OPENCODE_PLUGIN_PATH` (test redirects)
+- **Dev/build:** `SLAYZONE_DEV`, `SLAYZONE_REACT_DEV`, `SLAYZONE_PROFILE`, `SLAYZONE_CHROMIUM_PROD`, `SLAYZONE_DEBUG_BOOT`, `SLAYZONE_REGISTER_DEV_PROTOCOL`, `SLAYZONE_SIDECAR_HOT_RESTART`, `SLAYZONE_SHELL_DEV_SERVER`, `SLAYZONE_DISABLE_CLONEFILE`, `SLAYZONE_GC_*`, `*__` (build-time esbuild/vite defines: `SERVER_BUILT_AT__`, `SERVER_COMMIT__`, `CHROMIUM_PROD__`, `PROFILE__`)
+
+**Home-anchored (bold) = the 4 this task retargets to CWD:** `SLAYZONE_HOME_DIR`, `SLAYZONE_STORE_DIR`, `SLAYZONE_RUNNER_CREDENTIALS_DIR` (+ raw-homedir credential-store gap).

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="100%">
+  <rect x="0" y="0" width="400" height="300" fill="#1a1a2e"/>
+  <circle cx="100" cy="100" r="60" fill="#e94560" opacity="0.8"/>
+  <circle cx="300" cy="100" r="60" fill="#0f4c75" opacity="0.8"/>
+  <circle cx="200" cy="200" r="80" fill="#3282b8" opacity="0.6"/>
+  <text x="200" y="50" text-anchor="middle" fill="white" font-family="sans-serif" font-size="24" font-weight="bold">SVG Test</text>
+  <text x="200" y="280" text-anchor="middle" fill="white" font-family="sans-serif" font-size="14">Vector pan/zoom check</text>
+  <line x1="50" y1="250" x2="350" y2="250" stroke="#bbe1fa" stroke-width="3"/>
+</svg>

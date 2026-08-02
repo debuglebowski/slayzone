@@ -1,0 +1,47 @@
+# Vendor Review: Namecheap
+
+## URLs
+- Vendor Master Sheet (row 24): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=24
+- Cycle Drive folder: https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev
+- Screenshot file: Namecheap Screenshot 2026-05-15 at 13.01.52.png
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/6802936eb01d2e565056010d
+- Tool admin / login: https://ap.www.namecheap.com/settings/personal-info
+
+## Status
+- Information complete?: Yes
+- Duplicates: none
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | First-pass questions to user | Done |
+| 4 | Login + personal-info screenshot in Drive folder | Done |
+| 5 | Create access-removal Linear sub-issues | N/A (sole-owner account, no delegations) |
+| 6 | Fill cells | Done |
+| 7 | Flip Information complete? = Yes | Done |
+
+## Cells written
+| Col | Header | Final value |
+|---|---|---|
+| F | Information complete? | Yes |
+| I | Subprocessor | N/A |
+| L | Business owner | Kalle Hansson |
+| M | Security owner | Kalle Hansson |
+| Q | Sync comment | Checked 2026-05-15 |
+| S | Contract details status | Complete |
+| T | Subscription type | Not a subscription |
+| V | Cost per month | 0.00 |
+| AC | Security comment | No ISO 27001 / SOC 2 / trust center. PCI DSS L1 only. |
+| AE | Access review 2026-04-29 | Done |
+| AF | Screenshot completed? | Yes |
+
+## Vanta facts (reference)
+- Status: Active, Approved
+- Inherent risk: High (matches sheet P)
+- Last assessment: 2025-08-06 by Sara Landfors
+- Vendor type: IT
+- Auth method: Username/password + 2FA TOTP
+- Business/Security owner: Kalle Hansson
+- Single account `kallenormain`; no team/sub-user feature on Namecheap.

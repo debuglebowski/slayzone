@@ -1,0 +1,96 @@
+# CHG-39 — Change management (ISO 27001 A.8.32) — Investigation
+
+**Task:** CHG-39 · Vanta status 9/10 tests passing · Internal control ID: NRM-CHG-001
+**Source of truth:** **<https://app.eu.vanta.com/c/normain.com/controls>** (search CHG-39)
+
+## ⏳ Blocking dependency
+
+Vanta still shows **Gustav (offboarded)** as control owner. **Kalle must reassign CHG-39 to a current employee** before any evidence work or test re-run will land. All steps below are queued behind that reassignment.
+
+## Situation overview
+
+### What CHG-39 / A.8.32 covers
+
+Controls on changes to information processing facilities and information systems:
+
+* Code changes (PR review, CI gating)
+
+* Infrastructure changes (IaC, deploy pipelines)
+
+* Configuration changes
+
+### Current change-management posture (from `gh` inspection)
+
+| Repo                                            | Default branch | Protection                             | Notes                                                                                                                                                                                                                                      |
+| ----------------------------------------------- | -------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `normainofficial/normain` (app monorepo)        | `main`         | ✅ Ruleset *"Main branch rules"* active | PR required, **1** approval, squash-only merge, linear history, required check `🔍 Lint & Test`. No force-push, no deletion. **No CODEOWNERS.** Bypass actors: PhilipNgo, redsuperbat (Max), Admin role, 1 GitHub App — all `always` mode. |
+| `normainofficial/normain-infra` (Terraform IaC) | `main`         | ❌ **None**                             | `protected: false`, no rulesets. Last push 2024-12-12 — dormant but still authoritative IaC. README itself flags missing state lock.                                                                                                       |
+
+CI/CD on `normain`: `pr-checks.yml` runs lint+test on PRs. Production deploys gated by separate workflows (`deploy-k8s-prod.yml`, `deploy-tenant-api.yml`, `provision-tenants.yml`, `trivy-scan.yml`). No deploy-time approval gate inspected yet.
+
+### Likely failing test
+
+Could not read the actual failing test name — Vanta UI access blocked this session (chrome-devtools profile conflict; slay browser panel needs task tab focused in UI). Best inference from `gh` evidence:
+
+**Most likely (1 of 1):** *"Production code repositories enforce code review on changes to the default branch"* (or Vanta's equivalent) failing on `normain-infra`. It is the only production-tier repo with zero protection rules, and A.8.32 explicitly covers IaC ("information processing facilities").
+
+**Less likely:** missing CODEOWNERS, single-approver count, or admin-bypass list — but these would also fail on `normain`, which is reportedly passing.
+
+**Confirm via Vanta UI** once reassignment lands.
+
+## Solution overview
+
+### Fix
+
+Apply a ruleset on `normainofficial/normain-infra/main` mirroring `normain`'s shape:
+
+* Require PR
+
+* ≥1 approval
+
+* No force-push, no deletion
+
+* Linear history
+
+* (Optional) required status check: lightweight `terraform fmt -check && terraform validate` workflow
+
+~5 min if no status check; ~30 min with the `terraform validate` workflow added.
+
+### Sequencing
+
+1. **Kalle** reassigns CHG-39 in Vanta (Gustav → current owner).
+2. Read the actual failing test in Vanta — confirm `normain-infra` is the gap (not something else).
+3. Coordinate with **sibling subtask #30 (broader GitHub PR-approval enforcement)**:
+
+   * If #30 lands an **org-level ruleset** covering all repos including `normain-infra` → CHG-39 closes for free, **no action needed here**.
+
+   * If #30 is scoped to app repos only → apply per-repo ruleset on `normain-infra` here.
+4. Re-run CHG-39 tests in Vanta. Attach the **Change Management Procedure** policy doc as evidence (control register lists this as the linked policy — verify the doc text reflects current GitHub-gated reality, not the Gustav-era process).
+
+### Effort
+
+🟢 Small. \~30 min of actual work post-reassignment. Most cost is coordination with #30 to avoid duplicate effort.
+
+## Actions taken (this session)
+
+* ✅ Inspected branch protection / rulesets on `normainofficial/normain` and `normainofficial/normain-infra` via `gh` API.
+
+* ✅ Listed CI workflows on `normain`; read `pr-checks.yml` (lint+test, the required check).
+
+* ✅ Identified bypass actors on `normain`'s ruleset (Philip, Max, Admin role, 1 GitHub App — all current employees / sanctioned, no offboarded users).
+
+* ✅ Cross-referenced internal UCF: `NRM-CHG-001` maps to A.8.32, evidence source = Vanta, linked doc = "Change Management Procedure".
+
+* ❌ Could not read the failing-test name from Vanta UI (browser tooling unavailable this session — both chrome-devtools MCP and slay browser panel blocked).
+
+* ⏸️ **No shared changes made.** No ruleset applied, no Vanta evidence uploaded, no policy docs edited. All blocked behind Vanta reassignment + #30 scope check.
+
+## Unresolved questions
+
+* Which exact Vanta test fails? (need UI access post-reassignment)
+
+* \#30 scope — org-level ruleset, or per-repo? Determines whether this task does any code work
+
+* Bump approval count to 2 / add CODEOWNERS while we're at it, or stay minimal to match audit baseline?
+
+* Is the "Change Management Procedure" policy doc current, or also Gustav-era and needs editing?

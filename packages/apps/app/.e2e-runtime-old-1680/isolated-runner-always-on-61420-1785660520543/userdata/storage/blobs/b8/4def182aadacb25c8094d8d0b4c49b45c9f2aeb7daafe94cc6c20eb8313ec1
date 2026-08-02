@@ -1,0 +1,5 @@
+# Emails
+
+- Auth method: OAuth app
+- Requirements: Google Cloud OAuth and/or Microsoft Entra app; mail scopes; app verification likely
+- Capabilities: Read/send/search mail, thread sync, draft creation, email-triggered workflows

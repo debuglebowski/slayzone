@@ -1,0 +1,36 @@
+# @slayzone/server — what's left
+
+Companion to artifact `e684e7d4 server-extraction-audit.md`. Same items, table form.
+
+## Open work
+
+| ID | Category | Severity | Effort | Item | Fix |
+|----|----------|----------|--------|------|-----|
+| A1 | 🚧 Blocker | 🔴 HIGH | ~1d | 🔒 No authentication on remote tRPC | Add auth middleware to `wsLink` (Bearer token in URL or upgrade headers). Validate on server. Store auth token alongside `remote_server_url` in settings. Critical before any non-localhost deployment. |
+| A2 | 🚧 Blocker | 🔴 HIGH | ~0.5d | 🔄 No fallback if remote unreachable post-relaunch | `RemoteConfigScreen` polls `/health` with timeout (10s); auto-fall-back to local mode if remote is down. Today user is stuck on the config screen with only a manual mode revert. |
+| A3 | 🚧 Blocker | 🟡 MEDIUM | TBD | 🔌 Integration pollers (Linear, GitHub) skipped in remote mode | Architectural decision: either move pollers into `@slayzone/server` so the remote runs them, or document remote mode disables external sync. See `apps/app/src/main/index.ts:1760-1766`. |
+| B1 | ✨ Polish | 🟢 LOW | ~2h | 💬 Feedback ops still in `appDeps` | 6 pure DB ops at `apps/app/src/main/index.ts:1343-1354`. Extract to `packages/domains/feedback/src/server/` + add `feedbackRouter` to transport. |
+| B2 | ✨ Polish | 🟢 LOW | ~3h | ⚙️ Pre-boot settings reads in Electron host | `apps/app/src/main/index.ts:962-1000` reads onboarding/theme/CLI-migration settings via raw `db.prepare(...)` BEFORE the embedded server boots. Defer reads until post-boot, or cache + sync from server when ready. |
+| B3 | ✨ Polish | ⚪ Deferred | ~8h | 💾 Backup + export/import are Electron-coupled | Pure file I/O ops in `appDeps` (`backupList`, `backupCreate`, `exportAll`, `exportProject`, `importBundle`). Extract pure logic to `@slayzone/backup` package; keep file dialogs in `appDeps`. Lets CLI users get backups too. |
+| C1 | 🏗️ Architecture | 🔵 Open | n/a | 👥 Single-user vs multi-user remote | Never explicitly decided. Auth strategy hinges on this. Single-user → simple Bearer token. Multi-user → per-user isolation in `@slayzone/server`. |
+| C2 | 🏗️ Architecture | 🟢 LOW | ~1d | 📋 Schema-version drift mid-upload | Schema match checked only at preflight (`local-export.ts:99-103`), not per-chunk. Edge case: network failure + version skew during retry could silently corrupt. Fix: include `user_version` in every chunk manifest + validate per-chunk on commit. |
+| C3 | 🏗️ Architecture | ⚪ Deferred | ~2d | ⏯️ No upload resumability | Wizard says "don't close SlayZone" but a process death mid-upload leaves dirty remote state, no GC, no resume token. Server returns resumable upload ID from preflight; client checkpoints chunk offset; remote GCs uploads stale > 1h. Only matters at scale. |
+
+## Recommended path to "remote-mode shippable"
+
+| Order | Item | Effort | Cumulative |
+|-------|------|--------|------------|
+| 1️⃣ | 🔒 A1 — Auth headers in `wsLink` + remote validation | 1d | 1d |
+| 2️⃣ | 🔄 A2 — `RemoteConfigScreen` timeout + auto-fallback | 0.5d | 1.5d |
+| 3️⃣ | 📝 Doc — Single-user constraint + firewall guidance | 0.25d | 1.75d |
+| 4️⃣ | 💬 B1 — Extract feedback to a domain | 0.25d | 2d |
+| 5️⃣ | 🧪 CI — End-to-end local→remote migration test | 1d | 3d |
+
+**🎯 Total: ~3 days to ship-able remote mode.**
+
+Defer until later: 💾 B3 (backup to server, separate value), ⏯️ C3 (resumability, only matters at scale), 🔌 A3 + 👥 C1 (architectural decisions, post-shippable).
+
+## Legend
+
+- 🚧 Blocker · ✨ Polish · 🏗️ Architecture
+- 🔴 HIGH · 🟡 MEDIUM · 🟢 LOW · ⚪ Deferred · 🔵 Open

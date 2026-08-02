@@ -16,6 +16,38 @@ import { spawnSync } from 'child_process'
  *      `hook_event_name`) — agentId=codex envelope POST → /api/agent-hook →
  *      IPC broadcast with the correctly normalized lifecycle type.
  */
+/**
+ * Env for a direct `bash notify.sh` invocation.
+ *
+ * notify.sh v4 is a BENIGN FORWARDER: it reads NO named identity var — not
+ * `SLAYZONE_TASK_ID` — and forwards the opaque `SLAYZONE_AGENT_HOOK_CONTEXT`
+ * blob verbatim for the server to unpack (see resolveHookIdentity). So a spec
+ * must hand it the same blob `buildMcpEnv`'s setHookIdentity() packs at spawn;
+ * setting `SLAYZONE_TASK_ID` attributes nothing.
+ *
+ * The SLAYZONE_ scrub is load-bearing, not hygiene. Run from inside a
+ * supervised SlayZone terminal, the Playwright process itself carries a live
+ * `SLAYZONE_AGENT_HOOK_CONTEXT` for the HOST agent's task — inheriting it makes
+ * the hook resolve to that real task instead of this spec's, so the event
+ * arrives with the right agentId/type under the wrong taskId. Same reasoning as
+ * the fixture's launch-env strip (electron.ts), applied to the hook spawn.
+ */
+function notifyEnv(opts: { port: number; taskId?: string }): Record<string, string> {
+  const clean: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v == null || k.startsWith('SLAYZONE_')) continue
+    clean[k] = v
+  }
+  const ctx: Record<string, unknown> = { v: 1, agentId: 'codex', releaseChannel: 'dev' }
+  if (opts.taskId) ctx.taskId = opts.taskId
+  return {
+    ...clean,
+    SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${opts.port}/api/agent-hook`,
+    SLAYZONE_AGENT_ID: 'codex',
+    SLAYZONE_AGENT_HOOK_CONTEXT: JSON.stringify(ctx)
+  }
+}
+
 test.describe('Codex agent hooks', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -76,12 +108,7 @@ test.describe('Codex agent hooks', () => {
     // Codex native hooks deliver the event as JSON on stdin (hook_event_name).
     const res = spawnSync('bash', [scriptPath], {
       input: JSON.stringify({ hook_event_name: 'Stop', session_id: 'e2e' }),
-      env: {
-        ...process.env,
-        SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${port}/api/agent-hook`,
-        SLAYZONE_AGENT_ID: 'codex',
-        SLAYZONE_TASK_ID: 'e2e-codex-task'
-      }
+      env: notifyEnv({ port, taskId: 'e2e-codex-task' })
     })
     expect(res.status).toBe(0)
 
@@ -132,12 +159,10 @@ test.describe('Codex agent hooks', () => {
     })
 
     const res = spawnSync('bash', [scriptPath], {
+      // No taskId in the blob — this case asserts only agentId + normalized type,
+      // so it must not silently inherit the host session's task either.
       input: JSON.stringify({ hook_event_name: 'UserPromptSubmit' }),
-      env: {
-        ...process.env,
-        SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${port}/api/agent-hook`,
-        SLAYZONE_AGENT_ID: 'codex'
-      }
+      env: notifyEnv({ port })
     })
     expect(res.status).toBe(0)
 
@@ -220,12 +245,7 @@ test.describe('Codex agent hooks', () => {
         session_id: codexSessionId,
         source: 'startup'
       }),
-      env: {
-        ...process.env,
-        SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${port}/api/agent-hook`,
-        SLAYZONE_AGENT_ID: 'codex',
-        SLAYZONE_TASK_ID: task.id
-      }
+      env: notifyEnv({ port, taskId: task.id })
     })
     expect(res.status).toBe(0)
 

@@ -1,0 +1,88 @@
+flowchart TD
+    subgraph Phase1[Phase 1: Corpus and Questions]
+        UC1[UC1 Due diligence - Simple]
+        UC6[UC6 Multimodal - Simple]
+        UC7[UC7 M&A data-room deep dive - Simple]
+        UC2[UC2 ESG audit - Repeat]
+        UC4[UC4 Contract sweep at scale - Repeat 100+ files]
+        UC3[UC3 Regulatory gap - Spreadsheet]
+        UC5[UC5 Vendor risk matrix - Spreadsheet]
+        Docs[Source docs<br>real public + synthesized<br>~235+ files]
+        Q100[100 questions]
+        UC1 --> Q100
+        UC6 --> Q100
+        UC7 --> Q100
+        UC2 --> Q100
+        UC4 --> Q100
+        UC3 --> Q100
+        UC5 --> Q100
+        Docs --> Q100
+    end
+
+    subgraph Phase2[Phase 2: Ground Truth]
+        GTwrite[Human writes correct answer per question]
+        GTreview[Second human reviews]
+        GT100[100 ground truths]
+        GTwrite --> GTreview --> GT100
+    end
+
+    subgraph Phase3[Phase 3: Competitors]
+        Normain[Normain]
+        Claude[Claude]
+        GPT[ChatGPT]
+        NLM[NotebookLM]
+        Mike[MikeOSS]
+        Gem[Gemini Deep Research]
+        Cop[M365 Copilot]
+        V7[V7 Go]
+        Partner[Partner: Harvey + Legora]
+    end
+
+    subgraph Phase4[Phase 4: Runs]
+        Run[Each competitor answers all 100 questions]
+        Answers[About 1000 raw answers]
+        Run --> Answers
+    end
+
+    subgraph Phase5[Phase 5: Grading]
+        LLMjudge[LLM judge scores all 1000]
+        HumanGrade[Human grades 30-question sample per competitor]
+        Audit[Human audits 10 percent of rest]
+        Scores[Final scores + disagreement log]
+        LLMjudge --> Scores
+        HumanGrade --> Scores
+        Audit --> Scores
+    end
+
+    subgraph Phase6[Phase 6: Report]
+        Board[Scoreboard]
+        Break[Per-use-case + per-question-type breakdowns]
+        Cite[Citation fidelity deep-dive]
+        Cases[Case studies]
+        Board --> Final
+        Break --> Final
+        Cite --> Final
+        Cases --> Final
+        Final[REPORT.md]
+    end
+
+    Q100 --> GTwrite
+    Q100 --> Run
+    Normain --> Run
+    Claude --> Run
+    GPT --> Run
+    NLM --> Run
+    Mike --> Run
+    Gem --> Run
+    Cop --> Run
+    V7 --> Run
+    Partner --> Run
+    Answers --> LLMjudge
+    Answers --> HumanGrade
+    GT100 --> LLMjudge
+    GT100 --> HumanGrade
+    HumanGrade --> Audit
+    Scores --> Board
+    Scores --> Break
+    Scores --> Cite
+    Scores --> Cases

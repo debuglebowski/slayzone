@@ -1,0 +1,5 @@
+# Better Stack
+
+- Auth method: API token
+- Requirements: Better Stack API token; select Uptime/Telemetry/Status APIs; webhook targets
+- Capabilities: Monitors, incidents, on-call/status workflows, logs/metrics integration

@@ -1,0 +1,46 @@
+flowchart LR
+    subgraph OS["OS Layer"]
+        shell["Shell / claude-code<br/>(child process)"]
+        kernel["Kernel pipe buf<br/>~64 KB"]
+    end
+
+    subgraph Main["Main process (Electron / Node)"]
+        pty["node-pty<br/>master fd<br/>~negligible RAM"]
+        ring["RingBuffer per session<br/><b>max 5 MB raw bytes</b><br/>MAX_BUFFER_SIZE<br/>drop-oldest"]
+        sm["StateMachine<br/>idle / running / etc<br/>~bytes"]
+        listeners["dataListeners<br/>REST follow endpoints<br/>~bytes"]
+        ipc["IPC channel<br/>pty:data"]
+    end
+
+    subgraph Renderer["Renderer process (browser)"]
+        cache["terminal-cache<br/>per session<br/>persists across<br/>mount / unmount"]
+        subgraph xterm["xterm.js Terminal (per tab)"]
+            vt["VT parser<br/>handles alt-screen,<br/>/resume picker,<br/>vim, lazygit"]
+            screen["Active screen<br/>+ alt-screen buf<br/>~rows x cols"]
+            scrollback["Scrollback ring<br/><b>50 000 lines default</b><br/>~16-48 MB per tab<br/>BufferLine Uint32Array<br/>3 x 4 B per cell"]
+        end
+        webgl["WebglAddon<br/>GPU textures<br/>~few MB"]
+        serialize["SerializeAddon<br/>stateless snapshot tool"]
+        search["SearchAddon"]
+    end
+
+    shell -->|stdout| kernel
+    kernel --> pty
+    pty -->|data event| ring
+    ring -->|getBufferSince -1<br/>on mount| ipc
+    ring -.live chunks.-> ipc
+    ring -->|broadcast| listeners
+    pty -->|activity| sm
+    ipc -->|pty:data| vt
+    vt --> screen
+    screen -.scroll off top.-> scrollback
+    cache -.holds.-> xterm
+    xterm <--> webgl
+    xterm <--> serialize
+    xterm <--> search
+
+    classDef mem fill:#ffe4b5,stroke:#d4860d,color:#000
+    classDef proc fill:#cfe2ff,stroke:#1e4d8b,color:#000
+
+    class ring,scrollback,webgl,kernel mem
+    class shell,pty,vt proc

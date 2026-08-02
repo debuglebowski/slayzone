@@ -1,0 +1,146 @@
+# Change Management — Fix Plan
+
+
+## Context
+
+Feb 23 – Apr 7 2026 infra overhaul was executed
+**outside** the Change Management Procedure.
+
+7 themes delivered via PRs; most tagged `NOR-noticket`.
+
+
+## Gaps vs. procedure
+
+**No Change Request (CR) tickets** in Linear for
+the program — procedure requires one per change.
+
+**No risk assessment issues** — procedure requires
+a separate issue, approved by Security Delegate.
+
+**No CAB approval recorded** — every theme qualifies
+as Normal Change (high-impact infra/security).
+
+**No documented rollback plans** — mandatory for
+Normal Changes.
+
+**Segregation of duties unmet** — CTO self-merges
+allowed by Engineering Ops; incompatible with CM
+procedure for Normal Changes.
+
+**No staging validation trail** captured against
+a CR.
+
+**Emergency changes not backfilled** (e.g.
+`kill palle`, hotfix merges) — procedure allows
+emergency execution but requires retro CR in 24h.
+
+
+## Fix — retroactive (close the existing gap)
+
+
+### 1. One umbrella CR per theme
+
+Create 7 retroactive Normal-Change CRs in Linear:
+
+- K8s in prod (#1608)
+- Multi-tenant separation (#1650)
+- Tenant API + provisioning (#1656, #1659)
+- Key Vault / CSI secrets (#1774)
+- OIDC + Entra ID auth (#1786, #1793, #1812)
+- Audit + WORM logs + NSG (#1731, #1796, #1798)
+- Legacy IaC removal (#1863)
+
+
+### 2. Per CR, backfill
+
+- Description + PR list
+- Impact statement
+- Risk issue (linked) → Security Delegate signoff
+- Rollback notes (even if "forward-fix only —
+  state migration")
+- Post-deploy evidence: monitoring, audit-log
+  sample, cert test
+
+
+### 3. CAB retro-review
+
+Single CAB session. Approve program as delivered.
+Minutes stored in Normain data room.
+
+
+## Fix — prospective (prevent repeat)
+
+
+### Linear CR template
+
+Required fields match procedure:
+Description · Impact · Risk link · Urgency ·
+Rollback.
+
+Make `change` issue type mandatory for any PR
+touching `terraform/**`, `.github/workflows/**`,
+or prod secrets.
+
+
+### Standard Change catalog
+
+Pre-approve the routine so real reviews land on
+real risk:
+
+- image bumps (same tag pattern)
+- HPA / resource limits tweaks
+- dependency updates passing CI
+- tenant `tenants.json` additions via workflow
+
+
+### CAB (lightweight)
+
+Members: CTO, Security Delegate, 1 senior eng.
+Async approval via Linear for Normal Changes.
+SLA: 2 working days.
+
+
+### Segregation of duties
+
+Normal infra changes: PR author ≠ merger ≠
+deployer. Suspend CTO solo-merge override for
+`terraform/**` and prod workflows.
+
+
+### Emergency handling
+
+Keep emergency path. Enforce retro CR in 24h via
+a weekly sweep of merges without linked CRs.
+
+
+### Evidence capture
+
+Each CR closes with:
+- link to successful staging deploy
+- link to prod deploy logs
+- monitoring screenshot / dashboard link
+- post-deploy check outcome
+
+
+## Policy alignment to update
+
+**Engineering Operation Procedures** — remove
+blanket CTO solo-merge for infra; reference CM
+procedure.
+
+**Change Management Procedure** — add the
+Standard Change catalog as an appendix.
+
+**Infrastructure Security Architecture Review
+Runbook** — trigger a review after the retro
+CAB closes this program.
+
+
+## Open questions
+
+- Accept single umbrella CAB session for all 7
+  themes, or one per theme?
+- CAB size: 3 people OK, or add COO?
+- Standard-Change catalog scope — start with 4
+  above or broader?
+- Who owns the weekly emergency-CR sweep?

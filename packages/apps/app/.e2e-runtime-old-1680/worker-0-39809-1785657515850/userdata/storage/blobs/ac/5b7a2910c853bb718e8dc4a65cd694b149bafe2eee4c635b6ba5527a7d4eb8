@@ -1,0 +1,24 @@
+flowchart TD
+    Start([Round start])
+    Agent[Agent inference + decisions]
+    Apply[Apply decisions to state]
+    State[(Company state<br/>cash · capacity · brand · models · research)]
+    Variables[(Variables<br/>market size · price sensitivity · base costs)]
+    Compute[Compute market outcome<br/>share · demand served · revenue · burn]
+    Check{Bankrupt or<br/>round limit?}
+    EndN([End])
+
+    Start --> Agent
+    Agent --> Apply
+    Apply --> State
+    State --> Compute
+    Variables --> Compute
+    Compute --> State
+    State --> Check
+    Check -->|no| Start
+    Check -->|yes| EndN
+
+    Situations((⚡ Situations)):::sit -.->|modify| State
+    Situations -.->|modify| Variables
+
+    classDef sit fill:#ffe6cc,stroke:#d79b00

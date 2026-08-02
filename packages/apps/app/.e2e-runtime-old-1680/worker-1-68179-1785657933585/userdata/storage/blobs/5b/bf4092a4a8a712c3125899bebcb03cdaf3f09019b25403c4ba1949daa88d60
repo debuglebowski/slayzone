@@ -1,0 +1,23 @@
+# List
+
+Purpose: the workhorse — instances as rows, the bridge between
+dashboard and data. Exists because aggregates only raise questions;
+the list is where you see the actual things and click through.
+
+Size/position: drag + resize on the canvas (dnd), never in the menu.
+Relevancy: 🔥 core · ⭐ valuable · 💤 later
+
+| Option | Category | Relevancy | Values / default | Notes |
+|---|---|---|---|---|
+| variant | layout | ⭐ | auto / table / cards | cards when w<5: title + meta line |
+| density | layout | 💤 | comfortable / compact | row height |
+| title | display | 🔥 | text | |
+| icon | display | 💤 | icon name / none | |
+| columns | display | 🔥 | field[] picker, ordered | first = row title in cards |
+| orderBy | display | 🔥 | field + asc/desc | |
+| limit | display | 🔥 | n (default 10) | |
+| footer count | display | 💤 | on / off | "showing 5 of 132" |
+| concept | filter | 🔥 | conceptId / inherit | |
+| conditions | filter | 🔥 | SidebarCondition[] | |
+| match | filter | 🔥 | all / any | |
+| archived | filter | ⭐ | exclude / include / only | |

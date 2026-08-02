@@ -1,0 +1,34 @@
+# Slice 3/8 — IPC→tRPC: ai-config router (P15) — DONE
+
+**Commit (direct main, no PR):** `466581e3` — `feat(transport): ai-config router (P15)`
+Parent: `3ae97bd8` (notify P20). Not pushed (orchestrator batches).
+
+## What shipped
+- **Pure-node ops factory** `packages/domains/ai-config/src/server/`:
+  - `handlers-store.ts` (`createAiConfigOps(db: SlayzoneDb)`, 54 ai-config methods incl 6 MCP + 2 slay)
+  - `marketplace-store.ts` (`createMarketplaceOps(db)`, 12 methods)
+  - `index.ts` (`initAiConfigOps`/`getAiConfigOps`/`getMarketplaceOps`)
+  - Moved `skill-normalize.ts` + `github-registry-fetcher.ts` main→server (pure renames, history preserved)
+  - Electron stripped: `app.getPath('home')`→`os.homedir()` (8 sites); `app.isPackaged ? '' : ' --dev'`→`NODE_ENV==='development'`
+- **Thin IPC delegations** (coexistence, NO deletion): `main/handlers.ts` + `handlers-marketplace.ts` now delegate every channel to the shared ops instance (built once via `initAiConfigOps` in `registerAiConfigHandlers`). IPC + tRPC share one implementation.
+- **Router** `transport/src/server/routers/ai-config.ts` (66 procs) imports `@slayzone/ai-config/server` directly; registered `aiConfig` in appRouter; added `@slayzone/ai-config` workspace dep + `./server` export.
+- Host `index.ts` UNCHANGED (registerAiConfigHandlers at boot inits the singleton before startTrpcServer).
+
+## Sub-router grouping decision
+Mirrors ref P15: **core ai-config + MCP + slay procs FLAT at top level**, **`marketplace` as a nested sub-router** (`aiConfig.marketplace.*`). 2 source handler files → 2-level grouping. MCP (6 procs) NOT separately nested — kept flat per ref (too few to warrant a sub-router).
+
+## Census reconciliation (header math was off)
+Actual **66 IPC channels** = 54 `ai-config:*` (incl 6 MCP) + 12 `ai-config:marketplace:*`. Header's "54+12+9 mcp=75" double-counted the 6 MCP. Ref router = 65 procs (dropped 1 batch). **We mirror all 66 → 66 procs**: added `getProjectsStaleSkillCounts` (batch) for full IPC parity since the IPC channel stays live for the renderer until slice 5.
+
+## Pattern choice: pure-node server/ (not app-deps DI)
+ai-config touched electron only for home-dir → trivially pure-node, so plain-Node transport imports ops directly (matches ref + committed settings P12 / task-terminals P8). `lint:server-boundary` (electron-free guard) **passed**.
+
+## Verification — all green
+- typecheck: ai-config 0 / transport 0
+- biome lint ✓, eslint ✓, server-boundary (electron-free) ✓
+- **prod build ✓** (module resolution + externalize OK)
+- **behavioral smoke test ✓**: create→list→get item, list-providers(7), discover-context-files(7), marketplace:list-registries(4 — builtin seed via async `namedTxn`) all correct with the real async SlayzoneDb
+
+## Pre-existing (NOT my regression)
+- e2e specs 62/63 are `test.describe.skip` (commit `5bfe3df8`: "skip GPU/CLI-contention flakes"). Un-skipped + ran → 28 fail at `openSettingsTabWithRetry` UI-open timeout (contention from parallel slice-agents); re-skipped, not committed.
+- ai-config unit tests crash on `db.namedTxn`: they pass the raw sync `h.db` instead of `h.slayDb` (async adapter) → async-rot from the SlayzoneDb worker migration; HEAD crashes identically. Out of scope.

@@ -1,0 +1,31 @@
+# Slice 2.5 Risks
+
+Honest threat-model beyond plan's existing §Risks. Ordered by severity (blocker → minor).
+
+| # | Risk | Severity | Description | Mitigation |
+|---|---|---|---|---|
+| 1 | macOS Gatekeeper + hardened runtime blocks `ELECTRON_RUN_AS_NODE` child spawn | **Blocker (packaged)** | Notarized .app may refuse subprocess w/ `ELECTRON_RUN_AS_NODE=1` unless entitlements (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) + signature cover the child path. | Test `pnpm build:mac` early. Add entitlements to electron-builder.yml if needed. Have fallback plan: bundle node binary in extraResources + spawn that instead. |
+| 2 | Test-reset port churn breaks WS clients | **High** | `sidecarServer.restart()` pre-probes new port → renderer's cached `trpcPort` stale → tRPC WS client reconnects to dead port silently. | (a) Sticky port across restart (cache last port in supervisor, retry same port first). (b) Renderer re-queries `getTrpcPort()` on WS close event. Pick (a) — simpler. |
+| 3 | `pgrep slayzone-server` orphan cleanup targets wrong binary | **High** | Side-car runs as `process.execPath` (Electron binary, e.g. "SlayZone Dev"). pgrep doesn't match "slayzone-server". Orphan reaping ineffective. Existing global-setup cleanup at `e2e/global-setup.ts:11-14` has same flaw. | Identify side-car by argv (`dist/bin.js` path) or by parent-pid lookup. Update global-setup to use `pgrep -f 'server/dist/bin.js'`. |
+| 4 | Stdout/stderr back-pressure deadlock | **Medium** | Kernel pipe buffer (~64KB) fills if logger throws or stalls → side-car blocks on `write()` → hang. | Always consume `.on('data')` events even on logger errors. Wrap logger calls in try/catch. Use `child.stdout.resume()` safety net. |
+| 5 | Renderer mount blocks ~80s on permanent failure | **Medium** | Backoff sum 1+2+4+8+16=31s + 5×10s health timeout = ~81s before `waitForServerReady` rejects. User sees blank/splash screen for over a minute. | Show spinner → soft fallback after 5s while supervisor retries in background. Permanent-failure event swaps to hard fallback. |
+| 6 | Vite bundles `@slayzone/server` into Electron main | **Medium** | `externalizeDepsPlugin({exclude: slayzoneDeps})` pulls all `@slayzone/*` into main bundle. If `@slayzone/server` is declared as dep but spawned by path (no `import`), vite still bundles it → dead code + potential better-sqlite3 resolution conflict. | Import types only from `@slayzone/server` in main (`import type`). OR add `@slayzone/server` to vite `external` array in `electron.vite.config.ts`. |
+| 7 | DB-name divergence between Electron + side-car | **Medium** | Plan passes `SLAYZONE_DB_NAME` explicitly. Future engineer changes Electron's DB name selector (`app.isPackaged ? 'slayzone.sqlite' : 'slayzone.dev.sqlite'`) but forgets env passthrough → side-car opens different file → silent two-DB divergence. | Extract `getDbName(isPackaged: boolean): string` helper to `@slayzone/platform`. Both Electron + side-car call it. |
+| 8 | WS reconnect race after supervisor restart | **Medium** | Same root cause as #2. `wssHandler.broadcastReconnectNotification()` tells clients to reconnect, but reconnect target port may have changed mid-restart. | Fixed by #2 mitigation (sticky port). |
+| 9 | Orphaned side-car after Electron `kill -9` | **Low** | Side-car may outlive parent process. Already noted in plan R2. | `pgrep` cleanup (per #3 fix) catches on next launch. |
+| 10 | Dual-writer SQLITE_BUSY under load | **Low (this slice)** | Router empty → side-car never writes → zero contention. Becomes Medium when slice 4+ procedures land. | Monitor under e2e once procedures migrate. `busy_timeout=5000` covers transient. Add retry-on-BUSY helper if persistent. |
+| 11 | `__trpcPort` globalThis leftovers | **Low** | Confirmed only `transport/ws-server.ts:57` writes + `main:1734,1738` reads. Both gone after this slice. | Already addressed in plan. |
+
+## Severity legend
+
+- **Blocker**: prevents shipping the slice
+- **High**: would cause user-visible regression or test flake
+- **Medium**: silent foot-gun, hard to debug if hit
+- **Low**: monitored, mitigated by existing guards
+
+## Verification additions
+
+Add to plan §Verification:
+
+- After step 6 (`pnpm build:mac`): launch the packaged .app, confirm side-car spawned via Activity Monitor / `ps -ef | grep '[s]erver/bin.js'`. **Validates risk #1.**
+- After step 8 (`pnpm dev`): trigger `electronApp.evaluate(() => sidecarServer.restart())` via test harness, confirm renderer reconnects + queries still work. **Validates risk #2.**

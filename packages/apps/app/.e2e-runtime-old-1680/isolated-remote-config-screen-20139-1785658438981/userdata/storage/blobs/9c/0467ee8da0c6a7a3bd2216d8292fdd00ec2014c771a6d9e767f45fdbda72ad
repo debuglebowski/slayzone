@@ -1,0 +1,67 @@
+# LinkedIn Post — "The Long Becoming"
+
+<br />
+
+## My version
+
+Remember when "cloud-enabled" and "cloud-native" sounded like the same thing? They weren't. One group lifted their old apps onto AWS and called it a day. The other rebuilt from scratch. Five years later, you couldn't even compare them anymore.
+
+We are doing it again. With AI.
+
+Most companies are bolting an assistant onto the same team, the same workflow, the same process the
+
+## V1
+
+Read something this morning that's been stuck in my head all day.
+
+Remember when "cloud-enabled" and "cloud-native" sounded like the same thing? They weren't. One group lifted their old apps onto AWS and called it a day. The other rebuilt from scratch. Five years later, you couldn't even compare them anymore.
+
+We're doing it again. With AI.
+
+Most companies are bolting an assistant onto the same team, the same workflow, the same process they had last year. Then they wonder why nothing really changed.
+
+The ones actually pulling away? They're treating this as a refounding moment. Taking the whole thing apart and putting it back together.
+
+What I liked most was the framing of bottlenecks. You don't get to skip ahead. You move through them:
+
+1. Do people actually USE the tools? (harder than it sounds)
+2. Once they do, can engineers ship faster?
+3. Once they ship faster, can the company decide what to build fast enough to keep up?
+4. Are you building your own internal tools for all this — and throwing them away when they get stale?
+5. And honestly nobody has figured out yet: how should teams even be organized in this new world?
+
+Most companies stall at #3. Engineering becomes a firehose pointed at the wrong target.
+
+There was one detail I really liked. Chainguard's CEO told his eng managers their token usage should sit near the median of their team. Too low and you can't coach. Too high and you're hoarding leverage instead of teaching. Small policy. Says a lot.
+
+The honest part of the article: none of this makes for good headlines. The bold memo gets the press. The walkback gets the press. The actual becoming — the messy, unglamorous middle — doesn't.
+
+That's probably how you know it's the part that matters.
+
+***
+
+## V2
+
+Cloud-enabled vs. cloud-native. Remember that distinction? One group lifted old apps onto AWS and called it a day. The other rebuilt from scratch. Looked the same for a year. Five years later you couldn't compare them.
+
+We're doing it again. With AI.
+
+Most companies are bolting an assistant onto the same team, the same workflow, the same process they had last year. Then wondering why nothing really changed.
+
+The ones pulling away are treating this as a refounding moment. Taking the whole thing apart and putting it back together.
+
+The thing nobody talks about is that you move through bottlenecks in order. You don't get to skip ahead:
+
+1. Do people actually USE the tools? (harder than it sounds)
+2. Once they do, can engineers ship faster?
+3. Once they ship faster, can the company decide what to build fast enough to keep up?
+4. Are you building your own internal tools for all this — and throwing them away when they get stale?
+5. And honestly: how should teams even be organized in this new world? Nobody has figured this out yet.
+
+Most companies stall at #3. Engineering turns into a firehose pointed at the wrong target.
+
+One detail worth stealing: at Chainguard, eng managers are expected to sit near the median token usage of their team. Too low and you can't coach. Too high and you're hoarding leverage instead of teaching. Small policy. Says a lot.
+
+The uncomfortable truth is that none of this makes for good headlines. The bold memo gets the press. The walkback gets the press. The actual becoming — the messy, unglamorous middle — doesn't.
+
+That's probably how you know it's the part that matters.

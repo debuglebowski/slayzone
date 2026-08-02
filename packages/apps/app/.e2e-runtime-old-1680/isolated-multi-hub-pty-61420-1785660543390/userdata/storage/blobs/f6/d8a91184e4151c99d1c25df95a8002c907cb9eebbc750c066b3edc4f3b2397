@@ -1,0 +1,48 @@
+graph LR
+  classDef spine fill:#1f2937,stroke:#9ca3af,color:#fff;
+  classDef crm fill:#0e7490,stroke:#67e8f9,color:#fff;
+  classDef cs fill:#15803d,stroke:#86efac,color:#fff;
+  classDef comp fill:#b45309,stroke:#fcd34d,color:#fff;
+
+  subgraph SPINE[Shared spine]
+    A[Account]:::spine
+    C[Contact]:::spine
+    R["Review\n(by: member, freshness)"]:::spine
+  end
+
+  subgraph CRM[CRM docs]
+    AP["AccountPlan\nowner: member\ndraft->active->archived"]:::crm
+    MN["MeetingNote\nrecord"]:::crm
+    PR["Proposal\ndraft->sent->accepted/rejected"]:::crm
+  end
+
+  subgraph CS[Customer Success docs]
+    PB["Playbook\nowner: member\ndraft->review->published->archived"]:::cs
+    OB["OnboardingPlan\nowner: member"]:::cs
+    KB["KBArticle\nowner: member, decay"]:::cs
+  end
+
+  subgraph COMP[Compliance docs]
+    PO["Policy\nowner + approved_by: member\nreview_due"]:::comp
+    AG["Agreement MSA/DPA/NDA/SOW\ndraft->active->expired"]:::comp
+    CT["Control + evidence\nowner: member\nnot_impl->implemented->verified"]:::comp
+    AU["AuditReport\nplanned->in_progress->complete"]:::comp
+  end
+
+  C -->|works_at| A
+  AP -->|for| A
+  MN -->|about| A
+  MN -->|with| C
+  PR -->|for| A
+  OB -->|for| A
+  AG -->|for| A
+  AG -->|signed_by| C
+  AU -->|covers| CT
+  R -.->|of any document| PO
+  R -.->|of any document| AG
+  R -.->|of any document| KB
+
+  M{{"org member\n(built-in, not a concept)"}}
+  M -. owner/author/approver fields .-> CRM
+  M -. .-> CS
+  M -. .-> COMP

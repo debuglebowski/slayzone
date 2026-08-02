@@ -1,0 +1,41 @@
+# GitHub annual review — download steps
+
+**Goal:** fetch 8 files from GitHub Trust Center, drop in `~/Downloads/github-vanta-review-2026/`, tell me when done.
+
+## 1. Open Trust Center
+https://ghec.github.trust.page/resources
+
+Sign in if prompted (use Sara's email if she has access; else file a fresh access request — pick "I'm an existing Enterprise customer").
+
+## 2. Download (click "View" or "Request access" → confirm → download)
+
+### Replace (stale in Vanta)
+- [ ] **SOC 2 Type 2 Final Report** — file `GitHub.Enterprise.Cloud.SOC.2.Type.2.Final.Report_11.-.20.-.2025.pdf`
+- [ ] **ISO/IEC 27001:2022 Certificate**
+- [ ] **GitHub Infrastructure Penetration Test DLOE 2025-02-03.pdf**
+- [ ] **GitHub.Bug.Bounty.DLOE.Apr.-.June.2025.pdf**
+
+### Add (new evidence)
+- [ ] **GitHub Application Penetration Testing 2024 — Letter of Assessment Type 2**
+- [ ] **GitHub – CoPilot AI Security Assessment 2024 (20250404).pdf**
+- [ ] **ISO/IEC 42001:2023 Certificate** *(optional but recommended — Copilot governance)*
+
+### Supplement
+- [ ] **SOC 2 Type 2 Bridge Letter Dec 2025**
+
+## 3. Save location
+`~/Downloads/github-vanta-review-2026/` (already created)
+
+## 4. Optional DPA check
+Vanta has `GITHUB-202410-GitHubDataProtectionAgreement.pdf`. Confirm still current at https://www.microsoft.com/licensing/docs/view/Microsoft-Products-and-Services-Data-Protection-Addendum-DPA — if newer version exists, download too.
+
+## 5. Hand back
+Reply "files downloaded" — I'll:
+- Upload to Vanta security review
+- Mark old files for retirement
+- Draft new review summary + Approved status
+- Stop before submit for your sign-off
+
+## Notes
+- Trust Center is Vanta-hosted; slay browser can't follow popup viewer → manual download needed.
+- All gated files require NDA acceptance once per account.

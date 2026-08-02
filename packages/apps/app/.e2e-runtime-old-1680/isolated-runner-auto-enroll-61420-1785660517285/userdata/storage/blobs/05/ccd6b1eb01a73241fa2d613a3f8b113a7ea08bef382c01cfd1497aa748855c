@@ -1,0 +1,47 @@
+# Loading-State Validation
+
+Lazy panels show a Suspense fallback while their chunk loads. Local chunks load fast — to actually see a fallback, add a temp 2s delay to its `lazy()` import: `new Promise(r => setTimeout(r, 2000)).then(() => import(...))`. Or CPU-throttle 6× in DevTools (network throttle won't work — chunks are local `file://`).
+
+Tick the **Done** box once a row passes.
+
+## Suspense fallbacks (skeletons)
+
+| # | Done | State                       | How to test                                                                              | Expected look                                                                                                             | Pass criteria                                                                       |
+| - | ---- | --------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 1 | \[x] | BrowserPanel                | Open a fresh task (panels start hidden). Click the Browser panel toggle in the panel bar | Header bar (title pill + 2 icon btns) over 4 staggered content lines, inside panel chrome (bg-surface-1, border, rounded) | Skeleton fills panel exactly; no blank flash; no size jump when real panel swaps in |
+| 2 | \[x] | FileEditorView              | Open a task on a real repo → toggle Editor panel                                         | same                                                                                                                      | same                                                                                |
+| 3 | \[x] | UnifiedGitPanel             | Toggle Git/Diff panel on a repo task                                                     | same                                                                                                                      | same                                                                                |
+| 4 | \[ ] | ArtifactsPanel              | Toggle Artifacts panel                                                                   | same                                                                                                                      | same                                                                                |
+| 5 | \[x] | ChatPanel                   | Add a terminal tab in a chat mode (claude-chat or codex-chat)                            | Empty body + bottom input-bar skeleton (h-9, full width) pinned to bottom                                                 | Bottom bar aligns w/ real composer; NO top-header skeleton (chat has no header)     |
+| 6 | \[x] | TreeView                    | Sidebar view switcher → Tree                                                             | Full sidebar area pulses in sidebar color (`animate-pulse bg-sidebar`)                                                    | Pulse fills sidebar width; no white flash                                           |
+| 7 | \[x] | TaskDetailPage (2nd window) | Right-click a task → open in secondary window (or the open-in-new-window action)         | Full task-layout skeleton: header bar + body (`TaskShell`)                                                                | Matches main task layout shape; no white screen                                     |
+
+## Null fallbacks — validate NO flash / NO layout shift
+
+(These intentionally render nothing while loading. Add the temp delay to confirm the gap is invisible / non-jarring.)
+
+| #  | Done | State                        | How to test                                                      | Pass criteria                                                    |
+| -- | ---- | ---------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 8  | \[x] | KanbanBoard                  | Go to Home tab, board view (not list)                            | No flicker; board appears cleanly, no gap                        |
+| 9  | \[x] | KanbanListView               | Home tab → switch view to List                                   | same                                                             |
+| 10 | \[x] | FilterBar                    | Open a project that has tasks (filter toolbar above board)       | No gap/jump in the toolbar row                                   |
+| 11 | \[x] | GlobalAgentSidePanel         | Open the global agent panel (its toggle button)                  | Wrapper holds its width; content fills in without shoving layout |
+| 12 | \[x] | AgentStatusSidePanel         | Lock the agent-status panel open                                 | No flash; panel slot stays stable                                |
+| 13 | \[ ] | RichTextEditor (inline desc) | Open any task with a description; the inline notes editor mounts | Spacer (`h-20`) holds height; no layout jump when editor appears |
+| 14 | \[ ] | DescriptionDialog            | In a task, open the description in fullscreen                    | Dialog opens once loaded; no half-rendered frame                 |
+
+## CSS animations (framer-motion removed — confirm motion still feels right)
+
+| #  | Done | State                 | How to test                                                             | Pass criteria                                                                                                   |
+| -- | ---- | --------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 15 | \[ ] | Button tap            | Press any button and hold briefly                                       | Quick press-shrink to 0.98, springs back on release; disabled buttons do NOT react                              |
+| 16 | \[ ] | UpdateToast in/out    | Trigger an update-ready state, then dismiss (or fake `version` prop)    | Slides up + fades in from bottom-center; slides down + fades out on dismiss; version text stays put during exit |
+| 17 | \[ ] | DevServerToast in/out | Run a dev server in a task terminal so it's auto-detected, then dismiss | Same motion as #16; URL text stays put during exit                                                              |
+
+## Recipe
+
+1. Add temp 2s delay to the target `lazy()` import (one at a time keeps it clear).
+2. `pnpm dev`
+3. Trigger the row, watch the fallback, screenshot.
+4. Check Done + confirm pass criteria (fills, no flash, no shift).
+5. Revert the temp delay before moving on.

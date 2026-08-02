@@ -1,0 +1,59 @@
+# UC01 — Claude Instructions
+
+## Access
+
+- **URL**: <https://claude.ai>
+- **Account**: benchmark-dedicated (don't mix with personal conversations)
+- **Plan**: Claude Pro or Team (for Projects + full file-upload allowance)
+- **Model**: pin to latest production Claude in the dropdown; record exact ID in run notes at session start AND end
+
+## Setup for UC01
+
+1. **New Project** (left sidebar → "+ New project"). Name: `Benchmark UC01 - DD financial`.
+2. Upload both source files into Project knowledge:
+   - `msft-fy24-10k.htm` (local: `/tmp/uc01/`)
+   - `msft-fy24-proxy.htm` (local: `/tmp/uc01/`)
+3. Note: Claude does NOT natively fetch arbitrary URLs from prompts — must upload the files.
+4. Verify both files appear in the Project knowledge panel (green/processed status).
+5. Open a new conversation in the Project.
+
+## Per-question protocol
+
+1. Paste each question from `../questions-only.md` **verbatim**. No system prompt. No preamble.
+2. Capture per question:
+   - `prompt.txt` — verbatim
+   - `answer.md` — Claude's response, copy-pasted
+   - `answer.pdf` — Cmd+P → Save as PDF
+   - `screenshot.png` — full-page screenshot
+   - `notes.md` — anomalies
+3. **Start a fresh conversation between questions** (within the same Project) to match Normain's per-insight isolation.
+
+## Session metadata (record start + end)
+
+```
+account_email: <redacted in published report>
+plan_tier: Pro
+model_at_start: <exact dropdown ID>
+model_at_end:   <exact dropdown ID>
+date_start: 2026-05-XX HH:MM CET
+date_end:   2026-05-XX HH:MM CET
+project_url: https://claude.ai/project/<id>
+file_sha256:
+  - msft-fy24-10k.htm: 43829a12cc9cd7198474b3d735c4fc1aba1f871fb637d237aa5979d57e6b8c95
+  - msft-fy24-proxy.htm: 27e39040c32334fd3eb1c0167efbd3a8dc1ca2a819d2d62197950fd54d48b44c
+anomalies: <list>
+```
+
+## UC01-specific quirks to watch for
+
+- **Q03 calculation**: Claude tends to over-explain math. Score correctness of the final number, not the prose.
+- **Q07 cross-doc**: requires reading both files. Claude can falsely cite "the proxy says X" when X is actually in the 10-K — verify citation source.
+- **Q14 trap (Activision impairment)**: Claude is generally good at refusing-to-fabricate, but may volunteer adjacent goodwill/intangibles numbers — verify any volunteered figures against the actual 10-K (don't assume they're correct).
+- **Q15 over-claim trap**: Claude may list "common 10-K risk categories" from training data instead of reading the actual Item 1A — verify it cites the actual category names.
+
+## After running
+
+Update `../competitor-comparison.md`:
+- Fill the "Claude" column for all 15 rows: brief answer summary + verdict emoji
+- Update the Claude row in the score summary
+- Note any 🌐 (off-corpus answers) or refusals

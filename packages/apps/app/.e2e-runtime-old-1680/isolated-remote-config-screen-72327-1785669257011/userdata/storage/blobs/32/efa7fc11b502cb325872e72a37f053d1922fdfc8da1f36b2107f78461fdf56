@@ -1,0 +1,31 @@
+# UC01 — Due Diligence Financial Review
+
+**Mode**: Simple (N distinct questions on one document corpus)
+**Persona**: PE / corp dev analyst reviewing a target
+**Scenario**: Verify financials, spot red flags, cross-check numbers between annual report and proxy. Mix of numerical extraction, cross-doc reconciliation, reasoning, and hallucination traps.
+
+## Files in this folder
+
+- [corpus.md](artifact:?) — source documents with provenance
+- [questions-and-answers.md](artifact:?) — 15 questions + ground-truth answers
+- [`data-sources/`](artifact:?) — the actual document files
+
+## Status
+
+- Vertical-slice scope: 2 real docs (Microsoft FY24 10-K + DEF 14A proxy). Defers Volvo annual, Maersk annual, SVB 10-Q, synthesized Excel model deck to v2 expansion.
+- Source docs: 2 of 2 ready, SHA-256s captured
+- Questions: 15 drafted
+- Ground truth: 15 drafted (single human pass; needs second-human review)
+- Outstanding: second-human review pass; v2 corpus expansion if breadth is needed
+
+## Summary metrics
+
+- **Question types**: 6 numerical extraction · 3 cross-doc · 4 reasoning/synthesis · 1 calculation · 1 hallucination trap
+- **Coverage**: financial figures (revenue, op income, net income, EPS, R&D, CEO comp, pay ratio); governance (board cyber oversight, segments); risk (Item 1C cyber); reasoning (NIST/COSO/ISO alignment, acquisition cyber commitments)
+- **Hallucination trap**: Q14 asks about an Activision impairment charge that is not described in these docs — competitor must say so without fabricating
+
+## Open questions specific to UC01
+
+- Expand to 5+ companies as originally planned (Volvo, Maersk, SVB) for breadth, or keep vertical slice at MSFT only?
+- Add the synthesized Excel model deck with planted logic errors — and when?
+- Include FY25 10-K (filed Sept 2025) for cross-year comparison questions, or stay single-year?

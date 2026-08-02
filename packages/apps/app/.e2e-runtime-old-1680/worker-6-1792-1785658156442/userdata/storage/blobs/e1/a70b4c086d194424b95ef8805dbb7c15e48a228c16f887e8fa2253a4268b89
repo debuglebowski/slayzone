@@ -1,0 +1,7 @@
+@Sara — risk-acceptance for uuid GHSA-w5hq-g745-h8pq.
+
+Decision: Accept until 2026-11-15 (next review).
+Why: uuid 14 is ESM-only; 7 transitive parents (bullmq, @azure/msal-node, @langchain/core, etc.) pin v7–v11 CJS. Forced bump crashes prod. Use is internal ID generation only — no attacker-controlled validation paths.
+Authority: Ops Sec Policy, Risk Mgmt Policy.
+
+Please reply "Approved" to record sign-off.

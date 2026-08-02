@@ -1,0 +1,12 @@
+# SaaS DPA — 2026-06-04 DRAFT (new)
+
+**The click-through DPA for the open self-serve SaaS.** No prior version.
+📄 Doc: https://docs.google.com/document/d/1TYVTisENNzIuJR8eh_MJaLHvKXrAyIjc-6qjiw760C8/edit
+
+## What it is / changes
+- Basis = the old "provision of The Platform" DPA (`1it8`), repurposed as the SaaS DPA (separate lineage from the enterprise/Marketplace DPAs).
+- **Subprocessor appendix built from scratch.** Table 1 (hosting) = Azure, **AWS**, BetterStack, PostHog — **AWS is here only because it hosts Anthropic's models** (SaaS only, excluded from the enterprise DPAs). Table 2 (operations) = same ops set incl. OpenAI + Anthropic. Hyperlinked.
+- Subprocessor-change notice = **30 days** (+ 3-month termination on objection) — deliberately **longer than the enterprise DPAs' 14 days**.
+
+**On sign-off:** rename `2026-06-04 - DRAFT/` → `- LATEST/`.
+**To check:** AWS-in-SaaS-only rationale; the 30-day notice is intended here.

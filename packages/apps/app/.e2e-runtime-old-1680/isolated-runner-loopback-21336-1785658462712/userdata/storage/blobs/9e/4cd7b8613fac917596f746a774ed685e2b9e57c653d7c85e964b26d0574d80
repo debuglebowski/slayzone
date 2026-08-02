@@ -1,0 +1,101 @@
+# Meeting notes — Annual ISO 27001 Incident Response Table-Top Test
+
+Date: 2026-05-21
+Time: 14:45–15:45 CEST
+Location: Virtual (Google Meet)
+Facilitator: Kalle Hansson (CTO) — also acted as "the system", answering queries about logs, dashboards, and database state as the team investigated.
+Attendees: Max Netterberg (Engineer), Philip Ngo (Engineer), Sara Landfors (CEO — available as a resource; did not drive the response).
+Recording: Meet recording + Gemini transcript stored alongside this document.
+
+The exercise followed the stages of the Incident Response Plan: reporting, severity assignment, triage, investigation, containment, recovery, and post-incident hardening. Notes are organised by stage with indicative timestamps.
+
+---
+
+## Reporting & kickoff (14:45)
+
+Kalle set the scene: two customers, within five minutes of each other, reported that pressing Run Extraction on a run page does nothing — the button shows its loading state and never returns a result, with no error on screen. Sara, as CEO, had already logged a Security Event Report and flagged it in #security.
+
+Philip volunteered to take the Security Delegate role for the incident; Max joined as the second responder. Sara stepped back and said she'd stay reachable if the team needed a decision or sign-off.
+
+Philip opened an incident ticket (INC-031), linked Sara's Security Event Report, and started a status thread in #security so the rest of the company could follow along.
+
+## Severity (14:49)
+
+Max and Philip talked through severity. The Plan files outages under the lower P2/P3 band, but both noted this was hitting multiple customers at once on a core production feature, with the blast radius still unknown. They agreed to treat it as P1 and revisit if it turned out to be isolated.
+
+Philip recorded P1 on the ticket and, per the Plan, pinged the responsible manager in Slack. Sara was already aware, so no further escalation was needed for now.
+
+## Triage (14:52)
+
+The team laid out where the failure could live: the front end, the create-run request, the worker that processes runs, or the model provider downstream.
+
+Max took a reproduction and watched the network tab — the create-run request came back 200 OK and the UI moved to the run page as expected, then nothing. That pointed away from the front end and the request layer.
+
+Philip pulled the Azure application logs for the affected run IDs. He found the create-run entries but none of the "extraction worker starting" lines that should follow.
+
+> Philip: "The request lands, the row gets created, then the worker never picks it up. Whatever's wrong sits between the queue and the worker."
+
+He noted the working theory on the ticket: front end fine, jobs not being processed.
+
+## Investigation (14:57)
+
+Max opened Bull Board to look at the queues.
+
+> Max: "Kalle — on Bull Board, what does ExtractInsightQueue look like? Is it paused?"
+> Kalle (as the system): "Not paused, it's running. But there's no recent activity for the extractions you care about — nothing's moved through for those in hours."
+
+A live but idle queue. Max flagged that as odd: if jobs were being enqueued, something downstream should be consuming them.
+
+Philip went to the database and looked at the ExtractionInsightResult rows for one of the affected extractions.
+
+> Philip: "What's the status on the rows for this extraction?"
+> Kalle (as the system): "One row sitting in WAITING. Its updatedAt is about three hours old."
+> Philip: "Three hours — so it's been parked there the whole time, nothing's touched it."
+
+Max connected it to the guard:
+
+> Max: "If there's already a row in WAITING, the new-run check refuses to start another one. That's assertExtractionNotRunning — it reads the old row as still in-flight and silently blocks every new attempt. That's why the button does nothing and there's no error."
+
+To find out why the original row never finished, Philip pulled that job's worker logs around the updatedAt timestamp.
+
+> Philip: "Kalle — last log line for that original job?"
+> Kalle (as the system): "The container was OOM-killed. The timestamp matches the row's last update almost exactly."
+
+That closed the loop: the original job died on an out-of-memory kill mid-run, never wrote a terminal status, and left the row frozen in WAITING. The guard then treated that ghost row as an in-flight run and blocked everything new for that extraction.
+
+Philip checked in with Sara on whether anything external was needed yet. She asked whether customer data had been exposed or lost; the team confirmed it had not — this was a stuck job, not a data issue — so she agreed there was nothing to report externally at this stage and asked to be kept posted.
+
+## Containment — immediate (15:10)
+
+Max manually moved the stuck row to CANCELED. Philip kicked off a fresh Run Extraction on the same extraction to verify.
+
+> Kalle (as the system): "New run starts. Worker picks it up — WAITING, then RUNNING, then COMPLETED. Insights come back."
+
+Fix confirmed for that customer. The team then checked whether other extractions were wedged the same way and cleared the few they found.
+
+In parallel, Philip drafted a short note for support to send the two reporting customers: we found a stuck job blocking your runs, we've cleared it, please retry, and we'll follow up with a brief write-up. Sara read it over and approved the tone. The note went out while Max kept verifying recoveries — comms and remediation ran at the same time rather than one waiting on the other.
+
+## Containment — preventing a repeat (15:20)
+
+The team agreed that clearing rows by hand wasn't a fix. Philip opened NOR-2841 to harden the guard: assertExtractionNotRunning should disregard rows older than a safety window, so a single dead job can't wedge an extraction indefinitely. That stops the same OOM tomorrow from reproducing today's outage.
+
+## Recovery & data-protection check (15:26)
+
+Max confirmed the reporting customers' retries completed end to end.
+
+Per the Plan, the team walked the data-protection angle explicitly: no personal data was processed or exposed during the failure, and there was no unauthorised access — the jobs simply didn't run. Conclusion: no IMY notification and no customer DPA notification triggered. Philip recorded that assessment on the ticket so the reasoning is on file.
+
+Philip then marked the incident contained.
+
+## Hardening & post-mortem (15:34)
+
+Beyond the guard fix in NOR-2841, the team logged follow-ups:
+- NOR-2842 — Watchdog job that auto-cancels WAITING/RUNNING rows older than the safety window (starting at 60 minutes), so ghosts self-clear.
+- NOR-2843 — Alerting that pages when stuck rows accumulate past a threshold, so we hear about this before a customer does.
+- NOR-2844 — Worker resilience: determine why the OOM exit left the row un-terminated, and wrap the worker so an uncaught exit marks the row ERROR before the process dies.
+
+Philip scheduled a written root-cause analysis within a week, owned by the Security Delegate, per the Plan's guidance for P1 incidents.
+
+## Wrap (15:42)
+
+Philip recapped the open tickets, owners, and due dates on the incident ticket and confirmed the post-mortem slot. Kalle closed the scenario portion and moved the group into the exercise-feedback questions (captured under Discussion & Conclusions).

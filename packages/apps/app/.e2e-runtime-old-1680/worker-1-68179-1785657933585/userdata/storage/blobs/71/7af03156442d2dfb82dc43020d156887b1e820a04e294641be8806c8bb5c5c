@@ -1,0 +1,42 @@
+# Phase 0 — Final state
+
+## E2e cumulative
+
+| Round | Failures | Δ |
+|---|---|---|
+| Baseline (post Phase 0 fs/env hardening) | ~80 | — |
+| After all fixes (round 14) | **26** | **−54** |
+
+**67% e2e failure reduction.** All 🟢 small + 🟡 medium failures cleared. Phase 0 fs/env hardening landed clean (typecheck pass, all our env-rename specs green).
+
+## Final breakdown of remaining 26
+
+### Network-dependent (13 — current run only) — example.com unreachable in current network state
+- `73-browser-view-bounds:21`
+- `75-browser-view-navigation:21/197`
+- `76-browser-view-zorder:26`
+- `82-browser-loading-animation:42/46/59`
+- `83-browser-zoom-sync:43/90/114/152/170/196/217`
+
+These were green in earlier runs in this session. Verified: `curl https://example.com` from sterile env returns 000 — transient external connectivity issue, not a code defect.
+
+### Real test-architecture issues (10)
+- `93-artifacts-panel` ×7 — test ordering deps + selector races (toolbar gated behind collapsible banner; rename → delete chain)
+- `61-web-panel-handoff-routing:226` — synthetic webview new-window event doesn't translate to WebContentsView popup IPC
+- `71-webview-popup-handling:540/686` — same WebContentsView popup root
+
+### Flaky (1)
+- `30-terminal-core-behavior:222` — clear buffer; passed earlier this session
+
+### Single test from my own rewrite (1)
+- `90-chat-mode-toggle:96` — "Disable chat" context menu (the rewrite for chat mode)
+
+If we exclude the network-dependent 13, real-fail count is **13** = 84% reduction from baseline 80.
+
+## Source-level fixes shipped this session
+- `apps/app/src/main/index.ts` — `__restorePtyHandlers` covers all terminal-pkg handlers
+- `domains/settings/src/client/tabs/PanelsSettingsTab.tsx` — `mergePanelOrder` after Add Panel
+- `domains/settings/src/client/tabs/TagsSettingsTab.tsx` — listen to `slayzone:tag-{created,updated,deleted}`
+- `domains/worktrees/src/client/GitDiffPanel.tsx` — drop `flatEntries.length > 0` from chip-row
+- `domains/task/src/client/TaskDetailPage.tsx` — IPC listener for `browser-view:focused` → `setFocusedPanel`
+- `apps/cli/src/commands/tasks/list.ts` — added `t.deleted_at IS NULL` filter to list query

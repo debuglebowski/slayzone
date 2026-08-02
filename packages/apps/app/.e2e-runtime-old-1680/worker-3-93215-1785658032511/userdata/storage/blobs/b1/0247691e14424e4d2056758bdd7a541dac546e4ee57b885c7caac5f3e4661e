@@ -1,0 +1,42 @@
+# Loading-State Validation
+
+Lazy panels show a Suspense fallback while their chunk loads. Local chunks load fast — add a temp 2s delay to the `lazy()` import (or CPU-throttle in DevTools) to actually see each fallback.
+
+## Suspense fallbacks (skeletons)
+
+| # | State | How to trigger | Fallback | Expected look | Pass criteria |
+|---|-------|----------------|----------|---------------|---------------|
+| 1 | BrowserPanel | Fresh task → toggle Browser panel | `PanelLoadingSkeleton` | Header bar (title pill + 2 icon btns) over 4 staggered content lines, inside panel chrome (bg-surface-1, border, rounded) | Skeleton fills panel exactly, no blank flash, no size jump when real panel swaps in |
+| 2 | FileEditorView | Toggle Editor panel (repo task) | `PanelLoadingSkeleton` | same | same |
+| 3 | UnifiedGitPanel | Toggle Git/Diff panel | `PanelLoadingSkeleton` | same | same |
+| 4 | ArtifactsPanel | Toggle Artifacts panel | `PanelLoadingSkeleton` | same | same |
+| 5 | ChatPanel | Open chat-mode terminal tab (claude-chat / codex-chat) | `ChatPanelSkeleton` | Empty body + bottom input-bar skeleton (h-9, full width) pinned to bottom | Bottom bar aligns w/ real composer, no top-header skeleton |
+| 6 | TreeView | Switch sidebar to Tree view | `animate-pulse bg-sidebar` | Full sidebar area pulses in sidebar color | Pulse fills sidebar width, no white flash |
+| 7 | TaskDetailPage (secondary window) | Open task in secondary window | `TaskShell` | Full task-layout skeleton (header + body) | Matches main task layout shape |
+
+## Null fallbacks (validate: NO flash / NO layout shift)
+
+| # | State | Trigger | Fallback | Pass criteria |
+|---|-------|---------|----------|---------------|
+| 8 | KanbanBoard | Home tab, board view | `null` | No flicker; board appears cleanly |
+| 9 | KanbanListView | Home tab, list view | `null` | same |
+| 10 | FilterBar | Project w/ tasks | `null` | No gap/jump in toolbar |
+| 11 | GlobalAgentSidePanel | Open global agent panel | `null` | Wrapper chrome holds width; content fills in |
+| 12 | AgentStatusSidePanel | Lock agent-status panel | `null` | No flash |
+| 13 | RichTextEditor (inline desc) | Open task w/ description | `<div h-20>` | No layout jump; spacer matches editor min-height |
+| 14 | DescriptionDialog | Open description fullscreen | `null` | Dialog opens once loaded, no half-render |
+
+## CSS animations (framer removed — validate motion still feels right)
+
+| # | State | Trigger | Mechanism | Pass criteria |
+|---|-------|---------|-----------|---------------|
+| 15 | Button tap | Press any Button | CSS `active:scale-[0.98]` | Quick press-shrink, springs back, disabled btns inert |
+| 16 | UpdateToast in/out | Update ready → dismiss | `usePresence` + tw-animate-css | Slides up+fades in from bottom; slides down+fades out on dismiss; text stays during exit |
+| 17 | DevServerToast in/out | Dev server detected → dismiss | same | same (bottom-center) |
+
+## Test recipe
+1. Add temp delay to a `lazy()` import: `new Promise(r => setTimeout(r, 2000)).then(() => import(...))`
+2. `pnpm dev`
+3. Trigger each row above, screenshot the fallback
+4. Confirm pass criteria (fill, no flash, no shift)
+5. Revert temp delays

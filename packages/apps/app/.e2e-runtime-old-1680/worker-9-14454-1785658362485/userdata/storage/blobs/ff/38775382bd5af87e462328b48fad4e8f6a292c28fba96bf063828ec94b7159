@@ -1,0 +1,15 @@
+# System Description Rewrite — Plan
+
+## Context
+- Current: Normain System Description (Google Doc, shared drive `Normain`, ID `1-aa9Pa9vNNsf3ZE8pyGoA6oBAcOOOv-rCi1e03lJOZ0`, modified 2025-08-11)
+- Scoped for SOC2 Type 2 Q2–Q3 2025; follows DC 1–9 structure
+- Built from Prescient V2 template (same folder)
+- Target: slim, concise replacement
+
+## Steps
+1. Verify current facts against authoritative Drive sources (commitments, vendor list, incident log, last-12-months changes)
+2. Keep DC 1–9 skeleton; drop template scaffolding not load-bearing
+3. CC1–CC9: state shared governance/review/tracking cycle once, reference thereafter — no repetition
+4. Prefer tight tables over bullet trees for: commitments, third-party access, system boundaries, CUECs, CSOCs
+5. Draft as new Google Doc alongside current; do not edit current in place
+6. Surface diff summary for user review before any replacement

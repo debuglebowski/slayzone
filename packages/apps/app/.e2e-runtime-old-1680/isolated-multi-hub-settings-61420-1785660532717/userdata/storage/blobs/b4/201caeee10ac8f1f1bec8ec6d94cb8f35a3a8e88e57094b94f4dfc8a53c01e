@@ -1,0 +1,37 @@
+# Option 2 — Ghost add-row at end of list (Linear/Notion style)
+
+No header chrome at all. The list itself carries the affordance: last row is a
+muted "+ New label" ghost row. Archived toggle becomes a tiny footer link.
+Description appears only in the empty state.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ (● Urgent)                                                    ✎  │
+│ (● Backlog)                                                   ✎  │
+│ (● Blocked)                                                   ✎  │
+│ (● Waiting)                                                   ✎  │
+│ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄ │
+│  + New label                                  (muted, hover→fg)  │
+└──────────────────────────────────────────────────────────────────┘
+                                              Show archived (2) ▾
+```
+
+Click ghost row → opens the existing create modal (or later: inline edit row).
+
+Empty state carries the explanation instead of a permanent subtitle:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│        No labels yet.                                            │
+│        A shared vocabulary you apply to concepts and items.      │
+│                                                                  │
+│                        [ + New label ]                           │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
++ cleanest possible resting state; add-action sits where the result appears
++ same pattern works for Views (ghost card at bottom of the stack)
+- "New" less discoverable for first-time admins (mitigated by empty state)
+- non-admins just see the list end (ghost row hidden) — fine

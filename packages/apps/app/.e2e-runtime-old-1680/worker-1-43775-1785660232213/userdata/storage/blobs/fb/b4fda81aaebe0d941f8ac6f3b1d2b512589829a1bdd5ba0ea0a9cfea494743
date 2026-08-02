@@ -1,0 +1,28 @@
+# Normain App — Permissions Catalog
+
+> Permissions in the Normain app, mapped to roles. Feeds the roles/permissions section of the KPMG deliverable.
+>
+> **Scoped-variant note:** some team-level permissions (e.g. "Remove member from team") may split into "any team" vs "only teams the actor belongs to" — mirroring "Add member to team" vs "…team I'm a part of". Confirm whether that split is a general pattern.
+
+## Permissions
+
+| Category                  | Permission                        | Org owner | Org manager | Team owner | User   |
+| ------------------------- | --------------------------------- | --------- | ----------- | ---------- | ------ |
+| Org / tenant              | Add member to org                 | x         | <br />      | <br />     | <br /> |
+| Org / tenant              | Remove member from org            | <br />    | <br />      | <br />     | <br /> |
+| Org / tenant              | Edit org settings                 | <br />    | <br />      | <br />     | <br /> |
+| Teams                     | Create team                       | <br />    | <br />      | <br />     | <br /> |
+| Teams                     | Add member to team                | <br />    | <br />      | <br />     | <br /> |
+| Teams                     | Add member to team I'm a part of  | <br />    | <br />      | <br />     | <br /> |
+| Teams                     | Remove member from team           | <br />    | <br />      | <br />     | <br /> |
+| Teams                     | Edit team                         | <br />    | <br />      | <br />     | <br /> |
+| Teams                     | Archive / delete team             | <br />    | <br />      | <br />     | <br /> |
+| Teams                     | View teams                        | <br />    | <br />      | <br />     | <br /> |
+| Members / users           | Resend / revoke invitation        | <br />    | <br />      | <br />     | <br /> |
+| SharePoint / integrations | Setup SharePoint integration      | <br />    | <br />      | <br />     | <br /> |
+| SharePoint / integrations | Assign SharePoint site to team    | <br />    | <br />      | <br />     | <br /> |
+| SharePoint / integrations | Remove SharePoint site from team  | <br />    | <br />      | <br />     | <br /> |
+| SharePoint / integrations | View connected SharePoint sites   | <br />    | <br />      | <br />     | <br /> |
+| SharePoint / integrations | Disconnect SharePoint integration | <br />    | <br />      | <br />     | <br /> |
+| Audit & compliance        | View audit log                    | <br />    | <br />      | <br />     | <br /> |
+| Audit & compliance        | Export audit log                  | <br />    | <br />      | <br />     | <br /> |

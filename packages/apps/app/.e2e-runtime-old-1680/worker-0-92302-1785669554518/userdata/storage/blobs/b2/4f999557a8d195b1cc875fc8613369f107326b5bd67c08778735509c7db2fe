@@ -1,0 +1,43 @@
+# Slice 2.5 Risks
+
+Honest threat-model beyond plan's existing §Risks. Ordered by severity (blocker → minor). Severity column shows additive-mode value where it differs.
+
+| # | Risk | Severity | Description | Mitigation |
+|---|---|---|---|---|
+| 1 | macOS Gatekeeper + hardened runtime blocks `ELECTRON_RUN_AS_NODE` child spawn | Blocker → **Medium** (additive) | Notarized .app may refuse subprocess w/ `ELECTRON_RUN_AS_NODE=1` unless entitlements (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) + signature cover the child path. Additive mode: failure is non-fatal. | Spawn-smoke spike on day 1 (dev + build:mac). Add entitlements proactively. Fallback: bundle real node binary in extraResources. |
+| 2 | Test-reset port churn breaks WS clients | **Eliminated (additive)** | `sidecarServer.restart()` pre-probes new port → renderer cached port stale → WS reconnect to dead port. Additive: no renderer cache, no clients. | Eliminated by additive mode. If non-additive: sticky port across restart. |
+| 3 | `pgrep slayzone-server` orphan cleanup targets wrong binary | High | Side-car runs as `process.execPath` (Electron binary). pgrep doesn't match "slayzone-server". `e2e/global-setup.ts:11-14` has same flaw. | Match by argv: `pgrep -f 'server/dist/bin.js'`. Fix global-setup too. |
+| 4 | Stdout/stderr back-pressure deadlock | Medium | Kernel pipe buffer (~64KB) fills if logger throws/stalls → side-car blocks on write → hang. | Always consume `.on('data')`. Wrap logger in try/catch. Validated by spawn-smoke spike. |
+| 5 | Renderer mount blocks ~80s on permanent failure | **Eliminated (additive)** | Backoff 31s + 5×10s health timeout before reject. Additive: renderer never awaits side-car. | Eliminated by additive mode. If non-additive: soft fallback after 5s. |
+| 6 | Vite bundles `@slayzone/server` into Electron main | Medium | `externalizeDepsPlugin({exclude: slayzoneDeps})` pulls all `@slayzone/*` into main bundle. Spawned-by-path server need not be bundled. | `import type` only in main. Belt: add `@slayzone/server` to vite `external`. |
+| 7 | DB-name divergence between Electron + side-car | Medium | Future engineer changes Electron DB-name selector but forgets `SLAYZONE_DB_NAME` env passthrough → side-car opens different file → silent divergence. | Extract `getDbName(isPackaged)` helper to `@slayzone/platform`. Both call it. |
+| 8 | WS reconnect race after supervisor restart | **Eliminated (additive)** | Same root cause as #2. Additive: no WS clients on side-car. | Eliminated by additive mode. |
+| 9 | Orphaned side-car after Electron `kill -9` | Low | Side-car may outlive parent process. | Keep child ref'd. SIGTERM on `will-quit`. `pgrep -f` reap on next boot (per #3). |
+| 10 | Dual-writer SQLITE_BUSY under load | Low (this slice) | Router empty → side-car never writes → zero contention. Becomes Medium when slice 4+ procedures land. | Monitor under e2e once procedures migrate. `busy_timeout=5000` covers transient. |
+| 11 | `__trpcPort` globalThis leftovers | Low | Additive keeps in-process tRPC path alive → leftover var stays. | Rename leftover to `__inProcessTrpcPort` so slice 2.6 cutover is unambiguous. |
+
+## Severity legend
+
+- **Blocker**: prevents shipping the slice
+- **High**: would cause user-visible regression or test flake
+- **Medium**: silent foot-gun, hard to debug if hit
+- **Low**: monitored, mitigated by existing guards
+
+## Additive mode summary
+
+Making the side-car purely additive (shadow infra, no renderer dependency):
+- **Eliminates** #2, #5, #8
+- **Downgrades** #1 Blocker → Medium
+- **Unchanged**: #3, #4, #6, #7, #9, #10, #11 — all Low/Medium with named fixes
+
+Net: zero blockers, zero high-severity-with-user-impact. Renderer cutover deferred to a new slice 2.6.
+
+## Structural mitigations (apply regardless)
+
+1. **Additive mode** — side-car has no consumers this slice.
+2. **Spawn-smoke spike day 1** — validate `ELECTRON_RUN_AS_NODE` spawn in dev + `build:mac` before building feature logic. De-risks #1 + #4 before sunk cost.
+
+## Verification additions
+
+- After `pnpm build:mac`: launch packaged .app, confirm side-car spawned via `ps -ef | grep '[s]erver/bin.js'`. Validates #1.
+- `pnpm dev`: confirm log line `[supervisor] side-car ready on port N`. Manual additive-mode verification (no renderer dependency to test).

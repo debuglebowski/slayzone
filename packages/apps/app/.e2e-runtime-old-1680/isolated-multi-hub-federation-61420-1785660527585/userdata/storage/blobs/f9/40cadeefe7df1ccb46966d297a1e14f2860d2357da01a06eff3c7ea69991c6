@@ -1,0 +1,23 @@
+# 🩹 SOC 2 Incident Inquiry — Gap Remediation Plan
+
+Tied to Vanta doc `68d477b7b9f32d79cd6cecae` + control IRO-3.
+Source incident: INT-306 / INT-307 (bad migration 2025-11-08).
+
+| # | 🚧 Gap | 💡 Suggestion | ⏱️ Effort |
+|---|---|---|---|
+| 1 | 📅 12-day reporting delay (event 2025-11-08, INT-307 created 2025-11-20). IRP says "immediately" | 📝 Note in INT-306: same-day verbal alert + rollback happened; Linear ticket retroactive. Corrective action: enforce same-day ticketing via on-call runbook. | 🟢 ~15m |
+| 2 | 🔄 INT-306 still "In Progress" despite all checkboxes done | ✅ Mark Done. Closing comment with resolution date, PR #801, RCA link, backup-config link. | 🟢 ~10m |
+| 3 | 🗣️ Verbal-only communication — inquiry literally asks about comms to affected parties | 📨 Backfill written record on INT-306: who told, when, channel; post-hoc #security Slack summary; customer-comms decision rationale. | 🟡 ~45m |
+| 4 | 📄 No formal RCA doc — IRP requires for P1 | 📑 1-pager RCA: timeline, root cause (Prisma auto-migration `DROP COLUMN` missed in PR #789 review), impact, corrective actions + evidence. Store in Drive `08 - Incidents & DR`, link from INT-306. | 🟠 ~1.5h |
+| 5 | 👥 No customer-impact assessment / DPA notification trace | ⚖️ Legal-quick-review: was data in `SpreadsheetFrameworkSheetCell.content` fully recovered via rollback? If yes → attestation "no notification required". If partial loss → document why 48h DPA clock missed + remediate. | 🟠 ~1h |
+| 6 | 🏷️ Severity not P0–P3 tagged per IRP | 🟥 Re-classify INT-307/INT-306 as **P1** (data loss + customer-facing impact). Add label. | 🟢 ~5m |
+| 7 | 💾 Backup interval improvement — claimed but no evidence shipped | 🔍 Verify Azure DB backup config change shipped. If shipped → screenshot/Terraform diff. If not → ship it (stated corrective action, auditor will check). Linear follow-up ticket. | 🟡 ~45m |
+| 8 | 📎 INT-306 has 0 attachments / 0 comments / 0 documents | 🔗 After 2–7: attach RCA, link PR #789 (cause) + PR #801 (fix) + backup-config evidence. Self-contained evidence. | 🟢 ~15m |
+
+## 🎯 Suggested order
+**6 → 2 → 4 → 3 + 8 → 7 → 5 → 1**
+
+Cheap labels first (6), close ticket (2), write RCA (4), backfill comms + attach (3+8), verify backup change (7), legal pass on customer impact (5), process note last (1).
+
+## 📊 Total
+**~4h 25m** — RCA (4) and backup-verification (7) dominate; rest is admin polish.

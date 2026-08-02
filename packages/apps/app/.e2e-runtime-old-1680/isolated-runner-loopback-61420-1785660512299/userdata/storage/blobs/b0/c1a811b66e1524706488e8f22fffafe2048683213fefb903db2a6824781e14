@@ -1,0 +1,48 @@
+# Use Cases
+
+Each use case sized to its scenario. **Per-use-case question count matters; total is whatever it ends up being** (~200 across all UCs at current sizing). Sorted by UC number.
+
+**Mode definitions:**
+- **Simple** — ask N distinct questions on a document corpus. No templated row dimension.
+- **Repeat** — same question(s) repeated across N sources, output as comparison table.
+- **Spreadsheet** — N question templates × dynamic input column(s). Each row's output varies based on its row's column values.
+
+**Uniqueness** = how much of this test exercises capabilities that aren't already covered by another use case. Higher = more distinctive. Subjective.
+
+**# docs** for UC01–03 reflects as-built corpora; UC04–08 are still stubs and show target sizing.
+
+| # | Use case | Mode | Persona | Scenario | Question types | # docs | # questions | Uniqueness | What it tests |
+|---|---|---|---|---|---|---|---|---|---|
+| 01 | Due diligence financial review | Simple | PE / corp dev analyst reviewing a target | Verify financials, spot red flags, cross-check numbers between annual report, proxy, and Excel model | Numerical calc; cross-doc (10-K vs proxy); Excel step-by-step logic; reasoning on covenants/warning signs | 2 | 15 | **30%** — Excel logic unique; numerical + cross-doc overlap with several others | Numeric extraction + cross-doc consistency + chained reasoning |
+| 02 | ESG / sustainability audit | Repeat | Sustainability lead prepping CSRD, or auditor | Same Qs across multiple companies' sustainability reports → comparison table | Exhaustive search; numerical aggregation; multi-doc cross-reference (report vs framework) | 2 | 15 | **35%** — framework-vs-disclosure alignment angle | Long-doc exhaustive extraction + framework alignment |
+| 03 | Regulatory-vs-policy gap check | Spreadsheet | GRC / internal audit | Each row = one obligation from the regulation (column A); template Q assesses whether internal policy addresses that obligation with citations | 1 template × N obligation rows; cross-doc (reg vs policy); classification; reasoning on partial coverage | 3 | 15 | **55%** — per-obligation structured enumeration | Single-template Spreadsheet + cross-doc reasoning + citation fidelity |
+| 04 | Contract clause sweep at scale | Repeat | Legal ops / M&A counsel | Same clause-finding Qs across **100+ contracts** in a bundle → per-contract comparison table. Real-customer scale | Exhaustive (find every X); classification; clause-level citation fidelity; cross-contract pattern detection | **100+** | 20 | **70%** — only Repeat-at-scale test; exposes per-doc-count limits in competitors | Repeat-mode scale ceiling + clause-level citation across hundreds of docs |
+| 05 | Vendor / supplier risk matrix | Spreadsheet | GRC / vendor management / TPRM lead | Each row = one vendor (column A); columns = N risk dimensions (data handling, breach history, cert status, sub-processor exposure) scored from that vendor's SOC2 + ToS + trust page | N templates × M vendor rows; classification (risk tier per dimension); citation across short security docs | ~15 | 15 | **65%** — multi-template Spreadsheet with per-vendor cross-doc; TPRM scenario unique | Multi-template Spreadsheet + per-row cross-doc reasoning |
+| 06 | Multimodal evidence extraction | Simple | Advisory / forensic analyst | Single mixed-format corpus; varied Qs pull facts from scans, photos, charts, handwriting | OCR-grade text from scans; handwriting recognition; image-only chart interpretation; cross-modal reconciliation | 4 | 10 | **90%** — only test covering scanned, handwritten, image-only formats | Format coverage — exposes tools that can't ingest non-text inputs |
+| 07 | M&A data-room deep dive | Simple | M&A counsel / investment committee chair | 10 deep synthesis questions over a target's full data room (red flags, hidden liabilities, change-of-control, IP issues, regulatory risk, customer concentration, etc.) | Synthesis across many docs; risk identification; pattern detection; gap identification at scale | **100+** | 10 | **85%** — depth × scale combo; tests context-window survival + lost-in-the-middle | Reasoning across very large corpora — Normain's strongest competitive wedge |
+| 08 | DDQ / questionnaire response | Simple | Sales engineer, compliance lead, IR ops responding to a customer/investor questionnaire | 100 distinct hand-written questions from a real DDQ format (SIG-Lite ~125Q, CAIQ ~261Q, ODD, RFP). Each answered from the org's own documentation pack with citation | Structured answer generation; citation from own corpus; classification (in-scope / out-of-scope / partial); consistency across related questions | ~25 | **100** | **80%** — only high-volume single-corpus test; question-volume ceiling + repeatability stress | Question-volume on one corpus + structured response + consistency across many questions |
+
+**Total**: 8 use cases, ~200 questions, ~260+ docs (target). **Built so far**: UC01, UC02, UC03 = 7 docs, 45 questions.
+
+## Mode coverage
+
+- **Simple** (4): UC01, UC06, UC07, UC08
+- **Repeat** (2): UC02, UC04
+- **Spreadsheet** (2): UC03, UC05
+
+All three Normain modes covered. Simple is heavier because three distinct Simple-mode pressure points each warrant their own test (single-corpus depth, multimodal, single-corpus volume).
+
+## Scale stress points
+
+| Stress | Use case | Why it matters |
+|---|---|---|
+| **High question volume on one corpus** | UC08 (100 Qs on ~25 docs, Simple) | DDQ workflow — real Normain use case |
+| **Many docs, repeat mode** | UC04 (100+ contracts, 20 Qs) | Per-doc context isolation at scale |
+| **Few questions, deep synthesis on huge corpus** | UC07 (10 deep Qs spanning 100+ docs) | Lost-in-the-middle, citation drift, context overflow |
+| **Multimodal** | UC06 | Format ingestion ceiling |
+| **Single-template Spreadsheet** | UC03 | One question × many input rows |
+| **Multi-template Spreadsheet** | UC05 | Multiple questions × many input rows |
+
+## Grading workload note
+
+~200 questions × ~10 competitors = ~2000 grading events. LLM-judge first-pass remains feasible; human stratified sample sized to ~50 questions × all competitors.

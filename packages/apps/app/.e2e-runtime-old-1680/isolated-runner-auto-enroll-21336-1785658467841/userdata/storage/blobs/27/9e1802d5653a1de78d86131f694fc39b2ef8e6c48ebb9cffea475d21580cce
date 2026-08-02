@@ -1,0 +1,48 @@
+graph LR
+  classDef spine fill:#1f2937,stroke:#9ca3af,color:#fff;
+  classDef crm fill:#0e7490,stroke:#67e8f9,color:#fff;
+  classDef cs fill:#15803d,stroke:#86efac,color:#fff;
+  classDef comp fill:#b45309,stroke:#fcd34d,color:#fff;
+
+  subgraph SPINE[Shared spine]
+    A[Account]:::spine
+    C[Contact]:::spine
+    TM[TeamMember]:::spine
+    I[Interaction]:::spine
+  end
+
+  subgraph CRM[CRM]
+    O["Opportunity\n(stage SM, momentum, decay)"]:::crm
+  end
+
+  subgraph CS[Customer Success]
+    SUB[Subscription]:::cs
+    TK["Ticket\n(status SM)"]:::cs
+    SP["SuccessPlan\n(phase SM)"]:::cs
+  end
+
+  subgraph COMP[Compliance]
+    DOC["Document\n(lifecycle SM, expiry)"]:::comp
+    CTL["Control\n(status SM)"]:::comp
+    RSK["Risk\n(remediation SM)"]:::comp
+    DSAR["DataRequest\n(SLA SM)"]:::comp
+  end
+
+  C -->|works_at| A
+  I -->|about| A
+  I -->|with| C
+  O -->|for| A
+  O -->|owned_by| TM
+  SUB -->|for| A
+  TK -->|for| A
+  TK -->|raised_by| C
+  TK -->|assigned_to| TM
+  SP -->|for| A
+  SP -->|owned_by| TM
+  DOC -->|for| A
+  DOC -->|signed_by| C
+  RSK -->|for| A
+  RSK -->|relates_to| CTL
+  DSAR -->|from| C
+  DSAR -->|for| A
+  CTL -->|owned_by| TM

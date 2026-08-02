@@ -1,0 +1,79 @@
+# Step 15 — DRAFT change summaries (review pack)
+
+Five DRAFTs awaiting sign-off. Each section: the Drive link, the changes, what signing off triggers, and what to check. When ready, tell me which to promote (or "all") and I'll do the `DRAFT → LATEST` renames in one pass.
+
+---
+
+## 1. Marketplace template — `2026-06-05 - DRAFT`
+Package: Order TEMPLATE + Marketplace DPA + 99% SLA · vs `2026-04-20 - LATEST`
+📄 [Folder](https://drive.google.com/drive/folders/13eKzRZFSJEnsZ8IV8MJklqo58uf7WpR9) · [DPA](https://docs.google.com/document/d/1hXlev3wfp2RajifWrkJmcVX8Guu9-XX8wmTziFWfIKM/edit)
+
+| Change | Detail |
+|---|---|
+| DPA subprocessor appendix standardized | Table 2 (ops) **+ OpenAI + Anthropic**; Table 1 (hosting) = Azure, BetterStack, PostHog; hyperlinked |
+| Subprocessor-update clause | List updates under the 14-day notice = permitted modification (no separate amendment) |
+| 99% SLA added to package | Canonical 2026-05-29 SLA; cleaned (banner removed, "Main Agreement" → "Customer Agreement", typo fixed) |
+| Notice period | 14 days (unchanged) |
+
+**On sign-off:** `2026-06-05 - DRAFT/` → `- LATEST/`; demote `2026-04-20 - LATEST` → `2026-04-20`. · **Check:** OpenAI/Anthropic correct; 99% terms.
+
+---
+
+## 2. Customer Cloud Hosting template — `2026-06-05 - DRAFT`
+Package: Main Agreement + Att 1 Terms + Att 2 SLA + Att 3 DPA · vs `2025-10-29 - LATEST`
+📄 [Folder](https://drive.google.com/drive/folders/1nBeC1SHFgYvPlhult5TTpirwEJSg0xGX)
+
+| Change | Detail |
+|---|---|
+| SLA upgraded | **90% → 99%** (canonical 2026-05-29 SLA) |
+| DPA appendix standardized | Table 2 **+ OpenAI + Anthropic**; Table 1 = **BetterStack, PostHog only** (customer self-hosts → no Azure/AWS) |
+| DPA basis | `14JrU` retained; notice 14 days (unchanged) |
+
+**On sign-off:** `2026-06-05 - DRAFT/` → `- LATEST/`; demote `2025-10-29 - LATEST` → `2025-10-29`. · **Check:** 99% intended for self-hosting; OpenAI/Anthropic.
+
+---
+
+## 3. SaaS DPA — `2026-06-04 - DRAFT` (new)
+Click-through DPA for the open self-serve SaaS. No prior version.
+📄 [Doc](https://docs.google.com/document/d/1TYVTisENNzIuJR8eh_MJaLHvKXrAyIjc-6qjiw760C8/edit)
+
+| Item | Detail |
+|---|---|
+| Origin | Repurposed from the old "provision of The Platform" DPA (`1it8`) |
+| Table 1 (hosting) | Azure, **AWS**, BetterStack, PostHog — AWS only here (hosts Anthropic's models), SaaS-only |
+| Table 2 (operations) | Same ops set incl. OpenAI + Anthropic |
+| Notice period | **30 days** + 3-month termination — deliberately longer than enterprise's 14 days |
+
+**On sign-off:** `2026-06-04 - DRAFT/` → `- LATEST/`. · **Check:** AWS-in-SaaS-only; 30-day notice intended.
+
+---
+
+## 4. Pre-approved subprocessor list — `2026-06-04 - DRAFT`
+Master superset feeding every DPA's appendix. · vs `2026-04-28 - LATEST`
+📄 [Doc](https://docs.google.com/document/d/1RbAhmLFeDvfu-8-UrmWEFIQuZXllyyRQ15v1gt5YFC0/edit)
+
+| Vendor / item | Change |
+|---|---|
+| Anthropic | **Added** (Table 2) — was removed from LATEST |
+| OpenAI | Renamed from "ChatGPT" |
+| AWS | SaaS-only (Table 1) |
+| Sentry | Pre-approved, in **no** DPA |
+| Firecrawl | Excluded (no PII) |
+| Stripe / GitHub / Vanta | Internal-tools list — **NOT** customer subprocessors |
+
+**On sign-off:** `… - 2026-06-04 - DRAFT` → `- LATEST`; demote `… - 2026-04-28 - LATEST` → bare date. · **Open (O3-residual):** classify Loops / Zero / Cursor + MS Marketplace publisher.
+
+---
+
+## 5. Application Cookie Policy — `2026-06-07 - DRAFT` (rewrite)
+Prior copy was the *website* cookie policy wrongly duplicated in (now in `99 - old`).
+📄 [Doc](https://docs.google.com/document/d/117nM566kUT8LH-Z9XBoKuIkrJTFaA5onRDEmYOO7h9E/edit)
+
+| Change | Detail |
+|---|---|
+| Removed | Website-only trackers: Google, HubSpot, LinkedIn, Reddit, Salesloft, Intercom (none in app) |
+| Kept | Necessary cookies (auth / session / CSRF), reworded to platform scope |
+| Added | Analytics — **PostHog only**, set only after sign-in (cookieless until login), EU-hosted |
+| Meta | Date → 7 June 2026; scope → platform |
+
+**On sign-off:** `2026-06-07 - DRAFT/` → `- LATEST/`. (Stays separate + unpublished per your call.) · **Check:** PostHog-only matches the code (it does).

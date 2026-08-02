@@ -1,0 +1,10 @@
+# 🟢 WhatsApp
+
+| Area | Details |
+|---|---|
+| 🔐 Auth | 🔑 OAuth/token |
+| 🧾 Requirements | 📋 Meta app; WhatsApp Business Account; phone number; templates; user opt-in |
+| 👁️ Read | 💬 Inbound messages, delivery/read status |
+| ✍️ Write | 📤 Template messages, session replies |
+| ⚡ Triggers | 🔔 Message/status webhooks |
+| ⚠️ Limits | ⏳ Opt-in, template approval, messaging windows |

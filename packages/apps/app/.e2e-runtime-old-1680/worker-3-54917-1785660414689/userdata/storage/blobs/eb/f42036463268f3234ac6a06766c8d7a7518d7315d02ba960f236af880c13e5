@@ -1,0 +1,39 @@
+---
+title: Normain Network Diagram — Azure (Sweden Central)
+---
+flowchart TB
+    NET(["🌐 Internet"])
+
+    subgraph AZ["☁️ Azure subscription — Sweden Central"]
+      subgraph RG["Resource group: Production"]
+        subgraph VNET["Virtual network: vnet-normain"]
+          subgraph SNAPI["Subnet: snet-api"]
+            LB["Load Balancer"]
+            API["API<br/>(Container App)"]
+          end
+          subgraph SNVM["Subnet: snet-vm"]
+            WEB["Static web server"]
+            JUMP["Jump server<br/>(bastion)"]
+          end
+          subgraph SNDB["Subnet: snet-db"]
+            DB[("Managed PostgreSQL")]
+          end
+        end
+      end
+    end
+
+    NET -- HTTPS --> LB
+    NET -- RDP --> JUMP
+    LB -- HTTPS --> API
+    LB -- HTTPS --> WEB
+    API -- SQL --> DB
+    JUMP -- admin --> DB
+
+    NOTE["➕ Identical resource groups also deployed for dev &amp; demo"]
+
+    classDef ext fill:#fff3f3,stroke:#c0392b,color:#7a1f17;
+    classDef db fill:#eef7ee,stroke:#2e7d32,color:#1b3d1f;
+    classDef note fill:#fff8e6,stroke:#d6bf6a,color:#6b5618,font-style:italic;
+    class NET ext;
+    class DB db;
+    class NOTE note;

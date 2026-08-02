@@ -1,0 +1,55 @@
+# Accepting & Purchasing Your Offer
+
+We've sent you a link to your private offer. Follow these steps to accept it and get started.
+
+## Before You Begin
+
+Please make sure the following is in place:
+
+- [ ] You have an **active Azure subscription** linked to your billing account. If you don't have one, your Azure administrator will need to create one first.
+- [ ] Your organization allows purchases from **Microsoft Marketplace** ([how to check](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/ea-azure-marketplace#enabling-azure-marketplace-purchases))
+- [ ] You've identified who will handle each step — different steps require different permissions:
+  - **Accept the offer** — billing admin (e.g. Enterprise Admin or Billing Account Owner)
+  - **Complete the purchase** — Azure subscription owner or contributor
+  - **Approve app access** — IT admin / Global Administrator (only if your organization requires approval for new apps)
+
+> The owner of your Azure tenant typically has all the permissions needed to handle every step.
+
+## Step 1: Accept the Offer
+
+1. Open the link we sent you — it will take you to your offer in the Azure Marketplace
+2. Review the details: what's included, the pricing, and the start/end dates
+3. If there are terms & conditions attached, review them (you can download the PDF)
+4. Click **Accept private offer**
+
+> After accepting, the next step (Purchase) may take **15–60 minutes** to become available. You can refresh the page to check.
+
+## Step 2: Purchase
+
+1. When the **Purchase** button becomes active, click it
+2. You'll be asked to select an **Azure subscription** and **resource group**. If you don't have a resource group, create one and name it e.g. `Normain` — if unsure, ask your Azure administrator
+3. You'll be asked to name the purchase — this is just a label for your own reference, e.g. `Normain - <plan-name>`
+4. Set **auto-renew** to **off** (we will help you with renewal when the time comes)
+5. Click **Review + subscribe** → **Subscribe**
+6. Wait for it to finish setting up
+
+> If the Purchase button is greyed out, hover over it — a message will explain why. The most common reason is that it's not ready yet (wait a bit and refresh).
+
+## Step 3: Activate the Subscription
+
+1. When the subscription is ready, you'll be redirected to our website (or shown a link to it). Follow the instructions on the page to confirm and activate your subscription. **Your purchase is not complete until you do this.**
+2. Once the subscription is successfully set up, you'll be automatically redirected to the sign-in page (see Step 4 below)
+
+## Step 4: Sign In to the Application
+
+1. If you were not automatically redirected, contact us for the application URL
+2. Sign in with your Microsoft work email
+3. The first time you sign in, Microsoft will ask you to approve our app. Depending on your organization's settings:
+   - **You may be able to approve it yourself** — just click **Accept**
+   - **You may need IT approval** — click **Request approval** and your IT department will receive a request to approve the app. Once they do, you can sign in again
+
+> **Note for your IT department**: The approval request appears in the Microsoft admin center under **Enterprise applications** → **Admin consent requests**. It's a standard sign-in permission — it lets our app verify your identity. No data beyond your basic profile (name and email) is accessed.
+
+## Need Help?
+
+If you get stuck at any point, reach out to us and we'll help you through it.

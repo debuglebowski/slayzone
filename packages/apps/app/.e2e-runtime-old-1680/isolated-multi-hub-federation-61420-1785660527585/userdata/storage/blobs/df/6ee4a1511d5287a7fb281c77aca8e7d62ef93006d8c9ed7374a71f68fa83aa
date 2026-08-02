@@ -1,0 +1,53 @@
+# Azure Defender — Lane B fixes for remediation
+
+Subscription `a9049f9f` (Normain). Secure score 15.48% as of 2026-06-24. These are the **genuine + lower-urgency config fixes** from the Defender posture review — the real ISO-relevant hardening, separate from the 4,709 dependency-CVE findings (handled via the existing Trivy/Dependabot + nor-28xx bump flow) and from the items we're exempting.
+
+**Priority:** High = real exposure, do first · Med = should do, lower urgency.
+**Where:** mostly `terraform/modules/azure/` in the platform monorepo; AKS pod-security items are workload manifests/Helm enforced via the Azure Policy add-on.
+
+| Pri | Defender recommendation | Affected | Resource | Concrete fix |
+|---|---|---|---|---|
+| **High** | Storage public access should be disallowed | 8 | `azurerm_storage_account` | `allow_nested_items_to_be_public = false`; `public_network_access_enabled = false` |
+| **High** | Storage accounts should prevent shared key access | 13 | `azurerm_storage_account` | `shared_access_key_enabled = false` (move callers to Entra/SAS first) |
+| **High** | Secure transfer to storage should be enabled | 2 | `azurerm_storage_account` | `https_traffic_only_enabled = true` |
+| **High** | Restrict storage network access (VNet rules + firewall) | 11+11 | `azurerm_storage_account` | `network_rules { default_action = "Deny"; virtual_network_subnet_ids = [...]; ip_rules = [...] }` |
+| Med | Storage should use a private link connection | 13 | `azurerm_private_endpoint` | Private endpoint for blob/file subresource |
+| **High** | Firewall should be enabled on Key Vault | 6 | `azurerm_key_vault` | `network_acls { default_action = "Deny"; bypass = "AzureServices" }` |
+| **High** | Key Vaults should have deletion protection | 1 | `azurerm_key_vault` | `purge_protection_enabled = true` |
+| Med | Key Vaults should use private link | 6 | `azurerm_private_endpoint` | Private endpoint for vault |
+| Med | RBAC should be used on Key Vault | 1 | `azurerm_key_vault` | `enable_rbac_authorization = true` |
+| Med | Diagnostic logs in Key Vault should be enabled | 1 | `azurerm_monitor_diagnostic_setting` | `AuditEvent` → Log Analytics |
+| **High** | Foundry (AI) key access disabled (local auth) | 18 | `azurerm_ai_services`/`cognitive_account` | `local_authentication_enabled = false` (use Entra) |
+| **High** | Foundry (AI) restrict network access | 18 | same | `public_network_access_enabled = false` / `network_acls { default_action = "Deny" }` |
+| Med | Foundry (AI) use Azure Private Link | 18 | `azurerm_private_endpoint` | Private endpoint per resource |
+| Med | Diagnostic logs in Foundry should be enabled | 18 | `azurerm_monitor_diagnostic_setting` | → Log Analytics |
+| **High** | AKS Azure Policy add-on installed | 2 | `azurerm_kubernetes_cluster` | `azure_policy_enabled = true` — **leverage point**: drives the pod-security items below via Gatekeeper |
+| **High** | AKS disable automounting API credentials | 57 | workload manifests/Helm | `automountServiceAccountToken: false` |
+| **High** | AKS immutable (read-only) root filesystem | 43 | workload manifests/Helm | `securityContext.readOnlyRootFilesystem: true` |
+| **High** | AKS avoid privilege escalation | 38 | workload manifests/Helm | `securityContext.allowPrivilegeEscalation: false` |
+| **High** | AKS API server restricted access | 2 | `azurerm_kubernetes_cluster` | `api_server_access_profile.authorized_ip_ranges` or private cluster |
+| Med | AKS enforce CPU/memory limits | 8 | workload manifests/Helm | `resources.limits.cpu` / `.memory` |
+| Med | AKS should not use default namespace | 4 | workload manifests/Helm | Deploy into named namespaces |
+| Med | AKS Defender profile enabled | 2 | `azurerm_kubernetes_cluster` | `microsoft_defender { log_analytics_workspace_id = ... }` (Containers plan already on) |
+| Med | Container images from trusted registries only | 57 | Azure Policy / Gatekeeper | Allowed-registries constraint → your ACR |
+| Med | Audit diagnostic setting for selected resource types | 58 | `azurerm_monitor_diagnostic_setting` | Per resource; best via Policy DeployIfNotExists → Log Analytics |
+| Med | Diagnostic logs in Kubernetes services | 2 | `azurerm_monitor_diagnostic_setting` | On AKS → Log Analytics |
+| Med | Upgrade Azure Kubernetes Service | 16 | `azurerm_kubernetes_cluster` | Bump `kubernetes_version` |
+| Med | Upgrade Kubernetes nodes | 2 | node pool | Bump `orchestrator_version` |
+| **High** | Privileged roles permanent access (sub/RG) | 3 | Entra PIM | Convert to PIM-eligible (folds into PIM rollout) |
+| **High** | Service Principals with admin roles (sub/RG) | 2 | role assignments | Remove/scope down SP role assignments |
+| Med | VM/VMSS encryption at host | 2 | `azurerm_*virtual_machine*` | `encryption_at_host_enabled = true` |
+| Med | PostgreSQL geo-redundant backups | 2 | `azurerm_postgresql_flexible_server` | `geo_redundant_backup_enabled = true` (set at create — may need recreate) |
+| Med | PostgreSQL connection_throttle = on | 2 | `..._configuration` | Param `connection_throttle.enable = on` |
+| Med | PostgreSQL logfiles.retention_days > 3 | 2 | `..._configuration` | Param `logfiles.retention_days = 7` |
+| **High (5-min)** | Subscription security contact email | 1 | `azurerm_security_center_contact` | Set `email` |
+| **High (5-min)** | High-severity alert email (+ to sub owner) | 1+1 | `azurerm_security_center_contact` | `alert_notifications = true`; `alerts_to_admins = true` |
+
+## Not in this list (deliberately)
+- **Verify intent first, not blind-fix:** Container Apps public-internet exposure (9 — some are meant to be public SaaS endpoints); PostgreSQL Entra-only auth (2 — may break password-auth callers).
+- **Exempting, not fixing:** pgaudit recs (PIM activation-logging is our compensating control); Defender paid-plan upsells (cost decision, pending).
+- **Lane A overlap (dep-bump flow, not here):** AKS node vuln findings (2), ACR image vulnerabilities (1).
+
+## Notes
+- Enabling the **AKS Azure Policy add-on** is the single highest-leverage move — once Gatekeeper enforces the pod-security baseline, the automount / privesc / read-only-FS / limits items (~150 findings combined) clear together rather than one workload at a time.
+- Bulk diagnostic-logging (58) is best done with an Azure **Policy DeployIfNotExists** assignment so new resources auto-onboard, not per-resource by hand.

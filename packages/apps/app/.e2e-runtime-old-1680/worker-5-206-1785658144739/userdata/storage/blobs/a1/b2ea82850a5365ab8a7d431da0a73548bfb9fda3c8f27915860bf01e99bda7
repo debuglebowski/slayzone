@@ -1,0 +1,109 @@
+# Consolidate "Concepts" + "Concepts graph"
+
+## Goal
+- One Settings tab instead of two.
+- Clicking a concept node in the graph opens that concept's **settings** (not the instance browser, which is where it goes today).
+
+## What exists today
+- **Concepts** tab (admin-only): text-list of concepts on the left  +  name/description/fields editor on the right. (`Concepts.tsx`)
+- **Concepts graph** tab (all members): React-Flow LR diagram, nodes=concepts, edges=relation fields. Node click -> `/concepts/:id` instance browser. (`ConceptsGraph.tsx`)
+
+So we already have a master-detail editor. The merge = swap the text-list "master" for the graph as the selector, keep the detail editor.
+
+---
+
+## Option A — Graph canvas + right drawer  (recommended)
+Graph owns the tab. Click a node -> settings slide in on the right; graph stays visible.
+
+```
+Settings   [Profile][Organization][Members][ Concepts ]
++----------------------------------------------------------+
+| Concepts                                  [+ New concept] |
++-------------------------------------------+--------------+
+|                                           | Player    [x]|
+|   +--------+   owns    +--------+          |--------------|
+|   | Player |---------->| Estate |          | Name         |
+|   +--------+           +--------+          | [Player    ] |
+|       |                                    | Description  |
+|       | rival                              | [..........] |
+|       v                                    |              |
+|   +--------+                               | Fields    [+]|
+|   | House  |                               |  name   text |
+|   +--------+                               |  gold   money|
+|                                            |  owns -> Est |
+|   (pan / zoom canvas)                      |              |
+|                                            | [View rows]  |
+|                                            | [Save][Del]  |
++-------------------------------------------+--------------+
+```
++ Graph is the spatial home; editing in context.
+- Drawer overlaps canvas; a bit more new code (drawer state/animation).
+
+## Option B — Persistent split: graph left / editor right
+Closest to today's master-detail; lowest-risk reuse of `Concepts.tsx` editor.
+
+```
+Settings  >  Concepts
++----------------------------------+----------------------+
+| graph canvas          [+ New]    | Player               |
+|  +--------+    +--------+         | Name [Player       ] |
+|  | Player |--->| Estate |         | Desc [............]  |
+|  +--------+    +--------+         | Fields          [+]  |
+|       |                           |  name   text         |
+|       v                           |  gold   money        |
+|  +--------+                       |  owns   -> Estate    |
+|  | House  |                       | [View rows]          |
+|  +--------+                       | [Save]      [Delete] |
++----------------------------------+----------------------+
+```
++ Detail always visible, no overlay; mostly a layout swap.
+- Graph gets ~60% width; editor + fields can feel cramped side-by-side.
+
+## Option C — Graph on top / editor below
+```
+Settings > Concepts
++----------------------------------------------------------+
+| graph canvas                            [+ New concept]  |
+|   +--------+   +--------+   +--------+                    |
+|   | Player |-->| Estate |   | House  |                    |
+|   +--------+   +--------+   +--------+                    |
++----------------------------------------------------------+
+| Player                                  [Save] [Delete]  |
+| Name [Player       ]  Desc [.....................]       |
+| Fields                                            [+]    |
+|  name text | gold money | owns -> Estate(many) ...       |
++----------------------------------------------------------+
+```
++ Editor gets full width (good when fields list is long).
+- Graph height is squeezed; more vertical scrolling.
+
+---
+
+## Open questions
+1. **Admin gating.** Editor is admin-only today; graph is all-members. Merged tab -> admin-only (non-admins lose the graph), or keep graph readable by all with editor disabled for them?
+2. **Reach the instance browser.** Node-click currently jumps to instances; that becomes "open settings". Keep a path via a "View rows" link in the detail pane? (sidebar + dashboard already link to instances, so not the only path.)
+3. **Layout** A / B / C.
+4. **Tab label** after merge — keep "Concepts", drop "Concepts graph"?
+
+---
+
+## Decisions (locked)
+- **Layout A** — graph fills the tab; node-click opens a **right drawer** with that concept's settings. Graph stays visible.
+- **Access: read-only for members** — all members see graph + can open a concept's drawer; Save / Delete / Add-field / Edit-field disabled unless admin.
+- **Node-click focuses the concept for editing** (opens its drawer).
+- Merged tab keeps label **"Concepts"**; the separate "Concepts graph" tab is removed.
+
+## Build plan
+1. **`ui.tsx`** — add a right-anchored `Drawer` (esc-to-close + backdrop), mirroring `Modal`.
+2. **`ConceptGraphCanvas.tsx`** (new) — extract `buildFlow` / node+edge types / `Flow` out of `ConceptsGraph.tsx`; expose `onSelect(conceptId)` + `selectedId` (highlight active node) instead of `navigate(...)`.
+3. **`Concepts.tsx`** (becomes the merged page) — graph canvas + `[+ New concept]` toolbar; `selectedId` opens the `Drawer` holding the existing name/description + fields editor (reused as-is). Consume `admin` from outlet context to gate every mutation control. Optional `[View rows]` link → `/concepts/:id`.
+4. **Cache** — concept + field mutations also `invalidateQueries(["conceptGraph"])` so the canvas reflects renames / new relations; after create, select the new node.
+5. **`SettingsLayout.tsx`** — drop the `concepts-graph` tab; flip `concepts` tab to `admin: false` (members get read-only).
+6. **`App.tsx`** — remove the `concepts-graph` route.
+7. Delete `ConceptsGraph.tsx` once its canvas is extracted.
+
+## Unresolved
+1. Drawer: overlay canvas (~420px) vs push/resize it? (proposing overlay.)
+2. Members: show the drawer with disabled controls, or hide it entirely? (proposing show, disabled.)
+3. Keep the `[View rows]` link to the instance browser, or leave instances to the sidebar/dashboard only?
+4. `[+ New concept]`: inline create-row (like today) vs small modal? (proposing inline.)

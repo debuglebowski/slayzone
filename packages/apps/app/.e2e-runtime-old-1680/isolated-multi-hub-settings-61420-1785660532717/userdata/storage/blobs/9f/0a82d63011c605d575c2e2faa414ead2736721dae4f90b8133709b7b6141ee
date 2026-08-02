@@ -1,0 +1,34 @@
+flowchart TB
+  n1["1. Pick protocol<br/>(SAML or OIDC)"]:::n
+  n2["2. Decide required claims<br/>(sub, email, name, UPN)"]:::n
+  n3["3. Pick SP Entity ID<br/>and callback URL"]:::n
+
+  h1["4. Normain → KPMG<br/>• Protocol<br/>• Claim list<br/>• SP Entity ID<br/>• Callback URL"]:::h
+
+  k1["5. NITSO security review<br/>and approval"]:::k
+  k2["6. Create non-gallery<br/>enterprise app"]:::k
+  k3["7. Configure SSO and claim mapping"]:::k
+  k4["8. Assign KPMG Sweden users"]:::k
+
+  h2["9. KPMG → Normain<br/>• App ID<br/>• Federation metadata"]:::h
+
+  n4["10. Wire auth library<br/>to KPMG's metadata"]:::n
+  n5["11. Implement sign-in and callback<br/>(validate signature, iss, aud)"]:::n
+  n6["12. Map claims to<br/>Normain user accounts"]:::n
+
+  k5["13. KPMG provides test user"]:::k
+  n7["14. End-to-end test"]:::n
+  k6["15. KPMG adds remaining users<br/>— GO LIVE"]:::k
+
+  n1 --> n2 --> n3 --> h1 --> k1 --> k2 --> k3 --> k4 --> h2 --> n4 --> n5 --> n6 --> k5 --> n7 --> k6
+
+  classDef n fill:#e1f5ff,stroke:#0066cc,color:#000
+  classDef k fill:#fff3e0,stroke:#e65100,color:#000
+  classDef h fill:#f3e5f5,stroke:#6a1b9a,color:#000
+
+  subgraph legend["Legend"]
+    direction LR
+    lN["Normain"]:::n
+    lK["KPMG"]:::k
+    lH["Hand-off"]:::h
+  end

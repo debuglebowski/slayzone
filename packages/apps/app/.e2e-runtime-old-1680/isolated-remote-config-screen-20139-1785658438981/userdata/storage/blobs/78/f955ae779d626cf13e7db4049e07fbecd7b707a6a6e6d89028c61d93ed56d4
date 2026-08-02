@@ -1,0 +1,40 @@
+# Slice 5 — Renderer tRPC cutover — FINAL
+
+Mode: autonomous, live tree, direct-to-main per verified batch (signed commits).
+
+## DONE — renderer cut off window.api onto @trpc/tanstack-react-query
+Every router-backed window.api call in the app renderer + all 19 domain client pkgs converted.
+App boots + renders, tRPC WS functional. Validated by e2e: tags 5/5, onboarding pass, terminals work (mode-switching 7/8).
+
+## Commits (main)
+P0 infra(tanstack switch+vanilla client+dataRoot) 34f40031 · P1 tags 97447fe1 · P2 agent-turns 4e948ee7 ·
+P3 usage-analytics 2fed684f · P4-7 automations/test-panel/task-artifacts/file-editor c32bc599 ·
+P8-11 settings/projects/task-browser/worktrees 80d7595e · P12-13 ai-config/task-terminals 42298c9d ·
+P14-15 terminal(PtyContext subs+getTrpcClient) 0a282703 · task+tasks+telemetry+onboarding daf1cb60 ·
+P6b feedback router + P17 app renderer be2297c0 · BOOT FIX (provider order + initTrpcClient) e27c09b9 ·
+refreshData global-invalidate 521fa5bd
+
+## Infra added beyond plan
+- @trpc/tanstack-react-query (createTRPCContext: useTRPC/queryOptions/mutationOptions/subscriptionOptions)
+- getTrpcClient()/initTrpcClient() module-scope singleton (one WS, shared React+non-React)
+- TrpcProvider wraps ALL entrypoints (main+floating+secondary); TrpcProvider OUTERMOST (ConvexAuthBootstrap needs it)
+- feedback tRPC router (new); server worker-DB return types narrowed (artifact-store versions, integrations.applyStatusSync, marketplace skills, taskWindows)
+- __slayzone_refreshData now invalidates ALL tRPC queries (cross-transport refresh)
+
+## REMAINING (documented follow-ups)
+### P19 — e2e seed→tRPC + green the suite
+e2e seed helpers still use window.api (IPC, live via dual-transport). Most specs pass; some (terminal-core openTaskTerminal, temp-task cleanup) fail on IPC-seed→tRPC-cache timing. Full suite not yet run end-to-end (hours). Swap fixtures/electron.ts seed + specs to window.getTrpcVanillaClient(); ensure seed points trigger refresh.
+### Slice-3 router gaps (block true zero-window.api; left on bridge, documented)
+- project-groups (9 ops) — no router
+- subscriptions/procs missing: automations.onChanged, pty.onStats, pty.onResizeNeeded, pty.ackEnsureAlive, telemetry.onIpcEvent, window.setTrafficLightPosition, window.setWindowButtonVisibility
+- return `unknown` server-side (need typing, left on bridge): app.floatingAgent.getState/onState, app.browser.onShortcut/onCreateTaskFromLink
+### Electron-native (stay by design): browser WCV ops, files.getDropPaths/getPastePaths, leaderboard (Convex)
+### Bootstrap (remove in slice 8): main.tsx getTrpcPort/bootMark/isPlaywright/error-capture, theme-init
+### Module-scope stores at boot: useTabStore, useContextManagerStore (settings read before client ready)
+### 4 task client unit tests mock window.api (orphaned from CI) — need tRPC-mock rewrites
+
+## UNCLARITIES (need your call)
+1. chromium/ fork tree breaks root `pnpm lint` + `pnpm typecheck` (mojo-bindings + 70GB scan). Add chromium/ to eslint/tsconfig ignores?
+2. Build the slice-3-gap routers (project-groups, the missing subscriptions) to reach true zero-window.api? (arguably slice-3 scope)
+3. P19 full e2e seed swap (70 spec files) — proceed, or defer to slice 8?
+4. Type the `unknown`-returning app-deps procs (floatingAgent/browser events) server-side so those last consumers can convert?

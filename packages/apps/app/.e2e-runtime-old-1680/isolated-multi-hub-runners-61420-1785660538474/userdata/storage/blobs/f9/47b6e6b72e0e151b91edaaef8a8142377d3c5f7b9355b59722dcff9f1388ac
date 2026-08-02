@@ -1,0 +1,27 @@
+# Activity — Layout A: timeline feed
+
+Vertical rail with dots, actor-first sentences, relative times.
+The "social feed" reading of org events; rail placement (3-4 cols).
+
+```
++----------------------------------+
+| Activity                         |
++----------------------------------+
+|  o  anna updated Acme Corp       |
+|  |    stage: open -> nego        |
+|  |    10:42                      |
+|  o  jens created Cloudly         |
+|  |    in Vendors                 |
+|  |    10:31                      |
+|  o  mia completed a task         |
+|  |    "Review vendor sheet"      |
+|  |    09:58                      |
+|  o  anna noted on Globex         |
+|       "pushing to Q3"            |
+|       09:12                      |
++----------------------------------+
+| limit: 20 . scope: all concepts  |
++----------------------------------+
+```
+
+Config: limit, optional conceptId scope. Row click -> instance.

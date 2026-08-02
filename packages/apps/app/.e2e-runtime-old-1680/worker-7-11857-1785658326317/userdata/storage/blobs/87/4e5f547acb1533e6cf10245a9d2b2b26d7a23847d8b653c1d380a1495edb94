@@ -1,0 +1,103 @@
+# Slice 2.5 Risks
+
+Threat-model for the side-car shell. **Slice 2.5 is additive dark-launch** — the side-car is shadow infra (spawned, supervised, listening) with nothing depending on it.
+
+Risks #2, #5, #8 are **structurally eliminated** by this posture and are omitted from the table below — see "Why dark-launch collapses the risk surface". They return at the renderer cutover (slice 2.6); mitigate them there. Risk numbers are kept stable (gaps intentional) so cross-references to the plan stay valid.
+
+Table sorted by severity: Medium → Low. **No Blocker or High remain.**
+
+| # | Risk | Severity | Description | Mitigation |
+|---|---|---|---|---|
+| 7 | DB-name divergence between Electron + side-car | **Medium** | Future engineer changes Electron's DB-name selector but forgets `SLAYZONE_DB_NAME` env passthrough → side-car opens different file → silent two-DB divergence. | Extract `getDbName(isPackaged)` helper to `@slayzone/platform`. Electron `db/index.ts` + side-car `db.ts` both call it. |
+| 1 | macOS Gatekeeper + hardened runtime blocks `ELECTRON_RUN_AS_NODE` child spawn | **Low** (was Blocker) | Theoretical concern: a notarized hardened-runtime .app spawning a child. **Largely pre-mitigated** — see "macOS Gatekeeper" section. Required entitlements already present; side-car is the same signed binary (inherits clearance). | Confirm via spawn-smoke spike on a **quarantined DMG**. Ship `bin.js` as plain `.js` in `Contents/Resources/` (not code — never Gatekeeper-checked). If it ever fails: add the one missing entitlement — do NOT bundle a separate `node` binary (that needs its own signing). |
+| 3 | `pgrep slayzone-server` orphan cleanup targets wrong binary | **Low** (was High) | Side-car runs as `process.execPath` (Electron binary, e.g. "SlayZone Dev"). pgrep doesn't match "slayzone-server". `e2e/global-setup.ts:11-14` has the same latent flaw. **Downgraded** — parent-death detection means the side-car self-exits when Electron dies, so orphans are no longer the common case; pgrep is now only a backstop. | **Primary**: parent-death detection — side-car watches `process.stdin` close/end + polls `process.ppid`, self-exits when parent dies (clean exit OR `kill -9`). Gated on `SLAYZONE_SUPERVISED=1`. **Backstop**: `pgrep -f 'server/dist/bin.js'` (match argv, not binary name) in `e2e/global-setup.ts` + global-teardown. |
+| 4 | Stdout/stderr back-pressure deadlock | **Low** (was Medium) | Kernel pipe buffer (~64KB) fills if logger throws/stalls → side-car blocks on write → hang. **Downgraded** — file-based logging means the pipe carries ~10 lines for the whole process life, so the buffer cannot fill. | **Primary**: side-car logs verbose output to `<dataRoot>/logs/sidecar.log` (`src/log.ts`), NOT stdout. stdout/stderr carry only banner + fatals. No `console.log` in request hot paths. **Backstop**: supervisor still drains `.on('data')` immediately + wraps logger in try/catch. |
+| 6 | Vite bundles `@slayzone/server` into Electron main | **Low** (was Medium) | `electron.vite.config.ts` builds `slayzoneDeps` from `dependencies` + `devDependencies` and `externalizeDepsPlugin({exclude})` *bundles* every `@slayzone/*` into main. **Downgraded** — `@slayzone/app` imports nothing from `@slayzone/server`, and vite cannot bundle an unimported module. The residual risk is purely a future accidental import. | **Structural**: `@slayzone/app` imports *nothing* from `@slayzone/server` — supervisor spawns `dist/bin.js` by file path; its types are local to `sidecar-server-supervisor.ts`. `@slayzone/server` declared a **devDependency** (build-order hint only). **Enforced**: static guard fails if `packages/apps/app/src` contains `from '@slayzone/server'`. |
+| 9 | Orphaned side-car after Electron `kill -9` | **Low** | Side-car may outlive parent process. | Parent-death detection (see #3) — side-car self-terminates within ~2s of parent death, covering `kill -9`. Keep child ref'd (no `unref()`). SIGTERM on `will-quit`. `pgrep -f` reaps the sub-second detection-gap window. |
+| 10 | Dual-writer SQLITE_BUSY under load | **Low** | Router empty → side-car never writes → zero contention this slice. Becomes Medium when slice 4+ procedures land. | Monitor under e2e once procedures migrate. `busy_timeout=5000` covers transient. Add retry-on-BUSY helper if persistent. |
+| 11 | `__trpcPort` globalThis leftover | **Low** | Dark-launch keeps the in-process tRPC path alive → leftover var stays. | Optional: rename to `__inProcessTrpcPort` so slice 2.6 cutover diff is unambiguous. |
+
+## Severity legend
+
+- **Blocker**: prevents shipping the slice — *none*
+- **High**: would cause a test flake or dev-tooling failure — *none*
+- **Medium**: silent foot-gun, hard to debug if hit
+- **Low**: monitored, mitigated by existing guards or pre-existing config
+
+## Why dark-launch collapses the risk surface
+
+Three risks — **#2 test-reset port churn, #5 ~80s mount block, #8 WS reconnect race** — all require the renderer to *depend on* the side-car. Slice 2.5 ships the side-car as shadow infra: spawned, supervised, listening on `/trpc` + `/health`, holding a DB writer handle — but the renderer keeps using the in-process tRPC server. No dependency → those three cannot occur, so they are dropped from the table above.
+
+Net: **zero blockers, zero high-severity.** Remaining items are one Medium foot-gun and seven Low — all with named fixes baked into the slice.
+
+## macOS Gatekeeper (#1) — why it is Low, not a blocker
+
+The concern *sounds* scary — a notarized, hardened-runtime .app spawning a child process — but the structure makes it nearly a non-issue:
+
+- **The side-car is the same signed binary.** It is `process.execPath` (the Electron binary) launched with `ELECTRON_RUN_AS_NODE=1`. It inherits 100% of the app's entitlements, notarization, and quarantine clearance. Gatekeeper clears a binary once; re-`exec`ing an already-cleared binary does not re-trigger it.
+- **Entitlements are already in place.** `packages/apps/app/build/entitlements.mac.plist` has `allow-jit`, `allow-unsigned-executable-memory`, `allow-dyld-environment-variables`, `network.client` — exactly what `ELECTRON_RUN_AS_NODE` + V8 + the side-car's HTTP/WS need. Nothing to add.
+- **better-sqlite3 `.node` is co-signed.** The main process loads it today without `disable-library-validation` → electron-builder signs nested `.node` files with the app identity. The side-car loads the same signed `.node` → library validation passes.
+- **`bin.js` is plain JavaScript in `Contents/Resources/`** — not an executable, never Gatekeeper-inspected.
+
+What to actually do: confirm via spawn-smoke spike on a **quarantined DMG** (local `.app` lacks the `com.apple.quarantine` xattr → false pass); never ship the side-car as a separate signed executable; if it ever fails, add the one missing entitlement — do NOT bundle a standalone `node`.
+
+## Parent-death detection (#3, #9) — orphan prevention
+
+The side-car self-terminates the instant its parent dies:
+
+- **Spawn w/ `stdin:'pipe'`** — supervisor holds the write end open + never writes. Any parent death (clean exit OR `kill -9`) closes the pipe.
+- **Side-car watches** `process.stdin` `close`/`end` → shut down. Backstop: poll `process.ppid`; reparent to init/launchd (`ppid === 1`) → shut down.
+- **Gated on `SLAYZONE_SUPERVISED=1`** — standalone runs never self-exit on stdin close.
+
+With this, an orphan cannot outlive Electron. `pgrep -f` reaping covers only the sub-second window before the child wires up its watchers — which is why #3 drops High → Low.
+
+## File-based logging (#4) — back-pressure prevention
+
+The side-car logs to a file, not the parent's pipe — so there is no pipe to deadlock:
+
+- **Verbose logging** → `<dataRoot>/logs/sidecar.log` (rotating, `src/log.ts`). Decoupled from the stdout pipe entirely.
+- **stdout/stderr** carry only the startup banner + fatal pre-exit errors — a handful of lines over the whole process life. The supervisor's 64KB pipe buffer physically cannot fill from ~10 lines.
+- **No `console.log` in request hot paths** — a per-request stdout write is the real deadlock trigger (handler itself blocks if stdout backs up). Hot paths use the file logger.
+- Bonus: `sidecar.log` is the primary debugging surface for the dark-launch — shadow infra has no UI; a persistent file readable across restarts is how you diagnose it.
+
+This makes the deadlock structurally impossible, not merely "handled" — which is why #4 drops Medium → Low.
+
+## Side-car / main bundle boundary (#6) — keeping the side-car out of main
+
+`electron.vite.config.ts` collects `slayzoneDeps` from `dependencies` + `devDependencies` and `externalizeDepsPlugin({exclude: slayzoneDeps})` *bundles* every `@slayzone/*` into the main process. If `@slayzone/app` imported `@slayzone/server`, the side-car would be bundled into main — dead code + native-resolution risk.
+
+Fixed structurally, not by discipline:
+
+- **`@slayzone/app` imports nothing from `@slayzone/server`** — not runtime, not `import type`. The supervisor spawns `dist/bin.js` by file path; its types (`SidecarServerOpts`, `SidecarServerHandle`) are defined locally in `sidecar-server-supervisor.ts`. Vite/rollup cannot bundle a module that is never imported — `exclude` only decides externalize-vs-bundle for modules already in the import graph.
+- **`@slayzone/server` is a `devDependency`** of `@slayzone/app`, not `dependencies` — it produces a `dist/bin.js` artifact; it is not a runtime dep. devDependency still gives pnpm the topological build-order hint; the `prebuild` script is the explicit guarantee.
+- **Enforced** — the static guard fails if `packages/apps/app/src` contains `from '@slayzone/server'`. Turns the invariant into a CI-checked rule, so the residual "future accidental import" risk is caught at lint time.
+
+No vite `external` entry is needed — with zero imports there is nothing to externalize.
+
+## Structural mitigations (applied regardless)
+
+1. **Dark-launch** — side-car has no consumers this slice; renderer cutover deferred to slice 2.6.
+2. **Spawn-smoke spike day 1** — validate `ELECTRON_RUN_AS_NODE` spawn + stdio drain in dev + a quarantined `build:mac` DMG before building feature logic.
+3. **Parent-death detection** — side-car self-exits when parent dies (#3, #9).
+4. **File-based logging** — side-car logs to `sidecar.log`; pipe carries banner + fatals only (#4).
+5. **Zero `@slayzone/server` imports in `@slayzone/app`** — devDependency + static guard keep the side-car out of the main bundle (#6).
+6. **`getDbName()` shared helper** — single source of truth for DB filename (#7).
+7. **`pgrep -f` by script path** — backstop orphan-reaping target (#3, #9).
+
+## Verification hooks
+
+- `pnpm build:mac` → test the **quarantined DMG** (install from DMG or `xattr -w com.apple.quarantine`), launch, confirm side-car spawned via `ps -ef | grep '[s]erver/bin.js'`. Validates #1 under real Gatekeeper.
+- `pnpm dev`: confirm log line `[supervisor] sidecar ready pid=X port=N`, and that `<dataRoot>/logs/sidecar.log` is being written. App behaves exactly as before (renderer on in-process tRPC).
+- `pnpm lint`: static guard passes — confirms no `electron` import in side-car-reachable code AND no `@slayzone/server` import in `@slayzone/app` (#6).
+- `kill -9 <side-car-pid>`: supervisor restarts within ~2s; renderer unaffected (no dependency).
+- `kill -9 <electron-main-pid>`: side-car self-exits within ~2s (`ps -p <side-car-pid>` → gone); `pgrep -f 'server/dist/bin.js'` → empty. Validates parent-death detection (#3, #9).
+- All existing e2e specs pass unchanged — dark-launch touches no renderer/IPC surface.
+
+## Slice 2.6 — risks to re-address at renderer cutover
+
+When the renderer is flipped to the side-car, the three eliminated risks return:
+- **#2 test-reset port churn** — supervisor restart picks a new port, renderer's cached port goes stale.
+- **#5 ~80s mount block** — renderer awaiting `waitForReady` through full backoff on permanent failure.
+- **#8 WS reconnect race** — reconnect target port changes mid-restart.
+
+Slice 2.6 must ship with: sticky port across supervisor restart, renderer re-query of port on WS close, soft-fallback UI after 5s pending, and a permanent-failure screen. Slice 2.6 is small + reversible — if side-car telemetry from the dark-launch period looks bad, 2.6 simply doesn't ship.

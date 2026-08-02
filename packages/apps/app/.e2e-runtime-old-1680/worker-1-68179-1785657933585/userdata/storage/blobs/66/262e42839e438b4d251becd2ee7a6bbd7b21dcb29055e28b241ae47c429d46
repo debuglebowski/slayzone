@@ -1,0 +1,77 @@
+# ChatGPT — Run Instructions
+
+## Access
+
+- **URL**: <https://chatgpt.com>
+- **Account**: benchmark-dedicated account.
+- **Plan required**: **ChatGPT Plus** (or Team / Enterprise). Free tier has too-restrictive file uploads and slower models.
+- **Model pin**: at the start of each conversation, switch to the latest GPT model (e.g., GPT-5 or whatever is currently top-of-tier). Record exact model name in `runs/chatgpt/session.md`.
+  - If running both a "reasoning" and a "standard" tier (e.g., o-series + GPT-5), do TWO separate runs of the full UC and report both in the comparison table as separate rows ("ChatGPT (reasoning)" and "ChatGPT (standard)"). Otherwise pick one and disclose.
+
+## Ingestion approach
+
+For UC01 (and any Simple-mode UC):
+
+1. Create a **new Project** (left sidebar → "Projects" → "+ New project"). Name: `Benchmark UC01 - DD financial`.
+2. Add the source files via the Project's file-upload area. For UC01: `msft-fy24-10k.htm`, `msft-fy24-proxy.htm`.
+   - If the tool refuses `.htm`, convert to `.pdf` (use `pandoc /tmp/uc01/msft-fy24-10k.htm -o msft-fy24-10k.pdf` or print-to-PDF in a browser). Note this deviation in the comparison table.
+3. Verify files are processed (greens checkmarks in the file list).
+4. Start a new conversation inside the Project.
+
+For URL-based sources (when files aren't uploadable): ChatGPT can browse the web in newer tiers. Paste the URL with the question and ask the model to fetch + answer. Disclose this deviation.
+
+For UC02 (Repeat): one Project containing all per-source files.
+For UC03 (Spreadsheet): paste canonical template + loop rows one per message.
+For UC08 (DDQ, 100 questions): use a single conversation OR a Custom GPT with the docs preloaded to keep voice consistent. Disclose which approach.
+
+## Limits to know
+
+- **Per-Project files**: 20 files / 512MB combined (current Plus tier — verify at run time).
+- **Per-message attachments**: 10 max.
+- **Format support**: PDF, DOCX, TXT, HTM/HTML, CSV, code, images. Excel/spreadsheets supported with Code Interpreter.
+- **Web browsing**: enabled in newer models; can fetch URLs directly. Note when used.
+- **Context window**: depends on model — record the spec in `session.md`. UC04/UC07 may overflow.
+
+## Per-question protocol
+
+Same as Claude:
+
+1. Open the Project's main conversation.
+2. Paste question verbatim. No system prompt, no preamble.
+3. Wait for full response.
+4. Capture: `prompt.txt`, `answer.md`, `answer.pdf`, `screenshot.png`, `notes.md`.
+5. **Start a fresh conversation between questions** in the same Project to prevent context bleed.
+
+## Capture session metadata
+
+In `runs/chatgpt/session.md`:
+
+```
+account_email: <redacted>
+plan_tier: Plus
+model_at_start: <exact name from the model picker, e.g. GPT-5.x or o4-reasoning>
+model_at_end:   <same field at end>
+date_start: ...
+date_end:   ...
+project_name: Benchmark UC01 - DD financial
+project_url: https://chatgpt.com/g/g-XXX...
+file_count: 2
+file_sha256: <list>
+anomalies: <list — including any model auto-swap, rate-limit hits, browsing-vs-no-browsing decisions>
+```
+
+## Known quirks to flag in grading
+
+- ChatGPT may **silently use web browsing** even when not asked. Watch for "searched the web" indicators in the response and record.
+- Tends to give bullet-list responses; may invert "verbosity without substance" risk vs Claude.
+- Citation style varies by model — record what format the tested model produces (numbered, inline link, or none).
+- May refuse some financial-pay disclosure questions — flag if it happens (it should NOT happen for public SEC data, but record if it does).
+- If web browsing is on, the tool may pull from sources OUTSIDE the uploaded files — disclose this in the comparison table (mark with a 🌐 flag next to the answer).
+
+## After running UC01
+
+Update `use-cases/01-due-diligence-financial/competitor-comparison.md`:
+- Fill the "ChatGPT" column for all 15 rows with: brief answer summary + verdict emoji.
+- If you ran both reasoning + standard models, fill BOTH ChatGPT columns (you may need to add a column).
+- Update the score summary table row for ChatGPT.
+- Add a Notes section, especially noting whether web browsing was used and which model was active.

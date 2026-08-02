@@ -1,0 +1,22 @@
+graph LR
+  classDef spine fill:#1f2937,stroke:#9ca3af,color:#fff;
+  classDef cs fill:#15803d,stroke:#86efac,color:#fff;
+  classDef comp fill:#b45309,stroke:#fcd34d,color:#fff;
+
+  subgraph SPINE[Spine - only Agreement uses these]
+    A[Account]:::spine
+    C[Contact]:::spine
+  end
+
+  subgraph COMP[Compliance docs]
+    PO["Policy<br/>owner + approved_by: member<br/>draft to published to archived<br/>review_due"]:::comp
+    AG["Agreement<br/>MSA / DPA / NDA / SOW<br/>owner: member<br/>draft to active to expired<br/>effective + expiry dates"]:::comp
+  end
+
+  subgraph CS[Customer Success docs]
+    RB["Runbook<br/>owner: member<br/>draft to published to archived<br/>review_due"]:::cs
+  end
+
+  C -->|works_at| A
+  AG -->|for| A
+  AG -->|signed_by| C

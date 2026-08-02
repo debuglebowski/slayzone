@@ -1,0 +1,9 @@
+# LinkedIn
+
+- Auth method: OAuth app
+- Requirements: LinkedIn Developer app; approved products; partner approval for rich data
+- Capabilities:
+  - Read: Basic profile; approved ads/marketing data
+  - Write: Share/post; approved marketing actions
+  - Triggers: Limited; product-dependent
+  - Limits: Restricted APIs; partner approval often required

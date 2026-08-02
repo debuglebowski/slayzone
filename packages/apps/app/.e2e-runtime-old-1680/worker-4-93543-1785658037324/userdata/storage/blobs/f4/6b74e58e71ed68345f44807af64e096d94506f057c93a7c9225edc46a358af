@@ -1,0 +1,81 @@
+# Env Var Simplification — Changes to Implement
+
+Actionable deltas from the env-var deep-dive. Each is a behavior/code change. `SLAYZONE_SUPERVISED` gates all standalone-only changes → the desktop app path stays byte-identical.
+
+## 1. Single-anchor path consolidation (`SLAYZONE_ROOT`)
+
+- **Rename** `SLAYZONE_HOME_DIR` → `SLAYZONE_ROOT` (`platform/dirs.ts` getSlayzoneHomeDir + all readers).
+- **Standalone default** `SLAYZONE_ROOT` = CWD (gate on `!SLAYZONE_SUPERVISED`); supervised = `$HOME/.slayzone`.
+- Derive under `<ROOT>`: DB (`<ROOT>/slayzone.sqlite`), config.json, `logs/`, runner creds (`<ROOT>/runner`).
+- **Fully derived from ROOT — env read remains ONLY as the supervised host→sidecar handoff:**
+  - `SLAYZONE_DB_PATH` — standalone derives `<ROOT>/slayzone.sqlite` (no env). Supervised: the Electron host resolves a path once and passes it to the sidecar it spawns (`db.ts:32` throws if unset) — a cross-process handoff, not an operator knob.
+  - `SLAYZONE_STORE_DIR` — standalone = `<ROOT>` (no env). Supervised: app sets it (`getTrpcDataRoot`, `ensureDataRoot`).
+  - Both leave the operator surface; they exist purely because the host and sidecar are separate processes.
+- `SLAYZONE_DB_NAME` filename becomes a const under ROOT.
+
+## 2. New flag: `SLAYZONE_MODE` (`local` | `remote`, default `local`)
+
+Shared flag read by hub + runner. `remote` sets the whole hardening bundle:
+- **Hub:** auth ON; TLS `/trpc` required + bind-failure fatal; expect non-loopback bind.
+- **Runner:** require `wss` + pinned cert; reject plaintext `ws`.
+- `local` (default): loopback, auth off, `ws` allowed — desktop/fork/laptop unchanged.
+
+### MODE-ripple — 6 vars change behavior under `remote`
+
+| Var | `local` (today) | `remote` (new, fail-loud) |
+|---|---|---|
+| `SLAYZONE_HUB_AUTH_REQUIRED` | off | **ON** (derived from MODE; drop the flag) |
+| `SLAYZONE_HUB_TLS_PORT` | opt-in; bind-fail = TLS dark | required; bind-fail = **fatal** |
+| `SLAYZONE_HUB_PUBLIC_URL` | unset → silent loopback fallback | unset → **boot error** |
+| `SLAYZONE_HUB_RUNNER_TRANSPORT_HOST` | blanket `0.0.0.0` | `0.0.0.0` remote / `127.0.0.1` local |
+| `SLAYZONE_HUB_URL` (runner) | `ws://` soft-allowed | `ws://` = **hard error** |
+| `SLAYZONE_HUB_CERT_SHA256` (runner) | pin optional / softly ignored on ws | pin **required** |
+
+- `SLAYZONE_HOST` no longer drives auth (pure bind addr). **Validate combo**: `mode=local`+non-loopback = exposed-unhardened → fatal; `mode=remote`+loopback → warn.
+
+## 3. Renames — `SLAYZONE_HUB_` prefix (hub-only vars)
+
+| Old | New |
+|---|---|
+| `SLAYZONE_RUNNER_TRANSPORT_PORT` | `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` |
+| `SLAYZONE_RUNNER_TRANSPORT_HOST` | `SLAYZONE_HUB_RUNNER_TRANSPORT_HOST` |
+| `SLAYZONE_RUNNER_TRANSPORT_SECRET` | `SLAYZONE_HUB_RUNNER_TRANSPORT_SECRET` |
+
+Runner-only rename:
+| Old | New |
+|---|---|
+| `SLAYZONE_JOIN_TOKEN` | `SLAYZONE_RUNNER_JOIN_TOKEN` |
+
+config.json keys unchanged (`runnerTransportPort/Secret`, `joinToken`). NOT renamed (shared w/ app+CLI): `SLAYZONE_PORT`, `SLAYZONE_HOST`, `SLAYZONE_DB_PATH`, `SLAYZONE_STORE_DIR`, `SLAYZONE_DB_DIR`.
+
+## 4. Runner env surface collapse
+
+- `SLAYZONE_RUNNER_HEARTBEAT_MS` → **static const** (existing default).
+- `SLAYZONE_RUNNER_CREDENTIALS_DIR` → **derive** `<ROOT>/runner`, no knob. **Fix**: credential-store honors ROOT (uses raw `os.homedir()` today, `credential-store.ts:47`).
+- `SLAYZONE_RUNNER_CONFIG` → **drop** (`<ROOT>/config.json` already carries runner keys).
+- `SLAYZONE_RUNNER_ALLOWED_ROOTS` → **drop env var**; add `allowedRoots?: string[]` to `SlayzoneConfig` + `fromShared` mapping. Default `[ROOT]`, operator appends project dirs in config.json. MUST stay locally-declared, NEVER hub-pushed (verified: runner reads only `ctx.config.allowedRoots`, never hub frames).
+- `SLAYZONE_RUNNER_NAME` → **delete the env var entirely** (both paths). Standalone: name = hostname (derived). Supervised: app + hub already share the `DEFAULT_LOCAL_RUNNER_NAME` const (`types.ts:20`, imported by `index.ts:584,664` + `composition.ts:915`) — so the app doesn't need to *pass* a name; both read the const directly. Env var was only the passing channel → redundant. Identity is the hub-minted `runnerId` persisted in cred store (not name-derived); name is a display label, renamable hub-side.
+
+## 5. Delete (derivable / redundant, live code)
+
+- `SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS` → replace w/ runtime `cipher.isEncryptionAvailable()` (`credentials.ts:43`); inject memory cipher in tests instead of the env branch.
+- `SLAYZONE_DB_DIR` → drop hub reads (`db.ts`, `artifacts/shared.ts`); keep app-only, then retire.
+- `SLAYZONE_DB_NAME` → drop read (`db.ts:41`); const under ROOT.
+- `SLAYZONE_RUNNER_TRANSPORT_BASE_URL` → inline `http://127.0.0.1:8788` (`composition.ts:904`); remove env read.
+- `SLAYZONE_RUNNER_CAPABILITIES` → drop env read; hardcode full set at enroll (never enforced today).
+
+## 6. Delete (dead code — verified never read in prod)
+
+- `SLAYZONE_SERVER_PORT` → remove `getServerPort()` + barrel export (`platform/paths.ts:27`, `index.ts:13`); zero callers.
+- `SLAYZONE_MCP_HOST` → remove 2 write lines (`pty-manager.ts:987,1011`); no reader (CLI hardcodes 127.0.0.1).
+- `SLAYZONE_RUNNERS_ENABLED` → remove from `install-handshake.test.ts:196`; never read in prod (hub always runs gateway).
+- `SLAYZONE_HOOK_NAME` → not an env var (JS const); drop from any env docs.
+
+## 7. Bugs to fix (surfaced by the dive — not deploy knobs)
+
+- `SLAYZONE_AGENT_MODE` — 1 reader (`_shared.ts:8`), 0 setters → CLI artifacts always tag `user`. Fix reader → `SLAYZONE_AGENT_ID` (or set AGENT_MODE at spawn).
+- `SLAYZONE_DB_DIR` ↔ `STORE_DIR` precedence inverted: hub `STORE_DIR ?? DB_DIR` vs artifacts `DB_DIR || STORE_DIR` → split dirs if both set. Unify to STORE_DIR-wins (`artifacts/shared.ts:12`).
+
+## Scope
+
+All of the above are SEPARATE from (and supersede) the original CWD-anchoring task. `SLAYZONE_SUPERVISED` gates every standalone-only change so the supervised desktop app boot stays byte-identical.

@@ -1,0 +1,32 @@
+---
+title: "Approach A — Notify then targeted refetch (RECOMMENDED)"
+---
+flowchart TD
+  subgraph S["SERVER — single Bun process"]
+    W["User write<br/>(advance deal / log interaction / create account)"]
+    TICK["Decay/momentum tick (~hourly)<br/>recompute bands; on a crossing append<br/>ComputedBandChanged event<br/>(time-based change becomes a REAL event)"]
+    A["EventStore.append()<br/>inside sql.withTransaction"]
+    N["SELECT pg_notify('km_events', envelope)<br/>delivered to listeners on COMMIT"]
+    HUB["Stream hub<br/>ONE app-wide LISTEN<br/>fan-out by orgId (isolation enforced here)"]
+    RPC["getAccountHub / getOwed / getDemand<br/>existing SQL joins + decay decoration<br/>(SERVER READS UNCHANGED)"]
+    AUTO["server-side automations (future)<br/>react to ComputedBandChanged"]
+  end
+  subgraph C["CLIENT — User A's browser"]
+    SSE["SSE subscriber<br/>GET /api/stream (Last-Event-ID resumable)"]
+    MAP["map envelope to affected collections<br/>coalesce/debounce ~120ms"]
+    COL["TanStack DB query collections<br/>call .utils.refetch()"]
+    LQ["useLiveQuery on pages"]
+    UI["UI updates within ~1s"]
+  end
+  W --> A
+  TICK --> A
+  TICK -.-> AUTO
+  A --> N --> HUB
+  HUB -->|"TINY envelope:<br/>id, subjectKind, subjectId,<br/>eventType, conceptName"| SSE
+  SSE --> MAP --> COL
+  COL -->|"refetch over HTTP"| RPC
+  RPC -->|"decorated rows back"| COL
+  COL --> LQ --> UI
+  TIMER["local timer (~60s)"] -->|"smooths decay 'days' countdown<br/>between ticks (display only)"| LQ
+  classDef good fill:#16351f,stroke:#3fb96a,color:#d7f5e0;
+  class RPC,TICK good;

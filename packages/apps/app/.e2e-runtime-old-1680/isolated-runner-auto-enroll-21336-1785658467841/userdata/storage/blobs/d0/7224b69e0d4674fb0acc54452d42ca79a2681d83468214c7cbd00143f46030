@@ -1,0 +1,64 @@
+# Vendor Review: Cloudflare
+
+## URLs
+- Vendor Master Sheet (row 14): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=14:14
+- Cycle Drive folder: https://drive.google.com/drive/folders/1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev (`2026-04-29 Vendor Access Review`)
+- Cycle parent ticket: https://linear.app/normain/issue/INT-411
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/67fad24b15d3aabfd9994031
+- Tool admin / login: https://dash.cloudflare.com/244cc080d80c9bd00650f838d686aa02/members
+
+## Status
+- Information complete?: Yes (premature — pending I/AE/AF backfill)
+- Duplicates: none
+
+## Browser tabs
+- 0: Vendor Master Sheet @ row 14
+- 1: INT-411 cycle parent ticket
+- 2 (active): Cloudflare admin (login screen)
+- 3: Cycle Drive folder
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | Look up cycle context (Drive folder + Linear parent) | Done |
+| 4 | Open admin URL + Drive folder in tabs | Done |
+| 5 | Resolve Subprocessor (col I) | Pending — user |
+| 6 | Login + members screenshot | Pending — user |
+| 7 | Verify + rename screenshot in Drive folder | Pending |
+| 8 | Set AE = Done, AF = Yes | Pending |
+| 9 | Create access-removal Linear sub-issues (if any) | Pending — user input |
+
+## Cells applied (round 1)
+| Col | Header | Before | After | Source |
+|---|---|---|---|---|
+| L | Business owner | kalle@normain.com | Kalle Hansson | Vanta |
+| M | Security owner | kalle@normain.com | Kalle Hansson | Vanta |
+| Q | Sync comment | Checked 2025-07-07 | Checked 2026-05-07 | calculated |
+| Y | Contract Renewal Date | (blank) | Free plan | user |
+| AA | Admin permissions through role | (blank) | Yes | user |
+| F | Information complete? | (blank) | Yes (will reverify after I/AE/AF) | calculated |
+
+## Cells outstanding
+| Col | Header | Current | Proposed | Source |
+|---|---|---|---|---|
+| I | Subprocessor | (blank) | rec = Operations | user |
+| AE | Access review 2026-04-29 | (blank) | Done [+ removal ticket if any] | tool-page |
+| AF | Screenshot completed? | (blank) | Yes (after Drive upload + rename) | tool-page |
+
+## Decisions
+- **T (Subscription type) kept as `Total`** — Cloudflare on free tier ($0.00/mo) but still account-wide plan.
+- **Y = `Free plan`** — explicit signal vs blank ambiguity.
+- **AA = `Yes`** — Cloudflare role-based admin (Super Admin / Admin / Read Only / custom).
+
+## Vanta snapshot
+- Vendor: Cloudflare Dashboard (cloud monitoring category)
+- Inherent risk: High
+- Last assessment: 2025-06-13 by Sara Landfors — Approved
+- Owners (per Vanta): Kalle Hansson (business + security)
+
+## Cycle context
+- Drive folder ID: `1OalgiFIbuAnnsr-tkJ5i-3QYPu84TCev`
+- Existing sibling tickets under INT-411: INT-414 (LinkedIn / Eldor), INT-415 (Miro / Sahba+Kalle+Max+Philip)
+- Existing screenshots in folder: Microsoft 365, Miro, Loops, Loom, Normain LinkedIn, Linear, Framer (no Cloudflare yet)

@@ -1,0 +1,440 @@
+# SlayZone Chromium — Execution Plan
+
+Ground-up migration of every SlayZone surface onto a Chromium fork + Bun sidecar. Organized so every surface currently in the app has a named home in a named phase, every phase ends with something testable, and foundations land before surfaces.
+
+Architecture reference: [Implementation plan](asset:978a4843) · [Migration investigation](asset:3cd6fdf1).
+
+**Principles**
+- Foundations before surfaces. No UI migration until the shell + IPC + state transport are stable.
+- Each phase ends with a demo — a user-visible artifact a human can click through.
+- Parity-tested per surface: for every migrated screen, a side-by-side diff vs. the Electron build must pass before the old path is deleted.
+- 119 `ipcMain.handle` calls + 19 domain packages are tracked on a parity ledger. Not a single handler or component is allowed to slip through.
+- Continuous activities (upstream merge bot, parity ledger, CI health) run alongside phase work from day one of the phase that introduces them.
+
+---
+
+# Part I — Foundations (Phases 1–6)
+
+## Phase 1 — Build infrastructure
+
+Stand up Chromium build tooling before writing any patch. Everything downstream assumes reproducible builds on Mac + Linux + Windows.
+
+- **1.1 Install `depot_tools`** — Google's build toolkit (`gclient`, `gn`, `ninja`, `autoninja`). Verified via `which gclient`.
+- **1.2 Fetch Chromium source** — `fetch --nohooks chromium` + `gclient sync`. Baseline ~50 GB.
+- **1.3 Verify baseline build** — `autoninja -C out/Default chrome` produces a runnable binary on all three OSes.
+- **1.4 Provision `reclient` cluster** — distributed build cache. Target: full build < 30 min, incremental < 5 min.
+- **1.5 CI matrix scaffolding** — runners for Mac×2 arch, Win×2 arch, Linux×2 arch with `depot_tools` + `reclient` baked in.
+- **1.6 Signing pipeline stubs** — Apple Developer ID + notarization, Azure Key Vault for Win EV, GPG for Linux. Dry-run only.
+- **1.7 Smoke-test `chrome://hello/` page with a button** — throwaway patch proving the full chain: build → sign → launch → custom scheme → JS.
+
+**Phase 1 demo**: launch signed binary, navigate to `chrome://hello/`, click the button, counter ticks.
+
+**Exit**: all three OSes build + sign in CI; `chrome://hello/` clickable on each.
+
+---
+
+## Phase 2 — Foundation patches
+
+Only the patches needed to host WebUIs + talk to the sidecar. UI-tree patches are deferred to Phase 5; inline-tab patch to Phase 6.
+
+- **2.1 Branding** — name, icon, about page, splash. Mechanical.
+- **2.2 `chrome://` scheme handler factory** — one registration per region; replaces the throwaway from 1.7.
+- **2.3 IPC bridge C++ shim** — `SlayzoneSidecarClient`: Unix socket, JSON-RPC request/response, keepalive, reconnect.
+- **2.4 Telemetry strip** — compile out UMA, Crashpad upload, Safe Browsing phone-home, field trials.
+- **2.5 NTP override** — default new tab → `chrome://slayzone-shell/` (empty placeholder for now).
+
+**Phase 2 demo**: signed binary launches, NTP shows the (empty) shell, sidecar connection handshakes (logged).
+
+**Exit**: all five patches in the patch series, clean rebase onto latest Chromium stable tag.
+
+---
+
+## Phase 3 — Bun sidecar extraction
+
+Lift `packages/apps/app/src/main/` into a standalone Bun process. Hard dependency: **every** `ipcMain.handle` call must have a JSON-RPC counterpart. This is the most mechanical phase but also the one with the most breadth — 119 handlers across 6 files.
+
+- **3.1 Inventory + parity ledger** — automated scan of `ipcMain.handle(...)` → CSV: method, file, arity, return type, domain. Ledger becomes the phase-complete checklist.
+- **3.2 Factor `main/` into a pure Node module** — strip `electron` imports. Internal interfaces replace `app` / `BrowserWindow` / `ipcMain` touchpoints.
+- **3.3 JSON-RPC method registry** — decorator or manifest file. Auto-generates the dispatch map + TS client types (shared with `packages/shared/rpc-types/`).
+- **3.4 Unix socket server** — `$SLAYZONE_RUNTIME_DIR/sidecar.sock`. Multiplexed requests, crash recovery, reconnect.
+- **3.5 Native-module compat** — verify `better-sqlite3`, `node-pty`, `@convex/browser`, `express`, `ws`, `msgpackr` under Bun. Fall back to Node via `SLAYZONE_RUNTIME=node` if any blocks.
+- **3.6 Proxy Electron-only APIs** — `dialog`, `Menu`, `globalShortcut`, `Notification`, `autoUpdater` → each becomes a JSON-RPC method answered by the C++ shim from 2.3.
+- **3.7 Sidecar lifecycle** — Chromium launches sidecar on startup, tears it down on exit. Respawn + state replay on crash.
+- **3.8 Parity verification** — Electron build still runs, but pointed at the new sidecar via a compatibility shim. All 119 handlers reply correctly. Ledger is 100% green.
+- **3.9 Handler test migration to Bun** — port every `main/**/*.test.ts` (handlers, DB migrations, state machines, backup/export, floating-agent state) to run under the sidecar's Vitest-on-Bun setup. Replace Electron stubs with sidecar-internal equivalents. Tests in the test-coverage ledger (C5) flip from `electron` to `bun`.
+- **3.10 Preload test replacement** — delete `preload/**/*.test.ts`; reimplement equivalents as RPC-client tests in `packages/shared/rpc-client/` (in Phase 4.7). Tracked in C5 as `replaced-in-4.7`.
+
+**Phase 3 demo**: current Electron SlayZone runs unchanged against the Bun sidecar via a shim. No user-visible difference. Every handler test passes under Bun.
+
+**Exit**: parity ledger 100% green; existing Playwright suite passes; every migrated handler test green on Bun; preload tests fully retired from ledger.
+
+---
+
+## Phase 4 — Shared foundations
+
+Packages every WebUI will depend on. Must land before any surface migrates.
+
+- **4.1 Design tokens** — Tailwind config + CSS variables extracted to `packages/shared/design-tokens/`. Every WebUI imports.
+- **4.2 UI kit** — Radix wrappers, buttons, dialogs, toasts moved to `packages/shared/ui-kit/`.
+- **4.3 Mojo TS bindings** — generated from `.mojom` files. Type-safe client for each region.
+- **4.4 State transport** — Zustand store + Mojo fan-out adapter in `packages/shared/state/`. Hook API identical to today; transport is new. Unit-tested with N mock regions.
+- **4.5 RPC client** — typed client for JSON-RPC methods, auto-generated from 3.3's registry. Drop-in replacement for `window.electronAPI.*`.
+- **4.6 Dev harness** — Vite config that can serve a single region at `chrome://slayzone-<name>/` for fast iteration. Hot reload.
+- **4.7 Shared test harness** — unified Vitest config for every WebUI + shared package. jsdom baseline for component tests; optional real-Chromium mode (launch actual dev binary, load region, drive via Mojo) for visual + integration tests. `rpc-client` tests live here; absorb the semantics previously covered by preload tests (3.10). Wire into CI.
+
+**Phase 4 demo**: scratch region `chrome://slayzone-demo/` imports design tokens + ui-kit + state, renders a button that toggles a state atom mirrored to another scratch region — both live. Component tests run green under jsdom + Chromium mode.
+
+**Exit**: all shared packages shipping under `packages/shared/`; demo regions prove state fan-out; dev harness reloads in < 200ms; shared test harness runs in CI on every PR.
+
+---
+
+## Phase 5 — Native layout shell
+
+Empty `views::` tree that will host the WebUIs. No region content yet — placeholder WebViews.
+
+- **5.1 `SlayzoneBrowserView` subclass** — root `views::View`, BoxLayout tree, member WebView pointers per region slot.
+- **5.2 Layout slots** — one WebView per region slot, each loading a placeholder `chrome://slayzone-placeholder/?region=<name>` that renders its name + size.
+- **5.3 Feasibility checkpoint (inline-tab smoke)** — before wiring the rest of the layout, drop one real-browser `WebContents` from `TabStripModel` into a single layout slot via `WebView::SetWebContents`. Does it render? Does it resize with the parent? Does it handle focus? If yes → continue. If no → stop and redesign before investing in the full layout. This is the de-risking that a throwaway spike would have tried to do, now inside the real code path with no duplication.
+- **5.4 `views::SplitView`** — draggable terminal ↔ browser divider, snap points, keyboard resize.
+- **5.5 `views::FocusManager` plumbing** — tab cycle between regions, shortcut routing: region → Mojo → browser proc → target region.
+- **5.6 Layout intent API** — regions send `hide`/`show`/`resize` via Mojo; browser proc calls `SetVisible` / triggers reflow.
+
+**Phase 5 demo**: launch binary, see the full layout grid with labelled placeholders + one slot showing a real web page, drag the split, tab through regions.
+
+**Exit**: every slot reachable; 5.3 checkpoint passed (real `WebContents` renders + resizes + focuses in a slot); resize stable; focus cycles correctly.
+
+---
+
+## Phase 6 — Inline tab widget
+
+Real Chromium `WebContents` as a peer `views::WebView`. Eliminates the Electron `WebContentsView` overlay.
+
+- **6.1 `TabStripModel` integration** — create/switch/close tabs via Mojo messages from the placeholder tabbar.
+- **6.2 `WebContents` hosting** — `inline_tab_webview_->SetWebContents(active_tab)`. Layout parent drives size.
+- **6.3 URL bar wiring** — placeholder browserchrome region sends URL → `tab->GetController().LoadURL(...)`; nav state broadcast back.
+- **6.4 Extension event plumbing** — browser-wide session means MV2 + MV3 load automatically. Verify: 1Password, React DevTools, uBlock Origin.
+- **6.5 Auth flow verification** — Google, GitHub, Microsoft, Apple SSO — each manually tested end-to-end.
+
+**Phase 6 demo**: type a URL, watch a real web page render inline in the browser slot; install 1Password, unlock it; sign into Google.
+
+**Exit**: four SSO flows pass; at least three major extensions work; rapid tab switch under 50 ms.
+
+---
+
+# Part II — Surface migration (Phases 7–15)
+
+Each phase migrates one category of surfaces onto real chrome:// WebUIs. A surface is not considered migrated until parity testing (A/B vs. Electron build) passes.
+
+**Tests travel with code.** Every surface phase has an explicit `.T` step: port the matching `*.test.ts(x)` files from `apps/app/src/renderer/**` (and any relevant `domains/*/client/**`) into the new WebUI package; update imports; verify green under the Phase 4.7 shared harness. No surface counts as migrated until its tests pass at the new location. Status is tracked per file on the C5 ledger.
+
+## Phase 7 — Task-detail regions
+
+The main working surface of SlayZone — what's in the screenshot. Ten regions.
+
+- **7.1 `chrome://slayzone-shell/`** — outer frame, owns cross-region routing state.
+- **7.2 `chrome://slayzone-tabbar/`** — top task tabs (current `TabBar.tsx`).
+- **7.3 `chrome://slayzone-projects/`** — left project icon rail (current `AppSidebar.tsx` slim side).
+- **7.4 `chrome://slayzone-tasklist/`** — kanban + list view (`KanbanBoard`, `KanbanListView`, `FilterBar`).
+- **7.5 `chrome://slayzone-sidebar/`** — task metadata sidebar (descriptions, tags, priority).
+- **7.6 `chrome://slayzone-taskheader/`** — task title row + status selector.
+- **7.7 `chrome://slayzone-terminal/`** — xterm.js panel (near-verbatim port; terminal domain unchanged).
+- **7.8 `chrome://slayzone-browserchrome/`** — URL bar + nav buttons wired to Phase 6.3.
+- **7.9 `chrome://slayzone-tools/`** — right-side tool toggles.
+- **7.10 `chrome://slayzone-statusbar/`** — bottom status.
+- **7.11 Parity gate** — A/B screenshot diff per region; state sync across regions verified under load.
+- **7.T Test port** — move renderer component tests for `TabBar`, kanban, filter bar, task detail, task header, sidebar into their new WebUI packages. All green under 4.7 harness. C5 rows updated.
+
+**Phase 7 demo**: open a task, see the full detail view, interact with kanban, terminal, inline browser. Feature-complete vs. Electron for task flow.
+
+**Exit**: parity passes all ten regions; task-open flow indistinguishable from Electron build.
+
+---
+
+## Phase 8 — Home-tab panels
+
+The non-task-detail panels available on the home tab. Each becomes its own WebUI.
+
+- **8.1 `chrome://slayzone-git/`** — `UnifiedGitPanel` (worktree/branch/diff).
+- **8.2 `chrome://slayzone-test/`** — `TestPanel`.
+- **8.3 `chrome://slayzone-processes/`** — `ProcessesPanel`.
+- **8.4 `chrome://slayzone-automations/`** — `AutomationsPanel`.
+- **8.5 Home panel layout** — `SlayzoneBrowserView` gains a home-tab mode that swaps the content slot between panels.
+- **8.6 Parity gate** — each panel A/B-tested.
+- **8.T Test port** — move `AutomationCard.test.tsx`, test-panel tests, processes panel tests, worktree/git panel tests into each panel's WebUI package. All green. C5 updated.
+
+**Phase 8 demo**: home tab cycles through all four panels with the same look + behavior as Electron.
+
+**Exit**: all four home panels pass parity.
+
+---
+
+## Phase 9 — Overlay pages
+
+Full-window overlay pages that replace the main content. Each is its own WebUI.
+
+- **9.1 `chrome://slayzone-leaderboard/`** — `LeaderboardPage`.
+- **9.2 `chrome://slayzone-usage/`** — `UsageAnalyticsPage`.
+- **9.3 `chrome://slayzone-context/`** — `ContextManagerPage` (AI config).
+- **9.4 Overlay routing** — shell region subscribes to an `activeOverlay` atom; browser proc swaps the visible WebView.
+- **9.5 Parity gate** — pixel + behavior per page.
+- **9.T Test port** — leaderboard, usage-analytics, and ai-config client tests move into their WebUI packages. All green. C5 updated.
+
+**Phase 9 demo**: open leaderboard, usage analytics, context manager — same as Electron.
+
+**Exit**: three overlay pages pass parity.
+
+---
+
+## Phase 10 — Dialog framework + core dialogs
+
+Dialogs need their own shared infra — a lightweight dialog host WebUI + a dialog-open Mojo channel. Then the core dialogs migrate.
+
+- **10.1 `chrome://slayzone-dialogs/`** — dialog host. Receives `(dialogId, props)` via Mojo, renders the matching component, returns result.
+- **10.2 `CreateTaskDialog` + `EditTaskDialog` + `DeleteTaskDialog`** — task lifecycle.
+- **10.3 `CreateProjectDialog` + `ProjectSettingsDialog` + `DeleteProjectDialog`** — project lifecycle.
+- **10.4 `SearchDialog`** — Cmd+K global search.
+- **10.5 `FeedbackDialog` + `CliInstallDialog` + `ChangelogDialog`** — auxiliary.
+- **10.6 Modal focus trap + ESC handling** — `views::Widget` modal mode, focus return.
+- **10.7 Parity gate** — open, interact, submit for every dialog.
+- **10.T Test port** — `CliInstallDialog.test.tsx` + any dialog-specific tests from `tasks`/`projects` domains move into the dialogs WebUI. New tests for the dialog host (dialogId routing, result return). All green. C5 updated.
+
+**Phase 10 demo**: every dialog openable via keyboard shortcut and sidebar menu; identical to Electron.
+
+**Exit**: all ~10 core dialogs pass parity.
+
+---
+
+## Phase 11 — Settings surface
+
+`UserSettingsDialog` is multi-tab and stateful. Large enough to warrant its own phase.
+
+- **11.1 `chrome://slayzone-settings/`** — multi-tab shell + tab navigation.
+- **11.2 General / Appearance / Shortcuts tabs** — theme, keybindings.
+- **11.3 AI Config tab** — providers, profiles, CCS skills.
+- **11.4 Templates tab** — task templates (`TemplatesSettingsTab`).
+- **11.5 Integrations tab** — external providers (GitHub, Linear, etc.).
+- **11.6 Parity gate** — every tab + every setting round-trips.
+- **11.T Test port** — `useDialogStore.test.ts` and settings/templates/integrations client tests move into the settings WebUI. All green. C5 updated.
+
+**Phase 11 demo**: open settings, flip every toggle, verify persisted to DB and applied live.
+
+**Exit**: every setting documented + parity-verified.
+
+---
+
+## Phase 12 — Onboarding + tutorial
+
+First-run experience. Visually distinct + gated, so isolated from the rest.
+
+- **12.1 `chrome://slayzone-onboarding/`** — `OnboardingDialog` flow, step state in shared state.
+- **12.2 `chrome://slayzone-tutorial/`** — `TutorialAnimationModal` host; each of the 13 `Scene*` components ports 1:1.
+- **12.3 Onboarding checklist** — `useOnboardingChecklist` wiring + progress persistence.
+- **12.4 Parity gate** — full first-run flow recorded + diffed against Electron recording.
+- **12.T Test port** — onboarding domain client tests move into the onboarding WebUI; add smoke tests per tutorial scene (render + no console errors). All green. C5 updated.
+
+**Phase 12 demo**: fresh user data dir → signed binary → full onboarding + tutorial plays.
+
+**Exit**: 13 tutorial scenes + checklist + onboarding dialog all at parity.
+
+---
+
+## Phase 13 — File editor
+
+CodeMirror-based editor. Own phase because it's heavy + stateful (caret, selection, multi-buffer).
+
+- **13.1 `chrome://slayzone-editor/`** — `FileEditorView` host.
+- **13.2 Multi-file state** — open buffers, dirty tracking, diff view; Mojo-synced with shell for tab integration.
+- **13.3 Terminal ↔ editor focus interplay** — Cmd+W priority chain preserved from existing rules.
+- **13.4 Parity gate** — open, edit, save, diff indistinguishable from Electron.
+- **13.T Test port** — `useWatchedFile.test.ts` + file-editor client tests move into the editor WebUI. All green. C5 updated.
+
+**Phase 13 demo**: open a file, edit, save, close. Same shortcuts, same undo history.
+
+**Exit**: editor at parity; closeTab/openTab lifecycle preserved.
+
+---
+
+## Phase 14 — Auxiliary windows
+
+Separate OS windows beyond the main shell. Each becomes its own `views::Widget` + WebUI.
+
+- **14.1 Splash window** — shown on startup before main window ready. Native `views::Widget` hosting `chrome://slayzone-splash/`.
+- **14.2 Floating agent panel** — `FloatingAgentPanel` + `FloatingAgentCollapsed*`. Separate always-on-top `views::Widget` hosting `chrome://slayzone-agent-float/`.
+- **14.3 Leaderboard popout** — when detached, runs in its own window (separate from Phase 9 in-app overlay).
+- **14.4 Window positioning + restoration** — saved to settings, restored across launches.
+- **14.5 Parity gate** — each window parity-tested.
+- **14.T Test port** — `floating-agent/state-machine.test.ts` (already ported in 3.9) plus new WebUI-side tests for splash + agent-float + leaderboard-popout. All green. C5 updated.
+
+**Phase 14 demo**: launch → splash appears → main window loads → floating agent togglable → leaderboard popout works.
+
+**Exit**: all auxiliary windows pass parity; multi-display positioning verified.
+
+---
+
+## Phase 15 — Plugin panels + user web panels
+
+User-defined panels + runtime-loadable plugin panels (MCP-driven).
+
+- **15.1 Plugin panel host** — generic `chrome://slayzone-plugin/?id=<panelId>` hosting sandboxed plugin WebViews.
+- **15.2 User web panels** — arbitrary URL panels (today's `web_panel_urls` feature). Host as real tabs via Phase 6 widget.
+- **15.3 Panel persistence** — layout + URL + resolution per task.
+- **15.4 Parity gate** — all existing user panels load; plugin panels sandbox correctly.
+- **15.T Test port** — panel-registry, persistence, and sandbox tests move into the plugin WebUI package. All green. C5 updated.
+
+**Phase 15 demo**: add a Google Docs panel + a plugin panel, both behave as today.
+
+**Exit**: panel subsystem at parity.
+
+---
+
+# Part III — Cross-cutting (Phases 16–19)
+
+## Phase 16 — Auth + updates
+
+Things that span every surface.
+
+- **16.1 Convex auth** — login flow migrated; tokens stored by sidecar, never in renderer.
+- **16.2 Session rotation** — Chromium browser session shared across WebUIs via cookie domain.
+- **16.3 Auto-update** — Sparkle (Mac) / Squirrel-like (Win) / AppImage updater (Linux), driven by sidecar, surfaced in settings.
+- **16.4 Crash reporting** — replace stripped Crashpad with SlayZone-owned sink (sidecar).
+
+**Exit**: login, logout, session expiry, update prompt, update apply — all work.
+
+---
+
+## Phase 17 — Keyboard, focus, zen mode
+
+The polish pass. The existing app has strong keyboard + zen rules (many feedback memories about shortcut routing, focus quirks) — preserve all of them.
+
+- **17.1 Shortcut matrix** — every registered shortcut mapped: which WebUI owns it, which is native menu, which is global.
+- **17.2 Native menu accelerators** — Chromium's real OS menu replaces current react-hotkeys for menu-bound shortcuts.
+- **17.3 Focus chain** — `lastFocusedPanelRef` behavior ported via browser-proc tracking of WebView focus.
+- **17.4 Zen mode** — full-screen single-region mode; hide chrome, hide status, hide tools.
+- **17.5 Parity gate** — full shortcut matrix passes automated + manual tests.
+
+**Exit**: every shortcut from the existing app works identically.
+
+---
+
+## Phase 18 — Full-suite test retarget
+
+Playwright currently drives Electron; unit/integration tests were migrated per-surface in Phases 3.9, 4.7, and the `.T` steps of Phases 7–15. This phase assembles the full picture, retargets the top-level runners, and gates the parity suite.
+
+- **18.1 Playwright Chromium driver** — swap `electron.launch` for `chromium.launch`; fixtures updated for `chrome://` URLs.
+- **18.2 Port existing e2e/ specs** — every `packages/apps/app/e2e/core/*.spec.ts` runs against the new binary. Specs that test Electron-specific behavior (BrowserWindow, `webContents.send`, etc.) get rewritten against the new architecture.
+- **18.3 Parity screenshot suite** — per-region baselines consolidated from Phases 7–15; diff threshold calibrated.
+- **18.4 Load tests** — 200 tasks, 50 tabs, 10 open browsers. Measure TTI + frame drops.
+- **18.5 Flake budget** — <1% flake over 100 runs.
+- **18.6 CLI test verification** — `packages/apps/cli/test/*.test.ts` run against the Bun sidecar (not Electron main). Domain/handler tests (already on Bun from 3.9) join the full-suite CI run.
+- **18.7 Coverage gate** — per-package threshold (initially current %, never lower). C5 ledger fully green: every original test file is either passing in its new home or explicitly retired with reason.
+
+**Exit**: full unit + integration + CLI + e2e suites all green on the Chromium binary; parity suite green; C5 ledger 100% reconciled.
+
+---
+
+## Phase 19 — Distribution
+
+Ship signed binaries per-platform. Only runs end-to-end once Phases 1–18 ship a working app.
+
+- **19.1 Mac universal `.dmg`** — `lipo` x64 + arm64; Developer ID + notarize + staple.
+- **19.2 Windows installer** — WiX or NSIS, EV signing via Azure Key Vault.
+- **19.3 Linux `.AppImage` + `.deb` + `.rpm`** — GPG signing; repo hosting on our CDN.
+- **19.4 Update manifest** — signed JSON at CDN; sidecar checks on launch + interval.
+- **19.5 Staged rollout** — 1% → 10% → 100% with health metrics gate.
+
+**Exit**: all three OSes auto-update end-to-end from CI.
+
+---
+
+# Continuous activities (run alongside phases, not gated)
+
+Spun up the day the corresponding phase begins; never complete.
+
+- **C1 Upstream merge bot** — rebase patches on new Chromium tags, CVE fast lane, LLM conflict resolution, `//content/` human gate. Starts day 1 of Phase 2.
+- **C2 Parity ledger** — living spreadsheet: every `ipcMain.handle`, every component, every route. Starts day 1 of Phase 3.
+- **C3 CI health** — flake tracking, build time, test duration; alerts on regression. Starts day 1 of Phase 1.
+- **C4 Security review fleet** — dedicated agents audit each patch + each migrated surface for XSS, CSP, IPC trust boundaries. Starts day 1 of Phase 2.
+- **C5 Test-coverage ledger** — one row per pre-migration test file (~97 + e2e + CLI). Columns: origin path, new path, runtime (electron/bun/chromium), status (passing / migrated / replaced / retired-with-reason). A surface/phase does not close until all its rows are non-`pending`. Starts day 1 of Phase 3.
+
+---
+
+# Final repo layout
+
+```
+slayzone-chromium/
+├── chromium/
+│   ├── src/
+│   └── patches/                        # ~9 foundation + UI patches
+│
+├── packages/
+│   ├── sidecar/                        # Bun — was apps/app/src/main/
+│   │   └── src/{rpc,adapters,proxies,lifecycle.ts}
+│   │
+│   ├── webui/                          # One per chrome://slayzone-*/
+│   │   ├── shell/                      # 7.1
+│   │   ├── tabbar/ projects/ tasklist/ sidebar/ taskheader/
+│   │   │ terminal/ browserchrome/ tools/ statusbar/   # 7.x
+│   │   ├── git/ test/ processes/ automations/         # 8.x
+│   │   ├── leaderboard/ usage/ context/               # 9.x
+│   │   ├── dialogs/                                   # 10.1
+│   │   ├── settings/                                  # 11.x
+│   │   ├── onboarding/ tutorial/                      # 12.x
+│   │   ├── editor/                                    # 13.x
+│   │   ├── splash/ agent-float/ leaderboard-popout/   # 14.x
+│   │   ├── plugin/                                    # 15.1
+│   │   └── placeholder/                               # 5.2
+│   │
+│   ├── shared/
+│   │   ├── design-tokens/ ui-kit/
+│   │   ├── mojo-bindings/ rpc-types/ rpc-client/
+│   │   └── state/                      # Zustand + Mojo transport
+│   │
+│   ├── domains/                        # Unchanged — 19 packages
+│   └── apps/cli/                       # Unchanged
+│
+├── tools/
+│   ├── merge-bot/                      # C1
+│   ├── parity-ledger/                  # C2
+│   ├── build-scripts/
+│   └── release/
+│
+├── ci/
+├── e2e/                                # Retargeted Playwright + parity suite
+├── docs/
+├── AGENTS.md
+├── CLAUDE.md
+└── package.json
+```
+
+**Gone**: `packages/apps/app/` entirely (its `main/` → `sidecar/`, its `renderer/` → `webui/*`, its `preload/` → `shared/rpc-client/`).
+
+**Unchanged**: 19 domain packages, `apps/cli`, e2e specs (only the driver swaps).
+
+**New**: `chromium/`, `packages/sidecar/`, `packages/webui/*` (~25 apps), `packages/shared/*`, `tools/merge-bot`, `tools/parity-ledger`.
+
+---
+
+# Exit criteria summary
+
+| Phase | Exits when |
+|-------|------------|
+| 1 | `chrome://hello/` clickable on signed binary, all three OSes |
+| 2 | 5 foundation patches rebase clean; sidecar handshake logs |
+| 3 | Parity ledger 100% green; full Playwright suite passes against Bun sidecar + Electron shell; every handler test green on Bun; preload tests retired |
+| 4 | Shared packages published; two demo regions exchange state live |
+| 5 | Layout grid of labelled placeholders resizable + tabbable; 5.3 feasibility checkpoint passes (real `WebContents` in a slot) |
+| 6 | SSO flows pass; extensions load; tab switch < 50 ms |
+| 7 | Task detail view parity across 10 regions |
+| 8 | Four home panels at parity |
+| 9 | Three overlay pages at parity |
+| 10 | All core dialogs at parity |
+| 11 | Settings multi-tab at parity |
+| 12 | Onboarding + 13 tutorial scenes at parity |
+| 13 | File editor at parity, close/reopen lifecycle preserved |
+| 14 | Splash + floating agent + leaderboard popout at parity |
+| 15 | Plugin + user web panels at parity |
+| 16 | Auth, update, crash reporting end-to-end |
+| 17 | Full shortcut matrix passes automated + manual |
+| 18 | full unit + integration + CLI + e2e green; parity suite < 1% flake; C5 ledger 100% reconciled |
+| 19 | Staged rollout hits 100% on all three OSes |
+

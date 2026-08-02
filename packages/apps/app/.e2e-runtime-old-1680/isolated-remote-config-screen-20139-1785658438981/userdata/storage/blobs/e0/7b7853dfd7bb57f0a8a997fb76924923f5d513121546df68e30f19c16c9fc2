@@ -1,0 +1,87 @@
+# SMB 3.1.1+ enforcement — implementation in Normain
+
+Goal: make every Azure Storage Account allow **only SMB 3.1.1** for Azure Files, to pass the Vanta test `azure-storage-account-file-share-smb-protocol-version-3-1-1-or-higher-only`. 20 accounts currently fail (sitting at Azure default, which permits SMB 2.1/3.0).
+
+Repo: `~/dev/projects/normain`. Provider: `hashicorp/azurerm >= 4.51` (supports `share_properties.smb.versions`).
+
+The Terraform change to restrict SMB version is, on each `azurerm_storage_account`:
+
+```hcl
+share_properties {
+  smb {
+    versions = ["SMB3.1.1"]
+  }
+}
+```
+
+Valid `versions` values: `SMB2.1`, `SMB3.0`, `SMB3.1.1`. Listing only `SMB3.1.1` drops the older two. Safe on all account kinds (blob-only, StorageV2, Premium FileStorage); does not affect the existing NFS share.
+
+---
+
+## Account inventory (where each of the 20 lives in code)
+
+### Group A — managed by `modules/azure` (8 accounts, FIXABLE in HCL)
+Module is instantiated by both envs: `app-production` (postfix `prod01`) and `app-development` (postfix `dev20`).
+
+| Vanta account | TF resource | File |
+|---|---|---|
+| ufnormainprod01 / ufnormaindev20 | `azurerm_storage_account.uploaded_files` | `terraform/modules/azure/main.tf:206` |
+| artnormainprod01 / artnormaindev20 | `azurerm_storage_account.artifacts` | `terraform/modules/azure/main.tf:218` |
+| dssnormainprod01 / dssnormaindev20 | `azurerm_storage_account.data_sources` (Premium FileStorage / NFS) | `terraform/modules/azure/main.tf:230` |
+| auinormainprod01 / auinormaindev20 | `azurerm_storage_account.audit_immutable` | `terraform/modules/azure/audit.tf:15` |
+
+### Group B — NOT defined as `azurerm_storage_account` resources in this repo (12 accounts)
+These cannot be fixed by the Group A edit; each needs a separate path.
+
+| Vanta account | What it is | Where it comes from |
+|---|---|---|
+| normaintfappproduction, normaintfappdevelopment, normaintfidentity, normainfglobal | Terraform **state backends** | created by `terraform/scripts/createStorageBackend.ts` (`az storage account create`); referenced as `backend "azurerm"` + `data` sources |
+| storagenormainiacprod01, storagenormainiacdev20 | Terraform state backends (RGs `rg-normain-*--terraform`) | same bootstrap script |
+| rpsnormainprod01, rpsnormaindev20 | Redis-related storage (only referenced in `extra_monitored_storage_accounts` for alerts) | out-of-band / auto-provisioned — not created in repo |
+| stsublogarch | VNet flow-logs archive (RG `rg-normain-global`) | read as `data` in `terraform/modules/azure/flow-logs.tf:10`; created externally |
+| stwinvmnormainprod01, stwinvmnormaindev20 | Windows-VM storage (boot diagnostics) | not in repo — manual/out-of-band |
+| normainstorage | RG `Normain` | not in repo — legacy/manual |
+
+---
+
+## Required changes
+
+### Change 1 — Group A (covers 8/20)
+Add the `share_properties` block to the 4 resources:
+- `terraform/modules/azure/main.tf` → `uploaded_files`, `artifacts`, `data_sources`
+- `terraform/modules/azure/audit.tf` → `audit_immutable`
+
+One module edit; both `app-production` and `app-development` inherit it on `terraform apply`.
+
+`terraform plan` should show only an in-place update (`~`) of `share_properties` on each — no replacement.
+
+### Change 2 — Group B state backends (6 accounts)
+These exist already and are created imperatively, so two parts:
+1. **New accounts going forward:** add to `createStorageBackend.ts`, after `az storage account create`:
+   ```
+   az storage account file-service-properties update \
+     --account-name ${accountName} \
+     --resource-group ${resourceGroup} \
+     --versions SMB3.1.1
+   ```
+2. **Existing accounts (one-time):** run the same `file-service-properties update --versions SMB3.1.1` once per account: normaintfappproduction, normaintfappdevelopment, normaintfidentity, normainfglobal, storagenormainiacprod01, storagenormainiacdev20.
+
+(Alternative: `terraform import` each into HCL and apply Change-1-style blocks — heavier, gives drift detection.)
+
+### Change 3 — Group B out-of-band (rps*, stwinvm*, stsublogarch, normainstorage = 6 accounts)
+Not managed by any code. Per account, one-time:
+```
+az storage account file-service-properties update \
+  --account-name <name> --resource-group <rg> --versions SMB3.1.1
+```
+RGs: rps* → `rg-normain-{prod-01,dev-20}`; stwinvm* → `rg-normain-{prod-01,dev-20}`; stsublogarch → `rg-normain-global`; normainstorage → `Normain`.
+(Optional follow-up: bring these under IaC so they don't drift back.)
+
+---
+
+## Rollout
+1. Apply Change 1 in `app-development` first (`terraform plan`/`apply` in `environments/app-development/infra`), then `app-production`.
+2. Run Change 2 + 3 `az` one-shots.
+3. Re-run the Vanta Azure integration sync; confirm test flips to passing (20/20).
+
+Impact: none expected — no SMB file shares are mounted anywhere (the sole file share is NFS); blob/tfstate/queue traffic is unaffected by SMB version.

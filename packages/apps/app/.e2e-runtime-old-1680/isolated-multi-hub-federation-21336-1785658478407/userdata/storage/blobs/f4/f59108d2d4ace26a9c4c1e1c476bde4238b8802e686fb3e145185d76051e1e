@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure Marketplace Private Offer — Process Overview</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5b6577;
+    --line: #d9dee9;
+    --p1: #2563eb;
+    --p2: #7c3aed;
+    --p3: #0d9488;
+    --yes: #16a34a;
+    --no: #dc2626;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 12px rgba(16,24,40,.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 48px 24px 72px;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 40px; }
+  header h1 { font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  header p { color: var(--muted); margin-top: 6px; font-size: 15px; }
+
+  .phase {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 28px;
+    position: relative;
+  }
+  .phase + .phase-gap { display: flex; justify-content: center; padding: 4px 0; }
+  .phase-label {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+    color: #fff; padding: 5px 12px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .phase h2 { font-size: 18px; font-weight: 700; margin-bottom: 18px; }
+  .p1 .phase-label { background: var(--p1); }
+  .p2 .phase-label { background: var(--p2); }
+  .p3 .phase-label { background: var(--p3); }
+  .p1 { border-top: 4px solid var(--p1); }
+  .p2 { border-top: 4px solid var(--p2); }
+  .p3 { border-top: 4px solid var(--p3); }
+
+  .node {
+    background: #fafbfe;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+  .node b { display: block; font-size: 14px; }
+  .node .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .row { display: flex; gap: 16px; }
+  .row .node { flex: 1; }
+  .col { display: flex; flex-direction: column; align-items: stretch; }
+
+  .arrow-down {
+    display: flex; justify-content: center; padding: 6px 0; color: #98a2b3;
+  }
+  .arrow-down svg { width: 18px; height: 18px; }
+
+  .connector {
+    display: flex; justify-content: center; align-items: center; gap: 10px;
+    color: var(--muted); font-size: 12px; font-weight: 600;
+    padding: 10px 0;
+  }
+  .connector svg { width: 20px; height: 20px; color: #98a2b3; }
+
+  .decision {
+    border: 1.5px dashed #c4b5fd;
+    background: #f8f6ff;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 14px; font-weight: 600;
+    text-align: center;
+  }
+  .branches { display: flex; gap: 16px; margin-top: 0; }
+  .branch { flex: 1; display: flex; flex-direction: column; }
+  .branch-tag {
+    align-self: center; font-size: 11px; font-weight: 700;
+    padding: 2px 10px; border-radius: 999px; margin: 8px 0;
+  }
+  .branch-tag.yes { background: #dcfce7; color: var(--yes); }
+  .branch-tag.no { background: #fee2e2; color: var(--no); }
+  .branch-tag.neutral { background: #e0e7ff; color: #4338ca; }
+
+  ul.roles { list-style: none; margin-top: 6px; }
+  ul.roles li { font-size: 12.5px; color: var(--muted); padding: 2px 0; }
+  ul.roles li b { color: var(--ink); font-weight: 600; display: inline; font-size: 12.5px; }
+
+  .step-num {
+    display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--p3); color: #fff; font-size: 12px; font-weight: 700;
+    align-items: center; justify-content: center; margin-right: 8px; flex-shrink: 0;
+  }
+  .step { display: flex; align-items: flex-start; gap: 4px; }
+  .step .node { flex: 1; }
+  .note { font-size: 12px; color: var(--muted); font-style: italic; margin-top: 4px; }
+
+  .done {
+    background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;
+    border-radius: 10px; padding: 14px 16px; text-align: center;
+    font-weight: 700; font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Azure Marketplace Private Offer</h1>
+    <p>End-to-end process — from initial setup to signing in to the application</p>
+  </header>
+
+  <!-- PHASE 1 -->
+  <section class="phase p1">
+    <span class="phase-label">Phase 1</span>
+    <h2>Initial Client Setup &amp; Information</h2>
+    <div class="row">
+      <div class="node"><b>Find Billing Account ID</b><span class="sub">Cost Management + Billing → Settings → Properties</span></div>
+      <div class="node"><b>Find Tenant ID</b><span class="sub">Microsoft Entra ID → Overview</span></div>
+    </div>
+    <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+    <div class="node"><b>Send both to your Normain contact</b></div>
+    <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+    <div class="node"><b>Normain creates the private offer</b></div>
+  </section>
+
+  <div class="connector"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg> meanwhile, on the client side</div>
+
+  <!-- PHASE 2 -->
+  <section class="phase p2">
+    <span class="phase-label">Phase 2</span>
+    <h2>Identifying the Right People</h2>
+    <div class="decision">Do you have a suitable Azure subscription?<br><span style="font-weight:400;font-size:12.5px;color:var(--muted)">Active, with a valid payment method — MSDN / Visual Studio / free trial / sponsorship don't qualify</span></div>
+    <div class="branches">
+      <div class="branch">
+        <span class="branch-tag no">No</span>
+        <div class="node">
+          <b>Create one first</b>
+          <ul class="roles">
+            <li><b>Enterprise Agreement</b> — Enterprise Admin / Account Owner</li>
+            <li><b>Microsoft Customer Agreement</b> — Billing Owner / Contributor</li>
+            <li><b>Pay-as-you-go</b> — account holder</li>
+          </ul>
+        </div>
+      </div>
+      <div class="branch">
+        <span class="branch-tag yes">Yes</span>
+        <div class="node" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px">Continue below ↓</div>
+      </div>
+    </div>
+    <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+    <div class="node">
+      <b>Identify who can…</b>
+      <ul class="roles">
+        <li><b>Accept the offer</b> — billing admin (Enterprise Admin / Billing account owner or contributor / Account Administrator)</li>
+        <li><b>Complete the purchase</b> — Owner or Contributor on the Azure subscription</li>
+        <li><b>Approve app access</b> — Global Administrator (only needed at first sign-in)</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="connector"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg> offer link arrives</div>
+
+  <!-- PHASE 3 -->
+  <section class="phase p3">
+    <span class="phase-label">Phase 3</span>
+    <h2>Accepting &amp; Purchasing the Offer</h2>
+    <div class="col">
+      <div class="step"><span class="step-num">1</span><div class="node"><b>Accept the private offer</b><span class="sub">Open the link → review details &amp; terms → click <i>Accept private offer</i></span><div class="note">Purchase becomes available after 15–60 min — refresh to check</div></div></div>
+      <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+      <div class="step"><span class="step-num">2</span><div class="node"><b>Purchase</b><span class="sub">Select subscription + resource group → name the purchase → auto-renew <b>off</b> → Review + subscribe → Subscribe</span></div></div>
+      <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+      <div class="step"><span class="step-num">3</span><div class="node"><b>Activate the subscription</b><span class="sub">Follow instructions on the Normain website</span><div class="note">Purchase is not complete until this is done</div></div></div>
+      <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+      <div class="step"><span class="step-num">4</span><div class="node"><b>Sign in to the application</b><span class="sub">&lt;your-instance&gt;.normain.com — Microsoft work email</span></div></div>
+      <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+      <div class="decision">First sign-in: app approval needed?</div>
+      <div class="branches">
+        <div class="branch">
+          <span class="branch-tag neutral">Self-approve</span>
+          <div class="node" style="text-align:center"><b>Click Accept</b></div>
+        </div>
+        <div class="branch">
+          <span class="branch-tag neutral">IT approval</span>
+          <div class="node"><b>Request approval</b><span class="sub">IT approves via Enterprise applications → Admin consent requests; sign-in permission only (name + email)</span></div>
+        </div>
+      </div>
+      <div class="arrow-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m0 0l-6-6m6 6l6-6"/></svg></div>
+      <div class="done">✓ Done — signed in and ready to go</div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

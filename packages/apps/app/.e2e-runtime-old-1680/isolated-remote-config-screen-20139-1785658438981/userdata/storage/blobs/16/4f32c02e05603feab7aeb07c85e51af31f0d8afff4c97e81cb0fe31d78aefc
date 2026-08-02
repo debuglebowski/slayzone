@@ -1,0 +1,29 @@
+# Step 4 — Diff Summary and Sign-Off
+
+## Goal
+Surface a reviewable diff summary and route the new doc to the approver from Step 1.5. Do not replace the current doc until signed off.
+
+## Inputs
+- New doc from Step 3
+- Current doc `1-aa9Pa9vNNsf3ZE8pyGoA6oBAcOOOv-rCi1e03lJOZ0`
+- Approver from Step 1.5
+
+## Tasks
+- Produce diff summary covering: removed content, added content, factual corrections (with Step 2 source links), structural changes, length delta
+- Send to approver via the channel agreed in Step 1.5 (do not send without explicit user authorization — see memory `feedback_compliance_drive_only` and `feedback_linear_comments_need_explicit_auth`)
+- Capture approver decision and any requested edits
+- Apply requested edits; re-route if material
+- On approval: mark current doc superseded (do not delete) and link to new doc
+
+## Output
+- Diff summary recorded here:
+- Approver decision + date:
+- Supersession action taken:
+
+## Status
+- [ ] Diff summary produced
+- [ ] User authorization to send obtained
+- [ ] Approver notified
+- [ ] Decision captured
+- [ ] Edits applied
+- [ ] Current doc superseded / linked

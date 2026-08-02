@@ -1,0 +1,41 @@
+flowchart TD
+    subgraph GATE["canPrompt() — shared gate"]
+        G{"stdin.isTTY<br/>AND not SUPERVISED<br/>AND not NONINTERACTIVE?"}
+    end
+
+    START([bin boot]) --> G
+    G -- no --> SKIP["skip setup →<br/>resolve config as before<br/>(auto-gen / fail-fast)"]
+
+    G -- yes --> KIND{hub or runner?}
+
+    KIND -- runner --> R1{"joinToken set?<br/>(env / config.json)"}
+    R1 -- yes --> SKIP
+    R1 -- no --> R2{"hubUrl known<br/>AND creds stored?"}
+    R2 -- yes --> SKIP
+    R2 -- no --> RQ["ask fields:<br/>1 join token<br/>2 allowedRoots (default=cwd)<br/>3 name (empty→live hostname)"]
+    RQ --> RUN
+
+    KIND -- hub --> H1{"publicUrl set?<br/>(env / config.json)"}
+    H1 -- yes --> SKIP
+    H1 -- no --> HQ["ask field:<br/>publicUrl<br/>(empty→loopback only)"]
+    HQ --> RUN
+
+    subgraph SUB["runInteractiveConfig()"]
+        RUN["for each field: ask"] --> EMPTY{"answer empty<br/>AND no default?"}
+        EMPTY -- yes --> DROP["skip field<br/>(not collected)"]
+        EMPTY -- no --> COLLECT["apply default/transform<br/>→ collect value"]
+        DROP --> MORE
+        COLLECT --> MORE{more fields?}
+        MORE -- yes --> RUN
+        MORE -- no --> ANY{"any collected?"}
+        ANY -- no --> SKIP
+        ANY -- yes --> SEED["seed process.env<br/>(this run uses values)"]
+        SEED --> SUMMARY["print summary"]
+        SUMMARY --> CONFIRM{"Save to config.json?<br/>[Y/n] (Enter=yes)"}
+        CONFIRM -- yes --> WRITE["updateSlayzoneConfig()<br/>atomic 0600 merge"]
+        CONFIRM -- no --> RUNONLY["run-only<br/>(not persisted)"]
+    end
+
+    WRITE --> BOOT([resolver reads env+config → boot])
+    RUNONLY --> BOOT
+    SKIP --> BOOT

@@ -1,0 +1,79 @@
+# Data restore test — how to run + what to capture
+
+**Goal:** prove a PostgreSQL restore was *planned, executed, and validated successfully* (Vanta "Data restore test", ISO 27001:2022).
+
+**Scope:** restore + validate only. No production cutover, no downtime. Run in **app-development**. ~15 min.
+
+Replace before running: `<rg>` `<id>` `<postfix>` `<user>` `<password>` `<uid>` `<core_table>`.
+Restore time must be within the last 14 days (UTC).
+
+---
+
+## Step 1 — Restore to a new server (PITR)
+
+```bash
+az postgres flexible-server restore \
+  --resource-group <rg> \
+  --name psql-<id>-<postfix>-restore \
+  --source-server psql-<id>-<postfix> \
+  --restore-time "2026-06-25T09:00:00Z"
+```
+
+Wait for success. The live server is untouched (PITR always restores to a new server).
+
+> 📸 **Screenshot 1** — the command + its success output. Must show: source server, the new `-restore` target, and `--restore-time`.
+
+---
+
+## Step 2 — Validate the restored data
+
+From a client pod inside the VNet (server is private):
+
+```bash
+kubectl run pg-validate --rm -it --restart=Never --image=postgres:16-alpine -- /bin/sh
+```
+
+Inside the pod:
+
+```sh
+export PGHOST="psql-<id>-<postfix>-restore.<...>.postgres.database.azure.com"
+export PGPORT=5432 PGUSER="<user>" PGPASSWORD="<password>" PGSSLMODE="require"
+
+psql -d postgres -c '\l'
+psql -d "dbname=tenant_<uid>" -c '\dt'
+psql -d "dbname=tenant_<uid>" -c 'SELECT count(*) FROM <core_table>;'
+```
+
+> 📸 **Screenshot 2** — `\l` output: tenant databases present on the restored server.
+> 📸 **Screenshot 3** — `\dt` + `SELECT count(*)` output: tables present **and row count > 0**. This is the line that proves *data* was restored, not just the schema.
+
+(2 and 3 can be a single capture if both fit on screen.)
+
+---
+
+## Step 3 — Tear down
+
+Delete the throwaway `-restore` server once screenshots are captured (avoids ~2x DB cost; this was a test, nothing to cut over to).
+
+```bash
+az postgres flexible-server delete \
+  --resource-group <rg> \
+  --name psql-<id>-<postfix>-restore --yes
+```
+
+---
+
+## Evidence to submit to Vanta
+
+Upload as the new version (test page → **Copy files to a new draft** → replace files → submit):
+
+1. Screenshots 1–3 above.
+2. A short caption/note containing:
+   - **Date** run
+   - **Who** ran it
+   - **Restore point** used (UTC)
+   - **Source → target** server names
+   - **Environment**: app-development
+   - **Result: PASS**
+
+That's the complete minimal evidence set.

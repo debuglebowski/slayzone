@@ -1,0 +1,142 @@
+# Skill drafts
+
+Working doc — bullets per skill. Schema authority: `data/README.md` + `src/shared/types.ts`.
+
+---
+
+## uc--new
+
+Scaffold a new use-case folder under `data/<uc>/`.
+
+- pick `<uc>` id (folder name, e.g. `uc09`) + label + optional description
+- create:
+  - `use-case.json` = `{ label, description? }` (no id field — folder name wins)
+  - `structure.json` = `[]` (empty `StructureColumn[]`)
+  - `data-sources/` (empty)
+  - `runs/v1/run.json` = `{ date: <today>, notes? }`
+- competitor folders are not pre-created — added as runs are collected
+- `bun run check` after
+
+---
+
+## uc--edit-structure
+
+Edit `data/<uc>/structure.json` — add/remove/edit columns + cells.
+
+- `structure.json` is always a `StructureColumn[]`; cells align by row index across columns
+- column types: `input` (values = primitives) and `question` (values = `Question[]`)
+- single-`question`-column = simple Q&A UC; mixed `input`+`question` columns = spreadsheet-style UC
+- adding a question: append to a `question` column's `values`; enforce `id` unique within UC, `uc` field = folder name
+- `groundTruth` = `{ answer, sources: SourceRef[] }`; preserve `groundTruthHistory[]` on edits to canonical answer (append `{ date, value, reason }`)
+- warn if id renames/removals would orphan existing `answers.json` / `answers.verdicts.json` rows
+- `bun run check` after
+
+---
+
+## uc--evaluate-ground-truth--setup
+
+Orchestrator. Pulls server-filtered diffing rows; writes a working file inside the run folder; fans out per-question sub-agents.
+
+### Preconditions (fail-fast)
+- `bun dev` must be running on `localhost:3000`. If not, STOP. User must start it.
+- `data/<uc>/runs/<run>/ground-truth-eval.json` must NOT exist. If it does, STOP — eval already in progress.
+
+### Steps
+- `GET /api/uc/<uc>/runs/<run>/gt-eval-candidates` → `GroundTruthEvalCandidate[]`
+  - server filters: ≥1 competitor `answer.verdict ∈ {wrong, partial}`
+  - all competitor answers for those questions included (context for the evaluator)
+- write the response to `data/<uc>/runs/<run>/ground-truth-eval.json` (committed; audit trail)
+- chunk + spawn ≤10 sub-agents in parallel (Agent tool, `subagent_type: general-purpose`)
+  - each sub-agent invokes `uc--evaluate-ground-truth--question` per `questionId` in its batch
+- merge sub-agent results back into `ground-truth-eval.json` (attach `subAgentVerdict` per entry)
+- present `gt-wrong` set + proposed answers; on approval, apply via `uc--edit-structure`
+- never auto-rewrite `structure.json`
+
+---
+
+## uc--evaluate-ground-truth--question
+
+Per-question evaluator. Atomic unit invoked by `--setup` sub-agents (or directly for one-offs).
+
+- inputs: `<uc>`, `<questionId>`, candidate entry (text + currentGroundTruth + competitorAnswers)
+- read relevant files in `data/<uc>/data-sources/`; use `competitorAnswers[].citedSources` as hints but verify independently
+- independently derive the correct answer from sources — do not trust GT or any competitor
+- compare against `currentGroundTruth.answer`; return JSON:
+  ```
+  { questionId, verdict: "gt-correct" | "gt-wrong" | "inconclusive",
+    proposedAnswer?, reasoning, sourceRefs[{ source, location? }] }
+  ```
+- does NOT write files — orchestrator merges
+- terse reasoning, but cite specific source locations
+
+---
+
+## uc-run--new
+
+Create a new versioned run `data/<uc>/runs/v<N>/`.
+
+- auto-pick next `v<N>` from existing `runs/` siblings
+- write `run.json` = `{ date: <today>, notes? }` (id is implicit from folder)
+- do NOT snapshot ground truth — it lives in `structure.json` (+ history if changed)
+- do NOT pre-create per-competitor folders — created on-demand by register skill
+- `bun run check` after
+
+---
+
+## uc-run--register-competitor-answers
+
+Ingest raw competitor output into `runs/<run>/<cid>/`.
+
+- inputs: `<uc>`, `<run>`, `<competitorId>`, raw output (paste / file / artifact)
+- verify `<competitorId>` exists in `data/competitors.json`
+- create `runs/<run>/<cid>/` if missing
+- write/update:
+  - `answers.json` = `CompetitorAnswer[]` = `{ questionId, answerText, answerRaw?, citedSources? }[]`
+  - `instructions.md` — verbatim prompt + setup/upload steps used for this run
+  - `stats.json` (optional) = `RunStats` `{ model?, cost?, time?, tokens?, notes? }`
+- map raw output → per-question rows against current `structure.json`; preserve `answerRaw` for traceability
+- flag unmatched `questionId`s or missing questions
+- `bun run check` after
+
+---
+
+## uc-run--grade-competitor-answers
+
+Produce `answers.verdicts.json` for one competitor in a run.
+
+- inputs: `<uc>`, `<run>`, `<competitorId>`
+- read `structure.json` (ground truth) + `answers.json`
+- per question emit `AnswerVerdict` = `{ questionId, answer: VerdictEntry, sources?: VerdictEntry }`
+  - `VerdictEntry` = `{ verdict, reason? }`; `reason` recommended unless `correct`
+  - `verdict` ∈ `correct | partial | wrong | retrieval-fail | not-run`
+  - omit `sources` aspect if the question doesn't expect citations (empty `groundTruth.sources` + no `citedSources`)
+- write `runs/<run>/<cid>/answers.verdicts.json`
+- default: overwrite existing verdicts
+- `bun run check` after
+
+---
+
+## Server support (implemented)
+
+- `GET /api/uc/:uc/runs/:run/gt-eval-candidates` → `GroundTruthEvalCandidate[]` — joins structure + answers + verdicts, filters to questions with ≥1 `wrong`/`partial` competitor verdict
+- type `GroundTruthEvalCandidate` lives in `src/shared/types.ts`
+- `data/README.md` tree lists `ground-truth-eval.json` as an optional per-run file
+
+---
+
+## Deferred: per-competitor execution skills
+
+Pulled for now. When revisited: one skill per id in `data/competitors.json`, each drives the competitor against `<uc>` and hands raw output to `uc-run--register-competitor-answers`.
+
+---
+
+## Open questions
+
+- naming: `uc--`/`uc-run--` double-dash intentional? keep as namespace separator?
+- endpoint name (`gt-eval-candidates`) shorter than file name (`ground-truth-eval.json`) — keep or align?
+- grade skill: human-in-the-loop per question, or batch w/ LLM judge?
+- register skill input format: JSON paste, markdown table, CSV, screenshot+OCR?
+- structure-edit: safely support id renames (rewrite existing answers + verdicts), or refuse?
+- gt-eval candidate definition: lock to "≥1 wrong/partial" or expose threshold via query param?
+- gt-eval sub-agent chunk size: 1 question per agent (true 10-wide fanout) vs N per agent?
+- ground-truth-eval.json: once applied, leave as-is (audit) or archive/rename (e.g. `ground-truth-eval.<date>.json`) so a new eval can run?

@@ -1,0 +1,77 @@
+# Vanta SLA-miss reasons — recommendation
+
+Scope: the **38 SLA-miss findings** currently shown in Vanta › Vulnerabilities › History › SLA misses (last 12 months). All have an empty REASON field.
+
+## TL;DR
+
+**All 38 are already remediated on `origin/main`.** Reconciled every finding against the monorepo lockfile (`normainofficial/normain`, main @ `bb3ae0775`, 2026-06-29). Every resolved version sits **at or above** the patched version, or the package is **gone from the tree**. Nothing here is still vulnerable in main — these are Vanta scan-lag artifacts.
+
+**Primary recommendation:** trigger a Vanta re-scan / re-sync of the GitHub integration first — most should auto-close as resolved. Only annotate findings that refuse to close.
+
+**If reasons are required anyway,** Vanta offers exactly 5 options. Recommended pick per finding below.
+
+## The 5 reason options Vanta gives
+
+| Option | Means |
+|---|---|
+| False positive | Not actually vulnerable / not present |
+| Fix is not yet available | No upstream patch exists |
+| Low risk for environment | Present but low exploitability/impact in our deployment |
+| Not applicable | Vulnerable code path / feature not used |
+| Other | Free-text justification |
+
+> Note: there is **no "remediated late" option**. For findings fixed-but-late, "Other" (with the resolved version cited) is the honest catch-all.
+
+## Recommended reason per finding
+
+### A. Not applicable — vulnerable component provably unused (also version-fixed)
+| # | CVE | Pkg | Why |
+|---|---|---|---|
+| 20, 21 | CVE-2025-64756 | glob | Vuln is in the glob **CLI** `-c/--cmd` flag. glob is transitive only (0 direct imports in `src`), CLI never invoked. Resolved 10.5.0 / 13.0.6 (both ≥ fix). |
+| 25 | CVE-2025-68130 | @trpc/server | Vuln in `experimental_nextAppDirCaller` (Next.js app-dir). Backend is fastify; symbol unused. Resolved 11.15.0 (≥ 11.8.0 fix). |
+| 18 | GHSA-wmjr-v86c-m9jj | better-auth | `multiSession` plugin not enabled anywhere in `src`. Resolved 1.6.16 (≥ 1.4.0 fix). |
+
+### B. Low risk for environment — build/dev-only dependency
+| # | CVE | Pkg | Why |
+|---|---|---|---|
+| 8 | CVE-2025-58751 | vite | Direct **devDependency** of admin + insights (build tooling). Not in production runtime; exploit needs access to a local dev server. Resolved 6.4.3 (≥ fix). |
+| 9 | CVE-2025-58752 | vite | same as above |
+| 10 | CVE-2025-62522 | vite | same; resolved 6.4.3 (> 6.4.0 fix) |
+
+### C. False positive / stale — package no longer in the dependency tree
+| # | CVE | Pkg | Why |
+|---|---|---|---|
+| 11 | CVE-2025-64718 | js-yaml | **Absent** from main lockfile. Not a dependency anymore. |
+| 36 | CVE-2026-25547 | @isaacs/brace-expansion | **Absent**. Only unrelated `brace-expansion@2.1.0` present; the scoped `@isaacs/*` package is gone. |
+
+### D. Other — remediated in main; Vanta scan lag (cite resolved version in free-text)
+| # | CVE | Pkg | Resolved in main | Patch boundary |
+|---|---|---|---|---|
+| 1–6, 14–17, 35 | CVE-2026-23745 / -23950 / -24842 / -26960 / -29786 / -31802 / CVE-2025-64118 | tar | 7.5.19 | all ≤ 7.5.10 / =7.5.1 |
+| 7 | CVE-2026-4926 | path-to-regexp | 8.4.2 | < 8.4.0 |
+| 12 | CVE-2025-66400 | mdast-util-to-hast | 13.2.1 | < 13.2.1 (at patch) |
+| 13 | CVE-2025-13465 | lodash | 4.18.1 | ≤ 4.17.22 |
+| 19 | GHSA-569q-mpph-wgww | better-auth | 1.6.16 | < 1.4.2 |
+| 24 | GHSA-x732-6j76-qmhm | better-auth | 1.6.16 | < 1.4.5 |
+| 22, 23 | CVE-2025-65945 | jws | 3.2.3 | < 3.2.3 (at patch); v4.0.0 not present |
+| 26 | CVE-2025-68665 | @langchain/core | 1.1.35 | < 1.1.8 |
+| 27–31 | CVE-2026-23957 / -23956 / -23736 / -23737 / -24006 | seroval | 1.5.1 | ≤ 1.4.0 / < 1.4.1 |
+| 32 | CVE-2026-25223 | fastify | 5.8.5 | < 5.7.2 |
+| 33 | CVE-2026-25536 | @modelcontextprotocol/sdk | 1.29.0 | ≤ 1.25.3 |
+| 34 | CVE-2026-25639 | axios | 1.17.0 | ≤ 1.13.4 |
+| 37 | CVE-2026-25128 | fast-xml-parser | 5.7.2 | ≤ 5.3.3 |
+| 38 | CVE-2025-15284 | qs | 6.15.2 | < 6.14.1 |
+
+Most of group D are **transitive** deps (tar, path-to-regexp, mdast, jws, seroval, mcp-sdk, axios, qs) — the SLA slipped because the fix was gated on an upstream parent bump, not directly controllable. Direct prod deps in D (lodash, better-auth, @langchain/core, fastify, fast-xml-parser, @trpc) were simply bumped after the SLA window.
+
+## Evidence basis
+- Source of truth: `origin/main` HEAD `bb3ae0775` (2026-06-29), `yarn.lock` resolved versions (Yarn Berry).
+- Direct-vs-transitive: scanned every workspace `package.json`.
+- Feature-usage checks: `git grep` over `src/**` for glob CLI flags, `experimental_nextAppDirCaller`, `multiSession`.
+- Vanta lockfile-based scan lags merged dependency PRs (known pattern) — hence findings open here but fixed in main.
+
+## Open questions / decisions
+- Re-scan first, or annotate now? (re-scan likely closes most)
+- For group D, OK to use "Other" with resolved-version note, or prefer "Low risk" where sev is Low/Medium?
+- Groups C (absent): tag "False positive" or "Other: dependency removed"?
+- Confirm scope = these 38 only (an earlier filter state showed a different set incl. axios proto-pollution / hono / esbuild — not in current view).

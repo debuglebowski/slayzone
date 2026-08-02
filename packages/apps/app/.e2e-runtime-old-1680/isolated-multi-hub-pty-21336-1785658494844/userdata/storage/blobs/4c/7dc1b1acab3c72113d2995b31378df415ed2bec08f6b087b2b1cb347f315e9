@@ -1,0 +1,35 @@
+# Vendor Review: Cloudflare
+
+## URLs
+- Vendor Master Sheet (row 14): https://docs.google.com/spreadsheets/d/1r2BohxDsqLyOrrpGZv96zmostnPOTWHaydExVzCP9Ts/edit#gid=0&range=14:14
+- Vanta record: https://app.eu.vanta.com/c/normain.com/vendors/67fad24b15d3aabfd9994031
+- Tool admin / login: https://dash.cloudflare.com/244cc080d80c9bd00650f838d686aa02/members
+
+## Status
+- Information complete?: (blank)
+- Duplicates: none
+
+## Plan
+| # | Step | State |
+|---|---|---|
+| 1 | Read sheet row | Done |
+| 2 | Check Vanta | Done |
+| 3 | Resolve open questions | Pending |
+| 4 | Fill cells | Pending |
+| 5 | Flip Information complete? = Yes | Pending |
+
+## Cells
+| Col | Header | Current | Proposed | Source |
+|---|---|---|---|---|
+| L | Business owner | kalle@normain.com | Kalle Hansson | Vanta |
+| M | Security owner | kalle@normain.com | Kalle Hansson | Vanta |
+| Q | Sync comment | Checked 2025-07-07 | Checked 2026-05-04 | calculated |
+| AA | Admin permissions through role | (blank) | ? | user |
+| T | Subscription type | Total | ? (Total or Free plan?) | user |
+| Y | Contract Renewal Date | (blank) | ? (e.g. Free plan / Monthly / blank) | user |
+| F | Information complete? | (blank) | Yes | calculated (set last) |
+
+## Open questions
+1. **AA Admin permissions through role**: Yes / No / Unknown / N/A?
+2. **T Subscription type**: cost is $0.00/mo with USD — keep as "Total" or change to "Free plan" / "Not a subscription"?
+3. **Y Contract Renewal Date**: blank, "Free plan", "Monthly", or specific date?

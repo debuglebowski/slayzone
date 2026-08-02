@@ -1,0 +1,25 @@
+# Inbox View
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  🦴 CAVEMAN                          john@gmail.com  ⚙  ?         │
+├──────────┬──────────────────────────────────────────────────────────┤
+│          │  Primary    Updates    Newsletters    Shared             │
+│ ☰ Inbox  │──────────────────────────────────────────────────────────│
+│   Starred│  ★ Sarah K            Q2 planning doc — Hey, can we...  │
+│   Snoozed│    Mike R             Re: deploy schedule — Looks go... │
+│   Sent   │    GitHub             PR #42 merged — ci/cd-pipeline... │
+│   Drafts │    Lisa M             Design review — Attached the m... │
+│   Trash  │    newsletters@       Weekly digest — Top stories th... │
+│          │  · Dave P             Re: offsite — Works for me, le... │
+│ ──────── │  · Stripe             Payment received — Invoice #12... │
+│ Labels   │  · Tom B              Bug report — Steps to reproduc... │
+│   eng    │                                                         │
+│   ops    │                                                         │
+│   hiring │                                                         │
+│          │                                                         │
+│          │                                                         │
+│          │                                   ────────────────────── │
+│          │                                   ✏ Compose    ⌘K Search│
+└──────────┴──────────────────────────────────────────────────────────┘
+```

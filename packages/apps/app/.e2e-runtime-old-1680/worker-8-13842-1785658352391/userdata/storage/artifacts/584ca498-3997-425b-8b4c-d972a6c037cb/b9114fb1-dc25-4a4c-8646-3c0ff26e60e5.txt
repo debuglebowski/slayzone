@@ -1,0 +1,136 @@
+# Setup 2 — Human instructions
+
+Your companion doc. The other asset on this task (`Setup 2 — Background and Plan`) is for the new orchestrator AI. This one is for you.
+
+---
+
+## What Setup 2 is
+
+Setup 2 is the clean restart of the SlayZone Chromium migration. The previous effort drifted — regions render but nothing functions, layout doesn't truly switch modes, writes aren't wired, visual parity never measured. This task (`584ca498`) is the new root. The old root (`6a07e0b7`) is frozen for historical record.
+
+The new orchestrator role is strict: validate every capability close against Electron side-by-side, maintain DEFERRED.md, cap parallel agents at 2, never accept "renders" as "functions." The plan is 13 capabilities (`cap-01` through `cap-13`) from validation infra through distribution.
+
+---
+
+## How to start a fresh orchestrator session
+
+1. Open a new Claude Code session in `/Users/Kalle/dev/projects/slayzone-chromium`.
+2. Paste this opening prompt:
+
+```
+You are the new orchestrator for the SlayZone Chromium migration — task "Setup 2", id 584ca498.
+
+Before doing anything else, read the two assets on this task in full:
+1. "Setup 2 — Background and Plan" — your orchestrator brief, architecture invariants, rebuild discipline, capability tree, and protocol.
+2. "Setup 2 — Human instructions" — context about what I will do and expect.
+
+Then read docs/chromium/ORCHESTRATOR-HANDOFF.md for the honest retrospective of the previous session's drift.
+
+Then confirm back to me:
+1. Your understanding of the rebuild-discipline rule (full rebuilds banned until cap-13).
+2. The first three visual gaps you see when you launch fork vs Electron side-by-side.
+3. Your cap-01 kickoff plan.
+4. Your commitment to validation-log-in-git per capability close.
+
+Load the slay skill before running any slay CLI command. The old parent task 6a07e0b7 is frozen — do not touch it.
+```
+
+3. Confirm the session loaded both assets and understood the rebuild rule before approving any cap-01 work.
+
+---
+
+## What the new orchestrator will do automatically, in order
+
+1. Read both assets on task `584ca498`.
+2. Read `docs/chromium/ORCHESTRATOR-HANDOFF.md`.
+3. `git log --oneline -50`.
+4. Launch Electron + launch fork + screenshot each + identify top three visual gaps.
+5. Create `DEFERRED.md` at repo root, pre-populated from the plan's section 6.
+6. Create `docs/chromium/validation/` + a `README.md` describing the validation-log protocol.
+7. Create `cap-01` subtask under `584ca498` using the description template in the plan's section 7.
+8. Open `cap-01` PTY + delegate.
+9. Validate + close `cap-01`.
+10. Proceed to `cap-02`, etc.
+
+---
+
+## Red flags — interrupt the orchestrator if you see
+
+- Closes a capability without `docs/chromium/validation/cap-NN-<date>.md` in git.
+- Runs 3+ agents in parallel.
+- Triggers a full Chromium rebuild (3+ hour build — it's forbidden until cap-13).
+- Touches task `6a07e0b7` (frozen).
+- Accepts an agent report without launching the fork + comparing to Electron.
+- Adds a deferral to DEFERRED.md without a draining capability.
+
+Point them back at the plan's section 5 (non-negotiable protocol) and section 3 (rebuild discipline).
+
+---
+
+## Expected cadence
+
+This is a long, careful migration. You told the orchestrator: infinite dev power, no shortcuts, most sustainable solution.
+
+Concrete implication: expect **many days to weeks** of orchestrator work, with validation logs building up in `docs/chromium/validation/`. Each capability close is small proof — cumulative proof is what ships.
+
+You are not expected to QA constantly. The orchestrator validates every close. You are notified with a one-line status at every close and a full validation log in git for inspection if you want it.
+
+Every ~3 capability closes the orchestrator will offer you a manual smoke run — not required, but available.
+
+---
+
+## Launch commands (for when you want to test yourself)
+
+**Electron (reference)**:
+```bash
+pnpm --filter @slayzone/app dev
+```
+If command has drifted, check `packages/apps/app/package.json`.
+
+**Fork (with seed + home mode)**:
+```bash
+SLAYZONE_SEED_DEMO=1 ./scripts/chromium/run.sh -- \
+  --slayzone-layout-shell \
+  --slayzone-layout-mode=home \
+  --slayzone-webui-bundle-dir=$(pwd)/packages/webui \
+  --user-data-dir=$(mktemp -d)
+```
+
+After cap-03 closes, `--slayzone-layout-mode=home` becomes optional (tab clicks drive the mode).
+
+---
+
+## Questions the orchestrator will batch-ask you (eventually)
+
+Before `cap-13` distribution:
+- EdDSA key generation ceremony — keys are yours to produce; the orchestrator will coordinate.
+- Apple Developer ID reuse vs fresh.
+- Visual parity threshold (< 2% per region — confirm or adjust).
+- Deliberately deprecated features in the current Electron build (default: none, carry everything).
+
+These are not asked one at a time; the orchestrator batches them.
+
+---
+
+## If you want to end the project
+
+Run `slay tasks done 584ca498` yourself only after you've verified:
+
+1. `cap-13` is closed.
+2. `DEFERRED.md` is empty (or only contains items explicitly deferred to post-parity — which should be zero).
+3. A signed DMG is installable and runs indistinguishably from Electron.
+
+---
+
+## Summary table
+
+| Item | Location |
+|---|---|
+| This task (orchestrator root) | slay task `584ca498` "Setup 2" |
+| Full plan asset (orchestrator reads) | asset 1 on this task |
+| Human instructions (you are reading) | asset 2 on this task |
+| Retrospective of previous drift | `docs/chromium/ORCHESTRATOR-HANDOFF.md` in git |
+| Deferral log | `DEFERRED.md` at repo root (orchestrator creates) |
+| Validation logs (one per capability) | `docs/chromium/validation/cap-NN-<date>.md` |
+| Archived Part I/II assets | parent task `6a07e0b7`, folder `part-1-archive` |
+| Old phase subtasks | under `6a07e0b7` — **frozen, do not touch** |

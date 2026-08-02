@@ -1,0 +1,41 @@
+# Slice 3/8 — integrations router (P16, 43 handlers)
+
+**Status:** Implementation + verification COMPLETE. Commit HELD (user's call) — 3 shared files entangle with in-flight sibling slices (projects, task-terminals). No SHA yet.
+
+## What shipped (code, not yet committed)
+Additive slice-3: mirror all 43 `integrations:*` IPC handlers as a tRPC router; **IPC kept** (deletion = slice 5).
+
+**New**
+- `packages/domains/integrations/src/main/handlers-store.ts` — `createIntegrationOps(db, opts)` factory: the 43 handler bodies lifted verbatim into one ops object + `IntegrationOps` type. Single source of truth. Electron-free aside from existing `./` + `@slayzone/{task,terminal}/main` helper imports (physical relocation to `src/server/` deferred to slice 4).
+- `packages/shared/transport/src/server/routers/integrations.ts` — 43 procedures, `getIntegrationOps().method(...)`, mirrors the ref-commit `18b3312e` router 1:1.
+
+**Edited**
+- `integrations/src/main/handlers.ts` → thin delegator: `registerIntegrationHandlers` builds ops, registers the 43 channels delegating to `ops.*` (test channels still gated on `enableTestChannels`), returns `{ pushGithubTask, ops }`. Signature unchanged → 5 IPC test files + boot untouched.
+- `integrations/src/main/index.ts` → barrel exports `createIntegrationOps` + `IntegrationOps`.
+- `transport/src/server/app-deps.ts` → `setIntegrationOps`/`getIntegrationOps` (+`import type { IntegrationOps } from '@slayzone/integrations/main'`).
+- `transport/src/server/index.ts` → export the two setters.
+- `transport/src/server/router.ts` → register `integrations: integrationsRouter`.
+- `transport/package.json` → +`@slayzone/integrations` dep.
+- `apps/app/src/main/index.ts` → `mod.setIntegrationOps(integrationHandles.ops)` next to `setChatDeps` at boot (same instance as IPC → true single source of truth).
+
+## Key design decisions (diverge from ref commit `18b3312e`, deliberately)
+1. **Slice-3-only.** Ref commit combined slices 3+4+5 (deleted IPC, dropped ~2537 lines of IPC tests, rewired renderer/preload, moved domain to `src/server/`). Per task constraint "No renderer/handler-deletion (slice 5)" + "never drop functionality", I kept IPC + all 5 test files + domain in `src/main/`. Matches the landed slice-3 convention (`@slayzone/automations`).
+2. **Injection via `app-deps.ts` (not module-global, not ctx).** Found the codebase's purpose-built mechanism: electron-coupled domain ops are injected into transport via `app-deps.ts` setter/getter (the chat router does exactly this with `setChatDeps`/`getChatDeps`). `IntegrationOps` is the same category as `ChatDeps`, so `setIntegrationOps`/`getIntegrationOps` is the consistent home — supersedes the ctx-injection idea from the plan. `ctx.automationEngine` is reserved for the small decoupled structural interface; not appropriate for a 44-method electron-coupled bundle.
+
+## Verification
+- **typecheck**: GREEN — integrations, transport, apps/app, projects, task-terminals, terminal, task. (`apps/server` sidecar fails on `--jsx` reaching shared/ui — proven PRE-EXISTING on pure HEAD with zero of my changes; not mine.)
+- **lint**: GREEN on my files — biome ✓, eslint exit 0 ✓, server-boundary ✓ (`import type` keeps transport electron-free, same as chat).
+- **logic parity**: store ≡ HEAD `handlers.ts` — 12 token classes (db.prepare, crypto.randomUUID, throw, .run/.get/.all, getConnection, readCredential, getAdapter, batchTxn, namedTxn) all exact match.
+- **behavior preservation**: ran `handlers.api.test.ts` under electron-as-node on BOTH my delegator and HEAD original → **byte-identical** results (same pass + same failures). The failures are pre-existing sandbox/harness gaps (`no such column: status_setup_complete` in the test's own SQL; better-sqlite3 ABI 145 vs node 137) — not my refactor.
+- **prod build**: `electron-vite build` EXIT=0 — my code bundles into the Electron main process; no resolution errors (only pre-existing benign "use client" rollup warnings).
+- **full `pnpm test:e2e`**: NOT run — very heavy + sandbox ABI/harness limits. Build success + HEAD-baseline equivalence + green typecheck/lint cover the risk.
+
+## Commit blocker (your call: HOLD)
+3 files interleave my integrations work with uncommitted sibling slices:
+- `transport/src/server/router.ts` — +integrations (mine) / +projects, +taskTerminals (siblings)
+- `transport/package.json` — same 3 deps
+- `pnpm-lock.yaml` — same 3 link entries
+
+Committing wholesale would sweep sibling work (whose router files are still untracked) onto main. Clean isolated commit needs partial-staging (`git apply --cached`) of only the integrations hunks. Held pending your multi-task coordination.
+
+DONE WHEN remaining: clean commit `feat(transport): integrations router (P16)` once shared-file sequencing is resolved.

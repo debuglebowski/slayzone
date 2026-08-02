@@ -1,0 +1,35 @@
+flowchart TB
+  D["DASHBOARD<br/>opaque body JSONB · scope personal | org<br/>resolved client-side (mirrors SidebarView)"]
+
+  D --> A
+  D --> B
+  D --> C
+  D --> E
+  D --> F
+
+  subgraph A["Instances + QueryService filters"]
+    A1["Metric — count / sum / avg of a field"]
+    A2["List / Table — embedded ConceptView"]
+    A3["Breakdown — group-by enum or label (bar/pie)"]
+  end
+
+  subgraph B["Event log (event-sourced)"]
+    B1["Trend — created/updated per day/week"]
+    B2["Activity feed — recent events"]
+    B3["Time-travel — dashboard as-of a date"]
+  end
+
+  subgraph C["Computed bands (decay / momentum)"]
+    C1["Attention — N cooling, M cold"]
+    C2["Stale queue — items needing a nudge"]
+  end
+
+  subgraph E["Relations"]
+    E1["Rollup — count/sum across a relation"]
+    E2["Gap — instances missing a required link"]
+  end
+
+  subgraph F["Static / narrative"]
+    F1["Text / markdown / heading"]
+    F2["Links — external or instance routes"]
+  end
