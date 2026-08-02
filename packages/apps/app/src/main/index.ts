@@ -731,6 +731,24 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       const fresh = await mintLocalRunnerJoinToken(port)
       return fresh?.token ?? null
     },
+    onNeedsReEnrollment: () => {
+      // The hub no longer recognizes this runner, so restarting cannot help. Say so
+      // where the user will see it: nothing can execute until it is enrolled again.
+      console.error('[local-runner] needs re-enrollment — the hub does not recognize this runner')
+      try {
+        recordDiagnosticEvent({
+          level: 'error',
+          source: 'main',
+          event: 'local_runner.needs_re_enrollment',
+          message:
+            'The local runner must be enrolled again — the hub no longer recognizes it ' +
+            '(its stored credentials were refused). Agents, terminals and git work all run ' +
+            'on runners, so nothing can execute until it is re-enrolled from Settings → Runners.'
+        })
+      } catch {
+        /* diagnostics unavailable — the console error above still records it */
+      }
+    },
     onPermanentFailure: (info) => {
       console.error('[local-runner] permanent failure (local runner, non-fatal):', info)
       // After this point NOTHING can execute — runners run the agents. Surface it

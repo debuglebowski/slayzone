@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryCredentialStore } from '../client/credential-store'
 import { HubDialer, type HubDialerOptions } from '../client/hub-dialer'
 import { RunnerTransportErrorCodes } from '../shared/frames'
-import { RpcError, RpcTimeoutError } from '../shared/rpc'
+import { JSON_RPC_INTERNAL_ERROR, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { startLoopbackHub, type LoopbackHub } from '../testing/loopback'
 
 const IDENTITY = { name: 'test-runner', platform: 'darwin-arm64', version: '0.0.0', capabilities: ['pty'] }
@@ -75,10 +75,12 @@ describe('enrollment', () => {
     const errorEvent = dialer.events.once('error')
     dialer.start()
 
-    const { error, fatal } = await errorEvent
+    const { error, fatal, reason } = await errorEvent
     expect(fatal).toBe(true)
+    // Assert the machine-readable reason, not the prose: an operator-facing message
+    // should be free to change without breaking a test.
+    expect(reason).toBe('needs-re-enrollment')
     expect(error.message).toContain('bad join token')
-    expect(error.message).toContain(String(RunnerTransportErrorCodes.unauthorized))
 
     await dialer.events.once('disconnected')
     expect(dialer.state).toBe('stopped')
@@ -431,9 +433,9 @@ describe('join-token recovery (single-use token already spent)', () => {
     const errorEvent = dialer.events.once('error')
     dialer.start()
 
-    const { fatal, error } = await errorEvent
+    const { fatal, error, reason } = await errorEvent
     expect(fatal).toBe(true)
-    expect(error.message).toContain('hub rejected enrollment')
+    expect(reason).toBe('needs-re-enrollment')
     expect(error.message).not.toContain('fresh token')
     expect(hub.auth.enrollCalls).toHaveLength(1)
   })
@@ -458,5 +460,63 @@ describe('join-token recovery (single-use token already spent)', () => {
     const { fatal } = await errorEvent
     expect(fatal).toBe(true)
     expect(minted).toBe(0)
+  })
+})
+
+describe('needs-re-enrollment (the hub no longer recognizes this runner)', () => {
+  // The real-world shape: the runner holds working-looking credentials, but the hub
+  // cannot verify them because ITS state changed — storage deleted, one of the two
+  // DBs (hub-auth.sqlite / the runners row) restored without the other, or the
+  // runner revoked. All human actions, so the answer is "enroll it again", not a
+  // retry and not an automatic re-mint.
+  it('reports needs-re-enrollment with an actionable message, and stops', async () => {
+    const hub = await startHub()
+    const store = createMemoryCredentialStore()
+    await store.save({ runnerId: 'runner-forgotten', apiKey: 'key-the-hub-never-heard-of' })
+
+    // No join token: nothing to fall back on, which is the steady state for a
+    // runner enrolled long ago (the token was consumed at enrollment).
+    const dialer = makeDialer(hub.url, { credentialStore: store, joinToken: undefined })
+    const errorEvent = dialer.events.once('error')
+    dialer.start()
+
+    const { fatal, reason, error } = await errorEvent
+    expect(fatal).toBe(true)
+    expect(reason).toBe('needs-re-enrollment')
+    // The message must tell an operator what to DO — this is the one failure they
+    // can fix, and it used to read "join token rejected: unknown".
+    expect(error.message).toContain('enrolled again')
+    expect(error.message).toContain('Settings → Runners')
+
+    await dialer.events.once('disconnected')
+    expect(dialer.state).toBe('stopped')
+    // It does NOT keep retrying: the hub's answer will not change on its own.
+    expect(hub.auth.helloCalls).toHaveLength(1)
+  })
+
+  it('a transient hub error is NOT needs-re-enrollment (it reconnects)', async () => {
+    // Only an explicit credential refusal means the identity is gone. A hub blip
+    // must stay on the backoff path, or a restart would look like a lost runner.
+    let calls = 0
+    const hub = await startHub({
+      verifyApiKey: async () => {
+        calls += 1
+        throw new RpcError(JSON_RPC_INTERNAL_ERROR, 'hub is having a moment')
+      }
+    })
+    const store = createMemoryCredentialStore()
+    await store.save({ runnerId: 'runner-1', apiKey: 'key-ok' })
+
+    const dialer = makeDialer(hub.url, { credentialStore: store, joinToken: undefined })
+    let sawFatal = false
+    dialer.events.on('error', (e) => {
+      if (e.fatal) sawFatal = true
+    })
+    dialer.start()
+
+    await dialer.events.once('reconnect-scheduled')
+    expect(sawFatal).toBe(false)
+    expect(calls).toBeGreaterThan(0)
+    await dialer.stop()
   })
 })

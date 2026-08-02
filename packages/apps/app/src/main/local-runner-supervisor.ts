@@ -19,6 +19,18 @@ import { spawn, type ChildProcess } from 'node:child_process'
  * runner config.ts), supplied by the caller.
  */
 
+/**
+ * Exit code the runner uses for "the hub no longer recognizes me" (EX_CONFIG).
+ *
+ * Duplicated rather than imported: the app does not depend on
+ * `@slayzone/runner-transport`, and taking a package dependency to share one
+ * integer would pull the whole transport tree into the main bundle. The canonical
+ * definition is `RUNNER_EXIT_NEEDS_RE_ENROLLMENT` in
+ * `runner-transport/src/shared/frames.ts` — keep them in step (a mismatch degrades
+ * to "supervisor keeps retrying", i.e. today's behavior, not a crash).
+ */
+const RUNNER_EXIT_NEEDS_RE_ENROLLMENT = 78
+
 /** Production timing defaults. Overridable via `LocalRunnerOpts.timing` (tests). */
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000] as const
 const HEALTHY_RESET_MS = 60_000
@@ -61,6 +73,9 @@ export type LocalRunnerOpts = {
   logger: (line: string) => void
   /** Called once the backoff budget is exhausted — log-only, non-fatal. */
   onPermanentFailure?: (info: { attempts: number; lastError: unknown }) => void
+  /** Called when the runner reports the hub no longer recognizes it. Restarts are
+   *  suppressed from that point; the caller should surface it to the user. */
+  onNeedsReEnrollment?: () => void
   /** Optional timing overrides (tests only — production omits this). */
   timing?: LocalRunnerTiming
 }
@@ -76,6 +91,9 @@ export function startLocalRunner(opts: LocalRunnerOpts): LocalRunnerHandle {
   const stopSigtermGraceMs = opts.timing?.stopSigtermGraceMs ?? STOP_SIGTERM_GRACE_MS
 
   let child: ChildProcess | null = null
+  /** Set when the runner reports its identity is gone. Suppresses restarts, which
+   *  cannot fix it — only an operator re-enrolling can. */
+  let needsReEnrollment = false
   /** Latest re-minted join token, or null to use whatever `opts.env` carries. */
   let currentJoinToken: string | null = null
   let attempt = 0
@@ -91,6 +109,13 @@ export function startLocalRunner(opts: LocalRunnerOpts): LocalRunnerHandle {
 
   const scheduleRestart = (lastError: unknown): void => {
     if (stopped) return
+    if (needsReEnrollment) {
+      opts.logger(
+        '[local-runner] not restarting: this runner must be enrolled again before it can connect'
+      )
+      opts.onNeedsReEnrollment?.()
+      return
+    }
     if (attempt >= backoffMs.length) {
       opts.logger(`[local-runner] giving up after ${attempt} attempts`)
       opts.onPermanentFailure?.({ attempts: attempt, lastError })
@@ -146,12 +171,11 @@ export function startLocalRunner(opts: LocalRunnerOpts): LocalRunnerHandle {
 
     const pipe = (chunk: Buffer): void => {
       for (const line of chunk.toString().split('\n')) {
-        if (line.trim()) {
-          try {
-            opts.logger(`[runner] ${line}`)
-          } catch {
-            /* a throwing logger must never stall the pipe */
-          }
+        if (!line.trim()) continue
+        try {
+          opts.logger(`[runner] ${line}`)
+        } catch {
+          /* a throwing logger must never stall the pipe */
         }
       }
     }
@@ -168,6 +192,11 @@ export function startLocalRunner(opts: LocalRunnerOpts): LocalRunnerHandle {
     })
     proc.on('exit', (code, signal) => {
       if (child !== proc) return
+      // A runner that needs re-enrolling will NEVER reconnect by restarting: the hub
+      // has forgotten its identity, and only an operator enrolling it again fixes
+      // that. Respawning would burn the backoff budget re-failing identically. Read
+      // it from the EXIT CODE (a shared constant) rather than matching a log line.
+      if (code === RUNNER_EXIT_NEEDS_RE_ENROLLMENT) needsReEnrollment = true
       child = null
       if (healthyTimer) clearTimeout(healthyTimer)
       if (stopped) return

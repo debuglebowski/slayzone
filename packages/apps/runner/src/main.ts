@@ -176,7 +176,21 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
   dialer.events.on('reconnect-scheduled', ({ attempt, delayMs }) =>
     log('reconnect scheduled', { attempt, delayMs })
   )
-  dialer.events.on('error', ({ error, fatal }) => log(fatal ? 'fatal error' : 'error', { error: error.message, fatal }))
+  dialer.events.on('error', ({ error, fatal, reason }) => {
+    // `needs-re-enrollment` is the one failure an operator can act on: the hub no
+    // longer recognizes this runner (its storage was deleted, one of its two DBs was
+    // restored without the other, or the runner was revoked). Log it as its own
+    // thing rather than burying it in a generic fatal, because the message carries
+    // the fix and the process is about to stop.
+    if (reason === 'needs-re-enrollment') {
+      log('NEEDS RE-ENROLLMENT — this runner will not reconnect until it is enrolled again', {
+        error: error.message,
+        reason
+      })
+      return
+    }
+    log(fatal ? 'fatal error' : 'error', { error: error.message, fatal })
+  })
 
   // Agent-hook loopback relay (hub/runner split): host /api/agent-hook on the
   // runner's own loopback and forward each envelope to the hub over the existing

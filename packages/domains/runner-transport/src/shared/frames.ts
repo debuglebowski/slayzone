@@ -29,6 +29,17 @@
 
 import { z } from 'zod'
 
+/**
+ * Runner process exit code meaning "the hub no longer recognizes this runner".
+ *
+ * 78 = EX_CONFIG (sysexits.h): a configuration problem a restart cannot fix. A
+ * supervisor must NOT respawn on this — the hub has lost this runner's identity
+ * (storage deleted, one of its two DBs restored without the other, or the runner
+ * revoked) and only an operator enrolling it again resolves it. Lives here so the
+ * runner that exits with it and the supervisor that reads it cannot disagree.
+ */
+export const RUNNER_EXIT_NEEDS_RE_ENROLLMENT = 78
+
 /** Bump on any breaking change to the frames below. */
 export const RUNNER_PROTOCOL_VERSION = 1
 

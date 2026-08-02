@@ -51,8 +51,17 @@ export type HubDialerEvents = {
   connected: { runnerId: string; mode: 'enroll' | 'hello' }
   disconnected: { reason: string }
   'reconnect-scheduled': { attempt: number; delayMs: number }
-  /** `fatal: true` means the dialer gave up (bad join token, missing creds…). */
-  error: { error: Error; fatal: boolean }
+  /**
+   * `fatal: true` means the dialer gave up (bad join token, missing creds…).
+   *
+   * `reason: 'needs-re-enrollment'` is the one an operator can act on: the hub
+   * refused this runner's stored api key, so the runner's identity no longer
+   * exists as far as the hub is concerned. That is always the result of a human
+   * action — storage deleted, one of the two DBs restored without the other, or
+   * the runner revoked — so the fix is to enroll it again, not to retry. Callers
+   * should surface it rather than string-matching the message.
+   */
+  error: { error: Error; fatal: boolean; reason?: 'needs-re-enrollment' }
   /** Hub→runner notification (none defined in protocol v1; future-proofing). */
   notification: { method: string; params: unknown }
 }
@@ -346,10 +355,20 @@ export class HubDialer {
           // the reconnect path (rethrow → outer catch → backoff).
           if (!(err instanceof RpcError) || err.code !== RunnerTransportErrorCodes.unauthorized) throw err
           if (!this.opts.joinToken) {
-            this.fatal(new Error(`hub rejected stored credentials and no join token is configured: ${err.message}`), conn)
+            this.fatal(
+              new Error(
+                `This runner needs to be enrolled again: the hub rejected its stored ` +
+                  `credentials, so the hub no longer recognizes this runner. ` +
+                  `Enroll it from Settings → Runners (or \`slay runner enroll\`). (${err.message})`
+              ),
+              conn,
+              'needs-re-enrollment'
+            )
             return
           }
-          this.log('runner dialer hello rejected, re-enrolling', { code: err.code })
+          this.log('runner dialer hello rejected — hub does not recognize this runner', {
+            code: err.code
+          })
         }
       }
       if (!this.opts.joinToken) {
@@ -378,7 +397,19 @@ export class HubDialer {
           this.opts.refreshJoinToken !== undefined &&
           !this.triedTokenRefresh
         if (!retriable) {
-          this.fatal(new Error(`hub rejected enrollment (${(err as RpcError).code}): ${err instanceof Error ? err.message : String(err)}`), conn)
+          const isAuth =
+            err instanceof RpcError && err.code === RunnerTransportErrorCodes.unauthorized
+          this.fatal(
+            new Error(
+              isAuth
+                ? `This runner needs to be enrolled again: the hub refused its join token ` +
+                  `(a join token is single-use). Enroll it from Settings → Runners ` +
+                  `(or \`slay runner enroll\`). (${err instanceof Error ? err.message : String(err)})`
+                : `hub rejected enrollment (${(err as RpcError).code}): ${err instanceof Error ? err.message : String(err)}`
+            ),
+            conn,
+            isAuth ? 'needs-re-enrollment' : undefined
+          )
           return
         }
 
@@ -525,13 +556,13 @@ export class HubDialer {
     this.retryTimer.unref?.()
   }
 
-  private fatal(error: Error, conn: Connection): void {
+  private fatal(error: Error, conn: Connection, reason?: 'needs-re-enrollment'): void {
     // A stale authenticate() racing a reconnect must not kill the live
     // session that replaced it.
     if (this.current !== conn) return
     if (this.fatalStop) return
     this.fatalStop = true
-    this.events.emit('error', { error, fatal: true })
+    this.events.emit('error', { error, fatal: true, ...(reason ? { reason } : {}) })
     this.log('runner dialer fatal error', { error: error.message })
     conn.ws.terminate()
   }
