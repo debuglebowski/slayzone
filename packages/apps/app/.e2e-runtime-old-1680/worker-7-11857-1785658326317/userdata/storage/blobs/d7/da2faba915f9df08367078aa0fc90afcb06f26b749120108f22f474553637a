@@ -1,5 +1,0 @@
-# Clay
-
-- Auth method: API key/webhook
-- Requirements: Clay workspace; API key or webhook setup; defined table/action flow
-- Capabilities: Push/pull GTM data, enrichment workflows, webhook-triggered automations

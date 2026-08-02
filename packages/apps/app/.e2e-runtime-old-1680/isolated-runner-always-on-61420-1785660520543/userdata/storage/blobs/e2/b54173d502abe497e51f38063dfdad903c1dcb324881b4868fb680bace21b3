@@ -1,6 +1,0 @@
-# Orchestration log
-
-| time | task | event | note |
-|------|------|-------|------|
-| 2026-04-24T13:26:00Z | 4925c0be | started | wave-0 dispatched |
-| 2026-04-24T13:26:00Z | babf9681 | started | wave-0 dispatched |

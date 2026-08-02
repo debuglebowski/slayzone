@@ -1,5 +1,0 @@
-# Linear
-
-- Auth method: OAuth app/API key
-- Requirements: Linear OAuth app or API key; GraphQL setup; webhook secret
-- Capabilities: Issues, comments, projects, teams, cycles, workflow-triggered sync

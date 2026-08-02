@@ -1,7 +1,0 @@
-# Vanta evidence description — Capacity increase request
-
-## Primary
-Microsoft Support ticket (Case 2601260050002341) documenting a capacity increase request for Azure Document Intelligence (Cognitive Services). Normain requested a quota/TPS increase to meet processing demand (~50–80k docs/month); Microsoft's product team reviewed and approved it, increasing the TPS limit on the production resource. Request opened Jan 26, 2026; approved Feb 3, 2026; validated and closed Feb 11, 2026. Demonstrates the org's process for scaling infrastructure to meet demand.
-
-## Short alt (if field is tight)
-MS Support Case 2601260050002341 — quota/TPS increase for Azure Document Intelligence to meet processing demand. Requested Jan 26, 2026; approved & verified Feb 2026. Evidence of infrastructure scaling process.

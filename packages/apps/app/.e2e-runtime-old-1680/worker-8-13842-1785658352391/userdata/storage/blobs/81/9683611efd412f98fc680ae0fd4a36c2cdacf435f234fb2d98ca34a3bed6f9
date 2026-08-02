@@ -1,8 +1,0 @@
-flowchart TD
-  All([All tasks]) --> F1[Archived?<br/>Drop archived tasks.]
-  F1 --> F2[Priority<br/>Drop if priority not selected.<br/>Always applied.]
-  F2 --> F3[Status<br/>Drop if status not selected.<br/>Pinned, active, and open tasks pass.]
-  F3 --> F4[Temporary<br/>Drop temporary tasks if hidden.<br/>Open tasks pass.]
-  F4 --> F5[Only active<br/>Drop inactive tasks if enabled.<br/>Pinned and open tasks pass.]
-  F5 --> Post[Pull in parents<br/>so the tree stays connected.]
-  Post --> Visible([Visible tasks])

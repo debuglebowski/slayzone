@@ -1,1 +1,0 @@
-{"net":{"http_server_properties":{"servers":[{"anonymization":[],"server":"https://eu-assets.i.posthog.com","supports_spdy":true},{"anonymization":[],"server":"https://chatgpt.com","supports_spdy":true},{"anonymization":[],"server":"https://eu.i.posthog.com","supports_spdy":true}],"version":5},"network_qualities":{"CAASABiAgICA+P////8B":"4G"}}}

@@ -1,5 +1,0 @@
-flowchart TB
-  Q{"how does the canvas<br/>get its subgraph?"}
-  Q --> A["A — fetch-all, build client-side (rec v1)<br/>load relations + instances of involved concepts<br/>+ trivial; layout/filter swaps instant, no API work<br/>− unbounded at scale → hard node cap + 'showing N of M'"]
-  Q --> B["B — server subgraph endpoint (later)<br/>seeds + depth + field filter, recursive CTE<br/>+ scales; enables expand-on-click neighborhoods<br/>− new engine query surface + RPC"]
-  A -. "same props contract: {nodes, edges}<br/>swap invisible to canvas" .-> B

@@ -1,9 +1,0 @@
-# Discussion & Conclusions
-## Findings
-We found the response plan harder to use than it needs to be — too many steps and too much administration for our team size. The team followed the plan’s stages, but with friction. Operationally the exercise landed: the #security report and virtual huddle worked, severity (P1) was assigned correctly, containment was reached within the hour, and with no PII involved there was no GDPR or DPA notification trigger. Action: over the coming year, simplify the Incident Response Plan to make it faster and more straightforward to run.
-## Exercise feedback
-- The plan has more steps and administration than a team our size needs — simplification is the main improvement to plan for.
-- We heard about the outage from customers, not from our own monitoring — the missing alerting on stuck jobs was the clearest operational gap.
-- There was no runbook for safely clearing a stuck extraction row — the fix was improvised; a short runbook would make this faster and lower-risk next time.
-### Sign-off
-Reviewed and approved by: ________________  (Security Delegate)        Date: ____________

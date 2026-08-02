@@ -1,4 +1,0 @@
-{
-  "server_mode": "local",
-  "remote_server_url": "ws://127.0.0.1:1/trpc"
-}

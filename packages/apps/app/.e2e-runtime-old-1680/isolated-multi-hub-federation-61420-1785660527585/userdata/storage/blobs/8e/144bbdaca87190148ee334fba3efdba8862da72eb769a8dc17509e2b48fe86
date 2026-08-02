@@ -1,7 +1,0 @@
-# Defender for Cloud — IDS/IPS evidence descriptions
-
-Evidence for Vanta test **"Intrusion detection system alerts"**.
-Tool: **Microsoft Defender for Cloud** (NORMAIN tenant). Captured 2026-06-16.
-
-- **defender-plans-normain-2026-06-16.png** — Defender for Cloud → Environment settings → subscription **Normain** (production) → Defender plans. Shows Defender plans **enabled (Status = On)** with monitoring coverage: Foundational CSPM (On), Defender CSPM (On), Defender for Servers (Plan 2, 5 servers, On), plus App Service / Databases / Storage / Containers / Key Vault / Resource Manager / APIs. Confirms active threat detection is enabled for production resources.
-- **defender-environment-settings-2026-06-16.png** — Environment settings overview across all 3 subscriptions (supporting context: Defender plan coverage at tenant level).

@@ -36,6 +36,9 @@ test-results/
 playwright-report/
 .e2e-userdata/
 .e2e-runtime/
+# Also match dirs moved aside for deletion (.e2e-runtime-old-*): the plain
+# pattern above missed them and 145k scratch files were committed once.
+.e2e-runtime-*/
 
 # Performance profiling artifacts
 *.cpuprofile

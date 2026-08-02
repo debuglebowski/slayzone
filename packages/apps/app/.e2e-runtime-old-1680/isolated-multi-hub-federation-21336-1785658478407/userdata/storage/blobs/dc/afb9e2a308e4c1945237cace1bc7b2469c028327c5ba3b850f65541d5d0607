@@ -1,9 +1,0 @@
-Security response headers — https://app.normain.com
-Captured: 2026-06-21
-----------------------------------------
-content-security-policy: default-src 'self';script-src 'self' https://eu-assets.i.posthog.com;style-src 'self' 'unsafe-inline';style-src-attr 'unsafe-inline';img-src 'self' data: blob: https://lh3....
-referrer-policy: no-referrer
-strict-transport-security: max-age=31536000; includeSubDomains
-x-content-type-options: nosniff
-x-frame-options: SAMEORIGIN
-x-xss-protection: 0

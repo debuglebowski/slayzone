@@ -1,9 +1,0 @@
-# Action tickets
-
-> Follow-up engineering ticket created from the exercise (Linear, Normain Product & Tech / NOR).
-
-## NOR-XXXX — Stuck extraction row blocks new runs
-
-- **Problem:** An OOM-killed job leaves an ExtractionInsightResult row in WAITING; assertExtractionNotRunning then silently blocks every new Run Extraction for that extraction.
-- **Fix:** Make the guard disregard rows older than a safety window, and add alerting when stuck rows accumulate.
-- **Priority:** High · **Owner:** Engineering

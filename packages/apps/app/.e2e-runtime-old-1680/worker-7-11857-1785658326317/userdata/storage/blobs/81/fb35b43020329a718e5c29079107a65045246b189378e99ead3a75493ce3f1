@@ -1,9 +1,0 @@
-# Better Stack
-
-- Auth method: API token
-- Requirements: Better Stack API token; select Uptime/Telemetry/Status APIs; webhook targets
-- Capabilities:
-  - Read: Monitors, incidents, status, logs/metrics
-  - Write: Monitors, incidents, status page updates
-  - Triggers: Incident/webhook notifications
-  - Limits: Product-specific APIs; retention/rate limits

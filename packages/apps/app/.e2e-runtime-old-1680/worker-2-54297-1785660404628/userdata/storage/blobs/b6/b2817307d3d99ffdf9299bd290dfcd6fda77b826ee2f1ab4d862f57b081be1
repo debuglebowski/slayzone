@@ -1,5 +1,0 @@
-# GitHub
-
-- Auth method: GitHub App/OAuth app
-- Requirements: GitHub App or OAuth app; repo/org permissions; webhook secret
-- Capabilities: Repos, issues, PRs, checks, actions, commits, webhooks

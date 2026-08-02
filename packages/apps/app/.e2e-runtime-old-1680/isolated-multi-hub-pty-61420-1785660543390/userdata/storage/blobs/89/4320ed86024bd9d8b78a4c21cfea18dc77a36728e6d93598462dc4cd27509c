@@ -1,9 +1,0 @@
-<!DOCTYPE html><html><body>
-      <button id="b">click me</button>
-      <div id="r">initial</div>
-      <script>
-        document.getElementById('b').addEventListener('click', () => {
-          document.getElementById('r').textContent = 'CLICKED';
-        });
-      </script>
-    </body></html>

@@ -1,2 +1,0 @@
-# Scenario
-Two customers within 5 minutes report that nothing happens when they press Run Extraction on a run page — the button enters its loading state and stays. No error toast appears. CSM raises it in #security. CTO files a Security Event Report. One engineer recognises it as a potential urgent issue and calls a virtual meeting.

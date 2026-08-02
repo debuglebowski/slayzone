@@ -1,5 +1,0 @@
-# Stripe
-
-- Auth method: API key or OAuth app
-- Requirements: Stripe account; restricted keys/OAuth; webhook endpoint; signing secret
-- Capabilities: Customers, subscriptions, payments, invoices, billing portal, webhooks
