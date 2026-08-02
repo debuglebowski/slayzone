@@ -1212,10 +1212,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // scheduleAtlasCorrection() inside ensureFit already no-ops without an addon.
   useEffect(() => {
     if (isActive && !wasActiveRef.current) {
-      ensureFit('reactivate')
+      // Record that the handler RAN, with whether it had to re-fit. `ensureFit`
+      // is idempotent, so on an unchanged panel it emits no `fit` event at all —
+      // which leaves this reveal path with no trace of having executed. The
+      // marker is the observable seam a test can gate on; asserting on the
+      // conditional `fit` instead cannot tell a healthy no-op from a handler
+      // that was never wired up.
+      const refit = ensureFit('reactivate')
+      diag(sessionId, 'reactivate', { terminal: terminalRef.current, refit })
     }
     wasActiveRef.current = isActive
-  }, [isActive, ensureFit])
+  }, [isActive, ensureFit, sessionId])
 
   // Re-fit terminal when PTY dimensions need resync (e.g., after floating agent
   // reattach). Server fan-out is global; filter by sessionId. The follow-up

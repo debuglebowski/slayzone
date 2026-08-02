@@ -27,8 +27,10 @@ import { getMainSessionId, openTaskTerminal, waitForPtySession } from '../fixtur
 interface DiagEvent {
   t: number
   sessionId: string
-  event: 'webgl-load' | 'atlas-correct' | 'fit' | 'webgl-context-loss'
+  event: 'webgl-load' | 'atlas-correct' | 'fit' | 'webgl-context-loss' | 'reactivate'
   site?: string
+  /** `reactivate` only — whether the handler had to re-fit (see below). */
+  refit?: boolean
   geom?: {
     cellDeviceW: number
     cellDeviceH: number
@@ -203,13 +205,17 @@ test.describe('terminal atlas stability across task switches', () => {
       []
     )
 
-    // Sanity — every target task recorded at least one fit/reactivate event,
-    // proving the test actually exercised the new code path.
-    const counts: Record<string, { reactivate: number; correct: number; fit: number }> = {}
+    // Sanity — every target task actually ran the reactivate handler, proving
+    // the test exercised the code path rather than passing vacuously.
+    const counts: Record<
+      string,
+      { reactivate: number; reactivateRefit: number; correct: number; fit: number }
+    > = {}
     for (const id of taskIds) {
       const events = await readEvents(getMainSessionId(id))
       counts[id.slice(0, 8)] = {
-        reactivate: events.filter((e) => e.event === 'fit' && e.site === 'reactivate').length,
+        reactivate: events.filter((e) => e.event === 'reactivate').length,
+        reactivateRefit: events.filter((e) => e.event === 'reactivate' && e.refit === true).length,
         correct: events.filter((e) => e.event === 'atlas-correct').length,
         fit: events.filter((e) => e.event === 'fit').length
       }
@@ -217,15 +223,33 @@ test.describe('terminal atlas stability across task switches', () => {
     console.log('[smoke] per-task event counts:', JSON.stringify(counts, null, 2))
     console.log(`[smoke] iterations=${ITERATIONS} failures=${failures.length}`)
 
+    // Gate on the reactivate handler HAVING RUN, not on it having re-fit.
+    //
+    // This used to assert `fit` with `site: 'reactivate'`, which held only while
+    // the reveal path called `fit()` unconditionally. `ensureFit` is now
+    // idempotent — it skips the fit (and so emits no `fit` event) when the
+    // proposed geometry already matches. All three tabs here share one panel
+    // size, so nothing drifts while hidden and the correct behavior is zero
+    // refits: the old assertion was failing on the fix, not on a regression.
+    //
+    // A refit COUNT is therefore the wrong signal — asserting > 0 demands
+    // redundant work, and asserting == 0 would bake in this fixture's geometry.
+    // What must hold either way is that the handler executed on every reveal, so
+    // real drift WOULD be caught. That is what `reactivate` records.
     for (const id of taskIds) {
       const events = await readEvents(getMainSessionId(id))
-      const reactivateFits = events.filter(
-        (e) => e.event === 'fit' && e.site === 'reactivate'
-      )
+      const reactivations = events.filter((e) => e.event === 'reactivate')
       expect(
-        reactivateFits.length,
-        `task ${id.slice(0, 8)} saw at least one reactivate fit`
+        reactivations.length,
+        `task ${id.slice(0, 8)} ran the reactivate handler at least once`
       ).toBeGreaterThan(0)
+      // Every reveal must reach a verdict — a recorded `reactivate` with no
+      // `refit` boolean would mean the handler ran without consulting geometry.
+      for (const r of reactivations) {
+        expect(typeof r.refit, `task ${id.slice(0, 8)} reactivate recorded a refit verdict`).toBe(
+          'boolean'
+        )
+      }
     }
   })
 })

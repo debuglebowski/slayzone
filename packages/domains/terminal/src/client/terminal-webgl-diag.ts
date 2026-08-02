@@ -41,7 +41,7 @@ export interface DiagEvent {
   /** ms since page load (`performance.now()`). */
   t: number
   sessionId: string
-  event: 'webgl-load' | 'atlas-correct' | 'fit' | 'webgl-context-loss'
+  event: 'webgl-load' | 'atlas-correct' | 'fit' | 'webgl-context-loss' | 'reactivate'
   /** For `fit` events — which call site fired it. */
   site?: string
   geom?: TermGeom
@@ -51,6 +51,20 @@ export interface DiagEvent {
    * correction is scheduled. The scramble signal.
    */
   dirty?: boolean
+  /**
+   * For `reactivate` events — did the isActive false→true handler actually
+   * re-fit? `false` is the healthy steady state (geometry unchanged while
+   * hidden, so `ensureFit` correctly no-ops); `true` means real drift was
+   * caught and corrected.
+   *
+   * Recorded because the reactivate handler is only OBSERVABLE via its side
+   * effects otherwise, and its main side effect is conditional. A test that
+   * gates on "a reactivate fit happened" therefore cannot distinguish "the
+   * handler ran and found nothing to do" (correct) from "the handler never
+   * ran at all" (the regression worth catching) — so it silently stops
+   * protecting anything the moment the no-op path becomes the common one.
+   */
+  refit?: boolean
 }
 
 const RING_CAP = 600
@@ -101,7 +115,7 @@ export function readTermGeometry(terminal: unknown): TermGeom | undefined {
 export function diag(
   sessionId: string,
   event: DiagEvent['event'],
-  opts: { site?: string; terminal?: unknown } = {}
+  opts: { site?: string; terminal?: unknown; refit?: boolean } = {}
 ): void {
   const geom = opts.terminal !== undefined ? readTermGeometry(opts.terminal) : undefined
   const rec: DiagEvent = {
@@ -111,6 +125,7 @@ export function diag(
     site: opts.site,
     geom
   }
+  if (opts.refit !== undefined) rec.refit = opts.refit
 
   if (event === 'atlas-correct') {
     const k = cellKey(geom)
