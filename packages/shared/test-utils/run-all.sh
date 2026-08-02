@@ -65,6 +65,7 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cha
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-boundary.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
 # Client↔hub /trpc connection-context seam — windowId parse + bearer→principal verify (real hub-auth).
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
