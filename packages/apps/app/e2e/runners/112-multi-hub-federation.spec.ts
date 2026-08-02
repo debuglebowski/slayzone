@@ -5,7 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { test as base, expect } from '@playwright/test'
-import { launchIsolatedElectron, projectBlob, clickSettings } from '../fixtures/electron'
+import { launchIsolatedElectron, projectBlob, clickSettings, bootConfigPath } from '../fixtures/electron'
 
 /**
  * Phase 3a — multi-hub federation, 2-hub loopback end-to-end.
@@ -159,7 +159,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         seedUserData: (userDataDir) => {
           fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
           fs.writeFileSync(
-            path.join(userDataDir, 'storage', 'boot-config.json'),
+            bootConfigPath(userDataDir),
             JSON.stringify(
               {
                 server_mode: 'local',
@@ -300,7 +300,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         seedUserData: (userDataDir) => {
           fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
           fs.writeFileSync(
-            path.join(userDataDir, 'storage', 'boot-config.json'),
+            bootConfigPath(userDataDir),
             JSON.stringify(
               {
                 server_mode: 'local',
@@ -387,7 +387,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         seedUserData: (userDataDir) => {
           fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
           fs.writeFileSync(
-            path.join(userDataDir, 'storage', 'boot-config.json'),
+            bootConfigPath(userDataDir),
             JSON.stringify(
               {
                 server_mode: 'local',
@@ -484,7 +484,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         seedUserData: (userDataDir) => {
           fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
           fs.writeFileSync(
-            path.join(userDataDir, 'storage', 'boot-config.json'),
+            bootConfigPath(userDataDir),
             JSON.stringify(
               {
                 server_mode: 'local',

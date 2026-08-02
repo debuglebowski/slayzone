@@ -1,4 +1,12 @@
-import { test, expect, resetApp, seed, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  resetApp,
+  seed,
+  TEST_PROJECT_PATH,
+  notifyScriptEnv,
+  notifyScriptPath
+} from '../fixtures/electron'
 import fs from 'fs'
 import { spawnSync } from 'child_process'
 
@@ -16,37 +24,10 @@ import { spawnSync } from 'child_process'
  *      `hook_event_name`) — agentId=codex envelope POST → /api/agent-hook →
  *      IPC broadcast with the correctly normalized lifecycle type.
  */
-/**
- * Env for a direct `bash notify.sh` invocation.
- *
- * notify.sh v4 is a BENIGN FORWARDER: it reads NO named identity var — not
- * `SLAYZONE_TASK_ID` — and forwards the opaque `SLAYZONE_AGENT_HOOK_CONTEXT`
- * blob verbatim for the server to unpack (see resolveHookIdentity). So a spec
- * must hand it the same blob `buildMcpEnv`'s setHookIdentity() packs at spawn;
- * setting `SLAYZONE_TASK_ID` attributes nothing.
- *
- * The SLAYZONE_ scrub is load-bearing, not hygiene. Run from inside a
- * supervised SlayZone terminal, the Playwright process itself carries a live
- * `SLAYZONE_AGENT_HOOK_CONTEXT` for the HOST agent's task — inheriting it makes
- * the hook resolve to that real task instead of this spec's, so the event
- * arrives with the right agentId/type under the wrong taskId. Same reasoning as
- * the fixture's launch-env strip (electron.ts), applied to the hook spawn.
- */
-function notifyEnv(opts: { port: number; taskId?: string }): Record<string, string> {
-  const clean: Record<string, string> = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v == null || k.startsWith('SLAYZONE_')) continue
-    clean[k] = v
-  }
-  const ctx: Record<string, unknown> = { v: 1, agentId: 'codex', releaseChannel: 'dev' }
-  if (opts.taskId) ctx.taskId = opts.taskId
-  return {
-    ...clean,
-    SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${opts.port}/api/agent-hook`,
-    SLAYZONE_AGENT_ID: 'codex',
-    SLAYZONE_AGENT_HOOK_CONTEXT: JSON.stringify(ctx)
-  }
-}
+/** `notifyScriptEnv` bound to this spec's agent — see the fixture for why the
+ *  identity must ride the ctx blob and why the env scrub is load-bearing. */
+const codexHookEnv = (opts: { port: number; taskId?: string }): Record<string, string> =>
+  notifyScriptEnv({ agentId: 'codex', ...opts })
 
 test.describe('Codex agent hooks', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -92,7 +73,7 @@ test.describe('Codex agent hooks', () => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
-    const scriptPath = `${env.SLAYZONE_USER_DATA_DIR}/hooks/notify.sh`
+    const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     await waitForFile(scriptPath, 5000)
 
     await mainWindow.evaluate(() => {
@@ -108,7 +89,7 @@ test.describe('Codex agent hooks', () => {
     // Codex native hooks deliver the event as JSON on stdin (hook_event_name).
     const res = spawnSync('bash', [scriptPath], {
       input: JSON.stringify({ hook_event_name: 'Stop', session_id: 'e2e' }),
-      env: notifyEnv({ port, taskId: 'e2e-codex-task' })
+      env: codexHookEnv({ port, taskId: 'e2e-codex-task' })
     })
     expect(res.status).toBe(0)
 
@@ -146,7 +127,7 @@ test.describe('Codex agent hooks', () => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
-    const scriptPath = `${env.SLAYZONE_USER_DATA_DIR}/hooks/notify.sh`
+    const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__codexStartEvents = []
@@ -162,7 +143,7 @@ test.describe('Codex agent hooks', () => {
       // No taskId in the blob — this case asserts only agentId + normalized type,
       // so it must not silently inherit the host session's task either.
       input: JSON.stringify({ hook_event_name: 'UserPromptSubmit' }),
-      env: notifyEnv({ port })
+      env: codexHookEnv({ port })
     })
     expect(res.status).toBe(0)
 
@@ -200,7 +181,7 @@ test.describe('Codex agent hooks', () => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
-    const scriptPath = `${env.SLAYZONE_USER_DATA_DIR}/hooks/notify.sh`
+    const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     await waitForFile(scriptPath, 5000)
 
     // A real task row must exist — the server reads provider_config by task id.
@@ -245,7 +226,7 @@ test.describe('Codex agent hooks', () => {
         session_id: codexSessionId,
         source: 'startup'
       }),
-      env: notifyEnv({ port, taskId: task.id })
+      env: codexHookEnv({ port, taskId: task.id })
     })
     expect(res.status).toBe(0)
 

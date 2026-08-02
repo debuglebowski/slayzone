@@ -4,7 +4,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { test as base, expect, type Page } from '@playwright/test'
-import { launchIsolatedElectron } from '../fixtures/electron'
+import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
 
 /**
  * Wave 3 — runner-ON loopback end-to-end.
@@ -198,7 +198,7 @@ base.describe('Runner loopback (runner ON)', () => {
         // listener, so no flag is needed.
         fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
         fs.writeFileSync(
-          path.join(userDataDir, 'storage', 'boot-config.json'),
+          bootConfigPath(userDataDir),
           JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
@@ -386,7 +386,7 @@ base.describe('Runner loopback (runner ON)', () => {
       seedUserData: (userDataDir) => {
         fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
         fs.writeFileSync(
-          path.join(userDataDir, 'storage', 'boot-config.json'),
+          bootConfigPath(userDataDir),
           JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
@@ -446,7 +446,7 @@ base.describe('Runner loopback (runner ON)', () => {
       seedUserData: (userDataDir) => {
         fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
         fs.writeFileSync(
-          path.join(userDataDir, 'storage', 'boot-config.json'),
+          bootConfigPath(userDataDir),
           JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },

@@ -505,6 +505,84 @@ export function cliDbPath(root: string): string {
 }
 
 /**
+ * `<root>/storage/boot-config.json` — the pre-boot server-mode config file.
+ *
+ * Derived HERE, once, for the same reason `cliDbPath` is: the layout is the
+ * app's (`getStorageDir()` = `<ROOT>/storage`), and e2e can only mirror it. It
+ * was previously hand-joined at seven call sites across four spec files, so the
+ * `<ROOT>/storage` migration silently broke the one spec whose copy still
+ * pointed at `<ROOT>/` — the seed was written to a path nothing reads, the app
+ * fell back to `local`, and the spec failed on a premise that was no longer
+ * true rather than on the behavior it tested. One helper makes the next layout
+ * change a single edit, and a wrong path a compile-time-visible one.
+ *
+ * Takes the resolved ROOT (a `userDataDir` from `launchIsolatedElectron`, or
+ * `SLAYZONE_USER_DATA_DIR` read back from the shared worker app).
+ */
+export function bootConfigPath(root: string): string {
+  return path.join(root, 'storage', 'boot-config.json')
+}
+
+/**
+ * `<root>/hooks/notify.sh` — the installed agent-lifecycle hook script.
+ *
+ * Same rationale as `bootConfigPath`: the installer owns this layout and five
+ * hook specs were each re-deriving it (two of them by string interpolation
+ * rather than `path.join`, which would not survive Windows).
+ */
+export function notifyScriptPath(root: string): string {
+  return path.join(root, 'hooks', 'notify.sh')
+}
+
+/**
+ * Env for invoking the installed `notify.sh` DIRECTLY from a spec.
+ *
+ * Two things make this non-obvious enough to belong in the fixture:
+ *
+ *  1. `notify.sh` v4 is a BENIGN FORWARDER — it reads no named identity var.
+ *     Not `SLAYZONE_TASK_ID`. Identity travels only in the opaque
+ *     `SLAYZONE_AGENT_HOOK_CONTEXT` blob that `buildMcpEnv`'s
+ *     `setHookIdentity()` packs at spawn and `resolveHookIdentity` unpacks on
+ *     the server. A spec that sets `SLAYZONE_TASK_ID` attributes nothing.
+ *
+ *  2. The `SLAYZONE_` scrub is load-bearing, not hygiene. Run from inside a
+ *     supervised SlayZone terminal, the Playwright process itself carries a
+ *     LIVE `SLAYZONE_AGENT_HOOK_CONTEXT` for the host agent's own task. Spread
+ *     `...process.env` and that blob wins, so the hook resolves to a real task
+ *     and the assertion fails with the right agentId and type under the wrong
+ *     taskId. Mirrors the launch-env strip in `launchElectronWithRetry`.
+ *
+ * Omit `taskId` to post a hook with no task attribution at all (the blob is
+ * still explicit, so the host's cannot leak in through the gap).
+ */
+export function notifyScriptEnv(opts: {
+  port: number
+  agentId: string
+  taskId?: string
+  /** Extra ctx-blob fields (e.g. `slaySessionId`) for pool/warm-adoption paths. */
+  ctx?: Record<string, unknown>
+}): Record<string, string> {
+  const scrubbed: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value == null || key.startsWith('SLAYZONE_')) continue
+    scrubbed[key] = value
+  }
+  const ctx: Record<string, unknown> = {
+    v: 1,
+    agentId: opts.agentId,
+    releaseChannel: 'dev',
+    ...opts.ctx
+  }
+  if (opts.taskId) ctx.taskId = opts.taskId
+  return {
+    ...scrubbed,
+    SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${opts.port}/api/agent-hook`,
+    SLAYZONE_AGENT_ID: opts.agentId,
+    SLAYZONE_AGENT_HOOK_CONTEXT: JSON.stringify(ctx)
+  }
+}
+
+/**
  * Base env for spawning the built `slay` CLI against a given install ROOT.
  *
  * ROOT is the ONLY channel: the CLI derives `<ROOT>/storage/slayzone{.dev}.sqlite`

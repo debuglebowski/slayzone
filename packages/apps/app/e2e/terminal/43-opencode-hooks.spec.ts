@@ -1,4 +1,4 @@
-import { test, expect, resetApp } from '../fixtures/electron'
+import { test, expect, resetApp, notifyScriptPath } from '../fixtures/electron'
 import fs from 'fs'
 import path from 'path'
 import http from 'http'
@@ -45,7 +45,7 @@ test.describe('OpenCode agent hooks', () => {
       expect(stat.mode & 0o777).toBe(0o644)
     }
 
-    const expectedNotifyPath = path.join(env.SLAYZONE_USER_DATA_DIR, 'hooks', 'notify.sh')
+    const expectedNotifyPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     const content = fs.readFileSync(pluginPath, 'utf8')
     expect(content).toContain('SlayZone opencode plugin v1')
     expect(content).toContain('__slayzoneOpencodePluginV1')

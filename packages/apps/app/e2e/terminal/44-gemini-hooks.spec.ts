@@ -1,6 +1,5 @@
-import { test, expect, resetApp } from '../fixtures/electron'
+import { test, expect, resetApp, notifyScriptPath } from '../fixtures/electron'
 import fs from 'fs'
-import path from 'path'
 import http from 'http'
 
 /**
@@ -34,7 +33,7 @@ test.describe('Gemini agent hooks', () => {
     expect(env.SLAYZONE_USER_DATA_DIR).toBeTruthy()
     expect(env.SLAYZONE_GEMINI_SETTINGS_PATH).toBeTruthy()
 
-    const scriptPath = path.join(env.SLAYZONE_USER_DATA_DIR, 'hooks', 'notify.sh')
+    const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     await waitForFile(scriptPath, 5000)
     await waitForFile(env.SLAYZONE_GEMINI_SETTINGS_PATH, 5000)
 

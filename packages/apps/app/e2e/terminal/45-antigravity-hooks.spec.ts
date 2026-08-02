@@ -1,6 +1,5 @@
-import { test, expect, resetApp, seed, TEST_PROJECT_PATH } from '../fixtures/electron'
+import { test, expect, resetApp, seed, TEST_PROJECT_PATH, notifyScriptPath } from '../fixtures/electron'
 import fs from 'fs'
-import path from 'path'
 import http from 'http'
 
 /**
@@ -36,7 +35,7 @@ test.describe('Antigravity agent hooks', () => {
     expect(env.SLAYZONE_USER_DATA_DIR).toBeTruthy()
     expect(env.SLAYZONE_ANTIGRAVITY_HOOKS_PATH).toBeTruthy()
 
-    const scriptPath = path.join(env.SLAYZONE_USER_DATA_DIR, 'hooks', 'notify.sh')
+    const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     await waitForFile(scriptPath, 5000)
     await waitForFile(env.SLAYZONE_ANTIGRAVITY_HOOKS_PATH, 5000)
 

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { test as base, expect } from '@playwright/test'
-import { launchIsolatedElectron } from '../fixtures/electron'
+import { bootConfigPath, launchIsolatedElectron } from '../fixtures/electron'
 
 /**
  * Slice 7 — RemoteConfigScreen boot-fallback path.
@@ -16,13 +16,6 @@ import { launchIsolatedElectron } from '../fixtures/electron'
  * resetApp/tRPC helpers) assumes a working server connection, which is exactly
  * what this spec must boot WITHOUT.
  */
-// Main reads the pre-boot config from `getTrpcDataRoot()` = `<ROOT>/storage`
-// (getStorageDir), NOT from ROOT itself — same path 100-server-settings-toggle
-// asserts on. Seeding one level up leaves the file unread, so the app boots
-// `local` and the recovery screen legitimately never renders.
-const bootConfigPath = (userDataDir: string): string =>
-  path.join(userDataDir, 'storage', 'boot-config.json')
-
 base.describe('RemoteConfigScreen fallback', () => {
   base('boots into the recovery screen and can fall back to local', async () => {
     base.setTimeout(120_000)
