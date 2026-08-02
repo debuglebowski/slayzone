@@ -111,7 +111,8 @@ export const runnersRouter = router({
       return { ok: true as const }
     }),
 
-  /** Set a project's default runner (`null` = local/first runner). */
+  /** Set a project's default runner (`null` = no explicit default; exec falls back
+   *  to the connected default runner — never to an in-process spawn). */
   setProjectDefaultRunner: publicProcedure
     .input(z.object({ projectId: z.string(), runnerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {

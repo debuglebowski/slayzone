@@ -14,6 +14,7 @@ export {
   setTaskRunner,
   setProjectDefaultRunner,
   resolveTaskRunnerId,
+  resolveTaskRunnerIdOrDefault,
   type RegisterRunnerInput,
   type UpsertRunnerCheckoutInput
 } from './store'

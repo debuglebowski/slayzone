@@ -10,6 +10,7 @@ import {
   registerOrReplaceRunner,
   registerRunner,
   resolveTaskRunnerId,
+  resolveTaskRunnerIdOrDefault,
   retireStaleLocalRunners,
   revokeRunner,
   setProjectDefaultRunner,
@@ -17,6 +18,7 @@ import {
   touchRunnerLastSeen,
   upsertRunnerCheckout
 } from './store'
+import { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
 import { createMigratedDb, seedProjectAndTask, type TestDb } from './test-db'
 
 let t: TestDb
@@ -294,8 +296,54 @@ describe('task/project runner binding', () => {
     seedProjectAndTask(t.raw, projectId, taskId)
   })
 
-  it('both NULL resolves to null (local/first runner)', async () => {
+  it('both NULL resolves to null (no EXPLICIT binding)', async () => {
+    // null here means "nothing bound" — NOT "run on the hub". There is no
+    // in-process exec path; resolveTaskRunnerIdOrDefault supplies the fallback.
     expect(await resolveTaskRunnerId(t.db, taskId)).toBeNull()
+  })
+
+  describe('resolveTaskRunnerIdOrDefault', () => {
+    // Both binding columns are nullable TEXT with no default, so an install that
+    // never opened project settings has NOTHING bound. Since removing the
+    // in-process fallback, such a task must still resolve to a real runner or no
+    // agent could ever start on an existing install.
+    it('falls back to the sole connected runner when nothing is bound', async () => {
+      expect(
+        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [{ runnerId: 'r-only' }])
+      ).toBe('r-only')
+    })
+
+    it('prefers the local runner by name when several are connected', async () => {
+      expect(
+        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [
+          { runnerId: 'r-remote', name: 'build-box' },
+          { runnerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
+        ])
+      ).toBe('r-local')
+    })
+
+    it('refuses to guess when several are connected and none is the local one', async () => {
+      // Silently picking one would run the agent on an arbitrary machine.
+      expect(
+        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [
+          { runnerId: 'r-a', name: 'box-a' },
+          { runnerId: 'r-b', name: 'box-b' }
+        ])
+      ).toBeNull()
+    })
+
+    it('an EXPLICIT binding always wins over the connected default', async () => {
+      await setTaskRunner(t.db, taskId, 'runner-pinned')
+      expect(
+        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [
+          { runnerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
+        ])
+      ).toBe('runner-pinned')
+    })
+
+    it('null when nothing is bound and nothing is connected', async () => {
+      expect(await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [])).toBeNull()
+    })
   })
 
   it('task NULL inherits the project default', async () => {

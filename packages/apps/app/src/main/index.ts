@@ -654,9 +654,27 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
 
   const minted = await mintLocalRunnerJoinToken(sidecarPort)
   if (!minted) {
-    // Runner just has no local runner — the user can still enroll remote runners
-    // via the UI. Do NOT spawn a token-less runner (it would only backoff-loop).
+    // Do NOT spawn a token-less runner (it would only backoff-loop). The user can
+    // still enroll a remote runner via the UI.
+    //
+    // This used to be log-only, which was survivable while the hub could spawn
+    // agents in-process. It no longer can — runners run the agents — so an
+    // unspawned local runner means NO agents can start at all. Record it as a
+    // diagnostic error so it shows up in the Diagnostics tab instead of only in a
+    // boot log nobody reads.
     logBoot('[local-runner] no join token minted — leaving runner unspawned')
+    try {
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'main',
+        event: 'local_runner.unspawned',
+        message:
+          'Local runner could not be enrolled (join-token mint failed). Agents, terminals and ' +
+          'git work all run on runners — enroll one in Settings → Runners, or restart the app.'
+      })
+    } catch {
+      /* diagnostics unavailable this early — the boot log above still records it */
+    }
     return
   }
 

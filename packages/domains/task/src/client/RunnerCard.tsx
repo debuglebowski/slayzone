@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
  *
  * Backend model (see `runners` router / store):
  *   - `tasks.runner_id`          : NULL = inherit the project default; else pinned.
- *   - `projects.default_runner_id`: NULL = local/in-process; else a runner.
+ *   - `projects.default_runner_id`: NULL = no explicit default (exec uses the
+ *     connected default runner); else a specific runner.
  *   - `resolveTaskRunner`        : the effective (coalesced) runner — null = local.
  *
  * The task's own binding is only ever {inherit | pinned-to-runner}: `setTaskRunner`

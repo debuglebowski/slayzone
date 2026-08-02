@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RunnerCheckoutStatus, RunnerProjectCheckout, RunnerRecord } from '../shared/types'
+import { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
 
 /**
  * Runner store: CRUD over the v149 runner tables (`runners`,
@@ -303,7 +304,8 @@ export async function setTaskRunner(
   await db.run(`UPDATE tasks SET runner_id = ? WHERE id = ?`, [runnerId, taskId])
 }
 
-/** `null` = local/first runner. */
+/** `null` = no explicit default; agents fall back to the connected default
+ *  runner (see `resolveTaskRunnerIdOrDefault`). It does NOT mean "run on the hub". */
 export async function setProjectDefaultRunner(
   db: SlayzoneDb,
   projectId: string,
@@ -313,8 +315,14 @@ export async function setProjectDefaultRunner(
 }
 
 /**
- * Effective runner for a task: the task's explicit `runner_id`, else its
- * project's `default_runner_id`, else `null` (= local/first runner).
+ * The task's EXPLICIT runner binding: its own `runner_id`, else its project's
+ * `default_runner_id`. `null` = nothing bound, which does NOT mean "run locally"
+ * — see {@link resolveTaskRunnerIdOrDefault}, which falls back to the connected
+ * default runner. (Runners run the agents; there is no in-process spawn path.)
+ *
+ * Both columns are plain nullable TEXT with no default, so `null` is the state of
+ * every install that has never opened project settings — which is why an
+ * unbound task must resolve to a real runner rather than to "the hub".
  */
 export async function resolveTaskRunnerId(db: SlayzoneDb, taskId: string): Promise<string | null> {
   const row = await db.get<{ runner_id: string | null }>(
@@ -325,4 +333,35 @@ export async function resolveTaskRunnerId(db: SlayzoneDb, taskId: string): Promi
     [taskId]
   )
   return row?.runner_id ?? null
+}
+
+/**
+ * Effective runner for a task, including the implicit default.
+ *
+ * Resolution order:
+ *   1. the task's explicit `runner_id`
+ *   2. its project's `default_runner_id`
+ *   3. the sole connected runner, if exactly one is connected
+ *   4. the connected runner named {@link DEFAULT_LOCAL_RUNNER_NAME} (the
+ *      co-located one the app auto-enrolls)
+ *   5. `null` — genuinely nowhere to run
+ *
+ * Steps 3-4 exist because the two binding columns default to NULL: without them,
+ * removing the in-process fallback would strand every existing install with zero
+ * runnable agents despite a healthy auto-enrolled runner sitting right there.
+ * `null` from this function is a hard error at the exec seams, not a signal to
+ * run on the hub.
+ */
+export async function resolveTaskRunnerIdOrDefault(
+  db: SlayzoneDb,
+  taskId: string,
+  listConnectedRunners: () => Array<{ runnerId: string; name?: string }>
+): Promise<string | null> {
+  const bound = await resolveTaskRunnerId(db, taskId)
+  if (bound !== null) return bound
+  const connected = listConnectedRunners()
+  if (connected.length === 0) return null
+  if (connected.length === 1) return connected[0].runnerId
+  const local = connected.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+  return local ? local.runnerId : null
 }

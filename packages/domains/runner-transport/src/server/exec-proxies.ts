@@ -1,12 +1,21 @@
 /**
- * Hub-side exec proxies — routing backends that forward OS-level exec work
- * (ptys, child processes, git/fs worktree ops) to a remote runner over the
- * runner gateway, transparently falling back to an in-process ("local") backend
- * when no runner is assigned.
+ * Hub-side exec proxies — routing backends that forward ALL OS-level exec work
+ * (ptys, chat agents, child processes, git/fs worktree ops) to a runner over the
+ * runner gateway.
+ *
+ * **Runners run the agents.** There is no in-process fallback: a spec whose
+ * runnerId does not resolve raises {@link NoRunnerAvailableError} rather than
+ * silently executing on the hub. The old fallback made "which machine is this
+ * running on?" depend on invisible DB state — a task with no runner bound looked
+ * identical to one deliberately pinned local, and a chat agent could end up on a
+ * different machine than its own worktree.
+ *
+ * The one exception is worktree COLOR state (`getWorktreeColor`,
+ * `ensureProjectWorktreeColors`): hub-local UI data, never routed, and the former
+ * is sync so it could not be a network call.
  *
  * These are drop-in replacements for the terminal/processes/task exec backends:
- * `spawn(spec)` dispatches per-spec — a null resolved runnerId runs locally,
- * anything else is served by a remote handle whose data/exit stream is demuxed
+ * `spawn(spec)` is served by a remote handle whose data/exit stream is demuxed
  * from the shared gateway event bus and whose write/resize/kill translate to
  * hub → runner requests.
  *
@@ -122,15 +131,32 @@ const sessionKey = (runnerId: string, sessionId: string): string => `${runnerId}
 
 const noop = (): void => {}
 
+/**
+ * Raised when exec work has no runner to go to.
+ *
+ * Runners run the agents — there is no in-process spawn path — so an unresolved
+ * runner is a hard, visible failure rather than a silent degradation to the hub.
+ * The message is user-facing: it says what to do, because the only fix is to
+ * enroll or connect a runner.
+ */
+export class NoRunnerAvailableError extends Error {
+  constructor(readonly what: string) {
+    super(
+      `No runner available to run ${what}. Agents, terminals and git work all run on runners — ` +
+        `enroll one (Settings → Runners) or wait for the local runner to reconnect.`
+    )
+    this.name = 'NoRunnerAvailableError'
+  }
+}
+
 // ===========================================================================
 // Routing pty backend
 // ===========================================================================
 
 export interface RoutingPtyBackendOptions {
   gateway: RoutingGateway
-  /** In-process backend used when `resolveRunnerId` returns null. */
-  local: PtyBackend
-  /** Route a spawn to a runnerId, or null to run locally. */
+  /** Route a spawn to a runnerId. `null` throws {@link NoRunnerAvailableError} —
+   *  there is no in-process fallback; runners run the agents. */
   resolveRunnerId: (spec: PtySpawnSpec) => string | null
 }
 
@@ -168,7 +194,7 @@ interface PtyEntry {
  * monotonic. Sessions are disposed on `pty.exit` and on runner loss/disconnect.
  */
 export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyBackend {
-  const { gateway, local, resolveRunnerId } = options
+  const { gateway, resolveRunnerId } = options
   const sessions = new Map<string, PtyEntry>()
 
   function drain(entry: PtyEntry): void {
@@ -255,7 +281,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   return {
     spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle> {
       const runnerId = resolveRunnerId(spec)
-      if (runnerId == null) return local.spawn(spec)
+      if (runnerId == null) throw new NoRunnerAvailableError(`terminal session ${spec.sessionId}`)
 
       const key = sessionKey(runnerId, spec.sessionId)
       const dataEmitter = new BufferingEmitter<string>()
@@ -345,7 +371,6 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
 export interface RoutingProcessBackendOptions {
   gateway: RoutingGateway
-  local: ProcessBackend
   resolveRunnerId: (spec: ProcSpawnSpec) => string | null
   /**
    * Override how a spec becomes `proc.spawn` params. Default: treat
@@ -394,7 +419,7 @@ interface ProcEntry {
  * `proc.spawn` frame.
  */
 export function createRoutingProcessBackend(options: RoutingProcessBackendOptions): ProcessBackend {
-  const { gateway, local, resolveRunnerId } = options
+  const { gateway, resolveRunnerId } = options
   const sessions = new Map<string, ProcEntry>()
 
   function finalize(entry: ProcEntry, code: number | null, signal: string | null): void {
@@ -480,7 +505,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
   return {
     spawn(spec: ProcSpawnSpec): ProcHandle {
       const runnerId = resolveRunnerId(spec)
-      if (runnerId == null) return local.spawn(spec)
+      if (runnerId == null) throw new NoRunnerAvailableError(`process ${spec.id}`)
 
       const key = sessionKey(runnerId, spec.id)
       const dataEmitter = new BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>()
@@ -568,9 +593,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
 
 export interface RoutingChatBackendOptions {
   gateway: RoutingGateway
-  /** In-process backend used when `resolveRunnerId` returns null. */
-  local: ChatBackend
-  /** Route a spawn to a runnerId, or null to run on the hub. */
+  /** Route a spawn to a runnerId. `null` throws {@link NoRunnerAvailableError}. */
   resolveRunnerId: (spec: ChatSpawnSpec) => string | null
 }
 
@@ -589,22 +612,15 @@ export interface RoutingChatBackendOptions {
  * handshake, request correlation — remains on the hub.
  */
 export function createRoutingChatBackend(options: RoutingChatBackendOptions): ChatBackend {
-  const { gateway, local, resolveRunnerId } = options
+  const { gateway, resolveRunnerId } = options
 
   return {
     async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
       const runnerId = resolveRunnerId(spec)
-      if (runnerId == null) return local.spawn(spec)
+      if (runnerId == null) throw new NoRunnerAvailableError(`chat agent ${spec.binaryName}`)
 
       const backend = createRoutingProcessBackend({
         gateway,
-        // Unreachable: `resolveRunnerId` below is a constant non-null. Present
-        // only to satisfy the ProcessBackend contract.
-        local: {
-          spawn: () => {
-            throw new Error('routing chat backend: local proc spawn is unreachable')
-          }
-        },
         resolveRunnerId: () => runnerId,
         // An agent spawn is a resolved binary + argv, NOT a shell string: `sh
         // <script>` must stay two argv entries. The default sender would set
@@ -712,8 +728,9 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
 
 export interface RemoteWorktreeAdaptersOptions {
   gateway: RoutingGateway
-  /** In-process adapters — fallback when unrouted, plus always-local color ops. */
-  local: WorktreeExecAdapters
+  /** In-process adapters. Used ONLY for the two color ops, which are hub-local UI
+   *  state and never routed — every other method requires a runner. */
+  local: Pick<WorktreeExecAdapters, 'getWorktreeColor' | 'ensureProjectWorktreeColors'>
   /**
    * The runner a given TASK's worktree work belongs to, or null for hub-local.
    * Takes the taskId because that is the only thing a runner can be resolved
@@ -737,8 +754,7 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
   return {
     async createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null)
-        return local.createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch)
+      if (runnerId == null) throw new NoRunnerAvailableError(`worktree create for task ${taskId}`)
       await gateway.request(runnerId, HubToRunnerMethods.gitCreateWorktree, {
         repoPath,
         worktreePath,
@@ -749,7 +765,7 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
 
     async removeWorktree(taskId, projectPath, worktreePath) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) return local.removeWorktree(taskId, projectPath, worktreePath)
+      if (runnerId == null) throw new NoRunnerAvailableError(`worktree remove for task ${taskId}`)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitRemoveWorktree, {
         projectPath,
         worktreePath
@@ -759,8 +775,7 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
 
     async runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null)
-        return local.runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch)
+      if (runnerId == null) throw new NoRunnerAvailableError(`worktree setup for task ${taskId}`)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitRunWorktreeSetupScript, {
         worktreePath,
         repoPath,
@@ -772,7 +787,7 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
     async copyIgnoredFiles(taskId, repoPath, worktreePath, behavior, customPaths) {
       const runnerId = await resolveRunnerId(taskId)
       if (runnerId == null)
-        return local.copyIgnoredFiles(taskId, repoPath, worktreePath, behavior, customPaths)
+        throw new NoRunnerAvailableError(`ignored-file copy for task ${taskId}`)
       await gateway.request(runnerId, HubToRunnerMethods.gitCopyIgnoredFiles, {
         repoPath,
         worktreePath,
@@ -783,14 +798,14 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
 
     async getCurrentBranch(taskId, repoPath) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) return local.getCurrentBranch(taskId, repoPath)
+      if (runnerId == null) throw new NoRunnerAvailableError(`git branch read for task ${taskId}`)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitGetCurrentBranch, { repoPath })
       return gitGetCurrentBranchResultSchema.parse(res).branch
     },
 
     async isGitRepo(taskId, path) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) return local.isGitRepo(taskId, path)
+      if (runnerId == null) throw new NoRunnerAvailableError(`git repo probe for task ${taskId}`)
       const res = await gateway.request(runnerId, HubToRunnerMethods.gitIsGitRepo, { path })
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
     },
@@ -806,14 +821,15 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
 
     async pathExists(taskId, path) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) return local.pathExists(taskId, path)
+      if (runnerId == null) throw new NoRunnerAvailableError(`path probe for task ${taskId}`)
       const res = await gateway.request(runnerId, HubToRunnerMethods.fsPathExists, { path })
       return fsPathExistsResultSchema.parse(res).exists
     },
 
     async removeArtifactDir(taskId, absDir) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) return local.removeArtifactDir(taskId, absDir)
+      if (runnerId == null)
+        throw new NoRunnerAvailableError(`artifact-dir remove for task ${taskId}`)
       await gateway.request(runnerId, HubToRunnerMethods.fsRemoveDir, { path: absDir })
     }
   }

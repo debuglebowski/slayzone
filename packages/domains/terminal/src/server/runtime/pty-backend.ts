@@ -90,7 +90,15 @@ export const localPtyBackend: PtyBackend = {
 // Active backend. Callers re-read this ref on EVERY spawn, so a swap only takes
 // effect for spawns issued after it — never mid-session. Swap ONLY at a boot or
 // reconnect quiesce point (no in-flight spawn/exit for a session that could
-// straddle two backends). `null` resets to the local default.
+// straddle two backends).
+//
+// The default remains `localPtyBackend` so TESTS (and any harness that never
+// wires a composition root) keep spawning in-process. In the real app the
+// composition root installs the routing backend, which requires a runner and has
+// no local fallback — see `NoRunnerAvailableError`. `setPtyBackend(null)`
+// therefore means "restore the test/default in-process backend", NOT "fall back
+// to local for a routed session": once the routing backend is installed, nothing
+// resets it, so a null runner is an error rather than a silent hub spawn.
 let ptyBackend: PtyBackend = localPtyBackend
 
 export function getPtyBackend(): PtyBackend {

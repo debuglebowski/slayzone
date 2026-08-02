@@ -55,7 +55,6 @@ import {
   setPtyBackend,
   setPtySpawnLookups,
   setRemoteMcpEnvProvider,
-  localPtyBackend,
   ptyEvents,
   createChatOps,
   createChatQueueOps,
@@ -87,8 +86,7 @@ import {
   onGlobalStateChange,
   hasSessionUserInput,
   configureTransport,
-  createLocalChatBackend,
-  whichBinary,
+  createDbChatDataOps,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import {
@@ -113,8 +111,7 @@ import {
   listForTask,
   listAllProcesses,
   subscribeToProcessLogs,
-  setProcessBackend,
-  localProcessBackend
+  setProcessBackend
 } from '@slayzone/processes/server'
 // Runner transport: runner gateway + hub-auth + runner resolution, wired
 // unconditionally at boot (a hub always accepts runners).
@@ -441,16 +438,35 @@ export function composeServer(opts: {
     isDarkTheme: () => true,
     bus: { on: () => undefined }
   })
+  // ── The single runner resolver ────────────────────────────────────────────
+  // Explicit task/project binding, else the connected default runner. Declared
+  // HERE, before the pty/chat lookups that capture it, but reads the gateway
+  // through a late-bound ref because the gateway is built asynchronously further
+  // down. Without the indirection the spawn-time resolvers (wired synchronously)
+  // would see only the explicit binding while the exec backends (wired after the
+  // gateway) applied the default — so an unbound task would build a HUB-shaped
+  // agent env and then run that agent on a runner, giving it a loopback hook URL
+  // that resolves to the wrong machine.
+  let execGateway: HubRunnerGateway | null = null
+  const resolveExecRunner = (specRunnerId: string | null | undefined): string | null => {
+    if (specRunnerId != null) return specRunnerId
+    const connected = execGateway?.listRunners() ?? []
+    if (connected.length === 0) return null
+    if (connected.length === 1) return connected[0].runnerId
+    const local = connected.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+    return local ? local.runnerId : null
+  }
+  /** Effective runner for a task: explicit binding, else connected default. */
+  const resolveRunnerForTask = async (taskId: string): Promise<string | null> =>
+    resolveExecRunner(await resolveTaskRunnerId(db, taskId))
+
   // Inject runner-aware spawn lookups BEFORE createPtyOps (which captures the
-  // lookups at construction). Only `resolveRunnerId` is overridden — it needs the
-  // db, not the gateway, so it's safe to wire synchronously here; the mode-row /
-  // project-id reads keep their db defaults. With no runner assigned,
-  // `resolveTaskRunnerId` returns null → the spec carries a null runnerId → every
-  // routing backend below falls through to local (in-process, the common case).
+  // lookups at construction). Only `resolveRunnerId` is overridden; the mode-row /
+  // project-id reads keep their db defaults.
   const dbLookups = createDbPtySpawnLookups(db)
   setPtySpawnLookups({
     ...dbLookups,
-    resolveRunnerId: (taskId) => resolveTaskRunnerId(db, taskId)
+    resolveRunnerId: (taskId) => resolveRunnerForTask(taskId)
   })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
   // Warm-process pool (plans/agent-sessions.md): pre-warm one agent per active
@@ -485,7 +501,17 @@ export function composeServer(opts: {
     }
   })
   setChatDeps({
-    ops: createChatOps(db),
+    // Override ONLY the runner resolution over the db defaults, so a chat spawn
+    // resolves the same runner the exec backend will route it to. If chat resolved
+    // just the explicit binding while the backend applied the connected default,
+    // an unbound task would build a hub-shaped agent env (loopback agent-hook URL)
+    // and then run that agent on the runner, where the URL points nowhere.
+    ops: createChatOps(db, {
+      dataOps: {
+        ...createDbChatDataOps(db),
+        resolveRunnerId: (taskId) => resolveRunnerForTask(taskId)
+      }
+    }),
     queueOps: createChatQueueOps(db),
     events: chatEvents,
     queueEvents: chatQueueEvents
@@ -1004,21 +1030,25 @@ export function composeServer(opts: {
     // agent-hook-relay-consumer.ts.
     attachAgentHookRelayConsumer(runnerGateway, restDeps, terminalStateBridge)
 
-    // Route OS-level exec (pty/proc) to the resolved runner; a null runnerId
-    // (baked into the spec by the runner-aware spawn lookups above) falls
-    // through to the in-process local backend.
+    // Route ALL OS-level exec (pty / chat agents / processes) to a runner. There
+    // is no in-process fallback: an unresolved runner raises
+    // NoRunnerAvailableError so "which machine ran this?" is never an invisible
+    // property of DB state.
+    //
+    // Bind the gateway into the shared `resolveExecRunner` declared above, so the
+    // spawn-time lookups and these exec backends resolve IDENTICALLY. Any spec
+    // arriving with a null runnerId still gets the connected default here.
+    execGateway = runnerGateway
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: runnerGateway,
-        local: localPtyBackend,
-        resolveRunnerId: (spec) => spec.runnerId ?? null
+        resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     )
     setProcessBackend(
       createRoutingProcessBackend({
         gateway: runnerGateway,
-        local: localProcessBackend,
-        resolveRunnerId: (spec) => spec.runnerId ?? null
+        resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     )
     // Chat agents route the same way terminal agents do (the runnerId is baked
@@ -1028,8 +1058,7 @@ export function composeServer(opts: {
     configureTransport({
       backend: createRoutingChatBackend({
         gateway: runnerGateway,
-        local: createLocalChatBackend({ whichBinary }),
-        resolveRunnerId: (spec) => spec.runnerId ?? null
+        resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     })
     // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
@@ -1040,10 +1069,11 @@ export function composeServer(opts: {
         gateway: runnerGateway,
         // Route each task's worktree/git/fs work to the SAME runner its agents
         // spawn on — the seam now carries the taskId, so this is the same
-        // resolution the pty/chat backends use. Without it a task whose agent runs
-        // on a runner had its worktree created on the hub, leaving the agent with
-        // a cwd that does not exist on its own machine.
-        resolveRunnerId: (taskId) => resolveTaskRunnerId(db, taskId),
+        // resolution the pty/chat backends use (explicit binding, else the
+        // connected default runner). Without it a task whose agent runs on a
+        // runner had its worktree created on the hub, leaving the agent with a cwd
+        // that does not exist on its own machine.
+        resolveRunnerId: (taskId) => resolveRunnerForTask(taskId),
         local: defaultWorktreeExecAdapters
       })
     })

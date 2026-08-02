@@ -139,6 +139,10 @@ export {
   onTaskReachedTerminal as runtimeOnTaskReachedTerminal
 } from './runtime/pty-manager'
 export { createChatOps, type ChatOps, type ChatMode } from './runtime/chat-handlers'
+// The chat data seam. Exported so a composition root can override ONE method
+// (e.g. runner resolution) over the db-backed defaults instead of reimplementing
+// the whole interface.
+export { createDbChatDataOps, type ChatDataOps } from './runtime/chat-data-ops'
 export {
   createChatQueueOps,
   chatQueueEvents,

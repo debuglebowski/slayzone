@@ -3219,7 +3219,8 @@ export const migrations: Migration[] = [
       //   - runner_project_checkouts  : where each runner has each project
       //                                  checked out, one row per pair.
       //   - tasks.runner_id            : NULL = inherit the project default.
-      //   - projects.default_runner_id : NULL = local/first runner.
+      //   - projects.default_runner_id : NULL = no explicit default (exec falls
+      //     back to the connected default runner, never an in-process spawn).
       db.exec(`
         CREATE TABLE runners (
           id                TEXT PRIMARY KEY,
