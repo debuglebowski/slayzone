@@ -1,6 +1,5 @@
 import fs from 'fs'
-import path from 'path'
-import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
+import { test, expect, clickSettings, resetApp, bootConfigPath } from '../fixtures/electron'
 
 declare global {
   interface Window {
@@ -19,7 +18,11 @@ declare global {
  * have a hub), so the spec adds a remote hub first.
  */
 test.describe('Run-local-hub toggle', () => {
-  let bootConfigPath: string
+  // Named distinctly from the imported `bootConfigPath` helper: a local
+  // `let bootConfigPath` shadowed it, so the call below resolved to this
+  // (still-undefined) string and threw "bootConfigPath is not a function" in
+  // beforeAll — taking the whole describe down with it.
+  let configPath: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -27,7 +30,7 @@ test.describe('Run-local-hub toggle', () => {
       window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     )) as { SLAYZONE_USER_DATA_DIR?: string }
     expect(env.SLAYZONE_USER_DATA_DIR).toBeTruthy()
-    bootConfigPath = path.join(env.SLAYZONE_USER_DATA_DIR!, 'storage', 'boot-config.json')
+    configPath = bootConfigPath(env.SLAYZONE_USER_DATA_DIR!)
   })
 
   const readBootConfig = (): {
@@ -36,7 +39,7 @@ test.describe('Run-local-hub toggle', () => {
     hubs?: Array<{ id: string; url?: string }>
   } | null => {
     try {
-      return JSON.parse(fs.readFileSync(bootConfigPath, 'utf8'))
+      return JSON.parse(fs.readFileSync(configPath, 'utf8'))
     } catch {
       return null
     }
