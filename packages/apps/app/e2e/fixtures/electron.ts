@@ -216,7 +216,14 @@ export async function resetApp(page: Page): Promise<void> {
   // renderer's tRPC connection survives the restart, so it has nothing to notice.
   //
   // Every spec calls resetApp in beforeAll, so waiting here covers all of them.
-  await waitForUsableRunner(page, 30_000)
+  //
+  // SMALL budget on purpose. This waits for a redial (~450ms), not an enrollment —
+  // the worker-level gate already proved a runner exists. A 30s budget here sat
+  // inside a 30s `beforeAll` hook timeout, so a worker whose runner was slow blew
+  // the hook and took its whole spec file down; that cost 14 specs and 6 minutes of
+  // wall-clock. Returning false is fine: the spec then fails on its own assertion
+  // with a real error instead of an opaque hook timeout.
+  await waitForUsableRunner(page, 5_000)
 }
 
 /**
@@ -509,7 +516,10 @@ async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boo
     } catch {
       // Renderer mid-reload / tRPC not ready yet — keep polling.
     }
-    await wait(1_000)
+    // 100ms, not 1s: the post-reset redial completes in ~450ms, and this runs in
+    // EVERY spec's beforeAll — a 1s interval turned a sub-second wait into a
+    // multi-second one and pushed 30s beforeAll hooks over their budget.
+    await wait(100)
   }
   return false
 }
