@@ -264,7 +264,14 @@ async function main(): Promise<void> {
       // must overlap probes or `hub ls` is unusable.
       const port = await fakeHub(HUB_A)
       const started = Date.now()
-      const hubs = await discoverHubs({ range: { start: port, end: port + 199 }, timeoutMs: 300 })
+      // Sweep DOWNWARD from the real hub when counting up would run off the end
+      // of the port space: `port` is ephemeral, so anything above 65336 made
+      // `port + 199` exceed 65535 and node rejected the probe outright ("Port
+      // should be >= 0 and < 65536"). Intermittent by construction — it depended
+      // on which port the OS handed out — and it never surfaced because this
+      // file sat downstream of a `set -e` abort in run-all.sh and had never run.
+      const start = port + 199 <= 65535 ? port : port - 199
+      const hubs = await discoverHubs({ range: { start, end: start + 199 }, timeoutMs: 300 })
       const elapsed = Date.now() - started
       assert(hubs.length >= 1, 'still found the real hub')
       assert(elapsed < 10_000, `200-port sweep took ${elapsed}ms`)

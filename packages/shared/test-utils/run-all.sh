@@ -35,6 +35,41 @@ run_test_electron_strict_loader() {
   fi
 }
 
+# Moved up from mid-script: `set -e` aborts on an undefined function, and each
+# of these was CALLED above its old definition — so the run died at the first
+# such call and every test after it silently never ran. Definitions belong
+# with the other helpers, above all call sites.
+
+run_test_no_loader() {
+  echo ""
+  echo "=== $1 (integration) ==="
+  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+run_test_electron_loader() {
+  echo ""
+  echo "=== $1 (electron+loader) ==="
+  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+run_test_electron_strict() {
+  echo ""
+  echo "=== $1 (electron, strict) ==="
+  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 # Domain handler contract tests touch the harness better-sqlite3 DB, so they need
 # the Electron node ABI (strict+loader) — plain `npx tsx` ERR_DLOPENs. Paths moved
 # from src/main/ → src/electron/ in the Wave C2 split; repointed here.
@@ -225,6 +260,9 @@ run_test packages/domains/terminal/src/server/state-machine.test.ts
 # Terminal — idle-close engagement (browser/other-panel interaction keeps agent warm)
 run_test packages/domains/terminal/src/server/engagement.test.ts
 run_test packages/domains/terminal/src/server/session-error-gate.test.ts
+# Terminal — PTY exit handling: shell-fallback decision + the runner-routed
+# recovery-shell adoption guard (was never registered here, so it never ran).
+run_test packages/domains/terminal/src/server/pty-exit-strategy.test.ts
 # Terminal — fresh-vs-resume decision (restart-clobber invariant: known id ⇒ resume)
 run_test packages/domains/terminal/src/server/spawn-conversation.test.ts
 run_test packages/domains/terminal/src/server/claude-transcripts.test.ts
@@ -248,38 +286,11 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/ado
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 
-run_test_no_loader() {
-  echo ""
-  echo "=== $1 (integration) ==="
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
 
-run_test_electron_loader() {
-  echo ""
-  echo "=== $1 (electron+loader) ==="
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
 
 # Strict: pipefail makes a non-zero test exit code propagate through the grep
 # filter, so a real failure counts as FAIL (the lenient runners above count
 # PASS as long as any output is produced).
-run_test_electron_strict() {
-  echo ""
-  echo "=== $1 (electron, strict) ==="
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
 
 # Side-car supervisor crash-recovery (slice 2.5.1 HARD GATE).
 run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.test.ts
