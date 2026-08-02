@@ -113,14 +113,24 @@ export interface WorktreeExecAdapters {
   getWorktreeColor: (projectPath: string, worktreePath: string) => string | undefined
   /** `ensureProjectWorktreeColors` from `@slayzone/worktrees/server`. */
   ensureProjectWorktreeColors: (projectPath: string) => Promise<ReadonlyMap<string, string>>
-  /** `fs.existsSync` seam (recovered-worktree check, artifact-dir guard). The
-   *  local default stays sync (`boolean`); a runner-backed impl needs a network
+  /** `fs.existsSync` for a path in the task's WORKSPACE (e.g. the recovered-worktree
+   *  check). Routed: the workspace lives wherever the task's agents run. The local
+   *  default stays sync (`boolean`); a runner-backed impl needs a network
    *  round-trip, so the return is widened to allow a Promise (call sites await). */
   pathExists: (taskId: string, path: string) => boolean | Promise<boolean>
-  /** `fs.rmSync(dir, { recursive, force })` seam for task artifact directories.
-   *  Widened to `void | Promise<void>` for the same remote-async reason as
-   *  `pathExists`; the local default stays sync. */
-  removeArtifactDir: (taskId: string, absDir: string) => void | Promise<void>
+  /**
+   * `fs.existsSync` for a path in the HUB's own storage (`<ROOT>/storage/...`).
+   *
+   * Separate from {@link pathExists} on purpose: artifacts are hub-owned data, not
+   * workspace files, so this must NEVER be routed to a runner — the directory does
+   * not exist there, and requiring a runner to probe it would make archiving a task
+   * impossible with no runner connected (which is exactly what happened when both
+   * shared one seam).
+   */
+  hubPathExists: (absPath: string) => boolean | Promise<boolean>
+  /** `fs.rmSync(dir, { recursive, force })` for a task's artifact directory under
+   *  the HUB's storage. Hub-local for the same reason as {@link hubPathExists}. */
+  removeArtifactDir: (absDir: string) => void | Promise<void>
 }
 
 export interface TaskRuntimeAdapters {
@@ -165,7 +175,8 @@ export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   getWorktreeColor,
   ensureProjectWorktreeColors,
   pathExists: (_taskId, p) => existsSync(p),
-  removeArtifactDir: (_taskId, absDir) => rmSync(absDir, { recursive: true, force: true })
+  hubPathExists: (p) => existsSync(p),
+  removeArtifactDir: (absDir) => rmSync(absDir, { recursive: true, force: true })
 }
 
 const defaultRuntimeAdapters: TaskRuntimeAdapters = {
@@ -443,8 +454,9 @@ export async function cleanupTaskFull(
   // Clean up artifact files on disk. getDataRoot() is the single source of truth
   // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage).
   const artifactsBaseDir = path.join(runtimeAdapters.getDataRoot(), 'artifacts', taskId)
-  if (await runtimeAdapters.worktrees.pathExists(taskId, artifactsBaseDir)) {
-    await runtimeAdapters.worktrees.removeArtifactDir(taskId, artifactsBaseDir)
+  // HUB storage, not workspace: never routed to a runner (see hubPathExists).
+  if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {
+    await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
   }
 
   const task = await db.get<{ worktree_path: string | null; project_id: string }>(

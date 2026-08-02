@@ -414,6 +414,7 @@ function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeE
     getWorktreeColor: vi.fn(() => '#abcdef'),
     ensureProjectWorktreeColors: vi.fn(async () => new Map([['/wt', '#abcdef']]) as ReadonlyMap<string, string>),
     pathExists: vi.fn(async () => false),
+  hubPathExists: vi.fn(() => false),
     removeArtifactDir: vi.fn(async () => {}),
     ...over
   }
@@ -475,8 +476,12 @@ describe('createRemoteWorktreeAdapters', () => {
     expect(await adapters.pathExists(TASK, '/some/path')).toBe(true)
     expect(requireCall(gateway, 'fs.pathExists').params).toEqual({ path: '/some/path' })
 
-    await adapters.removeArtifactDir(TASK, '/artifacts/x')
-    expect(requireCall(gateway, 'fs.removeDir').params).toEqual({ path: '/artifacts/x' })
+    // Artifact dirs live in the HUB's own storage, so they are served locally and
+    // never cross the wire — routing them would have made archiving a task
+    // impossible with no runner connected.
+    await adapters.removeArtifactDir('/artifacts/x')
+    expect(gateway.requestsOf('fs.removeDir')).toHaveLength(0)
+    expect(local.removeArtifactDir).toHaveBeenCalledWith('/artifacts/x')
 
     // git/fs work never touched the local adapters.
     expect(local.isGitRepo).not.toHaveBeenCalled()
@@ -503,14 +508,18 @@ describe('createRemoteWorktreeAdapters', () => {
     const local = makeLocalWorktrees()
     const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveRunnerId: () => null })
 
-    // Git/fs work must land on the SAME machine as the agent that will use it, so
-    // "no runner" cannot silently mean "do it on the hub".
+    // WORKSPACE work must land on the SAME machine as the agent that will use it,
+    // so "no runner" cannot silently mean "do it on the hub".
     await expect(adapters.isGitRepo(TASK, '/repo')).rejects.toThrow(NoRunnerAvailableError)
     await expect(adapters.pathExists(TASK, '/x')).rejects.toThrow(NoRunnerAvailableError)
-    await expect(adapters.removeArtifactDir(TASK, '/dir')).rejects.toThrow(NoRunnerAvailableError)
     await expect(adapters.createWorktree(TASK, '/r', '/wt', 'b')).rejects.toThrow(
       NoRunnerAvailableError
     )
+    // …but HUB-storage ops keep working with no runner at all (archiving a task
+    // must not require one).
+    expect(await adapters.hubPathExists('/storage/artifacts/x')).toBe(false)
+    await adapters.removeArtifactDir('/storage/artifacts/x')
+
     expect(gateway.calls).toHaveLength(0)
   })
 

@@ -730,7 +730,10 @@ export interface RemoteWorktreeAdaptersOptions {
   gateway: RoutingGateway
   /** In-process adapters. Used ONLY for the two color ops, which are hub-local UI
    *  state and never routed — every other method requires a runner. */
-  local: Pick<WorktreeExecAdapters, 'getWorktreeColor' | 'ensureProjectWorktreeColors'>
+  local: Pick<
+    WorktreeExecAdapters,
+    'getWorktreeColor' | 'ensureProjectWorktreeColors' | 'hubPathExists' | 'removeArtifactDir'
+  >
   /**
    * The runner a given TASK's worktree work belongs to, or null for hub-local.
    * Takes the taskId because that is the only thing a runner can be resolved
@@ -819,6 +822,7 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
       return local.ensureProjectWorktreeColors(projectPath)
     },
 
+    // WORKSPACE path probe → routed (the workspace lives on the runner).
     async pathExists(taskId, path) {
       const runnerId = await resolveRunnerId(taskId)
       if (runnerId == null) throw new NoRunnerAvailableError(`path probe for task ${taskId}`)
@@ -826,11 +830,16 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
       return fsPathExistsResultSchema.parse(res).exists
     },
 
-    async removeArtifactDir(taskId, absDir) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null)
-        throw new NoRunnerAvailableError(`artifact-dir remove for task ${taskId}`)
-      await gateway.request(runnerId, HubToRunnerMethods.fsRemoveDir, { path: absDir })
+    // HUB-storage ops: always local, never routed, and never require a runner.
+    // Artifacts live under the hub's own <ROOT>/storage — that directory does not
+    // exist on a runner, and routing these made archiving a task impossible
+    // whenever no runner was connected.
+    hubPathExists(absPath) {
+      return local.hubPathExists(absPath)
+    },
+
+    removeArtifactDir(absDir) {
+      return local.removeArtifactDir(absDir)
     }
   }
 }

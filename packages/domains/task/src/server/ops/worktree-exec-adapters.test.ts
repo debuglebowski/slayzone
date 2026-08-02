@@ -92,6 +92,7 @@ const makeFakes = (
   getWorktreeColor: () => undefined,
   ensureProjectWorktreeColors: async () => new Map(),
   pathExists: () => false,
+  hubPathExists: () => false,
   removeArtifactDir: () => {
     calls.push('removeArtifactDir')
   },
@@ -214,8 +215,9 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
       removeCalls.push([projPath, wtPath])
       return {}
     },
-    // Artifacts dir "exists" → removeArtifactDir seam must fire (rmSync path).
-    pathExists: () => true
+    // Artifacts dir "exists" → removeArtifactDir seam must fire. It's HUB storage,
+    // so the guard is hubPathExists (never routed to a runner).
+    hubPathExists: () => true
   })
   configureTaskRuntimeAdapters({ getDataRoot: () => dataRoot, worktrees: fakes })
 
