@@ -38,6 +38,13 @@ export default function globalSetup(): void {
   killStale('Electron.*out/main/index\\.js', 'Electron')
   killStale('hub/dist/bin\\.js', 'side-car')
   killStale('hub/bin\\.js', 'side-car')
+  // Runners too. An orphan from an interrupted run keeps re-dialing whatever hub
+  // port it can reach, so a FRESH worker's gate sees `connected: true` within ~14ms
+  // from a runner that process never spawned — and that runner then dies mid-test
+  // when its credentials or port stop matching. One was found alive 25+ HOURS later.
+  // Harmless while the hub could execute work in-process; with runners as the only
+  // exec path it silently poisons whichever worker it attaches to.
+  killStale('runner/dist/bin\\.cjs', 'runner')
 
   // Under Playwright the app loads from out/main, so the sidecar's dev
   // scriptPath (`app.getAppPath()/../hub/dist/bin.cjs`) resolves to

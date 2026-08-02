@@ -203,6 +203,20 @@ export async function resetApp(page: Page): Promise<void> {
   }).toPass({ timeout: 15_000 })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root', { timeout: 10_000 })
+
+  // Re-gate on a usable runner. `app:reset-for-test` restarts the SIDE-CAR, which
+  // builds a fresh runner gateway — the runner's existing session belonged to the
+  // old one, so for ~450ms afterwards the hub has zero connected runners even
+  // though the runner process is perfectly healthy and re-dialing.
+  //
+  // Measured: a resolver miss at t=2300ms, the runner's connect at t=2442ms. Any
+  // spec that creates a task or opens a terminal inside that gap resolved no runner
+  // — which used to degrade silently to an in-process spawn, and now (correctly)
+  // fails. The worker-level gate cannot cover this: it runs once at launch, and the
+  // renderer's tRPC connection survives the restart, so it has nothing to notice.
+  //
+  // Every spec calls resetApp in beforeAll, so waiting here covers all of them.
+  await waitForUsableRunner(page, 30_000)
 }
 
 /**
@@ -469,17 +483,29 @@ export async function launchIsolatedElectron(opts: {
  * specs that legitimately boot runner-less (SLAYZONE_E2E_NO_RUNNER=1) call this
  * too. The individual spec still fails loudly on its own assertion.
  */
+/** What `runners.list` returned when the gate last passed (diagnostic). */
+let lastGateSnapshot: { atMs: number; rows: unknown[] } | null = null
+
 async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boolean> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const usable = await page.evaluate(async () => {
-        const rows = (await window.getTrpcVanillaClient().runners.list.query()) as Array<{
+      const rows = await page.evaluate(async () =>
+        (await window.getTrpcVanillaClient().runners.list.query()) as Array<{
+          id?: string
+          name?: string
+          connected?: boolean
           usable?: boolean
         }>
-        return rows.some((r) => r.usable === true)
-      })
-      if (usable) return true
+      )
+      if (rows.some((r) => r.usable === true)) {
+        // Diagnostic: this gate has passed implausibly fast (~17ms, before the
+        // runner's first dial at ~2.4s) while reporting a usable runner. Record
+        // exactly what the router returned at pass time so the cause is a
+        // measurement rather than a guess.
+        lastGateSnapshot = { atMs: Date.now() - startedAt, rows }
+        return true
+      }
     } catch {
       // Renderer mid-reload / tRPC not ready yet — keep polling.
     }
@@ -648,7 +674,8 @@ export const test = base.extend<ElectronFixtures>({
           testProjectPath: TEST_PROJECT_PATH,
           attempts: launched.attempts,
           runnerReady,
-          runnerReadyMs: Date.now() - runnerReadyStartedAt
+          runnerReadyMs: Date.now() - runnerReadyStartedAt,
+          runnerGateSnapshot: lastGateSnapshot
         })
 
         attachSessionLogCapture(sharedApp, workerArtifactsDir)

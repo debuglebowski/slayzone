@@ -110,8 +110,7 @@ import {
   killTaskProcesses,
   listForTask,
   listAllProcesses,
-  subscribeToProcessLogs,
-  setProcessBackend
+  subscribeToProcessLogs
 } from '@slayzone/processes/server'
 // Runner transport: runner gateway + hub-auth + runner resolution, wired
 // unconditionally at boot (a hub always accepts runners).
@@ -119,7 +118,6 @@ import {
   createHubRunnerGateway,
   createRoutingChatBackend,
   createRoutingPtyBackend,
-  createRoutingProcessBackend,
   createRemoteWorktreeAdapters,
   type HubRunnerGateway
 } from '@slayzone/runner-transport/server'
@@ -1050,12 +1048,15 @@ export function composeServer(opts: {
         resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     )
-    setProcessBackend(
-      createRoutingProcessBackend({
-        gateway: runnerGateway,
-        resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
-      })
-    )
+    // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
+    // servers, not agents. `doSpawn` is synchronous and also driven by restart
+    // timers, so it cannot resolve a runner — its spec always carries
+    // `runnerId: null`. Routing them therefore is NOT wired: enforcement would
+    // block every `pnpm dev`, and running them on the hub is the intended
+    // behavior, not a fallback.
+    //
+    // The routing backend stays available for when they become async and routable
+    // (a separate change); until then the in-process default stands.
     // Chat agents route the same way terminal agents do (the runnerId is baked
     // into the spec by chat-handlers' resolveRunnerId). Before this, chat was the
     // one agent kind the hub always ran in its OWN process, so a chat session
