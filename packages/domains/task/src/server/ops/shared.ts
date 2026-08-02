@@ -537,6 +537,39 @@ export async function maybeAutoCreateWorktree(
 ): Promise<void> {
   if (!(await isAutoCreateWorktreeEnabled(db, projectId))) return
 
+  // Auto-creation is BEST-EFFORT by contract (hence "maybe", and the
+  // `auto_worktree_skipped` diagnostics below): the task must be created either
+  // way. So a missing runner SKIPS the worktree instead of failing the create —
+  // the exec seams throw when unrouted, and this runs during task creation,
+  // before any agent exists to need a workspace. The user can attach a worktree
+  // later once a runner is connected.
+  try {
+    await createWorktreeForTask(db, taskId, projectId, taskTitle, repoName)
+  } catch (err) {
+    if (err instanceof Error && err.name === 'NoRunnerAvailableError') {
+      runtimeAdapters.recordDiagnosticEvent({
+        level: 'warn',
+        source: 'task',
+        event: 'task.auto_worktree_skipped',
+        taskId,
+        projectId,
+        message: 'No runner available — worktree not created'
+      })
+      return
+    }
+    throw err
+  }
+}
+
+/** The actual auto-create flow. Split out so `maybeAutoCreateWorktree` can treat
+ *  "no runner" as a skip without wrapping every internal step. */
+async function createWorktreeForTask(
+  db: SlayzoneDb,
+  taskId: string,
+  projectId: string,
+  taskTitle: string,
+  repoName?: string | null
+): Promise<void> {
   const projectRow = await db.get<{
     path: string | null
     worktree_source_branch: string | null

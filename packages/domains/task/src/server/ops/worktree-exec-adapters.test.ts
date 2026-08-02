@@ -232,3 +232,33 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
   expect(removeCalls[0]).toEqual([projectPath, sharedWt])
   h.cleanup()
 })
+
+test('maybeAutoCreateWorktree: no runner → skips the worktree, task creation still succeeds', async () => {
+  const h = await createTestHarness()
+  const projectId = crypto.randomUUID()
+  const taskId = crypto.randomUUID()
+  seedProject(h, projectId, { copyBehavior: 'all' })
+  seedTask(h, taskId, projectId, 'No Runner Task')
+
+  // The exec seams throw NoRunnerAvailableError when nothing routes. Auto-creation
+  // runs during task CREATE — before any agent exists to need a workspace — so it
+  // must degrade to a skip rather than fail the create. (It did fail it, which is
+  // what broke task creation e2e-wide.)
+  const noRunner = (): never => {
+    const err = new Error('No runner available to run git repo probe')
+    err.name = 'NoRunnerAvailableError'
+    throw err
+  }
+  const calls: string[] = []
+  configureTaskRuntimeAdapters({
+    getDataRoot: () => tmpdir(),
+    worktrees: makeFakes(calls, { isGitRepo: async () => noRunner() })
+  })
+
+  // Must NOT throw.
+  await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'No Runner Task')
+
+  expect(taskRow(h, taskId).worktree_path).toBeNull() // skipped, not half-linked
+  expect(calls.filter((c) => c === 'create' || c === 'copy' || c === 'setup')).toHaveLength(0)
+  h.cleanup()
+})
