@@ -367,3 +367,96 @@ describe('heartbeat-loss detection (hub side)', () => {
     expect(hub.gateway.isRunnerUsable('runner-1')).toBe(true)
   })
 })
+
+describe('join-token recovery (single-use token already spent)', () => {
+  // The dead-end this closes: join tokens are single-use, and the dialer enrolls as
+  // a FALLBACK whenever its stored api key fails verification (rebuilt hub-auth,
+  // wiped runners row, restored backup). It then presents a token the hub has
+  // already consumed, gets an explicit refusal, and — before this — treated that as
+  // fatal. The runner never returned until its process restarted, which with
+  // runners as the only execution path means nothing can run at all.
+
+  it('re-mints and enrolls when the configured token is refused', async () => {
+    const hub = await startHub()
+    // The store holds credentials the hub does not recognize (its auth state was
+    // rebuilt), so `hello` is rejected and the dialer falls back to enroll.
+    const store = createMemoryCredentialStore()
+    await store.save({ runnerId: 'runner-stale', apiKey: 'key-from-a-previous-life' })
+
+    let minted = 0
+    const dialer = makeDialer(hub.url, {
+      credentialStore: store,
+      joinToken: 'jt-SPENT',
+      refreshJoinToken: async () => {
+        minted += 1
+        return 'jt-valid' // what the memory auth accepts
+      }
+    })
+    dialer.start()
+
+    const connected = await dialer.events.once('connected')
+    expect(connected.mode).toBe('enroll')
+    expect(minted).toBe(1)
+    // Two enroll attempts: the spent token, then the fresh one.
+    expect(hub.auth.enrollCalls.map((c) => c.joinToken)).toEqual(['jt-SPENT', 'jt-valid'])
+    // And the recovered credentials are persisted for next boot.
+    expect((await store.load())?.apiKey).toMatch(/^key-/)
+  })
+
+  it('gives up fatally when the fresh token is ALSO refused (no mint loop)', async () => {
+    const hub = await startHub()
+    let minted = 0
+    const dialer = makeDialer(hub.url, {
+      joinToken: 'jt-WRONG',
+      refreshJoinToken: async () => {
+        minted += 1
+        return 'jt-ALSO-WRONG'
+      }
+    })
+    const errorEvent = dialer.events.once('error')
+    dialer.start()
+
+    const { fatal, error } = await errorEvent
+    expect(fatal).toBe(true)
+    expect(error.message).toContain('fresh token')
+    // Exactly one re-mint per attempt — a hub refusing everything must not spin.
+    expect(minted).toBe(1)
+    await dialer.events.once('disconnected')
+    expect(dialer.state).toBe('stopped')
+  })
+
+  it('stays fatal without a refreshJoinToken (unchanged default)', async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, { joinToken: 'jt-WRONG' })
+    const errorEvent = dialer.events.once('error')
+    dialer.start()
+
+    const { fatal, error } = await errorEvent
+    expect(fatal).toBe(true)
+    expect(error.message).toContain('hub rejected enrollment')
+    expect(error.message).not.toContain('fresh token')
+    expect(hub.auth.enrollCalls).toHaveLength(1)
+  })
+
+  it('does not re-mint on a protocol mismatch (a fresh token cannot help)', async () => {
+    const hub = await startHub({
+      verifyEnrollment: async () => {
+        throw new RpcError(RunnerTransportErrorCodes.protocolMismatch, 'protocol too old')
+      }
+    })
+    let minted = 0
+    const dialer = makeDialer(hub.url, {
+      joinToken: 'jt-valid',
+      refreshJoinToken: async () => {
+        minted += 1
+        return 'jt-valid'
+      }
+    })
+    const errorEvent = dialer.events.once('error')
+    dialer.start()
+
+    const { fatal } = await errorEvent
+    expect(fatal).toBe(true)
+    expect(minted).toBe(0)
+  })
+})

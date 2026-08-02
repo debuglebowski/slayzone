@@ -64,6 +64,23 @@ export interface HubDialerOptions {
   credentialStore: RunnerCredentialStore
   /** Required for first contact; reconnects use stored credentials. */
   joinToken?: string
+  /**
+   * Obtain a FRESH join token. Called only when enrollment is needed and the
+   * configured `joinToken` has already been refused — i.e. the one-shot recovery
+   * path below.
+   *
+   * Why this exists: join tokens are SINGLE-USE. If a stored api key ever fails
+   * verification (a rebuilt hub-auth DB, a wiped `runners` row, a restored
+   * backup), the dialer falls back to enrolling — with a token it already spent.
+   * The hub answers "join token rejected: unknown", which is an explicit refusal,
+   * so it was treated as fatal and the runner never came back until its process
+   * was restarted. With runners as the only execution path, that means nothing
+   * can run at all.
+   *
+   * Return `null` when a token cannot be minted; enrollment then fails as before.
+   * Absent → today's behavior exactly (no re-mint, refusal is fatal).
+   */
+  refreshJoinToken?: () => Promise<string | null>
   /** Lowercase-hex sha256 of the hub leaf cert DER (colons tolerated). wss only. */
   pinnedCertSha256?: string
   /**
@@ -109,6 +126,11 @@ export class HubDialer {
   private runnerIdValue: string | null = null
   private stopping = false
   private fatalStop = false
+  /** Fresh token from `refreshJoinToken`, preferred over `opts.joinToken` once set. */
+  private currentJoinToken: string | null = null
+  /** One re-mint per connection attempt, so a hub that refuses every token cannot
+   *  become a mint loop. Reset on each new connection. */
+  private triedTokenRefresh = false
 
   constructor(opts: HubDialerOptions) {
     this.opts = opts
@@ -243,6 +265,9 @@ export class HubDialer {
 
   private connect(): void {
     this.retryTimer = null
+    // Per-connection guard: a fresh attempt may legitimately need to re-mint again
+    // (e.g. the hub was rebuilt between attempts), but within ONE attempt only once.
+    this.triedTokenRefresh = false
     this.setState('connecting')
     const ws = new WebSocket(this.opts.url, this.buildWsOptions())
     const conn: Connection = {
@@ -289,6 +314,22 @@ export class HubDialer {
     })
   }
 
+  /** One `enroll` round-trip with the given token. Throws on any failure. */
+  private async enroll(
+    conn: Connection,
+    joinToken: string
+  ): Promise<{ runnerId: string; apiKey: string }> {
+    const raw = await conn.rpc.request(RunnerToHubMethods.enroll, {
+      joinToken,
+      name: this.opts.identity.name,
+      platform: this.opts.identity.platform,
+      version: this.opts.identity.version,
+      capabilities: this.opts.identity.capabilities,
+      protocolVersion: RUNNER_PROTOCOL_VERSION
+    })
+    return enrollResultSchema.parse(raw)
+  }
+
   private async authenticate(conn: Connection): Promise<void> {
     this.setState('authenticating')
     try {
@@ -317,26 +358,61 @@ export class HubDialer {
       }
       let result
       try {
-        const raw = await conn.rpc.request(RunnerToHubMethods.enroll, {
-          joinToken: this.opts.joinToken,
-          name: this.opts.identity.name,
-          platform: this.opts.identity.platform,
-          version: this.opts.identity.version,
-          capabilities: this.opts.identity.capabilities,
-          protocolVersion: RUNNER_PROTOCOL_VERSION
-        })
-        result = enrollResultSchema.parse(raw)
+        result = await this.enroll(conn, this.currentJoinToken ?? this.opts.joinToken)
       } catch (err) {
-        // An explicit refusal (bad token, protocol mismatch) cannot succeed on
-        // retry with the same inputs → fatal. Anything else is transient.
-        if (
+        // An explicit refusal cannot succeed on retry with the SAME inputs. A
+        // protocol mismatch is unfixable, so it stays fatal. An `unauthorized`
+        // refusal usually means the token was already spent — which a FRESH token
+        // does fix, so try to mint one and enroll once more before giving up.
+        // Without this, one bad api-key verification retired the runner for the
+        // lifetime of its process.
+        const explicitlyRefused =
           err instanceof RpcError &&
-          (err.code === RunnerTransportErrorCodes.unauthorized || err.code === RunnerTransportErrorCodes.protocolMismatch)
-        ) {
-          this.fatal(new Error(`hub rejected enrollment (${err.code}): ${err.message}`), conn)
+          (err.code === RunnerTransportErrorCodes.unauthorized ||
+            err.code === RunnerTransportErrorCodes.protocolMismatch)
+        if (!explicitlyRefused) throw err
+
+        const retriable =
+          err instanceof RpcError &&
+          err.code === RunnerTransportErrorCodes.unauthorized &&
+          this.opts.refreshJoinToken !== undefined &&
+          !this.triedTokenRefresh
+        if (!retriable) {
+          this.fatal(new Error(`hub rejected enrollment (${(err as RpcError).code}): ${err instanceof Error ? err.message : String(err)}`), conn)
           return
         }
-        throw err
+
+        // One attempt only, per connection, so a hub that refuses every token
+        // cannot become a mint loop.
+        this.triedTokenRefresh = true
+        this.log('runner dialer enrollment refused — minting a fresh join token')
+        let fresh: string | null = null
+        try {
+          fresh = await this.opts.refreshJoinToken!()
+        } catch (mintErr) {
+          this.log('runner dialer join-token mint failed', { error: String(mintErr) })
+        }
+        if (!fresh) {
+          this.fatal(new Error(`hub rejected enrollment and no fresh join token could be minted: ${err instanceof Error ? err.message : String(err)}`), conn)
+          return
+        }
+        this.currentJoinToken = fresh
+        try {
+          result = await this.enroll(conn, fresh)
+        } catch (retryErr) {
+          if (
+            retryErr instanceof RpcError &&
+            (retryErr.code === RunnerTransportErrorCodes.unauthorized ||
+              retryErr.code === RunnerTransportErrorCodes.protocolMismatch)
+          ) {
+            this.fatal(
+              new Error(`hub rejected enrollment with a fresh token (${retryErr.code}): ${retryErr.message}`),
+              conn
+            )
+            return
+          }
+          throw retryErr
+        }
       }
       try {
         await this.opts.credentialStore.save({
