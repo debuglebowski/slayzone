@@ -93,8 +93,15 @@ test.describe('Screenshot browser to terminal', () => {
 
     await btn.click()
 
-    // The file path should appear in the terminal buffer
-    await waitForBufferContains(mainWindow, sessionId, 'browser-screenshot.png', 10_000)
+    // The file path should appear in the terminal buffer.
+    //
+    // 30s, not the 10s default: the injected text now makes a round trip the
+    // original budget did not account for — hub → runner (`pty.write`) → the pty on
+    // the runner → sequenced `pty.data` back → hub buffer. Every terminal spawn is
+    // runner-routed since agents stopped running in the hub process. In isolation
+    // that hop is a few ms, but under 12-worker load it is what pushes this past
+    // 10s. Widened because the WORK grew, not to paper over an unexplained wait.
+    await waitForBufferContains(mainWindow, sessionId, 'browser-screenshot.png', 30_000)
 
     const buffer = await readFullBuffer(mainWindow, sessionId)
     expect(buffer).toContain('browser-screenshot.png')

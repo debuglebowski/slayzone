@@ -1003,7 +1003,16 @@ export async function showProjectBoard(
   await expect(async () => {
     await goHome(page)
     await clickProject(page, projectAbbrev)
-    await expect(page.getByText(cardText).first()).toBeVisible({ timeout: 4_000 })
+    // `.filter({ visible: true })`, NOT `.first()`: tabs stay MOUNTED with
+    // `display: none`, so the same card text exists in every board that has ever
+    // been rendered. `.first()` picks whichever is first in DOM order — routinely a
+    // hidden one — and then waits 4s for it to become visible, which it never will.
+    // That is the observed failure: "8 × locator resolved to <p>…</p>, unexpected
+    // value hidden". It only bites under load because DOM order depends on which
+    // boards a worker happened to mount first.
+    await expect(page.getByText(cardText).filter({ visible: true }).first()).toBeVisible({
+      timeout: 4_000
+    })
   }).toPass({ timeout })
 }
 

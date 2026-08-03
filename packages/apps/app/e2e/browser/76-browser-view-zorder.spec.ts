@@ -1,8 +1,14 @@
-import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  resetApp,
+  openTaskByTitle,
+  TEST_PROJECT_PATH
+} from '../fixtures/electron'
 import {
   testInvoke,
   ensureBrowserPanelVisible,
-  openTaskViaSearch,
   getAllViewIds,
   getActiveViewId,
   getViewsForTask
@@ -24,7 +30,7 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     const t = await s.createTask({ projectId: p.id, title: 'ZOrder task', status: 'todo' })
     taskId = t.id
     await s.refreshData()
-    await openTaskViaSearch(mainWindow, 'ZOrder task')
+    await openTaskByTitle(mainWindow, 'ZOrder task')
   })
 
   test('REAL dialog hides browser views, closing restores them', async ({ mainWindow }) => {
@@ -207,7 +213,10 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await s.refreshData()
 
     // Open second task
-    await openTaskViaSearch(mainWindow, 'ZOrder task B')
+    // `openTaskByTitle`, not `openTaskViaSearch`: the search flow can select the
+    // wrong result under load, or spawn a temporary scratch task that steals the
+    // active tab — the fixtures document it as the deterministic replacement.
+    await openTaskByTitle(mainWindow, 'ZOrder task B')
     await ensureBrowserPanelVisible(mainWindow)
 
     // Contract (useBrowserViewBounds offScreen): when the parent task tab hides,
@@ -244,7 +253,7 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     }
 
     // Switch back to task A — its views should restore on-screen
-    await openTaskViaSearch(mainWindow, 'ZOrder task')
+    await openTaskByTitle(mainWindow, 'ZOrder task')
     await expect
       .poll(
         async () => {
