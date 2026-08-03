@@ -24,7 +24,9 @@ import {
   FileCode,
   Archive,
   History,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Minus,
+  Plus
 } from 'lucide-react'
 import {
   cn,
@@ -58,6 +60,7 @@ import {
   getEffectiveRenderMode,
   RENDER_MODE_INFO,
   isBinaryRenderMode,
+  hasZoomableSurface,
   canExportAsPdf,
   canExportAsPng,
   canExportAsHtml
@@ -73,7 +76,12 @@ import { useArtifactTree } from './useArtifactTree'
 import { useArtifactClipboard } from './useArtifactClipboard'
 import { useArtifactVersions } from './useArtifactVersions'
 import type { ArtifactsPanelHandle, ArtifactsPanelProps } from './ArtifactsPanel.types'
-import { DEFAULT_SIDEBAR_WIDTH } from './ArtifactsPanel.constants'
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  DEFAULT_ZOOM_PCT,
+  ZOOM_STEPS,
+  stepZoom
+} from './ArtifactsPanel.constants'
 
 export type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
 
@@ -236,6 +244,20 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const effectiveReadability: 'compact' | 'normal' =
       selectedArtifact?.readability_override ?? notesReadability
     const effectiveWidth: 'narrow' | 'wide' = selectedArtifact?.width_override ?? notesWidth
+    const zoomPct = selectedArtifact?.zoom_pct ?? DEFAULT_ZOOM_PCT
+    const showZoom = selectedRenderMode ? hasZoomableSurface(selectedRenderMode, viewMode) : false
+
+    // Persist as NULL at 100% so the column only ever holds a real override.
+    const applyZoom = useCallback(
+      (next: number) => {
+        if (!selectedArtifact) return
+        void updateArtifact({
+          id: selectedArtifact.id,
+          zoomPct: next === DEFAULT_ZOOM_PCT ? null : next
+        })
+      },
+      [selectedArtifact, updateArtifact]
+    )
 
     useEffect(() => {
       const artifact = artifacts.find((a) => a.id === selectedId)
@@ -767,6 +789,39 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                       </div>
                     </MarkdownSettingsPopover>
                   )}
+                  {showZoom && (
+                    <div
+                      className="flex items-center h-7 rounded-md border border-input shrink-0 overflow-hidden"
+                      data-testid="artifact-zoom"
+                    >
+                      <button
+                        className="flex items-center justify-center w-6 h-full text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground transition-colors"
+                        onClick={() => applyZoom(stepZoom(zoomPct, -1))}
+                        disabled={zoomPct <= ZOOM_STEPS[0]}
+                        title="Zoom out"
+                        data-testid="artifact-zoom-out"
+                      >
+                        <Minus className="size-3" />
+                      </button>
+                      <button
+                        className="h-full px-1 min-w-11 text-[11px] tabular-nums text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        onClick={() => applyZoom(DEFAULT_ZOOM_PCT)}
+                        title="Reset zoom"
+                        data-testid="artifact-zoom-value"
+                      >
+                        {zoomPct}%
+                      </button>
+                      <button
+                        className="flex items-center justify-center w-6 h-full text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground transition-colors"
+                        onClick={() => applyZoom(stepZoom(zoomPct, 1))}
+                        disabled={zoomPct >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+                        title="Zoom in"
+                        data-testid="artifact-zoom-in"
+                      >
+                        <Plus className="size-3" />
+                      </button>
+                    </div>
+                  )}
                   <Select
                     value={selectedArtifact.render_mode ?? '__auto__'}
                     onValueChange={(v) =>
@@ -1050,6 +1105,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   getFilePath={getFilePath}
                   effectiveReadability={effectiveReadability}
                   effectiveWidth={effectiveWidth}
+                  zoomPct={zoomPct}
                   searchQuery={findOpen ? findQuery : ''}
                   searchActiveIndex={findActiveIndex}
                   searchMatchCase={findMatchCase}

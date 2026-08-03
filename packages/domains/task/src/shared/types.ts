@@ -630,6 +630,23 @@ export function canExportAsHtml(mode: RenderMode): boolean {
   return mode === 'markdown' || mode === 'code' || mode === 'mermaid-preview'
 }
 
+/**
+ * Whether the surface currently on screen is a *document* — laid-out DOM or an
+ * HTML frame — and therefore honors the header's zoom control.
+ *
+ * The media modes (image / svg / mermaid preview) already ship their own
+ * pan-zoom canvas with wheel zoom and fit/full buttons (`MediaView`), so a
+ * second zoom control over them would fight the fit-to-host transform. They
+ * still qualify in split/raw view, where the visible surface is the CodeMirror
+ * source pane. PDF is excluded outright — Chromium's embedded viewer owns its
+ * own zoom UI.
+ */
+export function hasZoomableSurface(mode: RenderMode, viewMode: string | null): boolean {
+  if (mode === 'pdf' || mode === 'image') return false
+  if (mode === 'svg-preview' || mode === 'mermaid-preview') return viewMode !== 'preview'
+  return true
+}
+
 /** Extract file extension from title (e.g. "notes.md" → ".md"). Empty string if none. */
 export function getExtensionFromTitle(title: string): string {
   const dot = title.lastIndexOf('.')
@@ -652,6 +669,8 @@ export interface TaskArtifact {
   view_mode: string | null
   readability_override: 'compact' | 'normal' | null
   width_override: 'narrow' | 'wide' | null
+  /** Document zoom as an integer percent. NULL = 100%. */
+  zoom_pct: number | null
   language: string | null
   order: number
   created_at: string
@@ -676,6 +695,8 @@ export interface UpdateArtifactInput {
   viewMode?: string | null
   readabilityOverride?: 'compact' | 'normal' | null
   widthOverride?: 'narrow' | 'wide' | null
+  /** Integer percent; null resets to the 100% default. */
+  zoomPct?: number | null
   content?: string
   language?: string | null
 }

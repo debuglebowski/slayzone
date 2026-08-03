@@ -3390,6 +3390,16 @@ export const migrations: Migration[] = [
       `)
       db.exec(`PRAGMA foreign_keys = ON;`)
     }
+  },
+  {
+    version: 152,
+    up: (db) => {
+      // Per-artifact document zoom, as an integer percent. NULL = 100% so the
+      // column stays empty for the overwhelming majority of rows — same
+      // "override only when it differs from the default" shape as
+      // readability_override / width_override (v109).
+      db.exec(`ALTER TABLE task_artifacts ADD COLUMN zoom_pct INTEGER DEFAULT NULL;`)
+    }
   }
 ]
 

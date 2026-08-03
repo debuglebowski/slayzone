@@ -44,6 +44,7 @@ export function parseArtifact(row: Record<string, unknown> | undefined): TaskArt
     view_mode: (row.view_mode as string) ?? null,
     readability_override: (row.readability_override as 'compact' | 'normal' | null) ?? null,
     width_override: (row.width_override as 'narrow' | 'wide' | null) ?? null,
+    zoom_pct: (row.zoom_pct as number | null) ?? null,
     language: (row.language as string) ?? null,
     order: row.order as number,
     created_at: row.created_at as string,
@@ -176,6 +177,7 @@ export function createArtifactStore(dataDir: string) {
         'viewMode',
         'readabilityOverride',
         'widthOverride',
+        'zoomPct',
         'language',
         'content'
       ] as const) {
@@ -193,6 +195,7 @@ export function createArtifactStore(dataDir: string) {
           viewMode: data.viewMode,
           readabilityOverride: data.readabilityOverride,
           widthOverride: data.widthOverride,
+          zoomPct: data.zoomPct,
           language: data.language,
           content: data.content,
           setKeys

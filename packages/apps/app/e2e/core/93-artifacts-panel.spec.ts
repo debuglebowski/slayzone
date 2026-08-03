@@ -465,6 +465,139 @@ test.describe('Artifacts panel', () => {
     await expect(banner).not.toBeVisible({ timeout: 3_000 })
   })
 
+  // --- Group 9: Per-artifact zoom ---
+
+  test('header zoom steps, scales the document, persists, and resets', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    await s.createArtifact({ taskId, title: 'zoom-doc.md', content: '# Heading\n\nbody text\n' })
+    await s.createArtifact({ taskId, title: 'zoom-other.md', content: '# Other\n' })
+    await s.refreshData()
+
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'zoom-doc.md').click()
+
+    const panel = artifactsPanel(mainWindow)
+    const zoomValue = panel.locator('[data-testid="artifact-zoom-value"]')
+    await expect(zoomValue).toHaveText('100%', { timeout: 5_000 })
+
+    const heading = panel.locator('.ProseMirror h1').first()
+    await expect(heading).toBeVisible({ timeout: 5_000 })
+    const baseline = await heading.boundingBox()
+    expect(baseline).toBeTruthy()
+
+    // 100 → 110 is the next rung of the Chromium-style ladder, not a fixed +10.
+    await panel.locator('[data-testid="artifact-zoom-in"]').click()
+    await expect(zoomValue).toHaveText('110%', { timeout: 3_000 })
+    await expect
+      .poll(async () => (await heading.boundingBox())!.height, { timeout: 3_000 })
+      .toBeGreaterThan(baseline!.height * 1.05)
+
+    // The zoomed layer must still fill its parent exactly — a zoomed flex item
+    // would instead overflow by the zoom factor.
+    const fit = await panel
+      .locator('[data-testid="artifact-zoom-pane"]')
+      .first()
+      .evaluate((el) => {
+        const a = el.getBoundingClientRect()
+        const b = el.parentElement!.getBoundingClientRect()
+        return { pane: Math.round(a.width), parent: Math.round(b.width) }
+      })
+    expect(fit.pane).toBe(fit.parent)
+
+    // Per-artifact, not per-panel: the sibling opens at 100%.
+    await artifactRow(mainWindow, 'zoom-other.md').click()
+    await expect(zoomValue).toHaveText('100%', { timeout: 3_000 })
+
+    // Persisted: coming back restores 110%.
+    await artifactRow(mainWindow, 'zoom-doc.md').click()
+    await expect(zoomValue).toHaveText('110%', { timeout: 3_000 })
+
+    // Clicking the readout resets to 100%.
+    await zoomValue.click()
+    await expect(zoomValue).toHaveText('100%', { timeout: 3_000 })
+  })
+
+  // CSS zoom is a layout scale, so pointer coords and element rects stay in the
+  // same space — CodeMirror's posAtCoords must still land on the clicked line.
+  test('CodeMirror hit-testing stays correct while zoomed', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    await s.createArtifact({ taskId, title: 'zoom-code.ts', content: 'const a = 1\nconst b = 2\n' })
+    await s.refreshData()
+
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'zoom-code.ts').click()
+
+    const panel = artifactsPanel(mainWindow)
+    const zoomValue = panel.locator('[data-testid="artifact-zoom-value"]')
+    const zoomIn = panel.locator('[data-testid="artifact-zoom-in"]')
+    await expect(panel.locator('.cm-editor').first()).toBeVisible({ timeout: 5_000 })
+
+    // 100 → 110 → 125 → 150
+    for (const expected of ['110%', '125%', '150%']) {
+      await zoomIn.click()
+      await expect(zoomValue).toHaveText(expected, { timeout: 3_000 })
+    }
+
+    const secondLine = panel.locator('.cm-line').nth(1)
+    await secondLine.click()
+    await expect
+      .poll(async () => panel.locator('.cm-activeLine').first().textContent(), { timeout: 3_000 })
+      .toBe('const b = 2')
+  })
+
+  // The sandboxed slz-file:// frame can't be restyled from the parent, so zoom
+  // there shrinks the frame's layout viewport and scales the element back up.
+  test('HTML preview scales via the frame transform', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    await s.createArtifact({ taskId, title: 'zoom-page.html', content: '<h1>hi</h1>' })
+    await s.refreshData()
+
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'zoom-page.html').click()
+
+    const panel = artifactsPanel(mainWindow)
+    const frame = panel.locator('iframe[title="HTML preview"]').first()
+    await expect(frame).toBeVisible({ timeout: 5_000 })
+
+    await panel.locator('[data-testid="artifact-zoom-in"]').click()
+    await expect(panel.locator('[data-testid="artifact-zoom-value"]')).toHaveText('110%', {
+      timeout: 3_000
+    })
+
+    const geom = await frame.evaluate((el) => {
+      const host = el.parentElement!.getBoundingClientRect()
+      return {
+        // Layout viewport shrinks by the zoom factor...
+        layoutWidth: Math.round(el.getBoundingClientRect().width / 1.1),
+        hostWidth: Math.round(host.width),
+        // ...and the element paints back at full host width.
+        paintedWidth: Math.round(el.getBoundingClientRect().width),
+        transform: getComputedStyle(el).transform
+      }
+    })
+    expect(geom.paintedWidth).toBe(geom.hostWidth)
+    expect(geom.layoutWidth).toBeLessThan(geom.hostWidth)
+    expect(geom.transform).toContain('1.1')
+  })
+
+  test('zoom control is hidden where the viewer owns its own zoom', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    await s.createArtifact({ taskId, title: 'zoom-skip.pdf', content: '' })
+    await s.createArtifact({ taskId, title: 'zoom-skip.svg', content: '<svg viewBox="0 0 10 10"/>' })
+    await s.refreshData()
+
+    await openArtifactsPanel(mainWindow)
+    const zoom = artifactsPanel(mainWindow).locator('[data-testid="artifact-zoom"]')
+
+    // Chromium's embedded PDF viewer owns its own zoom UI.
+    await artifactRow(mainWindow, 'zoom-skip.pdf').click()
+    await expect(zoom).toHaveCount(0)
+
+    // MediaView's pan-zoom canvas owns zoom in the SVG preview.
+    await artifactRow(mainWindow, 'zoom-skip.svg').click()
+    await expect(zoom).toHaveCount(0)
+  })
+
   test('caret survives save round-trip in code editor', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     // Use a code-mode extension (.ts) so CodeMirror renders directly (no ProseMirror preview).

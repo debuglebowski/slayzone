@@ -83,6 +83,41 @@ function PdfViewer({
   return <iframe src={src} className="flex-1 w-full" title="PDF preview" />
 }
 
+// --- Zoom ---
+
+/**
+ * CSS-zoom container for document surfaces (rich text, CodeMirror, rendered
+ * markdown).
+ *
+ * `zoom`, not `transform: scale`: zoom is a layout-level scale, so the content
+ * REFLOWS the way browser zoom does — line wrapping, CodeMirror's own rect
+ * measurement and the scrollbars all stay in one coordinate space, instead of a
+ * rasterized bitmap stretched over a differently-sized layout box.
+ *
+ * The inner absolute layer keeps the zoomed box out of the parent's flex
+ * sizing: a zoomed flex *item* gets its base size resolved in the parent's
+ * (unzoomed) space and is then scaled, overflowing by the zoom factor. Against
+ * an absolute containing block the insets resolve inside the zoomed space, so
+ * the pane fills its parent exactly at any zoom.
+ *
+ * Rendered unconditionally — including at zoom 1 — so stepping through 100%
+ * never changes the element tree under the editors, which would remount them
+ * and drop caret/scroll state.
+ */
+function ZoomPane({ zoom, children }: { zoom: number; children: React.ReactNode }) {
+  return (
+    <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
+      <div
+        className="absolute inset-0 flex flex-col"
+        style={{ zoom }}
+        data-testid="artifact-zoom-pane"
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
 // --- Artifact content editor ---
 
 export function ArtifactContentEditor({
@@ -93,6 +128,7 @@ export function ArtifactContentEditor({
   getFilePath,
   effectiveReadability,
   effectiveWidth,
+  zoomPct,
   searchQuery,
   searchActiveIndex,
   searchMatchCase,
@@ -106,6 +142,7 @@ export function ArtifactContentEditor({
   getFilePath: (id: string) => Promise<string | null>
   effectiveReadability: 'compact' | 'normal'
   effectiveWidth: 'narrow' | 'wide'
+  zoomPct: number
   searchQuery: string
   searchActiveIndex: number
   searchMatchCase: boolean
@@ -171,6 +208,7 @@ export function ArtifactContentEditor({
 
   const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
   const isBinary = isBinaryRenderMode(renderMode)
+  const zoom = zoomPct / 100
 
   // Read file from disk + refresh baseline mtime. Clears dirty + pending flags.
   const loadFromDisk = useCallback(async (): Promise<void> => {
@@ -357,70 +395,76 @@ export function ArtifactContentEditor({
 
     if (renderMode === 'markdown' && viewMode === 'preview') {
       return (
-        <RichTextEditor
-          className="flex-1 min-h-0"
-          value={content ?? ''}
-          onChange={handleChange}
-          placeholder="Write markdown..."
-          readability={effectiveReadability}
-          width={effectiveWidth}
-          fontFamily={notesFontFamily}
-          checkedHighlight={notesCheckedHighlight}
-          showToolbar={notesShowToolbar}
-          spellcheck={notesSpellcheck}
-          themeColors={themeColors}
-          searchQuery={searchQuery}
-          searchActiveIndex={searchActiveIndex}
-          onSearchMatchCountChange={onSearchMatchCountChange}
-        />
+        <ZoomPane zoom={zoom}>
+          <RichTextEditor
+            className="flex-1 min-h-0"
+            value={content ?? ''}
+            onChange={handleChange}
+            placeholder="Write markdown..."
+            readability={effectiveReadability}
+            width={effectiveWidth}
+            fontFamily={notesFontFamily}
+            checkedHighlight={notesCheckedHighlight}
+            showToolbar={notesShowToolbar}
+            spellcheck={notesSpellcheck}
+            themeColors={themeColors}
+            searchQuery={searchQuery}
+            searchActiveIndex={searchActiveIndex}
+            onSearchMatchCountChange={onSearchMatchCountChange}
+          />
+        </ZoomPane>
       )
     }
 
     if (renderMode === 'markdown' && viewMode === 'split') {
       return (
-        <div className="flex-1 flex flex-row overflow-hidden">
-          <div className="flex-1 min-w-0">
-            <SearchableCodeView
-              ref={splitCodeRef}
-              value={content ?? ''}
-              onChange={handleChange}
-              fileExt={fileExt}
-              version={editorReloadVersion}
-              searchQuery={searchQuery}
-              searchActiveIndex={searchActiveIndex}
-              searchMatchCase={searchMatchCase}
-              searchRegex={searchRegex}
-              onSearchMatchCountChange={onSearchMatchCountChange}
-              placeholder="Write markdown..."
-              minimap={editorMinimapEnabled}
-              viewHandleRef={cmViewRef}
-            />
-          </div>
-          <div
-            className="flex-1 border-l border-border min-w-0 min-h-0"
-            onClick={(e) => {
-              const el = (e.target as HTMLElement).closest('[data-source-line]')
-              const line = el ? parseInt(el.getAttribute('data-source-line') || '1', 10) : 1
-              splitCodeRef.current?.focusLine(Number.isFinite(line) ? line : 1)
-            }}
-          >
+        <ZoomPane zoom={zoom}>
+          <div className="flex-1 flex flex-row overflow-hidden">
+            <div className="flex-1 min-w-0">
+              <SearchableCodeView
+                ref={splitCodeRef}
+                value={content ?? ''}
+                onChange={handleChange}
+                fileExt={fileExt}
+                version={editorReloadVersion}
+                searchQuery={searchQuery}
+                searchActiveIndex={searchActiveIndex}
+                searchMatchCase={searchMatchCase}
+                searchRegex={searchRegex}
+                onSearchMatchCountChange={onSearchMatchCountChange}
+                placeholder="Write markdown..."
+                minimap={editorMinimapEnabled}
+                viewHandleRef={cmViewRef}
+              />
+            </div>
             <div
-              className="mk-doc"
-              data-readability={effectiveReadability}
-              data-width={effectiveWidth}
-              style={themeStyle}
+              className="flex-1 border-l border-border min-w-0 min-h-0"
+              onClick={(e) => {
+                const el = (e.target as HTMLElement).closest('[data-source-line]')
+                const line = el ? parseInt(el.getAttribute('data-source-line') || '1', 10) : 1
+                splitCodeRef.current?.focusLine(Number.isFinite(line) ? line : 1)
+              }}
             >
-              <div className="mk-doc-scroll">
-                <div className="mk-doc-body">
-                  <Markdown attachSourceLines>{content ?? ''}</Markdown>
+              <div
+                className="mk-doc"
+                data-readability={effectiveReadability}
+                data-width={effectiveWidth}
+                style={themeStyle}
+              >
+                <div className="mk-doc-scroll">
+                  <div className="mk-doc-body">
+                    <Markdown attachSourceLines>{content ?? ''}</Markdown>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </ZoomPane>
       )
     }
 
+    // Preview-only: the HTML frame scales itself (see HtmlPreviewFrame); the SVG
+    // and mermaid canvases own their zoom via MediaView, so no ZoomPane here.
     if (hasPreview && viewMode === 'preview') {
       return (
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -430,6 +474,7 @@ export function ArtifactContentEditor({
             artifactId={artifact.id}
             contentVersion={previewVersion}
             getFilePath={getFilePath}
+            zoom={zoom}
           />
         </div>
       )
@@ -438,7 +483,7 @@ export function ArtifactContentEditor({
     if (hasPreview && viewMode === 'split') {
       return (
         <div className="flex-1 flex flex-row overflow-hidden">
-          <div className="flex-1 min-w-0">
+          <ZoomPane zoom={zoom}>
             <SearchableCodeView
               value={content ?? ''}
               onChange={handleChange}
@@ -453,7 +498,7 @@ export function ArtifactContentEditor({
               minimap={editorMinimapEnabled}
               viewHandleRef={cmViewRef}
             />
-          </div>
+          </ZoomPane>
           <div className="flex-1 flex flex-col border-l border-border overflow-hidden min-w-0">
             <ArtifactPreview
               renderMode={renderMode}
@@ -461,6 +506,7 @@ export function ArtifactContentEditor({
               artifactId={artifact.id}
               contentVersion={previewVersion}
               getFilePath={getFilePath}
+              zoom={zoom}
             />
           </div>
         </div>
@@ -468,7 +514,7 @@ export function ArtifactContentEditor({
     }
 
     return (
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <ZoomPane zoom={zoom}>
         <SearchableCodeView
           value={content ?? ''}
           onChange={handleChange}
@@ -481,7 +527,7 @@ export function ArtifactContentEditor({
           minimap={editorMinimapEnabled}
           viewHandleRef={cmViewRef}
         />
-      </div>
+      </ZoomPane>
     )
   })()
 
@@ -529,13 +575,15 @@ function ArtifactPreview({
   content,
   artifactId,
   contentVersion,
-  getFilePath
+  getFilePath,
+  zoom
 }: {
   renderMode: RenderMode
   content: string
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
+  zoom: number
 }) {
   if (renderMode === 'html-preview')
     return (
@@ -543,6 +591,7 @@ function ArtifactPreview({
         artifactId={artifactId}
         contentVersion={contentVersion}
         getFilePath={getFilePath}
+        zoom={zoom}
       />
     )
   if (renderMode === 'svg-preview')
@@ -561,14 +610,23 @@ function ArtifactPreview({
 // `script-src 'self'` is inherited by them and blocks inline + CDN scripts.
 // slz-file gets its own origin and bypasses CSP so user HTML runs unmodified.
 // `contentVersion` cache-busts on each save so the iframe reloads after edits.
+//
+// Zoom cannot go through CSS `zoom` here the way it does for the DOM panes: the
+// frame is a separate document on its own origin behind `sandbox`, so the parent
+// can neither restyle it nor rely on a layout-scale crossing the frame boundary.
+// Shrinking the frame's layout viewport by the zoom factor and scaling the
+// element back up by the same factor reproduces browser zoom exactly — the inner
+// document reflows to the narrower viewport, then paints enlarged.
 function HtmlPreviewFrame({
   artifactId,
   contentVersion,
-  getFilePath
+  getFilePath,
+  zoom
 }: {
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
+  zoom: number
 }) {
   const [src, setSrc] = useState<string | null>(null)
   useEffect(() => {
@@ -583,6 +641,19 @@ function HtmlPreviewFrame({
       </div>
     )
   return (
-    <iframe src={src} sandbox="allow-scripts" className="flex-1 bg-white" title="HTML preview" />
+    <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-white">
+      <iframe
+        src={src}
+        sandbox="allow-scripts"
+        className="absolute top-0 left-0 border-0"
+        style={{
+          width: `${100 / zoom}%`,
+          height: `${100 / zoom}%`,
+          transform: `scale(${zoom})`,
+          transformOrigin: '0 0'
+        }}
+        title="HTML preview"
+      />
+    </div>
   )
 }

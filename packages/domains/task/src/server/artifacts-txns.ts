@@ -138,6 +138,7 @@ export interface UpdateArtifactTxnParams {
   viewMode?: string | null
   readabilityOverride?: 'compact' | 'normal' | null
   widthOverride?: 'narrow' | 'wide' | null
+  zoomPct?: number | null
   language?: string | null
   content?: string
   // Mirrors `'x' in data` checks so we know which optional keys were provided.
@@ -354,6 +355,10 @@ export const artifactsTxns = {
     if (has('widthOverride')) {
       sets.push('width_override = ?')
       values.push(p.widthOverride)
+    }
+    if (has('zoomPct')) {
+      sets.push('zoom_pct = ?')
+      values.push(p.zoomPct)
     }
     if (has('language')) {
       sets.push('language = ?')

@@ -71,6 +71,30 @@ test('artifacts router: versions list after create', async () => {
   expect(Array.isArray(versions)).toBeTruthy()
 })
 
+// Per-artifact document zoom (v152 `zoom_pct`). NULL means "the 100% default",
+// so the reset path must write NULL back rather than the literal 100 — otherwise
+// every artifact the user ever zoomed keeps a row-level override forever.
+test('artifacts router: zoomPct round-trips and resets to null', async () => {
+  const a = await caller.create(mkArtifact('zoom.md', 'x'))
+  expect(a!.zoom_pct).toBeNull()
+
+  const zoomed = await caller.update({ id: a!.id, zoomPct: 150 })
+  expect(zoomed!.zoom_pct).toBe(150)
+  expect((await caller.get({ id: a!.id }))!.zoom_pct).toBe(150)
+
+  const reset = await caller.update({ id: a!.id, zoomPct: null })
+  expect(reset!.zoom_pct).toBeNull()
+})
+
+// An unrelated update must not disturb a stored zoom — the store forwards only
+// the keys the caller actually provided.
+test('artifacts router: update without zoomPct leaves zoom untouched', async () => {
+  const a = await caller.create(mkArtifact('zoom-keep.md', 'x'))
+  await caller.update({ id: a!.id, zoomPct: 200 })
+  const renamed = await caller.update({ id: a!.id, title: 'zoom-kept.md' })
+  expect(renamed!.zoom_pct).toBe(200)
+})
+
 test('artifacts router: delete', async () => {
   const a = await caller.create(mkArtifact('del.md', 'x'))
   expect(await caller.delete({ id: a!.id })).toBe(true)
