@@ -209,6 +209,11 @@ export const HubToRunnerMethods = {
   ptyResize: 'pty.resize',
   ptyWrite: 'pty.write',
   ptyGetBufferSince: 'pty.getBufferSince',
+  // warm pool (pre-warmed agents live ON the runner — see server/warm-*)
+  ptyWarmSpawn: 'pty.warmSpawn',
+  ptyWarmAdopt: 'pty.warmAdopt',
+  ptyWarmKill: 'pty.warmKill',
+  ptyWarmList: 'pty.warmList',
   // git ops (routed WorktreeExecAdapters — see server/exec-proxies)
   gitIsGitRepo: 'git.isGitRepo',
   gitGetCurrentBranch: 'git.getCurrentBranch',
@@ -269,7 +274,19 @@ export type PtyWriteParams = z.infer<typeof ptyWriteParamsSchema>
 /** Replay buffered output with `seq > since.seq` (gap recovery on reconnect). */
 export const ptyGetBufferSinceParamsSchema = z.object({
   sessionId: z.string().min(1),
-  seq: z.number().int().nonnegative()
+  /**
+   * Exclusive lower bound — frames with `seq > this` are replayed.
+   *
+   * MAY be -1, meaning "everything, including seq 0". The hub's gap detector
+   * starts at `lastSeq = -1` (`exec-proxies.ts`) precisely so seq 0 is not eaten,
+   * and it sends that value verbatim when the OPENING chunk is the one that went
+   * missing. A `nonnegative()` bound here rejected exactly that request; the
+   * rejection was swallowed by the caller's best-effort catch, so the session
+   * silently lost its first output instead of recovering it — the very bug
+   * starting at -1 exists to prevent. `procGetBufferSinceParamsSchema` already
+   * allows it; these two must not drift.
+   */
+  seq: z.number().int()
 })
 export type PtyGetBufferSinceParams = z.infer<typeof ptyGetBufferSinceParamsSchema>
 
@@ -282,6 +299,88 @@ export const ptyGetBufferSinceResultSchema = z.object({
   )
 })
 export type PtyGetBufferSinceResult = z.infer<typeof ptyGetBufferSinceResultSchema>
+
+// ---------------------------------------------------------------------------
+// hub → runner requests: warm pool
+//
+// A pre-warmed agent is an ORDINARY pty session on the runner, keyed by a
+// `warmId` instead of a real `sessionId`. Adoption REKEYS that entry rather than
+// spawning anything: the process, its pid and — critically — its RingBuffer and
+// assigned seqs all carry over untouched, so `pty.getBufferSince` stays coherent
+// across the adopt boundary. Replaying a seed into a fresh buffer instead would
+// restart seq numbering under a stream the hub is already tracking.
+//
+// The runner owns the process; the hub owns the POLICY (which projects deserve a
+// warm agent) and the `agent_sessions` rows. That split is why there is no
+// "warm state" frame — the hub already knows what it asked for.
+// ---------------------------------------------------------------------------
+
+export const ptyWarmSpawnParamsSchema = z.object({
+  /** Placeholder session key; becomes a real `sessionId` at adopt. */
+  warmId: z.string().min(1),
+  command: z.string().min(1),
+  args: z.array(z.string()).optional(),
+  cwd: z.string().min(1),
+  env: z.record(z.string(), z.string()).optional(),
+  cols: z.number().int().positive().optional(),
+  rows: z.number().int().positive().optional(),
+  /**
+   * Written to the shell's stdin right after spawn, to `exec` the agent inside
+   * it (the pre-boot). Optional: omitted ⇒ a bare warm shell, and the caller
+   * execs at adopt instead.
+   */
+  postSpawnCommand: z.string().optional()
+})
+export type PtyWarmSpawnParams = z.infer<typeof ptyWarmSpawnParamsSchema>
+
+export const ptyWarmSpawnResultSchema = z.object({
+  pid: z.number().int()
+})
+export type PtyWarmSpawnResult = z.infer<typeof ptyWarmSpawnResultSchema>
+
+/** Promote a warm session to a real one. Rekeys in place — no respawn. */
+export const ptyWarmAdoptParamsSchema = z.object({
+  warmId: z.string().min(1),
+  sessionId: z.string().min(1)
+})
+export type PtyWarmAdoptParams = z.infer<typeof ptyWarmAdoptParamsSchema>
+
+export const ptyWarmAdoptResultSchema = z.object({
+  pid: z.number().int(),
+  /**
+   * Everything the warm process emitted before adoption, and the seq it stopped
+   * at. The hub seeds its own buffer with `data` and resumes gap detection from
+   * `seq`, so the first post-adopt frame is contiguous with the pre-adopt ones.
+   */
+  data: z.string(),
+  seq: z.number().int()
+})
+export type PtyWarmAdoptResult = z.infer<typeof ptyWarmAdoptResultSchema>
+
+export const ptyWarmKillParamsSchema = z.object({
+  warmId: z.string().min(1)
+})
+export type PtyWarmKillParams = z.infer<typeof ptyWarmKillParamsSchema>
+
+/**
+ * Every warm session this runner still holds.
+ *
+ * Load-bearing on reconnect: warm agents are the runner's processes, so unlike
+ * the old hub-local pool they SURVIVE a hub restart — and an unclaimed pre-booted
+ * agent is a billable process with no owner. The hub reconciles against this list
+ * when a runner (re)connects and kills what it no longer wants.
+ */
+export const ptyWarmListResultSchema = z.object({
+  warms: z.array(
+    z.object({
+      warmId: z.string().min(1),
+      cwd: z.string(),
+      pid: z.number().int(),
+      startedAt: z.number()
+    })
+  )
+})
+export type PtyWarmListResult = z.infer<typeof ptyWarmListResultSchema>
 
 export const pingParamsSchema = z.object({
   ts: z.number().optional()

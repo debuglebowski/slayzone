@@ -142,6 +142,106 @@ describe('createPtyHandlers', () => {
     pty.disposeAll()
   })
 
+  it('warm session buffers silently, then adopt rekeys it with pid + seq continuity', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    const warm = (await pty.handlers['pty.warmSpawn']({
+      warmId: 'warm-1',
+      command: 'cat',
+      cwd: process.cwd()
+    })) as { pid: number }
+    expect(warm.pid).toBeGreaterThan(0)
+
+    // Output produced BEFORE adoption must not be streamed: the hub has no
+    // session to route it to, and adopt hands the whole buffer over instead.
+    await pty.handlers['pty.write']({ sessionId: 'warm-1', data: 'preboot\n' })
+    await waitFor(() => (pty.handlers['pty.warmList']() as { warms: unknown[] }).warms.length === 1)
+    await new Promise((r) => setTimeout(r, 150))
+    expect(dataParams(notifies)).toEqual([])
+
+    const listed = (await pty.handlers['pty.warmList']()) as {
+      warms: Array<{ warmId: string; pid: number; cwd: string }>
+    }
+    expect(listed.warms[0]).toMatchObject({ warmId: 'warm-1', pid: warm.pid })
+
+    const adopted = (await pty.handlers['pty.warmAdopt']({
+      warmId: 'warm-1',
+      sessionId: 'sess-warm'
+    })) as { pid: number; data: string; seq: number }
+
+    // SAME process — adoption rekeys, it never respawns.
+    expect(adopted.pid).toBe(warm.pid)
+    expect(adopted.data).toContain('preboot')
+    expect(adopted.seq).toBeGreaterThanOrEqual(0)
+
+    // No longer warm, and now streaming under the REAL session id.
+    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
+    await pty.handlers['pty.write']({ sessionId: 'sess-warm', data: 'after\n' })
+    await waitFor(() =>
+      dataParams(notifies)
+        .map((f) => f.data)
+        .join('')
+        .includes('after')
+    )
+    const live = notifies.filter((n) => n.method === 'pty.data')
+    expect(live.every((n) => n.params.sessionId === 'sess-warm')).toBe(true)
+
+    // Seq CONTINUES past the handover rather than restarting — the whole reason
+    // adoption rekeys the buffer instead of replaying a seed into a fresh one.
+    expect(dataParams(notifies)[0].seq).toBeGreaterThan(adopted.seq)
+
+    // ...and backfill spanning the boundary still resolves against that buffer.
+    const replay = (await pty.handlers['pty.getBufferSince']({
+      sessionId: 'sess-warm',
+      seq: -1
+    })) as { frames: Array<{ seq: number; data: string }> }
+    expect(replay.frames.map((f) => f.data).join('')).toContain('preboot')
+
+    pty.disposeAll()
+  })
+
+  it('warm exit before adoption stays silent; adopting an unknown warm throws', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    await pty.handlers['pty.warmSpawn']({
+      warmId: 'warm-dies',
+      command: 'sh',
+      args: ['-c', 'exit 0'],
+      cwd: process.cwd()
+    })
+    // The hub holds no session for a warm id, so a pre-adopt death must not
+    // surface as pty.exit — it would tear down a session that never existed.
+    await waitFor(() => (pty.handlers['pty.warmList']() as { warms: unknown[] }).warms.length === 0)
+    expect(notifies.some((n) => n.method === 'pty.exit')).toBe(false)
+
+    expect(() => pty.handlers['pty.warmAdopt']({ warmId: 'warm-dies', sessionId: 's' })).toThrow(
+      /no warm session/
+    )
+
+    pty.disposeAll()
+  })
+
+  it('warmKill reaps an unclaimed warm (orphan reconcile) and is idempotent', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    await pty.handlers['pty.warmSpawn']({
+      warmId: 'warm-orphan',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toHaveLength(1)
+
+    await pty.handlers['pty.warmKill']({ warmId: 'warm-orphan' })
+    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
+    // Idempotent: the hub reconciles against a list that may already be stale.
+    await pty.handlers['pty.warmKill']({ warmId: 'warm-orphan' })
+
+    pty.disposeAll()
+  })
+
   it('emits pty.exit with exitCode 0 for a short-lived command', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
@@ -184,6 +284,34 @@ describe('createPtyHandlers', () => {
     await new Promise((r) => setTimeout(r, 100))
     expect(notifies.filter((n) => n.method === 'pty.exit').length).toBe(1)
 
+    pty.disposeAll()
+  })
+
+  it('getBufferSince accepts seq -1 and replays from seq 0 (opening-chunk recovery)', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'sess-from-start'
+
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.write']({ sessionId, data: 'first\n' })
+    await waitFor(() =>
+      dataParams(notifies)
+        .map((f) => f.data)
+        .join('')
+        .includes('first')
+    )
+
+    // -1 is what the hub sends when the chunk it is missing is seq 0 itself: its
+    // gap detector starts at lastSeq = -1. Rejecting it (the old `nonnegative()`
+    // bound) made the caller's best-effort catch swallow the failure and the
+    // session lose its opening output permanently.
+    const replay = (await pty.handlers['pty.getBufferSince']({ sessionId, seq: -1 })) as {
+      frames: Array<{ seq: number; data: string }>
+    }
+    expect(replay.frames[0]?.seq).toBe(0)
+    expect(replay.frames.map((f) => f.data).join('')).toContain('first')
+
+    await pty.handlers['pty.kill']({ sessionId })
     pty.disposeAll()
   })
 

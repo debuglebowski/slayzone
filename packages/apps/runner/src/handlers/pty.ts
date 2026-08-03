@@ -17,8 +17,13 @@ import {
   ptyKillParamsSchema,
   ptyResizeParamsSchema,
   ptySpawnParamsSchema,
+  ptyWarmAdoptParamsSchema,
+  ptyWarmKillParamsSchema,
+  ptyWarmSpawnParamsSchema,
   ptyWriteParamsSchema,
-  RunnerNotificationMethods
+  RpcError,
+  RunnerNotificationMethods,
+  RunnerTransportErrorCodes
 } from '@slayzone/runner-transport/shared'
 import * as pty from 'node-pty'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
@@ -31,6 +36,17 @@ const MAX_BUFFER_SIZE = 750 * 1024
 interface PtySession {
   proc: pty.IPty
   buffer: RingBuffer
+  /**
+   * The key this session is currently filed under, read by its own onData/onExit.
+   *
+   * MUTABLE and read live, not captured: `pty.warmAdopt` promotes a warm session
+   * by rekeying it (`warmId` → real `sessionId`) so the process, pid, buffer and
+   * seq counter all survive. Closures that had captured the spawn-time id would
+   * keep emitting under the dead `warmId` after that swap.
+   */
+  id: string
+  /** Set for a warm (unadopted) session; cleared on adopt. */
+  warm?: { cwd: string; startedAt: number }
 }
 
 export interface PtyHandlers {
@@ -70,36 +86,52 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     return merged
   }
 
-  function spawn(rawParams: unknown): { pid: number } {
-    const params = ptySpawnParamsSchema.parse(rawParams)
-
+  /**
+   * Spawn a pty and file it under `id`. Shared by `pty.spawn` and
+   * `pty.warmSpawn` so a warm session is byte-for-byte an ordinary session —
+   * same buffering, same seq assignment, same exit handling — differing only in
+   * the key it is filed under and (until adopted) the `warm` marker.
+   */
+  function spawnSession(
+    id: string,
+    opts: {
+      command: string
+      args?: string[]
+      cwd: string
+      env?: Record<string, string>
+      cols?: number
+      rows?: number
+      warm?: { cwd: string; startedAt: number }
+    }
+  ): PtySession {
     // Replace any pre-existing session with the same id (defensive against a
     // stale session that never signalled exit).
-    const existing = sessions.get(params.sessionId)
+    const existing = sessions.get(id)
     if (existing) {
       try {
         existing.proc.kill()
       } catch {
         // Already dead — ignore.
       }
-      sessions.delete(params.sessionId)
+      sessions.delete(id)
     }
 
-    const proc = pty.spawn(params.command, params.args ?? [], {
+    const proc = pty.spawn(opts.command, opts.args ?? [], {
       name: 'xterm-color',
-      cwd: params.cwd,
-      env: buildEnv(params.env),
-      cols: params.cols ?? 80,
-      rows: params.rows ?? 24
+      cwd: opts.cwd,
+      env: buildEnv(opts.env),
+      cols: opts.cols ?? 80,
+      rows: opts.rows ?? 24
     })
 
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
-    const session: PtySession = { proc, buffer }
-    sessions.set(params.sessionId, session)
+    const session: PtySession = { proc, buffer, id, ...(opts.warm ? { warm: opts.warm } : {}) }
+    sessions.set(id, session)
 
     proc.onData((data) => {
       // Ignore output from a session that has since been superseded/disposed.
-      if (sessions.get(params.sessionId) !== session) return
+      // `session.id` is read LIVE so a rekey (warm adopt) redirects the stream.
+      if (sessions.get(session.id) !== session) return
       // Output is buffered and streamed BYTE-IDENTICALLY, deliberately. The two
       // are interchangeable by contract, not redundant: the hub's demux keeps
       // whichever copy of a seq arrives first and drops the other, then emits that
@@ -118,8 +150,13 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
       // the runner would only risk starving a remote program of an answer the hub
       // would otherwise have given it.
       const seq = buffer.append(data)
+      // A WARM session buffers but does not stream: the hub has no session to
+      // route it to yet, and `pty.warmAdopt` hands the whole buffer over at
+      // adopt. Emitting under a `warmId` the hub never registered would be
+      // dropped anyway — and would burn a seq the adopt handover then replays.
+      if (session.warm) return
       ctx.dialer.notify(RunnerNotificationMethods.ptyData, {
-        sessionId: params.sessionId,
+        sessionId: session.id,
         seq,
         data
       })
@@ -129,17 +166,105 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
       // Only the CURRENTLY-active session for this id may clear the map and
       // emit exit — a superseded/disposed pty exiting must stay silent, else it
       // would tear down the replacement and confuse the hub.
-      if (sessions.get(params.sessionId) !== session) return
-      sessions.delete(params.sessionId)
+      if (sessions.get(session.id) !== session) return
+      sessions.delete(session.id)
+      // A warm session dying before adoption is the runner's business: the hub
+      // holds no session for it. It re-warms on its own reconcile.
+      if (session.warm) {
+        ctx.log('warm pty exited before adoption', { warmId: session.id })
+        return
+      }
       ctx.dialer.notify(RunnerNotificationMethods.ptyExit, {
-        sessionId: params.sessionId,
+        sessionId: session.id,
         exitCode: typeof exitCode === 'number' ? exitCode : null,
         signal: signal != null ? String(signal) : null
       })
     })
 
-    ctx.log('pty spawned', { sessionId: params.sessionId, pid: proc.pid, command: params.command })
-    return { pid: proc.pid }
+    return session
+  }
+
+  function spawn(rawParams: unknown): { pid: number } {
+    const params = ptySpawnParamsSchema.parse(rawParams)
+    const session = spawnSession(params.sessionId, params)
+    ctx.log('pty spawned', {
+      sessionId: params.sessionId,
+      pid: session.proc.pid,
+      command: params.command
+    })
+    return { pid: session.proc.pid }
+  }
+
+  function warmSpawn(rawParams: unknown): { pid: number } {
+    const params = ptyWarmSpawnParamsSchema.parse(rawParams)
+    const session = spawnSession(params.warmId, {
+      ...params,
+      warm: { cwd: params.cwd, startedAt: Date.now() }
+    })
+    // Pre-boot the agent inside the warm shell. Written to stdin rather than
+    // spawned directly so the shell's rc init (PATH, toolchain shims) has already
+    // run — the whole point of warming.
+    if (params.postSpawnCommand) session.proc.write(`${params.postSpawnCommand}\r`)
+    ctx.log('warm pty spawned', { warmId: params.warmId, pid: session.proc.pid })
+    return { pid: session.proc.pid }
+  }
+
+  function warmAdopt(rawParams: unknown): { pid: number; data: string; seq: number } {
+    const params = ptyWarmAdoptParamsSchema.parse(rawParams)
+    const session = sessions.get(params.warmId)
+    if (!session || !session.warm) {
+      throw new RpcError(
+        RunnerTransportErrorCodes.unknownRunner,
+        `no warm session ${params.warmId} to adopt`
+      )
+    }
+    // Rekey in place. The process, pid, RingBuffer and seq counter all carry
+    // over, so the hub's gap detection continues across the boundary instead of
+    // restarting under a stream it is already tracking.
+    sessions.delete(params.warmId)
+    session.id = params.sessionId
+    delete session.warm
+    sessions.set(params.sessionId, session)
+    // `getCurrentSeq()` is -1 on an empty buffer — the same "nothing seen yet"
+    // sentinel the hub's gap detector starts from, so an adopt with no output
+    // needs no special case.
+    const data = session.buffer.toString()
+    const seq = session.buffer.getCurrentSeq()
+    ctx.log('warm pty adopted', {
+      warmId: params.warmId,
+      sessionId: params.sessionId,
+      pid: session.proc.pid
+    })
+    return { pid: session.proc.pid, data, seq }
+  }
+
+  function warmKill(rawParams: unknown): { ok: true } {
+    const params = ptyWarmKillParamsSchema.parse(rawParams)
+    const session = sessions.get(params.warmId)
+    if (!session) return { ok: true }
+    sessions.delete(params.warmId)
+    try {
+      session.proc.kill()
+    } catch {
+      // Already dead — ignore.
+    }
+    return { ok: true }
+  }
+
+  function warmList(): {
+    warms: Array<{ warmId: string; cwd: string; pid: number; startedAt: number }>
+  } {
+    const warms: Array<{ warmId: string; cwd: string; pid: number; startedAt: number }> = []
+    for (const [id, session] of sessions) {
+      if (!session.warm) continue
+      warms.push({
+        warmId: id,
+        cwd: session.warm.cwd,
+        pid: session.proc.pid,
+        startedAt: session.warm.startedAt
+      })
+    }
+    return { warms }
   }
 
   function kill(rawParams: unknown): { ok: true } {
@@ -205,7 +330,11 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     [HubToRunnerMethods.ptyKill]: kill,
     [HubToRunnerMethods.ptyResize]: resize,
     [HubToRunnerMethods.ptyWrite]: write,
-    [HubToRunnerMethods.ptyGetBufferSince]: getBufferSince
+    [HubToRunnerMethods.ptyGetBufferSince]: getBufferSince,
+    [HubToRunnerMethods.ptyWarmSpawn]: warmSpawn,
+    [HubToRunnerMethods.ptyWarmAdopt]: warmAdopt,
+    [HubToRunnerMethods.ptyWarmKill]: warmKill,
+    [HubToRunnerMethods.ptyWarmList]: warmList
   }
 
   return { handlers, disposeAll }
