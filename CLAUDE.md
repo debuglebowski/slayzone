@@ -40,7 +40,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm build`     | Build for production           |
 | `pnpm build:mac` | Build macOS .app               |
 | `pnpm typecheck` | Typecheck all packages         |
-| `pnpm test:e2e`  | Run E2E tests (requires build) |
+| `pnpm test:e2e`  | Run E2E tests (requires build) — full suite runs one process per `e2e/` subdirectory; passing args (`pnpm test:e2e e2e/core/64-x.spec.ts`) forwards them straight to Playwright |
 | `pnpm lint`      | Lint all packages              |
 
 ## Dev Env Flags
@@ -112,6 +112,10 @@ Scope optional: `feat(terminal): ...`
 ## E2E Testing Rules
 
 * **TDD**: Always run tests FIRST to see them fail, then fix code. Never write tests alongside code and assume they pass.
+
+* **Never add `--workers=N` to the full suite**: measured on 10 cores, `--workers=12` gives 13 failures + dozens skipped in the SAME wall clock as the 6-group default's 1. Every extra failure is a starved timeout that passes in isolation and rotates identity per run, so it reads as a dozen product bugs. The box is saturated at 6.
+
+* **"Target page, context or browser has been closed" ≠ the app died**: it is usually Playwright dismantling a test that already blew its own timeout, so the real failure is the hang above it. A genuine window/process loss is reported by `_mainWindowGuard` with the culprit spec named, in `main-window-lost.json`.
 
 * **useRef + useEffect for DOM measurement**: If a component has early returns (loading/null guards) before the measured element, `useEffect([], [])` runs when the ref is still null. Use a **callback ref** instead.
 

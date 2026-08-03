@@ -710,7 +710,25 @@ export const test = base.extend<ElectronFixtures>({
       await use(sharedApp)
 
       if (sharedApp) {
-        await sharedApp.close().catch(() => {})
+        // Bounded on purpose. `close()` has been measured wedging under
+        // full-suite load, and the fixture timeout below is sized for the SETUP
+        // budget (launch retries + the runner gate) — letting a stuck close
+        // consume that same ceiling would add minutes of dead wall clock per
+        // worker. Report it and move on: the process is about to be reaped
+        // anyway, and a silent raise of the ceiling would just hide the hang.
+        const closed = await Promise.race([
+          sharedApp
+            .close()
+            .then(() => true)
+            .catch(() => true),
+          wait(20_000).then(() => false)
+        ])
+        if (!closed) {
+          console.warn(
+            `[e2e] electronApp.close() did not settle within 20s in worker ` +
+              `${workerInfo.workerIndex} — the app is wedged on shutdown, not merely slow.`
+          )
+        }
       }
 
       closeSessionLogCapture()
@@ -726,7 +744,15 @@ export const test = base.extend<ElectronFixtures>({
       sharedPage = undefined
       sharedWorkerArtifactsDir = undefined
     },
-    { scope: 'worker' }
+    // Playwright bounds fixture setup by the TEST timeout (30s) unless given its
+    // own. Setup here can legitimately need far longer: up to 3 launch attempts
+    // (20s window each, plus backoff) and then `waitForUsableRunner`'s 120s
+    // gate — ~181s worst case. At 30s that 120s budget was unreachable, so a
+    // slow sidecar surfaced as "Fixture electronApp timeout of 30000ms exceeded
+    // during setup" instead of the gate's own "no connected runner" warning,
+    // and the reasoning behind the 120s never actually applied. Teardown is
+    // bounded separately above so this ceiling only ever covers setup.
+    { scope: 'worker', timeout: 200_000 }
   ],
 
   mainWindow: [

@@ -1,8 +1,30 @@
 #!/usr/bin/env bash
 # Run e2e tests in parallel — one group per subdirectory, one Electron per group.
-# Usage: ./e2e-parallel.sh
+#
+# Usage:
+#   ./e2e-parallel.sh                 full suite, one process per group
+#   ./e2e-parallel.sh <args...>       forwarded verbatim to `playwright test`
+#
+# Group-per-subdirectory is the configuration to run the FULL suite in. Measured
+# on a 10-core machine, same build, back to back:
+#
+#   groups (6 processes)   918 passed   1 failed    0 not run   5m40s
+#   --workers=12           882 passed  13 failed   24 not run   5m18s
+#   --workers=12           862 passed  13 failed   44 not run   5m24s
+#
+# Twelve workers buys no wall clock — the box is already saturated at six — and
+# the extra workers only steal CPU from each other. Every one of those 13 is a
+# starved timeout (a 4s toBeVisible, a 5s predicate, a 30s test budget); each
+# passes in isolation, and which ones fail rotates per run, so they read as a
+# dozen unrelated product bugs. They are one scheduling choice.
 set -uo pipefail
 cd "$(dirname "$0")"
+
+# Targeted runs (a spec path, -g, --headed, …) still mean "just run playwright".
+# Keeps `pnpm test:e2e <file>` working now that this script backs that script.
+if [[ $# -gt 0 ]]; then
+  exec npx playwright test --config playwright.config.ts "$@"
+fi
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
