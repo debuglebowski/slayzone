@@ -88,8 +88,10 @@ import {
   hasSessionUserInput,
   configureTransport,
   createDbChatDataOps,
+  setIdleCloseConfigGetter,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
+import { SettingsService } from '@slayzone/settings/server'
 import {
   createIntegrationOps,
   ensureIntegrationSchema,
@@ -473,6 +475,44 @@ export function composeServer(opts: {
     resolveRunnerId: (taskId) => resolveRunnerForTask(taskId)
   })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
+
+  // Idle-close (hibernation) config. Wired HERE because the pty runtime lives in
+  // this process (slice 9) — `isHibernateEligible` reads this getter, and with it
+  // unset it fails safe to `{ enabled: false }`. It was only ever wired in the
+  // Electron host, so when pty moved to the sidecar the entire feature went
+  // silently dead: the sweep ran, found no config, and never hibernated anything
+  // no matter what the user had set. Same orphaning as the warm pool below.
+  //
+  // Reads through the SHARED `SettingsService` instance (one per db handle) rather
+  // than a private cache: the settings router mutates that same instance, and
+  // `set()` is write-through for warmed keys, so a UI toggle is visible to this
+  // SYNC getter with no event and no restart. That is exactly the reader the
+  // service's own comment was designed for.
+  const settingsService = SettingsService.forDatabase(db)
+  const IDLE_CLOSE_KEYS = [
+    'terminal_auto_close_idle',
+    'terminal_idle_close_value',
+    'terminal_idle_close_unit'
+  ]
+  void settingsService.warmCache(IDLE_CLOSE_KEYS).then(
+    () => {
+      setIdleCloseConfigGetter(() => {
+        const value = Number(settingsService.getCached('terminal_idle_close_value')) || 30
+        const unit = settingsService.getCached('terminal_idle_close_unit') || 'minutes'
+        const unitMs = unit === 'seconds' ? 1_000 : unit === 'hours' ? 3_600_000 : 60_000
+        return {
+          // Raw `=== '1'` (NOT isLabEnabled, which defaults ON in dev) keeps it
+          // strictly opt-in.
+          enabled: settingsService.getCached('terminal_auto_close_idle') === '1',
+          idleMs: value * unitMs
+        }
+      })
+    },
+    () => {
+      // Warm failed (transient DB error at boot) — leave the getter unset so the
+      // sweep keeps failing safe rather than reading half a config.
+    }
+  )
   // Warm-process pool (plans/agent-sessions.md): pre-warm one agent per active
   // project so opening a task adopts instantly. PTY runs in THIS process
   // (slice 9), so the manager MUST be initialized here — the renderer's warm

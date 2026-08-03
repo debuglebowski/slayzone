@@ -408,6 +408,7 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/settings/src/client/tabs/RunnersSettingsTab.test.tsx \
   packages/domains/task/src/client/RunnerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
+  packages/domains/settings/src/server/service.test.ts \
   packages/domains/hub-auth/src/server/hub-auth.test.ts \
   packages/domains/hub-auth/src/server/users.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \

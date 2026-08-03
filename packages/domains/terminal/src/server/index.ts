@@ -140,7 +140,13 @@ export {
   // `onTaskReachedTerminal` (task-events) exported above; the side-car wires
   // THIS as the seam handler so status→done actually tears down sessions in
   // this process (where the PTYs/chats live post-cutover).
-  onTaskReachedTerminal as runtimeOnTaskReachedTerminal
+  onTaskReachedTerminal as runtimeOnTaskReachedTerminal,
+  // Idle-close (hibernation) config seam. Only the ELECTRON barrel exported this,
+  // which is how the feature went dead: the sweep that reads it runs in the
+  // side-car (slice 9), and with the getter unset it fails safe to disabled — so
+  // hibernation silently never fired. The side-car composition wires it now, and
+  // it must be reachable from the server barrel to do that.
+  setIdleCloseConfigGetter
 } from './runtime/pty-manager'
 export { createChatOps, type ChatOps, type ChatMode } from './runtime/chat-handlers'
 // The chat data seam. Exported so a composition root can override ONE method
