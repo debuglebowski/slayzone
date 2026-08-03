@@ -204,26 +204,20 @@ export async function resetApp(page: Page): Promise<void> {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root', { timeout: 10_000 })
 
-  // Re-gate on a usable runner. `app:reset-for-test` restarts the SIDE-CAR, which
-  // builds a fresh runner gateway — the runner's existing session belonged to the
-  // old one, so for ~450ms afterwards the hub has zero connected runners even
-  // though the runner process is perfectly healthy and re-dialing.
+  // `app:reset-for-test` restarts the SIDE-CAR, which builds a fresh runner gateway
+  // — the runner's session belonged to the old one, so briefly the hub has zero
+  // connected runners while the runner (healthy) re-dials. Any spec spawning inside
+  // that gap resolves no runner and, with the in-process fallback gone, fails.
   //
-  // Measured: a resolver miss at t=2300ms, the runner's connect at t=2442ms. Any
-  // spec that creates a task or opens a terminal inside that gap resolved no runner
-  // — which used to degrade silently to an in-process spawn, and now (correctly)
-  // fails. The worker-level gate cannot cover this: it runs once at launch, and the
-  // renderer's tRPC connection survives the restart, so it has nothing to notice.
+  // Measured: resolver miss at t=2300ms, runner connect at t=2442ms.
   //
-  // Every spec calls resetApp in beforeAll, so waiting here covers all of them.
-  //
-  // SMALL budget on purpose. This waits for a redial (~450ms), not an enrollment —
-  // the worker-level gate already proved a runner exists. A 30s budget here sat
-  // inside a 30s `beforeAll` hook timeout, so a worker whose runner was slow blew
-  // the hook and took its whole spec file down; that cost 14 specs and 6 minutes of
-  // wall-clock. Returning false is fine: the spec then fails on its own assertion
-  // with a real error instead of an opaque hook timeout.
-  await waitForUsableRunner(page, 5_000)
+  // Cheap wait, deliberately: the runner's first redial is now 100ms
+  // (DEFAULT_BACKOFF.initialDelayMs), so a fixed sleep costs less than polling and
+  // adds no load. An earlier version polled `runners.list` over the renderer in
+  // every spec's beforeAll across 12 workers — the polling itself became the
+  // bottleneck, adding ~7min of wall-clock and causing load-shaped failures (30s
+  // click timeouts, closed pages) that looked like product bugs.
+  await wait(600)
 }
 
 /**
@@ -516,10 +510,10 @@ async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boo
     } catch {
       // Renderer mid-reload / tRPC not ready yet — keep polling.
     }
-    // 100ms, not 1s: the post-reset redial completes in ~450ms, and this runs in
-    // EVERY spec's beforeAll — a 1s interval turned a sub-second wait into a
-    // multi-second one and pushed 30s beforeAll hooks over their budget.
-    await wait(100)
+    // Runs ONCE per worker (at launch), so a 1s interval is fine — a tighter one
+    // only adds load. The per-spec post-reset wait is a fixed cheap sleep in
+    // `resetApp`, deliberately not a poll.
+    await wait(1_000)
   }
   return false
 }
