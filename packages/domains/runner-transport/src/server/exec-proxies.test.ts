@@ -161,6 +161,67 @@ describe('createRoutingPtyBackend', () => {
     expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 
+  it('adopt: seeds warm output first, then drains frames that raced the reply', async () => {
+    const gateway = new FakeGateway()
+    let releaseAdopt: (() => void) | null = null
+    gateway.onMethod('pty.warmAdopt', () => ({ pid: 4242, data: 'BOOT-BANNER', seq: 5 }))
+    const backend = createRoutingPtyBackend({ gateway, resolveRunnerId: () => 'runner-1' })
+
+    const chunks: string[] = []
+    // Start the adopt but do not await it yet, so we can emit a live frame while
+    // the request is still in flight — the real race, since the runner begins
+    // streaming the instant it rekeys.
+    const pending = backend.adopt!('runner-1', 'warm-1', 'sess-warm', 'bash')
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-warm', seq: 6, data: 'AFTER' })
+
+    const handle = await pending
+    handle.onData((d) => chunks.push(d))
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(handle.pid).toBe(4242)
+    // Warm output precedes the frame that raced it, despite arriving later.
+    expect(chunks.join('')).toBe('BOOT-BANNERAFTER')
+    // ...and no backfill was issued. A frame arriving before the seed looks like
+    // a gap against the initial lastSeq of -1, so an unsealed entry fires a
+    // getBufferSince on EVERY adopt — a wasted round-trip re-fetching precisely
+    // the bytes the adopt reply is already carrying.
+    expect(gateway.requestsOf('pty.getBufferSince')).toHaveLength(0)
+    // Rekey, not respawn: nothing was spawned for this session.
+    expect(gateway.requestsOf('pty.spawn')).toHaveLength(0)
+    expect(requireCall(gateway, 'pty.warmAdopt').params).toEqual({
+      warmId: 'warm-1',
+      sessionId: 'sess-warm'
+    })
+
+    // Seq continues from the seed's high-water mark rather than restarting, so a
+    // frame at or below it is a duplicate and must not be re-delivered.
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-warm', seq: 5, data: 'DUP' })
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-warm', seq: 7, data: '-NEXT' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(chunks.join('')).toBe('BOOT-BANNERAFTER-NEXT')
+  })
+
+  it('adopt: a failed warmAdopt disposes the session instead of leaking it', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.warmAdopt', () => {
+      throw new Error('no warm session warm-gone to adopt')
+    })
+    const backend = createRoutingPtyBackend({ gateway, resolveRunnerId: () => 'runner-1' })
+
+    await expect(backend.adopt!('runner-1', 'warm-gone', 'sess-x', 'bash')).rejects.toThrow(
+      /no warm session/
+    )
+    // The caller cold-spawns after a failed adopt; a stale entry under the same
+    // key would swallow that session's frames.
+    gateway.onMethod('pty.spawn', () => ({ pid: 7 }))
+    const handle = await backend.spawn(ptySpec({ sessionId: 'sess-x' }))
+    const chunks: string[] = []
+    handle.onData((d) => chunks.push(d))
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-x', seq: 0, data: 'fresh' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(chunks.join('')).toBe('fresh')
+  })
+
   it('skips forward instead of stalling when a gap is unrecoverable', async () => {
     // Starting delivery at seq -1 makes an unfillable seq 0 reachable: a session
     // whose opening chunk already aged out of the runner's ring buffer can never

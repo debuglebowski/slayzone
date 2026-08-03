@@ -64,7 +64,8 @@ import {
   procGetBufferSinceResultSchema,
   procSpawnResultSchema,
   ptyGetBufferSinceResultSchema,
-  ptySpawnResultSchema
+  ptySpawnResultSchema,
+  ptyWarmAdoptResultSchema
 } from '../shared/frames'
 import type { HubRunnerGateway } from './hub-gateway'
 
@@ -190,6 +191,21 @@ interface PtyEntry {
    */
   backfilledAt: number | null
   disposed: boolean
+  /**
+   * Withhold delivery until the warm-adopt seed lands (adopt only).
+   *
+   * The runner starts streaming the instant it rekeys, so live frames can reach
+   * the hub BEFORE the `pty.warmAdopt` reply carrying everything the session
+   * emitted while warm. Such a frame sits far above the initial `lastSeq` of -1,
+   * which reads as a gap and fires a `getBufferSince` on EVERY adopt — a wasted
+   * round-trip re-fetching exactly the bytes the adopt reply already carries.
+   * Sealing suppresses that; the seed then sets the real `lastSeq` and drains.
+   *
+   * Ordering does NOT depend on this (a raced frame parks in `pending` either
+   * way, since post-adopt seqs are always above the seed's). Pinned by test —
+   * removing the seal fails on the backfill count, not on output order.
+   */
+  sealed: boolean
   dataEmitter: BufferingEmitter<string>
   exitEmitter: BufferingEmitter<PtyExitEvent>
 }
@@ -205,6 +221,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   const sessions = new Map<string, PtyEntry>()
 
   function drain(entry: PtyEntry): void {
+    if (entry.sealed) return
     while (!entry.disposed && entry.pending.has(entry.lastSeq + 1)) {
       const next = entry.lastSeq + 1
       const data = entry.pending.get(next)!
@@ -285,69 +302,111 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   gateway.events.on('runner-lost', (payload) => disposeRunner(payload.runnerId, 'runner-lost'))
   gateway.events.on('runner-disconnected', (payload) => disposeRunner(payload.runnerId, 'runner-disconnected'))
 
+  /**
+   * Register a routed session and build its handle. Shared by `spawn` and
+   * `adopt`: both end up with an ordinary remote session keyed by
+   * `(runnerId, sessionId)`; they differ only in the request that starts it and
+   * whether delivery is sealed pending a seed.
+   */
+  function register(
+    runnerId: string,
+    sessionId: string,
+    processName: string,
+    sealed: boolean
+  ): { entry: PtyEntry; handle: PtyHandle; setPid: (pid: number) => void } {
+    const key = sessionKey(runnerId, sessionId)
+    const dataEmitter = new BufferingEmitter<string>()
+    const exitEmitter = new BufferingEmitter<PtyExitEvent>()
+    const entry: PtyEntry = {
+      key,
+      runnerId,
+      sessionId,
+      lastSeq: -1,
+      pending: new Map(),
+      backfilledAt: null,
+      disposed: false,
+      sealed,
+      dataEmitter,
+      exitEmitter
+    }
+    sessions.set(key, entry)
+
+    let pid = 0
+    const handle: PtyHandle = {
+      get pid(): number {
+        return pid
+      },
+      process: processName,
+      onData: (listener: (data: string) => void): ExecDisposable => dataEmitter.on(listener),
+      onExit: (cb: (e: { exitCode: number; signal?: number }) => void): ExecDisposable =>
+        exitEmitter.on((event) =>
+          cb({
+            exitCode: event.exitCode ?? 1,
+            signal: typeof event.signal === 'number' ? event.signal : undefined
+          })
+        ),
+      write: (data: string): void => {
+        void gateway
+          .request(runnerId, HubToRunnerMethods.ptyWrite, { sessionId, data })
+          .catch(noop)
+      },
+      resize: (cols: number, rows: number): void => {
+        void gateway
+          .request(runnerId, HubToRunnerMethods.ptyResize, { sessionId, cols, rows })
+          .catch(noop)
+      },
+      kill: (signal?: string): void => {
+        void gateway
+          .request(runnerId, HubToRunnerMethods.ptyKill, {
+            sessionId,
+            ...(signal ? { signal } : {})
+          })
+          .catch(noop)
+      }
+    }
+    return { entry, handle, setPid: (next) => (pid = next) }
+  }
+
   return {
+    /**
+     * Promote a warm session on `runnerId` into a real one. No spawn happens —
+     * the runner rekeys the existing process, so pid/buffer/seq all carry over.
+     */
+    async adopt(runnerId: string, warmId: string, sessionId: string, processName: string) {
+      const { entry, handle, setPid } = register(runnerId, sessionId, processName, true)
+      try {
+        const res = await gateway.request(runnerId, HubToRunnerMethods.ptyWarmAdopt, {
+          warmId,
+          sessionId
+        })
+        const parsed = ptyWarmAdoptResultSchema.parse(res)
+        setPid(parsed.pid)
+        // Seed BEFORE unsealing: everything the agent emitted while warm is
+        // delivered first, then whatever queued up during the round-trip drains
+        // on top of it, in seq order.
+        if (parsed.data) entry.dataEmitter.emit(parsed.data)
+        entry.lastSeq = parsed.seq
+        entry.sealed = false
+        drain(entry)
+        return handle
+      } catch (err) {
+        finalize(entry, null, 'adopt-failed')
+        throw err
+      }
+    },
+
     spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle> {
       const runnerId = resolveRunnerId(spec)
       if (runnerId == null) throw new NoRunnerAvailableError(`terminal session ${spec.sessionId}`)
 
-      const key = sessionKey(runnerId, spec.sessionId)
-      const dataEmitter = new BufferingEmitter<string>()
-      const exitEmitter = new BufferingEmitter<PtyExitEvent>()
-      const entry: PtyEntry = {
-        key,
-        runnerId,
-        sessionId: spec.sessionId,
-        lastSeq: -1,
-        pending: new Map(),
-        backfilledAt: null,
-        disposed: false,
-        dataEmitter,
-        exitEmitter
-      }
-      sessions.set(key, entry)
-
       // `pid` is 0 until the remote `pty.spawn` reply lands (remote ptys key by
-      // sessionId, not pid). Exposed via a getter so the returned handle stays a
-      // valid `readonly pid` under the terminal `PtyHandle` seam.
-      let pid = 0
-      // Annotated `PtyHandle` so the object is checked against the terminal seam
-      // directly. `onExit` adapts the wider remote `PtyExitEvent` (exitCode may be
-      // null on signal death / runner-loss; signal may be a string like
-      // 'runner-lost') to the seam's `{ exitCode: number; signal?: number }`:
-      // null exit code → 1 (abnormal), string signals dropped. Lossless for
-      // pty-manager, which only reads `exitCode`.
-      const handle: PtyHandle = {
-        get pid(): number {
-          return pid
-        },
-        process: spec.file,
-        onData: (listener: (data: string) => void): ExecDisposable => dataEmitter.on(listener),
-        onExit: (cb: (e: { exitCode: number; signal?: number }) => void): ExecDisposable =>
-          exitEmitter.on((event) =>
-            cb({
-              exitCode: event.exitCode ?? 1,
-              signal: typeof event.signal === 'number' ? event.signal : undefined
-            })
-          ),
-        write: (data: string): void => {
-          void gateway
-            .request(runnerId, HubToRunnerMethods.ptyWrite, { sessionId: spec.sessionId, data })
-            .catch(noop)
-        },
-        resize: (cols: number, rows: number): void => {
-          void gateway
-            .request(runnerId, HubToRunnerMethods.ptyResize, { sessionId: spec.sessionId, cols, rows })
-            .catch(noop)
-        },
-        kill: (signal?: string): void => {
-          void gateway
-            .request(runnerId, HubToRunnerMethods.ptyKill, {
-              sessionId: spec.sessionId,
-              ...(signal ? { signal } : {})
-            })
-            .catch(noop)
-        }
-      }
+      // sessionId, not pid). The handle exposes it via a getter so it stays a
+      // valid `readonly pid` under the terminal `PtyHandle` seam. `onExit` adapts
+      // the wider remote `PtyExitEvent` (exitCode may be null on signal death /
+      // runner-loss; signal may be a string like 'runner-lost') to the seam's
+      // `{ exitCode: number; signal?: number }` — lossless for pty-manager, which
+      // only reads `exitCode`.
+      const { entry, handle, setPid } = register(runnerId, spec.sessionId, spec.file, false)
 
       void gateway
         .request(runnerId, HubToRunnerMethods.ptySpawn, {
@@ -362,7 +421,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         .then(
           (res) => {
             const parsed = ptySpawnResultSchema.safeParse(res)
-            if (parsed.success) pid = parsed.data.pid
+            if (parsed.success) setPid(parsed.data.pid)
           },
           () => finalize(entry, null, 'spawn-failed')
         )

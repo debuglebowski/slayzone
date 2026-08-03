@@ -56,6 +56,23 @@ export interface PtyHandle {
 
 export interface PtyBackend {
   spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle>
+  /**
+   * Promote a runner's pre-warmed session into a real one (warm pool, Phase 6).
+   *
+   * NOT a spawn: the runner rekeys the process it already booted, so pid, output
+   * buffer and seq counter all carry over and the handle returned here is an
+   * ordinary routed session from that point on. `processName` is cosmetic — it
+   * populates `PtyHandle.process`, which the warm path cannot infer from a spec.
+   *
+   * Optional because only the ROUTING backend can do it; the local backend has
+   * no warm pool of its own (that is the point — warm agents live on runners).
+   */
+  adopt?(
+    runnerId: string,
+    warmId: string,
+    sessionId: string,
+    processName: string
+  ): Promise<PtyHandle>
 }
 
 /**
