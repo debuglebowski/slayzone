@@ -48,6 +48,19 @@ let sharedApp: ElectronApplication | undefined
 let sharedPage: Page | undefined
 let sharedWorkerArtifactsDir: string | undefined
 
+/**
+ * Set when the shared app's OS process exits. Lets the liveness guard below tell
+ * a real crash apart from a self-inflicted window close — on macOS
+ * `window-all-closed` deliberately does NOT quit, so an app that closed its own
+ * last window looks identical to a dead one from Playwright's side (both report
+ * "Target page, context or browser has been closed") while the process lives on.
+ */
+let sharedProcExit: { code: number | null; signal: string | null; at: string } | null = null
+
+/** The first test that lost the main window. Later tests in the worker can only
+ *  be its victims, so they are not re-reported. */
+let windowLoss: { test: string; at: string } | null = null
+
 export function getWorkerArtifactsDir(): string | undefined {
   return sharedWorkerArtifactsDir
 }
@@ -57,6 +70,8 @@ let sessionStderrStream: fs.WriteStream | null = null
 type ElectronFixtures = {
   electronApp: ElectronApplication
   mainWindow: Page
+  /** Auto fixture — see the `_mainWindowGuard` definition for what it reports. */
+  _mainWindowGuard: void
 }
 
 interface LaunchAttemptRecord {
@@ -658,6 +673,13 @@ export const test = base.extend<ElectronFixtures>({
         sharedPage = launched.page
         sharedWorkerArtifactsDir = workerArtifactsDir
 
+        // Record a process exit so `_mainWindowGuard` can distinguish "the app
+        // crashed" from "the app closed its own window" — the two are
+        // indistinguishable from the Page side but need opposite fixes.
+        sharedApp.process()?.once('exit', (code, signal) => {
+          sharedProcExit = { code, signal, at: new Date().toISOString() }
+        })
+
         // Runner-ready gate: agents only run on runners, so no spec may start
         // before the auto-enrolled local runner is USABLE (not merely listed). Recorded in the
         // worker artifacts so a suite-wide agent failure is diagnosable from the
@@ -731,6 +753,86 @@ export const test = base.extend<ElectronFixtures>({
       await use(sharedPage)
     },
     { scope: 'worker' }
+  ],
+
+  /**
+   * Attribute the loss of the shared main window to the test that caused it.
+   *
+   * `mainWindow` is worker-scoped, so every spec in a worker shares ONE Page.
+   * If any test loses that page — the app closed its own window, or the process
+   * died — every later spec in the worker fails with Playwright's generic
+   * "Target page, context or browser has been closed", pointing at innocent
+   * victims. Whole files' worth of failures then rotate identity run to run
+   * purely with how Playwright happened to distribute files across workers.
+   *
+   * The routes into that state are real and reachable: the renderer's Cmd+W /
+   * Cmd+Shift+W handlers (useAppIpcListeners.ts) fall through to
+   * `app.window.close()` when the active tab isn't the type they target, so a
+   * `menu.testEmit` fired while the HOME tab is active closes the main window —
+   * measured, windows 1 → 0 with the process still running.
+   *
+   * The guard cannot REPAIR the run: worker-scoped fixtures hand each test the
+   * Page resolved at worker start, so a replacement window can't be swapped in
+   * for tests that already have the old handle. What it can do is stop the
+   * cascade from being anonymous — the culprit test goes red with the reason,
+   * and the evidence lands in the worker artifacts.
+   *
+   * Costs nothing on the happy path: `page.isClosed()` is a local flag read, so
+   * a live window returns before any IPC.
+   */
+  _mainWindowGuard: [
+    async ({}, use, testInfo) => {
+      await use()
+
+      if (!sharedPage || !sharedPage.isClosed()) return
+      // Already attributed to its culprit — later tests are victims, not causes.
+      if (windowLoss) return
+
+      windowLoss = { test: testInfo.titlePath.join(' › '), at: new Date().toISOString() }
+
+      const liveWindowCount = async (): Promise<number> => {
+        try {
+          return await sharedApp!.evaluate(
+            ({ BrowserWindow }) =>
+              BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length
+          )
+        } catch {
+          return -1 // process gone
+        }
+      }
+
+      const lostAtWindows = await liveWindowCount()
+      const processAlive = sharedProcExit == null
+
+      if (sharedWorkerArtifactsDir) {
+        writeJson(path.join(sharedWorkerArtifactsDir, 'main-window-lost.json'), {
+          ...windowLoss,
+          processAlive,
+          lostAtWindows,
+          procExit: sharedProcExit
+        })
+      }
+
+      // Thrown from fixture teardown on purpose. Besides naming the culprit, it
+      // makes Playwright retire this worker and start the next spec in a FRESH
+      // Electron — so the loss costs one red test instead of every spec the
+      // worker had left. A plain in-body failure gets no such restart, which is
+      // why an unattributed loss used to cascade through whole files.
+      throw new Error(
+        `Main window LOST during this test. ` +
+          (processAlive
+            ? `The app CLOSED its own main window; it did not crash (process still running, ` +
+              `${lostAtWindows} live window(s)). Usual cause: a close menu event (Cmd+W / ` +
+              `Cmd+Shift+W, incl. menu.testEmit) reaching the renderer while the active tab is ` +
+              `not the type the handler targets — those handlers fall through to ` +
+              `app.window.close().`
+            : `The Electron process EXITED (code=${sharedProcExit?.code}, ` +
+              `signal=${sharedProcExit?.signal}).`) +
+          ` Any later spec that still shares this app fails with "Target page, context or ` +
+          `browser has been closed" — those are victims of this test, not independent failures.`
+      )
+    },
+    { auto: true }
   ]
 })
 

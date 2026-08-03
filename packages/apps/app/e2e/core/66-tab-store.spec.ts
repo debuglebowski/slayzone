@@ -182,6 +182,18 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     await goHome(mainWindow)
     await openTaskViaSearch(mainWindow, 'TS temp task')
 
+    // "Close Task" falls through to app.window.close() when the active tab is
+    // not a task (useAppIpcListeners.ts). `mainWindow` is shared by every spec
+    // in this worker, so firing it on the home tab would close the window and
+    // fail the rest of the worker with "Target page ... has been closed".
+    // Assert the precondition this test already assumes rather than gamble on it.
+    const activeType = await mainWindow.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const state = (window as any).__slayzone_tabStore?.getState?.()
+      return String(state?.tabs?.[state.activeTabIndex]?.type ?? 'unknown')
+    })
+    expect(activeType, 'active tab must be a task before invoking Window ▸ Close Task').toBe('task')
+
     await clickMenuItem(electronApp, ['Window', 'Close Task'])
 
     await expect

@@ -5,7 +5,42 @@ import type { Page } from '@playwright/test'
 import fs from 'fs'
 import path from 'path'
 
+/** Type of the tab the app currently has active, read from the exposed store. */
+async function activeTabType(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state = (window as any).__slayzone_tabStore?.getState?.()
+    if (!state) return 'unknown'
+    return String(state.tabs?.[state.activeTabIndex]?.type ?? 'none')
+  })
+}
+
+/**
+ * Emit a close menu event — but never while the active tab is the home tab.
+ *
+ * Both handlers in useAppIpcListeners.ts end in `app.window.close()` when the
+ * active tab is not the type they target: `close-current-focus` closes the
+ * WINDOW on a home tab, `close-active-task` closes it on anything that isn't a
+ * task. That is correct macOS Cmd+W behaviour in the product, but lethal here —
+ * `mainWindow` is shared by the whole worker, so one stray emit closes the
+ * window and every later spec in that worker fails with "Target page, context
+ * or browser has been closed".
+ *
+ * The emits below run inside retry polls that re-fire until they observe the
+ * effect. The close cascade is stepwise (extra terminal group → task tab →
+ * window), so an iteration landing after the cascade has already reached the
+ * task tab would take the window with it. Refusing to emit turns that into a
+ * loud local failure in THIS spec instead of a silent cascade in the next one.
+ */
 async function emitMenu(page: Page, event: 'close-current-focus' | 'close-active-task') {
+  const active = await activeTabType(page)
+  if (active !== 'task') {
+    throw new Error(
+      `Refusing to emit "${event}" with active tab "${active}" — the renderer would fall ` +
+        `through to app.window.close() and take the shared main window down for every ` +
+        `later spec in this worker. Re-open the task tab before emitting.`
+    )
+  }
   await page.evaluate((eventName) => {
     return window.getTrpcVanillaClient().menu.testEmit.mutate({ event: eventName })
   }, event)
