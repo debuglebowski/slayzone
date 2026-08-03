@@ -31,6 +31,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 const APP_DIR = path.resolve(__dirname, '..', '..')
 const HUB_BIN = path.resolve(APP_DIR, '..', 'hub', 'dist', 'bin.cjs')
+/** Built by `ensureRunnerBuilt()` in global-setup, so it exists before any spec. */
+const RUNNER_BIN = path.resolve(APP_DIR, '..', 'runner', 'dist', 'bin.cjs')
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -124,6 +126,110 @@ async function waitForHubHealth(port: number, timeoutMs = 30_000): Promise<void>
     await new Promise((r) => setTimeout(r, 300))
   }
   throw new Error(`second hub /health not ready on :${port} within ${timeoutMs}ms`)
+}
+
+interface HubRunner {
+  proc: ChildProcess
+  runnerId: string
+  stop: () => Promise<void>
+}
+
+/**
+ * Enroll + spawn a runner against a hub, and wait until that hub reports it
+ * USABLE.
+ *
+ * Needed because agents, terminals and git work run ONLY on runners — a hub with
+ * none refuses `pty.create` with an actionable error instead of quietly spawning
+ * the process itself. `spawnSecondHub` starts a bare hub, so a PTY test against it
+ * has to bring its own runner; without this the spawn correctly fails.
+ *
+ * Mirrors `110-runner-loopback`'s loopback runner: mint a join token from the hub
+ * that will own the runner, hand the runner its `<ROOT>/config.json` (display name
+ * + FS path-jail) and dial the url encoded in the token.
+ */
+async function attachRunnerToHub(opts: {
+  hubUrl: string
+  rootDir: string
+  credentialsDir: string
+  allowedRoots: string
+  name: string
+}): Promise<HubRunner> {
+  const minted = (await withHubClient(opts.hubUrl, (c) =>
+    c.runners.mintJoinToken.mutate({ label: opts.name })
+  )) as { token: string }
+  const payload = JSON.parse(
+    Buffer.from(minted.token.slice(minted.token.indexOf('.') + 1), 'base64url').toString('utf8')
+  ) as { hubUrl: string }
+
+  fs.mkdirSync(opts.rootDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(opts.rootDir, 'config.json'),
+    JSON.stringify({ runnerName: opts.name, allowedRoots: [opts.allowedRoots] })
+  )
+
+  const electronPath = require('electron') as unknown as string
+  // ELECTRON_RUN_AS_NODE: the runner's node-pty native addon must share the app's
+  // ABI — same way the app supervisor spawns it.
+  const proc = spawn(electronPath, [RUNNER_BIN], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      // Standalone runner: clear any leaked SUPERVISED so it reads <ROOT>/config.json.
+      SLAYZONE_SUPERVISED: '',
+      SLAYZONE_ROOT: opts.rootDir,
+      SLAYZONE_HUB_ADDRESS: new URL(payload.hubUrl).host,
+      SLAYZONE_HUB_JOIN_TOKEN: minted.token,
+      SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir
+    },
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
+  proc.stdout?.on('data', () => undefined)
+  proc.stderr?.on('data', () => undefined)
+
+  // Gate on `usable`, NOT `connected`: usable means authenticated AND heard from
+  // inside the heartbeat window. A spawn dispatched to an open-but-silent socket
+  // would hang until the watchdog reaped it.
+  let runnerId: string | null = null
+  await expect
+    .poll(
+      async () => {
+        const rows = (await withHubClient(opts.hubUrl, (c) => c.runners.list.query())) as Array<{
+          id: string
+          usable: boolean
+        }>
+        runnerId = rows.find((r) => r.usable)?.id ?? null
+        return runnerId !== null
+      },
+      { timeout: 60_000, intervals: [500, 1_000, 2_000] }
+    )
+    .toBe(true)
+
+  return {
+    proc,
+    runnerId: runnerId!,
+    stop: () =>
+      new Promise<void>((resolve) => {
+        if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
+        const t = setTimeout(() => {
+          try {
+            proc.kill('SIGKILL')
+          } catch {
+            /* gone */
+          }
+          resolve()
+        }, 3_000)
+        proc.once('exit', () => {
+          clearTimeout(t)
+          resolve()
+        })
+        try {
+          proc.kill('SIGTERM')
+        } catch {
+          clearTimeout(t)
+          resolve()
+        }
+      })
+  }
 }
 
 base.describe('Multi-hub federation (2 hubs)', () => {
@@ -457,11 +563,25 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
     const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
     let hub: SecondHub | null = null
+    let hubRunner: HubRunner | null = null
     let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
     try {
       hub = await spawnSecondHub(secondStore)
       await waitForHubHealth(hub.port)
       const remoteHubUrl = hub.url
+
+      // The remote hub needs its OWN runner: terminals run only on runners, so a
+      // bare hub refuses pty.create with an actionable error. This is also what
+      // makes the assertion below meaningful — the PTY genuinely runs on the
+      // remote hub's machine rather than inside the hub process itself.
+      hubRunner = await attachRunnerToHub({
+        hubUrl: remoteHubUrl,
+        rootDir: path.join(secondStore, 'runner-root'),
+        credentialsDir: path.join(secondStore, 'runner-creds'),
+        // Path-jail must admit the pty cwd used below.
+        allowedRoots: secondStore,
+        name: 'e2e-remote-hub-runner'
+      })
 
       // Remote hub: create a project (path = the remote store dir, a real dir) +
       // a task to run a terminal in.
@@ -563,6 +683,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         .toMatch(/running|idle/)
     } finally {
       if (launched) await launched.close()
+      // Runner before hub: it re-dials on disconnect, so killing the hub first
+      // leaves it reconnecting against a dead port for the whole teardown.
+      if (hubRunner) await hubRunner.stop()
       if (hub) await hub.stop()
       fs.rmSync(secondStore, { recursive: true, force: true })
     }
