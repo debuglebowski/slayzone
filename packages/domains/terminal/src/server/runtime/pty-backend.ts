@@ -73,6 +73,26 @@ export interface PtyBackend {
     sessionId: string,
     processName: string
   ): Promise<PtyHandle>
+  /**
+   * Pre-boot a warm session on `runnerId`. It buffers output but streams nothing
+   * until `adopt` gives it a real session id — the hub has nowhere to route it to
+   * before then.
+   */
+  warmSpawn?(
+    runnerId: string,
+    spec: {
+      warmId: string
+      command: string
+      args: string[]
+      cwd: string
+      env: Record<string, string>
+      /** Written to the shell's stdin post-spawn, to `exec` the agent inside it. */
+      postSpawnCommand?: string
+    }
+  ): Promise<{ pid: number }>
+  warmKill?(runnerId: string, warmId: string): Promise<void>
+  /** Warm sessions the runner still holds — used to reap orphans on reconnect. */
+  warmList?(runnerId: string): Promise<Array<{ warmId: string; cwd: string; pid: number }>>
 }
 
 /**

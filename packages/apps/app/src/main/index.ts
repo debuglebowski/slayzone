@@ -1927,7 +1927,13 @@ app
           [projectId]
         )
         return row?.path ?? null
-      }
+      },
+      // Never warms from THIS process. Warm agents run on runners, reached through
+      // the routing PtyBackend — which is composed in the SIDECAR (slice 9), where
+      // the pty runtime lives. The main process holds only the local backend, so it
+      // has no way to route a warm spawn and must not try; the sidecar's own
+      // `initWarmProcessManager` owns the pool.
+      resolveRunnerId: async () => null
     })
     logBoot('terminal tab runtime wired')
     const chatHandlerOps = {

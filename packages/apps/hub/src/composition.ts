@@ -83,6 +83,7 @@ import {
   setOnTaskReachedTerminalHandler,
   broadcastRespawnRequest,
   initWarmProcessManager,
+  reapOrphanWarms,
   onGlobalStateChange,
   hasSessionUserInput,
   configureTransport,
@@ -496,11 +497,25 @@ export function composeServer(opts: {
   initWarmProcessManager({
     db,
     isEnabled: () => prewarmEnabled,
+    // `settings.set` writes the row but emits no settings-changed, so the cache
+    // above would otherwise stay stale until the next boot — i.e. toggling
+    // pre-warm in Settings did nothing until restart.
+    refreshEnabled: refreshPrewarm,
     getProjectRoot: async (projectId) => {
       const row = await db.get<{ path?: string }>('SELECT path FROM projects WHERE id = ?', [
         projectId
       ])
       return row?.path ?? null
+    },
+    // Warm on the runner this project's tasks will actually resolve to. Reads the
+    // project's default binding through the SAME resolver a spawn uses, so a warm
+    // agent is never booted on a machine no task will land on.
+    resolveRunnerId: async (projectId) => {
+      const row = await db.get<{ default_runner_id?: string | null }>(
+        'SELECT default_runner_id FROM projects WHERE id = ?',
+        [projectId]
+      )
+      return resolveExecRunner(row?.default_runner_id ?? null)
     }
   })
   setChatDeps({
@@ -1048,6 +1063,14 @@ export function composeServer(opts: {
         resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
       })
     )
+    // Warm agents are the RUNNER's processes, so they outlive a hub or sidecar
+    // restart — unlike the old hub-local pool, whose children died with it. An
+    // unclaimed pre-booted agent is a billable LLM process with no owner, so
+    // reconcile against the runner's own list on every (re)connect and reap
+    // whatever this hub is no longer tracking.
+    runnerGateway.events.on('runner-connected', ({ runner }) => {
+      void reapOrphanWarms(runner.runnerId)
+    })
     // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
     // servers, not agents. `doSpawn` is synchronous and also driven by restart
     // timers, so it cannot resolve a runner — its spec always carries

@@ -65,7 +65,9 @@ import {
   procSpawnResultSchema,
   ptyGetBufferSinceResultSchema,
   ptySpawnResultSchema,
-  ptyWarmAdoptResultSchema
+  ptyWarmAdoptResultSchema,
+  ptyWarmListResultSchema,
+  ptyWarmSpawnResultSchema
 } from '../shared/frames'
 import type { HubRunnerGateway } from './hub-gateway'
 
@@ -372,6 +374,32 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
      * Promote a warm session on `runnerId` into a real one. No spawn happens —
      * the runner rekeys the existing process, so pid/buffer/seq all carry over.
      */
+    async warmSpawn(
+      runnerId: string,
+      spec: {
+        warmId: string
+        command: string
+        args: string[]
+        cwd: string
+        env: Record<string, string>
+        postSpawnCommand?: string
+      }
+    ) {
+      // No session entry: a warm session has no hub-side identity yet, and the
+      // runner streams nothing for it. It becomes routable at `adopt`.
+      const res = await gateway.request(runnerId, HubToRunnerMethods.ptyWarmSpawn, spec)
+      return ptyWarmSpawnResultSchema.parse(res)
+    },
+
+    async warmKill(runnerId: string, warmId: string) {
+      await gateway.request(runnerId, HubToRunnerMethods.ptyWarmKill, { warmId })
+    },
+
+    async warmList(runnerId: string) {
+      const res = await gateway.request(runnerId, HubToRunnerMethods.ptyWarmList, {})
+      return ptyWarmListResultSchema.parse(res).warms
+    },
+
     async adopt(runnerId: string, warmId: string, sessionId: string, processName: string) {
       const { entry, handle, setPid } = register(runnerId, sessionId, processName, true)
       try {

@@ -13,6 +13,7 @@ import type { PtySessionWindow } from '../pty-host'
 import type { IPty } from 'node-pty'
 import type { PtySessionLedger } from './pty-data-ops'
 import { createPty, killPty, setPtySessionLedger } from './pty-manager'
+import { setPtyBackend, type PtyBackend } from './pty-backend'
 
 let passed = 0
 let failed = 0
@@ -130,12 +131,31 @@ function makeFakeLedger(events: string[]): { ledger: PtySessionLedger; calls: Le
   return { ledger, calls }
 }
 
+/**
+ * Warm adoption is a REKEY on a RUNNER (`pty.warmAdopt`) reached through
+ * `PtyBackend.adopt` — there is no hub-local warm pool. These tests exercise the
+ * adoption BRANCH of createPty, so they stand in a backend whose `adopt` returns
+ * the fake pty the runner would have handed back.
+ */
+function installAdoptBackend(fake: unknown): void {
+  setPtyBackend({
+    spawn() {
+      throw new Error('adoption must not cold-spawn')
+    },
+    async adopt() {
+      return fake as never
+    }
+  } as unknown as PtyBackend)
+}
+
 await test('pending-spawn is recorded durably BEFORE the agent starts (no bind on plain adopt)', async () => {
   const events: string[] = []
   const { ledger, calls } = makeFakeLedger(events)
   setPtySessionLedger(ledger)
   try {
     const fake = makeFakePty(events)
+  installAdoptBackend(fake)
+    installAdoptBackend(fake)
     const sessionId = 'ledgerA:ledgerA'
     const res = await createPty({
       win: fakeWin,
@@ -146,7 +166,7 @@ await test('pending-spawn is recorded durably BEFORE the agent starts (no bind o
       conversationId: 'conv-L1',
       initialCommand: 'claude --session-id {id} {flags}',
       defaultFlags: '--allow-dangerously-skip-permissions',
-      adoptPty: { pty: fake as unknown as IPty }
+      adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
     })
     expect(res.success === true, `createPty failed: ${res.error}`)
     expect(calls.record.length === 1, `expected 1 recordPendingSpawn, got ${calls.record.length}`)
@@ -179,6 +199,8 @@ await test('pending-spawn is pruned on exit (fire-and-forget, scoped to task+mod
   setPtySessionLedger(ledger)
   try {
     const fake = makeFakePty(events)
+  installAdoptBackend(fake)
+    installAdoptBackend(fake)
     const sessionId = 'ledgerB:ledgerB'
     await createPty({
       win: fakeWin,
@@ -189,7 +211,7 @@ await test('pending-spawn is pruned on exit (fire-and-forget, scoped to task+mod
       conversationId: 'conv-L2',
       initialCommand: 'claude --session-id {id} {flags}',
       defaultFlags: '--allow-dangerously-skip-permissions',
-      adoptPty: { pty: fake as unknown as IPty }
+      adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
     })
     expect(calls.prune.length === 0, 'prune must not fire before exit')
     // Natural exit through the REAL production path: emit output first (so the
@@ -215,6 +237,8 @@ await test('bindSessionToTask fires ONLY on pre-warmed pooled adoption (and skip
   setPtySessionLedger(ledger)
   try {
     const fake = makeFakePty(events)
+  installAdoptBackend(fake)
+    installAdoptBackend(fake)
     const sessionId = 'ledgerC:ledgerC'
     await createPty({
       win: fakeWin,
@@ -228,7 +252,8 @@ await test('bindSessionToTask fires ONLY on pre-warmed pooled adoption (and skip
       defaultFlags: '--x',
       initialPrompt: 'HI',
       adoptPty: {
-        pty: fake as unknown as IPty,
+        warmId: 'warm-1',
+        runnerId: 'runner-1',
         preWarmedAgent: true,
         sessionId: 'poolX',
         conversationId: 'convPool'
@@ -254,6 +279,7 @@ await test('null ledger (pre-init): spawn still succeeds, nothing recorded', asy
   const events: string[] = []
   setPtySessionLedger(null)
   const fake = makeFakePty(events)
+  installAdoptBackend(fake)
   const sessionId = 'ledgerD:ledgerD'
   const res = await createPty({
     win: fakeWin,
@@ -264,7 +290,7 @@ await test('null ledger (pre-init): spawn still succeeds, nothing recorded', asy
     conversationId: 'conv-L4',
     initialCommand: 'claude --session-id {id} {flags}',
     defaultFlags: '--x',
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   expect(res.success === true, `createPty must succeed without a ledger: ${res.error}`)
   // The mcp-env fallback still exports the task identity without a db.

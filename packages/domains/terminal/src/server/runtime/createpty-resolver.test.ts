@@ -18,6 +18,7 @@ import {
   setConversationResolver,
   setReinstallHooks
 } from './pty-manager'
+import { setPtyBackend, type PtyBackend } from './pty-backend'
 
 let passed = 0
 let failed = 0
@@ -83,9 +84,27 @@ const stubDb = {
 
 setDatabase(stubDb)
 
+/**
+ * Warm adoption is a REKEY on a RUNNER (`pty.warmAdopt`) reached through
+ * `PtyBackend.adopt` — there is no hub-local warm pool. These tests exercise the
+ * adoption BRANCH of createPty, so they stand in a backend whose `adopt` returns
+ * the fake pty the runner would have handed back.
+ */
+function installAdoptBackend(fake: unknown): void {
+  setPtyBackend({
+    spawn() {
+      throw new Error('adoption must not cold-spawn')
+    },
+    async adopt() {
+      return fake as never
+    }
+  } as unknown as PtyBackend)
+}
+
 await test('null renderer hint + ledger id → RESUME (no fresh mint)', async () => {
   setConversationResolver(async () => 'REAL-LEDGER-ID')
   const fake = makeFakePty()
+  installAdoptBackend(fake)
   const sid = 'resTaskA:resTaskA'
   await createPty({
     win: fakeWin,
@@ -98,7 +117,7 @@ await test('null renderer hint + ledger id → RESUME (no fresh mint)', async ()
     initialCommand: 'claude --session-id {id} {flags}',
     resumeCommand: 'claude --resume {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   const cmd = fake.written.join('')
   expect(cmd.includes('--resume'), `expected resume template, got: ${cmd}`)
@@ -111,6 +130,7 @@ await test('null renderer hint + ledger id → RESUME (no fresh mint)', async ()
 await test('null hint + no ledger id → fresh mint (--session-id), not resume', async () => {
   setConversationResolver(async () => null)
   const fake = makeFakePty()
+  installAdoptBackend(fake)
   const sid = 'resTaskB:resTaskB'
   await createPty({
     win: fakeWin,
@@ -123,7 +143,7 @@ await test('null hint + no ledger id → fresh mint (--session-id), not resume',
     initialCommand: 'claude --session-id {id} {flags}',
     resumeCommand: 'claude --resume {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   const cmd = fake.written.join('')
   expect(cmd.includes('--session-id'), `expected fresh --session-id, got: ${cmd}`)
@@ -144,6 +164,7 @@ async function spawnWithResolver(
 ): Promise<string> {
   setConversationResolver(resolver)
   const fake = makeFakePty()
+  installAdoptBackend(fake)
   await createPty({
     win: fakeWin,
     sessionId: sid,
@@ -155,7 +176,7 @@ async function spawnWithResolver(
     initialCommand: 'claude --session-id {id} {flags}',
     resumeCommand: 'claude --resume {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   const cmd = fake.written.join('')
   killPty(sid)
@@ -275,6 +296,7 @@ await test('real-db resolver drives resume from the ledger (renderer hint absent
     return row?.conversation_id ?? null
   })
   const fake = makeFakePty()
+  installAdoptBackend(fake)
   const sid = 'rt1:rt1'
   await createPty({
     win: fakeWin,
@@ -287,7 +309,7 @@ await test('real-db resolver drives resume from the ledger (renderer hint absent
     initialCommand: 'claude --session-id {id} {flags}',
     resumeCommand: 'claude --resume {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   const cmd = fake.written.join('')
   expect(
@@ -312,6 +334,7 @@ await test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {
   })
   setConversationResolver(async () => null)
   const fake = makeFakePty()
+  installAdoptBackend(fake)
   const sid = 'healA:healA'
   await createPty({
     win: fakeWin,
@@ -324,7 +347,7 @@ await test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {
     initialCommand: 'claude --session-id {id} {flags}',
     resumeCommand: 'claude --resume {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   expect(calls === 1, `reinstallHooks must fire once for a hook-driven spawn (calls=${calls})`)
   killPty(sid)
@@ -338,6 +361,7 @@ await test('non-hook mode (terminal) does NOT fire reinstallHooks', async () => 
     calls++
   })
   const fake = makeFakePty()
+  installAdoptBackend(fake)
   const sid = 'healB:healB'
   await createPty({
     win: fakeWin,
@@ -347,7 +371,7 @@ await test('non-hook mode (terminal) does NOT fire reinstallHooks', async () => 
     type: 'terminal',
     existingConversationId: undefined,
     conversationId: undefined,
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   expect(calls === 0, `plain terminal must not touch notify.sh (calls=${calls})`)
   killPty(sid)
@@ -360,6 +384,7 @@ await test('a throwing reinstallHooks never blocks the spawn', async () => {
   })
   setConversationResolver(async () => null)
   const fake = makeFakePty()
+  installAdoptBackend(fake)
   const sid = 'healC:healC'
   // Must resolve (not reject) despite the throwing repair.
   await createPty({
@@ -373,7 +398,7 @@ await test('a throwing reinstallHooks never blocks the spawn', async () => {
     initialCommand: 'claude --session-id {id} {flags}',
     resumeCommand: 'claude --resume {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { pty: fake as unknown as IPty }
+    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
   })
   const cmd = fake.written.join('')
   expect(cmd.includes('claude'), `spawn must still complete despite a failing repair: ${cmd}`)

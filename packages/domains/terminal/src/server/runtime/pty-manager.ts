@@ -21,7 +21,10 @@ import {
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
-import { getPtyBackend, spawnLocalPty, type PtySpawnSpec } from './pty-backend'
+// No `spawnLocalPty` import: this process no longer spawns a pty itself under any
+// path. It reaches every agent through the injected backend, which routes to a
+// runner. `spawnLocalPty` still exists in pty-backend for the RUNNER's own use.
+import { getPtyBackend, type PtySpawnSpec } from './pty-backend'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
@@ -1146,46 +1149,11 @@ export function buildBaseEnv(): Record<string, string> {
   } as Record<string, string>
 }
 
-/**
- * Spawn a bare login+interactive shell (no post-spawn command) for the warm-process
- * pool. Reuses the exact shell resolution, startup args, ulimit wrap, and interactive-only
- * fallback that createPty's initial spawn uses, so an adopted warm shell is indistinguishable
- * from a cold spawn. The caller writes `exec <agent>` later, at adopt time.
- */
-export function spawnLoginShell(opts: {
-  cwd: string
-  extraEnv?: Record<string, string>
-  cols?: number
-  rows?: number
-}): { pty: pty.IPty; shell: string; usedArgs: string[]; usedFallback: boolean } {
-  const shell = resolveUserShell()
-  const args = getShellStartupArgs(shell)
-  const spawnOptions: pty.IPtyForkOptions = {
-    name: 'xterm-256color',
-    cols: opts.cols ?? 80,
-    rows: opts.rows ?? 24,
-    cwd: opts.cwd,
-    env: { ...buildBaseEnv(), ...(opts.extraEnv ?? {}) }
-  }
-  try {
-    return {
-      pty: spawnLocalPty(shell, args, spawnOptions, false),
-      shell,
-      usedArgs: args,
-      usedFallback: false
-    }
-  } catch (err) {
-    // Some shells reject the login+interactive combo on certain hosts — retry without -l.
-    if (!(args.includes('-i') && args.includes('-l'))) throw err
-    const fallbackArgs = args.filter((a) => a !== '-l')
-    return {
-      pty: spawnLocalPty(shell, fallbackArgs, spawnOptions, false),
-      shell,
-      usedArgs: fallbackArgs,
-      usedFallback: true
-    }
-  }
-}
+// `spawnLoginShell` lived here to give the warm-process pool a bare login shell on
+// the HUB. It is gone with the pool: warm agents run on runners, spawned via
+// `PtyBackend.warmSpawn` → `pty.warmSpawn`, and the runner resolves and spawns the
+// shell itself. Removing it (rather than leaving it unused) is the point — it was
+// the last function in this process capable of starting an agent locally.
 
 export interface CreatePtyOptions {
   win: PtySessionWindow
@@ -1235,8 +1203,10 @@ export interface CreatePtyOptions {
    * `conversationId`, and sends the task's initial prompt to the running agent.
    */
   adoptPty?: {
-    pty: pty.IPty
-    seedBuffer?: string
+    /** Key the RUNNER currently files the warm session under. */
+    warmId: string
+    /** Runner holding it. Adoption is a rekey there, not a local handoff. */
+    runnerId: string
     preWarmedAgent?: boolean
     /** Pooled `agent_sessions.id` to bind to this task (preWarmedAgent only). */
     sessionId?: string
@@ -1670,11 +1640,23 @@ export async function createPty(
     const spawnRemote = async (rawFile: string, rawArgs: string[]): Promise<pty.IPty> =>
       (await getPtyBackend().spawn(buildSpec(rawFile, rawArgs))) as unknown as pty.IPty
     if (opts.adoptPty) {
-      // Warm-process adoption: reuse the already-spawned, rc-initialized idle shell.
-      // Skip the initial spawn entirely; the post-spawn command (export + exec agent)
-      // is written into the live shell below. Fallback paths still re-spawn fresh
-      // shells via `spawn` if the agent exits, exactly as for a cold spawn.
-      ptyProcess = opts.adoptPty.pty
+      // Warm-process adoption: the agent is already running ON THE RUNNER. Adopting
+      // REKEYS it there (warmId → this sessionId) rather than spawning anything, so
+      // pid, output buffer and seq counter carry over and what comes back is an
+      // ordinary routed handle. Everything the agent emitted while warm arrives as
+      // the first chunk on that handle.
+      const backend = getPtyBackend()
+      if (!backend.adopt) {
+        throw new Error(
+          '[pty-manager] warm adoption requires a routing PtyBackend — warm agents live on runners'
+        )
+      }
+      ptyProcess = (await backend.adopt(
+        opts.adoptPty.runnerId,
+        opts.adoptPty.warmId,
+        sessionId,
+        spawnFile
+      )) as unknown as pty.IPty
     } else if (runnerId != null) {
       // Remote session: await the runner spawn. No local -l / interactive-shell
       // fallback — a runner owns its shell startup, and its handle can't be
@@ -1740,11 +1722,10 @@ export async function createPty(
     if (opts.adoptPty) {
       resizePty(sessionId, opts.cols ?? 80, opts.rows ?? 24)
     }
-    // Adoption: seed the fresh RingBuffer with whatever the warm shell already
-    // emitted (its rc prompt), so getBufferSince / hibernation history stay consistent.
-    if (opts.adoptPty?.seedBuffer) {
-      sessions.get(sessionId)?.buffer.append(opts.adoptPty.seedBuffer)
-    }
+    // No seed append here any more: the warm output is replayed by the RUNNER in
+    // the adopt reply and arrives as the first chunk on this session's normal data
+    // path, so it lands in the RingBuffer (and through `filterBufferData`) exactly
+    // like live output. Appending it here as well would duplicate it.
     // Pre-warmed pool adoption: bind the pre-recorded pooled session entity to
     // this task+tab (set-once). Its write-once conversation id then becomes the
     // task's resume target via the resolver (which reads agent_sessions by task).

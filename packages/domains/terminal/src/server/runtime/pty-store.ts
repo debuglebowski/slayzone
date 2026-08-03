@@ -298,20 +298,22 @@ export function createPtyOps(db: SlayzoneDb) {
 
     const modeInfo = (await lookups.getTerminalMode(modeId)) ?? undefined
 
-    // Warm-process pool: if this project has a ready warm shell that matches this
-    // spawn (default mode, project-root cwd, fresh start), adopt it instead of
-    // cold-spawning. Resolve the project via the session's task. A miss is silent —
+    // Warm-process pool: if this project has a ready warm agent ON THE RUNNER this
+    // spawn resolves to, and it matches (default mode, project-root cwd, fresh
+    // start, same flags), adopt it instead of cold-spawning. A miss is silent —
     // createPty cold-spawns exactly as before.
+    //
+    // Claiming is gated on a RESOLVED runner, the inverse of the old rule. It used
+    // to fire only when `runnerId == null`, because the pool was hub-local — which
+    // meant the hub booted the agent itself in precisely the case that is supposed
+    // to raise "no runner available". The pool now lives on the runner, so a claim
+    // needs a runner rather than the absence of one.
     let warmClaim: ReturnType<typeof claimWarmShell> = null
     const taskId = opts.sessionId.split(':')[0]
-    // Hub/runner split (wave 2, Model A): resolve which runner this task spawns
-    // on. The db default is always null (hub-local, today's only path). Warm-pool
-    // adoption is a HUB-LOCAL optimization, so gate it to local sessions — a
-    // remote-runner spawn must never claim a hub warm shell.
     let runnerId: string | null = null
     if (taskId) {
       runnerId = await lookups.resolveRunnerId(taskId)
-      if (runnerId == null) {
+      if (runnerId != null) {
         const projectId = await lookups.getTaskProjectId(taskId)
         if (projectId) {
           warmClaim = claimWarmShell({
@@ -319,6 +321,7 @@ export function createPtyOps(db: SlayzoneDb) {
             mode: modeId,
             cwd: opts.cwd,
             resuming: !!opts.existingConversationId,
+            runnerId,
             // The warm agent baked the mode's default flags; only adopt it when
             // this spawn's flags match (else cold-spawn with the right flags).
             flags: opts.providerFlags ?? null
