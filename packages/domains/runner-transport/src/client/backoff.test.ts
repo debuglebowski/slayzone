@@ -8,9 +8,13 @@ describe('computeBackoffDelayMs', () => {
     expect(delays).toEqual([100, 200, 400, 800, 1_000, 1_000])
   })
 
-  it('defaults to 1s → 30s doubling', () => {
-    expect(computeBackoffDelayMs(1)).toBe(1_000)
-    expect(computeBackoffDelayMs(2)).toBe(2_000)
+  it('defaults to 100ms → 30s doubling', () => {
+    // The FIRST retry is fast on purpose: the common disconnect is a hub restart
+    // that is listening again within a few hundred ms, and with runners as the only
+    // execution path any work attempted inside that gap fails outright.
+    expect(computeBackoffDelayMs(1)).toBe(100)
+    expect(computeBackoffDelayMs(2)).toBe(200)
+    // Growth is unchanged, so a genuinely-down hub still backs off to the cap.
     expect(computeBackoffDelayMs(10)).toBe(30_000)
   })
 

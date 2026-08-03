@@ -6,7 +6,19 @@
  */
 
 export interface BackoffOptions {
-  /** Delay before the first retry. Default 1s. */
+  /**
+   * Delay before the first retry. Default 100ms.
+   *
+   * Deliberately small: the overwhelmingly common disconnect is the HUB
+   * restarting, where the runner's socket closes and the hub is listening again
+   * within a few hundred ms. A full second of dead time there is user-visible —
+   * and since runners are now the only execution path, work attempted inside that
+   * window fails rather than quietly running on the hub.
+   *
+   * The exponential growth below still protects a hub that is genuinely down: 100ms
+   * → 200 → 400 … so a persistent outage backs off just as before, only starting
+   * from a value tuned for the common case instead of the rare one.
+   */
   initialDelayMs: number
   /** Upper bound for any retry delay. Default 30s. */
   maxDelayMs: number
@@ -17,7 +29,7 @@ export interface BackoffOptions {
 }
 
 export const DEFAULT_BACKOFF: BackoffOptions = {
-  initialDelayMs: 1_000,
+  initialDelayMs: 100,
   maxDelayMs: 30_000,
   multiplier: 2,
   jitterRatio: 0
