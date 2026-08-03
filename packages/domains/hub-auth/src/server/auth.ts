@@ -58,7 +58,21 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
       apiKey({
         // Runner identity travels in key metadata ({ runnerId }).
         enableMetadata: true,
-        defaultPrefix: RUNNER_KEY_PREFIX
+        defaultPrefix: RUNNER_KEY_PREFIX,
+        // Runner keys are MACHINE credentials verified once per reconnect, so the
+        // plugin's default verify limit (10 requests / 24h, ON unless set) bricks
+        // them: the 11th reconnect in a day is denied, `verifyRunnerApiKey` returns
+        // null, the gateway answers `hello` with -32002, and the runner's re-enroll
+        // fallback burns its single-use join token and exits fatally. Hub restarts,
+        // laptop sleep and network flaps clear 10 reconnects/day easily.
+        //
+        // Turning it off costs no security: `validateApiKey` LOOKS THE KEY UP FIRST
+        // and evaluates the limit only after, so an unknown key never reaches it —
+        // it throttles nobody but the legitimate holder. Revocation
+        // (`revokeRunnerApiKey`) and the `runners.revoked_at` check in
+        // `verifyApiKey` are the real controls. Written explicitly rather than left
+        // default because the default is a footgun for this key class.
+        rateLimit: { enabled: false }
       })
     ]
   })

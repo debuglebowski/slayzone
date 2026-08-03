@@ -204,6 +204,51 @@ describe('runner API keys (create / verify / revoke)', () => {
     expect(await revokeRunnerApiKey(auth, 'no-such-key-id')).toBe(false)
   })
 
+  it('verifies the same runner key far more than 10 times (no verify rate limit)', async () => {
+    // Regression: the api-key plugin rate-limits KEY VERIFICATION to 10 requests
+    // per 24h by default (`rateLimit.maxRequests = 10`, `timeWindow = 86400000`),
+    // and every runner reconnect verifies its key once. So the 11th reconnect in a
+    // day was denied → `verifyRunnerApiKey` → null → the gateway answered `hello`
+    // with -32002 → the runner's re-enroll fallback burned its single-use join
+    // token → fatal exit, bricked until an operator re-enrolled it. Hub restarts,
+    // laptop sleep and network flaps trivially exceed 10 reconnects in a day.
+    //
+    // The limit also protects nothing: `validateApiKey` LOOKS THE KEY UP FIRST and
+    // only then evaluates the limit, so an unknown key never reaches it. It can
+    // only throttle the legitimate holder — a machine credential that is either
+    // valid or not. 30 here is well past the old ceiling of 10.
+    const minted = await mintRunnerApiKey(auth, { runnerId: 'runner-reconnect', name: 'flappy' })
+    for (let i = 1; i <= 30; i += 1) {
+      const principal = await verifyRunnerApiKey(auth, minted.key)
+      expect(principal, `verify #${i} should still succeed`).toEqual({
+        runnerId: 'runner-reconnect',
+        keyId: minted.keyId
+      })
+    }
+  })
+
+  it('heals a key already exhausted under the old default (upgrade path)', async () => {
+    // The limit values are ALSO persisted per key at mint time, so an install that
+    // upgrades carries keys with `rateLimitEnabled=1, requestCount=10`. Those must
+    // recover from the config change alone — no re-enrollment, no data migration.
+    // `evaluateRateLimit` checks the global `opts.rateLimit.enabled === false`
+    // BEFORE the per-key flag, which is what makes this work; asserted here so a
+    // plugin upgrade that reorders those checks fails loudly instead of silently
+    // re-bricking every existing runner.
+    const minted = await mintRunnerApiKey(auth, { runnerId: 'runner-upgraded', name: 'old-key' })
+    const raw = new DatabaseSync(dbPath)
+    raw.exec(
+      `UPDATE apikey SET rateLimitEnabled = 1, rateLimitMax = 10, rateLimitTimeWindow = 86400000,
+       requestCount = 10, lastRequest = '${new Date().toISOString()}' WHERE id = '${minted.keyId}'`
+    )
+    raw.close()
+
+    expect(await verifyRunnerApiKey(auth, minted.key)).toEqual({
+      runnerId: 'runner-upgraded',
+      keyId: minted.keyId
+    })
+  })
+
   it('rejects keys that carry no runner metadata', async () => {
     const ctx = await auth.$context
     const serviceUser = await ctx.internalAdapter.findUserByEmail(RUNNER_SERVICE_USER_EMAIL)
