@@ -19,8 +19,22 @@ const LOADING_TEXTS = [
   'Adjusting the vibes...'
 ]
 
+/**
+ * The dot field is a tiled background rather than one element per dot, so its
+ * cost is two elements and one disc of pixels no matter how large the pane is.
+ * What kills the old square outline is that the field's edge is now the mask,
+ * not the last row of dots: a fixed-radius circle fading to nothing, landing on
+ * dots that keep going underneath it. The layer is sized to that circle so no
+ * dot is painted only to be masked away; the second mask layer takes over in
+ * panes too small to hold it, fading to the box instead of being clipped.
+ */
+const DOT_PITCH = 12 // px between dot centres
+const WAVE_LENGTH = 300 // px between successive ripple crests
+/** Radius at which the field has faded to nothing. Clamped to the pane in boxes too small to hold it. */
+const FIELD_RADIUS = 300
+const WAVE_DURATION = '2s'
+
 export function PulseGrid() {
-  const size = 20
   const [textIndex, setTextIndex] = useState(() => Math.floor(Math.random() * LOADING_TEXTS.length))
   const [fade, setFade] = useState(true)
 
@@ -33,45 +47,66 @@ export function PulseGrid() {
   }, 3000)
 
   return (
-    <div className="flex items-center justify-center h-full">
-      <div className="relative">
-        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${size}, 6px)` }}>
-          {Array.from({ length: size * size }, (_, i) => {
-            const row = Math.floor(i / size)
-            const col = i % size
-            const cx = (size - 1) / 2
-            const cy = (size - 1) / 2
-            const dist = Math.sqrt((col - cx) ** 2 + (row - cy) ** 2)
-            const maxDist = Math.sqrt(cx ** 2 + cy ** 2)
-            const edgeFade = 1 - dist / maxDist
-            const delay = dist * 0.12
-
-            return (
-              <div
-                key={i}
-                className="w-[6px] h-[6px] rounded-full bg-muted-foreground"
-                style={{
-                  opacity: edgeFade * 0.15,
-                  animation: `pulse-grid 2s ease-in-out ${delay}s infinite`,
-                  ['--edge-fade' as string]: edgeFade
-                }}
-              />
-            )
-          })}
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span
-            className="text-xs font-mono text-muted-foreground transition-opacity duration-300 whitespace-nowrap backdrop-blur-sm rounded-full px-3 py-1"
-            style={{ opacity: fade ? 1 : 0 }}
-          >
-            {LOADING_TEXTS[textIndex]}
-          </span>
-        </div>
+    <div className="relative h-full w-full overflow-hidden text-muted-foreground">
+      <div className="pulse-grid-field">
+        <div className="pulse-grid-dots absolute inset-0 opacity-15" />
+        <div className="pulse-grid-dots pulse-grid-dots--wave absolute inset-0 opacity-80" />
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <span
+          className="text-xs font-mono text-muted-foreground transition-opacity duration-300 whitespace-nowrap backdrop-blur-sm rounded-full px-3 py-1"
+          style={{ opacity: fade ? 1 : 0 }}
+        >
+          {LOADING_TEXTS[textIndex]}
+        </span>
       </div>
       <style>{`
-        @keyframes pulse-grid {
-          0%, 100% { opacity: calc(0.15 * var(--edge-fade)); transform: scale(0.8); }
-          50% { opacity: calc(0.8 * var(--edge-fade)); transform: scale(1.2); }
+        @property --pulse-grid-wave {
+          syntax: '<length>';
+          inherits: false;
+          initial-value: 0px;
+        }
+        .pulse-grid-field {
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          width: min(${FIELD_RADIUS * 2}px, 100%);
+          height: min(${FIELD_RADIUS * 2}px, 100%);
+          mask-image:
+            radial-gradient(circle ${FIELD_RADIUS}px at center, #000 0%, transparent 100%),
+            radial-gradient(ellipse farthest-side at center, #000 0%, #000 40%, transparent 100%);
+          mask-composite: intersect;
+        }
+        .pulse-grid-dots {
+          background-image: radial-gradient(
+            circle at center,
+            currentColor 0 1.9px,
+            transparent 2.4px
+          );
+          background-size: ${DOT_PITCH}px ${DOT_PITCH}px;
+          background-position: center;
+        }
+        .pulse-grid-dots--wave {
+          background-image: radial-gradient(
+            circle at center,
+            currentColor 0 2.4px,
+            transparent 2.9px
+          );
+          mask-image: repeating-radial-gradient(
+            circle at center,
+            transparent calc(var(--pulse-grid-wave) + 0px),
+            #000 calc(var(--pulse-grid-wave) + ${WAVE_LENGTH / 2}px),
+            transparent calc(var(--pulse-grid-wave) + ${WAVE_LENGTH}px)
+          );
+          animation: pulse-grid-wave ${WAVE_DURATION} linear infinite;
+        }
+        @keyframes pulse-grid-wave {
+          from { --pulse-grid-wave: 0px; }
+          to { --pulse-grid-wave: ${WAVE_LENGTH}px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .pulse-grid-dots--wave { animation: none; }
         }
       `}</style>
     </div>
