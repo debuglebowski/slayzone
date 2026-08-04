@@ -441,6 +441,13 @@ export type AppDeps = {
 
   // app metadata (read-only)
   appGetVersion: () => string
+  /**
+   * OS downloads folder — the default directory for artifact save dialogs.
+   * Async because the capability bridge forwards every call over the wire; a
+   * sync signature here would type-check (the bridge proxy is cast to AppDeps)
+   * and then hand callers a Promise at runtime.
+   */
+  appGetDownloadsDir: () => Promise<string>
   appGetTrpcPort: () => Promise<number>
   appIsTestsPanelEnabled: () => boolean
   appIsLoopModeEnabled: () => boolean
@@ -531,6 +538,30 @@ export type AppDeps = {
   // dialog (native file picker — same electron dialog API backs the
   // `dialog:showOpenDialog` IPC handler; coexistence until slice 5)
   dialogShowOpenDialog: (options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>
+  // Native save sheet, parented to the focused window host-side so the side-car
+  // never needs a window handle. Backs every artifact download.
+  dialogShowSaveDialog: (options: unknown) => Promise<{ canceled: boolean; filePath?: string }>
+
+  // Artifact export — offscreen BrowserWindow rendering, unavailable off the
+  // Electron host. HTML building lives here too (not side-car side) because
+  // buildMermaidPdfHtml resolves mermaid via require.resolve and silently falls
+  // back to plain-code rendering when it misses; from the side-car bundle it
+  // would miss every time and quietly downgrade mermaid exports. The renderers
+  // write straight to destPath so multi-MB buffers never cross the bridge.
+  artifactBuildExportHtml: (content: string, mode: string, title: string) => Promise<string>
+  artifactRenderPdfToFile: (
+    content: string,
+    mode: string,
+    title: string,
+    destPath: string
+  ) => Promise<void>
+  /** False when the mode has no PNG representation (buildPngHtml declined). */
+  artifactRenderPngToFile: (
+    content: string,
+    mode: string,
+    title: string,
+    destPath: string
+  ) => Promise<boolean>
 
   // window.close — closes the window owning the connection (ctx.windowId).
   // Same effect as the `window:close` IPC (which uses event.sender).

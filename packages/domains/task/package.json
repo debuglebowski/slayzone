@@ -11,7 +11,6 @@
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./electron/artifact-export": "./src/electron/artifact-export.ts",
-    "./electron/artifact-downloads": "./src/electron/artifact-downloads.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./client/TaskDetailPage": "./src/client/TaskDetailPage.tsx",

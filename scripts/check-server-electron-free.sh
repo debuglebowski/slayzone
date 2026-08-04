@@ -45,25 +45,37 @@ if [ -n "$hit" ]; then
   fail=1
 fi
 
-# (2b) Server-side code must not STATICALLY value-import a domain's /electron
-#      entry — it drags the whole electron-coupled cluster (pty-manager, …)
-#      into the standalone bundle, which then crashes on the `electron` npm
-#      shim at module load (this exact bug shipped via integrations/sync.ts).
-#      `import type` (erased) and dynamic `import('…')` (lazy + caught) are
-#      allowed, so strip both before searching — perl handles the multiline
-#      type-import form a line-based grep can't.
+# (2b) Server-side code must not value-import a domain's /electron entry — it
+#      drags the whole electron-coupled cluster (pty-manager, …) into the
+#      standalone bundle, which then crashes on the `electron` npm shim at
+#      module load (this exact bug shipped via integrations/sync.ts).
+#
+#      Dynamic `import('…')` used to be exempt here on the theory that lazy +
+#      caught was safe. It is not, and the exemption shipped the bug a second
+#      time: artifacts.ts reached the download module that way, the module
+#      bundled fine so the "absent" branch never fired, and esbuild's __esm
+#      helper zeroes its init thunk *before* running the body — so the throw was
+#      swallowed once and every later call got a live module object with
+#      undefined bindings. Silent no-op, then a TypeError from deep inside
+#      business logic. Route host-only work through AppDeps instead: it is
+#      compile-enforced at every wiring site.
+#
+#      `import type` stays exempt (fully erased). Strip it before searching —
+#      perl handles the multiline form a line-based grep can't.
 for p in packages/apps/hub/src packages/shared/transport/src packages/domains/*/src/server; do
   [ -d "$p" ] || continue
   hit=$(find "$p" -name "*.ts" -not -name "*.test.ts" -print0 2>/dev/null | xargs -0 perl -0777 -ne '
     my $src = $_;
     $src =~ s/import\s+type\s+\{[^}]*\}\s+from\s+'\''[^'\'']*'\''//gs;   # multiline type imports
-    $src =~ s/import\s*\(\s*'\''[^'\'']*'\''\s*\)//gs;                    # dynamic imports
-    while ($src =~ /from\s+'\''(\@slayzone\/[a-z0-9-]+\/electron)'\''/g) {
-      print "$ARGV: static value import of $1\n";
+    while ($src =~ /from\s+'\''(\@slayzone\/[a-z0-9-]+\/electron[^'\'']*)'\''/g) {
+      print "$ARGV: value import of $1\n";
+    }
+    while ($src =~ /import\s*\(\s*'\''(\@slayzone\/[a-z0-9-]+\/electron[^'\'']*)'\''\s*\)/g) {
+      print "$ARGV: dynamic import of $1\n";
     }
   ' 2>/dev/null || true)
   if [ -n "$hit" ]; then
-    echo "Server-side code must not statically import a domain /electron entry ($p):"
+    echo "Server-side code must not import a domain /electron entry ($p) — use AppDeps:"
     echo "$hit"
     fail=1
   fi

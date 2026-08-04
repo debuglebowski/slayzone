@@ -1,7 +1,17 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { TRPCError } from '@trpc/server'
-import { createArtifactStore, artifactWatcherEvents } from '@slayzone/task/server'
+import {
+  createArtifactStore,
+  artifactWatcherEvents,
+  downloadArtifactFile,
+  downloadArtifactFolder,
+  downloadArtifactAsPdf,
+  downloadArtifactAsPng,
+  downloadArtifactAsHtml,
+  downloadAllArtifactsAsZip,
+  type ArtifactDownloadHost
+} from '@slayzone/task/server'
+import { getAppDeps } from '../app-deps'
 import type {
   CreateArtifactInput,
   UpdateArtifactInput,
@@ -14,10 +24,9 @@ import { router, publicProcedure } from '../trpc'
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The
 // CRUD/version/folder/upload store is electron-free (@slayzone/task/server) and shared
 // with the IPC handlers (coexistence until slice 5). The 6 download procedures need
-// Electron dialogs + export renderers, so they dynamic-import the electron-side
-// `@slayzone/task/electron/artifact-downloads` (PRECONDITION_FAILED when absent, e.g. the
-// standalone @slayzone/hub host). Complex inputs pass through unchecked — the IPC
-// path validates by TypeScript only.
+// Electron dialogs + export renderers, which reach the host through the AppDeps
+// capability bridge (see `downloadHost` below). Complex inputs pass through unchecked —
+// the IPC path validates by TypeScript only.
 const createArtifactInput = z.unknown() as unknown as z.ZodType<CreateArtifactInput>
 const updateArtifactInput = z.unknown() as unknown as z.ZodType<
   UpdateArtifactInput & { mutateVersion?: boolean }
@@ -53,19 +62,24 @@ const versionRef = z.union([z.number(), z.string()])
 const store = (dataRoot: string): ReturnType<typeof createArtifactStore> =>
   createArtifactStore(dataRoot)
 
-// Electron-only download module — resolved lazily so transport stays electron-free for
-// the standalone server build.
-async function loadDownloads(): Promise<
-  typeof import('@slayzone/task/electron/artifact-downloads') | null
-> {
-  try {
-    return await import('@slayzone/task/electron/artifact-downloads')
-  } catch {
-    return null
+// Host-only steps of a download (save sheet, directory picker, downloads dir, reveal,
+// offscreen PDF/PNG render) come from the AppDeps capability bridge. Previously these
+// procedures reached the electron-side download module through a catch-guarded dynamic
+// import, which cannot work in the plain-node side-car the renderer now talks to: the
+// module bundles fine, so the "absent" branch never fired, and its electron binding
+// resolved to a string path. AppDeps is compile-enforced at all three wiring sites, so a
+// missing capability is a build error rather than a silent no-op.
+const downloadHost = (): ArtifactDownloadHost => {
+  const deps = getAppDeps()
+  return {
+    showSaveDialog: deps.dialogShowSaveDialog,
+    showOpenDialog: deps.dialogShowOpenDialog,
+    getDownloadsDir: deps.appGetDownloadsDir,
+    showItemInFolder: deps.shellShowItemInFolder,
+    buildExportHtml: deps.artifactBuildExportHtml,
+    renderPdfToFile: deps.artifactRenderPdfToFile,
+    renderPngToFile: deps.artifactRenderPngToFile
   }
-}
-const electronOnly = (): never => {
-  throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Artifact download is Electron-only' })
 }
 
 export const artifactsRouter = router({
@@ -191,48 +205,40 @@ export const artifactsRouter = router({
     .input(z.object({ parentId: z.string().nullable(), folderIds: z.array(z.string()) }))
     .mutation(({ ctx, input }) => store(ctx.dataRoot).reorderFolders(ctx.db, input)),
 
-  // --- Download (Electron-only) ---
+  // --- Download (needs the Electron host via AppDeps) ---
   downloadFile: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const dl = await loadDownloads()
-      return dl ? dl.downloadArtifactFile(ctx.db, ctx.dataRoot, input.id) : electronOnly()
-    }),
+    .mutation(({ ctx, input }) => downloadArtifactFile(downloadHost(), ctx.db, ctx.dataRoot, input.id)),
 
   downloadFolder: publicProcedure
     .input(z.object({ folderId: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const dl = await loadDownloads()
-      return dl ? dl.downloadArtifactFolder(ctx.db, ctx.dataRoot, input.folderId) : electronOnly()
-    }),
+    .mutation(({ ctx, input }) =>
+      downloadArtifactFolder(downloadHost(), ctx.db, ctx.dataRoot, input.folderId)
+    ),
 
   downloadAsPdf: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const dl = await loadDownloads()
-      return dl ? dl.downloadArtifactAsPdf(ctx.db, ctx.dataRoot, input.id) : electronOnly()
-    }),
+    .mutation(({ ctx, input }) =>
+      downloadArtifactAsPdf(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+    ),
 
   downloadAsPng: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const dl = await loadDownloads()
-      return dl ? dl.downloadArtifactAsPng(ctx.db, ctx.dataRoot, input.id) : electronOnly()
-    }),
+    .mutation(({ ctx, input }) =>
+      downloadArtifactAsPng(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+    ),
 
   downloadAsHtml: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const dl = await loadDownloads()
-      return dl ? dl.downloadArtifactAsHtml(ctx.db, ctx.dataRoot, input.id) : electronOnly()
-    }),
+    .mutation(({ ctx, input }) =>
+      downloadArtifactAsHtml(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+    ),
 
   downloadAllAsZip: publicProcedure
     .input(z.object({ taskId: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const dl = await loadDownloads()
-      return dl ? dl.downloadAllArtifactsAsZip(ctx.db, ctx.dataRoot, input.taskId) : electronOnly()
-    }),
+    .mutation(({ ctx, input }) =>
+      downloadAllArtifactsAsZip(downloadHost(), ctx.db, ctx.dataRoot, input.taskId)
+    ),
 
   // --- Subscription ---
   // Fires when any artifact file changes on disk (fs.watch). Replaces the

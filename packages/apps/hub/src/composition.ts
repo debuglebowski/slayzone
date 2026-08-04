@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import {
   openPath as nativeOpenPath,
   openExternal as nativeOpenExternal,
@@ -695,6 +696,9 @@ export function composeServer(opts: {
     feedbackDeleteThread: feedbackOps.deleteThread,
 
     appGetVersion: () => '0.0.0-server',
+    // Real directory (node os.homedir) — it is only a dialog default, and the
+    // dialog itself is the stub that fails loud.
+    appGetDownloadsDir: async () => join(homedir(), 'Downloads'),
     appGetTrpcPort: async () => boundPort,
     // Graceful read-path defaults (flag getters / cosmetics) — a throwing stub
     // here would break harmless renderer reads post-flip for no gain.
@@ -797,6 +801,13 @@ export function composeServer(opts: {
       }
     },
     dialogShowOpenDialog: stub('dialogShowOpenDialog'),
+    dialogShowSaveDialog: stub('dialogShowSaveDialog'),
+
+    // Artifact export needs an offscreen BrowserWindow — there is no Electron host
+    // to forward to here, so these fail loud rather than silently producing nothing.
+    artifactBuildExportHtml: stub('artifactBuildExportHtml'),
+    artifactRenderPdfToFile: stub('artifactRenderPdfToFile'),
+    artifactRenderPngToFile: stub('artifactRenderPngToFile'),
     windowClose: () => {},
 
     browser: {

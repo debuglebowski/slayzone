@@ -25,7 +25,7 @@ import {
 import { join, extname, normalize, sep, resolve } from 'path'
 import { homedir } from 'os'
 import { EventEmitter } from 'node:events'
-import { readFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
+import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
 import { electronApp, is } from '@electron-toolkit/utils'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
@@ -264,7 +264,12 @@ import { startProactiveGc } from './proactive-gc'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
   filesPathExists,
-  filesSaveTempImage
+  filesSaveTempImage,
+  buildPdfHtml,
+  buildMermaidPdfHtml,
+  buildPngHtml,
+  renderToPdf,
+  renderToPng
 } from '@slayzone/task/electron'
 import {
   configureTaskRuntimeAdapters,
@@ -2136,6 +2141,26 @@ app
             feedbackUpdateThreadDiscordId: feedbackOps.updateThreadDiscordId,
             feedbackDeleteThread: feedbackOps.deleteThread,
             appGetVersion: () => app.getVersion(),
+            appGetDownloadsDir: async () => app.getPath('downloads'),
+            // Same renderers mcp-rest-deps.ts injects into the REST export routes —
+            // one implementation, two injection points.
+            artifactBuildExportHtml: async (content, mode, title) =>
+              mode === 'mermaid-preview'
+                ? buildMermaidPdfHtml(content, title)
+                : buildPdfHtml(content, mode, title),
+            artifactRenderPdfToFile: async (content, mode, title, destPath) => {
+              const isMermaid = mode === 'mermaid-preview'
+              const html = isMermaid
+                ? buildMermaidPdfHtml(content, title)
+                : buildPdfHtml(content, mode, title)
+              writeFileSync(destPath, await renderToPdf(html, isMermaid))
+            },
+            artifactRenderPngToFile: async (content, mode, title, destPath) => {
+              const html = buildPngHtml(content, mode, title)
+              if (!html) return false
+              writeFileSync(destPath, await renderToPng(html))
+              return true
+            },
             appGetTrpcPort: () => awaitTrpcPort(),
             appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
             appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
@@ -2163,6 +2188,16 @@ app
             authGithubSystemSignIn: (input) => githubSystemSignIn(input),
             dialogShowOpenDialog: (options) =>
               dialog.showOpenDialog(options as Electron.OpenDialogOptions),
+            // Parent the save sheet to the focused window when there is one —
+            // the side-car has no window handle to pass, so the choice is made
+            // here rather than threaded across the bridge.
+            dialogShowSaveDialog: (options) => {
+              const opts = options as Electron.SaveDialogOptions
+              const focused = BrowserWindow.getFocusedWindow()
+              return focused
+                ? dialog.showSaveDialog(focused, opts)
+                : dialog.showSaveDialog(opts)
+            },
             windowClose: (windowId) => {
               const wc = webContents.fromId(windowId)
               const win = wc ? BrowserWindow.fromWebContents(wc) : null

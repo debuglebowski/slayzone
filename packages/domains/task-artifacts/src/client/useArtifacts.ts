@@ -16,6 +16,21 @@ import type {
   PruneReport
 } from '@slayzone/task-artifacts/shared'
 import { track } from '@slayzone/telemetry/client'
+import { toast } from '@slayzone/ui'
+
+// Downloads reach the Electron host over the capability bridge, so they can fail for
+// reasons the user must see (no host capability, render failure, unwritable path).
+// These mutations were previously fired bare: a rejection became an unhandled promise
+// and the click looked like a no-op — which is how all 6 procedures stayed broken
+// unnoticed after the slice-9 cutover. `false` still means "user cancelled".
+async function runDownload(label: string, run: () => Promise<boolean>): Promise<boolean> {
+  try {
+    return await run()
+  } catch (e) {
+    toast.error(`${label} failed`, { description: e instanceof Error ? e.message : String(e) })
+    return false
+  }
+}
 
 export interface UseArtifactsReturn {
   artifacts: TaskArtifact[]
@@ -297,43 +312,38 @@ export function useArtifacts(
   )
 
   const downloadFile = useCallback(
-    async (id: string): Promise<boolean> => {
-      return downloadFileMutation.mutateAsync({ id })
-    },
+    async (id: string): Promise<boolean> =>
+      runDownload('Download', () => downloadFileMutation.mutateAsync({ id })),
     []
   )
 
   const downloadFolder = useCallback(
-    async (id: string): Promise<boolean> => {
-      return downloadFolderMutation.mutateAsync({ folderId: id })
-    },
+    async (id: string): Promise<boolean> =>
+      runDownload('Folder download', () => downloadFolderMutation.mutateAsync({ folderId: id })),
     []
   )
 
   const downloadAsPdf = useCallback(
-    async (id: string): Promise<boolean> => {
-      return downloadAsPdfMutation.mutateAsync({ id })
-    },
+    async (id: string): Promise<boolean> =>
+      runDownload('PDF export', () => downloadAsPdfMutation.mutateAsync({ id })),
     []
   )
 
   const downloadAsPng = useCallback(
-    async (id: string): Promise<boolean> => {
-      return downloadAsPngMutation.mutateAsync({ id })
-    },
+    async (id: string): Promise<boolean> =>
+      runDownload('PNG export', () => downloadAsPngMutation.mutateAsync({ id })),
     []
   )
 
   const downloadAsHtml = useCallback(
-    async (id: string): Promise<boolean> => {
-      return downloadAsHtmlMutation.mutateAsync({ id })
-    },
+    async (id: string): Promise<boolean> =>
+      runDownload('HTML export', () => downloadAsHtmlMutation.mutateAsync({ id })),
     []
   )
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
-    return downloadAllAsZipMutation.mutateAsync({ taskId })
+    return runDownload('ZIP export', () => downloadAllAsZipMutation.mutateAsync({ taskId }))
   }, [taskId])
 
   const uploadDir = useCallback(

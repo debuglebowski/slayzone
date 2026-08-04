@@ -34,6 +34,19 @@ export {
 } from './artifact-store'
 export type { ArtifactStore } from './artifact-store'
 
+// Artifact downloads. Electron-free — the host-only steps (dialogs, reveal,
+// offscreen PDF/PNG render) are injected as ArtifactDownloadHost, which the
+// transport layer fills from the AppDeps capability bridge.
+export {
+  downloadArtifactFile,
+  downloadArtifactFolder,
+  downloadArtifactAsPdf,
+  downloadArtifactAsPng,
+  downloadArtifactAsHtml,
+  downloadAllArtifactsAsZip
+} from './artifact-downloads'
+export type { ArtifactDownloadHost } from './artifact-downloads'
+
 // Pure task ops + conversation ledger. The Electron host injects runtime adapters
 // at boot via configureTaskRuntimeAdapters (kill PTYs, data root, diagnostics…).
 export {
