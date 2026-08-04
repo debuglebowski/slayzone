@@ -7,7 +7,7 @@ import type { McpToolsDeps } from './types'
 export function registerCreateTaskTool(server: McpServer, deps: McpToolsDeps): void {
   server.tool(
     'create_task',
-    'Create a task in a project. Requires projectId + title. Optional: description, status, priority, dueDate, assignee, terminalMode, parentId, *Flags, templateId, isTemporary, repoName. Returns the created task.',
+    'Create a task in a project. Requires projectId + title. Optional: description, status, priority, dueDate, assignee, terminalMode, parentId, *Flags, templateId, isTemporary, repoName, externalId, externalProvider. Returns the created task.',
     CreateTaskInputSchema.shape,
     async (input) => {
       try {

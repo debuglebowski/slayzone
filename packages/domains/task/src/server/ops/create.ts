@@ -88,7 +88,9 @@ export async function createTaskOp(
     panelVisibility,
     panelSizes: null,
     browserTabs,
-    webPanelUrls
+    webPanelUrls,
+    externalId: data.externalId ?? null,
+    externalProvider: data.externalProvider ?? null
   })
 
   if (!initialTask) return null

@@ -875,6 +875,15 @@ export interface CreateTaskInput {
   isTemporary?: boolean
   repoName?: string | null
   templateId?: string
+  /**
+   * Identity of this task in the system it came from (an issue key, a PR number).
+   * Written BY the insert, not by a follow-up UPDATE — the pair is half of the
+   * `(project_id, external_provider, external_id)` unique index, so a task must
+   * never exist in a state where its external identity is not yet recorded.
+   */
+  externalId?: string | null
+  /** The system `externalId` belongs to. Only meaningful alongside one. */
+  externalProvider?: string | null
 }
 
 export interface UpdateTaskInput {

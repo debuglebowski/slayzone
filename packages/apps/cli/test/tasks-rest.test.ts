@@ -580,6 +580,227 @@ await describe('CLI id-prefix addressing works without a local database', () => 
   })
 })
 
+/**
+ * `slay tasks create` against a hub, with NO local database.
+ *
+ * It was the last command that could not: `openDb()` ran unconditionally on the
+ * first line, so a remote hub died on "Database not found" before a flag was even
+ * read. Project ref, status alias, template ref and the external-id dedupe all
+ * moved into POST /api/tasks; the external id is now written BY the insert rather
+ * than by a follow-up UPDATE behind the hub's back.
+ */
+await describe('CLI tasks create works without a local database', () => {
+  const noDbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-no-db-create-'))
+  const noDbEnv = { SLAYZONE_ROOT: noDbRoot }
+
+  const tplId = crypto.randomUUID()
+  db.prepare(
+    `INSERT INTO task_templates (id, project_id, name, terminal_mode, default_status, default_priority)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(tplId, projectId, 'Hotfix', 'codex', 'in_progress', 2)
+
+  test('sanity: this root really has no database file', () => {
+    expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.sqlite'))).toBe(false)
+  })
+
+  test('creates a task and prints the Created line with the project name', async () => {
+    const r = await runCli(['tasks', 'create', 'NoDbCreate', '--project', 'CLIREST'], noDbEnv)
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT id, status FROM tasks WHERE title = ?').get('NoDbCreate') as {
+      id: string
+      status: string
+    }
+    expect(row).toBeTruthy()
+    expect(r.stdout.trim()).toBe(
+      `Created: ${row.id.slice(0, 8)}  NoDbCreate  [${row.status}]  CLIREST`
+    )
+  })
+
+  test('--project matches a case-insensitive name substring', async () => {
+    const r = await runCli(['tasks', 'create', 'NoDbSubstring', '--project', 'clire'], noDbEnv)
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT project_id FROM tasks WHERE title = ?').get('NoDbSubstring') as {
+      project_id: string
+    }
+    expect(row.project_id).toBe(projectId)
+  })
+
+  test('--description --priority --due all forwarded', async () => {
+    const r = await runCli(
+      [
+        'tasks',
+        'create',
+        'NoDbFull',
+        '--project',
+        'CLIREST',
+        '--description',
+        'the body',
+        '--priority',
+        '1',
+        '--due',
+        '2030-01-01'
+      ],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    const row = db
+      .prepare('SELECT description, priority, due_date FROM tasks WHERE title = ?')
+      .get('NoDbFull') as { description: string; priority: number; due_date: string }
+    expect(row.description).toBe('the body')
+    expect(row.priority).toBe(1)
+    expect(row.due_date).toBe('2030-01-01')
+  })
+
+  test('--status accepts a label alias (resolved by the hub)', async () => {
+    const r = await runCli(
+      ['tasks', 'create', 'NoDbStatus', '--project', 'CLIREST', '--status', 'In Progress'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT status FROM tasks WHERE title = ?').get('NoDbStatus') as {
+      status: string
+    }
+    expect(row.status).toBe('in_progress')
+    expect(r.stdout.includes('[in_progress]')).toBe(true)
+  })
+
+  test('--status unknown exits 1 with the exact CLI wording', async () => {
+    const r = await runCli(
+      ['tasks', 'create', 'NoDbBadStatus', '--project', 'CLIREST', '--status', 'nonsense'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('Unknown status "nonsense" for project "CLIREST".')).toBe(true)
+    const row = db.prepare('SELECT id FROM tasks WHERE title = ?').get('NoDbBadStatus')
+    expect(row).toBe(undefined)
+  })
+
+  test('--priority out of range exits 1 with the exact CLI wording', async () => {
+    const r = await runCli(
+      ['tasks', 'create', 'NoDbBadPrio', '--project', 'CLIREST', '--priority', '9'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('Priority must be 1-5.')).toBe(true)
+  })
+
+  test('--template by NAME applies the template defaults', async () => {
+    const r = await runCli(
+      ['tasks', 'create', 'NoDbTpl', '--project', 'CLIREST', '--template', 'Hotfix'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    const row = db
+      .prepare('SELECT status, priority, terminal_mode FROM tasks WHERE title = ?')
+      .get('NoDbTpl') as { status: string; priority: number; terminal_mode: string }
+    expect(row.status).toBe('in_progress')
+    expect(row.priority).toBe(2)
+    expect(row.terminal_mode).toBe('codex')
+  })
+
+  test('--template by id PREFIX applies the same template', async () => {
+    const r = await runCli(
+      ['tasks', 'create', 'NoDbTplPrefix', '--project', 'CLIREST', '--template', tplId.slice(0, 8)],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    const row = db.prepare('SELECT priority FROM tasks WHERE title = ?').get('NoDbTplPrefix') as {
+      priority: number
+    }
+    expect(row.priority).toBe(2)
+  })
+
+  test('--template unknown exits 1 with the exact CLI wording', async () => {
+    const r = await runCli(
+      ['tasks', 'create', 'NoDbNoTpl', '--project', 'CLIREST', '--template', 'no-such-template'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('Template not found: "no-such-template"')).toBe(true)
+  })
+
+  test('--external-id lands on the created row (no post-create UPDATE)', async () => {
+    const r = await runCli(
+      [
+        'tasks',
+        'create',
+        'NoDbExt',
+        '--project',
+        'CLIREST',
+        '--external-id',
+        'GH-42',
+        '--external-provider',
+        'github'
+      ],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.startsWith('Created:')).toBe(true)
+    const row = db
+      .prepare('SELECT external_id, external_provider FROM tasks WHERE title = ?')
+      .get('NoDbExt') as { external_id: string; external_provider: string }
+    expect(row.external_id).toBe('GH-42')
+    expect(row.external_provider).toBe('github')
+  })
+
+  test('re-running the same --external-id prints Exists and creates nothing', async () => {
+    const existing = db
+      .prepare('SELECT id, status FROM tasks WHERE external_id = ?')
+      .get('GH-42') as { id: string; status: string }
+    const r = await runCli(
+      [
+        'tasks',
+        'create',
+        'A DIFFERENT TITLE',
+        '--project',
+        'CLIREST',
+        '--external-id',
+        'GH-42',
+        '--external-provider',
+        'github'
+      ],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.trim()).toBe(
+      `Exists: ${existing.id.slice(0, 8)}  NoDbExt  [${existing.status}]  CLIREST`
+    )
+    const count = db
+      .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE external_id = 'GH-42'`)
+      .get() as { n: number }
+    expect(count.n).toBe(1)
+    expect(db.prepare('SELECT id FROM tasks WHERE title = ?').get('A DIFFERENT TITLE')).toBe(
+      undefined
+    )
+  })
+
+  test('unknown --project exits 1 with the CLI wording', async () => {
+    const r = await runCli(
+      ['tasks', 'create', 'NoDbNoProj', '--project', 'totally-not-a-project'],
+      noDbEnv
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('No project matching "totally-not-a-project"')).toBe(true)
+  })
+
+  test('no --project and no $SLAYZONE_PROJECT_ID exits 1 before any network call', async () => {
+    const r = await runCli(['tasks', 'create', 'NoDbNoArg'], {
+      ...noDbEnv,
+      SLAYZONE_PROJECT_ID: undefined,
+      SLAYZONE_HUB_ADDRESS: '127.0.0.1:1'
+    })
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.includes('No --project provided and $SLAYZONE_PROJECT_ID is not set.')).toBe(
+      true
+    )
+  })
+
+  test('cleanup', () => {
+    fs.rmSync(noDbRoot, { recursive: true, force: true })
+    expect(true).toBe(true)
+  })
+})
+
 await describe('CLI tasks open → REST /api/open-task', () => {
   // Create a task once to reuse across these tests.
   const openTaskId = crypto.randomUUID()

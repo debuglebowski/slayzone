@@ -152,11 +152,13 @@ await describe('POST /api/projects/:id/skills', () => {
     expect(res.body.data.project.id).toBe(projectId)
   })
 
-  test('404: unknown project ref', async () => {
+  test('404: unknown project ref, naming the available projects', async () => {
     const res = await post('totally-not-a-project')
     expect(res.status).toBe(404)
     expect(res.body.ok).toBe(false)
-    expect(res.body.error).toBe('No project matching "totally-not-a-project"')
+    // The shared resolver carries the CLI's recoverable-typo hint.
+    expect(res.body.error.startsWith('No project matching "totally-not-a-project".')).toBe(true)
+    expect(res.body.error.includes('Available: ')).toBe(true)
   })
 
   test('400: ambiguous project ref lists the candidate names', async () => {

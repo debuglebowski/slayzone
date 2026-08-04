@@ -23,6 +23,16 @@ export interface TaskRowData {
   panelSizes: string | null
   browserTabs: string | null
   webPanelUrls: string | null
+  /**
+   * Identity in the system this task came from, and that system's name. Part of
+   * the INSERT rather than a follow-up UPDATE: they are two thirds of the
+   * `idx_tasks_external_dedup` unique index, so a row must never be visible in a
+   * state where its external identity is missing. `slay tasks create
+   * --external-id` used to patch them in afterwards, which meant the hub emitted
+   * no change for the identity and subscribed clients showed the task without it.
+   */
+  externalId?: string | null
+  externalProvider?: string | null
   /** Override updated_at (ISO string from external source). When null, SQL `datetime('now')` is used. */
   updatedAt?: string | null
 }
@@ -34,8 +44,9 @@ const INSERT_SQL = `
     claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
     is_temporary, repo_name,
     dangerously_skip_permissions, panel_visibility, panel_sizes, browser_tabs, web_panel_urls,
+    external_id, external_provider,
     updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     COALESCE(?, datetime('now')))
 `
 
@@ -72,6 +83,10 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
     row.panelSizes,
     row.browserTabs,
     row.webPanelUrls,
+    row.externalId ?? null,
+    // A provider without an id names nothing — and would make the dedup index
+    // key on a half-populated tuple.
+    row.externalId ? (row.externalProvider ?? null) : null,
     row.updatedAt ?? null
   ]
 

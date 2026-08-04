@@ -1,6 +1,5 @@
-import { openDb, type SlayDb } from '../../db'
+import { type SlayDb } from '../../db'
 import { apiGet } from '../../api'
-import { parseColumnsConfig } from '@slayzone/projects/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 
 // Re-exported for existing call sites; implementation lives in a decoupled,
@@ -15,14 +14,6 @@ export interface TaskRow extends Record<string, unknown> {
   priority: number
   project_name: string
   created_at: string
-}
-
-export function getProjectColumnsConfig(db: ReturnType<typeof openDb>, projectId: string) {
-  const rows = db.query<{ columns_config: string | null }>(
-    `SELECT columns_config FROM projects WHERE id = :projectId LIMIT 1`,
-    { ':projectId': projectId }
-  )
-  return parseColumnsConfig(rows[0]?.columns_config)
 }
 
 export function buildProviderConfig(db: SlayDb): Record<string, { flags: string }> {
@@ -53,45 +44,6 @@ export interface TemplateRow extends Record<string, unknown> {
   default_status: string | null
   default_priority: number | null
   provider_config: string | null
-}
-
-export function resolveTaskTemplate(
-  db: SlayDb,
-  projectId: string,
-  templateRef?: string
-): TemplateRow | null {
-  if (templateRef) {
-    // Try ID prefix first
-    let rows = db.query<TemplateRow>(
-      `SELECT * FROM task_templates WHERE id LIKE :prefix || '%' AND project_id = :pid LIMIT 2`,
-      { ':prefix': templateRef, ':pid': projectId }
-    )
-    if (rows.length === 1) return rows[0]
-    if (rows.length > 1) {
-      console.error(
-        `Ambiguous template id "${templateRef}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
-      )
-      process.exit(1)
-    }
-    // Try name match
-    rows = db.query<TemplateRow>(
-      `SELECT * FROM task_templates WHERE project_id = :pid AND LOWER(name) = LOWER(:name) LIMIT 2`,
-      { ':pid': projectId, ':name': templateRef }
-    )
-    if (rows.length === 1) return rows[0]
-    if (rows.length > 1) {
-      console.error(`Ambiguous template name "${templateRef}".`)
-      process.exit(1)
-    }
-    console.error(`Template not found: "${templateRef}"`)
-    process.exit(1)
-  }
-  // Check for project default
-  const defaults = db.query<TemplateRow>(
-    `SELECT * FROM task_templates WHERE project_id = :pid AND is_default = 1 LIMIT 1`,
-    { ':pid': projectId }
-  )
-  return defaults[0] ?? null
 }
 
 export function mergeTemplateProviderConfig(
