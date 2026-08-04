@@ -130,6 +130,31 @@ describe('reconnect auth (hello)', () => {
     expect(hub.auth.enrollCalls).toHaveLength(1) // no re-enroll
   })
 
+  it('carries the runner process epoch through both enroll and hello', async () => {
+    // The epoch is what lets the hub tell "my socket dropped" from "the runner
+    // died" — a reconnect reporting the SAME one proves the process holding the
+    // pty sessions never went away, so they can be reattached instead of being
+    // declared dead. It has to survive the hello path too: that is the one a
+    // reconnect actually uses.
+    const hub = await startHub()
+    const store = createMemoryCredentialStore()
+    const enrolled = hub.gateway.events.once('runner-connected')
+    const first = makeDialer(hub.url, { credentialStore: store, epoch: 'epoch-xyz' })
+    first.start()
+    await first.events.once('connected')
+    expect((await enrolled).runner).toMatchObject({ authMode: 'enroll', epoch: 'epoch-xyz' })
+
+    const disconnected = hub.gateway.events.once('runner-disconnected')
+    await first.stop()
+    await disconnected
+
+    const rejoined = hub.gateway.events.once('runner-connected')
+    const second = makeDialer(hub.url, { credentialStore: store, epoch: 'epoch-xyz' })
+    second.start()
+    await second.events.once('connected')
+    expect((await rejoined).runner).toMatchObject({ authMode: 'hello', epoch: 'epoch-xyz' })
+  })
+
   it('stale api key falls back to enroll when a join token is present', async () => {
     const hub = await startHub()
     const store = createMemoryCredentialStore({ runnerId: 'runner-old', apiKey: 'key-revoked' })
@@ -302,6 +327,37 @@ describe('heartbeat-loss detection (hub side)', () => {
     await vi.advanceTimersByTimeAsync(5_001)
     expect(await lost).toEqual({ runnerId: 'runner-1', reason: 'heartbeat-timeout' })
     expect((await disconnected).reason).toBe('heartbeat-timeout')
+    expect(hub.gateway.listRunners()).toEqual([])
+  })
+
+  it('a frozen process (host sleep) re-arms the watchdog instead of declaring the runner lost', async () => {
+    // Closing the laptop lid froze both processes. On wake the watchdog fired
+    // with a wall-clock delta of however long the machine slept, read that as
+    // "silent past the window", and disposed every terminal session on the
+    // runner as exitCode 1 — while the runner and its agents were still alive.
+    vi.useFakeTimers()
+    const hub = await startHub({ heartbeatTimeoutMs: 5_000 })
+    const dialer = makeDialer(hub.url, { heartbeatIntervalMs: 0 }) // never heartbeats
+    let lost = false
+    hub.gateway.events.on('runner-lost', () => {
+      lost = true
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+
+    // Host asleep for 20 minutes: the wall clock jumps, but the watchdog's timer
+    // only ever counted its own 5s delay. `setSystemTime` moves Date.now()
+    // WITHOUT the timer clock, which is exactly what a frozen process observes.
+    vi.setSystemTime(Date.now() + 20 * 60_000)
+    await vi.advanceTimersByTimeAsync(5_001)
+
+    expect(lost).toBe(false)
+    expect(hub.gateway.listRunners()).toHaveLength(1)
+
+    // The guard buys exactly ONE fresh window — it defers the decision, it does
+    // not disable it. A runner that is still silent afterwards is reaped.
+    await vi.advanceTimersByTimeAsync(5_001)
+    expect(lost).toBe(true)
     expect(hub.gateway.listRunners()).toEqual([])
   })
 

@@ -52,6 +52,17 @@ export interface RunnerDescriptor {
   protocolVersion?: number
   /** How this session authenticated. */
   authMode: 'enroll' | 'hello'
+  /**
+   * The runner PROCESS incarnation behind this connection (see `epochField` in
+   * shared/frames). Compare across reconnects: unchanged ⇒ the same process
+   * still holds its pty sessions and the hub may reattach; changed ⇒ a restart,
+   * and everything the old incarnation held is provably gone.
+   *
+   * `undefined` from a runner too old to report one — which proves NEITHER, so
+   * consumers must fall back to the conservative pre-epoch behavior rather than
+   * treating absence as a match.
+   */
+  epoch?: string
   connectedAt: number
   lastSeenAt: number
 }
@@ -147,6 +158,22 @@ const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000
 const DEFAULT_AUTH_TIMEOUT_MS = 10_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 
+/**
+ * Wall-clock lateness above which a watchdog fire is attributed to THIS PROCESS
+ * having been frozen rather than to the runner going silent.
+ *
+ * Ordinary event-loop lag is tens of milliseconds, seconds at the very worst
+ * under load; a host sleep is seconds to hours. Biased deliberately low: a false
+ * freeze-detection costs one extra heartbeat window of delay, a false reap costs
+ * every agent session on the runner.
+ *
+ * Lateness rather than a monotonic clock: libuv's monotonic source ticks through
+ * system sleep on some platforms and not others, so `performance.now()` would
+ * make this correct on one OS and silently useless on another. `setTimeout`
+ * cannot fire early anywhere.
+ */
+const SUSPEND_LATENESS_MS = 2_000
+
 interface RunnerConnection {
   ws: WebSocket
   rpc: DuplexRpc
@@ -182,10 +209,32 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
    * under a pty.data flood), the timer fires on schedule and checks how stale
    * `lastSeenAt` actually is — re-arming itself for the remainder when the
    * runner has been heard from.
+   *
+   * It also refuses to judge a window this process did not witness — see the
+   * freeze guard below.
    */
   function armHeartbeatWatchdog(conn: RunnerConnection, delayMs: number = heartbeatTimeoutMs): void {
     if (heartbeatTimeoutMs <= 0 || conn.closed) return
+    const armedAt = Date.now()
     conn.heartbeatTimer = setTimeout(() => {
+      // ── Freeze guard ────────────────────────────────────────────────────────
+      // `setTimeout` cannot fire EARLY, so a fire whose wall-clock lateness far
+      // exceeds its own delay means this process was not running for most of the
+      // window: host sleep (closing a laptop lid), VM suspend, a stopped
+      // debugger. The silence about to be judged was never actually observed —
+      // and judging it disposes every terminal session on a runner that is
+      // still very much alive, each surfacing as a fabricated
+      // "Process exited with code 1". Re-arm and look again with a window this
+      // process was awake for.
+      const latenessMs = Date.now() - armedAt - delayMs
+      if (latenessMs > SUSPEND_LATENESS_MS) {
+        log('watchdog fired after a process freeze — re-arming instead of reaping', {
+          runnerId: conn.descriptor?.runnerId ?? null,
+          latenessMs
+        })
+        armHeartbeatWatchdog(conn)
+        return
+      }
       const lastSeenAt = conn.descriptor?.lastSeenAt ?? 0
       const idleMs = Date.now() - lastSeenAt
       if (idleMs < heartbeatTimeoutMs) {
@@ -298,6 +347,7 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
       capabilities: parsed.data.capabilities,
       protocolVersion: parsed.data.protocolVersion,
       authMode: 'enroll',
+      ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -340,6 +390,10 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
       version: identity.version,
       capabilities: identity.capabilities,
       authMode: 'hello',
+      // From the hello FRAME, not from persistence: the epoch is a property of
+      // the live process, and a stored one would survive the restart it exists
+      // to detect.
+      ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

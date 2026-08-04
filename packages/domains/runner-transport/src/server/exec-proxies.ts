@@ -62,8 +62,10 @@ import {
   gitRunWorktreeSetupScriptResultSchema,
   HubToRunnerMethods,
   procGetBufferSinceResultSchema,
+  procListResultSchema,
   procSpawnResultSchema,
   ptyGetBufferSinceResultSchema,
+  ptyListResultSchema,
   ptySpawnResultSchema,
   ptyWarmAdoptResultSchema,
   ptyWarmListResultSchema,
@@ -78,11 +80,17 @@ import type { HubRunnerGateway } from './hub-gateway'
 
 /**
  * The slice of the runner hub gateway the routing backends consume: addressed
- * request/notify plus the demux event bus. A `Pick` of the real
- * `HubRunnerGateway` (not a re-declared mirror) so it can never drift from the
- * gateway the composition root injects.
+ * request/notify, the demux event bus, and the connected-runner roster. A `Pick`
+ * of the real `HubRunnerGateway` (not a re-declared mirror) so it can never
+ * drift from the gateway the composition root injects.
+ *
+ * `listRunners` is here for the detach controller's epoch baseline: the chat
+ * backend builds its routing backend at SPAWN time, long after the runner
+ * connected, so a controller that learned epochs only from `runner-connected`
+ * events would have no baseline for exactly those sessions and would finalize
+ * them on the first disconnect. Reading the roster at construction closes that.
  */
-export type RoutingGateway = Pick<HubRunnerGateway, 'request' | 'events'>
+export type RoutingGateway = Pick<HubRunnerGateway, 'request' | 'events' | 'listRunners'>
 
 // ===========================================================================
 // Internal helpers
@@ -161,6 +169,327 @@ export class NoRunnerAvailableError extends Error {
 }
 
 // ===========================================================================
+// Detach / reattach across a dropped runner connection
+// ===========================================================================
+
+/**
+ * How long the hub keeps tracking sessions on a runner it cannot reach.
+ *
+ * This is NOT a claim that the runner is dead when it expires — the hub cannot
+ * know that, and a timer is not evidence. It bounds the hub's own bookkeeping:
+ * without it, a runner that never returns leaks its entries forever and every
+ * task it owned hangs in "reconnecting" with nothing able to resolve it.
+ *
+ * Long enough to cover a lunch-break lid close, short enough not to hoard dead
+ * state. A reconnect inside the window resolves each session for real (see
+ * {@link createDetachController}), so this only ever fires when nothing better
+ * was available.
+ */
+const DETACH_GRACE_MS = 10 * 60_000
+
+/** The entry shape the detach controller needs, common to pty and proc. */
+interface DetachableEntry {
+  runnerId: string
+  sessionId: string
+  disposed: boolean
+  /** Runner unreachable: outcome unknown, still tracked, NOT finalized. */
+  detached: boolean
+}
+
+interface DetachControllerOptions<E extends DetachableEntry> {
+  gateway: RoutingGateway
+  /** The backend's live session map (keyed by `sessionKey`). */
+  sessions: Map<string, E>
+  /** `pty` / `proc` — diagnostics and log text only. */
+  kind: string
+  /** Hub→runner method listing the sessions the runner still holds. */
+  listMethod: string
+  /** Hub→runner method ending one session, for orphans the hub no longer tracks. */
+  killMethod: string
+  /** Parse that reply into session ids; `null` when it does not parse. */
+  parseListedSessionIds: (raw: unknown) => string[] | null
+  /** Report a session as ended, with the reason the hub let go of it. */
+  finalize: (entry: E, reason: string) => void
+  /** Runner confirmed this session is still alive: resume delivery + backfill. */
+  resume: (entry: E) => void
+}
+
+/**
+ * Keeps sessions alive across a dropped runner connection, and resolves each
+ * one against the runner itself on reconnect.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ * Both routing backends used to wire `runner-lost` / `runner-disconnected`
+ * straight to a disposal that finalized every session on the runner. Since the
+ * handle seam coerces a null exit code to 1, one dropped socket surfaced as N
+ * independent "Process exited with code 1" — while the runner and every agent
+ * on it were still running (the runner only kills ptys on its OWN shutdown).
+ * Closing a laptop lid did exactly this: the heartbeat watchdog fired on wake
+ * having never observed the window it was judging.
+ *
+ * ── The rule ────────────────────────────────────────────────────────────────
+ * Silence is not evidence. A quiet socket cannot distinguish crashed from
+ * partitioned from asleep, so a disconnect resolves NOTHING — it only moves
+ * sessions to `detached`. Every session is then closed out by a decisive signal:
+ *
+ *   - reconnect, SAME epoch, present in the runner's list → still alive, resume
+ *   - reconnect, SAME epoch, ABSENT from the list        → really did exit
+ *   - reconnect, DIFFERENT (or unknown) epoch            → fresh process, gone
+ *   - grace expired, no reconnect                        → hub stops tracking
+ *
+ * Only the last is time-based, and it is deliberately a statement about the hub
+ * ("I am no longer tracking this"), not about the world ("your agent died").
+ *
+ * ── One controller per (gateway, kind), not per backend ─────────────────────
+ * `createRoutingChatBackend` builds a FRESH `createRoutingProcessBackend` for
+ * every agent it spawns. A controller per backend would therefore add a listener
+ * set to the shared gateway on every spawn — unbounded growth over a session —
+ * and fire one `proc.list` per agent on every reconnect. So callers JOIN the
+ * controller for their (gateway, kind) and contribute a participant; the gateway
+ * listeners and the reconnect round-trip are wired exactly once.
+ */
+interface DetachParticipant {
+  sessions: Map<string, DetachableEntry>
+  finalize: (entry: DetachableEntry, reason: string) => void
+  resume: (entry: DetachableEntry) => void
+  /** Has this participant ever held a session? Gates pruning — see `prune`. */
+  everUsed?: boolean
+}
+
+interface DetachController {
+  join: (participant: DetachParticipant) => void
+}
+
+/** Live controllers, keyed by gateway then by kind. Weak so a discarded hub's go too. */
+const detachControllers = new WeakMap<RoutingGateway, Map<string, DetachController>>()
+
+function joinDetachController<E extends DetachableEntry>(
+  options: DetachControllerOptions<E>
+): void {
+  const { gateway, sessions, kind, finalize, resume } = options
+  const participant = {
+    sessions,
+    finalize,
+    resume
+  } as unknown as DetachParticipant
+
+  let byKind = detachControllers.get(gateway)
+  if (!byKind) {
+    byKind = new Map()
+    detachControllers.set(gateway, byKind)
+  }
+  const existing = byKind.get(kind)
+  if (existing) {
+    existing.join(participant)
+    return
+  }
+  const controller = createDetachController(options)
+  byKind.set(kind, controller)
+  controller.join(participant)
+}
+
+function createDetachController<E extends DetachableEntry>(
+  options: DetachControllerOptions<E>
+): DetachController {
+  const { gateway, kind, listMethod, killMethod, parseListedSessionIds } = options
+  const participants: DetachParticipant[] = []
+  /**
+   * Epoch seen on each runner's LAST connect — the baseline a reconnect is
+   * compared against. Seeded from the roster because a controller can be built
+   * after the runner already connected (chat), and a missing baseline is
+   * indistinguishable from a restart, which would finalize live sessions.
+   */
+  const epochByRunner = new Map<string, string | undefined>(
+    gateway.listRunners().map((r) => [r.runnerId, r.epoch] as const)
+  )
+  const graceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  /** An entry together with the participant that owns (and can finalize) it. */
+  interface Owned {
+    entry: DetachableEntry
+    owner: DetachParticipant
+  }
+
+  /**
+   * Drop participants that have finished. The chat backend builds a fresh
+   * process backend per agent spawn, so without this the controller accumulates
+   * one empty `sessions` Map (and its closures) per agent for the life of the
+   * hub. Gated on `everUsed` so a backend that has not spawned yet survives.
+   */
+  function prune(): void {
+    for (let i = participants.length - 1; i >= 0; i--) {
+      const p = participants[i]!
+      if (p.sessions.size > 0) {
+        p.everUsed = true
+      } else if (p.everUsed) {
+        participants.splice(i, 1)
+      }
+    }
+  }
+
+  const liveEntries = (runnerId: string): Owned[] =>
+    participants.flatMap((owner) =>
+      [...owner.sessions.values()]
+        .filter((e) => e.runnerId === runnerId && !e.disposed)
+        .map((entry) => ({ entry, owner }))
+    )
+
+  function clearGrace(runnerId: string): void {
+    const timer = graceTimers.get(runnerId)
+    if (!timer) return
+    clearTimeout(timer)
+    graceTimers.delete(runnerId)
+  }
+
+  function armGrace(runnerId: string): void {
+    clearGrace(runnerId)
+    const timer = setTimeout(() => {
+      graceTimers.delete(runnerId)
+      const stranded = liveEntries(runnerId).filter((o) => o.entry.detached)
+      if (stranded.length === 0) return
+      for (const o of stranded) o.owner.finalize(o.entry, 'reattach-timeout')
+      record('runner.sessions_dropped', 'error', stranded, runnerId, {
+        message:
+          `Runner unreachable for ${String(Math.round(DETACH_GRACE_MS / 60_000))} minutes — ` +
+          `${String(stranded.length)} ${kind} session(s) dropped. The hub has stopped tracking ` +
+          'them; any process still running on the runner is no longer attached to a task.'
+      })
+    }, DETACH_GRACE_MS)
+    timer.unref?.()
+    graceTimers.set(runnerId, timer)
+  }
+
+  function record(
+    event: string,
+    level: 'info' | 'error',
+    entries: Owned[],
+    runnerId: string,
+    extra: { message: string; [k: string]: unknown }
+  ): void {
+    const { message, ...rest } = extra
+    try {
+      recordDiagnosticEvent({
+        level,
+        source: 'pty',
+        event,
+        message,
+        payload: {
+          runnerId,
+          kind,
+          sessionCount: entries.length,
+          sessionIds: entries.map((o) => o.entry.sessionId),
+          ...rest
+        }
+      })
+    } catch {
+      /* diagnostics unavailable — the state transition must still complete */
+    }
+  }
+
+  function detachRunner(runnerId: string, reason: string): void {
+    prune()
+    const fresh = liveEntries(runnerId).filter((o) => !o.entry.detached)
+    for (const o of fresh) o.entry.detached = true
+    if (liveEntries(runnerId).some((o) => o.entry.detached)) armGrace(runnerId)
+    if (fresh.length === 0) return
+    // INFO, not error: nothing has gone wrong yet. Recorded because it is the
+    // one place that knows the blast radius, and because the reattach that
+    // follows is only legible next to it.
+    record('runner.sessions_detached', 'info', fresh, runnerId, {
+      reason,
+      message:
+        `Runner connection lost (${reason}) — ${String(fresh.length)} ${kind} session(s) ` +
+        'detached, awaiting reattach. Nothing has been killed.'
+    })
+  }
+
+  async function reattachRunner(runnerId: string, epoch: string | undefined): Promise<void> {
+    prune()
+    const previousEpoch = epochByRunner.get(runnerId)
+    epochByRunner.set(runnerId, epoch)
+    const detached = liveEntries(runnerId).filter((o) => o.entry.detached)
+    // First contact with this runner: nothing was ever detached, and the sweep
+    // below has no baseline to sweep against.
+    if (previousEpoch === undefined && detached.length === 0) return
+    clearGrace(runnerId)
+
+    // A missing epoch on EITHER side proves nothing — an old runner that cannot
+    // report one, or a hub that never saw the pre-disconnect value. Absence is
+    // not a match: fall back to the conservative pre-epoch outcome rather than
+    // reattaching to a process whose identity is unverified.
+    if (epoch === undefined || previousEpoch === undefined || epoch !== previousEpoch) {
+      if (detached.length === 0) return
+      for (const o of detached) o.owner.finalize(o.entry, 'runner-restarted')
+      record('runner.sessions_disposed', 'error', detached, runnerId, {
+        previousEpoch: previousEpoch ?? null,
+        epoch: epoch ?? null,
+        message:
+          `Runner reconnected as a different process — ${String(detached.length)} ${kind} ` +
+          'session(s) it was running are gone with the old one.'
+      })
+      return
+    }
+
+    // Same process. It is the authority on what it still holds; the hub's
+    // registry is only a belief about that.
+    let listed: string[] | null = null
+    try {
+      listed = parseListedSessionIds(await gateway.request(runnerId, listMethod, {}))
+    } catch {
+      listed = null
+    }
+    if (listed === null) {
+      // Unanswerable right now. Leave everything detached and re-arm: a later
+      // reconnect can still resolve it, and the grace timer bounds the wait.
+      armGrace(runnerId)
+      return
+    }
+
+    const live = new Set(listed)
+    const resumed: Owned[] = []
+    const ended: Owned[] = []
+    for (const o of detached) {
+      if (live.has(o.entry.sessionId)) {
+        o.owner.resume(o.entry)
+        resumed.push(o)
+      } else {
+        o.owner.finalize(o.entry, 'exited-while-detached')
+        ended.push(o)
+      }
+    }
+    // Sessions the runner holds that the hub no longer tracks — e.g. dropped by
+    // an earlier grace expiry. Nothing will ever attach to them again, so end
+    // them here rather than leaving an agent running against no task.
+    const tracked = new Set(liveEntries(runnerId).map((o) => o.entry.sessionId))
+    for (const sessionId of live) {
+      if (tracked.has(sessionId)) continue
+      void gateway.request(runnerId, killMethod, { sessionId }).catch(noop)
+    }
+    if (resumed.length > 0) {
+      record('runner.sessions_reattached', 'info', resumed, runnerId, {
+        message: `Runner reconnected — ${String(resumed.length)} ${kind} session(s) reattached.`
+      })
+    }
+    if (ended.length > 0) {
+      record('runner.sessions_disposed', 'error', ended, runnerId, {
+        message:
+          `${String(ended.length)} ${kind} session(s) exited while the runner was unreachable.`
+      })
+    }
+  }
+
+  gateway.events.on('runner-lost', (p) => detachRunner(p.runnerId, 'runner-lost'))
+  gateway.events.on('runner-disconnected', (p) => detachRunner(p.runnerId, 'runner-disconnected'))
+  gateway.events.on('runner-connected', (p) => {
+    void reattachRunner(p.runner.runnerId, p.runner.epoch)
+  })
+
+  return {
+    join: (participant) => participants.push(participant)
+  }
+}
+
+// ===========================================================================
 // Routing pty backend
 // ===========================================================================
 
@@ -194,6 +523,13 @@ interface PtyEntry {
    */
   backfilledAt: number | null
   disposed: boolean
+  /**
+   * The runner went unreachable while this session was live: its outcome is
+   * UNKNOWN, not decided. Still tracked, never finalized — resolved on
+   * reconnect against the runner's own session list. See
+   * {@link createDetachController}.
+   */
+  detached: boolean
   /**
    * Withhold delivery until the warm-adopt seed lands (adopt only).
    *
@@ -288,36 +624,6 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     entry.exitEmitter.emit({ exitCode, signal: signal ?? undefined })
   }
 
-  function disposeRunner(runnerId: string, reason: string): void {
-    const killed: string[] = []
-    for (const entry of [...sessions.values()]) {
-      if (entry.runnerId !== runnerId) continue
-      killed.push(entry.sessionId)
-      finalize(entry, null, reason)
-    }
-    if (killed.length === 0) return
-    // Each of these renders as "Process exited with code 1" in its own task (the
-    // handle seam coerces the null exit code below), so one runner blip reads as
-    // N independent agent crashes. Record the ONE cause behind them — and record
-    // it here rather than at the socket, because this is the point that knows
-    // the blast radius. Pairs with `local_runner.exit` in the app's supervisor:
-    // both present ⇒ the runner process died; this one alone ⇒ the runner is
-    // alive and only its hub connection dropped.
-    try {
-      recordDiagnosticEvent({
-        level: 'error',
-        source: 'pty',
-        event: 'runner.sessions_disposed',
-        message:
-          `Runner connection lost (${reason}) — ${killed.length} terminal session(s) ` +
-          'were declared dead as a result.',
-        payload: { runnerId, reason, sessionCount: killed.length, sessionIds: killed }
-      })
-    } catch {
-      /* diagnostics unavailable — disposal must still complete */
-    }
-  }
-
   gateway.events.on('pty.data', (payload) => {
     const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
     if (entry) ingest(entry, payload.seq, payload.data)
@@ -326,8 +632,26 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
     if (entry) finalize(entry, payload.exitCode, payload.signal ?? null)
   })
-  gateway.events.on('runner-lost', (payload) => disposeRunner(payload.runnerId, 'runner-lost'))
-  gateway.events.on('runner-disconnected', (payload) => disposeRunner(payload.runnerId, 'runner-disconnected'))
+  joinDetachController<PtyEntry>({
+    gateway,
+    sessions,
+    kind: 'terminal',
+    listMethod: HubToRunnerMethods.ptyList,
+    killMethod: HubToRunnerMethods.ptyKill,
+    parseListedSessionIds: (raw) => {
+      const parsed = ptyListResultSchema.safeParse(raw)
+      return parsed.success ? parsed.data.sessions.map((s) => s.sessionId) : null
+    },
+    finalize: (entry, reason) => finalize(entry, null, reason),
+    resume: (entry) => {
+      entry.detached = false
+      // Clear the backfill latch: the gap that matters now is whatever the
+      // session emitted while the hub was away, which is a different gap from
+      // any this entry had already given up on.
+      entry.backfilledAt = null
+      void backfill(entry)
+    }
+  })
 
   /**
    * Register a routed session and build its handle. Shared by `spawn` and
@@ -352,6 +676,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       pending: new Map(),
       backfilledAt: null,
       disposed: false,
+      detached: false,
       sealed,
       dataEmitter,
       exitEmitter
@@ -522,6 +847,8 @@ interface ProcEntry {
   /** `lastSeq` the in-flight/last backfill was issued for; `null` = never. */
   backfilledAt: number | null
   disposed: boolean
+  /** Runner unreachable, outcome unknown — see {@link createDetachController}. */
+  detached: boolean
   dataEmitter: BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>
   exitEmitter: BufferingEmitter<{ code: number | null; signal: string | null }>
 }
@@ -549,12 +876,6 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     entry.disposed = true
     sessions.delete(entry.key)
     entry.exitEmitter.emit({ code, signal })
-  }
-
-  function disposeRunner(runnerId: string, reason: string): void {
-    for (const entry of [...sessions.values()]) {
-      if (entry.runnerId === runnerId) finalize(entry, null, reason)
-    }
   }
 
   function drain(entry: ProcEntry): void {
@@ -621,8 +942,23 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
     if (entry) finalize(entry, payload.exitCode, payload.signal ?? null)
   })
-  gateway.events.on('runner-lost', (payload) => disposeRunner(payload.runnerId, 'runner-lost'))
-  gateway.events.on('runner-disconnected', (payload) => disposeRunner(payload.runnerId, 'runner-disconnected'))
+  joinDetachController<ProcEntry>({
+    gateway,
+    sessions,
+    kind: 'process',
+    listMethod: HubToRunnerMethods.procList,
+    killMethod: HubToRunnerMethods.procKill,
+    parseListedSessionIds: (raw) => {
+      const parsed = procListResultSchema.safeParse(raw)
+      return parsed.success ? parsed.data.sessions.map((s) => s.sessionId) : null
+    },
+    finalize: (entry, reason) => finalize(entry, null, reason),
+    resume: (entry) => {
+      entry.detached = false
+      entry.backfilledAt = null
+      void backfill(entry)
+    }
+  })
 
   return {
     spawn(spec: ProcSpawnSpec): ProcHandle {
@@ -640,6 +976,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         pending: new Map(),
         backfilledAt: null,
         disposed: false,
+        detached: false,
         dataEmitter,
         exitEmitter
       }

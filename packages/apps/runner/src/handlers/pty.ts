@@ -15,6 +15,7 @@ import {
   HubToRunnerMethods,
   ptyGetBufferSinceParamsSchema,
   ptyKillParamsSchema,
+  type PtyListResult,
   ptyResizeParamsSchema,
   ptySpawnParamsSchema,
   ptyWarmAdoptParamsSchema,
@@ -305,6 +306,33 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     return { ok: true }
   }
 
+  /**
+   * Every live session this runner still holds, for hub reattach after a
+   * dropped connection. The runner is the authority here — the hub's registry
+   * is only a belief about this list, and a disconnect lets the two diverge in
+   * both directions (sessions the hub gave up on that are still running;
+   * sessions it still tracks that have since exited).
+   *
+   * Warm sessions are excluded by design: the hub holds no identity for one
+   * until `pty.warmAdopt`, so offering it here would invent a session the hub
+   * never had. They keep their own reconcile path.
+   */
+  function list(): PtyListResult {
+    const live: PtyListResult['sessions'] = []
+    for (const [id, session] of sessions) {
+      if (session.warm) continue
+      live.push({
+        sessionId: id,
+        pid: session.proc.pid,
+        // -1 on an empty buffer — the same "nothing seen yet" sentinel the hub's
+        // gap detector starts from, so a session that has emitted nothing needs
+        // no special case on either side.
+        seq: session.buffer.getCurrentSeq()
+      })
+    }
+    return { sessions: live }
+  }
+
   function getBufferSince(rawParams: unknown): { frames: Array<{ seq: number; data: string }> } {
     const params = ptyGetBufferSinceParamsSchema.parse(rawParams)
     const session = sessions.get(params.sessionId)
@@ -331,6 +359,7 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     [HubToRunnerMethods.ptyResize]: resize,
     [HubToRunnerMethods.ptyWrite]: write,
     [HubToRunnerMethods.ptyGetBufferSince]: getBufferSince,
+    [HubToRunnerMethods.ptyList]: list,
     [HubToRunnerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToRunnerMethods.ptyWarmAdopt]: warmAdopt,
     [HubToRunnerMethods.ptyWarmKill]: warmKill,

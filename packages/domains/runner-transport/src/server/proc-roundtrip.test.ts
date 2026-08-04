@@ -48,7 +48,10 @@ function bridge(
       if (!handler) throw new Error(`runner has no handler for ${method}`)
       return await handler(params)
     },
-    events
+    events,
+    // These round-trips never disconnect, so the detach controller's epoch
+    // baseline is never consulted — an empty roster is the honest answer.
+    listRunners: () => []
   }
 }
 
@@ -209,7 +212,11 @@ describe('proc.* hub⇄runner round trip', () => {
     runner.events.on('proc.exit', (p) => lossy.emit('proc.exit', p))
 
     const backend = createRoutingProcessBackend({
-      gateway: { request: bridge(runner.handlers, runner.events).request, events: lossy },
+      gateway: {
+        request: bridge(runner.handlers, runner.events).request,
+        events: lossy,
+        listRunners: () => []
+      },
       local: {
         spawn: () => {
           throw new Error('must not fall back to local')

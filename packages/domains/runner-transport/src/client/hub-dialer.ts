@@ -14,6 +14,7 @@
  * @module runner/client/hub-dialer
  */
 
+import { randomUUID } from 'node:crypto'
 import type { PeerCertificate, TLSSocket } from 'node:tls'
 import WebSocket from 'ws'
 import type { ClientOptions } from 'ws'
@@ -105,10 +106,25 @@ export interface HubDialerOptions {
   /** Default timeout for runner→hub requests. Default 30s. */
   requestTimeoutMs?: number
   backoff?: Partial<BackoffOptions>
+  /**
+   * Override this process's epoch (see {@link PROCESS_EPOCH}). Only tests should
+   * set it — two dialers in ONE process share the module-level epoch, so
+   * simulating a runner RESTART (rather than a reconnect) requires saying so.
+   */
+  epoch?: string
   /** Injectable randomness for backoff jitter (tests). */
   random?: () => number
   log?: (message: string, meta?: Record<string, unknown>) => void
 }
+
+/**
+ * This runner PROCESS's epoch — minted once at module load, sent on every
+ * enroll/hello. Constant across all of this process's reconnects, different in
+ * any restarted process, which is exactly what lets the hub tell "my socket
+ * dropped" from "the runner died" and reattach to still-live pty sessions
+ * instead of declaring them dead. See `epochField` in shared/frames.
+ */
+const PROCESS_EPOCH = randomUUID()
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000
@@ -168,6 +184,11 @@ export class HubDialer {
   /** Set once authenticated; survives reconnects. */
   get runnerId(): string | null {
     return this.runnerIdValue
+  }
+
+  /** This process's incarnation id, sent on every enroll/hello. */
+  private get epoch(): string {
+    return this.opts.epoch ?? PROCESS_EPOCH
   }
 
   start(): void {
@@ -334,7 +355,8 @@ export class HubDialer {
       platform: this.opts.identity.platform,
       version: this.opts.identity.version,
       capabilities: this.opts.identity.capabilities,
-      protocolVersion: RUNNER_PROTOCOL_VERSION
+      protocolVersion: RUNNER_PROTOCOL_VERSION,
+      epoch: this.epoch
     })
     return enrollResultSchema.parse(raw)
   }
@@ -345,7 +367,10 @@ export class HubDialer {
       const stored = await this.opts.credentialStore.load()
       if (stored) {
         try {
-          const raw = await conn.rpc.request(RunnerToHubMethods.hello, { apiKey: stored.apiKey })
+          const raw = await conn.rpc.request(RunnerToHubMethods.hello, {
+            apiKey: stored.apiKey,
+            epoch: this.epoch
+          })
           const result = helloResultSchema.parse(raw)
           this.onAuthenticated(conn, result.runnerId, 'hello')
           return

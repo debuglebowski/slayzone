@@ -19,7 +19,7 @@ import {
   type PtyExitEvent,
   type RoutingGateway
 } from './exec-proxies'
-import type { RunnerGatewayEvents } from './hub-gateway'
+import type { RunnerDescriptor, RunnerGatewayEvents } from './hub-gateway'
 
 // ---------------------------------------------------------------------------
 // Fake gateway
@@ -52,9 +52,27 @@ class FakeGateway implements RoutingGateway {
     }
   }
 
-  /** Drive a gateway event to all subscribers. */
+  /**
+   * Drive a gateway event to all subscribers, keeping the connected-runner
+   * roster consistent with it — the real gateway registers on connect and
+   * removes on loss, and the detach controller reads that roster for its epoch
+   * baseline.
+   */
   emit<K extends keyof RunnerGatewayEvents>(event: K, payload: RunnerGatewayEvents[K]): void {
+    if (event === 'runner-connected') {
+      const { runner } = payload as RunnerGatewayEvents['runner-connected']
+      this.runners.set(runner.runnerId, runner)
+    } else if (event === 'runner-disconnected' || event === 'runner-lost') {
+      const { runnerId } = payload as { runnerId: string }
+      this.runners.delete(runnerId)
+    }
     this.events.emit(event, payload)
+  }
+
+  private readonly runners = new Map<string, RunnerDescriptor>()
+
+  listRunners(): RunnerDescriptor[] {
+    return [...this.runners.values()]
   }
 
   requestsOf(method: string): RecordedCall[] {
@@ -344,14 +362,38 @@ describe('createRoutingPtyBackend', () => {
     expect(gateway.requestsOf('pty.kill')[1]?.params).toEqual({ sessionId: 'sess-1' })
   })
 
-  it('disposes the session on runner-lost (exit emitted, later frames dropped)', async () => {
-    const gateway = new FakeGateway()
+  // ── Detach / reattach across a dropped runner connection ──────────────────
+  //
+  // These used to assert the opposite: that runner-lost / runner-disconnected
+  // finalized every session on the runner. That was the bug — a lost socket is
+  // not a dead agent, and coercing it to `exitCode: 1` surfaced one dropped
+  // connection as N independent "Process exited with code 1" while every agent
+  // was still running. A disconnect now resolves NOTHING; the runner does, on
+  // reconnect.
+
+  /** Drive the gateway's runner-connected event, optionally carrying an epoch. */
+  const connect = (gateway: FakeGateway, epoch?: string): void => {
+    gateway.emit('runner-connected', {
+      runner: {
+        runnerId: 'runner-1',
+        authMode: 'hello',
+        connectedAt: 0,
+        lastSeenAt: 0,
+        ...(epoch === undefined ? {} : { epoch })
+      }
+    })
+  }
+
+  const spawnDetached = async (
+    gateway: FakeGateway,
+    epoch: string | undefined = 'epoch-a'
+  ): Promise<{ chunks: string[]; exit: () => PtyExitEvent | null }> => {
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
     const backend = createRoutingPtyBackend({
       gateway,
       resolveRunnerId: (spec) => spec.runnerId ?? null
     })
-
+    connect(gateway, epoch)
     const handle = (await backend.spawn(ptySpec())) as PtyHandle
     const chunks: string[] = []
     let exit: PtyExitEvent | null = null
@@ -359,28 +401,32 @@ describe('createRoutingPtyBackend', () => {
     handle.onExit((e) => {
       exit = e
     })
-
     gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 0, data: 'a' })
     gateway.emit('runner-lost', { runnerId: 'runner-1', reason: 'heartbeat-timeout' })
+    return { chunks, exit: () => exit }
+  }
 
-    // The terminal PtyHandle.onExit seam can't carry a null exitCode or a string
-    // signal, so runner-loss is coerced to abnormal exit (exitCode 1) — pty-manager
-    // only reads exitCode. The raw null/'runner-lost' payload is internal.
-    expect(exit).toEqual({ exitCode: 1, signal: undefined })
+  it('runner-lost detaches the session rather than declaring it dead', async () => {
+    const gateway = new FakeGateway()
+    const { chunks, exit } = await spawnDetached(gateway)
 
-    // Session removed from the demux Map → no further delivery.
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 2, data: 'b' })
-    expect(chunks).toEqual(['a'])
+    // The regression this whole mechanism exists for: closing a laptop lid must
+    // not report a running agent as crashed.
+    expect(exit()).toBeNull()
+
+    // Still tracked, so anything that does arrive is still delivered.
+    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 1, data: 'b' })
+    expect(chunks).toEqual(['a', 'b'])
   })
 
-  it('disposes the session on runner-disconnected', async () => {
+  it('runner-disconnected detaches too — a clean close is no more evidence than a silent one', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
     const backend = createRoutingPtyBackend({
       gateway,
       resolveRunnerId: (spec) => spec.runnerId ?? null
     })
-
+    connect(gateway, 'epoch-a')
     const handle = (await backend.spawn(ptySpec())) as PtyHandle
     let exit: PtyExitEvent | null = null
     handle.onExit((e) => {
@@ -388,8 +434,114 @@ describe('createRoutingPtyBackend', () => {
     })
 
     gateway.emit('runner-disconnected', { runnerId: 'runner-1', reason: 'socket-closed' })
-    // Coerced to the terminal seam shape (see runner-lost test above).
-    expect(exit).toEqual({ exitCode: 1, signal: undefined })
+    expect(exit).toBeNull()
+  })
+
+  it('reconnect with the SAME epoch reattaches sessions the runner still holds, backfilling the gap', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: 1 }] }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [{ seq: 1, data: 'b' }] }))
+    const { chunks, exit } = await spawnDetached(gateway)
+
+    connect(gateway, 'epoch-a') // same process came back
+
+    await vi.waitFor(() => expect(chunks).toEqual(['a', 'b']))
+    expect(exit()).toBeNull()
+    // Backfill resumes from the last seq actually delivered, not from scratch.
+    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({
+      sessionId: 'sess-1',
+      seq: 0
+    })
+  })
+
+  it('reconnect with the same epoch ends the sessions the runner no longer holds', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.list', () => ({ sessions: [] }))
+    const { exit } = await spawnDetached(gateway)
+
+    connect(gateway, 'epoch-a')
+
+    // Absent from the runner's own list ⇒ it really did exit while we were away.
+    await vi.waitFor(() => expect(exit()).toEqual({ exitCode: 1, signal: undefined }))
+  })
+
+  it('reconnect as a DIFFERENT process ends every detached session without asking', async () => {
+    const gateway = new FakeGateway()
+    const { exit } = await spawnDetached(gateway)
+
+    connect(gateway, 'epoch-b') // runner restarted
+
+    await vi.waitFor(() => expect(exit()).toEqual({ exitCode: 1, signal: undefined }))
+    // A new process provably holds nothing of ours — no point listing.
+    expect(gateway.requestsOf('pty.list')).toHaveLength(0)
+  })
+
+  it('a runner that reports no epoch keeps the conservative pre-epoch behavior', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: 0 }] }))
+    const { exit } = await spawnDetached(gateway, undefined)
+
+    connect(gateway, undefined)
+
+    // Identity unverified ⇒ never reattach on it, even though the runner says
+    // it still holds the session. Absence of an epoch is not a match.
+    await vi.waitFor(() => expect(exit()).toEqual({ exitCode: 1, signal: undefined }))
+    expect(gateway.requestsOf('pty.list')).toHaveLength(0)
+  })
+
+  it('kills sessions the runner still holds that the hub no longer tracks', async () => {
+    const gateway = new FakeGateway()
+    // The runner reports one session the hub knows about and one it does not —
+    // e.g. stranded by an earlier grace expiry. Nothing will ever attach to the
+    // orphan again, so leaving it running would burn an agent against no task.
+    gateway.onMethod('pty.list', () => ({
+      sessions: [
+        { sessionId: 'sess-1', pid: 1, seq: 0 },
+        { sessionId: 'orphan-9', pid: 2, seq: 0 }
+      ]
+    }))
+    await spawnDetached(gateway)
+
+    connect(gateway, 'epoch-a')
+
+    await vi.waitFor(() =>
+      expect(gateway.requestsOf('pty.kill').map((c) => c.params)).toEqual([
+        { sessionId: 'orphan-9' }
+      ])
+    )
+  })
+
+  it('drops sessions once the grace window expires with no reconnect', async () => {
+    // The one time-based outcome, and deliberately the LAST resort: it bounds
+    // the hub's own bookkeeping (a runner that never returns would otherwise
+    // leak entries forever and hang its tasks in "reconnecting"). It is not a
+    // claim that the agent died — nothing here can know that.
+    vi.useFakeTimers()
+    try {
+      const gateway = new FakeGateway()
+      const { exit } = await spawnDetached(gateway)
+
+      await vi.advanceTimersByTimeAsync(9 * 60_000)
+      expect(exit()).toBeNull() // still inside the window
+
+      await vi.advanceTimersByTimeAsync(60_001)
+      expect(exit()).toEqual({ exitCode: 1, signal: undefined })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an unanswerable list leaves sessions detached rather than guessing', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.list', () => {
+      throw new Error('runner went away again mid-reattach')
+    })
+    const { exit } = await spawnDetached(gateway)
+
+    connect(gateway, 'epoch-a')
+
+    await vi.waitFor(() => expect(gateway.requestsOf('pty.list')).toHaveLength(1))
+    expect(exit()).toBeNull()
   })
 })
 
@@ -442,21 +594,99 @@ describe('createRoutingProcessBackend', () => {
     expect(chunks).toEqual(['one', 'two'])
   })
 
-  it('disposes the session on runner-lost', () => {
-    const gateway = new FakeGateway()
+  // Routed child processes (which the chat agents ride on) detach and reattach
+  // on exactly the same rule as ptys — same controller, `proc.list` instead of
+  // `pty.list`. Previously a dropped socket finalized these too, which is why
+  // one sleep killed both the terminals and the chat agents on a machine.
+  const connectProc = (gateway: FakeGateway, epoch?: string): void => {
+    gateway.emit('runner-connected', {
+      runner: {
+        runnerId: 'runner-1',
+        authMode: 'hello',
+        connectedAt: 0,
+        lastSeenAt: 0,
+        ...(epoch === undefined ? {} : { epoch })
+      }
+    })
+  }
+
+  const spawnDetachedProc = (
+    gateway: FakeGateway
+  ): { exit: () => { code: number | null; signal: string | null } | null } => {
     gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
     const backend = createRoutingProcessBackend({
       gateway,
       resolveRunnerId: (spec) => spec.runnerId ?? null
     })
-
+    connectProc(gateway, 'epoch-a')
     const handle = backend.spawn(procSpec())
     let exit: { code: number | null; signal: string | null } | null = null
     handle.onExit((e) => {
       exit = e
     })
     gateway.emit('runner-lost', { runnerId: 'runner-1', reason: 'heartbeat-timeout' })
-    expect(exit).toEqual({ code: null, signal: 'runner-lost' })
+    return { exit: () => exit }
+  }
+
+  it('runner-lost detaches the process rather than declaring it dead', () => {
+    const gateway = new FakeGateway()
+    expect(spawnDetachedProc(gateway).exit()).toBeNull()
+  })
+
+  it('reconnect with the same epoch resumes a process the runner still holds', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.list', () => ({ sessions: [{ sessionId: 'proc-1', pid: 1, seq: 0 }] }))
+    const { exit } = spawnDetachedProc(gateway)
+
+    connectProc(gateway, 'epoch-a')
+
+    await vi.waitFor(() => expect(gateway.requestsOf('proc.list')).toHaveLength(1))
+    expect(exit()).toBeNull()
+  })
+
+  it('many backends on one gateway share a single reattach round-trip', async () => {
+    // createRoutingChatBackend builds a FRESH process backend per agent spawn.
+    // One detach controller per backend would mean a listener set per agent
+    // (unbounded over a session) and one proc.list per agent on every
+    // reconnect. Controllers are keyed by (gateway, kind) instead.
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    gateway.onMethod('proc.list', () => ({
+      sessions: [
+        { sessionId: 'proc-1', pid: 1, seq: 0 },
+        { sessionId: 'proc-2', pid: 2, seq: 0 }
+      ]
+    }))
+    connectProc(gateway, 'epoch-a')
+
+    const exits: Array<{ code: number | null; signal: string | null } | null> = [null, null]
+    for (const [i, id] of ['proc-1', 'proc-2'].entries()) {
+      const backend = createRoutingProcessBackend({
+        gateway,
+        resolveRunnerId: (spec) => spec.runnerId ?? null
+      })
+      backend.spawn(procSpec({ id })).onExit((e) => {
+        exits[i] = e
+      })
+    }
+
+    gateway.emit('runner-lost', { runnerId: 'runner-1', reason: 'heartbeat-timeout' })
+    connectProc(gateway, 'epoch-a')
+
+    await vi.waitFor(() => expect(gateway.requestsOf('proc.list')).toHaveLength(1))
+    expect(exits).toEqual([null, null]) // both resumed, neither declared dead
+  })
+
+  it('reconnect with the same epoch ends a process the runner no longer holds', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.list', () => ({ sessions: [] }))
+    const { exit } = spawnDetachedProc(gateway)
+
+    connectProc(gateway, 'epoch-a')
+
+    await vi.waitFor(() =>
+      expect(exit()).toEqual({ code: null, signal: 'exited-while-detached' })
+    )
   })
 })
 

@@ -83,7 +83,10 @@ async function loadRunner(): Promise<{
         if (!handler) throw new Error(`runner has no handler for ${method}`)
         return await handler(params)
       },
-      events
+      events,
+      // Never disconnects here, so the detach controller's epoch baseline is
+      // never consulted — an empty roster is the honest answer.
+      listRunners: () => []
     },
     disposeAll: created.disposeAll
   }

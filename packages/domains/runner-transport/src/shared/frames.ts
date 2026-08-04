@@ -65,6 +65,24 @@ export const RunnerToHubMethods = {
   heartbeat: 'heartbeat'
 } as const
 
+/**
+ * Identifies one runner PROCESS INCARNATION. Minted once at runner startup,
+ * unchanged across every reconnect that process makes, and different after any
+ * restart.
+ *
+ * This is what makes "the socket dropped" distinguishable from "the runner
+ * died" without guessing: reconnecting with the SAME epoch proves the process
+ * that owns the pty sessions never went away, so the hub may reattach to them.
+ * A different epoch proves the opposite — everything the old process held is
+ * gone, and its sessions can be reaped immediately instead of waiting out a
+ * lease.
+ *
+ * OPTIONAL on the wire: a runner too old to send one leaves the hub unable to
+ * prove either, so it falls back to the conservative pre-epoch behavior
+ * (finalize on disconnect). Fail closed, never reattach on an unproven identity.
+ */
+const epochField = z.string().min(1).optional()
+
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
   joinToken: z.string().min(1),
@@ -76,7 +94,8 @@ export const enrollParamsSchema = z.object({
   version: z.string().min(1),
   /** Capability tags, e.g. `['pty', 'git']`. */
   capabilities: z.array(z.string()),
-  protocolVersion: z.number().int().positive()
+  protocolVersion: z.number().int().positive(),
+  epoch: epochField
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -88,7 +107,8 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
-  apiKey: z.string().min(1)
+  apiKey: z.string().min(1),
+  epoch: epochField
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
@@ -209,6 +229,8 @@ export const HubToRunnerMethods = {
   ptyResize: 'pty.resize',
   ptyWrite: 'pty.write',
   ptyGetBufferSince: 'pty.getBufferSince',
+  /** Live (non-warm) sessions the runner still holds — drives reattach. */
+  ptyList: 'pty.list',
   // warm pool (pre-warmed agents live ON the runner — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -229,6 +251,8 @@ export const HubToRunnerMethods = {
   procKill: 'proc.kill',
   procWrite: 'proc.write',
   procGetBufferSince: 'proc.getBufferSince',
+  /** Live child processes the runner still holds — drives reattach. */
+  procList: 'proc.list',
   ping: 'ping',
   runnerShutdown: 'runner.shutdown'
 } as const
@@ -299,6 +323,28 @@ export const ptyGetBufferSinceResultSchema = z.object({
   )
 })
 export type PtyGetBufferSinceResult = z.infer<typeof ptyGetBufferSinceResultSchema>
+
+/**
+ * Live (non-warm) sessions the runner still holds. The runner is the AUTHORITY
+ * on this — the hub's own registry is only a belief about it, and after a
+ * dropped connection the two can disagree in both directions.
+ *
+ * `seq` is the highest seq the runner has assigned, so the hub can tell whether
+ * it missed anything while detached and backfill via `pty.getBufferSince`.
+ * Empty on a runner holding nothing, which is a legitimate answer, NOT an error:
+ * it means every session really did exit while the hub was away.
+ */
+export const ptyListResultSchema = z.object({
+  sessions: z.array(
+    z.object({
+      sessionId: z.string().min(1),
+      pid: z.number().int(),
+      /** Highest assigned seq; -1 when the session has emitted nothing yet. */
+      seq: z.number().int()
+    })
+  )
+})
+export type PtyListResult = z.infer<typeof ptyListResultSchema>
 
 // ---------------------------------------------------------------------------
 // hub → runner requests: warm pool
@@ -551,3 +597,20 @@ export const procGetBufferSinceResultSchema = z.object({
   )
 })
 export type ProcGetBufferSinceResult = z.infer<typeof procGetBufferSinceResultSchema>
+
+/**
+ * Live child processes the runner still holds. The `proc.list` twin of
+ * {@link ptyListResultSchema} — same role in reattach, and the two must not
+ * drift.
+ */
+export const procListResultSchema = z.object({
+  sessions: z.array(
+    z.object({
+      sessionId: z.string().min(1),
+      pid: z.number().int().optional(),
+      /** Highest assigned seq; -1 when nothing has been emitted yet. */
+      seq: z.number().int()
+    })
+  )
+})
+export type ProcListResult = z.infer<typeof procListResultSchema>

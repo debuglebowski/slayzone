@@ -35,6 +35,7 @@ import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import {
   HubToRunnerMethods,
   procGetBufferSinceParamsSchema,
+  type ProcListResult,
   procKillParamsSchema,
   procSpawnParamsSchema,
   procWriteParamsSchema,
@@ -52,7 +53,8 @@ export const ProcMethods = {
   procSpawn: HubToRunnerMethods.procSpawn,
   procKill: HubToRunnerMethods.procKill,
   procWrite: HubToRunnerMethods.procWrite,
-  procGetBufferSince: HubToRunnerMethods.procGetBufferSince
+  procGetBufferSince: HubToRunnerMethods.procGetBufferSince,
+  procList: HubToRunnerMethods.procList
 } as const
 
 export const ProcNotifications = {
@@ -226,6 +228,24 @@ export function createProcHandlers(ctx: HandlerContext): ProcHandlers {
     return { frames }
   }
 
+  /**
+   * Every live child process this runner still holds, for hub reattach after a
+   * dropped connection. The `proc.list` twin of the pty handler's `list` — the
+   * runner is the authority on what survived, the hub's registry is only a
+   * belief about it.
+   */
+  function procList(): ProcListResult {
+    const sessions: ProcListResult['sessions'] = []
+    for (const [sessionId, session] of procs) {
+      sessions.push({
+        sessionId,
+        ...(typeof session.child.pid === 'number' ? { pid: session.child.pid } : {}),
+        seq: session.buffer.getCurrentSeq()
+      })
+    }
+    return { sessions }
+  }
+
   function disposeAll(): void {
     for (const [sessionId, session] of procs) {
       try {
@@ -242,7 +262,8 @@ export function createProcHandlers(ctx: HandlerContext): ProcHandlers {
     [ProcMethods.procSpawn]: procSpawn,
     [ProcMethods.procKill]: procKill,
     [ProcMethods.procWrite]: procWrite,
-    [ProcMethods.procGetBufferSince]: procGetBufferSince
+    [ProcMethods.procGetBufferSince]: procGetBufferSince,
+    [ProcMethods.procList]: procList
   }
 
   return { handlers, disposeAll }
