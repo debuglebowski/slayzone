@@ -397,6 +397,7 @@ import {
 } from '@slayzone/processes/server'
 import { buildExportImportOps } from './export-import'
 import { notifyEvents } from './notify-renderer'
+import { presentWindow } from './present-window'
 import { menuEvents } from './menu-events'
 import { automationsEvents } from './automations-events'
 import { telemetryEvents } from './telemetry-events'
@@ -996,11 +997,7 @@ function tryShowMainWindow(): void {
 // tuneInlineDevToolsFrontend and scheduleDisableDevToolsDeviceToolbar removed
 
 function emitOAuthCallback(payload: { code?: string; error?: string }): void {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-  }
+  presentWindow(mainWindow)
 
   const waiter = oauthCallbackWaiters.values().next().value as
     | ((p: OAuthCallbackPayload) => void)
@@ -1097,11 +1094,7 @@ function handleOAuthDeepLink(url: string): void {
   if (parsed.hostname === 'task' && normalizedPath.length > 1) {
     const taskId = normalizedPath.slice(1)
     menuEvents.emit('open-task', { taskId })
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
-    }
+    presentWindow(mainWindow)
     return
   }
 
@@ -1148,11 +1141,7 @@ if (!gotSingleInstanceLock) {
 } else if (shouldEnforceSingleInstanceLock) {
   app.on('second-instance', (_event, argv) => {
     handleOAuthDeepLinkFromArgv(argv)
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
-    }
+    presentWindow(mainWindow)
   })
 }
 
@@ -2201,11 +2190,7 @@ app
             // Raise/show+focus the main window — the CLI/agent `tasks/open`
             // foreground path, forwarded from the side-car REST over the bridge.
             appRaiseMainWindow: () => {
-              const win = mainWindow ?? BrowserWindow.getAllWindows()[0]
-              if (!win || win.isDestroyed()) return
-              if (win.isMinimized()) win.restore()
-              win.show()
-              win.focus()
+              presentWindow(mainWindow ?? BrowserWindow.getAllWindows()[0])
             },
             // Theme — Electron nativeTheme. The side-car's `settings.*Theme`
             // procedures forward here over the bridge; `theme:changed` streams
@@ -3858,7 +3843,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       // On macOS it's common to re-create a window in the app when the
       // dock icon is clicked and there are no other windows open.
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
-      else mainWindow?.show()
+      else presentWindow(mainWindow)
     })
   })
   .catch((error) => {

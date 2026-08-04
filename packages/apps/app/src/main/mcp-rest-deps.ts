@@ -27,6 +27,7 @@ import {
   renderToPng
 } from '@slayzone/task/electron'
 import { notifyRenderer } from './notify-renderer'
+import { presentWindow } from './present-window'
 import { menuEvents } from './menu-events'
 import { agentLifecycleEvents } from './agent-lifecycle-events'
 import { listAllProcesses, killProcess, subscribeToProcessLogs } from '@slayzone/processes/server'
@@ -88,12 +89,7 @@ export function buildMcpRestDeps(
     },
     windowActions: {
       raiseMainWindow: () => {
-        const mainWin = BrowserWindow.getAllWindows()[0]
-        if (mainWin) {
-          if (mainWin.isMinimized()) mainWin.restore()
-          mainWin.show()
-          mainWin.focus()
-        }
+        presentWindow(BrowserWindow.getAllWindows()[0])
       }
     },
     artifactExport: {

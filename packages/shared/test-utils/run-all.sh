@@ -176,6 +176,10 @@ run_test packages/apps/cli/src/commands/tasks/cli-author.test.ts
 run_test packages/shared/transport/src/server/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
 run_test packages/apps/app/src/main/storage-migration.test.ts
+# Hidden-window invariant under Playwright. Six call sites open-coded
+# restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
+# the developer's focus for the rest of that worker's specs (worker-scoped app).
+run_test packages/apps/app/src/main/present-window.test.ts
 # SLAYZONE_MODE resolver + mode/bind contradiction guard (local+exposed = fatal).
 run_test packages/shared/platform/src/slayzone-mode.test.ts
 # Env scope manifest + sanitizeSpawnEnv — spawn-boundary denylist (fail closed).
