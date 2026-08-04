@@ -1,7 +1,7 @@
 /**
  * Hub-side exec proxies — routing backends that forward OS-level exec work (ptys,
  * chat agents, child processes, git/fs worktree ops) to a runner over the runner
- * gateway, falling back to an in-process ("local") backend when no runner resolves.
+ * gateway. A runner is REQUIRED; see the next paragraph.
  *
  * ── Runners run the agents ────────────────────────────────────────────────────
  * There is NO in-process fallback: an unresolved runner raises
