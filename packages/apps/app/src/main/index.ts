@@ -545,6 +545,9 @@ let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHand
 // Local-runner supervisor — spawns the co-located runner in local mode. Null
 // in remote mode (no local hub to dial) or before the async spawn runs.
 let localRunnerCleanup: (() => void) | null = null
+// The same supervisor's handle. Kept separately from the cleanup thunk because
+// `app:restart-local-runner` needs to CYCLE it, not just stop it at quit.
+let localRunnerHandle: import('./local-runner-supervisor').LocalRunnerHandle | null = null
 // Local cutover (slice 9): the side-car must be spawned with the desktop bridge
 // address in env, but that server starts on its own async path. This promise
 // lets the sidecar-spawn block await the bound port. One listener now carries
@@ -720,6 +723,40 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       SLAYZONE_HUB_JOIN_TOKEN: minted.token
     },
     logger: (line) => logBoot(line),
+    // Every agent pty is a direct child of the runner, so a runner exit kills
+    // every agent on the machine at once and the hub renders it as "Process
+    // exited with code 1" on every open task (exec-proxies disposes each session
+    // on runner-disconnected). That was previously untraceable: `logger` above
+    // feeds logBoot, a no-op unless SLAYZONE_DEBUG_BOOT=1, so neither the exit
+    // code nor the runner's dying output reached anywhere durable. Record it.
+    onExit: (info) => {
+      try {
+        recordDiagnosticEvent({
+          // A restart-pending exit is recoverable; a terminal one is not.
+          level: info.restartAttempt === null ? 'error' : 'warn',
+          source: 'main',
+          event: 'local_runner.exit',
+          message:
+            `Local runner exited (code=${String(info.code)} signal=${String(info.signal)}) after ` +
+            `${Math.round(info.uptimeMs / 1000)}s — every agent terminal on this machine died with it. ` +
+            (info.restartAttempt === null
+              ? 'No restart left in the backoff budget.'
+              : `Restarting in ${String(info.restartDelayMs)}ms (attempt ${info.restartAttempt}).`),
+          payload: {
+            code: info.code,
+            signal: info.signal,
+            uptimeMs: info.uptimeMs,
+            restartAttempt: info.restartAttempt,
+            restartDelayMs: info.restartDelayMs,
+            // The dying runner's own output — the only place an uncaught
+            // exception stack or a fatal dialer error is visible.
+            tail: info.tail
+          }
+        })
+      } catch {
+        /* diagnostics unavailable — never let reporting break supervision */
+      }
+    },
     // Re-mint before each restart. The token above is SINGLE-USE, so a runner that
     // exits fatally on "join token rejected: unknown" (its stored api key failed
     // verification, and its re-enroll fallback then reused a spent token) would
@@ -767,8 +804,27 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       }
     }
   })
+  localRunnerHandle = handleRunner
   localRunnerCleanup = () => void handleRunner.stop()
   logBoot('local-runner supervisor started (auto-enrolled)')
+}
+
+/**
+ * Single-flight wrapper around {@link startLocalRunnerWithAutoEnroll}.
+ *
+ * Load-bearing for the Settings → Runners "Start" action: the boot attempt polls
+ * for a mintable join token for up to ~40s (`mintLocalRunnerJoinToken`), so a
+ * user who clicks Start while that is still running would otherwise spawn a
+ * SECOND supervisor — two runners enrolling under the same name, only one of
+ * which any cleanup hook tracks.
+ */
+let localRunnerStartInFlight: Promise<void> | null = null
+function ensureLocalRunnerStarted(): Promise<void> {
+  if (localRunnerStartInFlight) return localRunnerStartInFlight
+  localRunnerStartInFlight = startLocalRunnerWithAutoEnroll().finally(() => {
+    localRunnerStartInFlight = null
+  })
+  return localRunnerStartInFlight
 }
 let quitDrainComplete = false
 let quitSubprocessCleanupPromise: Promise<void> | null = null
@@ -2422,7 +2478,7 @@ app
     // still enroll remote runners via the UI.
     if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_RUNNER !== '1') {
       setImmediate(() => {
-        void startLocalRunnerWithAutoEnroll().catch((err) => {
+        void ensureLocalRunnerStarted().catch((err) => {
           console.error('[local-runner] auto-enroll failed (local runner, non-fatal):', err)
         })
       })
@@ -3096,6 +3152,46 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         const handle = await sidecarHandlePromise
         await handle.restart()
         await handle.waitForReady()
+        return { ok: true as const }
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
+    })
+    // Cycle the co-located runner. Every agent pty on this machine is a direct
+    // child of it, so this is a heavier hammer than the side-car restart — but it
+    // is the ONLY recovery from the supervisor's dead ends (needs-re-enrollment,
+    // exhausted backoff, and the boot-time "join-token mint failed → never
+    // spawned" case). All three previously required relaunching the app, while
+    // nothing on the machine could execute.
+    ipcMain.handle('app:restart-local-runner', async () => {
+      if (isRemoteMode) {
+        return { ok: false as const, error: 'Remote mode — no local runner on this machine' }
+      }
+      try {
+        if (localRunnerHandle) {
+          await localRunnerHandle.restart()
+        } else {
+          // Never spawned (or its auto-enroll is still retrying) — the recovery
+          // is the full mint-then-spawn path, not a cycle. Single-flight, so a
+          // click during boot's attempt joins it rather than racing it.
+          await ensureLocalRunnerStarted()
+          if (!localRunnerHandle) {
+            return {
+              ok: false as const,
+              error:
+                'Could not enroll a local runner — the hub refused to mint a join token. See Settings → Diagnostics.'
+            }
+          }
+        }
+        recordDiagnosticEvent({
+          level: 'info',
+          source: 'main',
+          event: 'local_runner.manual_restart',
+          message:
+            'Local runner restarted from Settings → Runners. Every agent terminal on this ' +
+            'machine was stopped with it.',
+          payload: { pid: localRunnerHandle.getPid() }
+        })
         return { ok: true as const }
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }

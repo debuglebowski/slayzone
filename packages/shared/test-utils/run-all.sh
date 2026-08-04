@@ -296,6 +296,10 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cre
 # Side-car supervisor crash-recovery (slice 2.5.1 HARD GATE).
 run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.test.ts
 
+# Local-runner supervisor exit reporting — the runner owns every agent pty, so
+# its exits must stay observable (they killed whole fleets silently before).
+run_test_electron_strict packages/apps/app/src/main/local-runner-supervisor.test.ts
+
 # e2e stale-process reaper: must never match the dev app's live runner (doing so
 # SIGTERM'd every agent on the machine once per `pnpm test:e2e`).
 run_test packages/apps/app/e2e/fixtures/stale-processes.test.ts
