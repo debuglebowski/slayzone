@@ -221,12 +221,17 @@ export function HubsSettingsTab() {
 
       {/* Hub list */}
       <div className="space-y-3">
-        <table className="w-full text-sm" data-testid="hubs-table">
+        {/* `table-fixed` + fractional widths. Auto layout sizes columns to their
+            CONTENT, so short values ("Local", "this machine") clump at the left and
+            the row trails off into dead space. Fractions pace the columns across the
+            full width regardless of value length; the actions column takes the
+            remainder and right-aligns, so a row is anchored at both edges. */}
+        <table className="w-full table-fixed text-sm" data-testid="hubs-table">
           <thead>
             <tr className="text-muted-foreground text-left text-xs">
-              <th className="py-1 pr-2 font-medium">Name</th>
-              <th className="py-1 pr-2 font-medium">Address</th>
-              <th className="py-1 pr-2 font-medium">Default</th>
+              <th className="w-1/4 py-1 pr-2 font-medium">Name</th>
+              <th className="w-1/3 py-1 pr-2 font-medium">Address</th>
+              <th className="w-1/6 py-1 pr-2 font-medium">Default</th>
               <th className="py-1" />
             </tr>
           </thead>
@@ -250,7 +255,7 @@ export function HubsSettingsTab() {
                 />
               </td>
               <td className="py-2">
-                <div className="flex items-center gap-2 text-xs">
+                <div className="flex items-center justify-end gap-2 text-xs">
                   <Switch
                     checked={effectiveRunLocal}
                     disabled={!canDisableLocal}
@@ -285,11 +290,11 @@ export function HubsSettingsTab() {
                   <Input
                     value={h.label}
                     onChange={(e) => relabel(h.id, e.target.value)}
-                    className="h-7 max-w-[12rem]"
+                    className="h-7 w-full"
                     data-testid="hub-label-input"
                   />
                 </td>
-                <td className="text-muted-foreground py-2 pr-2 font-mono text-xs">
+                <td className="text-muted-foreground py-2 pr-2 font-mono text-xs break-all">
                   {h.url}
                   {authedHubIds.has(h.id) && (
                     <span className="ml-2 text-green-500" data-testid="hub-signed-in">
