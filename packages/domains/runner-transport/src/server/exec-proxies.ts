@@ -69,6 +69,7 @@ import {
   ptyWarmListResultSchema,
   ptyWarmSpawnResultSchema
 } from '../shared/frames'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { HubRunnerGateway } from './hub-gateway'
 
 // ===========================================================================
@@ -288,8 +289,32 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   }
 
   function disposeRunner(runnerId: string, reason: string): void {
+    const killed: string[] = []
     for (const entry of [...sessions.values()]) {
-      if (entry.runnerId === runnerId) finalize(entry, null, reason)
+      if (entry.runnerId !== runnerId) continue
+      killed.push(entry.sessionId)
+      finalize(entry, null, reason)
+    }
+    if (killed.length === 0) return
+    // Each of these renders as "Process exited with code 1" in its own task (the
+    // handle seam coerces the null exit code below), so one runner blip reads as
+    // N independent agent crashes. Record the ONE cause behind them — and record
+    // it here rather than at the socket, because this is the point that knows
+    // the blast radius. Pairs with `local_runner.exit` in the app's supervisor:
+    // both present ⇒ the runner process died; this one alone ⇒ the runner is
+    // alive and only its hub connection dropped.
+    try {
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'pty',
+        event: 'runner.sessions_disposed',
+        message:
+          `Runner connection lost (${reason}) — ${killed.length} terminal session(s) ` +
+          'were declared dead as a result.',
+        payload: { runnerId, reason, sessionCount: killed.length, sessionIds: killed }
+      })
+    } catch {
+      /* diagnostics unavailable — disposal must still complete */
     }
   }
 

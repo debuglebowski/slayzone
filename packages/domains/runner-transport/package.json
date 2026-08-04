@@ -16,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@slayzone/diagnostics": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/terminal": "workspace:*",

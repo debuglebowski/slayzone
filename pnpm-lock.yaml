@@ -1324,6 +1324,9 @@ importers:
 
   packages/domains/runner-transport:
     dependencies:
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../diagnostics
       '@slayzone/processes':
         specifier: workspace:*
         version: link:../processes
