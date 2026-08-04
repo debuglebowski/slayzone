@@ -49,6 +49,13 @@ const remoteMintSpy = vi.fn(() =>
 const remoteRevokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
 
 /**
+ * The local runner is cycled over the DESKTOP BRIDGE, not tRPC — it is a child of
+ * the main process, which the hub has no handle on. So this spy stands in for a
+ * different transport than every other action in this tab.
+ */
+const restartLocalRunnerSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
+
+/**
  * Which hub's subtree is currently rendering.
  *
  * The mocked `HubScope` sets this in its render body; the mocked `useTRPC()` reads
@@ -94,6 +101,7 @@ vi.mock('@slayzone/transport/client', () => ({
           }
         },
   useFederationOrNull: () => federation,
+  electronBootstrap: { restartLocalRunner: () => restartLocalRunnerSpy() },
   // Passthrough that records the hub whose subtree follows (see renderingHubId).
   HubScope: ({ hubId, children }: any) => {
     renderingHubId = hubId
@@ -108,7 +116,11 @@ vi.mock('@tanstack/react-query', () => ({
     data:
       opts?.__hub !== undefined && runnersByHub[opts.__hub] !== undefined
         ? runnersByHub[opts.__hub]
-        : runnersData
+        : runnersData,
+    // The "local runner is missing" row is gated on a SETTLED query, so that an
+    // empty first render doesn't flash "Not running" at a healthy runner. These
+    // mocks answer synchronously, i.e. always settled.
+    isSuccess: true
   }),
   useMutation: (opts: { __key?: string; __hub?: string }) => {
     const remote = opts?.__hub !== undefined && opts.__hub !== 'local'
@@ -140,8 +152,13 @@ vi.mock('@slayzone/ui', () => {
     ),
     Input: (props: any) => <input {...props} />,
     Label: ({ children }: any) => <label>{children}</label>,
+    cn: (...parts: any[]) => parts.filter(Boolean).join(' '),
     AlertDialog: Pass,
-    AlertDialogAction: ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>,
+    AlertDialogAction: ({ children, onClick, ...props }: any) => (
+      <button onClick={onClick} {...props}>
+        {children}
+      </button>
+    ),
     AlertDialogCancel: ({ children }: any) => <button>{children}</button>,
     AlertDialogContent: Pass,
     AlertDialogDescription: Pass,
@@ -219,6 +236,7 @@ beforeEach(() => {
   revokeSpy.mockClear()
   remoteMintSpy.mockClear()
   remoteRevokeSpy.mockClear()
+  restartLocalRunnerSpy.mockClear()
 })
 
 afterEach(cleanup)
@@ -453,5 +471,75 @@ describe('RunnersSettingsTab', () => {
       expect(screen.getByTestId('runner-minted-token')).toBeDefined()
     })
     expect(screen.queryByTestId('runner-token-loopback-warning')).toBeNull()
+  })
+
+  // --- local runner: restart / start ---------------------------------------
+  //
+  // The local runner is the app's own supervised child, so it is the ONE row this
+  // client can act on as a process. Everything below pins that boundary: the
+  // affordance must never appear on a runner we cannot actually control.
+
+  it('offers restart on the local hub’s local-runner row only', async () => {
+    runnersData = [makeRunner({ id: 'r-local', name: 'local-runner' }), makeRunner()]
+    await act(async () => {
+      render(<RunnersSettingsTab />)
+    })
+    expect(screen.getAllByTestId('runner-row').length).toBe(2)
+    expect(screen.getAllByTestId('runner-local-restart').length).toBe(1)
+    expect(screen.queryByTestId('runner-local-missing')).toBeNull()
+  })
+
+  it('does NOT offer restart for a REMOTE hub’s own local-runner', async () => {
+    // Both hubs have a runner by that name — only the one on OUR machine is a
+    // process this app can cycle. Restarting the other is not ours to do.
+    runnersByHub = {
+      local: [makeRunner({ id: 'r-local', name: 'local-runner' })],
+      'hub-b': [makeRunner({ id: 'r-remote-local', name: 'local-runner' })]
+    }
+    federation = TWO_HUBS
+    await act(async () => {
+      render(<RunnersSettingsTab />)
+    })
+    expect(screen.getAllByTestId('runner-row').length).toBe(2)
+    expect(screen.getAllByTestId('runner-local-restart').length).toBe(1)
+  })
+
+  it('restarts only after the confirm, since it kills every terminal on the machine', async () => {
+    runnersData = [makeRunner({ id: 'r-local', name: 'local-runner' })]
+    await act(async () => {
+      render(<RunnersSettingsTab />)
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('runner-local-restart'))
+    })
+    expect(restartLocalRunnerSpy).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('runner-local-restart-confirm'))
+    })
+    expect(restartLocalRunnerSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers Start when the local hub has no local runner at all', async () => {
+    // The boot-time join-token mint failed → nothing on this machine can execute,
+    // and there is no row to hang a restart on. Starting destroys nothing, so it
+    // skips the confirm.
+    runnersData = [makeRunner()]
+    await act(async () => {
+      render(<RunnersSettingsTab />)
+    })
+    expect(screen.getByTestId('runner-local-missing')).toBeDefined()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('runner-local-start'))
+    })
+    expect(restartLocalRunnerSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('never claims a REMOTE hub is missing its local runner', async () => {
+    runnersByHub = { local: [], 'hub-b': [] }
+    federation = TWO_HUBS
+    await act(async () => {
+      render(<RunnersSettingsTab />)
+    })
+    expect(screen.getAllByTestId('runner-local-missing').length).toBe(1)
   })
 })

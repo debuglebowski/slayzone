@@ -461,6 +461,9 @@ export interface ElectronAPI {
       error?: string
     }>
     restartSidecar: () => Promise<{ ok: boolean; error?: string }>
+    /** Cycle the co-located runner, or start it if it never came up. Stops every
+     *  agent pty on this machine — they are all children of that process. */
+    restartLocalRunner: () => Promise<{ ok: boolean; error?: string }>
     isPlaywright: boolean
     dataReady: () => void
     bootMark: (label: string) => void

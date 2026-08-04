@@ -120,21 +120,15 @@ export interface SlayzoneConfig {
 export const DEV_HUB_AUTH_SECRET = 'slayzone-dev-runner-secret'
 
 /**
- * Name of the co-located ("local") auto-spawned runner. SINGLE source of truth
- * shared by BOTH sides of the local-runner dedup so they can never silently
- * diverge:
- *   - the supervised runner (config.ts) defaults its enroll `name` to this when
- *     `SLAYZONE_SUPERVISED=1`, and
- *   - the sidecar composition passes it as `localRunnerName` to the runner-auth
- *     adapters (which treat an enroll for THIS name as the local runner → gets a
- *     deterministic id + UPSERT + duplicate collapse).
- * If these two disagree the dedup silently disables (every local enroll takes
- * the remote fresh-uuid path → an orphan per boot), so both derive this const.
- * Lives on this lean subpath so the runner bundle imports it WITHOUT pulling the
- * heavy `@slayzone/runners/server` graph (better-sqlite3). A standalone runner
- * renames via the config.json `runnerName` key instead.
+ * Name of the co-located ("local") auto-spawned runner — re-exported so every
+ * existing importer of this subpath keeps working.
+ *
+ * It is DEFINED in `./runner-identity`, a leaf module with no imports, because
+ * this file reaches for `node:fs`/`node:path` and so cannot be pulled into a
+ * renderer bundle. The Runners settings table needs the same constant to know
+ * which row is the app's own runner; see that module for the full rationale.
  */
-export const DEFAULT_LOCAL_RUNNER_NAME = 'local-runner'
+export { DEFAULT_LOCAL_RUNNER_NAME } from './runner-identity'
 
 /** Name reported by the desktop app's supervised sidecar. Fixed rather than
  *  ROOT-derived: the app's ROOT is a platform state dir whose basename is

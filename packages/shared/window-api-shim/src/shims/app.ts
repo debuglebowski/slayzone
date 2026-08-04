@@ -83,6 +83,11 @@ export const appShim = {
     ok: false,
     error: 'Not supported in the Chromium shell',
   }),
+  // Same for the runner: the fork does not spawn it, so it cannot cycle it.
+  restartLocalRunner: async (): Promise<{ ok: boolean; error?: string }> => ({
+    ok: false,
+    error: 'Not supported in the Chromium shell',
+  }),
   getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
   bootMark: (_label: string): void => undefined,
   dataReady: (): Promise<void> => Promise.resolve(),

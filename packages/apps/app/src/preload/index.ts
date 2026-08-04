@@ -62,6 +62,8 @@ const api: ElectronAPI = {
       }>,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,
+    restartLocalRunner: () =>
+      ipcRenderer.invoke('app:restart-local-runner') as Promise<{ ok: boolean; error?: string }>,
     isPlaywright,
     dataReady: () => ipcRenderer.send('app:data-ready'),
     bootMark:

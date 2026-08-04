@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   useTRPCClient,
   useFederationOrNull,
   getHubClient,
+  electronBootstrap,
   HubScope
 } from '@slayzone/transport/client'
 import { isLoopbackRunnerUrl } from '@slayzone/platform/hub-addr'
@@ -67,6 +68,14 @@ import { RunnersHubRows } from './RunnersHubRows'
 /** The shell's own view of a revoke target — `revoke` is the child's hub-bound thunk. */
 type RevokeTarget = { id: string; name: string; revoke: () => Promise<void> }
 
+/**
+ * How long to wait before the second post-restart refetch. The spawn returns as
+ * soon as the process exists; enrolling + reporting connected happens after, and
+ * `runners.list` does not poll — so without this the table would sit on
+ * "Disconnected" until something else invalidated it.
+ */
+const RECONNECT_SETTLE_MS = 2000
+
 /** A minted token plus where it points, so the dialog can warn about loopback. */
 type MintedToken = {
   token: string
@@ -90,6 +99,10 @@ export function RunnersSettingsTab() {
   const [minting, setMinting] = useState(false)
   const [minted, setMinted] = useState<MintedToken | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<RevokeTarget | null>(null)
+  // Restart of the LOCAL runner (the app's own supervised child). Confirm-gated:
+  // it stops every agent pty on this machine.
+  const [restartOpen, setRestartOpen] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   // Per-hub row counts, so the header total is the UNION rather than one hub's.
   const [counts, setCounts] = useState<Record<string, number>>({})
   // Bumped after a mint so every hub's child refetches its own list.
@@ -102,6 +115,50 @@ export function RunnersSettingsTab() {
   const onRevokeRequest = useCallback((target: RevokeTarget) => {
     setRevokeTarget(target)
   }, [])
+
+  // Plain functions, not useCallback: unlike `onCount` these are only click
+  // handlers — nothing downstream puts them in a dependency array.
+  const onRestartRequest = (): void => setRestartOpen(true)
+
+  /**
+   * Restart (or first-start) the app's own supervised runner.
+   *
+   * `electronBootstrap` rather than tRPC on purpose: the runner is a child of the
+   * MAIN process, not of the hub. The hub can see the runner's registry row but
+   * has no handle on the process, so only the desktop bridge can cycle it — and
+   * on the Chromium fork, which does not spawn it, the shim answers "not
+   * supported" and this surfaces as an ordinary error toast.
+   *
+   * The runner re-dials asynchronously after the spawn, so one immediate refetch
+   * would always paint "Disconnected". `runners.list` does not poll, hence the
+   * second, delayed bump.
+   */
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (settleTimer.current) clearTimeout(settleTimer.current)
+    },
+    []
+  )
+
+  const runRestart = useCallback(async (): Promise<void> => {
+    setRestarting(true)
+    try {
+      const result = await electronBootstrap.restartLocalRunner()
+      if (result.ok) toast.success('Local runner restarted')
+      else toast.error(`Restart failed: ${result.error ?? 'unknown error'}`)
+    } catch (err) {
+      toast.error(`Restart failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setRestarting(false)
+      setRevision((r) => r + 1)
+      if (settleTimer.current) clearTimeout(settleTimer.current)
+      settleTimer.current = setTimeout(() => setRevision((r) => r + 1), RECONNECT_SETTLE_MS)
+    }
+  }, [])
+
+  // Starting an absent runner destroys nothing, so it skips the confirm.
+  const onStartRequest = (): void => void runRestart()
 
   const total = multiHub
     ? hubs.reduce((sum, h) => sum + (counts[h.id] ?? 0), 0)
@@ -169,13 +226,17 @@ export function RunnersSettingsTab() {
   // connects and no clue why.
   const mintedIsLoopback = minted?.hubUrl !== undefined && isLoopbackRunnerUrl(minted.hubUrl)
 
-  const rowsFor = (hubId: string, hubLabel: string) => (
+  const rowsFor = (hubId: string, hubLabel: string, isLocalHub: boolean) => (
     <RunnersHubRows
       hubId={hubId}
       hubLabel={hubLabel}
       showHubColumn={multiHub}
       onCount={onCount}
       onRevokeRequest={onRevokeRequest}
+      isLocalHub={isLocalHub}
+      onRestartRequest={onRestartRequest}
+      onStartRequest={onStartRequest}
+      restarting={restarting}
       revision={revision}
     />
   )
@@ -218,10 +279,13 @@ export function RunnersSettingsTab() {
             {fed
               ? hubs.map((h) => (
                   <HubScope key={h.id} hubId={h.id}>
-                    {rowsFor(h.id, h.label)}
+                    {rowsFor(h.id, h.label, h.kind === 'local')}
                   </HubScope>
                 ))
-              : rowsFor(defaultHubId, '')}
+              : // No federation = the Chromium fork, whose single hub IS the local
+                // one. The restart still surfaces there; the shim answers with an
+                // error toast rather than a dead button.
+                rowsFor(defaultHubId, '', true)}
             {/* Add-runner row — collapsed to a button, expands into the label form. */}
             <tr className="border-border/60 border-b last:border-0" data-testid="runner-add-row">
               {addingRunner ? (
@@ -347,6 +411,33 @@ export function RunnersSettingsTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Restarting the local runner is not like restarting the hub: every agent
+          pty on this machine is a DIRECT CHILD of that process, so confirm. */}
+      <AlertDialog open={restartOpen} onOpenChange={setRestartOpen}>
+        <AlertDialogContent data-testid="runner-local-restart-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restart local runner</AlertDialogTitle>
+            <AlertDialogDescription>
+              Every agent and terminal running on this machine stops immediately — they are all
+              child processes of the runner. The runner reconnects on its own, but running agents
+              do not resume and unsaved terminal state is lost. Runners on other machines are
+              unaffected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                void runRestart()
+              }}
+              data-testid="runner-local-restart-confirm"
+            >
+              Restart
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
         <AlertDialogContent>

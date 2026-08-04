@@ -1,8 +1,12 @@
 import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import { Button } from '@slayzone/ui'
-import { Trash2 } from 'lucide-react'
+// Leaf subpath, deliberately not `@slayzone/platform/slayzone-config`: that one
+// imports node:fs/node:path, which rollup externalizes out of the renderer bundle
+// and then fails to resolve. Same constant, browser-safe module.
+import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/runner-identity'
+import { Button, cn } from '@slayzone/ui'
+import { RotateCw, Trash2 } from 'lucide-react'
 
 /**
  * One hub's runner rows, inside that hub's `<HubScope>`.
@@ -21,6 +25,13 @@ import { Trash2 } from 'lucide-react'
  *
  * Renders ONLY `<tr>`s — it is mounted directly inside the shell's `<tbody>`, and
  * `HubScope` itself emits no DOM, so the table markup stays valid.
+ *
+ * THE LOCAL RUNNER is the one row this client can control as a PROCESS rather
+ * than as a registry entry: it is the app's own supervised child. So on the
+ * local hub only, its row carries a restart action, and its ABSENCE gets a row of
+ * its own — a local hub with no local runner cannot execute anything at all, and
+ * before this that state was reachable (boot-time join-token mint failure) with
+ * no way out but relaunching the app.
  */
 
 export interface RunnersHubRowsProps {
@@ -39,6 +50,18 @@ export interface RunnersHubRowsProps {
    * about hub routing.
    */
   onRevokeRequest: (target: { id: string; name: string; revoke: () => Promise<void> }) => void
+  /**
+   * This hub is the LOCAL one — i.e. its runners include the app's own supervised
+   * child, which is the only runner this client can restart. False for every
+   * remote hub: their machines' processes are not ours to cycle.
+   */
+  isLocalHub: boolean
+  /** Ask the shell to confirm restarting the local runner (it owns the dialog). */
+  onRestartRequest: () => void
+  /** Start a local runner that never came up. No confirm — nothing is running. */
+  onStartRequest: () => void
+  /** True while a restart/start is in flight, so the affordance can show it. */
+  restarting: boolean
   /** Bumped by the shell after a successful mint, so this hub refetches its list. */
   revision: number
 }
@@ -55,6 +78,10 @@ export function RunnersHubRows({
   showHubColumn,
   onCount,
   onRevokeRequest,
+  isLocalHub,
+  onRestartRequest,
+  onStartRequest,
+  restarting,
   revision
 }: RunnersHubRowsProps) {
   const trpc = useTRPC()
@@ -78,6 +105,13 @@ export function RunnersHubRows({
   useEffect(() => {
     onCount(hubId, runners.length)
   }, [hubId, runners.length, onCount])
+
+  // Only meaningful on the local hub. Gated on `isSuccess` so the first render
+  // (no data yet) doesn't flash "not running" at a perfectly healthy runner.
+  const localRunnerMissing =
+    isLocalHub &&
+    runnersQuery.isSuccess &&
+    !runners.some((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
 
   return (
     <>
@@ -106,6 +140,21 @@ export function RunnersHubRows({
           </td>
           <td className="text-muted-foreground py-2 pr-3 text-xs">{formatLastSeen(runner)}</td>
           <td className="py-2 text-right">
+            {/* The app's OWN supervised child — the one runner it can cycle as a
+                process. Restarting kills every agent pty on this machine, so the
+                shell gates it behind a confirm. */}
+            {isLocalHub && runner.name === DEFAULT_LOCAL_RUNNER_NAME && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={restarting}
+                title="Restart local runner (stops running agents + terminals; reconnects automatically)"
+                onClick={onRestartRequest}
+                data-testid="runner-local-restart"
+              >
+                <RotateCw className={cn('size-3.5', restarting && 'animate-spin')} />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -128,6 +177,37 @@ export function RunnersHubRows({
           </td>
         </tr>
       ))}
+      {/* No local runner on the local hub = nothing on this machine can execute:
+          agents, terminals and git work all run on runners. Reachable when the
+          boot-time join-token mint fails (diagnostic `local_runner.unspawned`),
+          which used to be recoverable only by relaunching the app. */}
+      {localRunnerMissing && (
+        <tr className="border-border/60 border-b" data-testid="runner-local-missing">
+          <td className="text-muted-foreground py-2 pr-3 font-medium">Local runner</td>
+          {showHubColumn && (
+            <td className="text-muted-foreground py-2 pr-3 text-xs">{hubLabel}</td>
+          )}
+          <td className="text-muted-foreground py-2 pr-3 font-mono text-xs">—</td>
+          <td className="text-muted-foreground py-2 pr-3 text-xs">—</td>
+          <td className="py-2 pr-3">
+            <span className="text-destructive text-xs font-medium">Not running</span>
+          </td>
+          <td className="text-muted-foreground py-2 pr-3 text-xs">—</td>
+          <td className="py-2 text-right">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={restarting}
+              title="Start the local runner — agents, terminals and git work all run on runners"
+              onClick={onStartRequest}
+              data-testid="runner-local-start"
+            >
+              {restarting ? <RotateCw className="mr-1 size-3.5 animate-spin" /> : null}
+              Start
+            </Button>
+          </td>
+        </tr>
+      )}
     </>
   )
 }
