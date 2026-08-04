@@ -9,6 +9,20 @@
  * "did the user type something" therefore has to tell the two apart first.
  */
 
+/**
+ * True when this write is the user pressing Esc — the interrupt key for
+ * claude-code and codex.
+ *
+ * Matches a bare ESC and the kitty CSI-u form (`CSI 27 [;mods[:event]] u`),
+ * which is what actually arrives once claude-code enables the kitty keyboard
+ * protocol. Anchored end-to-end: a write that merely *contains* an ESC byte is
+ * usually a mouse report, which is exactly the confusion this replaces.
+ */
+export function isInterruptKey(data: string): boolean {
+  if (data === '\x1b') return true
+  return /^\x1b\[27(?::\d+)*(?:;\d+(?::\d+)*)*u$/.test(data)
+}
+
 // SGR (1006) and SGR-Pixels (1016): CSI < Cb ; Cx ; Cy M|m. The dominant
 // encoding — 94.3% of observed ESC-bearing writes had exactly this shape.
 const SGR_MOUSE = /\x1b\[<\d{1,5};\d{1,5};\d{1,5}[Mm]/g

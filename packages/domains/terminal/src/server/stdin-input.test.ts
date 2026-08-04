@@ -3,12 +3,13 @@
  *
  * Run with: npx tsx packages/domains/terminal/src/server/stdin-input.test.ts
  *
- * These exist because "stdin contains an ESC byte" is not a useful signal: with
- * mouse tracking on (every agent TUI turns it on), the renderer writes an SGR
- * mouse report on every pointer move over the pane. Measured on a live session,
- * 94.3% of all ESC-bearing writes were mouse reports.
+ * Both functions exist because "stdin contains an ESC byte" is not a useful
+ * signal: with mouse tracking on (every agent TUI turns it on), the renderer
+ * writes an SGR mouse report on every pointer move over the pane. Measured on a
+ * live session, 94.3% of all ESC-bearing writes were mouse reports and 0.1%
+ * were the user's actual Esc key.
  */
-import { stripTerminalReports, appendInput, INPUT_BUFFER_MAX } from './stdin-input'
+import { isInterruptKey, stripTerminalReports, appendInput, INPUT_BUFFER_MAX } from './stdin-input'
 
 let passed = 0
 let failed = 0
@@ -37,6 +38,64 @@ function eq<T>(actual: T, expected: T, label?: string): void {
 // An SGR mouse report: CSI < Cb ; Cx ; Cy (M press/motion | m release).
 const sgr = (cb: number, x: number, y: number, rel = false): string =>
   `\x1b[<${cb};${x};${y}${rel ? 'm' : 'M'}`
+
+console.log('\nisInterruptKey')
+console.log('─'.repeat(40))
+
+test('a bare ESC is the interrupt key', () => {
+  eq(isInterruptKey('\x1b'), true)
+})
+
+test('kitty CSI-u encodes Escape as keycode 27', () => {
+  // Claude Code enables the kitty keyboard protocol, after which the Esc key
+  // never reaches stdin as a bare \x1b.
+  eq(isInterruptKey('\x1b[27u'), true)
+})
+
+test('kitty CSI-u Escape with a modifier still counts', () => {
+  eq(isInterruptKey('\x1b[27;1u'), true)
+  eq(isInterruptKey('\x1b[27;5u'), true)
+})
+
+test('kitty CSI-u Escape with an event-type subparam still counts', () => {
+  eq(isInterruptKey('\x1b[27;1:1u'), true)
+})
+
+test('an SGR mouse report is NOT the interrupt key', () => {
+  // The whole point: this is what was being counted as an Esc press.
+  eq(isInterruptKey(sgr(35, 80, 12)), false)
+  eq(isInterruptKey(sgr(0, 12, 34)), false)
+  eq(isInterruptKey(sgr(0, 12, 34, true)), false)
+})
+
+test('Alt+key word-nav is NOT the interrupt key', () => {
+  // The terminal client writes these itself for word-left / word-right.
+  eq(isInterruptKey('\x1bb'), false)
+  eq(isInterruptKey('\x1bf'), false)
+})
+
+test('arrow keys are NOT the interrupt key', () => {
+  eq(isInterruptKey('\x1b[A'), false)
+  eq(isInterruptKey('\x1b[B'), false)
+  eq(isInterruptKey('\x1b[C'), false)
+  eq(isInterruptKey('\x1b[D'), false)
+})
+
+test('focus reports are NOT the interrupt key', () => {
+  eq(isInterruptKey('\x1b[I'), false)
+  eq(isInterruptKey('\x1b[O'), false)
+})
+
+test('another kitty keycode is NOT the interrupt key', () => {
+  eq(isInterruptKey('\x1b[13u'), false, 'Enter')
+  eq(isInterruptKey('\x1b[270u'), false, 'must anchor, not prefix-match 27')
+})
+
+test('plain text and empty input are NOT the interrupt key', () => {
+  eq(isInterruptKey('hello'), false)
+  eq(isInterruptKey(''), false)
+  eq(isInterruptKey('\x1bhello'), false)
+})
 
 console.log('\nstripTerminalReports')
 console.log('─'.repeat(40))

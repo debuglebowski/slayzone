@@ -62,7 +62,7 @@ import {
 import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
 import { filterBufferData } from '../filter-buffer-data'
-import { appendInput } from '../stdin-input'
+import { isInterruptKey, appendInput } from '../stdin-input'
 import { shouldHonorDetectedError } from '../session-error-gate'
 import { resolveSpawnConversation } from '../spawn-conversation'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
@@ -2613,18 +2613,24 @@ export function writePty(sessionId: string, data: string): boolean {
   // cursor reports). The "user engaged" signal comes from the renderer's real
   // DOM events via `pty:touch`; the "agent blocked" signal comes from hooks.
 
-  // Observation only: ESC bytes in stdin are the user's interrupt key for
-  // claude-code (and codex). Log as a precise anchor so we can correlate
-  // user keystrokes against subsequent hook arrivals (or their absence).
-  // Pure passive — does NOT change state.
-  if (data.includes('\x1b')) {
+  // Observation only: the Esc key is the user's interrupt for claude-code (and
+  // codex). Log as a precise anchor so we can correlate user keystrokes against
+  // subsequent hook arrivals (or their absence). Pure passive — does NOT change
+  // state.
+  //
+  // Matched via `isInterruptKey`, NOT "contains an ESC byte": with mouse
+  // tracking on (every agent TUI enables it) the renderer writes an SGR mouse
+  // report on each pointer move over the pane, and those outnumbered real Esc
+  // presses 987:1 here — 55.7% of the whole diagnostics table was this one
+  // event logging mouse movement.
+  if (isInterruptKey(data)) {
     recordDiagnosticEvent({
       level: 'info',
       source: 'pty',
       event: 'pty.user_esc_input',
       sessionId,
       taskId: session.taskId,
-      message: 'esc-byte-written',
+      message: 'esc-key-written',
       payload: { currentState: session.state, mode: session.mode, bytes: data.length }
     })
   }
