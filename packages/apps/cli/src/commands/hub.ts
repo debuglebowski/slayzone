@@ -17,7 +17,7 @@
  * about. Foreground use is `npx @slayzone/hub` — the hub binary's only mode — so
  * no passthrough flag exists here.
  */
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, openSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
@@ -171,6 +171,35 @@ async function waitForHubGone(port: number, timeoutMs: number): Promise<boolean>
  * directory, the failure reporting. `creating` only affects wording and whether a
  * failed boot rolls the registration back.
  */
+/**
+ * SIGTERM a child we spawned, escalating to SIGKILL if it does not go quietly.
+ * Best-effort: the caller is already on a failure path and must not be blocked by
+ * a wedged child, so this always resolves.
+ */
+async function terminateChild(child: ChildProcess, graceMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  await new Promise<void>((resolve) => {
+    const hard = setTimeout(() => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        /* already gone */
+      }
+      resolve()
+    }, graceMs)
+    child.once('exit', () => {
+      clearTimeout(hard)
+      resolve()
+    })
+    try {
+      child.kill('SIGTERM')
+    } catch {
+      clearTimeout(hard)
+      resolve()
+    }
+  })
+}
+
 async function launchHub(args: {
   name: string
   root: string
@@ -219,7 +248,16 @@ async function launchHub(args: {
     })
     child.unref()
     const started = await waitForHub(findIt, 20_000)
-    if (!started) failWithLog('hub', name, logs.out, 'did not come up within 20s')
+    if (!started) {
+      // Kill what we spawned before declaring failure. This backend has NO service
+      // manager to own the child, and `failWithLog` exits the process — so a hub
+      // left running here belongs to nobody. Worse, the reason it wasn't found is
+      // usually that it is undiscoverable (an OS-assigned port, a bind the sweep
+      // can't reach), which is exactly the state in which `hub stop <name>` cannot
+      // clean it up either. Left unkilled these accumulated for days.
+      await terminateChild(child, 3_000)
+      failWithLog('hub', name, logs.out, 'did not come up within 20s')
+    }
     console.log(`Hub "${started.name}" started on port ${started.port} (pid ${started.pid}).`)
     console.log(`  Root:  ${shortenPath(root)}`)
     console.log(`  Logs:  ${shortenPath(logDir)}`)

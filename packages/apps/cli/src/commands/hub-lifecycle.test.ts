@@ -990,6 +990,31 @@ async function main(): Promise<void> {
     })
   } finally {
     for (const h of hubs) await h.stop()
+
+    // Runs AFTER teardown, so a survivor here is genuinely stranded — not merely
+    // still-running mid-suite.
+    //
+    // `hub create` starts the hub DETACHED. A case that only asserts on the
+    // config.json/stdout `create` produced still leaves a live hub, and one bound
+    // to an OS-assigned port is undiscoverable — so `hub stop <name>` cannot reach
+    // it and the loop above never sees it. That stranded ~3 hubs per run; 25 were
+    // found alive on one machine, the oldest four days old.
+    //
+    // Scoped to THIS process's name prefix, so a developer's or CI's real hubs —
+    // and strays from an earlier run — are never even inspected.
+    await test('the suite strands no hub process', async () => {
+      const strays: string[] = []
+      const pgrep = spawnSync('pgrep', ['-f', 'hub/dist/bin\\.cjs'], { encoding: 'utf8' })
+      for (const line of (pgrep.stdout ?? '').split('\n')) {
+        const pid = Number.parseInt(line.trim(), 10)
+        if (!Number.isInteger(pid) || pid <= 0) continue
+        const env = spawnSync('ps', ['eww', '-p', String(pid)], { encoding: 'utf8' }).stdout ?? ''
+        const name = /\sSLAYZONE_HUB_NAME=(\S+)/.exec(env)?.[1]
+        if (name?.startsWith(NAME_PREFIX)) strays.push(`${name} (pid ${pid})`)
+      }
+      assertEq(strays.join(', '), '', 'no hub outlived the case that created it')
+    })
+
     if (TMP) rmSync(TMP, { recursive: true, force: true })
   }
 
