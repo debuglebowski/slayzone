@@ -62,6 +62,7 @@ import {
 import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
 import { filterBufferData } from '../filter-buffer-data'
+import { appendInput } from '../stdin-input'
 import { shouldHonorDetectedError } from '../session-error-gate'
 import { resolveSpawnConversation } from '../spawn-conversation'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
@@ -2628,8 +2629,12 @@ export function writePty(sessionId: string, data: string): boolean {
     })
   }
 
-  // Buffer input to detect commands
-  session.inputBuffer += data
+  // Buffer input to detect commands. Mouse/focus reports are dropped and the
+  // result is capped: the buffer resets only on submit-Enter, so a pane the
+  // user hovers over but never submits in used to accumulate reports for the
+  // life of the session — and every consumer below (submitted-line emit,
+  // `markSessionUserInput`, the `/status` scan) read that noise as typing.
+  session.inputBuffer = appendInput(session.inputBuffer, data)
 
   // On Enter: transition TUI to 'working' if adapter opts in. Submit-Enter
   // detection must include the kitty CSI-u encoding — once Claude Code enables

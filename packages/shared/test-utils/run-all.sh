@@ -224,6 +224,7 @@ run_test_electron_strict_loader packages/domains/automations/src/server/engine.t
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
 run_test packages/domains/terminal/src/server/filter-buffer-data.test.ts
+run_test packages/domains/terminal/src/server/stdin-input.test.ts
 # Wave-3 remote-runner per-PTY env (loopback vs hub URL + scoped token).
 run_test packages/domains/terminal/src/server/mcp-env.test.ts
 run_test packages/domains/terminal/src/client/webgl-loader.test.ts
