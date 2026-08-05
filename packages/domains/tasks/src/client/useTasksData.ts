@@ -12,6 +12,7 @@ import {
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
+import { toast } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
 
 function hasTaskIdentity(task: Task | null | undefined): task is Task {
@@ -1043,7 +1044,17 @@ export function useTasksData(): UseTasksDataReturn {
       })
       clientForGroup(id)
         .projectGroups.update.mutate({ id, collapsed })
-        .catch(() => setProjectGroups(snap))
+        .catch((err) => {
+          // Silent rollback hid a real failure mode: the optimistic state stuck
+          // on screen looking correct until the next `loadGroups()` (mount /
+          // onTasksChanged / refreshData) re-read SQLite and snapped the folder
+          // back — e.g. after a sleep-wake WS reconnect. Surface it instead.
+          console.error('[projectGroups] collapse write failed', { id, collapsed, err })
+          toast(
+            `Couldn't save folder ${collapsed ? 'collapse' : 'expand'}: ${err instanceof Error ? err.message : String(err)}`
+          )
+          setProjectGroups(snap)
+        })
     },
     [clientForGroup]
   )

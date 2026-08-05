@@ -121,6 +121,10 @@ interface TabState {
   treeGroupPinned: boolean
   // Show group headers for groups with zero tasks (respecting treeStatusFilter).
   treeShowEmptyGroups: boolean
+  // projectId → whether that project's row is expanded in the tree view. Lives
+  // here rather than in TreeView component state so a remount (renderer reload,
+  // wake from sleep) doesn't silently reset every project to collapsed.
+  treeOpenProjects: Record<string, boolean>
   // Task-detail header layout.
   taskHeaderPanelMode: TaskHeaderPanelMode
   taskHeaderPanelAlign: TaskHeaderAlign
@@ -163,6 +167,7 @@ interface TabState {
   setTreeGroupTemporary: (group: boolean) => void
   setTreeGroupPinned: (group: boolean) => void
   setTreeShowEmptyGroups: (show: boolean) => void
+  setTreeProjectOpen: (projectId: string, open: boolean) => void
   setTaskHeaderPanelMode: (mode: TaskHeaderPanelMode) => void
   setTaskHeaderPanelAlign: (align: TaskHeaderAlign) => void
   setTaskHeaderTitleAlign: (align: TaskHeaderAlign) => void
@@ -209,6 +214,7 @@ interface TabState {
     treeGroupTemporary?: boolean
     treeGroupPinned?: boolean
     treeShowEmptyGroups?: boolean
+    treeOpenProjects?: Record<string, boolean>
     taskHeaderPanelMode?: TaskHeaderPanelMode
     taskHeaderPanelAlign?: TaskHeaderAlign
     taskHeaderTitleAlign?: TaskHeaderAlign
@@ -271,6 +277,7 @@ export const useTabStore = create<TabState>()(
     treeGroupTemporary: true,
     treeGroupPinned: true,
     treeShowEmptyGroups: false,
+    treeOpenProjects: {},
     taskHeaderPanelMode: 'tabs',
     taskHeaderPanelAlign: 'right',
     taskHeaderTitleAlign: 'left',
@@ -339,6 +346,9 @@ export const useTabStore = create<TabState>()(
     setTreeGroupTemporary: (group) => set({ treeGroupTemporary: group }),
     setTreeGroupPinned: (group) => set({ treeGroupPinned: group }),
     setTreeShowEmptyGroups: (show) => set({ treeShowEmptyGroups: show }),
+
+    setTreeProjectOpen: (projectId, open) =>
+      set((s) => ({ treeOpenProjects: { ...s.treeOpenProjects, [projectId]: open } })),
     setTaskHeaderPanelMode: (mode) => set({ taskHeaderPanelMode: mode }),
     setTaskHeaderPanelAlign: (align) => set({ taskHeaderPanelAlign: align }),
     setTaskHeaderTitleAlign: (align) => set({ taskHeaderTitleAlign: align }),
@@ -542,6 +552,10 @@ export const useTabStore = create<TabState>()(
         treeGroupPinned: typeof state.treeGroupPinned === 'boolean' ? state.treeGroupPinned : true,
         treeShowEmptyGroups:
           typeof state.treeShowEmptyGroups === 'boolean' ? state.treeShowEmptyGroups : false,
+        treeOpenProjects:
+          state.treeOpenProjects && typeof state.treeOpenProjects === 'object'
+            ? state.treeOpenProjects
+            : {},
         taskHeaderPanelMode: state.taskHeaderPanelMode === 'menu' ? 'menu' : 'tabs',
         taskHeaderPanelAlign: state.taskHeaderPanelAlign === 'left' ? 'left' : 'right',
         taskHeaderTitleAlign: state.taskHeaderTitleAlign === 'right' ? 'right' : 'left',
@@ -619,6 +633,7 @@ useTabStore.subscribe(
     treeGroupTemporary: state.treeGroupTemporary,
     treeGroupPinned: state.treeGroupPinned,
     treeShowEmptyGroups: state.treeShowEmptyGroups,
+    treeOpenProjects: state.treeOpenProjects,
     taskHeaderPanelMode: state.taskHeaderPanelMode,
     taskHeaderPanelAlign: state.taskHeaderPanelAlign,
     taskHeaderTitleAlign: state.taskHeaderTitleAlign,

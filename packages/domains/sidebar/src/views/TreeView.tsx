@@ -458,9 +458,10 @@ export function TreeView({
     return set
   }, [tasks, openTabTaskIds, sessionTaskIds])
 
-  const [openProjects, setOpenProjects] = useState<Record<string, boolean>>(() =>
-    selectedProjectId ? { [selectedProjectId]: true } : {}
-  )
+  // Persisted in the tab store (not component state) so a remount — renderer
+  // reload, wake from sleep — doesn't reset every project row to collapsed.
+  const openProjects = useTabStore((s) => s.treeOpenProjects)
+  const setTreeProjectOpen = useTabStore((s) => s.setTreeProjectOpen)
 
   const [showAll, setShowAll] = useState(false)
 
@@ -1239,7 +1240,9 @@ export function TreeView({
   ) => {
     const projectTasks = tasksByProject.get(project.id) ?? []
     const groups = rootGroupsByProject.get(project.id) ?? []
-    const isOpen = openProjects[project.id] ?? false
+    // No stored preference yet → fall back to the old mount-time default of
+    // "the selected project is open". An explicit stored value always wins.
+    const isOpen = openProjects[project.id] ?? project.id === selectedProjectId
     const isContextActive = selectedProjectId === project.id && activeView === 'context'
     const isHomeActive =
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
@@ -1301,7 +1304,7 @@ export function TreeView({
             ref={setNodeRef}
             style={style}
             open={isOpen}
-            onOpenChange={(open) => setOpenProjects((s) => ({ ...s, [project.id]: open }))}
+            onOpenChange={(open) => setTreeProjectOpen(project.id, open)}
             className="rounded-lg overflow-hidden bg-surface-1"
           >
             <div
