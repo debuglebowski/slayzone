@@ -1972,8 +1972,11 @@ app
     // graph off the hot import path. `installNotifyScript` writes under
     // getSlayzoneHomeDir() (honors SLAYZONE_ROOT) so E2E stays sandboxed.
     setReinstallHooks(async () => {
-      const { installNotifyScript } = await import('./agent-hooks/notify-script-installer')
-      await installNotifyScript()
+      const [{ installNotifyScript }, { NOTIFY_SCRIPT_SOURCE }] = await Promise.all([
+        import('@slayzone/platform/agent-hooks'),
+        import('./agent-hooks/sources')
+      ])
+      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE })
     })
     // Idle-close (hibernation) config — read live each sweep tick. Raw `=== '1'`
     // (NOT isLabEnabled, which defaults ON in dev) keeps it strictly opt-in.
@@ -2584,29 +2587,36 @@ app
               return
             }
           }
-          const [
-            { installNotifyScript },
-            { installClaudeHooks },
-            { installCodexHooks, uninstallCodexWrapper },
-            { installGeminiHooks },
-            { installAntigravityHooks },
-            { installOpencodePlugin }
-          ] = await Promise.all([
-            import('./agent-hooks/notify-script-installer'),
-            import('./agent-hooks/claude-hook-installer'),
-            import('./agent-hooks/codex-hook-installer'),
-            import('./agent-hooks/gemini-hook-installer'),
-            import('./agent-hooks/antigravity-hook-installer'),
-            import('./agent-hooks/opencode-plugin-installer')
-          ])
-          const { path: scriptPath } = await installNotifyScript()
+          // One import now: the six installers were six sibling modules under
+          // this app and are one shared entrypoint since the runner started
+          // needing them too.
+          const {
+            installNotifyScript,
+            installClaudeHooks,
+            installCodexHooks,
+            uninstallCodexWrapper,
+            installGeminiHooks,
+            installAntigravityHooks,
+            installOpencodePlugin
+          } = await import('@slayzone/platform/agent-hooks')
+          // File bodies come from the app's own `?raw` seam — the shared
+          // installers take them as input so they carry no bundler syntax.
+          const { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } = await import(
+            './agent-hooks/sources'
+          )
+          const { path: scriptPath } = await installNotifyScript({
+            source: NOTIFY_SCRIPT_SOURCE
+          })
           await installClaudeHooks({ scriptPath })
           await installCodexHooks({ scriptPath })
           // Remove the legacy ~/.slayzone/bin/codex bash wrapper from prior installs.
           await uninstallCodexWrapper()
           await installGeminiHooks({ scriptPath })
           await installAntigravityHooks({ scriptPath })
-          await installOpencodePlugin({ notifyPath: scriptPath })
+          await installOpencodePlugin({
+            notifyPath: scriptPath,
+            source: OPENCODE_PLUGIN_SOURCE
+          })
           logBoot('agent hooks installed')
         } catch (err) {
           console.error('[agent-hooks] install failed:', err)

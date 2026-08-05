@@ -1,6 +1,7 @@
-import fs from 'fs/promises'
-import path from 'path'
-import { getClaudeSettingsPath, writeFileIfChanged } from '@slayzone/platform'
+
+
+import { getClaudeSettingsPath } from '../dirs'
+import { updateFileAtomically } from '../fs-utils'
 import { formatHookCommand } from './hook-paths'
 
 const MARKER_KEY = '_slayzoneManaged'
@@ -66,7 +67,12 @@ export interface InstallClaudeHooksResult {
  *     a) inner hook command containing `notify.sh`, OR
  *     b) inner hook carries `_slayzoneManaged: true` marker.
  *   This handles users who hand-edit or relocate the script.
- * - Atomic write via `writeFileIfChanged` (no-op if content unchanged).
+ * - The read, the merge and the write are ONE guarded cycle
+ *   (`updateFileAtomically`). This file is shared with the user and with any other
+ *   SlayZone process on the machine — a standalone runner installs the same hooks
+ *   — so computing the merge from a snapshot and writing it back separately would
+ *   silently drop whatever a peer committed in between. On contention the merge is
+ *   re-run against the peer's result instead.
  */
 export async function installClaudeHooks(
   opts: InstallClaudeHooksOpts
@@ -74,45 +80,55 @@ export async function installClaudeHooks(
   const target = opts.settingsPath ?? getClaudeSettingsPath()
   const events = opts.events ?? CLAUDE_HOOK_EVENTS
 
-  let settings: ClaudeSettings
-  try {
-    const raw = await fs.readFile(target, 'utf8')
-    try {
-      const parsed = JSON.parse(raw)
+  // Set by the merge below; a decline (`null`) leaves the refusal reason in place.
+  let result: InstallClaudeHooksResult = { installed: false, eventsAdded: [], reason: 'unwritten' }
+
+  await updateFileAtomically(target, (current) => {
+    let settings: ClaudeSettings
+    if (current === null) {
+      settings = {}
+    } else {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(current.toString('utf8'))
+      } catch {
+        result = {
+          installed: false,
+          eventsAdded: [],
+          reason: 'settings.json is not valid JSON — refusing to overwrite'
+        }
+        return null
+      }
       if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { installed: false, eventsAdded: [], reason: 'settings.json is not a JSON object' }
+        result = {
+          installed: false,
+          eventsAdded: [],
+          reason: 'settings.json is not a JSON object'
+        }
+        return null
       }
       settings = parsed as ClaudeSettings
-    } catch {
-      return {
-        installed: false,
-        eventsAdded: [],
-        reason: 'settings.json is not valid JSON — refusing to overwrite'
-      }
     }
-  } catch (err: unknown) {
-    if (!isENOENT(err)) throw err
-    settings = {}
-  }
 
-  const hooks = (settings.hooks ??= {})
-  const added: string[] = []
+    const hooks = (settings.hooks ??= {})
+    const added: string[] = []
 
-  for (const event of events) {
-    const list = (hooks[event] ??= [])
-    const filtered = list
-      .map(stripManagedFromEntry)
-      .filter((entry): entry is ClaudeHookEntry => entry !== null && entry.hooks.length > 0)
-    const managedEntry = buildManagedEntry(event, opts.scriptPath)
-    filtered.push(managedEntry)
-    hooks[event] = filtered
-    added.push(event)
-  }
+    for (const event of events) {
+      const list = (hooks[event] ??= [])
+      const filtered = list
+        .map(stripManagedFromEntry)
+        .filter((entry): entry is ClaudeHookEntry => entry !== null && entry.hooks.length > 0)
+      const managedEntry = buildManagedEntry(event, opts.scriptPath)
+      filtered.push(managedEntry)
+      hooks[event] = filtered
+      added.push(event)
+    }
 
-  await fs.mkdir(path.dirname(target), { recursive: true })
-  await writeFileIfChanged(target, JSON.stringify(settings, null, 2) + '\n')
+    result = { installed: true, eventsAdded: added }
+    return JSON.stringify(settings, null, 2) + '\n'
+  })
 
-  return { installed: true, eventsAdded: added }
+  return result
 }
 
 function buildManagedEntry(event: string, scriptPath: string): ClaudeHookEntry {
@@ -152,8 +168,4 @@ export function isManagedSlayzoneHook(hook: unknown): boolean {
   if (h[MARKER_KEY] === true) return true
   const cmd = typeof h.command === 'string' ? h.command : ''
   return cmd.includes('.slayzone/hooks/notify.sh') || cmd.includes('/slayzone/hooks/notify.sh')
-}
-
-function isENOENT(err: unknown): boolean {
-  return typeof err === 'object' && err != null && (err as { code?: string }).code === 'ENOENT'
 }

@@ -1,15 +1,17 @@
-import fs from 'fs/promises'
 import path from 'path'
-import { getSlayzoneHomeDir, writeFileIfChanged } from '@slayzone/platform'
-// Vite resolves `?raw` to the file contents as a string at build time. Static
-// import (not dynamic) so the script content lands in this module's chunk and
-// no runtime file lookup is required in the packaged app.
-// @ts-expect-error -- ?raw is a Vite runtime feature, not a typed module.
-import notifyScriptSource from '@slayzone/hooks/notify.sh?raw'
+import { getSlayzoneHomeDir } from '../dirs'
+import { updateFileAtomically } from '../fs-utils'
 
 export interface InstallNotifyScriptOpts {
-  /** Override script source. Defaults to the bundled `notify.sh`. Tests inject a fixture. */
-  source?: string
+  /**
+   * The `notify.sh` body to install. REQUIRED, and deliberately not defaulted
+   * here: the content is inlined by the CALLER's bundler (the desktop app via
+   * Vite `?raw`, the standalone runner via esbuild's `text` loader), so this
+   * module stays free of any bundler-specific import syntax and can be shared by
+   * both. A runtime file read is not an option — `@slayzone/hooks` is private
+   * and never published, and the runner ships as one self-contained bundle.
+   */
+  source: string
   /** Override target path. Defaults to `~/.slayzone/hooks/notify.sh`. */
   targetPath?: string
 }
@@ -28,17 +30,6 @@ export function parseNotifyVersion(script: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
-async function readExisting(target: string): Promise<string | null> {
-  try {
-    return await fs.readFile(target, 'utf8')
-  } catch (err: unknown) {
-    if (typeof err === 'object' && err != null && (err as { code?: string }).code === 'ENOENT') {
-      return null
-    }
-    throw err
-  }
-}
-
 /**
  * Write the agent lifecycle notify script to `~/.slayzone/hooks/notify.sh`
  * with mode 0755.
@@ -54,27 +45,37 @@ async function readExisting(target: string): Promise<string | null> {
  *
  * So: write only when the incoming version is >= the on-disk version. Highest
  * version wins regardless of release channel or boot order. Below equality it still
- * defers to `writeFileIfChanged` for byte-level idempotency (equal-version
- * content tweaks in dev still land; a genuine no-op stays a no-op).
+ * gets byte-level idempotency (equal-version content tweaks in dev still land; a
+ * genuine no-op stays a no-op).
+ *
+ * The gate runs INSIDE `updateFileAtomically`'s merge, which is what makes it
+ * sound. A gate is only as good as the read it judges: comparing versions, then
+ * writing in a separate step, decides "mine is newer" against a snapshot a peer
+ * may already have replaced — so the downgrade this function exists to prevent
+ * could still happen through the gap. Now the comparison and the replacement are
+ * one guarded cycle, and a peer that commits first forces the gate to be
+ * re-evaluated against what is actually on disk. This matters more than it used
+ * to: the desktop app is no longer the only installer — a standalone runner
+ * installs the same shared script on the same machine.
  *
  * Returns the absolute target path so the agent hook installers can wire it.
  */
 export async function installNotifyScript(
-  opts: InstallNotifyScriptOpts = {}
+  opts: InstallNotifyScriptOpts
 ): Promise<{ path: string; changed: boolean }> {
   const target = opts.targetPath ?? path.join(getSlayzoneHomeDir(), 'hooks', 'notify.sh')
-  const source =
-    opts.source ??
-    (typeof notifyScriptSource === 'string' ? notifyScriptSource : String(notifyScriptSource))
+  const source = opts.source
+  const incomingV = parseNotifyVersion(source)
 
-  const existing = await readExisting(target)
-  if (existing !== null) {
-    const incomingV = parseNotifyVersion(source)
-    const existingV = parseNotifyVersion(existing)
-    // Strict downgrade → refuse: preserve the newer on-disk script untouched.
-    if (incomingV < existingV) return { path: target, changed: false }
-  }
-
-  const changed = await writeFileIfChanged(target, source, 0o755)
+  const changed = await updateFileAtomically(
+    target,
+    (current) => {
+      if (current === null) return source
+      // Strict downgrade → decline: preserve the newer on-disk script untouched.
+      if (incomingV < parseNotifyVersion(current.toString('utf8'))) return null
+      return source
+    },
+    { mode: 0o755 }
+  )
   return { path: target, changed }
 }

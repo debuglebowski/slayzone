@@ -5,8 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { processAgentHook } from '@slayzone/transport/server'
-import { formatHookCommand } from './hook-paths'
-import { installNotifyScript } from './notify-script-installer'
+import { formatHookCommand, installNotifyScript } from '@slayzone/platform/agent-hooks'
+import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
 
 /**
  * STITCHED round-trip: the REAL benign notify.sh (run via bash, exactly as an
@@ -131,7 +131,7 @@ async function withInstalledScript(
 ): Promise<void> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-rt-'))
   tmpDirs.push(root)
-  const { path: installedAt } = await installNotifyScript({
+  const { path: installedAt } = await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, 
     targetPath: path.join(root, 'hooks', 'notify.sh')
   })
   await fn(formatHookCommand(installedAt))

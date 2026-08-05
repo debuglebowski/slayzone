@@ -637,6 +637,9 @@ importers:
 
   packages/apps/runner:
     dependencies:
+      '@slayzone/hooks':
+        specifier: workspace:*
+        version: link:../../shared/hooks
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform

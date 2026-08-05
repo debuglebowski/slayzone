@@ -4,8 +4,8 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { formatHookCommand } from './hook-paths'
-import { installNotifyScript } from './notify-script-installer'
+import { formatHookCommand, installNotifyScript } from '@slayzone/platform/agent-hooks'
+import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
 
 /**
  * End-to-end regression test for issue #88.
@@ -66,7 +66,7 @@ describe('hook execution (issue #88)', () => {
     tmpDirs.push(root)
     const scriptPath = path.join(root, 'hooks', 'notify.sh')
 
-    const { path: installedAt } = await installNotifyScript({ targetPath: scriptPath })
+    const { path: installedAt } = await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: scriptPath })
     expect(fs.existsSync(installedAt)).toBe(true)
 
     const server = captureOnePost()
@@ -122,7 +122,7 @@ describe('hook execution (issue #88)', () => {
     tmpDirs.push(root)
     const scriptPath = path.join(root, 'hooks', 'notify.sh')
 
-    const { path: installedAt } = await installNotifyScript({ targetPath: scriptPath })
+    const { path: installedAt } = await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: scriptPath })
     const server = captureOnePost()
     try {
       const hookUrl = await server.url
@@ -155,7 +155,7 @@ describe('hook execution (issue #88)', () => {
   test('falls back to the retired SLAYZONE_HOOK_CONTEXT when the new var is unset', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-ctx-fallback-'))
     tmpDirs.push(root)
-    const { path: installedAt } = await installNotifyScript({
+    const { path: installedAt } = await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, 
       targetPath: path.join(root, 'hooks', 'notify.sh')
     })
     const server = captureOnePost()
@@ -182,7 +182,7 @@ describe('hook execution (issue #88)', () => {
   test('prefers SLAYZONE_AGENT_HOOK_CONTEXT when both vars are set', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-ctx-precedence-'))
     tmpDirs.push(root)
-    const { path: installedAt } = await installNotifyScript({
+    const { path: installedAt } = await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, 
       targetPath: path.join(root, 'hooks', 'notify.sh')
     })
     const server = captureOnePost()

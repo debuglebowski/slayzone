@@ -49,7 +49,7 @@ export {
   LOOPBACK_HOSTS,
   type HubBindAddress
 } from './hub-addr'
-export { writeFileIfChanged } from './fs-utils'
+export { writeFileIfChanged, updateFileAtomically } from './fs-utils'
 export {
   migrateXdgIfNeeded,
   migrateCliBinIfNeeded,

@@ -1,8 +1,7 @@
-import fs from 'fs/promises'
-import path from 'path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { getGeminiSettingsPath, writeFileIfChanged } from '@slayzone/platform'
+import { getGeminiSettingsPath } from '../dirs'
+import { updateFileAtomically } from '../fs-utils'
 import { formatHookCommand } from './hook-paths'
 
 const execFileAsync = promisify(execFile)
@@ -89,7 +88,7 @@ async function isGeminiInstalled(): Promise<boolean> {
  * - SlayZone-managed entries identified by `_slayzoneManaged: true` marker
  *   or substring match on `notify.sh`.
  * - `AfterTool` gets `matcher: '*'`; lifecycle events have no matcher.
- * - Atomic write via `writeFileIfChanged` (no-op if unchanged).
+ * - Read+merge+write is one guarded cycle via `updateFileAtomically`.
  */
 export async function installGeminiHooks(
   opts: InstallGeminiHooksOpts
@@ -108,45 +107,52 @@ export async function installGeminiHooks(
   const target = opts.settingsPath ?? getGeminiSettingsPath()
   const events = opts.events ?? GEMINI_HOOK_EVENTS
 
-  let settings: GeminiSettings
-  try {
-    const raw = await fs.readFile(target, 'utf8')
-    try {
-      const parsed = JSON.parse(raw)
+  // Read + merge + write as ONE guarded cycle — see installClaudeHooks for why a
+  // separate read and write silently drops a concurrent peer's entries.
+  let result: InstallGeminiHooksResult = { installed: false, eventsAdded: [], reason: 'unwritten' }
+
+  await updateFileAtomically(target, (current) => {
+    let settings: GeminiSettings
+    if (current === null) {
+      settings = {}
+    } else {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(current.toString('utf8'))
+      } catch {
+        result = {
+          installed: false,
+          eventsAdded: [],
+          reason: 'settings.json is not valid JSON — refusing to overwrite'
+        }
+        return null
+      }
       if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { installed: false, eventsAdded: [], reason: 'settings.json is not a JSON object' }
+        result = { installed: false, eventsAdded: [], reason: 'settings.json is not a JSON object' }
+        return null
       }
       settings = parsed as GeminiSettings
-    } catch {
-      return {
-        installed: false,
-        eventsAdded: [],
-        reason: 'settings.json is not valid JSON — refusing to overwrite'
-      }
     }
-  } catch (err: unknown) {
-    if (!isENOENT(err)) throw err
-    settings = {}
-  }
 
-  const hooks = (settings.hooks ??= {})
-  const added: string[] = []
+    const hooks = (settings.hooks ??= {})
+    const added: string[] = []
 
-  for (const event of events) {
-    const list = (hooks[event] ??= [])
-    const filtered = list
-      .map(stripManagedFromEntry)
-      .filter((entry): entry is GeminiHookEntry => entry !== null && entry.hooks.length > 0)
-    const managedEntry = buildManagedEntry(event, opts.scriptPath)
-    filtered.push(managedEntry)
-    hooks[event] = filtered
-    added.push(event)
-  }
+    for (const event of events) {
+      const list = (hooks[event] ??= [])
+      const filtered = list
+        .map(stripManagedFromEntry)
+        .filter((entry): entry is GeminiHookEntry => entry !== null && entry.hooks.length > 0)
+      const managedEntry = buildManagedEntry(event, opts.scriptPath)
+      filtered.push(managedEntry)
+      hooks[event] = filtered
+      added.push(event)
+    }
 
-  await fs.mkdir(path.dirname(target), { recursive: true })
-  await writeFileIfChanged(target, JSON.stringify(settings, null, 2) + '\n')
+    result = { installed: true, eventsAdded: added }
+    return JSON.stringify(settings, null, 2) + '\n'
+  })
 
-  return { installed: true, eventsAdded: added }
+  return result
 }
 
 function buildManagedEntry(event: string, scriptPath: string): GeminiHookEntry {
@@ -177,8 +183,4 @@ export function isManagedSlayzoneHook(hook: unknown): boolean {
   if (h[MARKER_KEY] === true) return true
   const cmd = typeof h.command === 'string' ? h.command : ''
   return cmd.includes('.slayzone/hooks/notify.sh') || cmd.includes('/slayzone/hooks/notify.sh')
-}
-
-function isENOENT(err: unknown): boolean {
-  return typeof err === 'object' && err != null && (err as { code?: string }).code === 'ENOENT'
 }

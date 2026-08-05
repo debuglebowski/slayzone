@@ -19,7 +19,8 @@
     "./hub-discovery": "./src/hub-discovery.ts",
     "./paths": "./src/paths.ts",
     "./service-unit": "./src/service-unit.ts",
-    "./join-token": "./src/join-token.ts"
+    "./join-token": "./src/join-token.ts",
+    "./agent-hooks": "./src/agent-hooks/index.ts"
   },
   "scripts": {
     "test": "vitest run",

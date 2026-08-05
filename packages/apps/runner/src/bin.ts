@@ -172,6 +172,21 @@ async function main(): Promise<void> {
     process.stdout.write(`[runner] ${message}${suffix}\n`)
   }
 
+  // Agent lifecycle hooks, BEFORE accepting any work. This runner spawns agents,
+  // and their status (running spinner, unread marker) is reported only through
+  // these hooks — a box that never runs the desktop app would otherwise have none
+  // installed, and every agent here would look permanently idle. Awaited so no pty
+  // can start against a half-written hook file; best-effort inside, so a failure
+  // degrades status reporting without stopping the runner.
+  //
+  // Skipped when SUPERVISED: the Electron host installs the very same files from
+  // the very same shared installers during its own boot, so doing it again here
+  // would be two writers racing for no gain.
+  if (process.env.SLAYZONE_SUPERVISED !== '1') {
+    const { installAgentHooks } = await import('./agent-hooks')
+    await installAgentHooks(log)
+  }
+
   const handle = startRunner(config, {
     log,
     onShutdown: () => {

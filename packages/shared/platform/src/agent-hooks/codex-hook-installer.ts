@@ -2,7 +2,8 @@ import fs from 'fs/promises'
 import path from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { getCodexHooksPath, getSlayzoneHomeDir, writeFileIfChanged } from '@slayzone/platform'
+import { getCodexHooksPath, getSlayzoneHomeDir } from '../dirs'
+import { updateFileAtomically } from '../fs-utils'
 import { formatHookCommand } from './hook-paths'
 
 const execP = promisify(exec)
@@ -81,7 +82,7 @@ export interface InstallCodexHooksResult {
  * - Malformed JSON → aborts (does NOT overwrite user data).
  * - For each event: replaces any existing SlayZone-managed entry, preserves
  *   user-defined entries. Managed entries carry `_slayzoneManaged: true`.
- * - Atomic write via `writeFileIfChanged` (no-op if unchanged).
+ * - Read+merge+write is one guarded cycle via `updateFileAtomically`.
  */
 export async function installCodexHooks(
   opts: InstallCodexHooksOpts
@@ -104,44 +105,51 @@ export async function installCodexHooks(
   const target = opts.hooksPath ?? getCodexHooksPath()
   const events = opts.events ?? CODEX_HOOK_EVENTS
 
-  let config: CodexHooksFile
-  try {
-    const raw = await fs.readFile(target, 'utf8')
-    try {
-      const parsed = JSON.parse(raw)
+  // Read + merge + write as ONE guarded cycle — see installClaudeHooks for why a
+  // separate read and write silently drops a concurrent peer's entries.
+  let result: InstallCodexHooksResult = { installed: false, eventsAdded: [], reason: 'unwritten' }
+
+  await updateFileAtomically(target, (current) => {
+    let config: CodexHooksFile
+    if (current === null) {
+      config = {}
+    } else {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(current.toString('utf8'))
+      } catch {
+        result = {
+          installed: false,
+          eventsAdded: [],
+          reason: 'hooks.json is not valid JSON — refusing to overwrite'
+        }
+        return null
+      }
       if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { installed: false, eventsAdded: [], reason: 'hooks.json is not a JSON object' }
+        result = { installed: false, eventsAdded: [], reason: 'hooks.json is not a JSON object' }
+        return null
       }
       config = parsed as CodexHooksFile
-    } catch {
-      return {
-        installed: false,
-        eventsAdded: [],
-        reason: 'hooks.json is not valid JSON — refusing to overwrite'
-      }
     }
-  } catch (err: unknown) {
-    if (!isENOENT(err)) throw err
-    config = {}
-  }
 
-  const hooks = (config.hooks ??= {})
-  const added: string[] = []
+    const hooks = (config.hooks ??= {})
+    const added: string[] = []
 
-  for (const event of events) {
-    const list = (hooks[event] ??= [])
-    const filtered = list
-      .map(stripManagedFromEntry)
-      .filter((entry): entry is CodexHookEntry => entry !== null && entry.hooks.length > 0)
-    filtered.push(buildManagedEntry(event, opts.scriptPath))
-    hooks[event] = filtered
-    added.push(event)
-  }
+    for (const event of events) {
+      const list = (hooks[event] ??= [])
+      const filtered = list
+        .map(stripManagedFromEntry)
+        .filter((entry): entry is CodexHookEntry => entry !== null && entry.hooks.length > 0)
+      filtered.push(buildManagedEntry(event, opts.scriptPath))
+      hooks[event] = filtered
+      added.push(event)
+    }
 
-  await fs.mkdir(path.dirname(target), { recursive: true })
-  await writeFileIfChanged(target, JSON.stringify(config, null, 2) + '\n')
+    result = { installed: true, eventsAdded: added }
+    return JSON.stringify(config, null, 2) + '\n'
+  })
 
-  return { installed: true, eventsAdded: added }
+  return result
 }
 
 function buildManagedEntry(event: string, scriptPath: string): CodexHookEntry {

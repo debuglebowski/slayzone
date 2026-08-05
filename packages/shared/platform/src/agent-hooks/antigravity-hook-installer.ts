@@ -1,8 +1,7 @@
-import fs from 'fs/promises'
-import path from 'path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { getAntigravityHooksPath, writeFileIfChanged } from '@slayzone/platform'
+import { getAntigravityHooksPath } from '../dirs'
+import { updateFileAtomically } from '../fs-utils'
 import { formatHookCommand } from './hook-paths'
 
 const execFileAsync = promisify(execFile)
@@ -94,7 +93,7 @@ async function isAntigravityInstalled(): Promise<boolean> {
  * - Overwrites the whole `slayzone-notify` named-hook key; every OTHER named
  *   hook in the file is preserved untouched. Antigravity's named-hook schema
  *   makes a dedicated key SlayZone's namespace — no per-entry markers needed.
- * - Atomic write via `writeFileIfChanged` (no-op if content unchanged).
+ * - Read+merge+write is one guarded cycle via `updateFileAtomically`.
  */
 export async function installAntigravityHooks(
   opts: InstallAntigravityHooksOpts
@@ -112,41 +111,52 @@ export async function installAntigravityHooks(
   const target = opts.hooksPath ?? getAntigravityHooksPath()
   const events = opts.events ?? ANTIGRAVITY_HOOK_EVENTS
 
-  let hooksFile: AntigravityHooksFile
-  try {
-    const raw = await fs.readFile(target, 'utf8')
-    try {
-      const parsed = JSON.parse(raw)
+  // Read + merge + write as ONE guarded cycle — see installClaudeHooks for why a
+  // separate read and write silently drops a concurrent peer's entries.
+  let result: InstallAntigravityHooksResult = {
+    installed: false,
+    eventsAdded: [],
+    reason: 'unwritten'
+  }
+
+  await updateFileAtomically(target, (current) => {
+    let hooksFile: AntigravityHooksFile
+    if (current === null) {
+      hooksFile = {}
+    } else {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(current.toString('utf8'))
+      } catch {
+        result = {
+          installed: false,
+          eventsAdded: [],
+          reason: 'hooks.json is not valid JSON — refusing to overwrite'
+        }
+        return null
+      }
       if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { installed: false, eventsAdded: [], reason: 'hooks.json is not a JSON object' }
+        result = { installed: false, eventsAdded: [], reason: 'hooks.json is not a JSON object' }
+        return null
       }
       hooksFile = parsed as AntigravityHooksFile
-    } catch {
-      return {
-        installed: false,
-        eventsAdded: [],
-        reason: 'hooks.json is not valid JSON — refusing to overwrite'
-      }
     }
-  } catch (err: unknown) {
-    if (!isENOENT(err)) throw err
-    hooksFile = {}
-  }
 
-  // SlayZone owns the `slayzone-notify` key entirely — rebuild it from scratch.
-  // Other named hooks in the file are left exactly as they were.
-  const named: AntigravityNamedHook = {}
-  const added: string[] = []
-  for (const event of events) {
-    named[event] = [buildEntry(event, opts.scriptPath)]
-    added.push(event)
-  }
-  hooksFile[SLAYZONE_HOOK_NAME] = named
+    // SlayZone owns the `slayzone-notify` key entirely — rebuild it from scratch.
+    // Other named hooks in the file are left exactly as they were.
+    const named: AntigravityNamedHook = {}
+    const added: string[] = []
+    for (const event of events) {
+      named[event] = [buildEntry(event, opts.scriptPath)]
+      added.push(event)
+    }
+    hooksFile[SLAYZONE_HOOK_NAME] = named
 
-  await fs.mkdir(path.dirname(target), { recursive: true })
-  await writeFileIfChanged(target, JSON.stringify(hooksFile, null, 2) + '\n')
+    result = { installed: true, eventsAdded: added }
+    return JSON.stringify(hooksFile, null, 2) + '\n'
+  })
 
-  return { installed: true, eventsAdded: added }
+  return result
 }
 
 function buildEntry(event: string, scriptPath: string): AntigravityHookEntry {
@@ -158,8 +168,4 @@ function buildEntry(event: string, scriptPath: string): AntigravityHookEntry {
   }
   if (TOOL_MATCHED_EVENTS.has(event)) entry.matcher = '*'
   return entry
-}
-
-function isENOENT(err: unknown): boolean {
-  return typeof err === 'object' && err != null && (err as { code?: string }).code === 'ENOENT'
 }

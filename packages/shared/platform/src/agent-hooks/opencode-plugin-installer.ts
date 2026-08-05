@@ -1,10 +1,6 @@
-import { getOpencodePluginPath, writeFileIfChanged } from '@slayzone/platform'
+import { getOpencodePluginPath } from '../dirs'
+import { writeFileIfChanged } from '../fs-utils'
 import { toPosixPath } from './hook-paths'
-// Vite resolves `?raw` to the file contents as a string at build time. Static
-// import (not dynamic) so the plugin source lands in this module's chunk and
-// no runtime file lookup is required in the packaged app.
-// @ts-expect-error -- ?raw is a Vite runtime feature, not a typed module.
-import opencodePluginSource from '@slayzone/hooks/opencode-plugin.js?raw'
 
 const NOTIFY_PATH_PLACEHOLDER = '{{NOTIFY_PATH}}'
 
@@ -14,8 +10,9 @@ export interface InstallOpencodePluginOpts {
    * Substituted into the plugin's `{{NOTIFY_PATH}}` placeholder.
    */
   notifyPath: string
-  /** Override plugin source. Defaults to the bundled `opencode-plugin.js`. Tests inject a fixture. */
-  source?: string
+  /** The plugin body to install. REQUIRED — inlined by the caller's bundler; see
+   *  `InstallNotifyScriptOpts.source` for why this module owns no bundler syntax. */
+  source: string
   /** Override target path. Defaults to `getOpencodePluginPath()`. */
   targetPath?: string
 }
@@ -39,9 +36,7 @@ export async function installOpencodePlugin(
   opts: InstallOpencodePluginOpts
 ): Promise<InstallOpencodePluginResult> {
   const target = opts.targetPath ?? getOpencodePluginPath()
-  const rawSource =
-    opts.source ??
-    (typeof opencodePluginSource === 'string' ? opencodePluginSource : String(opencodePluginSource))
+  const rawSource = opts.source
   // Forward-slash the path: the plugin substitutes it into a JS string literal
   // and then shells out `bash <path>` — backslashes would break both the JS
   // literal and bash's path parsing on Windows.
