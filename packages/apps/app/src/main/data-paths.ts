@@ -1,32 +1,59 @@
-import { getStorageDir as platformStorageDir } from '@slayzone/platform'
+import { getSlayzoneHomeDir, getSupervisedRoot } from '@slayzone/platform'
+import { ensureChannelScopedStorage } from './channel-storage-migration'
 import { ensureStorageDir } from './storage-migration'
 
 /**
- * The app's storage dir = `<SLAYZONE_ROOT>/storage` (platform-derived), migrated
- * once out of the legacy Electron userData location. `SLAYZONE_ROOT` is the ONLY
- * env var in this chain — the app, the sidecar it spawns, and the hub all derive
- * the same `<ROOT>/storage` from it. There is deliberately no dir- or file-pointing
- * var to thread across the process boundary: one would let two processes in the
- * same tree open different stores.
+ * The desktop app's storage dir = its CHANNEL-SCOPED HUB ROOT,
+ * `~/.slayzone/<dev|stable>/hub` (platform `getSupervisedRoot('hub')`), flat —
+ * no `storage/` nesting layer, since that root now belongs to exactly one role.
  *
- * `getStorageDir()` (platform) resolves the same path in any process; this module
- * only adds the boot-time one-shot migration of legacy data into it.
+ * The app main process plays the HUB role: it owns the DB, artifacts, blobs,
+ * backups and sidecar logs. Its co-located local runner gets its OWN root
+ * (`getSupervisedRoot('runner')`), handed over explicitly at spawn time in
+ * `index.ts` — the two used to silently share one ambient root, which is how a
+ * runner-owned `runners/` dir ended up loose inside the hub's own state.
+ *
+ * `getSupervisedRoot` reads `SLAYZONE_RELEASE_CHANNEL`, so the channel MUST be
+ * derived (in `index.ts`) before anything in this module is called.
+ *
+ * Two independent one-time COPY migrations feed this dir, both copy-only:
+ *  1. legacy flat `~/.slayzone/storage` → this channel-scoped root
+ *     (`channel-storage-migration.ts`)
+ *  2. legacy Electron userData → this root (`storage-migration.ts`)
+ * Order matters — see `initStorageDir`.
  */
 
 /**
- * Run the one-time COPY of legacy state (Electron userData) into `<ROOT>/storage`,
- * then return that dir. Call once at boot before the DB opens. `legacyStateDir` is
- * the pre-profile-swap userData (the copy SOURCE — treated as read-only, since a
- * pre-refactor peer app may share it). `packaged` scopes the copy to this channel's
- * DB (`app.isPackaged`): prod copies `slayzone.sqlite`, dev copies the `.dev` DB.
+ * Run both one-time COPY migrations of legacy state into the channel-scoped hub
+ * root, then return that dir. Call once at boot before the DB opens.
+ *
+ * `legacyStateDir` is the pre-profile-swap Electron userData (migration #2's
+ * SOURCE — read-only, since a pre-refactor peer app may share it). `packaged`
+ * scopes both copies to this channel's DB (`app.isPackaged`): prod copies
+ * `slayzone.sqlite`, dev copies the `.dev` DB.
+ *
+ * ORDER IS LOAD-BEARING: the channel migration runs FIRST. Both migrations skip
+ * a DB copy when the destination already exists, so running the userData one
+ * first would plant its (potentially years-old) DB in the fresh channel root and
+ * make the channel migration skip the user's ACTUAL current database sitting in
+ * `~/.slayzone/storage`. Newest source wins by going first.
  */
 export function initStorageDir(legacyStateDir: string, packaged: boolean): string {
-  const target = platformStorageDir()
+  const target = getSupervisedRoot('hub')
+  ensureChannelScopedStorage({
+    // Migration SOURCE, strictly read-only: the pre-channel-scoping flat root,
+    // where the old shared layout kept `storage/` and `runners/`.
+    legacyRoot: getSlayzoneHomeDir(),
+    hubRoot: target,
+    runnerRoot: getSupervisedRoot('runner'),
+    packaged
+  })
   ensureStorageDir(legacyStateDir, target, packaged)
   return target
 }
 
-/** The resolved `<ROOT>/storage` dir. Same value platform derives everywhere. */
+/** The resolved channel-scoped hub root. Same value the sidecar derives from the
+ *  `SLAYZONE_ROOT` this app hands it explicitly at spawn (`index.ts`). */
 export function getStorageDir(): string {
-  return platformStorageDir()
+  return getSupervisedRoot('hub')
 }

@@ -29,7 +29,7 @@ import {
   type ServiceBackend,
   type ServiceKind
 } from '@slayzone/platform/service-unit'
-import { getDataDir } from './db'
+import { getServiceRuntimeDir } from './cli-state'
 
 /** This CLI's version, substituted by build.mjs. The hub and runner are released
  *  from the same repo at the same version, so it is what we install (see
@@ -213,7 +213,7 @@ export function resolveServiceBin(kind: ServiceKind): ServiceBin {
   // That silently paired a current CLI with a much older hub. They are released
   // from one repo at one version, so requesting that exact version is both correct
   // and reproducible.
-  const prefix = join(getDataDir(), `${kind}-runtime`)
+  const prefix = getServiceRuntimeDir(kind)
   const installed = join(prefix, 'node_modules', pkg, 'package.json')
   // Fall back to the `beta` tag rather than a bare name if the version define is
   // somehow missing: `latest` is the one thing that must never be followed here.
@@ -254,9 +254,10 @@ export function resolveServiceBin(kind: ServiceKind): ServiceBin {
 /**
  * The directory a kind's logs live in, created so the supervisor can open its files.
  *
- * The hub keeps everything under `<ROOT>/storage` (db, artifacts, logs); a runner has
- * no `storage/` at all — it holds only `config.json` and `runners/` — so its logs sit
- * directly at `<ROOT>/logs`.
+ * Both kinds are flat now — a hub root holds `hub.config.json`/`hub.state.json`,
+ * `cli-hub-target.json`, the DB, and `logs/` directly (no `storage/` wrapper); a
+ * runner root holds `runner.config.json`/`runner.state.json` and `logs/`. So
+ * both resolve to `<ROOT>/logs` — no per-kind branch needed anymore.
  */
 export function ensureLogDir(kind: ServiceKind, root: string): string {
   const dir = logDirFor(kind, root)
@@ -264,9 +265,11 @@ export function ensureLogDir(kind: ServiceKind, root: string): string {
   return dir
 }
 
-/** {@link ensureLogDir} without the side effect, for read paths. */
-export function logDirFor(kind: ServiceKind, root: string): string {
-  return kind === 'hub' ? join(root, 'storage', 'logs') : join(root, 'logs')
+/** {@link ensureLogDir} without the side effect, for read paths. `kind` kept in the
+ *  signature for API symmetry with the other per-kind helpers here, even though
+ *  both kinds now resolve to the same shape. */
+export function logDirFor(_kind: ServiceKind, root: string): string {
+  return join(root, 'logs')
 }
 
 /** Absolute path of the supervisor's stdout / stderr capture for a service. */

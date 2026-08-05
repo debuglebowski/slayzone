@@ -4,7 +4,7 @@ import type { RenderMode } from '@slayzone/task/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
-import { getArtifactsDataRoot } from './shared'
+import { getArtifactsDataRoot, resolveArtifactFilePath } from './shared'
 import { createArtifactFromStream } from './content'
 
 /**
@@ -36,8 +36,10 @@ import { createArtifactFromStream } from './content'
  * <binary>` and piped binary stdin survive byte-exact.
  *
  * The version-history subcommands (write/append, versions:*) stay CLI-local:
- * they mutate blob-store history with no metadata-only mapping. `path` stays
- * CLI-local by design — it prints a LOCAL filesystem path, meaningless remotely.
+ * they mutate blob-store history with no metadata-only mapping. `path` is served
+ * by the `filePath` field on the GET above: the path is the HUB's, so only the hub
+ * can compose it, and the CLI compares it against `/health`'s `root` to refuse
+ * printing a path that belongs to another machine.
  */
 
 function store() {
@@ -89,8 +91,28 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         return
       }
       // Raw row (SELECT *) — same shape the by-task listing returns, so a caller
-      // can treat both interchangeably.
-      res.json({ ok: true, data: resolved.row })
+      // can treat both interchangeably — plus `filePath`, the artifact's working
+      // file on THIS hub's disk.
+      //
+      // `filePath` is derived here rather than by the caller because only the hub
+      // knows its own storage root. `slay tasks artifacts path` used to compose it
+      // from a local `SLAYZONE_ROOT`, which was the CLI's last direct database
+      // read (it needed the row to expand the id prefix) and silently printed a
+      // path from the WRONG machine whenever the hub was remote. It is advertised
+      // alongside `root` from `/health` so a caller can tell whether the path
+      // refers to its own filesystem.
+      const row = resolved.row as Record<string, unknown> & { id: string }
+      res.json({
+        ok: true,
+        data: {
+          ...row,
+          filePath: resolveArtifactFilePath(
+            String(row.task_id),
+            row.id,
+            String(row.title ?? '')
+          )
+        }
+      })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }

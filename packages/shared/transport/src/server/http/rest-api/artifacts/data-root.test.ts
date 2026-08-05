@@ -1,12 +1,11 @@
 /**
- * getArtifactsDataRoot resolution: `<SLAYZONE_ROOT>/storage` (the single
+ * getArtifactsDataRoot resolution: `<SLAYZONE_ROOT>` itself, flat (the single
  * data-root, same as hub/db.ts + ensureDataRoot) — so artifacts and the SQLite
  * DB always resolve to the same dir. The former DB_DIR fallback is gone
- * (SLAYZONE_DB_DIR retired in favor of the ROOT-derived storage dir).
+ * (SLAYZONE_DB_DIR retired in favor of the ROOT-derived data dir).
  *
  * Pure Node (no native deps) → runs under plain `npx tsx`.
  */
-import { join } from 'node:path'
 import { getArtifactsDataRoot } from './shared'
 
 let passed = 0
@@ -24,12 +23,12 @@ function check(name: string, cond: boolean, detail = ''): void {
 const prevRoot = process.env.SLAYZONE_ROOT
 const prevDbDir = process.env.SLAYZONE_DB_DIR
 try {
-  // <ROOT>/storage is the data root.
+  // <ROOT> itself is the data root — flat, no storage/ subfolder.
   delete process.env.SLAYZONE_DB_DIR
   process.env.SLAYZONE_ROOT = '/tmp/store-root'
   check(
-    'data root derives as <ROOT>/storage',
-    getArtifactsDataRoot() === join('/tmp/store-root', 'storage'),
+    'data root derives as <ROOT>, flat',
+    getArtifactsDataRoot() === '/tmp/store-root',
     `got ${getArtifactsDataRoot()}`
   )
 
@@ -38,7 +37,7 @@ try {
   process.env.SLAYZONE_DB_DIR = '/tmp/dbdir-only'
   check(
     'retired SLAYZONE_DB_DIR is ignored (not the data root)',
-    getArtifactsDataRoot() === join('/tmp/root-only', 'storage'),
+    getArtifactsDataRoot() === '/tmp/root-only',
     `got ${getArtifactsDataRoot()}`
   )
 } finally {

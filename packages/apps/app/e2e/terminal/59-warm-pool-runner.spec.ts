@@ -10,11 +10,10 @@
  * These tests assert the invariant end-to-end: with pre-warm ON, the warm agent is
  * spawned through the runner, and adopting it produces a working terminal.
  */
-import path from 'path'
 // `node:sqlite`, not better-sqlite3: the latter's native binding is compiled for
 // Electron's ABI and will not load in the Playwright runner's plain node.
 import { DatabaseSync } from 'node:sqlite'
-import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import { test, expect, seed, resetApp, TEST_PROJECT_PATH, cliDbPath } from '../fixtures/electron'
 
 test.describe('Warm pool (runner-hosted)', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -76,9 +75,8 @@ test.describe('Warm pool (runner-hosted)', () => {
       .poll(
         async () => {
           await reportTabOpen()
-          const rows = await queryFile<{ id: string; task_id: string | null }>(
+          const rows = await querySidecarDb<{ id: string; task_id: string | null }>(
             electronApp,
-            SIDECAR_DB,
             `SELECT id, task_id FROM agent_sessions WHERE status = 'pooled' LIMIT 5`
           )
           return rows.length > 0 && rows[0].task_id === null
@@ -125,23 +123,27 @@ test.describe('Warm pool (runner-hosted)', () => {
 })
 
 /**
- * Read a sqlite file under the app's userData directly.
+ * Read the SIDECAR's sqlite file directly.
  *
  * NOT `window.__db`: that is the MAIN process's `userdata/slayzone.dev.sqlite`,
- * while the warm pool runs in the SIDECAR and writes `userdata/storage/…` — two
- * different files with the same basename. Diagnostics are a third file again.
- * Querying the wrong one silently returns nothing, which reads as "the pool never
- * ran".
+ * while the warm pool runs in the SIDECAR and writes the app's real DB under its
+ * channel-scoped hub root — two different files with the same basename.
+ * Diagnostics are a third file again. Querying the wrong one silently returns
+ * nothing, which reads as "the pool never ran".
+ *
+ * The path comes from the shared `cliDbPath` helper rather than a local literal:
+ * this spec previously hardcoded its own `storage/…` fragment, so it was one of
+ * the files the channel-scoping change would have silently broken into exactly
+ * that false "pool never ran" reading.
  */
-async function queryFile<T>(
+async function querySidecarDb<T>(
   electronApp: import('@playwright/test').ElectronApplication,
-  relPath: string,
   sql: string
 ): Promise<T[]> {
   const userData = (await electronApp.evaluate(async ({ app }) =>
     app.getPath('userData')
   )) as string
-  const db = new DatabaseSync(path.join(userData, relPath), { readOnly: true })
+  const db = new DatabaseSync(cliDbPath(userData), { readOnly: true })
   try {
     return db.prepare(sql).all() as T[]
   } finally {
@@ -149,14 +151,11 @@ async function queryFile<T>(
   }
 }
 
-const SIDECAR_DB = path.join('storage', 'slayzone.dev.sqlite')
-
 async function countWarmSpawns(
   electronApp: import('@playwright/test').ElectronApplication
 ): Promise<number> {
-  const rows = await queryFile<{ n: number }>(
+  const rows = await querySidecarDb<{ n: number }>(
     electronApp,
-    SIDECAR_DB,
     `SELECT COUNT(*) AS n FROM agent_sessions WHERE status = 'pooled'`
   )
   return rows[0]?.n ?? 0

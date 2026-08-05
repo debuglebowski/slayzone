@@ -1,5 +1,4 @@
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { getSlayzoneHomeDir } from './dirs'
 import { LOOPBACK_HOSTS, parseHubAddress } from './hub-addr'
 
@@ -7,17 +6,26 @@ let warnedHost: string | null = null
 
 /**
  * The single storage dir for all SlayZone state (DB, artifacts, backups, logs,
- * diagnostics). DERIVED from `SLAYZONE_ROOT` as `<ROOT>/storage` — one anchor,
- * one on-disk shape on every machine. `SLAYZONE_ROOT` is the ONLY env var in
- * this chain; there is deliberately no dir- or file-pointing override to thread
- * across processes — each process derives the same path from ROOT.
+ * diagnostics) — `<ROOT>` itself, flat, no `storage/` subfolder. `SLAYZONE_ROOT`
+ * is the ONLY env var in this chain; there is deliberately no dir- or
+ * file-pointing override to thread across processes — each process derives the
+ * same path from ROOT.
+ *
+ * Flat by design: a root belongs to exactly one role (hub or runner, standalone
+ * or channel-scoped), so a `storage/` layer separating "this role's data" from
+ * "everything else in the root" has nothing left to separate from — everything
+ * under `<ROOT>` already is this role's own storage. Kept the function name
+ * (documents intent at call sites) even though it's no longer a distinct
+ * subdirectory. NOTE: this flattening is NOT migrated for existing standalone
+ * installs — see `channel-storage-migration.ts` for the supervised-only
+ * migration and the plan's explicit breaking-change note for standalone.
  *
  * getSlayzoneHomeDir resolves ROOT (`SLAYZONE_ROOT` > platform home); the
  * standalone entrypoints seed `SLAYZONE_ROOT=cwd`, the desktop app seeds it to
- * the migrated location.
+ * a channel-scoped root via `getSupervisedRoot`.
  */
 export function getStorageDir(): string {
-  return join(getSlayzoneHomeDir(), 'storage')
+  return getSlayzoneHomeDir()
 }
 
 /**

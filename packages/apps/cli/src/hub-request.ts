@@ -7,9 +7,13 @@
  * need the identical failure wording; two copies would drift the moment one of
  * them learned about a new channel.
  *
- * Deliberately NOT `./api.ts`: its `resolveTarget()` falls through to
- * `getServerPort()` → `openDb()`, which `process.exit(1)`s when there is no local
- * SlayZone database — the normal state of a hub-only VPS, and impossible to catch.
+ * Deliberately NOT `./api.ts`: that resolver answers "which hub does this command's
+ * DATA live on", falling back to the local app when nothing is configured. These
+ * commands act ON a hub as an object of administration, so "no hub configured" must
+ * be an explicit refusal with a hint, not a silent redirect to the desktop app.
+ * (It also used to differ far more sharply: api.ts's fallback opened the local
+ * SQLite database, which `process.exit(1)`s on a hub-only VPS where no such file
+ * exists. That fallback is gone — nothing in the CLI opens a database now.)
  *
  * @module cli/hub-request
  */
@@ -28,7 +32,7 @@ export interface HubRequestTarget {
  *
  * Precedence:
  *   1. Whatever `resolveHubTarget()` says — which already covers the root `--hub`
- *      flag, `SLAYZONE_HUB_ADDRESS`/`_TOKEN`, and `hub.json` (written by
+ *      flag, `SLAYZONE_HUB_ADDRESS`/`_TOKEN`, and `cli-hub-target.json` (written by
  *      `slay hub use` / `slay hub login`). Reusing it means `slay --hub staging …`
  *      works with no new surface, and a remote hub is reachable through exactly the
  *      channels that already exist.

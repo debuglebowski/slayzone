@@ -4,10 +4,11 @@
  * When a standalone `slayzone-hub` / `slayzone-runner` boots on an interactive
  * terminal and a required (runner) or recommended (hub) value is missing, the
  * bin prompts for it, prints a summary, and — after a `[Y/n]` confirmation —
- * persists it to `<ROOT>/config.json` via {@link updateSlayzoneConfig}. Values
- * collected this run are also seeded into `process.env` so the bin's EXISTING
- * config-resolution path (which reads env) picks them up unchanged — the prompt
- * is just an interactive env producer sitting at the very top of the pipeline.
+ * persists it to whichever config file the caller names (`hub.config.json` or
+ * `runner.config.json`) via {@link updateJsonFile}. Values collected this run
+ * are also seeded into `process.env` so the bin's EXISTING config-resolution
+ * path (which reads env) picks them up unchanged — the prompt is just an
+ * interactive env producer sitting at the very top of the pipeline.
  *
  * NEVER interactive when: stdin is not a TTY (CI, pipes, the install-handshake
  * test's piped stdio), the Electron host supervises the bin
@@ -25,11 +26,7 @@
 
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
-import {
-  getSlayzoneConfigPath,
-  updateSlayzoneConfig,
-  type SlayzoneConfig
-} from './slayzone-config'
+import { updateJsonFile } from './slayzone-config'
 
 /**
  * Minimal line-based console IO. The default implementation wraps
@@ -87,8 +84,8 @@ export async function confirm(
  * env/config/credential-store itself) and hands only missing fields here.
  */
 export interface PromptField {
-  /** Key written into config.json when persisted. */
-  configKey: keyof SlayzoneConfig
+  /** Key written into the target config file when persisted. */
+  configKey: string
   /** `process.env` key seeded for THIS run so the normal resolver sees it. */
   envKey: string
   /** One-line question text (no trailing punctuation — the framer adds it). */
@@ -117,8 +114,8 @@ export interface RunInteractiveConfigOptions {
   fields: PromptField[]
   /** IO override (tests). Defaults to real stdin/stdout; owned + closed here. */
   io?: PromptIO
-  /** config.json path override (tests). Defaults to `<ROOT>/config.json`. */
-  configPath?: string
+  /** Target config file path — `hub.config.json` or `runner.config.json` depending on the caller. Required: there's no single-file default anymore. */
+  configPath: string
   /** Heading printed above the write summary. */
   title?: string
 }
@@ -126,15 +123,15 @@ export interface RunInteractiveConfigOptions {
 export interface RunInteractiveConfigResult {
   /** Values the user supplied (empty ⇒ nothing to do, no confirm was shown). */
   collected: CollectedField[]
-  /** Whether the collected values were persisted to config.json. */
+  /** Whether the collected values were persisted to the target config file. */
   saved: boolean
 }
 
 /**
  * Prompt each missing field, seed the accepted values into `process.env` for
- * this run, then (if any were collected) show a summary and persist to
- * config.json on a `[Y/n]`-confirm. Declining the save keeps the values live
- * for this boot only. Callers MUST gate on {@link canPrompt} first — this
+ * this run, then (if any were collected) show a summary and persist to the
+ * target config file on a `[Y/n]`-confirm. Declining the save keeps the values
+ * live for this boot only. Callers MUST gate on {@link canPrompt} first — this
  * function does not re-check (so tests can drive it with an injected IO).
  *
  * `process.env` is seeded regardless of the save answer, so the bin's existing
@@ -143,7 +140,7 @@ export interface RunInteractiveConfigResult {
 export async function runInteractiveConfig(
   opts: RunInteractiveConfigOptions
 ): Promise<RunInteractiveConfigResult> {
-  const configPath = opts.configPath ?? getSlayzoneConfigPath()
+  const configPath = opts.configPath
   const ownIo = opts.io === undefined
   const io = opts.io ?? createStdioPromptIO()
 
@@ -179,8 +176,8 @@ export async function runInteractiveConfig(
     const saved = await confirm(io, `Save to ${configPath}?`, { defaultYes: true })
     if (saved) {
       const patch: Record<string, unknown> = {}
-      for (const { field, config } of collected) patch[field.configKey as string] = config
-      updateSlayzoneConfig(patch as Partial<SlayzoneConfig>, configPath)
+      for (const { field, config } of collected) patch[field.configKey] = config
+      updateJsonFile(patch, configPath)
       io.write(`Saved ${configPath}`)
     } else {
       io.write('Not saved — using these values for this run only.')

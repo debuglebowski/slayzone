@@ -39,9 +39,9 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  *
  * Isolation: `launchIsolatedElectron` gives a throwaway userdata dir, and the
  * spec pins `SLAYZONE_ROOT` to it (via the fixture's extraEnv) so the runner
- * boot's identity/*.pem + hub-auth.sqlite land under `<ROOT>/storage`, NOT the
- * real dev store. The runner's credential store + config also live under the
- * temp dir.
+ * boot's identity/*.pem + hub-auth.sqlite land under the app's channel-scoped
+ * hub root inside it, NOT the real dev store. The runner's credential store +
+ * config also live under the temp dir.
  *
  * Uses the raw Playwright base (like 103): the shared worker fixture assumes a
  * plain non-runner server, which is exactly what this spec must boot without.
@@ -111,12 +111,12 @@ function spawnLoopbackRunner(opts: {
 }): SpawnedRunner {
   const electronPath = require('electron') as unknown as string
   const logs: string[] = []
-  // The display name + FS path-jail now come from <ROOT>/config.json (the
+  // The display name + FS path-jail now come from <ROOT>/runner.config.json (the
   // SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
   // Write them before spawn so the STANDALONE runner reads them.
   fs.mkdirSync(opts.rootDir, { recursive: true })
   fs.writeFileSync(
-    path.join(opts.rootDir, 'config.json'),
+    path.join(opts.rootDir, 'runner.config.json'),
     JSON.stringify({ runnerName: 'e2e-loopback-runner', allowedRoots: [opts.allowedRoots] })
   )
   // ELECTRON_RUN_AS_NODE runs the Electron binary as plain Node so the runner's
@@ -127,7 +127,7 @@ function spawnLoopbackRunner(opts: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       // Standalone runner: clear any leaked SUPERVISED so loadRunnerConfig reads
-      // <ROOT>/config.json (it skips the shared file when SUPERVISED=1).
+      // <ROOT>/runner.config.json (it skips the shared file when SUPERVISED=1).
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: opts.rootDir,
       // Authority only — the runner composes ws(s)://<addr>/runners from
@@ -196,7 +196,7 @@ base.describe('Runner loopback (runner ON)', () => {
       seedUserData: (userDataDir) => {
         // Local mode — a hub always builds the gateway + binds the /runners
         // listener, so no flag is needed.
-        fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+        fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
         fs.writeFileSync(
           bootConfigPath(userDataDir),
           JSON.stringify({ server_mode: 'local' }, null, 2)
@@ -384,7 +384,7 @@ base.describe('Runner loopback (runner ON)', () => {
     const launched = await launchIsolatedElectron({
       name: 'runner-auto-enroll',
       seedUserData: (userDataDir) => {
-        fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+        fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
         fs.writeFileSync(
           bootConfigPath(userDataDir),
           JSON.stringify({ server_mode: 'local' }, null, 2)
@@ -444,7 +444,7 @@ base.describe('Runner loopback (runner ON)', () => {
     const launched = await launchIsolatedElectron({
       name: 'runner-always-on',
       seedUserData: (userDataDir) => {
-        fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+        fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
         fs.writeFileSync(
           bootConfigPath(userDataDir),
           JSON.stringify({ server_mode: 'local' }, null, 2)

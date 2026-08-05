@@ -1,10 +1,10 @@
 /**
  * Standalone-boot config resolution for the hub.
  *
- * Folds the shared `~/.slayzone/config.json` (see @slayzone/platform/
+ * Folds `hub.config.json`/`hub.state.json` (see @slayzone/platform/
  * slayzone-config) into `process.env` at the very start of a STANDALONE boot,
  * filling ONLY the env vars that are currently unset — so the precedence is
- * `env var > config.json > default` for every downstream reader
+ * `env var > file > default` for every downstream reader
  * (db.ts getDatabasePathFromEnv, composition.ts
  * SLAYZONE_HUB_AUTH_SECRET, server.ts getTrpcPort/getServerHost,
  * remote-mcp-env-provider SLAYZONE_HUB_PUBLIC_ADDRESS). Nothing downstream changes —
@@ -17,7 +17,7 @@
  * byte-identical to today (its env is fully supplied by the Electron host).
  *
  * SECURITY SEAM (hub-auth secret): the standalone boot resolves the secret
- * (`env SLAYZONE_HUB_AUTH_SECRET > config.json runnerTransportSecret > generate + persist`)
+ * (`env SLAYZONE_HUB_AUTH_SECRET > hub.state.json runnerTransportSecret > generate + persist`)
  * and sets `process.env.SLAYZONE_HUB_AUTH_SECRET` to it BEFORE composeServer runs.
  * composition.ts then reads that env value and NEVER falls back to the shared
  * `'slayzone-dev-runner-secret'` dev constant in standalone (that forgeable-token
@@ -30,7 +30,7 @@
 
 import {
   ensureHubAuthSecret,
-  loadSlayzoneConfig,
+  loadHubConfigFile,
   resolveHubName
 } from '@slayzone/platform/slayzone-config'
 
@@ -55,16 +55,17 @@ function authorityOf(rawUrl: string | undefined): string | undefined {
 }
 
 /**
- * Seed `process.env` for a standalone hub boot from `<ROOT>/config.json`.
+ * Seed `process.env` for a standalone hub boot from `hub.config.json`.
  * Call ONCE at the top of the standalone entrypoint (bin.ts), before startServer.
  * Returns silently (no file access) when supervised.
  *
  * ROOT anchoring: a standalone hub anchors ALL on-disk state to `SLAYZONE_ROOT`,
  * defaulting to the launch directory (`process.cwd()`). This MUST be seeded
- * before `loadSlayzoneConfig()` runs, because the config file itself lives at
- * `<ROOT>/config.json` (getSlayzoneHomeDir reads SLAYZONE_ROOT). The storage dir
- * (DB + logs + diagnostics) derives as `<ROOT>/storage` from the same root, so a
- * bare `slayzone-hub` in an empty dir keeps everything local to it.
+ * before `loadHubConfigFile()` runs, because the config file itself lives at
+ * `<ROOT>/hub.config.json` (getSlayzoneHomeDir reads SLAYZONE_ROOT). The DB +
+ * logs + diagnostics live directly under `<ROOT>` (flattened, no `storage/`
+ * layer) from the same root, so a bare `slayzone-hub` in an empty dir keeps
+ * everything local to it.
  */
 export function applyStandaloneHubConfig(): void {
   if (isSupervised()) return
@@ -80,7 +81,7 @@ export function applyStandaloneHubConfig(): void {
   if (!process.env.SLAYZONE_ROOT) {
     process.env.SLAYZONE_ROOT = process.cwd()
   }
-  const cfg = loadSlayzoneConfig()
+  const cfg = loadHubConfigFile()
 
   // Deployment hardening intent. Seeded FIRST because everything below is read in
   // light of it: the scheme of the join-token URL, whether client auth is enforced,
@@ -89,7 +90,7 @@ export function applyStandaloneHubConfig(): void {
   // stays byte-identical, defaulting to `local` inside getSlayzoneMode().
   setIfUnset('SLAYZONE_MODE', cfg.mode)
   // No dir- or file-pointing var is seeded: the DB + state dir DERIVE from
-  // SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>/storage`.
+  // SLAYZONE_ROOT (seeded above) via platform.getStorageDir() → `<ROOT>` directly.
   // Everything (hub db.ts, ensureDataRoot) computes that same path from ROOT, so
   // there is nothing to thread through env here.
   // The hub's own address. `address` is the current key; the legacy `port` key is
@@ -112,10 +113,10 @@ export function applyStandaloneHubConfig(): void {
     process.env.SLAYZONE_HUB_NAME = resolveHubName()
   }
 
-  // Hub-auth secret — security fix. Resolve env > config > generate+persist and set
-  // the env so composition.ts never reaches the shared dev constant in standalone.
-  // ensureHubAuthSecret returns the config value if present, else generates + writes
-  // a fresh 256-bit secret to config.json (0600, atomic create-if-absent). An
+  // Hub-auth secret — security fix. Resolve env > state file > generate+persist and
+  // set the env so composition.ts never reaches the shared dev constant in standalone.
+  // ensureHubAuthSecret returns the state-file value if present, else generates + writes
+  // a fresh 256-bit secret to hub.state.json (0600, atomic create-if-absent). An
   // EMPTY env value counts as ABSENT (env-wins only when meaningfully set) — so a
   // stray `SLAYZONE_HUB_AUTH_SECRET=''` generates rather than tripping composition's
   // fail-loud guard. A non-empty env pin is left untouched (CI path, no write).

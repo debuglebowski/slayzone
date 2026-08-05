@@ -22,9 +22,13 @@ export function getStateDir(): string {
 }
 
 /**
- * User-visible SlayZone home/root dir — the single anchor for on-disk state
- * (config.json, hooks, and for standalone hub/runner the DB, logs, and runner
- * creds all derive from it). Distinct from getStateDir() (Electron app state).
+ * User-visible SlayZone home/root dir — the single anchor for on-disk state.
+ * For standalone hub/runner, everything (hub.config.json/hub.state.json or
+ * runner.config.json, the DB, logs, runner creds) derives directly from it.
+ * For the desktop app it anchors only what's genuinely machine-wide and
+ * channel-agnostic — `hooks/`, `bin/` — since per-channel supervised state
+ * derives from {@link getSupervisedRoot} instead, not this function directly.
+ * Distinct from getStateDir() (Electron app state).
  *
  * Resolution (pure env reader — no CWD default here): `SLAYZONE_ROOT` >
  * `$HOME/.slayzone`. Standalone hub/runner entrypoints seed
@@ -50,16 +54,45 @@ export function getSlayzoneHomeDir(): string {
  * prerelease tag) BEFORE any sidecar / pty env is built; standalone hub/runner
  * boots and tests leave it unset → `unknown`.
  *
- * Why it exists: the shared `~/.slayzone/hooks/notify.sh` is NOT
- * release-channel-scoped, so two release channels (e.g. prod v0.35 + dev v0.36)
- * share one file. This value is packed into the opaque `SLAYZONE_AGENT_HOOK_CONTEXT`
- * blob so the server can log which release channel a hook actually came from —
- * making a future cross-release-channel clobber visible in Diagnostics instead
- * of silent. It is attribution/diagnostic only; no control flow keys off it.
+ * Two consumers now: attribution (packed into the opaque
+ * `SLAYZONE_AGENT_HOOK_CONTEXT` blob so the server can log which release channel
+ * a hook actually came from — the shared `~/.slayzone/hooks/notify.sh` is NOT
+ * release-channel-scoped, so this makes a cross-channel clobber visible in
+ * Diagnostics instead of silent), and control flow: {@link getSupervisedRoot}'s
+ * default `channel` param reads this to fold `beta`/`stable`/`unknown` onto the
+ * same `stable` bucket while keeping `dev` separate.
  */
 export function getSlayzoneReleaseChannel(): string {
   const raw = process.env.SLAYZONE_RELEASE_CHANNEL?.trim()
   return raw ? raw : 'unknown'
+}
+
+/** A supervised (desktop-app-spawned) process's role — the sidecar acting as
+ *  the local hub, or the co-located local runner. */
+export type SlayzoneSupervisedRole = 'hub' | 'runner'
+
+/**
+ * Channel-scoped root for the desktop app's supervised sidecar/local-runner —
+ * `~/.slayzone/<dev|stable>/<hub|runner>`. Two buckets, not three: `beta` folds
+ * into `stable` (they already share one DB file today via `getDbName`'s
+ * packaged-only boolean, and can't even run concurrently — the sidecar's fixed
+ * port only has `prod`/`dev`/`test` buckets — so a separate `beta` bucket here
+ * would buy no isolation that exists today). No empty/default case either:
+ * `stable` is always spelled out, so it can never collide with a standalone
+ * root someone names `hub` or `runner` directly under `~/.slayzone`.
+ *
+ * CALLER RESTRICTION: only the desktop app's own sidecar/local-runner spawn
+ * code may call this. Hook installers and standalone hub/runner keep resolving
+ * their own root via {@link getSlayzoneHomeDir} directly — misusing this
+ * function there would silently break the "hooks stay unscoped" invariant
+ * (`~/.slayzone/hooks/notify.sh` must stay outside any channel/role subfolder).
+ */
+export function getSupervisedRoot(
+  role: SlayzoneSupervisedRole,
+  channel: string = getSlayzoneReleaseChannel()
+): string {
+  const bucket = channel === 'dev' ? 'dev' : 'stable'
+  return path.join(getSlayzoneHomeDir(), bucket, role)
 }
 
 /**

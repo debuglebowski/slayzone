@@ -1,5 +1,4 @@
-import { test, expect, seed, TEST_PROJECT_PATH, resetApp } from '../fixtures/electron'
-import path from 'path'
+import { test, expect, seed, TEST_PROJECT_PATH, resetApp, cliDbPath } from '../fixtures/electron'
 import { DatabaseSync } from 'node:sqlite'
 
 type AutomationRow = {
@@ -15,7 +14,9 @@ test.describe('Automations: catchup_on_start (tRPC end-to-end)', () => {
     await resetApp(mainWindow)
 
     const dbDir = await electronApp.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
-    dbPath = path.join(dbDir, 'storage', 'slayzone.dev.sqlite')
+    // Via the shared helper, not a local join — this spec used to hand-duplicate
+    // the layout and so would have silently missed the channel-scoping change.
+    dbPath = cliDbPath(dbDir)
 
     const s = seed(mainWindow)
     const p = await s.createProject({

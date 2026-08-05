@@ -1,8 +1,8 @@
 /**
- * Runner configuration — env-first, layered over the single shared config file
- * at `<ROOT>/config.json` (see @slayzone/platform/slayzone-config). Precedence:
+ * Runner configuration — env-first, layered over the runner's own config file
+ * at `<ROOT>/runner.config.json` (see @slayzone/platform/slayzone-config). Precedence:
  *
- *   env var  >  <ROOT>/config.json  >  default
+ *   env var  >  <ROOT>/runner.config.json  >  default
  *
  * (plus the join-token embedded hubUrl/cert as the lowest fallback). Env still
  * wins so operators / the supervised host can override per boot. There is no
@@ -17,8 +17,8 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_RUNNER_NAME,
-  loadSlayzoneConfig,
-  type SlayzoneConfig
+  loadRunnerConfigFile,
+  type RunnerConfig as RunnerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr, type SlayzoneMode } from '@slayzone/platform/hub-addr'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
@@ -43,7 +43,7 @@ export const ENV_VARS = {
   // Authority ONLY — `host[:port]`, no scheme, no path. The dial scheme
   // (ws/wss) is derived from SLAYZONE_MODE via hubUrlFromAddr, and `/runners` is
   // appended here, so this env channel can never carry a scheme the CLI would
-  // reinterpret (the retired `SLAYZONE_HUB_URL` ws-vs-http collision). config.json
+  // reinterpret (the retired `SLAYZONE_HUB_URL` ws-vs-http collision). runner.config.json
   // `hubUrl` + the join token still carry a FULL url (they're not env-inherited
   // into terminals, so outside the collision).
   hubAddress: 'SLAYZONE_HUB_ADDRESS',
@@ -64,11 +64,11 @@ export const ENV_VARS = {
   // missing-SLAYZONE_HUB_JOIN_TOKEN error rather than half-working.
   // allowedRoots has NO env channel: a SUPERVISED runner self-derives its FS
   // path-jail to `[homedir()]` (below), a STANDALONE runner gets it from
-  // <ROOT>/config.json `allowedRoots` (+ the ROOT default in bin.ts). The runner
-  // NAME likewise has no env channel — it derives from SUPERVISED (→
-  // DEFAULT_LOCAL_RUNNER_NAME) or config.json `runnerName`, else the hostname.
+  // <ROOT>/runner.config.json `allowedRoots` (+ the ROOT default in bin.ts). The
+  // runner NAME likewise has no env channel — it derives from SUPERVISED (→
+  // DEFAULT_LOCAL_RUNNER_NAME) or runner.config.json `runnerName`, else the hostname.
   // The cert pin has NO env channel either: it arrives via the join token (auto
-  // path) or <ROOT>/config.json `pinnedCertSha256` (explicit standalone path).
+  // path) or <ROOT>/runner.config.json `pinnedCertSha256` (explicit standalone path).
   // Never a bare env var — a fingerprint is never fished out of ambient env.
 } as const
 
@@ -139,12 +139,12 @@ export function assertPathAllowed(candidate: string, allowedRoots: readonly stri
 type Env = Record<string, string | undefined>
 
 /**
- * Map the shared `<ROOT>/config.json` onto the runner's config shape. This is
- * the SINGLE config file for a standalone runner — the former
+ * Map `<ROOT>/runner.config.json` onto the runner's effective config shape.
+ * This is the SINGLE config file for a standalone runner — the former
  * `SLAYZONE_RUNNER_CONFIG` env var (a second path-pointing knob at an arbitrary
- * file) is gone; there is one derived config at `<ROOT>/config.json`.
+ * file) is gone; there is one derived config at `<ROOT>/runner.config.json`.
  */
-function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
+function fromSharedConfig(shared: RunnerConfigFile): Partial<RunnerConfig> {
   const out: Partial<RunnerConfig> = {}
   if (shared.hubUrl !== undefined) out.hubUrl = shared.hubUrl
   if (shared.joinToken !== undefined) out.joinToken = shared.joinToken
@@ -157,11 +157,11 @@ function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
 
 /**
  * Assemble the effective config. Precedence (low→high):
- *   defaults ← <ROOT>/config.json ← environment
+ *   defaults ← <ROOT>/runner.config.json ← environment
  * (with the join-token embedded hubUrl/cert as the lowest fallback). Throws with
  * a readable message when required fields are missing.
  *
- * `shared` defaults to reading `<ROOT>/config.json` ONLY for a STANDALONE
+ * `shared` defaults to reading `<ROOT>/runner.config.json` ONLY for a STANDALONE
  * runner using the real `process.env`. It is skipped ({}) when:
  *   - a test passes its own `env` object (hermetic — never touch the dev's real
  *     config file), or
@@ -176,8 +176,8 @@ function fromSharedConfig(shared: SlayzoneConfig): Partial<RunnerConfig> {
  */
 export function loadRunnerConfig(
   env: Env = process.env,
-  shared: SlayzoneConfig = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
-    ? loadSlayzoneConfig()
+  shared: RunnerConfigFile = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
+    ? loadRunnerConfigFile()
     : {}
 ): RunnerConfig {
   const fromShared = fromSharedConfig(shared)
@@ -190,7 +190,7 @@ export function loadRunnerConfig(
   // malformed token decodes to null → no fallback (schema then reports the missing
   // hubUrl, exactly as before).
   //
-  // Env precedence: env > config.json. Resolved ONCE here so the token-decode
+  // Env precedence: env > runner.config.json. Resolved ONCE here so the token-decode
   // fallback and the `joinToken` field can never disagree about which channel won.
   const envJoinToken = env[ENV_VARS.joinToken]
   const joinToken = envJoinToken ?? fromShared.joinToken
@@ -198,7 +198,7 @@ export function loadRunnerConfig(
 
   // The env channel carries only the hub AUTHORITY (host[:port]); compose the
   // full `ws(s)://<addr>/runners` dial url here, scheme from SLAYZONE_MODE (read
-  // from the passed `env` so tests stay hermetic). config.json / join-token
+  // from the passed `env` so tests stay hermetic). runner.config.json / join-token
   // fallbacks below still supply a full url directly.
   const mode: SlayzoneMode =
     env.SLAYZONE_MODE?.trim().toLowerCase() === 'remote' ? 'remote' : 'local'
@@ -208,19 +208,19 @@ export function loadRunnerConfig(
 
   const merged = {
     // Supervised local runner → the shared const so the hub's dedup collapses it
-    // to one row; standalone → the hostname (config.json `runnerName` overrides
+    // to one row; standalone → the hostname (runner.config.json `runnerName` overrides
     // via ...fromShared below).
     name: env.SLAYZONE_SUPERVISED === '1' ? DEFAULT_LOCAL_RUNNER_NAME : hostname(),
     // FS path-jail default. Supervised local runner → `[homedir()]` (it operates
     // on the user's own projects under $HOME); standalone → `[]` here, then
-    // config.json `allowedRoots` (...fromShared below) or the SLAYZONE_ROOT
+    // runner.config.json `allowedRoots` (...fromShared below) or the SLAYZONE_ROOT
     // fallback in bin.ts. No env channel either way.
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
     ...(fromToken
       ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint }
       : {}),
-    // <ROOT>/config.json — base under env (spread after). The single config file.
+    // <ROOT>/runner.config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
     ...(envJoinToken !== undefined ? { joinToken: envJoinToken } : {})
@@ -230,11 +230,11 @@ export function loadRunnerConfig(
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
     throw new Error(
-      `invalid runner configuration (${issues}). Set ${ENV_VARS.hubAddress} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/config.json.`
+      `invalid runner configuration (${issues}). Set ${ENV_VARS.hubAddress} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/runner.config.json.`
     )
   }
 
-  // Fail-fast on an EXPLICITLY-configured pin (config.json `pinnedCertSha256`)
+  // Fail-fast on an EXPLICITLY-configured pin (runner.config.json `pinnedCertSha256`)
   // against a plaintext ws:// hub: pinning is meaningless without TLS, and silently
   // dropping it would downgrade an operator who asked for pinning to an unpinned
   // connection. A pin that came ONLY from the join token (the auto path) is NOT
@@ -251,7 +251,7 @@ export function loadRunnerConfig(
   // SLAYZONE_MODE=remote hardening: a remote runner MUST dial the hub over TLS.
   // A plaintext ws:// hub on the open internet is a hard error (credentials +
   // command stream would be unencrypted). This can now only trip on a full ws://
-  // url supplied via config.json / join token — an env SLAYZONE_HUB_ADDRESS is
+  // url supplied via runner.config.json / join token — an env SLAYZONE_HUB_ADDRESS is
   // authority-only and hubUrlFromAddr forces wss:// in remote mode, so the env
   // path is unrepresentable-as-ws here (the whole point of the ADDRESS redesign).
   // The guard stays to catch the file/token paths. `mode` derived above.

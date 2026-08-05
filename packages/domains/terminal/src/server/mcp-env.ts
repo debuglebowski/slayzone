@@ -88,8 +88,11 @@ export async function resolveRemoteMcpEnv(
  *                              the hub over its ws channel, so the agent env is
  *                              byte-identical local vs remote.
  *   SLAYZONE_AGENT_ID        - the mode itself (passed back in the hook envelope)
- *   SLAYZONE_ROOT            - resolved on-disk anchor; the `slay` CLI inside the
- *                              agent derives `<ROOT>/storage` (same DB the app uses)
+ *   SLAYZONE_ROOT            - resolved on-disk anchor, set for EVERY spawn (not
+ *                              just hook-capable ones): the `slay` CLI inside the
+ *                              child finds the DB directly in `<ROOT>` (same one
+ *                              the hub uses). See the note at the assignment for
+ *                              why the child can no longer derive this itself.
  *   SLAYZONE_AGENT_HOOK_CONTEXT
  *                            - an OPAQUE JSON blob carrying every identity field
  *                              the server needs to attribute a hook (taskId,
@@ -109,7 +112,7 @@ export async function resolveRemoteMcpEnv(
  * `remote` (a task's pty routed to a runner) only suppresses the loopback hook
  * URL (the runner supplies it). It injects NO hub URL and NO bearer: the hook
  * posts to runner loopback, and the `slay` CLI reaches the hub via its own
- * `hub.json` (see apps/cli/hub-config.ts). With no `remote` (the default)
+ * `cli-hub-target.json` (see apps/cli/hub-config.ts). With no `remote` (the default)
  * nothing about the local env changes.
  *
  * No port/address env var is injected here: the `slay` CLI resolves the local
@@ -153,6 +156,22 @@ export async function buildMcpEnv(
 
   const hookCapable = Boolean(mode && HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId))
 
+  // On-disk anchor for EVERY spawn, hook-capable or not — this hub's own root,
+  // which the `slay` CLI inside the child uses to find the DB (post-flattening
+  // the DB sits directly in `<ROOT>`, no `storage/` level).
+  //
+  // Unconditional on purpose. The hub is the only process that knows where its
+  // state lives, and a child can no longer derive it: with the desktop app's
+  // supervised roles channel-scoped (`~/.slayzone/<dev|stable>/hub`), the old
+  // "everyone falls through to ~/.slayzone" assumption is dead. Worse, a pty
+  // routed through the co-located LOCAL RUNNER inherits that runner's own
+  // (different, role-scoped) SLAYZONE_ROOT through the base env — the manifest
+  // tags the var `global`, so sanitizeSpawnEnv keeps it. Setting it here means
+  // the hub's value always overrides that inherited one at the spawn boundary
+  // (the runner applies these overrides last), so a plain shell resolves the same
+  // DB an agent does instead of pointing at the runner's credential dir.
+  env.SLAYZONE_ROOT = getSlayzoneHomeDir()
+
   // The opaque identity blob the benign notify.sh forwards verbatim. Built ONLY
   // for hook-capable spawns (it rides the hook env). Carries every field the
   // server needs to resolve/attribute a hook — the per-field list lives HERE, in
@@ -162,7 +181,6 @@ export async function buildMcpEnv(
   // visible in Diagnostics.
   function setHookIdentity(): void {
     env.SLAYZONE_AGENT_ID = mode as string
-    env.SLAYZONE_ROOT = getSlayzoneHomeDir()
     const ctx: Record<string, unknown> = {
       v: 1,
       agentId: mode,
@@ -179,7 +197,7 @@ export async function buildMcpEnv(
     // (the runner overlays SLAYZONE_AGENT_HOOK_URL at spawn and relays to the hub
     // over its ws channel). So we set NO hub URL, NO bearer, and NO hook URL here
     // — the identity env is byte-identical to a local spawn. `remote.hubBaseUrl`
-    // is used only by the `slay` CLI's own hub.json path, not the hook.
+    // is used only by the `slay` CLI's own cli-hub-target.json path, not the hook.
     if (hookCapable) setHookIdentity()
     return env
   }

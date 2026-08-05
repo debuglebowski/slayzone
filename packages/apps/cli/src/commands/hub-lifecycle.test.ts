@@ -422,9 +422,11 @@ async function main(): Promise<void> {
       const empty = join(TMP, 'no-db-at-all')
       mkdirSync(empty, { recursive: true })
       const res = slay(['hub', 'ls'], { root: empty })
-      // getServerPort() → openDb() calls process.exit(1) when the DB file is
-      // absent, which a try/catch CANNOT intercept — so this pins the file-probe
-      // guard specifically, not just that the command "usually works".
+      // This used to pin a file-probe guard: `hub ls` reached the app's port
+      // through `getServerPort()` → `openDb()`, which `process.exit(1)`s when the
+      // DB file is absent — uncatchable, so the probe had to come first. The CLI
+      // opens no database at all now, so the property is structural rather than
+      // guarded; the assertion stays as the regression fence that keeps it so.
       assertEq(res.status, 0, `exited 0 (stdout: ${res.stdout} stderr: ${res.stderr})`)
       assert(
         !/Database not found/i.test(res.stderr + res.stdout),
@@ -745,13 +747,13 @@ async function main(): Promise<void> {
     // config it persists (the boot itself needs TLS + public DNS, so it is not booted
     // here — the mode/address plumbing is unit-covered in standalone-config.test.ts).
 
-    await test('create --public-address persists remote mode + addresses to config.json', async () => {
+    await test('create --public-address persists remote mode + addresses to hub.config.json', async () => {
       const remoteRoot = join(TMP, 'remote-cfg')
       mkdirSync(remoteRoot, { recursive: true })
       // `--bind 127.0.0.1:0` keeps this from binding a real interface: the point is
       // the FILE it writes, and a remote+loopback bind is a legitimate shape anyway
       // (a hub behind a reverse proxy). It will fail to come up (remote mode needs a
-      // real cert chain), which is fine — config.json is written BEFORE launch, so
+      // real cert chain), which is fine — hub.config.json is written BEFORE launch, so
       // the boot outcome is irrelevant to what we assert.
       slay(
         [
@@ -767,7 +769,7 @@ async function main(): Promise<void> {
         ],
         { root: remoteRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
       )
-      const cfg = JSON.parse(readFileSync(join(remoteRoot, 'config.json'), 'utf8')) as Record<
+      const cfg = JSON.parse(readFileSync(join(remoteRoot, 'hub.config.json'), 'utf8')) as Record<
         string,
         unknown
       >
@@ -795,7 +797,7 @@ async function main(): Promise<void> {
         ],
         { root: wideRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
       )
-      const cfg = JSON.parse(readFileSync(join(wideRoot, 'config.json'), 'utf8')) as Record<
+      const cfg = JSON.parse(readFileSync(join(wideRoot, 'hub.config.json'), 'utf8')) as Record<
         string,
         unknown
       >
@@ -840,7 +842,7 @@ async function main(): Promise<void> {
         assert(res.status !== 0, `refused ${bad}`)
         assert(/host\[:port\]/.test(res.stderr), `explains the grammar: ${res.stderr}`)
         // Failing fast means nothing was written — no half-configured hub root.
-        assert(!existsSync(join(badRoot, 'config.json')), `no config.json written for ${bad}`)
+        assert(!existsSync(join(badRoot, 'hub.config.json')), `no hub.config.json written for ${bad}`)
       }
     })
 
@@ -995,7 +997,7 @@ async function main(): Promise<void> {
     // still-running mid-suite.
     //
     // `hub create` starts the hub DETACHED. A case that only asserts on the
-    // config.json/stdout `create` produced still leaves a live hub, and one bound
+    // hub.config.json/stdout `create` produced still leaves a live hub, and one bound
     // to an OS-assigned port is undiscoverable — so `hub stop <name>` cannot reach
     // it and the loop above never sees it. That stranded ~3 hubs per run; 25 were
     // found alive on one machine, the oldest four days old.

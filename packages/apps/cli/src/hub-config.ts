@@ -8,25 +8,26 @@
  *      per-invocation flag has to beat the ambient env/config, or `slay --hub
  *      staging …` would silently hit whatever hub the shell was pointed at.
  *      Names a LOOPBACK hub only (discovery sweeps 127.0.0.1), and carries
- *      `SLAYZONE_HUB_TOKEN` if set — never `hub.json`'s token, which belongs to
+ *      `SLAYZONE_HUB_TOKEN` if set — never `cli-hub-target.json`'s token, which belongs to
  *      whichever hub `hub use`/`hub login` targeted and need not be this one.
  *   1. `SLAYZONE_HUB_ADDRESS` (+ `SLAYZONE_HUB_TOKEN`) environment variables —
  *      authority only (`host[:port]`); the http(s) scheme is DERIVED from
  *      SLAYZONE_MODE (local → http, remote → https). The env channel never
  *      carries a scheme, so it can't collide with the runner's ws(s):// reading
  *      of the same deployment (the retired `SLAYZONE_HUB_URL` bug).
- *   2. `hub.json` in the CLI state dir (written by `slay hub use` / `slay hub
- *      login`) — a FULL http(s) url (an operator pointing at an external hub gives
+ *   2. `hub-target[.dev].json` in the CLI's own state dir, `~/.slayzone/cli`
+ *      (written by `slay hub use` / `slay hub login`; pre-move locations are still
+ *      READ — see cli-state.ts) — a FULL http(s) url (an operator pointing at an external hub gives
  *      a complete url; not the env channel, so no scheme derivation). This is the
  *      channel that reaches a REMOTE hub, since `--hub` cannot.
  *   3. null — legacy behavior (local port discovery in db.ts, untouched)
  *
- * With no env vars and no hub.json the CLI behaves exactly as before.
+ * With no env vars and no cli-hub-target.json the CLI behaves exactly as before.
  */
 import fs from 'fs'
 import path from 'path'
 import { hubUrlFromAddr, isBareAuthority } from '@slayzone/platform/hub-addr'
-import { getDataDir } from './db'
+import { getHubTargetPath, legacyHubTargetPaths } from './cli-state'
 
 export interface HubTarget {
   baseUrl: string
@@ -37,8 +38,6 @@ interface HubFileConfig {
   url: string
   token?: string
 }
-
-const HUB_CONFIG_FILENAME = 'hub.json'
 
 /**
  * Target set by `--hub <name|port>` for THIS invocation only. Never persisted —
@@ -54,8 +53,12 @@ export function setHubOverride(target: HubTarget): void {
   hubOverride = target
 }
 
+/**
+ * Where the hub target is WRITTEN — the CLI's own state dir (see cli-state.ts).
+ * Reads also consult the legacy locations; see {@link readHubFile}.
+ */
 export function getHubConfigPath(): string {
-  return path.join(getDataDir(), HUB_CONFIG_FILENAME)
+  return getHubTargetPath()
 }
 
 /**
@@ -78,8 +81,20 @@ export function normalizeHubUrl(raw: string): string | null {
   return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
 }
 
+/**
+ * The hub-target file to READ: the current path, else the first legacy path that
+ * still exists. Written configs only ever land at the current path, so this is a
+ * one-way compatibility read for installs that configured a hub before the file
+ * moved into the CLI's own state dir.
+ */
+function hubFilePathForRead(): string {
+  const current = getHubConfigPath()
+  if (fs.existsSync(current)) return current
+  return legacyHubTargetPaths()[0] ?? current
+}
+
 function readHubFile(): HubFileConfig | null {
-  const configPath = getHubConfigPath()
+  const configPath = hubFilePathForRead()
   let rawText: string
   try {
     rawText = fs.readFileSync(configPath, 'utf-8')
@@ -109,7 +124,7 @@ function readHubFile(): HubFileConfig | null {
  * Resolve the hub target, or null when no hub is configured (legacy local-app
  * behavior). An invalid `SLAYZONE_HUB_ADDRESS` is a hard error (exit 1) — the user
  * explicitly asked for a hub, silently falling back to the local app would be
- * surprising. A corrupt hub.json only warns and falls back.
+ * surprising. A corrupt cli-hub-target.json only warns and falls back.
  *
  * `--hub` (see {@link setHubOverride}) wins over both.
  */
@@ -132,7 +147,7 @@ export function resolveHubTarget(): HubTarget | null {
       console.error(`Invalid SLAYZONE_HUB_ADDRESS (expected host[:port], no scheme/path): ${envAddress}`)
       process.exit(1)
     }
-    // Env address never picks up the file token — hub.json may target a different hub.
+    // Env address never picks up the file token — cli-hub-target.json may target a different hub.
     return { baseUrl, token: envToken || null }
   }
 
@@ -153,7 +168,7 @@ export function resolveHubTarget(): HubTarget | null {
 }
 
 /**
- * Write hub.json with owner-only permissions (0600). Returns the config path.
+ * Write cli-hub-target.json with owner-only permissions (0600). Returns the config path.
  * Expects a pre-normalized URL (see normalizeHubUrl).
  *
  * Note: the 0600 mode is best-effort on Windows — POSIX permission bits are
@@ -170,13 +185,23 @@ export function writeHubConfig(url: string, token?: string | null): string {
   return configPath
 }
 
-/** Remove hub.json. Returns false when no config existed. */
+/**
+ * Remove the stored hub target. Returns false when no config existed.
+ *
+ * Clears the LEGACY locations too. Removing only the current path would leave a
+ * pre-move file behind for {@link readHubFile}'s fallback to find, so `hub logout`
+ * would report success and the very next command would still be pointed at the old
+ * hub — with its bearer token still on disk.
+ */
 export function removeHubConfig(): boolean {
-  try {
-    fs.unlinkSync(getHubConfigPath())
-    return true
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false
-    throw e
+  let removed = false
+  for (const target of [getHubConfigPath(), ...legacyHubTargetPaths()]) {
+    try {
+      fs.unlinkSync(target)
+      removed = true
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
+    }
   }
+  return removed
 }

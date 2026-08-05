@@ -144,7 +144,7 @@ interface HubRunner {
  * has to bring its own runner; without this the spawn correctly fails.
  *
  * Mirrors `110-runner-loopback`'s loopback runner: mint a join token from the hub
- * that will own the runner, hand the runner its `<ROOT>/config.json` (display name
+ * that will own the runner, hand the runner its `<ROOT>/runner.config.json` (display name
  * + FS path-jail) and dial the url encoded in the token.
  */
 async function attachRunnerToHub(opts: {
@@ -163,7 +163,7 @@ async function attachRunnerToHub(opts: {
 
   fs.mkdirSync(opts.rootDir, { recursive: true })
   fs.writeFileSync(
-    path.join(opts.rootDir, 'config.json'),
+    path.join(opts.rootDir, 'runner.config.json'),
     JSON.stringify({ runnerName: opts.name, allowedRoots: [opts.allowedRoots] })
   )
 
@@ -174,7 +174,7 @@ async function attachRunnerToHub(opts: {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      // Standalone runner: clear any leaked SUPERVISED so it reads <ROOT>/config.json.
+      // Standalone runner: clear any leaked SUPERVISED so it reads <ROOT>/runner.config.json.
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: opts.rootDir,
       SLAYZONE_HUB_ADDRESS: new URL(payload.hubUrl).host,
@@ -263,7 +263,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-federation',
         seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
           fs.writeFileSync(
             bootConfigPath(userDataDir),
             JSON.stringify(
@@ -404,7 +404,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-settings',
         seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
           fs.writeFileSync(
             bootConfigPath(userDataDir),
             JSON.stringify(
@@ -491,7 +491,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-runners',
         seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
           fs.writeFileSync(
             bootConfigPath(userDataDir),
             JSON.stringify(
@@ -602,7 +602,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-pty',
         seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
           fs.writeFileSync(
             bootConfigPath(userDataDir),
             JSON.stringify(
@@ -715,7 +715,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       launched = await launchIsolatedElectron({
         name: 'multi-hub-live-add',
         seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
           fs.writeFileSync(
             bootConfigPath(userDataDir),
             JSON.stringify(

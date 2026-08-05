@@ -1,119 +1,30 @@
-import { DatabaseSync } from 'node:sqlite'
+/**
+ * Telling the app that something changed, and finding it in order to do so.
+ *
+ * WHAT THIS MODULE IS NOT, ANYMORE: it used to open the SlayZone SQLite database.
+ * That is gone — the CLI reads and writes every piece of domain state over the
+ * hub's REST surface, so it no longer derives a storage directory, no longer needs
+ * `SLAYZONE_ROOT` to be correct, and behaves the same in a laptop shell, an agent
+ * terminal, and on a hub-only box with no app installed. `openDb`/`getDbPath`/
+ * `getArtifactsDir` and the `node:sqlite` import are deleted rather than deprecated;
+ * the last consumer (`slay tasks artifacts path`) now reads `filePath` off
+ * `GET /api/artifacts/:id`.
+ *
+ * Nothing here resolves `SLAYZONE_ROOT` either: the two genuinely MACHINE-local
+ * files that remain (the hub pointer, the `<kind>-runtime` npm prefix) moved to the
+ * CLI's own state dir — see cli-state.ts.
+ *
+ * The filename is now a misnomer and kept only to avoid churning every import in
+ * one go; what survives is app NOTIFICATION.
+ *
+ * @module cli/db
+ */
 import http from 'node:http'
-import fs from 'fs'
-import path from 'path'
-import os from 'os'
-import {
-  getStorageDir,
-  getDbName,
-  DB_PRAGMAS,
-  LOOPBACK_HOSTS,
-  parseHubAddress
-} from '@slayzone/platform'
+import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
+import { findHub } from '@slayzone/platform/hub-discovery'
 import { resolveHubTarget, type HubTarget } from './hub-config'
-export { resolveProject, resolveProjectArg, resolveProjectByPath } from './db-helpers.mjs'
-export type { SlayDb } from './db-helpers.mjs'
-import type { SlayDb } from './db-helpers.mjs'
-
-function defaultDir(): string {
-  // Same derivation as the app/hub: <SLAYZONE_ROOT>/storage. Keeps the CLI's DB
-  // location in lockstep with wherever the app writes it (no split).
-  const dir = getStorageDir()
-  if (fs.existsSync(dir)) return dir
-  // Fallback: CLI runs before app has migrated data on Linux
-  // TODO: remove legacy fallback once Linux migration has been out for a few releases
-  if (process.platform === 'linux') {
-    const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config')
-    const legacyDir = path.join(configHome, 'slayzone')
-    if (fs.existsSync(legacyDir)) return legacyDir
-  }
-  return dir
-}
-
-/**
- * The DB file for this install — fully DERIVED, never overridable. `<ROOT>/storage`
- * from SLAYZONE_ROOT (defaultDir) + the dev-vs-packaged filename from the shared
- * `getDbName`, so the CLI, the app, and the hub cannot drift on either half.
- *
- * There is deliberately no path-pointing env var: an inherited one would let a
- * `slay` invocation open a DIFFERENT DB than the app it then notifies (the whole
- * two-DB-split class of bug). ROOT is the single knob, and it is `global`-scoped in
- * the env manifest precisely so a child resolves the same install as its parent.
- */
-function getDbPath(dev: boolean): string {
-  return path.join(defaultDir(), getDbName(!dev))
-}
-
-type SqlParams = Record<string, string | number | bigint | null | Uint8Array>
-
-/**
- * The port of a LOOPBACK `SLAYZONE_HUB_ADDRESS`, else null.
- *
- * Every caller of {@link getServerPort} dials `127.0.0.1:<port>`, so the address
- * may only shortcut the DB read when it actually names loopback — a remote
- * `hub.example:8443` would otherwise be reinterpreted as "the local app listens
- * on 8443". (A remote hub is not this function's job anyway: resolveHubTarget
- * handles it and every caller consults that first.)
- */
-function loopbackHubPort(): number | null {
-  const parsed = parseHubAddress(process.env.SLAYZONE_HUB_ADDRESS)
-  if (!parsed?.port) return null
-  return LOOPBACK_HOSTS.has(parsed.host) ? parsed.port : null
-}
-
-/**
- * True when a SlayZone database exists for this install.
- *
- * `openDb()` deliberately `process.exit(1)`s when the file is absent — right for
- * a task/project command (they cannot work without it), fatal for the hub
- * commands: a hub-only box has NO database and must still be able to run
- * `slay hub ls`. Callers that merely CONSULT the DB opportunistically probe with
- * this first. A try/catch around openDb() does NOT work — exit is not throw.
- */
-export function hasLocalDatabase(): boolean {
-  return fs.existsSync(getDbPath(process.env.SLAYZONE_DEV === '1'))
-}
-
-export function getServerPort(): number | null {
-  // The running server binds SLAYZONE_HUB_ADDRESS and publishes its actually-bound
-  // port to `settings.server_port` at boot (hub/src/server.ts). Fast-path a
-  // loopback address when one is set (an explicitly-configured local hub), else
-  // read the DB — the durable source of truth, and the ONLY path inside a task
-  // pty (sanitizeSpawnEnv strips the infra-scoped address at every spawn).
-  const envPort = loopbackHubPort()
-  if (envPort) return envPort
-  try {
-    const db = openDb()
-    const row = db.query<{ value: string }>(
-      `SELECT value FROM settings WHERE key = 'server_port' LIMIT 1`
-    )
-    db.close()
-    const port = parseInt(row[0]?.value ?? '', 10)
-    return port > 0 && port <= 65535 ? port : null
-  } catch {
-    return null
-  }
-}
-
-function getAlternateServerPort(): number | null {
-  // An explicit loopback hub address means "you were told which target to use" —
-  // probing the OTHER DB's port would contradict that instruction.
-  if (loopbackHubPort()) return null
-  const dev = process.env.SLAYZONE_DEV === '1'
-  const altPath = getDbPath(!dev)
-  if (!fs.existsSync(altPath)) return null
-  try {
-    const altDb = new DatabaseSync(altPath)
-    const row = altDb
-      .prepare(`SELECT value FROM settings WHERE key = 'server_port' LIMIT 1`)
-      .get() as { value: string } | undefined
-    altDb.close()
-    const port = parseInt(row?.value ?? '', 10)
-    return port > 0 && port <= 65535 ? port : null
-  } catch {
-    return null
-  }
-}
+import { probeFixedPort } from './local-hub'
+export { resolveProjectArg } from './db-helpers.mjs'
 
 export function postJson(port: number, path: string, timeoutMs = 3000): Promise<boolean> {
   return new Promise((resolve) => {
@@ -133,8 +44,19 @@ export function postJson(port: number, path: string, timeoutMs = 3000): Promise<
   })
 }
 
-function probePort(port: number): Promise<boolean> {
-  return postJson(port, '/api/notify', 1000)
+/**
+ * The OTHER channel's fixed port, when a hub answers there.
+ *
+ * Powers the "you are pointed at the wrong install" hint below. Previously this
+ * opened the other channel's SQLite file to read its `settings.server_port`; asking
+ * the port directly is both DB-free and strictly more accurate — a stored port can
+ * name a process that died, while a `/health` answer proves something is alive.
+ */
+async function probeAlternateChannel(): Promise<number | null> {
+  const dev = process.env.SLAYZONE_DEV === '1'
+  const altPort = dev ? SIDECAR_FIXED_PORT.prod : SIDECAR_FIXED_PORT.dev
+  const hub = await findHub(String(altPort))
+  return hub ? hub.port : null
 }
 
 async function postHubNotify(hub: HubTarget, timeoutMs = 3000): Promise<boolean> {
@@ -165,7 +87,8 @@ export async function notifyApp(): Promise<void> {
     return
   }
 
-  const port = getServerPort()
+  // Same channel as api.ts's resolveTarget: this channel's fixed port.
+  const port = await probeFixedPort()
   if (port) {
     const ok = await postJson(port, '/api/notify')
     if (!ok) {
@@ -176,9 +99,9 @@ export async function notifyApp(): Promise<void> {
     return
   }
 
-  // No server port in current DB — check if app is running on the other DB
-  const altPort = getAlternateServerPort()
-  if (altPort && (await probePort(altPort))) {
+  // Nothing on this channel's port — is the app running on the OTHER channel?
+  const altPort = await probeAlternateChannel()
+  if (altPort) {
     const dev = process.env.SLAYZONE_DEV === '1'
     const hint = dev ? 'without --dev' : 'with --dev'
     console.error(
@@ -188,49 +111,3 @@ export async function notifyApp(): Promise<void> {
   }
 }
 
-export function getArtifactsDir(): string {
-  const dir = defaultDir()
-  return path.join(dir, 'artifacts')
-}
-
-export function openDb(): SlayDb {
-  const dev = process.env.SLAYZONE_DEV === '1'
-  const dbPath = getDbPath(dev)
-
-  if (!fs.existsSync(dbPath)) {
-    console.error(`Database not found: ${dbPath}`)
-    const altPath = getDbPath(!dev)
-    if (fs.existsSync(altPath)) {
-      const hint = dev ? 'without --dev' : 'with --dev'
-      console.error(`Found other database at: ${altPath}`)
-      console.error(`Re-run ${hint} to target that database.`)
-    } else {
-      console.error('Make sure SlayZone has been launched at least once.')
-    }
-    process.exit(1)
-  }
-
-  const db = new DatabaseSync(dbPath)
-  for (const pragma of DB_PRAGMAS) {
-    db.exec(`PRAGMA ${pragma}`)
-  }
-
-  return {
-    query<T extends object>(sql: string, params: SqlParams = {}): T[] {
-      return db.prepare(sql).all(params) as T[]
-    },
-    run(sql: string, params: SqlParams = {}) {
-      db.prepare(sql).run(params)
-    },
-    close() {
-      db.close()
-    },
-    raw() {
-      return db as unknown as ReturnType<SlayDb['raw']>
-    }
-  }
-}
-
-export function getDataDir(): string {
-  return defaultDir()
-}

@@ -3,9 +3,10 @@
  *
  * The gap the single-boot runner e2e (110-runner-loopback) missed: nothing proved
  * a SECOND boot against the SAME persisted store reuses the runner's row instead
- * of orphaning a fresh one. The runner keys its credential file by hub host+PORT
- * (`hubHostFromUrl` → `host_port`), so if the port CHANGES between boots the
- * credential filename changes ⇒ the runner can't `hello` with prior creds ⇒
+ * of orphaning a fresh one. The runner keys its credential entry (one shared
+ * `runner.state.json` map, entries keyed by hub host+PORT via `hubHostFromUrl`
+ * → `host_port`) by hub host+PORT, so if the port CHANGES between boots the
+ * credential key changes ⇒ the runner can't `hello` with prior creds ⇒
  * RE-ENROLLS as a new `runners` row (an orphaned `local-runner` per relaunch).
  *
  * Single-listener model: `/runners` rides the ONE hub port (no separate runner
@@ -90,8 +91,9 @@ const HUB_PORT = 51102
 interface BootDeps {
   db: SlayzoneDb
   auth: HubAuth
-  /** The runner's credential dir — STABLE across boots (only the filename within
-   *  it varies, keyed by hub host+port via hubHostFromUrl). */
+  /** The runner's credential dir — STABLE across boots (holds one shared
+   *  runner.state.json; the entry key within it varies, keyed by hub host+port
+   *  via hubHostFromUrl). */
   credsBaseDir: string
   /** The hub port this boot serves on. Defaults to the stable HUB_PORT; a test can
    *  pass a DIFFERENT value to model the (now-impossible-in-prod) port-churn case. */
@@ -188,7 +190,7 @@ async function main(): Promise<void> {
 
     await test('regression guard: a CHANGED hub port would change the credential key (why stability matters)', async () => {
       // Documents the failure the single-listener model structurally prevents: if
-      // the hub port differed between boots, the runner's credential filename
+      // the hub port differed between boots, the runner's credential key
       // (hubHostFromUrl → host_port) would differ → creds miss → re-enroll. The
       // production hub port is fixed per-environment (SIDECAR_FIXED_PORT), so this
       // can't happen; the assertion pins the property so a future change that

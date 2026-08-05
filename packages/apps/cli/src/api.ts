@@ -1,4 +1,4 @@
-import { getServerPort } from './db'
+import { probeFixedPort } from './local-hub'
 import { resolveHubTarget } from './hub-config'
 
 interface ApiTarget {
@@ -7,11 +7,23 @@ interface ApiTarget {
   hub: boolean
 }
 
-/** Hub when configured (env or hub.json), otherwise the legacy local app. */
-function resolveTarget(): ApiTarget {
+/**
+ * Hub when configured (env or cli-hub-target.json), otherwise the local app.
+ *
+ * Both channels are DB-free. An explicitly configured hub is read from env/file;
+ * the local app is found by probing its fixed per-channel port — one loopback
+ * `/health`, no storage path derived, nothing that can go stale. The CLI used to
+ * read `settings.server_port` out of SQLite here, which is what forced it to know
+ * the app's on-disk layout and made a plain shell break whenever that layout moved.
+ *
+ * A hub that is configured but unreachable is NOT silently downgraded to the local
+ * app: the caller named a target, and quietly acting on a different one would apply
+ * their command to the wrong data.
+ */
+async function resolveTarget(): Promise<ApiTarget> {
   const hub = resolveHubTarget()
   if (hub) return { baseUrl: hub.baseUrl, token: hub.token, hub: true }
-  const port = getServerPort()
+  const port = await probeFixedPort()
   if (!port) {
     console.error('SlayZone server port not found. Is the app running?')
     process.exit(1)
@@ -36,7 +48,7 @@ function connectError(target: ApiTarget): never {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const target = resolveTarget()
+  const target = await resolveTarget()
   let res: Response
   try {
     res = await fetch(`${target.baseUrl}${path}`, withAuth(init, target.token))
@@ -80,7 +92,7 @@ export function apiDelete<T>(path: string, body?: Record<string, unknown>): Prom
 
 /** Raw fetch for SSE/streaming — returns the Response directly. */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const target = resolveTarget()
+  const target = await resolveTarget()
   try {
     return await fetch(`${target.baseUrl}${path}`, withAuth(init, target.token))
   } catch {
@@ -108,7 +120,7 @@ export async function apiGetStream(
    */
   passThroughCodes: string[] = []
 ): Promise<{ body: ReadableStream<Uint8Array> | null; code?: string }> {
-  const target = resolveTarget()
+  const target = await resolveTarget()
   let res: Response
   try {
     res = await fetch(`${target.baseUrl}${path}`, withAuth(undefined, target.token))
@@ -145,7 +157,7 @@ async function requestStream<T>(
   path: string,
   body: ReadableStream<Uint8Array>
 ): Promise<T> {
-  const target = resolveTarget()
+  const target = await resolveTarget()
   let res: Response
   try {
     res = await fetch(`${target.baseUrl}${path}`, {

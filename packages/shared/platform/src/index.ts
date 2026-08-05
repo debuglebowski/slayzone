@@ -2,6 +2,8 @@ export {
   getStateDir,
   getSlayzoneHomeDir,
   getSlayzoneReleaseChannel,
+  getSupervisedRoot,
+  type SlayzoneSupervisedRole,
   getClaudeSettingsPath,
   getGeminiSettingsPath,
   getCodexHooksPath,

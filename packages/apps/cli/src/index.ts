@@ -1,21 +1,13 @@
 declare const __APP_VERSION__: string
 
-// `node:sqlite` is still flagged experimental, so importing it prints an
-// ExperimentalWarning to stderr on every invocation. The repo's `bin/slay`
-// wrapper passes `--no-warnings`, but npm generates the bin shim for the
-// published package and cannot, so suppress precisely THIS warning here —
-// filtering by name rather than muting the channel, so any other warning still
-// reaches the user.
-process.removeAllListeners('warning')
-process.on('warning', (warning) => {
-  if (warning.name === 'ExperimentalWarning' && /SQLite/i.test(warning.message)) return
-  console.warn(`${warning.name}: ${warning.message}`)
-})
+// (Removed: a filter that suppressed the `node:sqlite` ExperimentalWarning on
+// every invocation. The CLI no longer imports `node:sqlite` at all — it reaches
+// every piece of state over the hub's REST surface — so there is no warning left
+// to hide, and Node's warning channel is back to its default behavior.)
 
 import { Command } from 'commander'
 import { discoverHubs, findHub } from '@slayzone/platform/hub-discovery'
 import { setHubOverride } from './hub-config'
-import { getServerPort, hasLocalDatabase } from './db'
 import { tasksCommand } from './commands/tasks'
 import { projectsCommand } from './commands/projects'
 import { processesCommand } from './commands/processes'
@@ -54,23 +46,13 @@ const program = new Command()
  * they did not choose.
  */
 async function applyHubOverride(nameOrPort: string): Promise<void> {
-  // The desktop app's sidecar binds outside the hub block and publishes its port
-  // to `settings.server_port`; include it so `--hub app` works like any other
-  // name. Best-effort — a hub-only box has no SlayZone DB to read.
-  // Probe for the DB file first — getServerPort() → openDb() exits the process
-  // when it is absent, which a try/catch cannot intercept.
-  let extraPorts: number[] = []
-  if (hasLocalDatabase()) {
-    try {
-      const appPort = getServerPort()
-      if (appPort) extraPorts = [appPort]
-    } catch {
-      /* unreadable DB — the block sweep is enough */
-    }
-  }
-  const hub = await findHub(nameOrPort, { extraPorts })
+  // No `extraPorts`: the desktop app's sidecar binds a fixed port inside the hub
+  // block now, so `--hub app` resolves through the ordinary sweep. This used to
+  // read the sidecar's OS-assigned port out of `settings.server_port`, guarded by
+  // a database-file probe because `openDb()` exits the process when none exists.
+  const hub = await findHub(nameOrPort)
   if (!hub) {
-    const running = await discoverHubs({ extraPorts })
+    const running = await discoverHubs()
     console.error(`No hub named or listening on "${nameOrPort}".`)
     console.error(
       running.length > 0
@@ -85,7 +67,7 @@ async function applyHubOverride(nameOrPort: string): Promise<void> {
   // set deliberately. Dropping it here (as this did) meant `--hub` silently
   // downgraded to an unauthenticated request — invisible on a loopback hub, which
   // allows every co-located caller before it even looks at the header, and a flat
-  // 401 the moment a hub enforces auth. `hub.json`'s token is NOT used: it belongs
+  // 401 the moment a hub enforces auth. `cli-hub-target.json`'s token is NOT used: it belongs
   // to whichever hub `hub use`/`hub login` targeted, which need not be this one.
   setHubOverride({
     baseUrl: `http://127.0.0.1:${hub.port}`,

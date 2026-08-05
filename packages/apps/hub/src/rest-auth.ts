@@ -8,7 +8,7 @@
  * endpoint, and `createMcpRestApp` mounts nothing but `express.json()`. Under
  * `SLAYZONE_MODE=remote` that listener IS the internet-facing https one, so those
  * routes were reachable unauthenticated — while the CLI was already sending an
- * `Authorization: Bearer` header (from `SLAYZONE_HUB_TOKEN` or `hub.json`) that
+ * `Authorization: Bearer` header (from `SLAYZONE_HUB_TOKEN` or `cli-hub-target.json`) that
  * no one verified. This module makes that header load-bearing.
  *
  * Shape mirrors `hub-trpc-context.ts` deliberately: the security-relevant

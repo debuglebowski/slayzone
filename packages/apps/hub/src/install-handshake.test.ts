@@ -175,8 +175,9 @@ async function main(): Promise<void> {
   const runnerRootDir = join(root, 'runner-root')
   const workDir = join(root, 'work')
   for (const d of [hubRootDir, runnerRootDir, workDir]) mkdirSync(d, { recursive: true })
-  // DB + state derive at <ROOT>/storage; assert the hub landed there, not the real DB.
-  const hubStorageDir = join(hubRootDir, 'storage')
+  // DB + state derive directly at <ROOT> (flat, no storage/ wrapper); assert the
+  // hub landed there, not the real DB.
+  const hubStorageDir = hubRootDir
 
   const secret = require('node:crypto').randomBytes(32).toString('hex') as string
   let hub: Proc | null = null
@@ -253,11 +254,11 @@ async function main(): Promise<void> {
     })
 
     // --- spawn the runner, isolated, pointed at the minted token -------------
-    // The runner display name + FS path-jail now come from <ROOT>/config.json (the
-    // SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
+    // The runner display name + FS path-jail now come from <ROOT>/runner.config.json
+    // (the SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
     // Write them before spawn so the standalone runner reads them.
     writeFileSync(
-      join(runnerRootDir, 'config.json'),
+      join(runnerRootDir, 'runner.config.json'),
       JSON.stringify({ runnerName: 'install-handshake-runner', allowedRoots: [workDir] })
     )
     runner = spawnChild(RUNNER_BIN, {

@@ -182,6 +182,8 @@ import {
   checkCliInstalled,
   getCliBinTarget,
   getManualInstallHint,
+  getSupervisedRoot,
+  SIDECAR_FIXED_PORT,
   SLZ_FILE_HOST,
   fileUrlToSlzFileUrl
 } from '@slayzone/platform'
@@ -211,31 +213,27 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // profile corrupts partition storage (wedged IndexedDB/quota service,
   // "Database IO error" on service worker DB), so isolate dev's Electron
   // profile the same way Playwright does above. Only the Chromium profile
-  // (Partitions, storage, caches) moves; our DB/artifacts are anchored to
-  // <ROOT>/storage below.
+  // (Partitions, storage, caches) moves; our DB/artifacts are anchored to this
+  // app's channel-scoped hub root below.
   const devProfileDir = `${legacyStateDir}-dev`
   mkdirSync(devProfileDir, { recursive: true })
   app.setPath('userData', devProfileDir)
 }
 
-// Anchor all our state (DB, artifacts, recent backups, logs) under
-// <SLAYZONE_ROOT>/storage — the same layout on every machine — migrating it once
-// out of the legacy Electron userData dir (Electron keeps its own profile there).
-// Every process (this app, the sidecar it spawns, the hub) derives the SAME
-// <ROOT>/storage from SLAYZONE_ROOT via platform.getStorageDir() — no dir- or
-// file-pointing var is threaded across the boundary, by design. Uses the
-// pre-swap userData as the migration SOURCE so the dev profile-swap above doesn't
-// hide the legacy data.
-initStorageDir(legacyStateDir, app.isPackaged)
-
-// Release channel → env, BEFORE the sidecar/pty env is built. `buildMcpEnv` (in
-// the electron-free terminal domain) reads this via getSlayzoneReleaseChannel()
-// and packs it into the opaque SLAYZONE_AGENT_HOOK_CONTEXT blob, so the server logs
-// which release channel a hook came from. The shared ~/.slayzone/hooks/notify.sh
-// is NOT release-channel-scoped (prod + dev share one file); recording the
-// release channel makes a future cross-release-channel clobber visible in
-// Diagnostics instead of silent.
-// Derivation: dev (unpackaged) vs beta (prerelease tag) vs stable.
+// Release channel → env. Must run BEFORE initStorageDir below: getSupervisedRoot()
+// (which resolves this app's own storage root) reads it via
+// getSlayzoneReleaseChannel() to pick the dev-vs-stable bucket, so deriving it
+// later would anchor every boot to `stable` regardless of build.
+//
+// Also read later, BEFORE the sidecar/pty env is built: `buildMcpEnv` (in the
+// electron-free terminal domain) packs it into the opaque
+// SLAYZONE_AGENT_HOOK_CONTEXT blob, so the server logs which release channel a
+// hook came from. The shared ~/.slayzone/hooks/notify.sh is NOT
+// release-channel-scoped (prod + dev share one file); recording the release
+// channel makes a future cross-release-channel clobber visible in Diagnostics
+// instead of silent.
+// Derivation: dev (unpackaged) vs beta (prerelease tag) vs stable. Note the
+// storage bucket folds beta into stable — see getSupervisedRoot's doc comment.
 if (!process.env.SLAYZONE_RELEASE_CHANNEL) {
   process.env.SLAYZONE_RELEASE_CHANNEL = !app.isPackaged
     ? 'dev'
@@ -243,6 +241,21 @@ if (!process.env.SLAYZONE_RELEASE_CHANNEL) {
       ? 'beta'
       : 'stable'
 }
+
+// Anchor all our state (DB, artifacts, recent backups, logs) under this app's
+// CHANNEL-SCOPED HUB ROOT — ~/.slayzone/<dev|stable>/hub — running the two
+// one-time COPY migrations that feed it: out of the legacy flat ~/.slayzone
+// layout, and out of the legacy Electron userData dir (Electron keeps its own
+// profile there). Uses the pre-swap userData as the second migration's SOURCE so
+// the dev profile-swap above doesn't hide the legacy data.
+//
+// This app IS the hub role. The sidecar it spawns is handed the SAME root
+// explicitly (SLAYZONE_ROOT below) rather than inheriting an ambient one, and
+// the co-located local runner is handed its own separate `runner` root — that
+// explicit per-child handoff is what actually keeps the two roles' state apart.
+// The main process's OWN ambient SLAYZONE_ROOT stays untouched, so the hook
+// installers later in this boot keep writing to the unscoped ~/.slayzone/hooks.
+initStorageDir(legacyStateDir, app.isPackaged)
 
 // tRPC server data root = the resolved storage dir, so every router's ctx.dataRoot
 // resolves project-icons/artifacts to the same dir the renderer reads.
@@ -699,21 +712,31 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
   const runnerScriptPath = is.dev
     ? join(app.getAppPath(), '../runner/dist/bin.cjs')
     : join(process.resourcesPath, 'runner', 'bin.cjs')
-  // The local runner derives its own credential store at `<ROOT>/runners` (same
-  // SLAYZONE_ROOT/$HOME it inherits from us) — no explicit handoff. Its FS
-  // path-jail likewise self-derives: under SLAYZONE_SUPERVISED=1 loadRunnerConfig
+  // The local runner gets its OWN channel-scoped root, handed over explicitly
+  // below — it no longer shares one ambient root with the hub (which is how a
+  // runner-owned credential store ended up loose inside the hub's state). Its FS
+  // path-jail still self-derives: under SLAYZONE_SUPERVISED=1 loadRunnerConfig
   // defaults allowedRoots to `[homedir()]` (local runner operates on the user's
-  // own projects), so there is no env handoff here either.
+  // own projects), so there is no env handoff for that.
   const handleRunner = startLocalRunner({
     execPath: process.execPath,
     scriptPath: runnerScriptPath,
     env: {
       ...process.env,
+      // This runner's own channel-scoped RUNNER root — separate from the hub's,
+      // so its credential store (runner.state.json) and logs never mix with the
+      // hub's DB/artifacts. Explicit because the runner cannot derive it:
+      // getSupervisedRoot is desktop-app-only, and an inherited-unset value would
+      // land it back on the flat, channel-shared ~/.slayzone. OVERRIDES anything
+      // inherited (in dev the repo may set it) so the local runner always uses
+      // this boot's channel root.
+      SLAYZONE_ROOT: getSupervisedRoot('runner'),
       // This local runner is HOST-SUPERVISED: the Electron app spawns + manages it
       // and supplies its env in full below. Flag it so the runner does NOT cwd-seed
       // SLAYZONE_ROOT (bin.ts) — without this it treated the app's CWD (the repo in
-      // dev) as its root and wrote creds to <repo>/runners/. Supervised → creds
-      // resolve to the shared ~/.slayzone/runners like the rest of app state.
+      // dev) as its root. Belt-and-braces now that SLAYZONE_ROOT is set explicitly
+      // above (the seed only fires when unset), but the flag still drives the
+      // supervised defaults for enroll name + path-jail.
       SLAYZONE_SUPERVISED: '1',
       // Auto-enroll: the freshly minted token embeds the cert fingerprint the
       // runner pins. The env channel carries the hub AUTHORITY only
@@ -1803,10 +1826,10 @@ app
       requestPtyRespawn: broadcastRespawnRequest,
       onReachedTerminal: onTaskReachedTerminal,
       // Data-root seam so task ops/ stays server-pure. MUST be the resolved
-      // storage dir (<ROOT>/storage), NOT app.getPath('userData') — after the
-      // storage migration artifacts live under <ROOT>/storage/artifacts, so a
-      // userData-based root would strand deleted-task artifact cleanup at the
-      // empty legacy dir.
+      // storage dir (this app's channel-scoped hub root), NOT
+      // app.getPath('userData') — post-migration artifacts live under
+      // <hub-root>/artifacts, so a userData-based root would strand deleted-task
+      // artifact cleanup at the empty legacy dir.
       getDataRoot: () => getStorageDir()
     })
     // Wire the cross-domain terminal seam so server-pure callers (integrations
@@ -2399,17 +2422,42 @@ app
             execPath: process.execPath,
             scriptPath,
             host: '127.0.0.1',
+            // The supervised sidecar binds a FIXED port per channel, inside the
+            // reserved head of HUB_PORT_BLOCK (51100-51109). That is what makes it
+            // findable without a database: `slay` and `slay hub ls` reach it by
+            // probing a known constant (or by the ordinary block sweep) instead of
+            // reading `settings.server_port` out of the SQLite file — the only
+            // reason the CLI still opened a DB at all. A bound port cannot go
+            // stale, and only one process can hold it, so a stray second sidecar
+            // now fails loud with EADDRINUSE instead of silently coexisting
+            // against the same DB.
+            //
+            // NOT under Playwright: `e2e-parallel.sh` runs the full suite as one
+            // process PER e2e/ SUBDIRECTORY — six concurrent Electron apps — so a
+            // single fixed test port would EADDRINUSE five of them. (SIDECAR_FIXED_PORT
+            // .test exists for a single-app run; paths.ts's "e2e is one worker" note
+            // predates the group runner and is true only within one group.) E2E
+            // keeps the OS-assigned port and the `settings.server_port` channel.
+            fixedPort: isPlaywright
+              ? undefined
+              : SIDECAR_FIXED_PORT[app.isPackaged ? 'prod' : 'dev'],
             // Diagnostics only — the SAME derivation the sidecar performs from the
-            // inherited SLAYZONE_ROOT + the SLAYZONE_DEV bit below, computed here so
-            // the Diagnostics "Database" row can name the file. NOT a handoff: there
-            // is no path-pointing env var, by design.
+            // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
+            // so the Diagnostics "Database" row can name the file.
             dbPath: getDatabasePath(),
             env: {
               ...process.env,
-              // The sidecar derives <ROOT>/storage + DB path from SLAYZONE_ROOT itself
-              // (inherited $HOME → same getSlayzoneHomeDir()), so no path is handed
-              // over. Pass only the dev-vs-packaged bit it can't infer (it has no
-              // Electron `app.isPackaged`), so it derives the right filename.
+              // The sidecar IS this app's hub, so hand it this app's own
+              // channel-scoped HUB root explicitly instead of letting it re-derive
+              // an ambient one. It can't derive this itself: getSupervisedRoot is
+              // desktop-app-only (a standalone hub anchors to its own --root), and
+              // an inherited-unset SLAYZONE_ROOT would land it back on the flat,
+              // channel-shared ~/.slayzone the migration just moved state out of.
+              // Everything else it needs (DB path, logs, artifacts) derives from
+              // this one var, so no path-pointing var is threaded, by design.
+              SLAYZONE_ROOT: getSupervisedRoot('hub'),
+              // Pass the dev-vs-packaged bit it can't infer (it has no Electron
+              // `app.isPackaged`), so it derives the right DB filename.
               SLAYZONE_DEV: app.isPackaged ? undefined : '1',
               // Desktop bridge: one listener carrying the capability bridge (renderer
               // Electron-only calls + desktop events, WS `/cap`) AND the REST

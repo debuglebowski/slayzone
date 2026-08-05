@@ -5,7 +5,7 @@ import path from 'path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ReadableStream as StreamWebReadable } from 'node:stream/web'
-import { openDb, getArtifactsDir, type SlayDb } from '../../db'
+import { isCoLocatedHub } from '../../local-hub'
 import type { ArtifactVersion, DiffResult, PruneReport } from '@slayzone/task-artifacts/shared'
 import {
   getExtensionFromTitle,
@@ -82,9 +82,14 @@ import { cliAuthor, resolveId } from './_shared'
  * "available types for <mode>" hint survive (an export route only knows its own
  * single type).
  *
- * Still DISK-LOCAL, deliberately — and now the ONLY one:
- *   - `path` — prints a LOCAL filesystem path; meaningless for a remote hub, so
- *     there is nothing to route. It is the last `openDb()` caller in this file.
+ *   path        → GET    /api/artifacts/:id  (reads the `filePath` field)
+ *
+ * NOTHING in this file opens a database anymore. `path` was the last one: it
+ * expanded the id prefix locally and joined a locally-derived artifacts dir, which
+ * both required the CLI to know the app's on-disk layout AND silently printed a
+ * path from the wrong machine against a remote hub. The hub composes the path now
+ * (only it knows its own root) and the CLI refuses to print one when the hub is not
+ * co-located.
  */
 
 interface ArtifactRow extends Record<string, unknown> {
@@ -106,40 +111,6 @@ interface ArtifactFolderRow extends Record<string, unknown> {
   name: string
   order: number
   created_at: string
-}
-
-/**
- * Expand an artifact id prefix against the LOCAL database. The last user is
- * `path`, which prints a local filesystem path and therefore has no remote
- * meaning — every other subcommand sends the prefix to the hub, which expands it
- * with the shared `resolveByIdPrefix` (identical 404/ambiguous wording).
- */
-function resolveArtifact(db: SlayDb, prefix: string): ArtifactRow {
-  const rows = db.query<ArtifactRow>(
-    `SELECT * FROM task_artifacts WHERE id LIKE :prefix || '%' LIMIT 2`,
-    { ':prefix': prefix }
-  )
-  if (rows.length === 0) {
-    console.error(`Artifact not found: "${prefix}"`)
-    process.exit(1)
-  }
-  if (rows.length > 1) {
-    console.error(
-      `Ambiguous artifact id "${prefix}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`
-    )
-    process.exit(1)
-  }
-  return rows[0]
-}
-
-function artifactFilePath(
-  artifactsDir: string,
-  taskId: string,
-  artifactId: string,
-  title: string
-): string {
-  const ext = getExtensionFromTitle(title) || '.txt'
-  return path.join(artifactsDir, taskId, `${artifactId}${ext}`)
 }
 
 function printArtifacts(artifacts: ArtifactRow[], folders?: ArtifactFolderRow[]) {
@@ -713,11 +684,26 @@ export function artifactsSubcommand(): Command {
     .command('path <artifactId>')
     .description('Print artifact file path')
     .action(async (artifactId: string) => {
-      const db = openDb()
-      const artifact = resolveArtifact(db, artifactId)
-      db.close()
-      const dir = getArtifactsDir()
-      process.stdout.write(artifactFilePath(dir, artifact.task_id, artifact.id, artifact.title))
+      // GET /api/artifacts/:id resolves the prefix and returns `filePath` composed
+      // against the HUB's own storage root. Composing it here needed a local DB read
+      // plus a locally-derived artifacts dir — and printed a path from the wrong
+      // machine, silently, whenever the hub was remote.
+      const { data } = await apiGet<{ ok: true; data: ArtifactRow & { filePath: string } }>(
+        `/api/artifacts/${encodeURIComponent(artifactId)}`
+      )
+      // A path only means something on the filesystem that holds it. `/health`
+      // reports the hub's root, so a hub that is not this machine is refused rather
+      // than answered with a path nothing here can open.
+      const local = await isCoLocatedHub()
+      if (!local) {
+        console.error(
+          `Refusing to print a path for a hub on another machine — ${data.filePath} exists there, not here.\n` +
+            `Use \`slay tasks artifacts read ${artifactId}\` to get the content, or ` +
+            `\`download\` to write it locally.`
+        )
+        process.exit(1)
+      }
+      process.stdout.write(data.filePath)
     })
 
   // slay tasks artifacts mkdir <name>

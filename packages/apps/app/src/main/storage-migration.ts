@@ -1,5 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-utils'
 
 /**
  * One-time COPY of the app's SQLite DB + artifacts + blobs + recent backups from
@@ -50,56 +51,6 @@ function channelBackupPrefix(packaged: boolean): string {
 /** Per-channel completion sentinel path under `<storage>`. */
 function sentinelPath(storageDir: string, packaged: boolean): string {
   return join(storageDir, `.storage-migrated.${packaged ? 'prod' : 'dev'}`)
-}
-
-function copyFileIfPresent(src: string, dst: string): void {
-  if (existsSync(src)) cpSync(src, dst)
-}
-
-/**
- * Copy one DB triplet (main + wal + shm) old→new. COPY-ONLY — source untouched.
- * Skips when the source is absent or the target already exists (never clobber a DB
- * the app may already be using). Sidecars copied FIRST, main LAST so the main
- * file's presence signals a complete triplet.
- */
-function copyDb(oldDir: string, newDir: string, base: string): void {
-  const srcMain = join(oldDir, base)
-  const dstMain = join(newDir, base)
-  if (!existsSync(srcMain) || existsSync(dstMain)) return
-
-  copyFileIfPresent(`${srcMain}-wal`, `${dstMain}-wal`)
-  copyFileIfPresent(`${srcMain}-shm`, `${dstMain}-shm`)
-  cpSync(srcMain, dstMain)
-
-  if (!existsSync(dstMain) || statSync(dstMain).size === 0) {
-    throw new Error(`[storage-migration] copy of ${base} failed verification`)
-  }
-}
-
-/**
- * Recursively copy every file under `src` into `dst`, creating dirs as needed and
- * copying ONLY files absent from `dst`. Files already present in `dst` are the
- * current (authoritative) copies and are left untouched — blobs are immutable by
- * content hash, so a same-path collision is a stale legacy dupe, not a conflict.
- * COPY-ONLY: the source tree is never modified. Returns true iff every source file
- * now has a counterpart in `dst`.
- */
-function mergeMissingFiles(src: string, dst: string): boolean {
-  mkdirSync(dst, { recursive: true })
-  let complete = true
-  for (const entry of readdirSync(src, { withFileTypes: true })) {
-    const s = join(src, entry.name)
-    const d = join(dst, entry.name)
-    if (entry.isDirectory()) {
-      if (!mergeMissingFiles(s, d)) complete = false
-    } else if (existsSync(d)) {
-      // Dest wins (current copy); source is a stale dupe. Counted as present.
-    } else {
-      cpSync(s, d)
-      if (!existsSync(d)) complete = false
-    }
-  }
-  return complete
 }
 
 /**
@@ -170,7 +121,7 @@ export function ensureStorageDir(oldDir: string, storageDir: string, packaged: b
   const sentinel = sentinelPath(storageDir, packaged)
   if (existsSync(sentinel)) return // this channel already migrated — do not re-scan the shared dir
 
-  copyDb(oldDir, storageDir, channelDbBasename(packaged))
+  copyDbTriplet(oldDir, storageDir, channelDbBasename(packaged))
   copyContentDir(oldDir, storageDir, 'blobs')
   copyContentDir(oldDir, storageDir, 'artifacts')
   copyRecentBackups(oldDir, storageDir, packaged)

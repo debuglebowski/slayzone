@@ -3,7 +3,7 @@
  *
  * Drives the BUILT `slay` bundle: boots a real hub in a throwaway root, mints a join
  * token, then runs `slay runner create` and asserts the runner actually ENROLLS —
- * token decode → config.json write → spawn → pinned dial → `mode:"enroll"`. The
+ * token decode → runner.config.json write → spawn → pinned dial → `mode:"enroll"`. The
  * library pieces are unit-tested elsewhere (platform/src/service-unit.test.ts for
  * unit CONTENT, runner/src/join-token.test.ts for the token codec); what only an
  * end-to-end run can catch is the wiring.
@@ -314,8 +314,8 @@ async function main(): Promise<void> {
       )
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
       assert(/not a valid SlayZone join token/.test(res.stderr), `explains why: ${res.stderr}`)
-      // The whole point of failing fast: no config.json, no unit, nothing to clean up.
-      assert(!existsSync(join(rejectRoot, 'config.json')), 'no config.json written')
+      // The whole point of failing fast: no runner.config.json, no unit, nothing to clean up.
+      assert(!existsSync(join(rejectRoot, 'runner.config.json')), 'no runner.config.json written')
       assertEq(leakedUnits(backend).length, 0, 'no unit written')
     })
 
@@ -331,7 +331,7 @@ async function main(): Promise<void> {
       )
       assert(res.status !== 0, 'exited non-zero')
       assert(/reserved for the runner inside the SlayZone/.test(res.stderr), `explains: ${res.stderr}`)
-      assert(!existsSync(join(rejectRoot, 'config.json')), 'no config.json written')
+      assert(!existsSync(join(rejectRoot, 'runner.config.json')), 'no runner.config.json written')
     })
 
     await test('create refuses a duplicate name, pointing at start/rm', async () => {
@@ -400,7 +400,7 @@ async function main(): Promise<void> {
 
     // ---------------------------------------------------------------- happy path
     // `SLZ_FORCE_NO_SERVICE=1` takes the unsupervised detached-spawn branch, so this
-    // exercises the ENTIRE chain — token decode → config.json → spawn → pinned dial →
+    // exercises the ENTIRE chain — token decode → runner.config.json → spawn → pinned dial →
     // enroll — while installing no service unit.
 
     const hub = await startHub()
@@ -486,9 +486,9 @@ async function main(): Promise<void> {
       assertEq(res.status, 0, `exited 0 (stdout: ${res.stdout}\nstderr: ${res.stderr})`)
       assert(/reached its hub/.test(res.stdout), `reports the hub link: ${res.stdout}`)
 
-      // The token, hub url, name and path-jail all travel via config.json — none has
+      // The token, hub url, name and path-jail all travel via runner.config.json — none has
       // an env channel, and a unit file must never carry a credential.
-      const cfg = JSON.parse(readFileSync(join(runnerRoot, 'config.json'), 'utf8')) as Record<
+      const cfg = JSON.parse(readFileSync(join(runnerRoot, 'runner.config.json'), 'utf8')) as Record<
         string,
         unknown
       >
@@ -501,12 +501,12 @@ async function main(): Promise<void> {
       )
     })
 
-    await test('config.json is 0600 — it holds the join token', async () => {
+    await test('runner.config.json is 0600 — it holds the join token', async () => {
       if (process.platform === 'win32') {
         console.log('    (skipped — POSIX mode bits are not enforced on Windows)')
         return
       }
-      const mode = statSync(join(runnerRoot, 'config.json')).mode & 0o777
+      const mode = statSync(join(runnerRoot, 'runner.config.json')).mode & 0o777
       assertEq(mode.toString(8), '600', 'owner-only')
     })
 
@@ -517,10 +517,13 @@ async function main(): Promise<void> {
         .map((f) => readFileSync(join(runnerRoot, 'logs', f), 'utf8'))
         .join('\n')
       assert(/"mode":"enroll"/.test(logs), `enroll logged:\n${logs.slice(-1500)}`)
-      // The durable record: the dialer persists {runnerId, apiKey} per hub host, which
-      // is what `runner ls` reads for its ENROLLED column.
-      const creds = readdirSync(join(runnerRoot, 'runners')).filter((f) => f.endsWith('.json'))
-      assert(creds.length > 0, `credential file written, got ${JSON.stringify(creds)}`)
+      // The durable record: the dialer persists {runnerId, apiKey} per hub host into
+      // one shared map file, which is what `runner ls` reads for its ENROLLED column.
+      const creds = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >
+      assert(Object.keys(creds).length > 0, `credential entry written, got ${JSON.stringify(creds)}`)
     })
 
     await test('the hub reports the runner as connected', async () => {
@@ -542,7 +545,7 @@ async function main(): Promise<void> {
     await test('create refuses a second runner under a name it already spawned', async () => {
       // Even on the unsupervised path a duplicate must be refused — otherwise a second
       // detached runner would race the first for the same root and credentials. With no
-      // unit file to consult, the config.json already naming this runner is the record.
+      // unit file to consult, the runner.config.json already naming this runner is the record.
       const res = slayNoService(
         ['runner', 'create', runnerName, '--token', token, '--root', runnerRoot],
         runnerRoot
@@ -550,7 +553,7 @@ async function main(): Promise<void> {
       const pid = /pid (\d+)/.exec(res.stdout)?.[1]
       if (pid) spawnedRunnerPids.push(Number(pid))
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
-      // On this path the refusal comes from config.json's `runnerName`, not a unit
+      // On this path the refusal comes from runner.config.json's `runnerName`, not a unit
       // file — that is the whole point: with no service manager there is no unit to
       // consult, and an unguarded second create silently spawned a rival runner.
       assert(
@@ -562,7 +565,7 @@ async function main(): Promise<void> {
 
     await test('create refuses a DIFFERENT name in an occupied root too', async () => {
       // Keyed on the ROOT, not the name: two runners sharing a root would share
-      // config.json and the credential store and fight over both.
+      // runner.config.json and the credential store and fight over both.
       const res = slayNoService(
         ['runner', 'create', `${NAME_PREFIX}second`, '--token', token, '--root', runnerRoot],
         runnerRoot

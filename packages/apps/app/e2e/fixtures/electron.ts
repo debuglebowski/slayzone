@@ -49,6 +49,21 @@ let sharedPage: Page | undefined
 let sharedWorkerArtifactsDir: string | undefined
 
 /**
+ * The port THIS worker's app-under-test serves its REST/tRPC surface on, read
+ * back from the main process once the sidecar has bound (see {@link cliEnv}).
+ *
+ * Captured at launch because every `slay` invocation in a spec MUST be pinned to
+ * this app and no other. In production the CLI finds the app by probing a fixed
+ * per-channel port (`SIDECAR_FIXED_PORT`); under Playwright the sidecar keeps an
+ * OS-assigned port instead — `e2e-parallel.sh` runs six concurrent apps, which
+ * cannot share one fixed port. So the CLI cannot DERIVE the right target here and
+ * has to be told, or it would probe the fixed port and reach the developer's own
+ * running SlayZone instead of the sandboxed one — mutating real data from a test
+ * run. Pinning the address is the isolation boundary.
+ */
+let sharedSidecarPort = 0
+
+/**
  * Set when the shared app's OS process exits. Lets the liveness guard below tell
  * a real crash apart from a self-inflicted window close — on macOS
  * `window-all-closed` deliberately does NOT quit, so an app that closed its own
@@ -343,10 +358,11 @@ async function launchElectronWithRetry(args: {
         env: {
           ...launchEnv,
           PLAYWRIGHT: '1',
-          // Single on-disk anchor: the DB derives at <ROOT>/storage and the
-          // agent-hook home at <ROOT> (getSlayzoneHomeDir). SLAYZONE_USER_DATA_DIR
-          // mirrors it so specs can read the anchor back (ROOT itself is stripped
-          // by the app's own env reads, but this passthrough is not).
+          // Single on-disk anchor: the app's own state derives at
+          // <ROOT>/dev/hub (getSupervisedRoot — see supervisedHubRoot) and the
+          // agent-hook home stays at the un-scoped <ROOT> (getSlayzoneHomeDir).
+          // SLAYZONE_USER_DATA_DIR mirrors it so specs can read the anchor back
+          // (ROOT itself is stripped by the app's own env reads, this is not).
           SLAYZONE_ROOT: args.userDataDir,
           SLAYZONE_USER_DATA_DIR: args.userDataDir,
           // Always-on boot tracing in e2e — cheap (~30 console.log per launch)
@@ -534,8 +550,9 @@ async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boo
 }
 
 /**
- * The per-worker `SLAYZONE_ROOT` the app under test was launched with. Its DB
- * lives at `<root>/storage/slayzone.dev.sqlite` (e2e always runs unpackaged).
+ * The per-worker `SLAYZONE_ROOT` the app under test was launched with. The app's
+ * own state lives one level in, under its channel-scoped HUB root — see
+ * {@link supervisedHubRoot}.
  *
  * Read back through the `SLAYZONE_USER_DATA_DIR` passthrough rather than
  * `SLAYZONE_ROOT` itself, which the app's own env reads consume.
@@ -544,17 +561,34 @@ export async function cliRoot(app: ElectronApplication): Promise<string> {
   return app.evaluate(() => process.env.SLAYZONE_USER_DATA_DIR!)
 }
 
-/** `<root>/storage/slayzone.dev.sqlite` — for specs that open the DB directly. */
+/**
+ * `<root>/dev/hub` — the app-under-test's channel-scoped HUB root, where all of
+ * its own state (DB, artifacts, blobs, backups, boot-config) actually lives.
+ *
+ * The app splits its supervised state by release channel AND role
+ * (`getSupervisedRoot`): the main process + sidecar are the `hub` role, the
+ * co-located local runner gets its own sibling `runner` root. The bucket is
+ * always `dev` here — e2e always launches unpackaged, so the app derives
+ * `SLAYZONE_RELEASE_CHANNEL=dev`, which is why no third e2e bucket is needed.
+ *
+ * NOT where hooks live: `notifyScriptPath` stays at the un-scoped `<root>` on
+ * purpose (one `notify.sh` per machine, shared across channels).
+ */
+export function supervisedHubRoot(root: string): string {
+  return path.join(root, 'dev', 'hub')
+}
+
+/** `<root>/dev/hub/slayzone.dev.sqlite` — for specs that open the DB directly. */
 export function cliDbPath(root: string): string {
-  return path.join(root, 'storage', 'slayzone.dev.sqlite')
+  return path.join(supervisedHubRoot(root), 'slayzone.dev.sqlite')
 }
 
 /**
- * `<root>/storage/boot-config.json` — the pre-boot server-mode config file.
+ * `<root>/dev/hub/boot-config.json` — the pre-boot server-mode config file.
  *
  * Derived HERE, once, for the same reason `cliDbPath` is: the layout is the
- * app's (`getStorageDir()` = `<ROOT>/storage`), and e2e can only mirror it. It
- * was previously hand-joined at seven call sites across four spec files, so the
+ * app's (`getSupervisedRoot('hub')`), and e2e can only mirror it. It was
+ * previously hand-joined at seven call sites across four spec files, so the
  * `<ROOT>/storage` migration silently broke the one spec whose copy still
  * pointed at `<ROOT>/` — the seed was written to a path nothing reads, the app
  * fell back to `local`, and the spec failed on a premise that was no longer
@@ -565,7 +599,7 @@ export function cliDbPath(root: string): string {
  * `SLAYZONE_USER_DATA_DIR` read back from the shared worker app).
  */
 export function bootConfigPath(root: string): string {
-  return path.join(root, 'storage', 'boot-config.json')
+  return path.join(supervisedHubRoot(root), 'boot-config.json')
 }
 
 /**
@@ -628,17 +662,54 @@ export function notifyScriptEnv(opts: {
 }
 
 /**
- * Base env for spawning the built `slay` CLI against a given install ROOT.
+ * Poll the main process for the port its sidecar bound. Same `__serverPort`
+ * global the app publishes for its own agent-hook URL, so no new seam.
  *
- * ROOT is the ONLY channel: the CLI derives `<ROOT>/storage/slayzone{.dev}.sqlite`
- * itself and there is no path-pointing override to hand it. `SLAYZONE_DEV=1` is
- * required, not decorative — it picks the `.dev` filename, and the Playwright
- * runner's own env may not carry it. Callers overlay task/project identity on top.
+ * Best-effort: a spec suite that never shells out to `slay` does not care, and
+ * failing the whole worker launch over it would turn a CLI-only problem into a
+ * suite-wide one. `cliEnv` raises a precise error if a spec actually needs it.
+ */
+async function readSidecarPort(app: ElectronApplication): Promise<number> {
+  return app.evaluate(async () => {
+    for (let i = 0; i < 40; i++) {
+      const p = (globalThis as Record<string, unknown>).__serverPort
+      if (p) return p as number
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    return 0
+  })
+}
+
+/**
+ * Base env for spawning the built `slay` CLI against the app under test.
+ *
+ * `SLAYZONE_HUB_ADDRESS` is what actually points the CLI at this app, and it is
+ * mandatory rather than a convenience. The CLI no longer reads a port out of the
+ * SQLite file; in production it probes the fixed per-channel port, and under
+ * Playwright the sidecar does NOT take that port (six concurrent apps cannot
+ * share one). Omit the address and a spec's `slay` call would probe 51101 and
+ * reach the DEVELOPER'S OWN running SlayZone — writing test data into real
+ * tasks. So this is the isolation boundary, not tidiness.
+ *
+ * `SLAYZONE_ROOT` is still handed over (narrowed to the app's channel-scoped hub
+ * root, mirroring what `buildMcpEnv` gives a real task terminal) for the specs
+ * that read the DB or artifact files directly. The CLI itself no longer needs it.
+ *
+ * `SLAYZONE_DEV=1` is required, not decorative — the Playwright runner's own env
+ * may not carry it. Callers overlay task/project identity on top.
  */
 export function cliEnv(root: string): Record<string, string> {
+  if (!sharedSidecarPort) {
+    throw new Error(
+      'cliEnv(): the app under test never published a sidecar port, so `slay` cannot be ' +
+        'pinned to it. Refusing to spawn the CLI unpinned — it would probe the fixed port ' +
+        "and hit this machine's real SlayZone instead of the sandboxed one."
+    )
+  }
   return {
     ...(process.env as Record<string, string>),
-    SLAYZONE_ROOT: root,
+    SLAYZONE_HUB_ADDRESS: `127.0.0.1:${sharedSidecarPort}`,
+    SLAYZONE_ROOT: supervisedHubRoot(root),
     SLAYZONE_DEV: '1'
   }
 }
@@ -672,6 +743,7 @@ export const test = base.extend<ElectronFixtures>({
         sharedApp = launched.app
         sharedPage = launched.page
         sharedWorkerArtifactsDir = workerArtifactsDir
+        sharedSidecarPort = await readSidecarPort(launched.app)
 
         // Record a process exit so `_mainWindowGuard` can distinguish "the app
         // crashed" from "the app closed its own window" — the two are

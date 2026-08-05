@@ -6,7 +6,7 @@
  *     `restart`, `logs`). Answered by probing the hub port block — see
  *     `@slayzone/platform/hub-discovery` for why a probe beats a pidfile.
  *   - CLIENT view: which hub THIS CLI talks to (`use`, `login`, `current`,
- *     `forget`). Answered from `hub.json` / `SLAYZONE_HUB_ADDRESS`. `use` points at
+ *     `forget`). Answered from `cli-hub-target.json` / `SLAYZONE_HUB_ADDRESS`. `use` points at
  *     a hub; `login` additionally OBTAINS the bearer an auth-enforcing hub needs.
  *   - ACCOUNTS on a hub (`users add|ls|rm`). Reaches the hub's loopback-only
  *     `/api/hub/users` — see {@link hubUsersCommand}.
@@ -23,7 +23,7 @@ import { join, resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { discoverHubs, findHub, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
 import { isBareAuthority, parseHubAddress } from '@slayzone/platform/hub-addr'
-import { updateSlayzoneConfig } from '@slayzone/platform/slayzone-config'
+import { updateHubConfigFile } from '@slayzone/platform/slayzone-config'
 import {
   detectBackend,
   listRegisteredUnits,
@@ -41,7 +41,6 @@ import {
   writeHubConfig
 } from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
-import { getServerPort, hasLocalDatabase } from '../db'
 import {
   ensureLogDir,
   fail,
@@ -63,37 +62,23 @@ import {
 const HUB_PACKAGE = servicePackage('hub')
 
 /**
- * Ports worth probing beyond the hub block.
+ * Every live hub on this machine, the desktop app's sidecar included.
  *
- * The desktop app's sidecar does NOT bind inside the block — its supervisor takes
- * an OS-assigned port and publishes it to `settings.server_port`. Reading that key
- * is how the CLI has always located the app, so reuse it here: without this, the
- * app's hub is invisible to `hub ls` even though it is a hub on this machine.
- *
- * Best-effort by design — no app installed / no DB yet is the normal standalone
- * case, and a hub-only box must not need a SlayZone database to list its hubs.
+ * No `extraPorts` special case anymore: the supervised sidecar now binds a fixed
+ * port in the reserved head of the hub block (`SIDECAR_FIXED_PORT`), so the
+ * ordinary block sweep sees it like any other hub. This used to read
+ * `settings.server_port` out of SQLite to learn the sidecar's OS-assigned port,
+ * which is why it first had to probe for a database file at all — `openDb()`
+ * `process.exit(1)`s when one is absent, the normal state of a hub-only box, and
+ * a try/catch cannot intercept an exit.
  */
-function outOfBlockPorts(): number[] {
-  // MUST probe for the file first: getServerPort() → openDb(), which
-  // `process.exit(1)`s when there is no database — a try/catch cannot intercept
-  // that. A hub-only machine has no SlayZone DB and must still run `hub ls`.
-  if (!hasLocalDatabase()) return []
-  try {
-    const port = getServerPort()
-    return port ? [port] : []
-  } catch {
-    return []
-  }
-}
-
-/** Discovery across the block PLUS the app's out-of-block sidecar port. */
 function discoverAllHubs(): Promise<DiscoveredHub[]> {
-  return discoverHubs({ extraPorts: outOfBlockPorts() })
+  return discoverHubs()
 }
 
-/** findHub, but also aware of the app's out-of-block sidecar port. */
+/** findHub over the same block. */
 function findAnyHub(nameOrPort: string): Promise<DiscoveredHub | null> {
-  return findHub(nameOrPort, { extraPorts: outOfBlockPorts() })
+  return findHub(nameOrPort)
 }
 
 /** Human-readable duration for the `ls` table. */
@@ -704,18 +689,18 @@ export function hubCommand(): Command {
         }
 
         // Persist the deployment shape BEFORE launching, so the very first boot reads
-        // it. `<ROOT>/config.json` is the single channel for these (the unit carries
+        // it. `<ROOT>/hub.config.json` is the single channel for these (the unit carries
         // only the bind address) — a `mode` env var pinned in the unit would be a
         // second home for the same value that `hub restart --upgrade` then rewrites
         // away. Merges + 0600, so an existing config in this root keeps its keys.
         if (publicAddress !== undefined) {
-          updateSlayzoneConfig(
+          updateHubConfigFile(
             {
               mode: 'remote',
               publicAddress,
               ...(address !== undefined ? { address } : {})
             },
-            join(root, 'config.json')
+            join(root, 'hub.config.json')
           )
           console.log('Mode:   remote (client auth + TLS enforced)')
           console.log(`Bind:   ${address ?? '(hub block default)'}`)
@@ -952,7 +937,7 @@ export function hubCommand(): Command {
   // enforces auth, every off-box command (`runner mint`, the whole REST surface)
   // needs one — so without this the only way to get a token was to read it out of
   // the desktop app's encrypted store by hand. This exchanges an account for one,
-  // then stores it exactly as `use` does (0600 hub.json).
+  // then stores it exactly as `use` does (0600 cli-hub-target.json).
   cmd
     .command('login <url>')
     .description('Sign in to a hub and store its bearer token for this CLI')

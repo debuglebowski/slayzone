@@ -7,7 +7,8 @@ import {
   TEST_PROJECT_PATH,
   resetApp,
   cliRoot,
-  cliEnv
+  cliEnv,
+  cliDbPath
 } from '../fixtures/electron'
 import { spawnSync } from 'child_process'
 import { DatabaseSync } from 'node:sqlite'
@@ -31,8 +32,9 @@ test.describe('CLI: slay', () => {
       throw new Error(`CLI not built. Run: pnpm --filter @slayzone/cli build\nExpected: ${SLAY_JS}`)
     }
 
-    // The install ROOT the running app was launched with — the CLI derives the
-    // same <ROOT>/storage/slayzone.dev.sqlite from it (tests are never packaged).
+    // The install ROOT the running app was launched with. `cliEnv` narrows it to
+    // the app's channel-scoped hub root, which is where the DB actually lives, so
+    // the CLI derives the same slayzone.dev.sqlite (tests are never packaged).
     rootDir = await cliRoot(electronApp)
 
     // Discover dynamic MCP port
@@ -152,17 +154,21 @@ test.describe('CLI: slay', () => {
       expect(task.provider_config['codex']?.flags).toContain('--sandbox workspace-write')
     })
 
-    test('UI updates when CLI discovers port from DB (production path)', async ({ mainWindow }) => {
-      const title = `CLI prod-path ${Date.now()}`
-      // No SLAYZONE_HUB_ADDRESS — CLI must read port from settings table (like production)
-      const { SLAYZONE_HUB_ADDRESS: _, ...envWithoutPort } = cliEnv(rootDir)
+    test('UI updates when CLI runs with no on-disk anchor at all', async ({ mainWindow }) => {
+      const title = `CLI no-root ${Date.now()}`
+      // The CLI must need NOTHING but the hub address: no SLAYZONE_ROOT, so it
+      // cannot derive a storage dir, open a database, or read `settings.server_port`.
+      // This replaces a test that asserted the opposite (that the CLI discovers the
+      // port THROUGH the DB) — that was the production path until the sidecar took
+      // a fixed port; the database is no longer on it at all.
+      const { SLAYZONE_ROOT: _root, ...envNoRoot } = cliEnv(rootDir)
       const r = spawnSync('node', [SLAY_JS, 'tasks', 'create', title, '--project', 'cli test'], {
-        env: envWithoutPort,
+        env: envNoRoot,
         encoding: 'utf8'
       })
       expect(r.status).toBe(0)
 
-      // CLI must discover port from DB and POST /api/notify on its own
+      // …and it still notifies the app on its own (POST /api/notify).
       await expect(mainWindow.getByText(title)).toBeVisible({ timeout: 10_000 })
     })
 
@@ -516,32 +522,17 @@ test.describe('CLI: slay', () => {
       expect(r.stderr).toContain('not found')
     })
 
-    test('exits non-zero when app is not running', () => {
-      // Fake a down server via the DB: a throwaway install ROOT whose
-      // <ROOT>/storage/slayzone.dev.sqlite has settings.server_port pointing at a
-      // dead port. The CLI derives that path from ROOT, resolves the port, fails to
-      // connect, and reports "not running". Unset SLAYZONE_HUB_ADDRESS so the env
-      // fast-path can't shadow the seeded dead port.
-      const deadRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-deadport-'))
-      const deadStorage = path.join(deadRoot, 'storage')
-      fs.mkdirSync(deadStorage, { recursive: true })
-      const seedDb = new DatabaseSync(path.join(deadStorage, 'slayzone.dev.sqlite'))
-      seedDb.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
-      seedDb
-        .prepare("INSERT INTO settings (key, value) VALUES ('server_port', '1')")
-        .run()
-      seedDb.close()
-      const { SLAYZONE_HUB_ADDRESS: _drop, ...envNoPort } = cliEnv(deadRoot)
-      try {
-        const r = spawnSync('node', [SLAY_JS, 'processes', 'list'], {
-          env: envNoPort,
-          encoding: 'utf8'
-        })
-        expect(r.status).not.toBe(0)
-        expect(r.stderr).toContain('not running')
-      } finally {
-        fs.rmSync(deadRoot, { recursive: true, force: true })
-      }
+    test('exits non-zero when the server is not reachable', () => {
+      // Point the CLI at a port nothing listens on. This used to be expressed by
+      // seeding a throwaway ROOT whose DB carried `settings.server_port = 1`; with
+      // the database off the discovery path there is no file to seed, and the
+      // condition under test ("the target does not answer") is stated directly.
+      const r = spawnSync('node', [SLAY_JS, 'processes', 'list'], {
+        env: { ...cliEnv(rootDir), SLAYZONE_HUB_ADDRESS: '127.0.0.1:1' },
+        encoding: 'utf8'
+      })
+      expect(r.status).not.toBe(0)
+      expect(r.stderr).toContain('Could not connect')
     })
 
     test('kill stops a process', () => {

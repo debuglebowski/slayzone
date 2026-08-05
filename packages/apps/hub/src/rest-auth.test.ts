@@ -7,7 +7,7 @@
  * nothing but `express.json()`. Under `SLAYZONE_MODE=remote` that listener is the
  * internet-facing https one, so every REST route was reachable unauthenticated
  * while the `slay` CLI was already sending an `Authorization: Bearer` header
- * (from `SLAYZONE_HUB_TOKEN` / `hub.json`) that nobody verified.
+ * (from `SLAYZONE_HUB_TOKEN` / `cli-hub-target.json`) that nobody verified.
  *
  * Decisions under test (extracted from `startServer` for the same reason
  * `hub-trpc-context.ts` was — the full boot pulls composeServer → better-auth
@@ -327,7 +327,7 @@ async function main(): Promise<void> {
       assertEq(
         await verifyRestBearer(auth, { authorization: `Bearer ${validToken}` }),
         true,
-        'the CLI bearer (SLAYZONE_HUB_TOKEN / hub.json) is now honoured'
+        'the CLI bearer (SLAYZONE_HUB_TOKEN / cli-hub-target.json) is now honoured'
       )
       assertEq(
         await verifyRestBearer(auth, { authorization: 'Bearer forged' }),

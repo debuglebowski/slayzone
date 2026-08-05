@@ -1,6 +1,4 @@
-import { type SlayDb } from '../../db'
 import { apiGet } from '../../api'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 
 // Re-exported for existing call sites; implementation lives in a decoupled,
 // unit-testable module (no CLI DB/api graph).
@@ -14,28 +12,6 @@ export interface TaskRow extends Record<string, unknown> {
   priority: number
   project_name: string
   created_at: string
-}
-
-export function buildProviderConfig(db: SlayDb): Record<string, { flags: string }> {
-  let rows: { id: string; default_flags: string | null }[] = []
-  try {
-    rows = db.query('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1')
-  } catch {
-    /* table may not exist */
-  }
-
-  if (rows.length === 0) {
-    rows = DEFAULT_TERMINAL_MODES.filter((m) => m.enabled).map((m) => ({
-      id: m.id,
-      default_flags: m.defaultFlags ?? ''
-    }))
-  }
-
-  const config: Record<string, { flags: string }> = {}
-  for (const row of rows) {
-    config[row.id] = { flags: row.default_flags ?? '' }
-  }
-  return config
 }
 
 export interface TemplateRow extends Record<string, unknown> {

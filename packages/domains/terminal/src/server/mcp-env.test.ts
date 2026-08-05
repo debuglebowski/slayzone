@@ -133,6 +133,29 @@ const REMOTE: RemoteMcpEnv = {
   assertNoHubEnv(env, 'local non-hook mode')
 }
 
+// 3b. SLAYZONE_ROOT is set for EVERY spawn, not only hook-capable ones —
+// including a plain shell with no mode at all. Regression guard for the
+// channel-scoped layout: a pty routed through the co-located local runner
+// inherits THAT runner's own role-scoped SLAYZONE_ROOT through the base env
+// (the manifest tags the var `global`, so sanitizeSpawnEnv keeps it). The hub's
+// value must override it at the spawn boundary, or `slay` inside a plain
+// terminal resolves the runner's credential dir instead of the hub's DB.
+{
+  for (const [label, env] of [
+    ['non-hook mode', await buildMcpEnv(null, 'task-3b', 'some-unknown-mode' as never)],
+    ['plain shell (no mode)', await buildMcpEnv(null, undefined, undefined)],
+    [
+      'remote non-hook mode',
+      await buildMcpEnv(null, 'task-3b', 'some-unknown-mode' as never, undefined, undefined, REMOTE)
+    ]
+  ] as const) {
+    assert(
+      typeof env.SLAYZONE_ROOT === 'string' && env.SLAYZONE_ROOT !== '',
+      `${label} must still set SLAYZONE_ROOT (hub is authoritative for the on-disk anchor)`
+    )
+  }
+}
+
 // ── REMOTE (runnerId != null + provider): agent posts to RUNNER LOOPBACK ──────
 //
 // New topology: the agent env is byte-identical local vs remote. The agent

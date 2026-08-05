@@ -17,14 +17,14 @@
  *     up, which is precisely the invisible-crash-loop case worth surfacing;
  *   - `stop` cannot "confirm the port closed"; it confirms with the supervisor.
  *
- * WHERE THE SECRETS GO. The join token is written to `<ROOT>/config.json` (0600) and
+ * WHERE THE SECRETS GO. The join token is written to `<ROOT>/runner.config.json` (0600) and
  * never into the unit file (0644, world-readable). The runner's display name and
  * filesystem path-jail likewise have no env channel at all (see
- * `runner/src/config.ts`), so config.json is the only channel for them too — the unit
+ * `runner/src/config.ts`), so runner.config.json is the only channel for them too — the unit
  * pins `SLAYZONE_ROOT` and nothing else.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, openSync, readdirSync } from 'node:fs'
+import { existsSync, openSync, readFileSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
@@ -33,8 +33,8 @@ import { discoverHubs } from '@slayzone/platform/hub-discovery'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import {
   DEFAULT_LOCAL_RUNNER_NAME,
-  loadSlayzoneConfig,
-  updateSlayzoneConfig
+  loadRunnerConfigFile,
+  updateRunnerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import {
   detectBackend,
@@ -79,9 +79,9 @@ const ENROLL_TIMEOUT_MS = 30_000
  */
 const CONNECTED_RE = /"mode":"(enroll|hello)"/
 
-/** `<ROOT>/config.json` for a runner rooted at `root`. */
+/** `<ROOT>/runner.config.json` for a runner rooted at `root`. */
 function configPathFor(root: string): string {
-  return join(root, 'config.json')
+  return join(root, 'runner.config.json')
 }
 
 /**
@@ -109,15 +109,16 @@ function warnIfLoopbackHub(hubUrl: string): void {
 
 /**
  * Whether this runner holds credentials for a hub — i.e. it has enrolled at least
- * once. The dialer writes `<ROOT>/runners/<hub-host>.json` (0600) after a successful
- * enroll, so the presence of any file there is the durable record.
+ * once. The dialer writes `<ROOT>/runner.state.json` (0600, `{hubHost: creds}`)
+ * after a successful enroll, so a non-empty map there is the durable record.
  *
  * This is what separates "installed but never reached its hub" (a bad token, an
  * unreachable hub, a crash-looping unit) from "running normally, currently offline".
  */
 function isEnrolled(root: string): boolean {
   try {
-    return readdirSync(join(root, 'runners')).some((f) => f.endsWith('.json'))
+    const parsed: unknown = JSON.parse(readFileSync(join(root, 'runner.state.json'), 'utf8'))
+    return typeof parsed === 'object' && parsed !== null && Object.keys(parsed).length > 0
   } catch {
     return false
   }
@@ -333,7 +334,7 @@ export function runnerCommand(): Command {
   // that hub's dial URL + cert fingerprint), so WHICH HUB A RUNNER CONNECTS TO is
   // decided here, not by `create`. It lives under `runner` because the thing being
   // created is a runner's credential; addressing follows the ambient hub target
-  // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `hub.json`), so `slay --hub staging runner
+  // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `cli-hub-target.json`), so `slay --hub staging runner
   // mint` reads the same as every other hub-targeted command.
   cmd
     .command('mint [label]')
@@ -393,17 +394,30 @@ export function runnerCommand(): Command {
     .option('--json', 'Output as JSON')
     .action((opts: { json?: boolean }) => {
       const backend = detectBackend()
+      // No supervisor ⇒ nothing can be registered, so there is nothing to
+      // enumerate. The answer to `ls` is still "none installed" — the same
+      // question the empty case below answers — with the reason appended rather
+      // than substituted for it. `--json` MUST stay machine-readable on this
+      // path: a caller asking for the list gets an empty array, never prose.
       if (backend === 'none') {
-        console.log('This platform has no user service manager — no runners can be registered.')
+        if (opts.json) {
+          console.log('[]')
+          return
+        }
+        console.log(
+          'No runners installed — this platform has no user service manager, so runners ' +
+            'cannot be registered here.'
+        )
+        console.log(`Run one in the foreground instead:\n  npx ${RUNNER_PACKAGE}`)
         return
       }
       const units = listRegisteredUnits('runner', backend)
       const rows = units.map((u) => {
         const root = readUnitRoot('runner', u.name, backend)
         const status = supervisorStatus('runner', backend, u.name)
-        // hubUrl comes from the runner's own config.json — the unit deliberately
+        // hubUrl comes from the runner's own runner.config.json — the unit deliberately
         // carries no hub address (a runner's dial target arrives with its token).
-        const hubUrl = root ? (loadSlayzoneConfig(configPathFor(root)).hubUrl ?? null) : null
+        const hubUrl = root ? (loadRunnerConfigFile(configPathFor(root)).hubUrl ?? null) : null
         return {
           name: u.name,
           unitPath: u.unitPath,
@@ -513,14 +527,14 @@ export function runnerCommand(): Command {
 
       // ONE ROOT, ONE RUNNER — checked independently of the unit file.
       //
-      // Two runners sharing a root would share `config.json` (so the second's token +
+      // Two runners sharing a root would share `runner.config.json` (so the second's token +
       // name would overwrite the first's) and the `runners/` credential store, then
       // fight over both. The unit check above cannot catch this: it is keyed on the
       // NAME, so a different name in an occupied root slips past it — and on a
       // platform with no service manager there is no unit to consult at all, which is
-      // how a second `create` came to silently spawn a rival runner. `config.json`
+      // how a second `create` came to silently spawn a rival runner. `runner.config.json`
       // already naming a runner is the durable record that this root is taken.
-      const occupant = loadSlayzoneConfig(configPathFor(root)).runnerName
+      const occupant = loadRunnerConfigFile(configPathFor(root)).runnerName
       if (occupant !== undefined) {
         fail(
           `A runner is already installed in ${shortenPath(root)} — "${occupant}".\n` +
@@ -532,13 +546,13 @@ export function runnerCommand(): Command {
         )
       }
 
-      // The token, hub url, display name and path-jail ALL travel via config.json:
+      // The token, hub url, display name and path-jail ALL travel via runner.config.json:
       // none has an env channel (by design — see runner/src/config.ts), and a 0644
-      // unit file must never carry a credential. updateSlayzoneConfig writes 0600 and
+      // unit file must never carry a credential. updateRunnerConfigFile writes 0600 and
       // merges, so an existing config in this root keeps its other keys.
       const allowedRoots =
         opts.allow && opts.allow.length > 0 ? opts.allow.map((d) => resolvePath(d)) : [root]
-      updateSlayzoneConfig(
+      updateRunnerConfigFile(
         {
           joinToken: opts.token,
           hubUrl: decoded.hubUrl,
@@ -607,7 +621,7 @@ export function runnerCommand(): Command {
       // is the very case that leaves a stale unit behind. Neither must block removal.
       supervisorStopQuiet('runner', backend, name)
       removeUnit('runner', name, backend)
-      // The runner's ROOT (config.json with its token, credentials, logs) is
+      // The runner's ROOT (runner.config.json with its token, credentials, logs) is
       // deliberately left on disk: it is the operator's data, and `rm` was asked to
       // remove a registration, not to delete their state. NOTE this does not revoke
       // the runner on the HUB — it will show there as disconnected until revoked.

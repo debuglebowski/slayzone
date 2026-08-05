@@ -130,6 +130,42 @@ for f in $BOARD_OPS; do
   fi
 done
 
+# (5) The `slay` CLI must reach every piece of DOMAIN state over the hub's REST
+#     surface — never by opening the SQLite file, and never by deriving the app's
+#     on-disk layout. Those two are one guard because they were one bug: the CLI
+#     read `settings.server_port` from the database purely to find the app, which
+#     forced it to know where storage lives, which broke every command from a plain
+#     shell the moment supervised state moved to ~/.slayzone/<channel>/<role>. It
+#     now probes a fixed port instead, so neither dependency has any remaining
+#     caller — and a reintroduced one would fail silently on a hub-only box (no DB
+#     file at all) rather than loudly here.
+#
+#     `cli-state.ts` is the deliberate carve-out: it owns the CLI's MACHINE-local
+#     files (the hub pointer, the service install prefix), which are legitimately
+#     on disk. It anchors on $HOME directly and never consults SLAYZONE_ROOT.
+CLI_SRC="packages/apps/cli/src"
+if [ -d "$CLI_SRC" ]; then
+  hit=$(grep -rnE --include="*.ts" --include="*.mts" --exclude="*.test.ts" \
+    "from ['\"]node:sqlite['\"]|require\(['\"]node:sqlite['\"]\)" "$CLI_SRC" 2>/dev/null || true)
+  if [ -n "$hit" ]; then
+    echo "The slay CLI must not open a database — route it through the hub's REST surface:"
+    echo "$hit"
+    fail=1
+  fi
+
+  # Layout derivation. getStorageDir/getSlayzoneHomeDir/getSupervisedRoot all
+  # resolve SLAYZONE_ROOT; any of them in the CLI means it is guessing at the
+  # app's on-disk layout again.
+  hit=$(grep -rnE --include="*.ts" --include="*.mts" --exclude="*.test.ts" \
+    --exclude="cli-state.ts" \
+    "getStorageDir|getSlayzoneHomeDir|getSupervisedRoot" "$CLI_SRC" 2>/dev/null || true)
+  if [ -n "$hit" ]; then
+    echo "The slay CLI must not derive the app's storage layout (only cli-state.ts owns paths):"
+    echo "$hit"
+    fail=1
+  fi
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "Server boundary guards passed."
 else

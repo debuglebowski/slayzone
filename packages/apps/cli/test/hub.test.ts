@@ -1,5 +1,5 @@
 /**
- * CLI hub plumbing tests — resolveHubTarget precedence, hub.json perms,
+ * CLI hub plumbing tests — resolveHubTarget precedence, cli-hub-target.json perms,
  * Authorization header injection, legacy fallback.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
  *   --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/hub.test.ts
@@ -190,7 +190,7 @@ await describe('resolveHubTarget precedence', () => {
     expect(target?.token).toBeNull()
   })
 
-  test('non-object hub.json warns and falls back to null', () => {
+  test('non-object cli-hub-target.json warns and falls back to null', () => {
     const dir = freshStateDir()
     setEnv({ SLAYZONE_ROOT: dir })
     const cfgPath = getHubConfigPath()
@@ -226,7 +226,7 @@ await describe('resolveHubTarget precedence', () => {
     expect(stderr.some((s) => s.includes('Invalid SLAYZONE_HUB_ADDRESS'))).toBe(true)
   })
 
-  test('corrupt hub.json warns and falls back to null', () => {
+  test('corrupt cli-hub-target.json warns and falls back to null', () => {
     const dir = freshStateDir()
     setEnv({ SLAYZONE_ROOT: dir })
     const cfgPath = getHubConfigPath()
@@ -241,7 +241,7 @@ await describe('resolveHubTarget precedence', () => {
     expect(stderr.some((s) => s.includes('ignoring invalid hub config'))).toBe(true)
   })
 
-  test('hub.json with invalid URL warns and falls back to null', () => {
+  test('cli-hub-target.json with invalid URL warns and falls back to null', () => {
     const dir = freshStateDir()
     setEnv({ SLAYZONE_ROOT: dir })
     const cfgPath = getHubConfigPath()
@@ -258,7 +258,7 @@ await describe('resolveHubTarget precedence', () => {
 })
 
 await describe('writeHubConfig / removeHubConfig', () => {
-  test('writes hub.json with 0600 perms', () => {
+  test('writes cli-hub-target.json with 0600 perms', () => {
     setEnv({ SLAYZONE_ROOT: freshStateDir() })
     const p = writeHubConfig('http://example.com:1', 'tok')
     expect(p).toBe(getHubConfigPath())
@@ -322,7 +322,7 @@ await describe('api Authorization header', () => {
   })
 
   test('no hub configured: falls back to settings.server_port, no Authorization header', async () => {
-    // The local-app path (`hub: false`): no SLAYZONE_HUB_ADDRESS and no hub.json,
+    // The local-app path (`hub: false`): no SLAYZONE_HUB_ADDRESS and no cli-hub-target.json,
     // so the port comes from the DB the server publishes it to at boot.
     const srv = await startServer()
     try {

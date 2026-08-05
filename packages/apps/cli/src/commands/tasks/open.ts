@@ -19,7 +19,7 @@ export async function openAction(idPrefix: string | undefined, opts: OpenOpts = 
   // This replaces a hand-rolled http.request to 127.0.0.1:<getServerPort()>:
   // both the port lookup and the prefix resolution read the hub's DB file, so
   // neither could work against a hub on another machine. `apiPost` routes
-  // through the same hub target (env / hub.json / --hub) as every other command
+  // through the same hub target (env / cli-hub-target.json / --hub) as every other command
   // and falls back to the local app exactly as before.
   const { data: task } = await apiPost<{ ok: true; data: { id: string; title: string } }>(
     `/api/open-task/${encodeURIComponent(idPrefix)}${opts.background ? '?background=1' : ''}`,

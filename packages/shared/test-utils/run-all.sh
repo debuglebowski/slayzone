@@ -161,24 +161,34 @@ run_test_electron_strict_loader packages/apps/cli/src/commands/runner-lifecycle.
 # `slay update` — global npm install detection + version bump. npm itself is a
 # PATH-faked script (no native deps involved) => plain node.
 run_test packages/apps/cli/src/commands/update.test.ts
+run_test packages/apps/cli/src/local-hub.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
 # Wave-3.5 runner TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
 run_test packages/apps/hub/src/runner-tls-listener.test.ts
-# Shared ~/.slayzone/config.json (hub+runner; env>file>default, auto-gen secret, race-safe).
-run_test packages/shared/platform/src/slayzone-config.test.ts
+# Per-role hub.config.json/hub.state.json + runner.config.json (env>file>default,
+# auto-gen secret, race-safe, legacy shared config.json fallback).
+run_test packages/shared/platform/src/hub-config-file.test.ts
+run_test packages/shared/platform/src/runner-config-file.test.ts
 run_test packages/apps/hub/src/standalone-config.test.ts
+# getSupervisedRoot: channel-to-bucket folding (beta/unknown → stable, never a
+# third bucket), SLAYZONE_ROOT composition.
+run_test packages/shared/platform/src/dirs.test.ts
 # Interactive first-run setup (hub+runner): TTY/supervised/noninteractive gating,
 # confirm-to-save, env seed, config.json merge (fake IO — no real TTY).
 run_test packages/shared/platform/src/config-prompt.test.ts
 # CLI author context resolves from SLAYZONE_AGENT_ID (the injected var), not AGENT_MODE.
 run_test packages/apps/cli/src/commands/tasks/cli-author.test.ts
-# Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>/storage (retired DB_DIR ignored).
+# Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>, flat (retired DB_DIR ignored).
 run_test packages/shared/transport/src/server/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
 run_test packages/apps/app/src/main/storage-migration.test.ts
+# Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|runner>,
+# copy-only (regression guard: a failed copy must never touch the legacy source),
+# runner slice is a per-host-file → shared-map TRANSFORM, not a directory copy.
+run_test packages/apps/app/src/main/channel-storage-migration.test.ts
 # Hidden-window invariant under Playwright. Six call sites open-coded
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
 # the developer's focus for the rest of that worker's specs (worker-scoped app).

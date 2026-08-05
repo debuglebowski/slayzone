@@ -9,7 +9,14 @@ import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { canPrompt, confirm, runInteractiveConfig, type PromptIO } from './config-prompt'
-import { loadSlayzoneConfig } from './slayzone-config'
+import { updateJsonFile } from './slayzone-config'
+
+/** config-prompt.ts is role-agnostic now (writes an arbitrary JSON object at
+ *  whatever path the caller names) — read persisted values back as raw JSON
+ *  rather than through a role-specific loader. */
+function readJson(path: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+}
 
 let passed = 0
 let failed = 0
@@ -139,7 +146,7 @@ async function main(): Promise<void> {
       assertEq(res.saved, true, 'saved')
       assertEq(res.collected.length, 1, 'one collected')
       assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example.com:8443', 'env seeded')
-      assertEq(loadSlayzoneConfig(cfgPath).publicAddress, 'hub.example.com:8443', 'persisted to file')
+      assertEq(readJson(cfgPath).publicAddress, 'hub.example.com:8443', 'persisted to file')
       assert(io.closed === false, 'injected io NOT closed by the runner')
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
@@ -213,7 +220,7 @@ async function main(): Promise<void> {
       })
       assertEq(res.collected.length, 1, 'default collected')
       assertEq(process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS, '/work', 'env seeded with default')
-      const roots = loadSlayzoneConfig(cfgPath).allowedRoots
+      const roots = readJson(cfgPath).allowedRoots
       assert(Array.isArray(roots) && roots[0] === '/work', 'persisted array')
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS
@@ -229,15 +236,14 @@ async function main(): Promise<void> {
     delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     try {
       // Pre-seed an unrelated key.
-      const { saveSlayzoneConfig } = await import('./slayzone-config')
-      saveSlayzoneConfig({ address: '0.0.0.0:9999' }, cfgPath)
+      updateJsonFile({ address: '0.0.0.0:9999' }, cfgPath)
       const io = fakeIo(['hub.example.com:8443', 'y'])
       await runInteractiveConfig({
         io,
         configPath: cfgPath,
         fields: [{ configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }]
       })
-      const cfg = loadSlayzoneConfig(cfgPath)
+      const cfg = readJson(cfgPath)
       assertEq(cfg.address, '0.0.0.0:9999', 'pre-existing key preserved')
       assertEq(cfg.publicAddress, 'hub.example.com:8443', 'new key merged in')
     } finally {

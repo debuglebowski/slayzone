@@ -1,5 +1,5 @@
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
-import { loadSlayzoneConfig } from '@slayzone/platform/slayzone-config'
+import { getHubConfigFilePath, loadHubConfigFile } from '@slayzone/platform/slayzone-config'
 import { startServer } from './server.js'
 import { applyStandaloneHubConfig } from './standalone-config.js'
 import type { ServerHandle } from './index.js'
@@ -19,7 +19,7 @@ import type { ServerHandle } from './index.js'
  */
 async function maybeInteractiveSetup(): Promise<void> {
   if (!canPrompt()) return
-  const cfg = loadSlayzoneConfig()
+  const cfg = loadHubConfigFile()
   // The legacy `publicUrl` key counts as answered too — an operator who already
   // filled this in on an older build must never be re-prompted.
   if (
@@ -28,7 +28,8 @@ async function maybeInteractiveSetup(): Promise<void> {
     return
 
   await runInteractiveConfig({
-    title: 'Hub setup — values to save to config.json:',
+    title: 'Hub setup — values to save to hub.config.json:',
+    configPath: getHubConfigFilePath(),
     fields: [
       {
         configKey: 'publicAddress',
@@ -43,12 +44,13 @@ async function maybeInteractiveSetup(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // Interactive first-run setup (TTY only) — may seed env + write config.json
+  // Interactive first-run setup (TTY only) — may seed env + write hub.config.json
   // before applyStandaloneHubConfig reads it. No-op when non-interactive / set.
   await maybeInteractiveSetup()
 
-  // Standalone-only: fold ~/.slayzone/config.json into process.env (env-wins) +
-  // resolve/persist the runner secret, BEFORE any downstream env reader runs. A
+  // Standalone-only: fold hub.config.json/hub.state.json into process.env
+  // (env-wins) + resolve/persist the runner secret, BEFORE any downstream env
+  // reader runs. A
   // no-op under SLAYZONE_SUPERVISED=1 (the Electron host owns the env + secret),
   // so the supervised sidecar boot is byte-identical. See ./standalone-config.ts.
   applyStandaloneHubConfig()
