@@ -94,6 +94,12 @@ const throwingPty: PtyBackend = {
 const throwingProc: ProcessBackend = {
   spawn: () => {
     throw new Error('local proc.spawn must not run for a routed spec')
+  },
+  getCommandLine: () => {
+    throw new Error('local proc.getCommandLine must not run for a routed spec')
+  },
+  killByPid: () => {
+    throw new Error('local proc.killByPid must not run for a routed spec')
   }
 }
 

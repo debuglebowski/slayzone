@@ -62,7 +62,13 @@ const fakeBackend: ProcessBackend = {
     const h = new FakeHandle()
     spawned.push(h)
     return h
-  }
+  },
+  // Never a stale pid to reap in this suite (every spawnProcess() call mints a
+  // fresh id), so these are unreachable — stubbed only to satisfy the interface.
+  getCommandLine(): Promise<string | null> {
+    return Promise.resolve(null)
+  },
+  killByPid(): void {}
 }
 
 async function main(): Promise<void> {
@@ -70,7 +76,7 @@ async function main(): Promise<void> {
   setProcessBackend(fakeBackend)
 
   // --- doSpawn routes through the backend with the right spec ---
-  const idA = spawnProcess('proj', 'task', 'A', 'echo a', '/tmp', false)
+  const idA = await spawnProcess('proj', 'task', 'A', 'echo a', '/tmp', false)
   assert(spawned.length === 1, 'spawnProcess drives backend.spawn')
   assert(lastSpec!.command === 'echo a' && lastSpec!.cwd === '/tmp', 'spec carries command + cwd')
   assert(
@@ -109,7 +115,7 @@ async function main(): Promise<void> {
   killProcess(idA)
 
   // --- exit → completed / error (no autoRestart) ---
-  const idB = spawnProcess('proj', 'task', 'B', 'echo b', '/tmp', false)
+  const idB = await spawnProcess('proj', 'task', 'B', 'echo b', '/tmp', false)
   spawned[spawned.length - 1].emitExit(0)
   assert(
     statuses.some((s) => s.id === idB && s.status === 'completed'),
@@ -117,7 +123,7 @@ async function main(): Promise<void> {
   )
   killProcess(idB)
 
-  const idC = spawnProcess('proj', 'task', 'C', 'false', '/tmp', false)
+  const idC = await spawnProcess('proj', 'task', 'C', 'false', '/tmp', false)
   spawned[spawned.length - 1].emitExit(1)
   assert(
     statuses.some((s) => s.id === idC && s.status === 'error'),
@@ -126,7 +132,7 @@ async function main(): Promise<void> {
   killProcess(idC)
 
   // --- exit → autoRestart: restart signals synchronously, re-spawn after timer ---
-  const idD = spawnProcess('proj', 'task', 'D', 'echo d', '/tmp', true)
+  const idD = await spawnProcess('proj', 'task', 'D', 'echo d', '/tmp', true)
   const beforeRestart = spawned.length
   spawned[beforeRestart - 1].emitExit(1)
   assert(
@@ -155,7 +161,7 @@ async function main(): Promise<void> {
   // ==================== REAL child_process (local backend) ====================
   setProcessBackend(null) // restore localProcessBackend
 
-  const idR = spawnProcess('proj', 'task', 'R', 'echo slayzone-real-ok', '/tmp', false)
+  const idR = await spawnProcess('proj', 'task', 'R', 'echo slayzone-real-ok', '/tmp', false)
   const sawLog = (): boolean => logs.some((l) => l.id === idR && l.line.includes('slayzone-real-ok'))
   const sawDone = (): boolean => statuses.some((s) => s.id === idR && s.status === 'completed')
   // `exit` can fire before the final stdout `data` flushes, so wait for BOTH the
@@ -173,7 +179,7 @@ async function main(): Promise<void> {
   process.env.SLAYZONE_HUB_TOKEN = 'leak-secret'
   process.env.SLAYZONE_HUB_ADDRESS = 'hub.example:8443'
   // Colon delimiters (not [brackets]) — interactive zsh globs `[]` and errors.
-  const idE = spawnProcess(
+  const idE = await spawnProcess(
     'proj',
     'task',
     'E',

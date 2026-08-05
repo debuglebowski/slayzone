@@ -111,7 +111,10 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       cwd: row.cwd,
       autoRestart: row.auto_restart === 1,
       status: 'stopped',
-      pid: null,
+      // Carried over from the last spawn, if the app never got to clear it (an
+      // uncontrolled exit) — reapStaleIfNeeded() checks and clears it before the
+      // next restartProcess()/spawnProcess() actually spawns.
+      pid: row.pid,
       exitCode: null,
       logBuffer: [],
       handle: null,
@@ -209,6 +212,7 @@ function doSpawn(proc: ManagedProcess): void {
   proc.exitCode = null
   proc.processTitle = null
   proc.oscTitleSet = false
+  void persistence?.updatePid(proc.id, proc.pid)
   startTitlePolling(proc)
 
   handle.onData((chunk) => handleProcessData(proc, chunk))
@@ -217,6 +221,7 @@ function doSpawn(proc: ManagedProcess): void {
     if (proc.handle !== handle) return // stale exit from restarted process
     stopTitlePolling(proc)
     proc.pid = null
+    void persistence?.updatePid(proc.id, null)
     proc.handle = null
     proc.exitCode = code
     proc.processTitle = null
@@ -235,6 +240,64 @@ function doSpawn(proc: ManagedProcess): void {
       setStatus(proc, code === 0 ? 'completed' : 'error')
     }
   })
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Exact-or-suffix only — never a loose substring — so a coincidental partial
+ *  overlap with an unrelated process's command line can't pass as a match. */
+function commandsLikelyMatch(persisted: string, live: string): boolean {
+  const p = persisted.trim()
+  const l = live.trim()
+  if (!p || !l) return false
+  return l === p || l.endsWith(p) || p.endsWith(l)
+}
+
+const REAP_POLL_INTERVAL_MS = 200
+const REAP_POLL_TIMEOUT_MS = 2000
+
+/**
+ * If `proc` still carries a pid from a previous, uncleanly-terminated run (the
+ * app/sidecar exited without ever reaching stopProcess/doSpawn's exit handler,
+ * so nothing sent it a kill signal and nothing cleared the persisted pid),
+ * verify it's still alive and still looks like the same command, then reap it
+ * before the caller spawns a fresh one against the same port.
+ *
+ * A pid that's alive but no longer matches (reused by an unrelated process
+ * since the last run) is deliberately left alone — killing an unverified
+ * process is worse than leaving a stale one for the new spawn to collide with.
+ */
+async function reapStaleIfNeeded(proc: ManagedProcess): Promise<void> {
+  const stalePid = proc.pid
+  if (proc.handle || stalePid == null) return
+  const backend = getProcessBackend()
+  const liveCommand = await backend.getCommandLine(stalePid)
+  if (!liveCommand || !commandsLikelyMatch(proc.command, liveCommand)) {
+    if (liveCommand) {
+      pushLog(
+        proc,
+        `[pid ${stalePid} from a previous run no longer matches this command — leaving it running]`
+      )
+    }
+    proc.pid = null
+    void persistence?.updatePid(proc.id, null)
+    return
+  }
+
+  pushLog(proc, `[reaping leftover process from a previous run: pid ${stalePid}]`)
+  backend.killByPid(stalePid, 'SIGTERM')
+  const deadline = Date.now() + REAP_POLL_TIMEOUT_MS
+  while (Date.now() < deadline && (await backend.getCommandLine(stalePid))) {
+    await sleep(REAP_POLL_INTERVAL_MS)
+  }
+  if (await backend.getCommandLine(stalePid)) {
+    backend.killByPid(stalePid, 'SIGKILL')
+    await sleep(REAP_POLL_INTERVAL_MS)
+  }
+  proc.pid = null
+  void persistence?.updatePid(proc.id, null)
 }
 
 export function createProcess(
@@ -271,14 +334,14 @@ export function createProcess(
   return id
 }
 
-export function spawnProcess(
+export async function spawnProcess(
   projectId: string | null,
   taskId: string | null,
   label: string,
   command: string,
   cwd: string,
   autoRestart: boolean
-): string {
+): Promise<string> {
   if (isShuttingDown) throw new Error('Cannot spawn process while app is shutting down.')
   const id = randomUUID()
   const proc: ManagedProcess = {
@@ -303,6 +366,9 @@ export function spawnProcess(
   }
   processes.set(id, proc)
   void persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
+  // proc.pid is always null here (id is freshly minted) — a no-op today, kept for
+  // symmetry with restartProcess in case a future caller ever reuses an id.
+  await reapStaleIfNeeded(proc)
   doSpawn(proc)
   return id
 }
@@ -337,6 +403,7 @@ export function stopProcess(id: string): boolean {
   const handle = proc.handle
   proc.handle = null
   proc.pid = null
+  void persistence?.updatePid(proc.id, null)
   proc.spawnedAt = null
   if (handle) handle.kill()
   setStatus(proc, 'stopped')
@@ -355,15 +422,23 @@ export function killProcess(id: string): boolean {
   return true
 }
 
-export function restartProcess(id: string): boolean {
+export async function restartProcess(id: string): Promise<boolean> {
   if (isShuttingDown) return false
   const proc = processes.get(id)
   if (!proc) return false
   stopTitlePolling(proc)
+  // Captured before proc.handle is nulled below: non-null here means this row
+  // was actually spawned and is being tracked live in THIS app instance — a
+  // normal restart, whose exit handler will clear pid/persistence on its own
+  // once handle.kill() (below) takes effect. Null means this row was reloaded
+  // from persistence and never spawned this session — the crash-recovery case,
+  // where proc.pid (if set) is a leftover from an uncontrolled previous exit.
+  const hadLiveHandle = proc.handle != null
   if (proc.handle) proc.handle.kill()
   proc.handle = null
   proc.logBuffer.push('[restarting...]')
   setStatus(proc, 'running')
+  if (!hadLiveHandle) await reapStaleIfNeeded(proc)
   setTimeout(() => doSpawn(proc), 500)
   return true
 }

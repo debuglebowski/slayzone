@@ -9,6 +9,7 @@ export interface ProcessRow {
   command: string
   cwd: string
   auto_restart: number
+  pid: number | null
 }
 
 /** The persisted slice of a process — what the manager hands to insert/update. */
@@ -34,6 +35,11 @@ export interface ProcessPersistence {
   insert(p: PersistedProcess): Promise<void>
   update(p: PersistedProcess): Promise<void>
   remove(id: string): Promise<void>
+  /** Records the pid of the current spawn attempt (or clears it to null on exit/stop) —
+   *  written separately from `update()` since it changes on every spawn/exit, not on
+   *  config edits, and is read back on the next boot to reap a leftover process that
+   *  survived an uncontrolled app exit. */
+  updatePid(id: string, pid: number | null): Promise<void>
 }
 
 /**
@@ -74,6 +80,12 @@ export function createDbProcessPersistence(db: SlayzoneDb): ProcessPersistence {
       return db
         .prepare('DELETE FROM processes WHERE id = ?')
         .run(id)
+        .then(() => undefined)
+    },
+    updatePid(id: string, pid: number | null): Promise<void> {
+      return db
+        .prepare('UPDATE processes SET pid = ? WHERE id = ?')
+        .run(pid, id)
         .then(() => undefined)
     }
   }

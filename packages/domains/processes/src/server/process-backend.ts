@@ -1,4 +1,4 @@
-import { spawn, execFileSync } from 'child_process'
+import { spawn, execFile, execFileSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { buildShellInvocation, sanitizeSpawnEnv } from '@slayzone/platform'
 import { getEnrichedPath } from '@slayzone/terminal/server'
@@ -39,14 +39,27 @@ export interface ProcHandle {
 /** Spawns processes for the manager. Swappable so exec can be remoted later. */
 export interface ProcessBackend {
   spawn(spec: ProcSpawnSpec): ProcHandle
+  /**
+   * Command line of a still-running process, or `null` if `pid` isn't alive.
+   * POSIX only (via `ps`) — mirrors the existing precedent in `pid-stats.ts`,
+   * which is also `ps`/`pgrep`-only with no Windows branch. Used to verify a
+   * pid persisted from a previous run is still *the same command* before
+   * `killByPid` touches it, so a reused pid never reaps an unrelated process.
+   * Returns `null` unconditionally on win32 — `killByPid` still works there,
+   * it's just never called without this confirming identity first.
+   */
+  getCommandLine(pid: number): Promise<string | null>
+  /** Kill the process tree rooted at `pid` without a live `ProcHandle` — used to
+   *  reap a leftover process whose parent (this app) exited without ever
+   *  running `kill()` on its handle. Same POSIX detached-group / Windows
+   *  `taskkill /T` mechanism as `ProcHandle.kill`. */
+  killByPid(pid: number, sig?: string): void
 }
 
-/** Kill the entire process tree rooted at `child` (must be spawned with
- *  `detached: true` on POSIX). Errors are swallowed — parity with the pre-seam
- *  inline `killProcessTree`, whose throws never reached callers. */
-function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
-  const pid = child.pid
-  if (pid == null) return
+/** Kill the entire process tree rooted at `pid` (must be the leader of a
+ *  detached POSIX group, or any pid on Windows). Errors are swallowed — parity
+ *  with the pre-seam inline `killProcessTree`, whose throws never reached callers. */
+function killPidTree(pid: number, signal: NodeJS.Signals = 'SIGTERM'): void {
   if (process.platform === 'win32') {
     try {
       execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)])
@@ -60,6 +73,21 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'
       // ignore
     }
   }
+}
+
+function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
+  const pid = child.pid
+  if (pid == null) return
+  killPidTree(pid, signal)
+}
+
+function getCommandLine(pid: number): Promise<string | null> {
+  if (process.platform === 'win32') return Promise.resolve(null)
+  return new Promise((resolve) => {
+    execFile('ps', ['-o', 'command=', '-p', String(pid)], { timeout: 2000 }, (err, stdout) => {
+      resolve(err ? null : stdout.trim() || null)
+    })
+  })
 }
 
 /**
@@ -126,6 +154,10 @@ export const localProcessBackend: ProcessBackend = {
     if (spec.env) Object.assign(env, spec.env)
     const child = spawn(file, args, { cwd: spec.cwd, env, detached: !isWin })
     return makeLocalHandle(child)
+  },
+  getCommandLine,
+  killByPid(pid: number, sig?: string) {
+    killPidTree(pid, (sig as NodeJS.Signals | undefined) ?? 'SIGTERM')
   }
 }
 

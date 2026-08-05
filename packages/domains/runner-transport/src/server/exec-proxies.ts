@@ -1044,7 +1044,16 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         )
 
       return handle
-    }
+    },
+    // Crash-reap (process-manager.ts's reapStaleIfNeeded) is a local-backend-only
+    // feature: it depends on inspecting/killing a bare OS pid, and a routed
+    // session only ever exposes the runner's own sessionId/key, not one the hub
+    // can act on independently. `getCommandLine` -> null is the same "can't
+    // verify, so don't touch it" signal `localProcessBackend` returns on win32.
+    getCommandLine(): Promise<string | null> {
+      return Promise.resolve(null)
+    },
+    killByPid(): void {}
   }
 }
 

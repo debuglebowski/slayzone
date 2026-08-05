@@ -3409,6 +3409,16 @@ export const migrations: Migration[] = [
       // tasks.pinned (v140).
       db.exec(`ALTER TABLE projects ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;`)
     }
+  },
+  {
+    version: 154,
+    up: (db) => {
+      // Last known top-level pid of a managed process's spawn. Lets the manager
+      // reap a leftover process (still holding its port) that survived an
+      // uncontrolled app/sidecar exit — the previous run never had a chance to
+      // send it a kill signal, so nothing on disk remembered its pid at all.
+      db.exec(`ALTER TABLE processes ADD COLUMN pid INTEGER DEFAULT NULL;`)
+    }
   }
 ]
 

@@ -4,10 +4,13 @@ import {
   createProcess,
   updateProcess,
   killProcess,
+  restartProcess,
   listAllProcesses
 } from './process-manager'
 import { createDbProcessPersistence } from './process-persistence'
 import type { PersistedProcess, ProcessPersistence, ProcessRow } from './process-persistence'
+import { setProcessBackend } from './process-backend'
+import type { ProcessBackend, ProcHandle } from './process-backend'
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -22,6 +25,7 @@ function assert(cond: boolean, msg: string): void {
 const inserts: PersistedProcess[] = []
 const updates: PersistedProcess[] = []
 const removes: Array<{ id: string; stillListed: boolean }> = []
+const pidUpdates: Array<{ id: string; pid: number | null }> = []
 const seededRow: ProcessRow = {
   id: 'seed-1',
   task_id: 'task-9',
@@ -29,10 +33,43 @@ const seededRow: ProcessRow = {
   label: 'seeded',
   command: 'echo seeded',
   cwd: '/tmp',
-  auto_restart: 1
+  auto_restart: 1,
+  pid: null
+}
+// Three shapes of "leftover pid from an uncontrolled previous exit" that
+// reapStaleIfNeeded (wired into restartProcess) must tell apart:
+const seedMatching: ProcessRow = {
+  id: 'seed-match',
+  task_id: 'task-9',
+  project_id: 'proj-9',
+  label: 'still running',
+  command: 'echo seeded2',
+  cwd: '/tmp',
+  auto_restart: 0,
+  pid: 4242
+}
+const seedMismatched: ProcessRow = {
+  id: 'seed-mismatch',
+  task_id: 'task-9',
+  project_id: 'proj-9',
+  label: 'pid reused',
+  command: 'echo seeded3',
+  cwd: '/tmp',
+  auto_restart: 0,
+  pid: 5555
+}
+const seedDead: ProcessRow = {
+  id: 'seed-dead',
+  task_id: 'task-9',
+  project_id: 'proj-9',
+  label: 'already gone',
+  command: 'echo seeded4',
+  cwd: '/tmp',
+  auto_restart: 0,
+  pid: 6666
 }
 const fake: ProcessPersistence = {
-  loadAll: async () => [seededRow],
+  loadAll: async () => [seededRow, seedMatching, seedMismatched, seedDead],
   insert: async (p) => {
     inserts.push(p)
   },
@@ -44,6 +81,29 @@ const fake: ProcessPersistence = {
     // already have run (statement order inside killProcess is load-bearing —
     // the exit handler's auto-restart checks `processes.has`).
     removes.push({ id, stillListed: listAllProcesses().some((p) => p.id === id) })
+  },
+  updatePid: async (id, pid) => {
+    pidUpdates.push({ id, pid })
+  }
+}
+
+// Controllable fake backend for the reap scenarios: getCommandLine is driven
+// by a mutable map (pid → live command, absent = not alive); killByPid records
+// calls and simulates the kill taking effect (clears the map entry).
+const reapKillCalls: Array<{ pid: number; sig?: string }> = []
+let liveCommandByPid: Record<number, string> = {}
+const noopHandle: ProcHandle = {
+  pid: undefined,
+  onData: () => ({ dispose() {} }),
+  onExit: () => ({ dispose() {} }),
+  kill: () => {}
+}
+const reapTestBackend: ProcessBackend = {
+  spawn: () => noopHandle,
+  getCommandLine: async (pid) => liveCommandByPid[pid] ?? null,
+  killByPid: (pid, sig) => {
+    reapKillCalls.push({ pid, sig })
+    delete liveCommandByPid[pid]
   }
 }
 
@@ -60,6 +120,52 @@ async function main(): Promise<void> {
   assert(seeded!.autoRestart === true, 'hydration maps auto_restart=1 → true')
   assert(seeded!.status === 'stopped', 'hydrated processes start stopped')
   assert(seeded!.pid === null, 'hydrated processes have no pid')
+  assert(
+    listAllProcesses().find((p) => p.id === 'seed-match')?.pid === 4242,
+    'hydration carries a leftover pid through from a previous, uncleanly-terminated run'
+  )
+
+  // --- reap-on-restart: restartProcess is the real entry point a "start this
+  //     again" click hits for a row reloaded at boot (see ProcessDialog.tsx —
+  //     an existing process always restarts, only a brand-new one spawns) ---
+  setProcessBackend(reapTestBackend)
+
+  liveCommandByPid = { 4242: 'echo seeded2' } // matches seedMatching.command
+  assert(await restartProcess('seed-match'), 'restartProcess succeeds for a hydrated row')
+  assert(
+    reapKillCalls.some((c) => c.pid === 4242),
+    'a leftover pid whose command line still matches is reaped'
+  )
+  assert(
+    listAllProcesses().find((p) => p.id === 'seed-match')?.pid == null,
+    'reaped pid is cleared from the in-memory row'
+  )
+  assert(
+    pidUpdates.some((u) => u.id === 'seed-match' && u.pid === null),
+    'reaped pid is cleared in persistence too'
+  )
+
+  reapKillCalls.length = 0
+  liveCommandByPid = { 5555: 'totally-unrelated-process --flag' } // does NOT match seedMismatched.command
+  await restartProcess('seed-mismatch')
+  assert(
+    !reapKillCalls.some((c) => c.pid === 5555),
+    'a live pid that no longer matches the stored command is left running, not killed'
+  )
+  assert(
+    listAllProcesses().find((p) => p.id === 'seed-mismatch')?.pid == null,
+    'a mismatched pid is still cleared from our own bookkeeping (it is not ours to track anymore)'
+  )
+
+  liveCommandByPid = {} // 6666 absent → getCommandLine resolves null → "not alive"
+  await restartProcess('seed-dead')
+  assert(reapKillCalls.length === 0, 'a pid that is no longer alive is never sent a kill')
+  assert(
+    listAllProcesses().find((p) => p.id === 'seed-dead')?.pid == null,
+    'a dead pid is cleared from the in-memory row'
+  )
+
+  setProcessBackend(null) // restore localProcessBackend for the rest of the suite
 
   // --- create → insert ---
   const id = createProcess('proj-a', 'task-1', 'dev server', 'echo hi', '/tmp', false)
@@ -118,7 +224,16 @@ async function main(): Promise<void> {
 async function testDbAdapter(): Promise<void> {
   const calls: Array<{ sql: string; params: unknown[] }> = []
   const dbRows: ProcessRow[] = [
-    { id: 'r1', task_id: null, project_id: 'p1', label: 'l', command: 'c', cwd: '/', auto_restart: 0 }
+    {
+      id: 'r1',
+      task_id: null,
+      project_id: 'p1',
+      label: 'l',
+      command: 'c',
+      cwd: '/',
+      auto_restart: 0,
+      pid: null
+    }
   ]
   const stubDb = {
     prepare(sql: string) {
@@ -182,6 +297,18 @@ async function testDbAdapter(): Promise<void> {
     calls[3].sql === 'DELETE FROM processes WHERE id = ?' &&
       JSON.stringify(calls[3].params) === JSON.stringify(['the-id']),
     'remove runs the exact pre-seam DELETE'
+  )
+
+  await persistenceOverDb.updatePid('the-id', 4242)
+  assert(
+    calls[4].sql.replace(/\s+/g, ' ').trim() === 'UPDATE processes SET pid = ? WHERE id = ?' &&
+      JSON.stringify(calls[4].params) === JSON.stringify([4242, 'the-id']),
+    'updatePid runs a minimal UPDATE, pid then id'
+  )
+  await persistenceOverDb.updatePid('the-id', null)
+  assert(
+    JSON.stringify(calls[5].params) === JSON.stringify([null, 'the-id']),
+    'updatePid accepts null to clear the pid'
   )
 
   // Sync-throw parity: pre-seam code called db.prepare() synchronously, so a
