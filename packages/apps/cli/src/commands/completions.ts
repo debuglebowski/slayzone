@@ -11,6 +11,7 @@ complete -c slay -n '__fish_use_subcommand' -a 'automations' -d 'Manage automati
 complete -c slay -n '__fish_use_subcommand' -a 'processes' -d 'Manage processes'
 complete -c slay -n '__fish_use_subcommand' -a 'hub' -d 'Run, list and target SlayZone hubs'
 complete -c slay -n '__fish_use_subcommand' -a 'runner' -d 'Run and manage SlayZone runners'
+complete -c slay -n '__fish_use_subcommand' -a 'update' -d 'Update globally npm-installed @slayzone packages'
 complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell completions'
 complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
 complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
@@ -37,6 +38,7 @@ _slay() {
     'processes:Manage processes'
     'hub:Run, list and target SlayZone hubs'
     'runner:Run and manage SlayZone runners'
+    'update:Update globally npm-installed @slayzone packages'
     'completions:Print shell completions'
   )
   local -a task_commands
@@ -138,6 +140,9 @@ _slay() {
     runner)
       _describe 'runner commands' runner_commands
       ;;
+    update)
+      _arguments '--check[Report available updates without installing]'
+      ;;
     completions)
       _arguments ':shell:(fish zsh bash)'
       ;;
@@ -157,7 +162,7 @@ _slay_completions() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
   if [ $COMP_CWORD -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "tasks projects tags templates automations processes hub runner completions" -- "$cur") )
+    COMPREPLY=( $(compgen -W "tasks projects tags templates automations processes hub runner update completions" -- "$cur") )
   elif [ $COMP_CWORD -eq 2 ]; then
     case "$prev" in
       tasks)
@@ -183,6 +188,9 @@ _slay_completions() {
         ;;
       runner)
         COMPREPLY=( $(compgen -W "ls mint create start stop rm restart logs" -- "$cur") )
+        ;;
+      update)
+        COMPREPLY=( $(compgen -W "--check" -- "$cur") )
         ;;
       completions)
         COMPREPLY=( $(compgen -W "fish zsh bash" -- "$cur") )

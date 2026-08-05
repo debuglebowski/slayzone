@@ -158,6 +158,9 @@ run_test_electron_strict_loader packages/apps/cli/src/commands/hub-lifecycle.tes
 # unsupervised branch (SLZ_FORCE_NO_SERVICE=1), so no launchd/systemd unit is ever
 # installed. Electron ABI (hub better-sqlite3 + runner node-pty) → strict loader.
 run_test_electron_strict_loader packages/apps/cli/src/commands/runner-lifecycle.test.ts
+# `slay update` — global npm install detection + version bump. npm itself is a
+# PATH-faked script (no native deps involved) => plain node.
+run_test packages/apps/cli/src/commands/update.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
