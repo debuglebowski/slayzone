@@ -5,6 +5,7 @@ export {
   MODE_ICONS,
   useTaskTerminals,
   isChatSupported,
-  CHAT_SUPPORTED_MODES
+  CHAT_SUPPORTED_MODES,
+  markForceStart
 } from './client'
 export type { TerminalContainerHandle } from './client'

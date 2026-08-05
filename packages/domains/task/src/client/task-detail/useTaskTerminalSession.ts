@@ -22,6 +22,7 @@ function readCurrentConversationId(
 }
 import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import { markSkipCache } from '@slayzone/terminal'
+import { markForceStart } from '@slayzone/task-terminals'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null
@@ -180,6 +181,11 @@ export function useTaskTerminalSession({
     if (!task) return
     const mainSessionId = getMainSessionId(task.id)
     resetTaskState(mainSessionId)
+    // Claim the next TerminalStarter mount before killing: the kill's exit
+    // handler flips `was_spawned` false and broadcasts it, but that DB
+    // round-trip routinely loses the race against the remount below, which
+    // would otherwise show the "Open <mode>" Start gate instead of resuming.
+    markForceStart(mainSessionId)
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
     await new Promise((r) => setTimeout(r, 100))
     markSkipCache(mainSessionId)
@@ -204,6 +210,9 @@ export function useTaskTerminalSession({
     if (!task) return
     const mainSessionId = getMainSessionId(task.id)
     resetTaskState(mainSessionId)
+    // See handleRestartTerminal — claim the next mount before the kill so the
+    // was_spawned=false race doesn't strand the user on the Start gate.
+    markForceStart(mainSessionId)
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
     const updated = await trpcClient.task.resetConversation.mutate({
       id: task.id,

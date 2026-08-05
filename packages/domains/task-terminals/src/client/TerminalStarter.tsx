@@ -13,6 +13,32 @@ import { getThemeTerminalColors, useVisibleInterval } from '@slayzone/ui'
 import { MODE_ICONS } from './TerminalTabBar'
 import { getModeLabel } from './get-tab-label'
 
+// Sessions whose next TerminalStarter mount should skip the Start gate
+// unconditionally. Explicit restart/reset kill the PTY then remount ~100ms
+// later; the kill's exit handler flips `terminal_tabs.was_spawned` to false
+// server-side and broadcasts the change, but that DB round-trip (write →
+// broadcast → tabs refetch → re-render) routinely loses the race against the
+// 100ms remount, so the gate-check below sees a stale `wasSpawned=false` and
+// shows "Open <mode>" instead of respawning. Callers that just killed a PTY
+// on purpose call `markForceStart` first so this mount ignores that prop.
+const forceStartSet = new Set<string>()
+const forceStartTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+
+export function markForceStart(sessionId: string): void {
+  const existing = forceStartTimeouts.get(sessionId)
+  if (existing) clearTimeout(existing)
+  forceStartSet.add(sessionId)
+  // Safety net: if no remount consumes the flag (e.g. restart aborted), don't
+  // leak it into an unrelated future mount.
+  forceStartTimeouts.set(
+    sessionId,
+    setTimeout(() => {
+      forceStartSet.delete(sessionId)
+      forceStartTimeouts.delete(sessionId)
+    }, 5000)
+  )
+}
+
 export interface TerminalStarterProps extends TerminalProps {
   /**
    * Hint from `terminal_tabs.was_spawned`: the agent was alive when the app
@@ -80,6 +106,17 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
 
     useEffect(() => {
       let cancelled = false
+      // Explicit restart/reset intent wins over everything else — see
+      // `markForceStart`. Consume it so it only applies to this one mount.
+      if (forceStartSet.has(sessionId)) {
+        forceStartSet.delete(sessionId)
+        setReason('initial')
+        setStarted(true)
+        setExistsChecked(true)
+        return () => {
+          cancelled = true
+        }
+      }
       // Persisted hibernation wins: show the "Reopen … (resumes)" screen, don't
       // auto-mount — survives reload/restart so a stale agent stays distinct.
       if (hibernated) {
