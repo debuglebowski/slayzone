@@ -461,22 +461,28 @@ jobs:
           if gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Using existing release: $CHANNEL_TAG"
           else
-            if [ "$PRERELEASE" = "true" ]; then
-              gh release create "$CHANNEL_TAG" \
-                --repo "$GITHUB_REPOSITORY" \
-                --target "$SOURCE_REF" \
-                --title "$RELEASE_TITLE" \
-                --notes-file /tmp/release-notes.md \
-                --draft \
-                --prerelease
-            else
-              gh release create "$CHANNEL_TAG" \
-                --repo "$GITHUB_REPOSITORY" \
-                --target "$SOURCE_REF" \
-                --title "$RELEASE_TITLE" \
-                --notes-file /tmp/release-notes.md \
-                --draft
+            # --target names the commit a NEW tag should be cut at, so it is only
+            # meaningful when the tag does not exist yet (the dispatch fan-out, where a
+            # clean base tag gains a channel suffix). On the tag-push flow the tag is
+            # already there and the API ignores target_commitish outright — but gh still
+            # sends it, and GITHUB_TOKEN is refused with "403: Resource not accessible by
+            # integration" whenever that commit is no longer the default branch's head.
+            # Any push to main while the build is in flight moves the head, so passing it
+            # unconditionally makes publishing lose a race it never needed to enter.
+            create_args=(
+              --repo "$GITHUB_REPOSITORY"
+              --title "$RELEASE_TITLE"
+              --notes-file /tmp/release-notes.md
+              --draft
+            )
+            if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CHANNEL_TAG" >/dev/null 2>&1; then
+              create_args+=(--target "$SOURCE_REF")
             fi
+            if [ "$PRERELEASE" = "true" ]; then
+              create_args+=(--prerelease)
+            fi
+
+            gh release create "$CHANNEL_TAG" "${create_args[@]}"
           fi
 
           for file in release-bundle/assets/* release-bundle/SHA256SUMS.txt release-bundle/release-manifest.json; do
