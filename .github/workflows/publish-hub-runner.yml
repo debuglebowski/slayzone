@@ -97,7 +97,7 @@ jobs:
           set -euo pipefail
           # OIDC token endpoint is injected into the process env only when
           # id-token: write is effective (absent on fork PRs) — read it here,
-          # not via the ${{ env.* }} expression context (which never holds it).
+          # not via the workflow `env` expression context (which never holds it).
           HAS_OIDC=false
           [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && HAS_OIDC=true
           if [ "$REQUESTED" = "publish" ] && [ "$HAS_OIDC" = "true" ]; then
