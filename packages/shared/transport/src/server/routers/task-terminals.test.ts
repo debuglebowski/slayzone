@@ -70,3 +70,46 @@ test('task-terminals router: delete non-main true, main false, missing false', a
   expect(await caller.delete({ tabId: taskId })).toBe(false)
   expect(await caller.delete({ tabId: 'nope' })).toBe(false)
 })
+
+test('task-terminals router: listAutoRestoreTasks — spawned+non-hibernated only', async () => {
+  const mkTask = (title: string, deletedAt: string | null = null) => {
+    const id = crypto.randomUUID()
+    h.db
+      .prepare(
+        'INSERT INTO tasks (id, project_id, title, status, priority, "order", deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      )
+      .run(id, projectId, title, 'inbox', 3, 0, deletedAt)
+    return id
+  }
+  const setTab = (id: string, wasSpawned: boolean, hibernated: boolean) =>
+    h.db
+      .prepare('UPDATE terminal_tabs SET was_spawned = ?, hibernated = ? WHERE id = ?')
+      .run(wasSpawned ? 1 : 0, hibernated ? 1 : 0, id)
+
+  const active = mkTask('active')
+  await caller.ensureMain({ taskId: active, mode: 'claude-code' })
+  setTab(active, true, false)
+
+  const hibernated = mkTask('hibernated')
+  await caller.ensureMain({ taskId: hibernated, mode: 'claude-code' })
+  setTab(hibernated, true, true)
+
+  const neverSpawned = mkTask('never-spawned')
+  await caller.ensureMain({ taskId: neverSpawned, mode: 'claude-code' })
+  setTab(neverSpawned, false, false)
+
+  const plainShell = mkTask('plain-shell')
+  await caller.ensureMain({ taskId: plainShell, mode: 'terminal' })
+  setTab(plainShell, true, false)
+
+  const deleted = mkTask('deleted', new Date().toISOString())
+  await caller.ensureMain({ taskId: deleted, mode: 'claude-code' })
+  setTab(deleted, true, false)
+
+  const ids = await caller.listAutoRestoreTasks()
+  expect(ids).toContain(active)
+  expect(ids).not.toContain(hibernated)
+  expect(ids).not.toContain(neverSpawned)
+  expect(ids).not.toContain(plainShell)
+  expect(ids).not.toContain(deleted)
+})

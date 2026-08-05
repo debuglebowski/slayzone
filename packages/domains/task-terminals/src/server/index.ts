@@ -1,6 +1,11 @@
 export { tabsEvents } from './events'
 export type { TabsChangedPayload, TabsEventMap } from './events'
-export { markTabSpawned, markTabHibernated, listHibernatedSessionIds } from './tab-flags'
+export {
+  markTabSpawned,
+  markTabHibernated,
+  listHibernatedSessionIds,
+  listAutoRestoreTaskIds
+} from './tab-flags'
 export {
   rowToTab,
   listTabsForTask,

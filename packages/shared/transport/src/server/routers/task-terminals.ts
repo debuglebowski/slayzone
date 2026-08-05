@@ -9,6 +9,7 @@ import {
   deleteTab,
   ensureMainTab,
   listHibernatedSessionIds,
+  listAutoRestoreTaskIds,
   tabsEvents,
   type TabsChangedPayload
 } from '@slayzone/task-terminals/server'
@@ -36,6 +37,10 @@ export const taskTerminalsRouter = router({
 
   /** Main-tab session ids flagged hibernated — seeds the renderer's 💤 dots at boot. */
   listHibernatedSessions: publicProcedure.query(({ ctx }) => listHibernatedSessionIds(ctx.db)),
+
+  /** Task ids whose main session was alive at last shutdown and isn't
+   *  hibernated — the boot-restore set (see `listAutoRestoreTaskIds`). */
+  listAutoRestoreTasks: publicProcedure.query(({ ctx }) => listAutoRestoreTaskIds(ctx.db)),
 
   create: publicProcedure
     .input(createInput)

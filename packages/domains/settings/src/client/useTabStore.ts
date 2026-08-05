@@ -596,6 +596,31 @@ export async function loadTabStoreState(): Promise<void> {
   } finally {
     performance.mark('sz:tabStore:end')
   }
+  await restoreActiveSessionTabs()
+}
+
+// A task's outer tab can be closed while its agent keeps running — closing a
+// tab only drops it from `viewState`, it doesn't touch `terminal_tabs.was_spawned`
+// (see tab-flags.ts). So the persisted tab list alone can miss live sessions on
+// boot. Reopen those as background tabs (no focus steal) so the existing
+// `wasSpawned` resume path on `TerminalStarter` picks them back up. Best-effort:
+// a failed fetch here must not block boot.
+async function restoreActiveSessionTabs(): Promise<void> {
+  try {
+    const activeIds = await getTrpcClient().taskTerminals.listAutoRestoreTasks.query()
+    if (activeIds.length === 0) return
+    const openIds = new Set(
+      useTabStore
+        .getState()
+        .tabs.filter((t): t is Extract<Tab, { type: 'task' }> => t.type === 'task')
+        .map((t) => t.taskId)
+    )
+    for (const taskId of activeIds) {
+      if (!openIds.has(taskId)) useTabStore.getState().openTaskInBackground(taskId)
+    }
+  } catch {
+    /* best-effort — a missed auto-restore just leaves the task's Start gate showing */
+  }
 }
 
 export const tabStoreReady: Promise<void> = Promise.resolve()

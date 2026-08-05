@@ -45,3 +45,26 @@ export async function listHibernatedSessionIds(db: SlayzoneDb): Promise<string[]
     .all()) as Array<{ task_id: string }>
   return rows.map((r) => `${r.task_id}:${r.task_id}`)
 }
+
+/**
+ * Task ids whose main agent session was alive at last shutdown (`was_spawned`)
+ * and isn't explicitly idle-closed (`hibernated`) — the set that should
+ * auto-restore on boot. `was_spawned` is tab-bar independent (closing a task's
+ * outer UI tab doesn't clear it), so this is used to re-open a background tab
+ * for tasks the persisted tab-bar list alone would miss; the existing
+ * `wasSpawned` prop on `TerminalStarter` then resumes each one without
+ * triggering inference. `mode != 'terminal'` mirrors the `shouldGate`
+ * condition in `TerminalSplitGroup` — plain shell tabs always eager-spawn.
+ */
+export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> {
+  const rows = (await db
+    .prepare(
+      `SELECT tt.task_id FROM terminal_tabs tt
+       JOIN tasks t ON t.id = tt.task_id
+       WHERE tt.is_main = 1 AND tt.mode != 'terminal'
+         AND tt.was_spawned = 1 AND tt.hibernated = 0
+         AND t.deleted_at IS NULL`
+    )
+    .all()) as Array<{ task_id: string }>
+  return rows.map((r) => r.task_id)
+}
