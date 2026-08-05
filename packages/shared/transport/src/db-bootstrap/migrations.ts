@@ -3400,6 +3400,15 @@ export const migrations: Migration[] = [
       // readability_override / width_override (v109).
       db.exec(`ALTER TABLE task_artifacts ADD COLUMN zoom_pct INTEGER DEFAULT NULL;`)
     }
+  },
+  {
+    version: 153,
+    up: (db) => {
+      // Starred projects are exempt from the sidebar tree's "hide inactive
+      // projects" collapse — same non-nullable default-0 boolean shape as
+      // tasks.pinned (v140).
+      db.exec(`ALTER TABLE projects ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;`)
+    }
   }
 ]
 

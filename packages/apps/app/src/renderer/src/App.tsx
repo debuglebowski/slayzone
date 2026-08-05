@@ -139,6 +139,7 @@ function App(): React.JSX.Element {
     clearBlockers,
     updateProject,
     reorderProjects,
+    setProjectStarred,
     deleteProject,
     createProjectGroup,
     createFolderWithProjects,
@@ -1330,6 +1331,7 @@ function App(): React.JSX.Element {
             onSetTasksPinned={setTasksPinned}
             onSetCollapsed={setTaskCollapsed}
             onPinnedReorder={reorderPinnedTasks}
+            onSetProjectStarred={setProjectStarred}
             taskProgress={taskProgress}
             doneTaskIds={doneTaskIds}
             columnsByProjectId={columnsByProjectId}

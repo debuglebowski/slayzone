@@ -79,6 +79,8 @@ export interface SidebarViewContext {
   onSetCollapsed?: (taskId: string, collapsed: boolean) => void
   /** Reorder the pinned group — writes `tasks.pin_order` for the ordered ids. */
   onPinnedReorder?: (taskIds: string[]) => void
+  /** Star / unstar a project — starred projects stay visible when inactive projects are hidden. */
+  onSetProjectStarred?: (projectId: string, starred: boolean) => void
 }
 
 export interface SidebarView {

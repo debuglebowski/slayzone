@@ -124,6 +124,7 @@ interface UseTasksDataReturn {
   // Project handlers
   updateProject: (project: Project) => void
   reorderProjects: (projectIds: string[]) => void
+  setProjectStarred: (projectId: string, starred: boolean) => void
   deleteProject: (
     projectId: string,
     selectedProjectId: string,
@@ -900,6 +901,21 @@ export function useTasksData(): UseTasksDataReturn {
     setProjects((prev) => prev.map((p) => (p.id === project.id ? project : p)))
   }, [])
 
+  // Star/unstar a project — exempts it from the sidebar tree's "hide inactive" collapse
+  const setProjectStarred = useCallback(
+    (projectId: string, starred: boolean) => {
+      let snapshot: Project[] = []
+      setProjects((prev) => {
+        snapshot = prev
+        return prev.map((p) => (p.id === projectId ? { ...p, starred } : p))
+      })
+      clientForProject(projectId)
+        .projects.update.mutate({ id: projectId, starred })
+        .catch(() => setProjects(snapshot))
+    },
+    [clientForProject]
+  )
+
   // Delete project and its tasks
   const deleteProject = useCallback(
     (projectId: string, selectedProjectId: string, setSelectedProjectId: (id: string) => void) => {
@@ -1094,6 +1110,7 @@ export function useTasksData(): UseTasksDataReturn {
     clearBlockers,
     updateProject,
     reorderProjects,
+    setProjectStarred,
     deleteProject,
     createProjectGroup,
     createFolderWithProjects,

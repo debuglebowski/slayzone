@@ -204,6 +204,7 @@ function synthProject(entry: {
     worktree_copy_paths: null,
     worktree_submodule_init: null,
     group_id: null,
+    starred: false,
     columns_config: parseColumnsConfig(entry.columns_config),
     execution_context: parseExecutionContext(entry.execution_context),
     selected_repo: null,

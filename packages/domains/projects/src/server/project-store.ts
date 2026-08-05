@@ -30,6 +30,7 @@ export function parseProject(
   if (!row) return null
   return {
     ...row,
+    starred: Boolean(row.starred),
     columns_config: parseColumnsConfig(row.columns_config),
     execution_context: row.execution_context
       ? (() => {
@@ -111,6 +112,10 @@ export async function updateProject(
     } else {
       values.push(data.autoCreateWorktreeOnTaskCreate ? 1 : 0)
     }
+  }
+  if (data.starred !== undefined) {
+    fields.push('starred = ?')
+    values.push(data.starred ? 1 : 0)
   }
   if (data.worktreeSourceBranch !== undefined) {
     fields.push('worktree_source_branch = ?')

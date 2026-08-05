@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { BookOpen, ChevronDown, FolderPlus, Home, Plus, Search, Settings } from 'lucide-react'
+import { BookOpen, ChevronDown, FolderPlus, Home, Plus, Search, Settings, Star } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import {
   DndContext,
@@ -94,7 +94,8 @@ export function TreeView({
   projectGroups,
   onSetTasksPinned,
   onSetCollapsed,
-  onPinnedReorder
+  onPinnedReorder,
+  onSetProjectStarred
 }: SidebarViewContext) {
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
@@ -466,11 +467,11 @@ export function TreeView({
   const [showAll, setShowAll] = useState(false)
 
   const activeProjects = useMemo(
-    () => sortedProjects.filter((p) => activeProjectIds.has(p.id)),
+    () => sortedProjects.filter((p) => activeProjectIds.has(p.id) || p.starred),
     [sortedProjects, activeProjectIds]
   )
   const hiddenProjects = useMemo(
-    () => sortedProjects.filter((p) => !activeProjectIds.has(p.id)),
+    () => sortedProjects.filter((p) => !activeProjectIds.has(p.id) && !p.starred),
     [sortedProjects, activeProjectIds]
   )
   const visibleProjects = showAll ? sortedProjects : activeProjects
@@ -1333,6 +1334,19 @@ export function TreeView({
                   <span className="truncate flex-1 text-left">{project.name}</span>
                 </button>
               </Collapsible.Trigger>
+              <button
+                type="button"
+                onClick={() => onSetProjectStarred?.(project.id, !project.starred)}
+                aria-label={project.starred ? `Unstar ${project.name}` : `Star ${project.name}`}
+                className={cn(
+                  'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                  project.starred
+                    ? 'text-foreground'
+                    : 'text-muted-foreground/70 hover:text-foreground'
+                )}
+              >
+                <Star className={cn('size-3.5', project.starred && 'fill-current')} />
+              </button>
               <button
                 type="button"
                 onClick={() => onSelectProject(project.id, { home: true })}

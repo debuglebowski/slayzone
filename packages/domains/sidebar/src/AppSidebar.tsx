@@ -72,6 +72,7 @@ interface AppSidebarProps {
   onSetTasksPinned?: (taskIds: string[], pinned: boolean) => void
   onSetCollapsed?: (taskId: string, collapsed: boolean) => void
   onPinnedReorder?: (taskIds: string[]) => void
+  onSetProjectStarred?: (projectId: string, starred: boolean) => void
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
   taskBulkContextMenuRender?: (taskIds: string[], child: ReactNode) => ReactNode
   taskProgress?: Map<string, number>
@@ -179,6 +180,7 @@ export function AppSidebar({
   onSetTasksPinned,
   onSetCollapsed,
   onPinnedReorder,
+  onSetProjectStarred,
   taskContextMenuRender,
   taskBulkContextMenuRender,
   taskProgress,
@@ -280,6 +282,7 @@ export function AppSidebar({
               onSetTasksPinned,
               onSetCollapsed,
               onPinnedReorder,
+              onSetProjectStarred,
               sessionTaskIds,
               idleByProject,
               taskContextMenuRender,

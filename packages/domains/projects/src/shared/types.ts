@@ -70,6 +70,8 @@ export interface Project {
   sort_order: number
   /** Group this project belongs to, or null = ungrouped (top-level). */
   group_id: string | null
+  /** Exempts the project from the sidebar tree's "hide inactive" collapse. */
+  starred: boolean
   created_at: string
   updated_at: string
 }
@@ -136,4 +138,5 @@ export interface UpdateProjectInput {
   iconLetters?: string | null
   iconImagePath?: string | null
   lockConfig?: ProjectLockConfig | null
+  starred?: boolean
 }
