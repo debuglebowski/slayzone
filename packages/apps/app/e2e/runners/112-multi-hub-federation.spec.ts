@@ -690,6 +690,80 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       fs.rmSync(secondStore, { recursive: true, force: true })
     }
   })
+
+  base('adding a hub via Settings goes live without a reload', async () => {
+    base.setTimeout(180_000)
+
+    // Boots SINGLE-hub (no remotes in boot-config, mirroring a user who has
+    // never touched multi-hub federation) — the app-level "add a hub" flow is
+    // the whole point of this test, not just the settings-tab UI in isolation.
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+    let hub: SecondHub | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const remoteHubUrl = hub.url
+
+      // Seed a project on the hub-to-be-added BEFORE it's added — proves the
+      // rail picks up pre-existing remote data on first live connect, not just
+      // data created after.
+      await withHubClient(remoteHubUrl, (c) =>
+        c.projects.create.mutate({ name: 'LiveAdd-P', color: '#f97316', path: '/tmp' })
+      )
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-live-add',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.join(userDataDir, 'storage'), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify(
+              { server_mode: 'local', multi_hub: false, hubs: [], default_hub_id: 'local' },
+              null,
+              2
+            )
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+
+      // Before adding: the rail has no way to see the remote hub's project.
+      await expect(projectBlob(page, 'LI')).not.toBeVisible({ timeout: 2_000 })
+
+      await clickSettings(page)
+      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      await expect(dialog).toBeVisible({ timeout: 10_000 })
+      await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+
+      await page.locator('[data-testid="hub-add-open"]').click()
+      await page.locator('[data-testid="hub-add-url"]').fill(remoteHubUrl)
+      await page.locator('[data-testid="hub-probe"]').click()
+      await expect(page.locator('[data-testid="hub-probe-result"]')).toContainText('reachable', {
+        timeout: 10_000
+      })
+      await page.locator('[data-testid="hub-add"]').click()
+      await page.locator('[data-testid="hubs-save-relaunch"]').click()
+
+      // The save button clears once the (live) save resolves — confirms the
+      // add-only path completed without waiting on a relaunch/reload.
+      await expect(page.locator('[data-testid="hubs-save-relaunch"]')).toBeHidden({
+        timeout: 10_000
+      })
+      await page.keyboard.press('Escape')
+
+      // The live path in question: the remote hub's project appears in the
+      // rail with NO page.reload() anywhere in this test.
+      await expect(projectBlob(page, 'LI')).toBeVisible({ timeout: 20_000 })
+    } finally {
+      if (launched) await launched.close()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
 })
 
 /** True when `marker` appears on a line that is NOT the `echo <marker>` command

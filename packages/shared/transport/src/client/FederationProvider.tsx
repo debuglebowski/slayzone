@@ -3,6 +3,7 @@ import { QueryClient } from '@tanstack/react-query'
 import type { HubEntry } from '@slayzone/types'
 import { getOrCreateHubClient, type HubWsClient } from './trpc'
 import { makeQueryClient } from './provider'
+import { useHubRegistryStore } from './hubRegistryStore'
 
 /**
  * Multi-hub federation — the outer, stable provider.
@@ -96,4 +97,29 @@ export function useFederation(): FederationContextValue {
 /** Non-throwing read — for surfaces that may render outside federation (fork). */
 export function useFederationOrNull(): FederationContextValue | null {
   return useContext(FederationContext)
+}
+
+export type FederatedRootProps = {
+  /** Appends `?windowId=N` (and any per-hub query) to a hub's ws url. Same
+   *  host-injected closure `main.tsx` passes to `FederationProvider` today. */
+  decorateUrl?: (url: string) => string
+  children: ReactNode
+}
+
+/**
+ * Boot wires `hubs`/`defaultHubId`/`tokens` into `useHubRegistryStore` once
+ * (see `main.tsx`); this component is the seam that turns a later live store
+ * update (a hub added via `HubsSettingsTab`'s add-only path) into an actual
+ * re-render of `FederationProvider` — the single `createRoot().render()` call
+ * at boot has no other way to receive post-boot updates.
+ */
+export function FederatedRoot({ decorateUrl, children }: FederatedRootProps): ReactNode {
+  const hubs = useHubRegistryStore((s) => s.hubs)
+  const defaultHubId = useHubRegistryStore((s) => s.defaultHubId)
+  const tokens = useHubRegistryStore((s) => s.tokens)
+  return (
+    <FederationProvider hubs={hubs} defaultHubId={defaultHubId} decorateUrl={decorateUrl} tokens={tokens}>
+      {children}
+    </FederationProvider>
+  )
 }

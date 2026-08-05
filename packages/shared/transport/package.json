@@ -47,7 +47,8 @@
     "superjson": "^2.2.1",
     "utf-8-validate": "^6.0.6",
     "ws": "^8.18.0",
-    "zod": "^4.3.5"
+    "zod": "^4.3.5",
+    "zustand": "^5.0.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

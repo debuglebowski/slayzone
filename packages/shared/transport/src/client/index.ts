@@ -18,11 +18,14 @@ export {
   FederationProvider,
   useFederation,
   useFederationOrNull,
+  FederatedRoot,
   type FederationProviderProps,
-  type ResolvedHub
+  type ResolvedHub,
+  type FederatedRootProps
 } from './FederationProvider'
 export { HubScope, useHubId, type HubScopeProps } from './HubScope'
 export { electronBootstrap } from './electron-bootstrap'
+export { useHubRegistryStore } from './hubRegistryStore'
 // Subscription hook for the tanstack integration — single import point so
 // renderer code gets it from the transport barrel (not @trpc/* directly).
 export { useSubscription } from '@trpc/tanstack-react-query'

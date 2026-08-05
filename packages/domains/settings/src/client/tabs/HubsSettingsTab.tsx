@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { electronBootstrap } from '@slayzone/transport/client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { electronBootstrap, useHubRegistryStore } from '@slayzone/transport/client'
 import type { HubEntry } from '@slayzone/types'
 import {
   Button,
@@ -30,9 +30,17 @@ import { SettingsTabIntro } from './SettingsTabIntro'
  *
  * The registry lives in the pre-boot `boot-config.json` (a hub can't store the
  * list of hubs), so it is read via `getHubRegistry` and written via
- * `setBootSettings` (bootstrap IPCs). Enabling multi-hub / adding / removing a
- * hub changes what the client dials at boot, so it requires a relaunch — the
- * "Save & relaunch" button is the consent, mirroring the Server tab.
+ * `setBootSettings` (bootstrap IPCs). Enabling multi-hub / removing / reordering
+ * a hub, toggling the local hub, or changing the default all change what the
+ * client dials at boot, so those still require a relaunch — the "Save &
+ * relaunch" button is the consent, mirroring the Server tab. A save that is a
+ * PURE ADDITION (nothing else changed since the last reload/save) skips the
+ * relaunch and pushes the new hub(s) into `useHubRegistryStore` instead — see
+ * `save()`'s `isAddOnly` check. That live path exists because every consumer
+ * below `FederatedRoot`/`FederationProvider` already resolves hubs reactively;
+ * it's deliberately NOT extended to removal, since `FederationProvider`'s
+ * per-hub `QueryClient` cache and the WS-client registry in `trpc.ts` have no
+ * teardown path yet.
  */
 
 type ProbeState =
@@ -68,16 +76,32 @@ export function HubsSettingsTab() {
   >({ kind: 'idle' })
   const [authedHubIds, setAuthedHubIds] = useState<Set<string>>(new Set())
 
+  // Baseline snapshot save() diffs against to detect a pure addition (see
+  // `isAddOnly` below) — kept in a ref (not state) since it never drives a
+  // render itself, only what save() compares NEXT save against.
+  const originalRef = useRef<{ remotes: HubEntry[]; defaultHubId: string; runLocalHub: boolean }>({
+    remotes: [],
+    defaultHubId: 'local',
+    runLocalHub: true
+  })
+
   const reload = useCallback(async () => {
     const [registry, tokens] = await Promise.all([
       electronBootstrap.getHubRegistry(),
       electronBootstrap.getHubTokens()
     ])
-    setRunLocalHub(registry.hubs.some((h) => h.kind === 'local'))
-    setRemotes(registry.hubs.filter((h) => h.kind === 'remote'))
+    const nextRunLocalHub = registry.hubs.some((h) => h.kind === 'local')
+    const nextRemotes = registry.hubs.filter((h) => h.kind === 'remote')
+    setRunLocalHub(nextRunLocalHub)
+    setRemotes(nextRemotes)
     setDefaultHubId(registry.defaultHubId)
     setAuthedHubIds(new Set(Object.keys(tokens)))
     setDirty(false)
+    originalRef.current = {
+      remotes: nextRemotes,
+      defaultHubId: registry.defaultHubId,
+      runLocalHub: nextRunLocalHub
+    }
   }, [])
 
   const openSignIn = (hubId: string): void => {
@@ -107,6 +131,11 @@ export function HubsSettingsTab() {
       setSignInState({ kind: 'ok' })
       setPassword('')
       setAuthedHubIds((prev) => new Set(prev).add(hub.id))
+      // Push the freshly-stored token into the live registry too — if this
+      // hub was already live-added this session (see save()'s isAddOnly
+      // path), FederationProvider needs the token without a relaunch.
+      const tokens = await electronBootstrap.getHubTokens()
+      useHubRegistryStore.getState().setTokens(tokens)
     } else {
       setSignInState({ kind: 'fail', error: result.error })
     }
@@ -194,15 +223,37 @@ export function HubsSettingsTab() {
       // Default must name a hub that will actually exist post-save.
       const nextDefault =
         defaultHubId === 'local' && !effectiveRunLocal ? (remotes[0]?.id ?? 'local') : defaultHubId
+
+      // A pure addition — every previously-saved remote is still present,
+      // unchanged (id/url/label), only new ones appended, and nothing else
+      // (default hub, local toggle) changed — can go live without a
+      // relaunch. Anything else (remove/reorder/relabel-of-existing/toggle/
+      // default-change) still needs one, unchanged from before.
+      const original = originalRef.current
+      const isAddOnly =
+        remotes.length > original.remotes.length &&
+        original.remotes.every(
+          (h, i) => remotes[i]?.id === h.id && remotes[i]?.url === h.url && remotes[i]?.label === h.label
+        ) &&
+        defaultHubId === original.defaultHubId &&
+        effectiveRunLocal === original.runLocalHub
+
       await electronBootstrap.setBootSettings({
         server_mode: serverMode,
         multi_hub: nextMultiHub,
         hubs: remotes,
         default_hub_id: nextDefault
       })
-      await electronBootstrap.relaunch()
-      // Under Playwright relaunch is a no-op — reflect the saved state.
-      setDirty(false)
+
+      if (isAddOnly) {
+        useHubRegistryStore.getState().addHubs(remotes.slice(original.remotes.length))
+        originalRef.current = { remotes, defaultHubId, runLocalHub: effectiveRunLocal }
+        setDirty(false)
+      } else {
+        await electronBootstrap.relaunch()
+        // Under Playwright relaunch is a no-op — reflect the saved state.
+        setDirty(false)
+      }
     } catch (err) {
       toast.error(`Failed to save: ${err instanceof Error ? err.message : String(err)}`)
     } finally {

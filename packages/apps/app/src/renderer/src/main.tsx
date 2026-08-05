@@ -6,11 +6,12 @@ import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import {
   TrpcProvider,
-  FederationProvider,
+  FederatedRoot,
   HubScope,
   electronBootstrap,
   getTrpcClient,
-  initTrpcClient
+  initTrpcClient,
+  useHubRegistryStore
 } from '@slayzone/transport/client'
 import type { HubEntry } from '@slayzone/types'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
@@ -174,20 +175,21 @@ if (isFloatingGlobalAgentPanel) {
       h.id === registry.defaultHubId ? { ...h, url: server.url } : h
     )
     const decorateUrl = (url: string): string => withWindowId(url, windowId)
+    // Seed the live hub registry once with the exact data that used to flow
+    // directly into FederationProvider's props. HubsSettingsTab's add-only
+    // save path pushes further updates into this store post-boot (no
+    // relaunch needed) — FederatedRoot below is the seam that turns a store
+    // update into an actual re-render.
+    useHubRegistryStore.getState().seed(hubs, registry.defaultHubId, hubTokens)
 
     performance.mark('sz:reactMount')
     electronBootstrap.bootMark('reactMount')
     createRoot(document.getElementById('root')!).render(
-      // FederationProvider (registry) + HubScope (the default hub's client) must
+      // FederatedRoot (registry) + HubScope (the default hub's client) must
       // be OUTERMOST: ConvexAuthBootstrap (and Pty/Theme/Telemetry providers) now
       // call tRPC hooks, so they need the tRPC context. With one hub this is
       // identical to the former single TrpcProvider.
-      <FederationProvider
-        hubs={hubs}
-        defaultHubId={registry.defaultHubId}
-        decorateUrl={decorateUrl}
-        tokens={hubTokens}
-      >
+      <FederatedRoot decorateUrl={decorateUrl}>
         <HubScope hubId={registry.defaultHubId}>
           <ConvexAuthBootstrap>
             <PtyProvider>
@@ -205,7 +207,7 @@ if (isFloatingGlobalAgentPanel) {
             </PtyProvider>
           </ConvexAuthBootstrap>
         </HubScope>
-      </FederationProvider>
+      </FederatedRoot>
     )
   })
 }
