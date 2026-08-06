@@ -152,25 +152,26 @@ describe('isManagedSlayzoneHook', () => {
     expect(isManagedSlayzoneHook({})).toBe(false)
   })
 
-  test('reclaims an orphan written against a non-standard root', () => {
-    // Regression: a runner used to resolve the notify script under its OWN root,
-    // so entries like these got written into the machine-wide settings.json and
-    // then pointed at a directory that no longer existed. The old substring test
-    // only recognised a path under a `.slayzone` dir, so these could never be
-    // stripped — the install could not repair itself, and only the
-    // `_slayzoneManaged` marker saved it. Match on the shape instead, so an
-    // orphan is reclaimable even with the marker gone (hand-edited settings).
+  test('never claims another tool that also ships a hooks/notify.sh', () => {
+    // settings.json is SHARED. Anything matched here gets DELETED by the
+    // installer, so a false positive destroys a different product's config.
+    //
+    // Regression, and a real incident: a broader `*/hooks/notify.sh` pattern
+    // shipped briefly to make SlayZone's own orphaned entries reclaimable, and it
+    // stripped a user's Superset hooks from every event SlayZone installs.
+    // `<something>/hooks/notify.sh` is a generic layout, not our signature.
     for (const cmd of [
-      '/tmp/slz-runnerctl-XIGOJt/runner-root/hooks/notify.sh',
-      '/repo/packages/apps/app/e2e-second-hub-81lyPA/runner-root/hooks/notify.sh',
-      'bash "/opt/some where/hooks/notify.sh"',
-      'C:\\Users\\k\\custom\\hooks\\notify.sh'
+      '[ -n "$SUPERSET_HOME_DIR" ] && [ -x "$SUPERSET_HOME_DIR/hooks/notify.sh" ] &&' +
+        ' SUPERSET_AGENT_ID=claude "$SUPERSET_HOME_DIR/hooks/notify.sh" || true',
+      '/opt/othertool/hooks/notify.sh',
+      'bash "$HOME/.othertool/hooks/notify.sh"',
+      '/opt/other/bin/notify.sh'
     ]) {
-      expect(isManagedSlayzoneHook({ type: 'command', command: cmd })).toBe(true)
+      expect(isManagedSlayzoneHook({ type: 'command', command: cmd })).toBe(false)
     }
-    // Still not a land-grab: another tool's notify.sh is left alone.
+    // Ours is still recognised without the marker (hand-edited settings).
     expect(
-      isManagedSlayzoneHook({ type: 'command', command: '/opt/other/bin/notify.sh' })
-    ).toBe(false)
+      isManagedSlayzoneHook({ type: 'command', command: '/home/x/.slayzone/hooks/notify.sh' })
+    ).toBe(true)
   })
 })

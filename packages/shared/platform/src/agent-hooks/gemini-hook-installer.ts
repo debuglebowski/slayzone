@@ -182,13 +182,14 @@ export function isManagedSlayzoneHook(hook: unknown): boolean {
   const h = hook as GeminiHookCommand
   if (h[MARKER_KEY] === true) return true
   const cmd = typeof h.command === 'string' ? h.command : ''
-  // Any `<something>/hooks/notify.sh` counts, not just one under a `.slayzone`
-  // dir. The narrower spelling only recognised the CORRECT path, so an entry
-  // written against some other root — a runner that resolved its own root, a
-  // hand-relocated install — was unreclaimable: it would never be stripped, and
-  // would sit in the user's settings pointing at a script that may not exist.
-  // Being generous here is safe because it only decides what WE are allowed to
-  // replace with our own current entry, and it is a fallback: a marked entry is
-  // already matched above.
-  return /(^|[/\\])hooks[/\\]notify\.sh(\s|$|")/.test(cmd)
+  // Deliberately narrow: only a path under a `slayzone` dir. This settings file
+  // is SHARED with other tools, and `<something>/hooks/notify.sh` is not a
+  // SlayZone-specific shape — Superset registers
+  // `"$SUPERSET_HOME_DIR/hooks/notify.sh"`, which a broader pattern matches and
+  // this installer then DELETES as if it were ours. That is not hypothetical: a
+  // wider regex shipped briefly and stripped a user's Superset hooks from every
+  // event SlayZone installs. Recognising our own orphans is not worth being able
+  // to destroy someone else's config, and the `_slayzoneManaged` marker above
+  // already identifies everything we have ever written.
+  return cmd.includes('.slayzone/hooks/notify.sh') || cmd.includes('/slayzone/hooks/notify.sh')
 }
