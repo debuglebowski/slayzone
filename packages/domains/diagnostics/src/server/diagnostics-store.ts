@@ -40,6 +40,24 @@ const WRITE_QUEUE_CAP = 5_000
 
 let localConfigSource: (() => Partial<DiagnosticsConfig>) | null = null
 let localConfigSink: ((next: DiagnosticsConfig) => Promise<void>) | null = null
+let configChangeListener: ((next: DiagnosticsConfig) => void) | null = null
+
+/**
+ * Announce a persisted config to the other process writing this machine's
+ * diagnostics database.
+ *
+ * Fire-and-forget by construction: the config is already durable by the time
+ * this runs, and the only real listener crosses the capability bridge — so a
+ * dead side-car must not turn a successful save into a failed mutation.
+ */
+function announceConfigChange(next: DiagnosticsConfig): void {
+  if (!configChangeListener) return
+  try {
+    configChangeListener(next)
+  } catch {
+    // Deliberately swallowed — see above.
+  }
+}
 
 /**
  * Merge a partial over the defaults, IGNORING undefined members.
@@ -130,10 +148,22 @@ export function bindDiagnosticsDbs(opts: {
   localConfig?: () => Partial<DiagnosticsConfig>
   /** Persist a config change locally. Required whenever `localConfig` is given. */
   saveLocalConfig?: (next: DiagnosticsConfig) => Promise<void>
+  /**
+   * Called with the full config after every successful save.
+   *
+   * TWO instances of this module write events into the SAME machine-local
+   * diagnostics database — the hub and the Electron host — and they hold
+   * separate config copies (shared DB vs client store). The renderer's Settings
+   * UI writes over tRPC, which the hub serves, so without this the host keeps
+   * recording from a client store that never learns the user turned diagnostics
+   * off. The hub binds this to a bridge call that hands the config to the host.
+   */
+  onConfigChanged?: (next: DiagnosticsConfig) => void
 }): void {
   settingsDb = opts.settingsDb ?? null // shared DB — config reads/writes (hub only)
   localConfigSource = opts.localConfig ?? null
   localConfigSink = opts.saveLocalConfig ?? null
+  configChangeListener = opts.onConfigChanged ?? null
   diagnosticsDb = opts.diagnosticsDb // separate diagnostics DB — writes to slayzone.dev.diagnostics.sqlite
   cachedConfig = null
 
@@ -219,6 +249,7 @@ export async function saveDiagnosticsConfig(
     const next = withDefaults({ ...localConfigSource(), ...partial })
     await localConfigSink?.(next)
     cachedConfig = next
+    announceConfigChange(next)
     return next
   }
   if (!settingsDb) return DEFAULT_CONFIG
@@ -233,7 +264,12 @@ export async function saveDiagnosticsConfig(
   await setSetting(settingsDb, CONFIG_KEYS.retentionDays, String(Math.max(1, next.retentionDays)))
 
   cachedConfig = null
-  return loadDiagnosticsConfig()
+  // Re-read rather than announcing `next`: the reload applies the same coercions
+  // the other process would (`retentionDays` is floored at 1 on write), so both
+  // copies end up byte-identical instead of merely close.
+  const saved = await loadDiagnosticsConfig()
+  announceConfigChange(saved)
+  return saved
 }
 
 function maybeTrimLongString(value: string): string {

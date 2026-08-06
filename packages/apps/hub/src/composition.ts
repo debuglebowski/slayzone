@@ -268,7 +268,22 @@ export function composeServer(opts: {
   // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
   // pre-bind events flush. No-op if the host didn't pass a diagnostics DB.
   if (opts.diagnosticsDb) {
-    bindDiagnosticsDbs({ settingsDb: db, diagnosticsDb: opts.diagnosticsDb })
+    bindDiagnosticsDbs({
+      settingsDb: db,
+      diagnosticsDb: opts.diagnosticsDb,
+      // The desktop records into this SAME machine-local diagnostics file from
+      // its own config copy (the client store), and the Settings UI writes here,
+      // over tRPC — so the desktop has to be told, or it keeps recording after
+      // the user turns diagnostics off. `bridge` is declared below; this closure
+      // only runs on a save, long after composeServer returns.
+      //
+      // Supervised only, by construction: a standalone hub has no desktop, and a
+      // REMOTE hub has no bridge to the client that connects to it — so a remote
+      // client's local diagnostics config stays whatever that client set.
+      onConfigChanged: (next) => {
+        void bridge?.appDeps.diagnosticsConfigChanged(next)
+      }
+    })
   }
 
   // Late-bound bound port (set once listen() resolves). Declared up front so the
@@ -740,6 +755,8 @@ export function composeServer(opts: {
     // No desktop to relaunch when standalone — restore is refused here anyway
     // (see buildBackupOps `supervised`), so this should never be reached.
     appRelaunch: stub('appRelaunch'),
+    // Never reached: the only caller is gated on `bridge`, which is null here.
+    diagnosticsConfigChanged: stub('diagnosticsConfigChanged'),
     // Task/tab browser registry — there are no WebContentsViews here, so every
     // member fails loud rather than pretending an empty registry (which would make
     // `hasTab` answer "no tab" and turn a missing capability into a 404).

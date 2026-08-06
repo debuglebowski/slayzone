@@ -326,6 +326,11 @@ run_test packages/domains/diagnostics/src/server/blob-retention.test.ts
 # never registered, which hid every assertion silently reading `undefined` from an
 # un-awaited async call.
 run_test_electron_strict_loader packages/domains/diagnostics/src/server/retention.test.ts
+# Diagnostics — config push to the desktop. Two processes record into the SAME
+# machine-local diagnostics DB from separate config copies; the Settings UI writes
+# only the hub's, so without this seam the desktop keeps recording after the user
+# turns diagnostics off.
+run_test packages/domains/diagnostics/src/server/config-push.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
 run_test packages/domains/terminal/src/server/state-machine.test.ts

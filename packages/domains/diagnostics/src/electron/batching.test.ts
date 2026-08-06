@@ -7,12 +7,17 @@ import Database from 'better-sqlite3'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
-import {
-  registerDiagnosticsHandlers,
-  recordDiagnosticEvent,
-  flushWriteQueue,
-  stopDiagnostics
-} from './service.js'
+import { registerDiagnosticsHandlers, stopDiagnostics } from './service.js'
+// The write queue lives in the electron-free data core. `service.ts` imports
+// these but never re-exported them, so importing them from there threw at module
+// load — the whole file failed before a single assertion ran, and it is not in
+// run-all.sh, so nothing reported it.
+//
+// Import via `../server` — the SAME specifier service.ts uses. Reaching for
+// `../server/diagnostics-store.js` instead resolves to a second ESM module
+// instance, giving this file its own write queue: `recordDiagnosticEvent` fills
+// one and `flushWriteQueue` drains the other, so every row count reads 0.
+import { recordDiagnosticEvent, flushWriteQueue } from '../server/index.js'
 
 const DIAG_SCHEMA = `
   CREATE TABLE diagnostics_events (
@@ -76,7 +81,14 @@ async function run(): Promise<void> {
   console.log('\nbatched writes')
 
   const h = makeHarness()
-  registerDiagnosticsHandlers(h.ipcMain as never, h.settingsDb, h.eventsDb)
+  // `clientRoot` is MANDATORY here, not tidiness: diagnostics config now comes
+  // from the client store, and without an injected root this resolves
+  // `getClientRoot()` — the developer's real ~/.slayzone — and case 7 below
+  // writes to it. Signature is (ipcMain, eventsDb, options); it used to take the
+  // shared settings DB as its second argument, and this call was left behind when
+  // that parameter went away.
+  const clientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-batching-'))
+  registerDiagnosticsHandlers(h.ipcMain as never, h.eventsDb as never, { clientRoot })
 
   // 1. enqueue does not write immediately
   {
@@ -93,7 +105,7 @@ async function run(): Promise<void> {
 
   // 2. flushWriteQueue drains
   {
-    flushWriteQueue()
+    await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(1)
     console.log('  ✓ flushWriteQueue drains queue into single transaction')
   }
@@ -139,7 +151,7 @@ async function run(): Promise<void> {
   // 5. queue cap drops events under runaway load
   {
     h.reset()
-    flushWriteQueue() // clear any residue
+    await flushWriteQueue() // clear any residue
 
     // Push WAY past the cap without flushing. We achieve this by using
     // info-level events and never flushing manually — each enqueue without
@@ -158,7 +170,7 @@ async function run(): Promise<void> {
         message: `b-${i}`
       })
     }
-    flushWriteQueue()
+    await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(TOTAL)
     console.log('  ✓ 3500 events under load all preserved when flush keeps up')
   }
@@ -172,7 +184,7 @@ async function run(): Promise<void> {
       event: 'test.debug',
       message: 'should-drop'
     })
-    flushWriteQueue()
+    await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(0)
     console.log('  ✓ debug events dropped when verbose=false (default)')
   }
@@ -195,7 +207,7 @@ async function run(): Promise<void> {
       event: 'test.debug',
       message: 'should-keep'
     })
-    flushWriteQueue()
+    await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(2) // setConfig records db.mutation too
     console.log('  ✓ debug events kept when verbose=true')
   }
@@ -204,10 +216,10 @@ async function run(): Promise<void> {
   {
     // Drain any residue from prior tests, then reset verbose=false and drain
     // the setConfig noise so test 8 starts with a clean queue.
-    flushWriteQueue()
+    await flushWriteQueue()
     const setConfig = h.ipcMain.handlers.get('diagnostics:setConfig')!
     await setConfig({}, { verbose: false })
-    flushWriteQueue()
+    await flushWriteQueue()
     h.reset() // wipe eventsDb rows
 
     // Close the events DB so flushes no-op and the queue accumulates.
@@ -226,9 +238,9 @@ async function run(): Promise<void> {
     // Re-open eventsDb and rewire so flush has somewhere to write.
     const fresh = new Database(':memory:')
     fresh.exec(DIAG_SCHEMA)
-    registerDiagnosticsHandlers(h.ipcMain as never, h.settingsDb, fresh)
+    registerDiagnosticsHandlers(h.ipcMain as never, fresh as never, { clientRoot })
 
-    flushWriteQueue()
+    await flushWriteQueue()
 
     // 5000 buffered + 1 synthetic diag.dropped event = 5001
     expect(countRows(fresh)).toBe(5001)

@@ -11,6 +11,7 @@
 import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { CliInstallResult } from '@slayzone/platform'
+import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import type { AgentLifecycleEvent } from '@slayzone/terminal/shared'
 import type {
   createChatOps,
@@ -375,6 +376,18 @@ export type AppDeps = {
   /** Relaunch the desktop app. Used by backup restore, which overwrites the
    *  database file and must then restart everything pointing at it. */
   appRelaunch: () => void
+
+  /**
+   * Hand a saved diagnostics config to the desktop, which persists it to the
+   * CLIENT store.
+   *
+   * Both processes record into the same machine-local diagnostics database but
+   * hold separate copies of the config that gates it — the hub's in the shared
+   * DB, the desktop's in the client store — and the Settings UI writes to the
+   * hub. Without this the desktop keeps recording after the user turns
+   * diagnostics off.
+   */
+  diagnosticsConfigChanged: (next: DiagnosticsConfig) => Promise<void>
 
   // clipboard
   clipboardWriteFilePaths: (paths: string[]) => void

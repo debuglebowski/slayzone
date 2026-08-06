@@ -393,7 +393,7 @@ import {
   stopDiagnostics,
   setIpcSuccessHook
 } from '@slayzone/diagnostics/electron'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+import { recordDiagnosticEvent, saveDiagnosticsConfig } from '@slayzone/diagnostics/server'
 import {
   detectPreviousCrash,
   writeBootStub,
@@ -2044,6 +2044,15 @@ app
             appRelaunch: () => {
               app.relaunch()
               app.exit()
+            },
+            // The side-car saved a diagnostics config; adopt it here so THIS
+            // process stops (or starts) recording into the machine-local
+            // diagnostics DB to match. Goes through saveDiagnosticsConfig rather
+            // than writing the client store directly so the in-process config
+            // cache — the synchronous hot path every recordDiagnosticEvent
+            // consults — is updated in the same step.
+            diagnosticsConfigChanged: async (next) => {
+              await saveDiagnosticsConfig(next)
             },
             appGetVersion: () => app.getVersion(),
             appGetDownloadsDir: async () => app.getPath('downloads'),
