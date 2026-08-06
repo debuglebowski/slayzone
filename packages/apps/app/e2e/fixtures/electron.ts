@@ -375,6 +375,13 @@ async function launchElectronWithRetry(args: {
           // real ~/.slayzone or ~/.claude/settings.json. `SLAYZONE_E2E_INSTALL_HOOKS=1`
           // opts the install path back in despite PLAYWRIGHT=1 skipping it by default.
           SLAYZONE_E2E_INSTALL_HOOKS: '1',
+          // The machine-wide dir (hooks/, bin/) is anchored on $HOME and does
+          // NOT follow SLAYZONE_ROOT — that is the whole point of it, so a
+          // runner cannot drag notify.sh under its own root. Which means ROOT
+          // alone no longer sandboxes it: without this the suite would install
+          // into the developer's REAL ~/.slayzone/hooks. Same dir as ROOT here,
+          // so `notifyScriptPath()` is unchanged.
+          SLAYZONE_MACHINE_DIR: args.userDataDir,
           SLAYZONE_CLAUDE_SETTINGS_PATH: path.join(args.userDataDir, '.claude', 'settings.json'),
           SLAYZONE_GEMINI_SETTINGS_PATH: path.join(args.userDataDir, '.gemini', 'settings.json'),
           SLAYZONE_CODEX_HOOKS_PATH: path.join(args.userDataDir, '.codex', 'hooks.json'),

@@ -20,8 +20,9 @@
  * as a single self-contained bundle.
  *
  * MACHINE-WIDE, NEVER ROLE- OR CHANNEL-SCOPED. Every path here resolves through
- * `getSlayzoneHomeDir()` / the `get*SettingsPath()` helpers, i.e. `~/.slayzone`
- * and `~/.claude` — deliberately NOT `getSupervisedRoot()`. The files being
+ * `getMachineSlayzoneDir()` / the `get*SettingsPath()` helpers, i.e. `$HOME`-
+ * anchored `~/.slayzone` and `~/.claude` — deliberately NOT `getSupervisedRoot()`
+ * and NOT `getSlayzoneHomeDir()`, which follows `SLAYZONE_ROOT`. The files being
  * written belong to OTHER tools whose own config is one file per machine, so
  * scoping ours by release channel would just move the collision into their
  * config instead of removing it. Concurrency between installers is handled in

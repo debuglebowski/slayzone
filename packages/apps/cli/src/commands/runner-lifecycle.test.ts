@@ -137,7 +137,17 @@ function ensureBuilt(pkgDir: string, bin: string, label: string): void {
   if (!existsSync(bin)) throw new Error(`${label} build did not produce ${bin}`)
 }
 
-/** Inherited env minus every SLAYZONE_/ELECTRON_ key. */
+/**
+ * Inherited env minus every SLAYZONE_/ELECTRON_ key, plus a sandbox for every
+ * MACHINE-WIDE install target.
+ *
+ * The sandbox is not hygiene, it is required: a standalone runner installs agent
+ * hooks at boot, and those targets are deliberately anchored on $HOME rather than
+ * on the runner's root (one `~/.claude/settings.json` per machine can hold only
+ * one notify.sh path). Scrubbing SLAYZONE_* alone therefore does NOT isolate them
+ * — it just puts them back on their real defaults, so this suite would rewrite
+ * the developer's actual ~/.slayzone and ~/.claude/settings.json.
+ */
 function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
@@ -145,6 +155,13 @@ function scrubbedEnv(): Record<string, string> {
     if (/^(SLAYZONE_|ELECTRON_)/.test(k)) continue
     out[k] = v
   }
+  const box = join(TMP, 'machine')
+  out.SLAYZONE_MACHINE_DIR = join(box, '.slayzone')
+  out.SLAYZONE_CLAUDE_SETTINGS_PATH = join(box, '.claude', 'settings.json')
+  out.SLAYZONE_CODEX_HOOKS_PATH = join(box, '.codex', 'hooks.json')
+  out.SLAYZONE_GEMINI_SETTINGS_PATH = join(box, '.gemini', 'settings.json')
+  out.SLAYZONE_ANTIGRAVITY_HOOKS_PATH = join(box, '.gemini', 'config', 'hooks.json')
+  out.SLAYZONE_OPENCODE_PLUGIN_PATH = join(box, '.config', 'opencode', 'plugin', 'slayzone.js')
   return out
 }
 

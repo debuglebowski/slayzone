@@ -104,6 +104,12 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // runners with none spawned" contract test).
   SLAYZONE_E2E_NO_RUNNER: 'infra',
   SLAYZONE_E2E_INSTALL_HOOKS: 'infra',
+  // Redirects the MACHINE-WIDE ~/.slayzone (hooks/, bin/) — the files shared by
+  // every SlayZone process on the box, which deliberately do NOT follow
+  // SLAYZONE_ROOT. Sandbox redirect for tests, same role as the per-provider
+  // overrides below. `infra`: a spawned terminal must never inherit it, or an
+  // agent would resolve a different notify.sh than the one wired into its hooks.
+  SLAYZONE_MACHINE_DIR: 'infra',
   // per-provider config/hook/plugin path overrides (test/sandbox redirects)
   SLAYZONE_CLAUDE_SETTINGS_PATH: 'infra',
   SLAYZONE_GEMINI_SETTINGS_PATH: 'infra',

@@ -1,5 +1,5 @@
 import path from 'path'
-import { getSlayzoneHomeDir } from '../dirs'
+import { getHooksDir } from '../dirs'
 import { updateFileAtomically } from '../fs-utils'
 
 export interface InstallNotifyScriptOpts {
@@ -63,7 +63,7 @@ export function parseNotifyVersion(script: string): number {
 export async function installNotifyScript(
   opts: InstallNotifyScriptOpts
 ): Promise<{ path: string; changed: boolean }> {
-  const target = opts.targetPath ?? path.join(getSlayzoneHomeDir(), 'hooks', 'notify.sh')
+  const target = opts.targetPath ?? path.join(getHooksDir(), 'notify.sh')
   const source = opts.source
   const incomingV = parseNotifyVersion(source)
 

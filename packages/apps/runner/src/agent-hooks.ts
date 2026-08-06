@@ -12,11 +12,17 @@
  *
  * MACHINE-WIDE PATHS, NOT `--root`. Everything here lands in `$HOME` —
  * `~/.slayzone/hooks/`, `~/.claude/settings.json`, `~/.codex/hooks.json`, … —
- * never under the runner's own `--root`. `--root` can point anywhere and there
- * can be several on one box, but the files being written belong to OTHER tools
- * that read exactly one path per machine. Two runners on one host therefore write
- * the same files, which is why the shared write primitive
- * (`updateFileAtomically`) is what keeps them from clobbering each other.
+ * never under the runner's own `--root`, and that is enforced by resolving
+ * through `getMachineSlayzoneDir()` rather than `getSlayzoneHomeDir()` (which
+ * follows `SLAYZONE_ROOT` and would drag the hooks dir along with it). `--root`
+ * can point anywhere and there can be several on one box, but the files being
+ * written belong to OTHER tools that read exactly one path per machine — and
+ * `~/.claude/settings.json` stores the notify.sh PATH, so a root-scoped answer
+ * would have each runner write its own path and the last boot win.
+ *
+ * Because every writer now computes the same path and the same bytes, concurrent
+ * installers converge rather than fight; the lock in `updateFileAtomically` keeps
+ * the file itself consistent while they do.
  *
  * BEFORE ANY PTY. Called before the runner accepts work: an agent that starts
  * against a missing or half-written hook file produces exactly the "stuck

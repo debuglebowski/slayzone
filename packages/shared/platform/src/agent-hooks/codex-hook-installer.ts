@@ -2,7 +2,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { getCodexHooksPath, getSlayzoneHomeDir } from '../dirs'
+import { getCodexHooksPath, getSlayzoneBinDir } from '../dirs'
 import { updateFileAtomically } from '../fs-utils'
 import { formatHookCommand } from './hook-paths'
 
@@ -190,7 +190,15 @@ export function isManagedSlayzoneHook(hook: unknown): boolean {
   const h = hook as CodexHookCommand
   if (h[MARKER_KEY] === true) return true
   const cmd = typeof h.command === 'string' ? h.command : ''
-  return cmd.includes('.slayzone/hooks/notify.sh') || cmd.includes('/slayzone/hooks/notify.sh')
+  // Any `<something>/hooks/notify.sh` counts, not just one under a `.slayzone`
+  // dir. The narrower spelling only recognised the CORRECT path, so an entry
+  // written against some other root — a runner that resolved its own root, a
+  // hand-relocated install — was unreclaimable: it would never be stripped, and
+  // would sit in the user's settings pointing at a script that may not exist.
+  // Being generous here is safe because it only decides what WE are allowed to
+  // replace with our own current entry, and it is a fallback: a marked entry is
+  // already matched above.
+  return /(^|[/\\])hooks[/\\]notify\.sh(\s|$|")/.test(cmd)
 }
 
 /**
@@ -199,7 +207,7 @@ export function isManagedSlayzoneHook(hook: unknown): boolean {
  * Idempotent — returns false when nothing was removed.
  */
 export async function uninstallCodexWrapper(opts: { wrapperPath?: string } = {}): Promise<boolean> {
-  const target = opts.wrapperPath ?? path.join(getSlayzoneHomeDir(), 'bin', 'codex')
+  const target = opts.wrapperPath ?? path.join(getSlayzoneBinDir(), 'codex')
   try {
     const content = await fs.readFile(target, 'utf8')
     if (!content.includes('slayzone codex wrapper')) return false
@@ -232,7 +240,7 @@ async function probeCodexVersion(): Promise<ParsedVersion | null> {
 
 function stripSlayzoneBin(pathVar: string): string {
   const sep = process.platform === 'win32' ? ';' : ':'
-  const ours = path.join(getSlayzoneHomeDir(), 'bin')
+  const ours = getSlayzoneBinDir()
   return pathVar
     .split(sep)
     .filter((p) => p !== ours)

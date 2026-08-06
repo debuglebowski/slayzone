@@ -96,6 +96,48 @@ export function getSupervisedRoot(
 }
 
 /**
+ * The MACHINE-WIDE SlayZone dir — `$HOME/.slayzone`, deliberately ignoring
+ * `SLAYZONE_ROOT`.
+ *
+ * NOT the same question as {@link getSlayzoneHomeDir}, which answers "where does
+ * THIS PROCESS keep its state" and correctly follows `SLAYZONE_ROOT` (a
+ * standalone hub/runner anchors to its launch dir; the desktop app's supervised
+ * roles are channel-scoped). This one answers "where do the files SHARED BY THE
+ * WHOLE MACHINE live", and those must not move per process.
+ *
+ * The two coincide for the desktop app, which is why one resolver served both
+ * for so long. They diverge for a runner — and the divergence is not cosmetic:
+ * `notify.sh`'s path gets written INTO `~/.claude/settings.json`, which is one
+ * file per machine that holds exactly one path. A root-scoped answer means two
+ * runners with different roots each write their own path there and the last boot
+ * wins, and a runner whose root was temporary leaves a path that no longer
+ * exists. Anchoring on `$HOME` makes every writer compute the SAME path with the
+ * SAME content, so concurrent installers converge instead of fighting.
+ *
+ * `SLAYZONE_MACHINE_DIR` redirects it so a test can exercise a real install
+ * without touching the developer's actual `~/.slayzone` — the same escape hatch
+ * `getClaudeSettingsPath()` and its siblings already provide for the files they
+ * own. Env-manifest scope `infra`: a spawned terminal must never inherit it.
+ */
+export function getMachineSlayzoneDir(): string {
+  if (process.env.SLAYZONE_MACHINE_DIR) return process.env.SLAYZONE_MACHINE_DIR
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir()
+  return path.join(home, '.slayzone')
+}
+
+/** `$HOME/.slayzone/hooks` — where the shared `notify.sh` lives. Machine-wide;
+ *  see {@link getMachineSlayzoneDir} for why this must not follow SLAYZONE_ROOT. */
+export function getHooksDir(): string {
+  return path.join(getMachineSlayzoneDir(), 'hooks')
+}
+
+/** `$HOME/.slayzone/bin` — machine-wide shims (today only the legacy `codex`
+ *  wrapper, which the installers remove). Same anchoring rule as the hooks dir. */
+export function getSlayzoneBinDir(): string {
+  return path.join(getMachineSlayzoneDir(), 'bin')
+}
+
+/**
  * Absolute path to the user's Claude Code settings.json. Honours
  * `SLAYZONE_CLAUDE_SETTINGS_PATH` so tests can redirect without overriding HOME.
  */

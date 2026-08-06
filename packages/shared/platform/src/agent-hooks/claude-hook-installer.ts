@@ -167,5 +167,13 @@ export function isManagedSlayzoneHook(hook: unknown): boolean {
   const h = hook as ClaudeHookCommand
   if (h[MARKER_KEY] === true) return true
   const cmd = typeof h.command === 'string' ? h.command : ''
-  return cmd.includes('.slayzone/hooks/notify.sh') || cmd.includes('/slayzone/hooks/notify.sh')
+  // Any `<something>/hooks/notify.sh` counts, not just one under a `.slayzone`
+  // dir. The narrower spelling only recognised the CORRECT path, so an entry
+  // written against some other root — a runner that resolved its own root, a
+  // hand-relocated install — was unreclaimable: it would never be stripped, and
+  // would sit in the user's settings pointing at a script that may not exist.
+  // Being generous here is safe because it only decides what WE are allowed to
+  // replace with our own current entry, and it is a fallback: a marked entry is
+  // already matched above.
+  return /(^|[/\\])hooks[/\\]notify\.sh(\s|$|")/.test(cmd)
 }
