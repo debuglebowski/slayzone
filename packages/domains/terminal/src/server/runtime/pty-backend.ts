@@ -44,7 +44,27 @@ export interface PtySpawnSpec {
  * its `pty.write()` fallback naturally, no remote-specific branch needed.
  */
 export interface PtyHandle {
-  readonly pid: number
+  /**
+   * `null` means NOT YET KNOWN, never "dead".
+   *
+   * A local spawn knows its pid the instant `pty.spawn` returns. A remote one
+   * cannot: the handle is created when the request is SENT, and the pid arrives
+   * with the runner's reply. Typed nullable so that distinction is impossible to
+   * skip — reading an unknown pid as a dead process is exactly how a batch of
+   * healthy sessions gets buried on a slow reply (see `whenSpawned`).
+   */
+  readonly pid: number | null
+  /**
+   * Resolves when the spawn is CONFIRMED by whoever owns the process, carrying
+   * the pid it ended up with; rejects if that owner refused it.
+   *
+   * Absent on a synchronous backend, where the spawn has already happened by the
+   * time the handle exists and `pid` is authoritative immediately. Present on any
+   * backend whose spawn is a round-trip, so callers can await the fact instead of
+   * guessing with a timer — no timeout tuned on one machine, one runner load or
+   * one batch size can be wrong on another.
+   */
+  readonly whenSpawned?: Promise<{ pid: number | null }>
   readonly process: string
   readonly fd?: number
   onData(cb: (data: string) => void): { dispose(): void }

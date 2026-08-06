@@ -14,7 +14,15 @@
  */
 import type { PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { createPty, writePty, resizePty, killPty, setDatabase, ptyEvents } from './pty-manager'
+import {
+  createPty,
+  writePty,
+  resizePty,
+  killPty,
+  hasPty,
+  setDatabase,
+  ptyEvents
+} from './pty-manager'
 import { setPtyBackend, type PtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
 
 let passed = 0
@@ -60,11 +68,12 @@ interface FakeHandle extends PtyHandle {
   emitData(d: string): void
   emitExit(code: number): void
 }
-function makeFakeHandle(): FakeHandle {
+function makeFakeHandle(opts: Partial<Pick<PtyHandle, 'pid' | 'whenSpawned'>> = {}): FakeHandle {
   const dataCbs: Array<(d: string) => void> = []
   const exitCbs: Array<(e: { exitCode: number; signal?: number }) => void> = []
   return {
-    pid: 9191,
+    pid: opts.pid === undefined ? 9191 : opts.pid,
+    ...(opts.whenSpawned ? { whenSpawned: opts.whenSpawned } : {}),
     process: 'fake-sh',
     written: [],
     resized: [],
@@ -248,6 +257,131 @@ await test(
     }
   }
 )
+
+// ── Remote spawn confirmation: an unknown pid is NOT a dead pty ──────────────
+//
+// A runner-routed handle comes back the instant the request is sent — the pid
+// arrives later, with the runner's `pty.spawn` reply. Anything that reads the
+// pid as a liveness signal inside that window is reading "not yet known" as
+// "dead", which buries a session whose agent is starting up perfectly well.
+// Both sentinels for "unknown" are covered so neither representation can creep
+// back in as a fatal one.
+for (const unknownPid of [null, 0] as Array<number | null>) {
+  await test(
+    `remote backend: a spawn reply that lands late must not synthesize an exit (pid=${String(unknownPid)})`,
+    async () => {
+      let confirmSpawn: (v: { pid: number | null }) => void = () => {}
+      const whenSpawned = new Promise<{ pid: number | null }>((res) => {
+        confirmSpawn = res
+      })
+      const handle = makeFakeHandle({ pid: unknownPid, whenSpawned })
+      setPtyBackend({ spawn: () => handle })
+
+      const sid = `remoteLate${String(unknownPid)}:remoteLate${String(unknownPid)}`
+      const exits: Array<number | null> = []
+      const eh = (s: string, code: number | null): void => {
+        if (s === sid) exits.push(code)
+      }
+      ptyEvents.on('exit', eh)
+
+      await createPty({
+        win: fakeWin,
+        sessionId: sid,
+        cwd: '/tmp',
+        mode: 'terminal',
+        type: 'terminal',
+        runnerId: 'runner-1'
+      })
+
+      // Well past any hub-side spawn watchdog, and the runner still has not
+      // replied — exactly the restart case where a batch of resumes queues up
+      // behind each other on a busy runner.
+      await new Promise((r) => setTimeout(r, 700))
+
+      expect(
+        exits.length === 0,
+        `no exit may be synthesized while the pid is merely unknown, got ${JSON.stringify(exits)}`
+      )
+      expect(hasPty(sid), 'session must still be alive while the spawn reply is in flight')
+
+      // The reply lands: the session carries on as normal.
+      confirmSpawn({ pid: 4242 })
+      await new Promise((r) => setTimeout(r, 50))
+      expect(exits.length === 0, `late reply must not exit either, got ${JSON.stringify(exits)}`)
+      expect(hasPty(sid), 'session must survive its spawn confirmation')
+
+      ptyEvents.off('exit', eh)
+      killPty(sid)
+      handle.emitExit(-2)
+      setPtyBackend(null)
+    }
+  )
+}
+
+await test('remote backend: a REJECTED spawn confirmation finalizes the session', async () => {
+  // The other half of the contract — deferring to the runner must not mean
+  // ignoring it. A spawn the runner refused has to surface as a dead session.
+  let failSpawn: (e: Error) => void = () => {}
+  const whenSpawned = new Promise<{ pid: number | null }>((_res, rej) => {
+    failSpawn = rej
+  })
+  // The test itself must never be the only handler — otherwise a regression in
+  // the code under test surfaces as an unhandled rejection that kills the whole
+  // run instead of one honest assertion failure.
+  void whenSpawned.catch(() => {})
+  const handle = makeFakeHandle({ pid: null, whenSpawned })
+  setPtyBackend({ spawn: () => handle })
+
+  const sid = 'remoteRefused:remoteRefused'
+  const exits: Array<number | null> = []
+  const eh = (s: string, code: number | null): void => {
+    if (s === sid) exits.push(code)
+  }
+  ptyEvents.on('exit', eh)
+
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'terminal',
+    type: 'terminal',
+    runnerId: 'runner-1'
+  })
+  failSpawn(new Error('runner refused the spawn'))
+  await new Promise((r) => setTimeout(r, 100))
+
+  expect(exits.length >= 1, 'a refused remote spawn must drive an exit')
+  ptyEvents.off('exit', eh)
+  setPtyBackend(null)
+})
+
+await test('a session declared dead must not leave a live process behind', async () => {
+  // Local backend, pid invalid at spawn: a genuine dead-on-arrival pty, and the
+  // one case the hub-side pid check legitimately catches. Whatever declares the
+  // session dead must also ensure the OS process is gone — a finalize that only
+  // tears down bookkeeping is how a false positive turns into an orphaned agent
+  // that nothing can ever reattach to.
+  const handle = makeFakeHandle({ pid: 0 })
+  setPtyBackend({ spawn: () => handle })
+
+  const sid = 'deadOnArrival:deadOnArrival'
+  const exits: Array<number | null> = []
+  const eh = (s: string, code: number | null): void => {
+    if (s === sid) exits.push(code)
+  }
+  ptyEvents.on('exit', eh)
+
+  await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
+  await new Promise((r) => setTimeout(r, 700))
+
+  expect(exits.length >= 1, 'a locally dead-on-arrival pty must still finalize')
+  expect(
+    handle.killed.length >= 1,
+    `finalize must kill the handle so no process is orphaned, got ${JSON.stringify(handle.killed)}`
+  )
+  ptyEvents.off('exit', eh)
+  setPtyBackend(null)
+})
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

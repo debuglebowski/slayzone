@@ -664,7 +664,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     sessionId: string,
     processName: string,
     sealed: boolean
-  ): { entry: PtyEntry; handle: PtyHandle; setPid: (pid: number) => void } {
+  ): { entry: PtyEntry; handle: PtyHandle; setPid: (pid: number | null) => void } {
     const key = sessionKey(runnerId, sessionId)
     const dataEmitter = new BufferingEmitter<string>()
     const exitEmitter = new BufferingEmitter<PtyExitEvent>()
@@ -683,9 +683,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     }
     sessions.set(key, entry)
 
-    let pid = 0
+    // `null`, not 0 — the pid is UNKNOWN until the runner replies, and a
+    // placeholder that reads as a number invites callers to treat it as one.
+    let pid: number | null = null
     const handle: PtyHandle = {
-      get pid(): number {
+      get pid(): number | null {
         return pid
       },
       process: processName,
@@ -777,7 +779,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       const runnerId = resolveRunnerId(spec)
       if (runnerId == null) throw new NoRunnerAvailableError(`terminal session ${spec.sessionId}`)
 
-      // `pid` is 0 until the remote `pty.spawn` reply lands (remote ptys key by
+      // `pid` is null until the remote `pty.spawn` reply lands (remote ptys key by
       // sessionId, not pid). The handle exposes it via a getter so it stays a
       // valid `readonly pid` under the terminal `PtyHandle` seam. `onExit` adapts
       // the wider remote `PtyExitEvent` (exitCode may be null on signal death /
@@ -786,7 +788,12 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       // only reads `exitCode`.
       const { entry, handle, setPid } = register(runnerId, spec.sessionId, spec.file, false)
 
-      void gateway
+      // Handed to the caller as `whenSpawned`: the round-trip IS the readiness
+      // signal, so anything that needs to know the session really started awaits
+      // this rather than sampling `pid` on a timer. Latency here is unbounded in
+      // practice — a runner restoring a dozen sessions at once, or one across a
+      // real network — and no hub-side deadline can second-guess it correctly.
+      const whenSpawned = gateway
         .request(runnerId, HubToRunnerMethods.ptySpawn, {
           sessionId: spec.sessionId,
           command: spec.file,
@@ -799,12 +806,28 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         .then(
           (res) => {
             const parsed = ptySpawnResultSchema.safeParse(res)
-            if (parsed.success) setPid(parsed.data.pid)
+            const spawnedPid = parsed.success ? parsed.data.pid : null
+            setPid(spawnedPid)
+            return { pid: spawnedPid }
           },
-          () => finalize(entry, null, 'spawn-failed')
+          (err: unknown) => {
+            // The runner refused the spawn: finalize (which emits the exit through
+            // the buffering emitter, so a not-yet-subscribed caller still gets it)
+            // AND propagate, so a caller awaiting confirmation sees the failure
+            // rather than a promise that never settles.
+            finalize(entry, null, 'spawn-failed')
+            throw err
+          }
         )
+      // Keep the rejection handled here too — `whenSpawned` is optional in the
+      // seam, so a backend consumer that ignores it must not trip an unhandled
+      // rejection. Attaching this does not consume it for anyone else.
+      void whenSpawned.catch(noop)
 
-      return handle
+      // Object.assign, NOT a spread: `pid` is a getter that tracks `setPid`, and
+      // spreading would evaluate it once — freezing the handle's pid at its
+      // pre-reply `null` for the life of the session.
+      return Object.assign(handle, { whenSpawned })
     }
   }
 }

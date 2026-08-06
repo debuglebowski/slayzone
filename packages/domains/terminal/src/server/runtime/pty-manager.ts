@@ -24,7 +24,7 @@ import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 // No `spawnLocalPty` import: this process no longer spawns a pty itself under any
 // path. It reaches every agent through the injected backend, which routes to a
 // runner. `spawnLocalPty` still exists in pty-backend for the RUNNER's own use.
-import { getPtyBackend, type PtySpawnSpec } from './pty-backend'
+import { getPtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
@@ -1695,6 +1695,15 @@ export async function createPty(
       }
     }
     const shellSpawnMs = Date.now() - spawnStartTs
+    // Readiness, straight from whoever owns the process. Present only on a
+    // round-trip backend; a synchronous spawn has nothing left to confirm.
+    const spawnConfirmation = (ptyProcess as unknown as PtyHandle).whenSpawned
+    // Is the process in THIS process's table? Only then does a pid mean anything
+    // here — `process.kill(pid, 0)` against a pid that belongs to a runner is
+    // asking the wrong kernel. Adoption always targets a runner (`adoptPty`
+    // carries a required `runnerId`), so it is remote even when `runnerId` is
+    // unset on the spawn itself.
+    const isHubLocalProcess = runnerId == null && !opts.adoptPty
 
     sessions.set(sessionId, {
       win: originalWin,
@@ -1827,6 +1836,20 @@ export async function createPty(
       clearEarlyExitWatchdog()
       // Clear pending timers
       const exitSession = sessions.get(sessionId)
+      // Declaring a session dead and leaving its process running are not allowed
+      // to be different things. On a natural exit this is a no-op (the process is
+      // already gone, and a remote kill for an unknown session is dropped by the
+      // runner); on any premature or mistaken finalize it is what stops an agent
+      // from surviving as an orphan — still burning tokens, still holding a
+      // conversation id, attached to nothing that could ever show its output.
+      if (exitSession) {
+        try {
+          exitSession.pty.kill()
+        } catch {
+          // Already dead, or a handle whose owner is unreachable — either way
+          // there is nothing left to reclaim, and the exit must still complete.
+        }
+      }
       if (exitSession?.sessionIdAutoDetectTimer) {
         clearTimeout(exitSession.sessionIdAutoDetectTimer)
       }
@@ -2524,37 +2547,90 @@ export async function createPty(
     armStartupTimeout(ptyProcess)
     schedulePostSpawnCommand(ptyProcess)
     startTitlePolling(sessions.get(sessionId)!, ptyProcess)
-    // Recover from rare race where an ultra-fast child can exit before handlers are attached.
-    earlyExitWatchdog = setTimeout(() => {
-      const session = sessions.get(sessionId)
-      if (!session || firstOutputTs !== null) return
-      const pid = session.pty.pid
-      if (typeof pid !== 'number' || pid <= 0) {
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'pty',
-          event: 'pty.missed_exit_recovered',
-          sessionId,
-          taskId: taskIdFromSessionId(sessionId),
-          payload: { reason: 'invalid_pid' }
-        })
-        finalizeSessionExit(-1)
-        return
-      }
-      try {
-        process.kill(pid, 0)
-      } catch {
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'pty',
-          event: 'pty.missed_exit_recovered',
-          sessionId,
-          taskId: taskIdFromSessionId(sessionId),
-          payload: { reason: 'pid_not_running', pid }
-        })
-        finalizeSessionExit(-1)
-      }
-    }, 300)
+    // Did this session actually start? Three cases, and collapsing them is how a
+    // healthy session gets buried:
+    //
+    //  (a) Round-trip backend — await the owner's reply. It is the only authority
+    //      on whether the spawn happened, and its latency is unbounded in
+    //      practice (a runner restoring a dozen sessions at once, or one reached
+    //      across a network). No hub-side deadline can second-guess that
+    //      correctly, so none is applied: a slow reply is slow, not dead.
+    //  (b) Hub-local spawn — the pty already exists, so an invalid or vanished
+    //      pid is a fact, and the short watchdog still catches a child that died
+    //      before handlers attached.
+    //  (c) Remote, already confirmed (warm adoption) — the runner replied before
+    //      handing the handle over. Its pid belongs to the runner's process table,
+    //      so probing it here would be meaningless; a real exit arrives over the
+    //      wire like any other.
+    //
+    // Nothing here is the sole net against a session that starts but never says
+    // anything: `armStartupTimeout` owns that, keyed on OUTPUT rather than pid.
+    if (spawnConfirmation) {
+      void spawnConfirmation.then(
+        ({ pid }) => {
+          const session = sessions.get(sessionId)
+          if (!session || session.pty !== ptyProcess || finalized) return
+          if (typeof pid === 'number' && pid > 0) return
+          // Confirmed spawned, yet no usable pid — the owner replied that it has
+          // no process. Unlike an unanswered reply, this IS a verdict.
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.missed_exit_recovered',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            payload: { reason: 'confirmed_without_pid' }
+          })
+          finalizeSessionExit(-1)
+        },
+        (err: unknown) => {
+          const session = sessions.get(sessionId)
+          if (!session || session.pty !== ptyProcess || finalized) return
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.missed_exit_recovered',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            message: err instanceof Error ? err.message : String(err),
+            payload: { reason: 'spawn_refused' }
+          })
+          finalizeSessionExit(-1)
+        }
+      )
+    } else if (isHubLocalProcess) {
+      // Recover from rare race where an ultra-fast child can exit before handlers are attached.
+      earlyExitWatchdog = setTimeout(() => {
+        const session = sessions.get(sessionId)
+        if (!session || firstOutputTs !== null) return
+        const pid = session.pty.pid
+        if (typeof pid !== 'number' || pid <= 0) {
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.missed_exit_recovered',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            payload: { reason: 'invalid_pid' }
+          })
+          finalizeSessionExit(-1)
+          return
+        }
+        try {
+          process.kill(pid, 0)
+        } catch {
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.missed_exit_recovered',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            payload: { reason: 'pid_not_running', pid }
+          })
+          finalizeSessionExit(-1)
+        }
+      }, 300)
+    }
 
     // Stop checking for session errors after 5 seconds.
     if (resuming) {
@@ -2884,13 +2960,19 @@ export async function listPtys(): Promise<PtyInfo[]> {
   return ptyEnricher ? await ptyEnricher(raw) : raw
 }
 
-/** Returns a map of sessionId → PID for all alive sessions. Used for stats polling. */
+/**
+ * Returns a map of sessionId → PID for all alive sessions. Used for stats polling.
+ *
+ * Sessions whose pid is not yet known are omitted rather than reported as 0 — a
+ * caller sampling per-process stats would otherwise attribute someone else's
+ * numbers, or nothing at all, to this session.
+ */
 export function getPtyPids(): Map<string, number> {
   const pids = new Map<string, number>()
   for (const [sessionId, session] of sessions) {
-    if (session.state !== 'dead') {
-      pids.set(sessionId, session.pty.pid)
-    }
+    if (session.state === 'dead') continue
+    const pid = session.pty.pid
+    if (typeof pid === 'number' && pid > 0) pids.set(sessionId, pid)
   }
   return pids
 }
