@@ -1132,3 +1132,81 @@ test('task router: missing id throws TRPCError NOT_FOUND (not silent null)', asy
   expect(await errCode(() => caller.restore({ id: 'nope' }))).toBe('NOT_FOUND')
   expect(await errCode(() => caller.unarchive({ id: 'nope' }))).toBe('NOT_FOUND')
 })
+
+// ===========================================================================
+// switchConversation / deleteConversation — the sessions sidebar's two actions.
+// Both are guarded by `isHonoredConversation`: only a conversation this task+mode
+// already owns can be named, so neither can launder a foreign id into the honored
+// set. `switchConversation` re-points the resume target by appending a
+// `user-selected` row; `deleteConversation` tombstones a session and refuses the
+// current one (a live agent is running on it).
+// ===========================================================================
+const seedSession = (taskId: string, conv: string, at: number, mode = 'claude-code'): void => {
+  h.db
+    .prepare(
+      `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at)
+       VALUES (?, ?, '/p', ?, ?, 'slay-spawned-fresh', 'dead', ?, ?)`
+    )
+    .run(crypto.randomUUID(), mode, taskId, conv, at, at)
+  // These model sessions that actually ran, so they carry the v158 resumability
+  // proof. Without it they would be correctly ignored: a session that never took
+  // a turn has no transcript, so it can never be a resume target.
+  h.db
+    .prepare(`INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`)
+    .run(conv, at)
+}
+
+test('switchConversation: re-points the task at an earlier session', async () => {
+  const t = await createTask('switch me')
+  seedSession(t.id, 'CONV-A', 1000)
+  seedSession(t.id, 'CONV-B', 2000)
+  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe('CONV-B')
+
+  const after = await caller.switchConversation({
+    id: t.id,
+    mode: 'claude-code',
+    conversationId: 'CONV-A'
+  })
+  expect(after.currentConversationByMode!['claude-code']).toBe('CONV-A')
+})
+
+test('switchConversation: rejects an id the task does not own', async () => {
+  const t = await createTask('switch guard')
+  seedSession(t.id, 'CONV-A', 1000)
+  expect(
+    await errCode(() =>
+      caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'SOMEONE-ELSE' })
+    )
+  ).toBe('BAD_REQUEST')
+  expect(
+    await errCode(() =>
+      caller.switchConversation({ id: 'nope', mode: 'claude-code', conversationId: 'CONV-A' })
+    )
+  ).toBe('NOT_FOUND')
+})
+
+test('deleteConversation: tombstones a non-current session', async () => {
+  const t = await createTask('delete me')
+  seedSession(t.id, 'CONV-A', 1000)
+  seedSession(t.id, 'CONV-B', 2000)
+  await caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'CONV-A' })
+  // Gone from the honored set → no longer switchable, and still not current.
+  expect(
+    await errCode(() =>
+      caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'CONV-A' })
+    )
+  ).toBe('BAD_REQUEST')
+  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe('CONV-B')
+})
+
+test('deleteConversation: refuses the CURRENT session', async () => {
+  const t = await createTask('delete current')
+  seedSession(t.id, 'CONV-A', 1000)
+  seedSession(t.id, 'CONV-B', 2000)
+  expect(
+    await errCode(() =>
+      caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'CONV-B' })
+    )
+  ).toBe('BAD_REQUEST')
+  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe('CONV-B')
+})

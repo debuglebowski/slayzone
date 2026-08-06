@@ -66,6 +66,8 @@ export {
   getCurrentConversationId,
   listConversationHistory,
   listTaskSessions,
+  isHonoredConversation,
+  deleteSession,
   findPendingSpawn,
   findOwnedSpawnForConversation
 } from './agent-sessions.js'
@@ -77,6 +79,8 @@ export {
   confirmSessionConversation,
   confirmSessionConversationByTaskMode,
   markSessionDead,
+  markSessionFirstTurn,
+  listResumeCandidates,
   bindSessionToTask,
   getBoundTaskId
 } from './agent-sessions.js'

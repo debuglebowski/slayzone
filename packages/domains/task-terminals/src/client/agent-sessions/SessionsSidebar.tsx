@@ -1,6 +1,17 @@
 import { useState, useCallback } from 'react'
-import { History, MessageSquare, X } from 'lucide-react'
-import { IconButton, cn } from '@slayzone/ui'
+import { History, MessageSquare, Trash2, X } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  IconButton,
+  cn
+} from '@slayzone/ui'
 import { useTaskSessions } from './useTaskSessions'
 
 const storageKey = (taskId: string): string => `slayzone:sessions-sidebar:${taskId}`
@@ -84,26 +95,63 @@ function sessionTitle(firstPrompt: string | null, origin: string): string {
   return ORIGIN_LABEL[origin] ?? 'Session'
 }
 
+/** The session a confirm dialog is about, and which action is pending on it. */
+interface PendingAction {
+  kind: 'switch' | 'delete'
+  conversationId: string
+  title: string
+}
+
 /**
- * Read-only sidebar listing every agent session tied to the task's main agent
- * (mode `agentId`), newest first. One card per distinct provider conversation —
+ * Sidebar listing every agent session tied to the task's main agent (mode
+ * `agentId`), newest first. One card per distinct provider conversation —
  * `--resume` re-spawns collapse into a single session. Docks beside the terminal
  * inside TerminalContainer, alongside the messages sidebar.
+ *
+ * Each non-current card is a button that SWITCHES the agent back to that session
+ * (`onSwitch`), with a trash affordance that DELETES it from the task
+ * (`onDelete`). Both confirm first: a switch stops the running agent, and a
+ * delete cannot be undone from the UI. The current session offers neither —
+ * switching to it is a no-op, and deleting it is refused server-side because a
+ * live agent is running on that conversation.
  */
 export function SessionsSidebar({
   taskId,
   agentId,
-  onToggle
+  onToggle,
+  onSwitch,
+  onDelete
 }: {
   taskId: string
   agentId: string
   /** Closes the sidebar — the toggle lives in this header while open. */
   onToggle: () => void
+  /** Restarts the main agent on this conversation. Omitted → cards are inert. */
+  onSwitch?: (conversationId: string) => Promise<void>
+  /** Removes this session from the task. Omitted → no delete affordance. */
+  onDelete?: (conversationId: string) => Promise<void>
 }): React.ReactElement {
   const sessions = useTaskSessions(taskId, agentId, true)
   // Stable "now" anchored at mount — relative labels don't need per-ms churn, and
   // reading the clock in render is an impure call the React Compiler rejects.
   const [now] = useState(() => Date.now())
+  const [pending, setPending] = useState<PendingAction | null>(null)
+  // Latched across the confirm handler so a slow switch (kill → mutate → remount)
+  // can't be fired twice, and so every card reads as unavailable meanwhile.
+  const [busy, setBusy] = useState(false)
+
+  const confirm = useCallback(async () => {
+    if (!pending || busy) return
+    const run = pending.kind === 'switch' ? onSwitch : onDelete
+    if (!run) return
+    setBusy(true)
+    try {
+      await run(pending.conversationId)
+      setPending(null)
+    } finally {
+      setBusy(false)
+    }
+  }, [pending, busy, onSwitch, onDelete])
 
   return (
     <div
@@ -128,39 +176,113 @@ export function SessionsSidebar({
         {sessions.length === 0 ? (
           <div className="px-2 py-6 text-center text-xs text-muted-foreground">No sessions yet</div>
         ) : (
-          sessions.map((s) => (
-            <div
-              key={s.conversationId}
-              data-testid="agent-session-item"
-              className={cn(
-                'rounded-md px-2.5 py-2 text-sm',
-                s.isCurrent
-                  ? 'bg-surface-2 ring-1 ring-primary/40'
-                  : 'bg-surface-2 text-foreground'
-              )}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <p className="line-clamp-2 break-words text-foreground">
-                  {sessionTitle(s.firstPrompt, s.origin)}
-                </p>
-                {s.isCurrent && (
-                  <span className="mt-0.5 shrink-0 rounded-sm bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">
-                    Current
-                  </span>
+          sessions.map((s) => {
+            const title = sessionTitle(s.firstPrompt, s.origin)
+            const switchable = !s.isCurrent && !!onSwitch && !busy
+            const deletable = !s.isCurrent && !!onDelete && !busy
+            return (
+              // The delete control is a SIBLING of the card button, not a child:
+              // a button inside a button is invalid HTML and browsers reparent it.
+              <div key={s.conversationId} className="group relative">
+                <button
+                  type="button"
+                  data-testid="agent-session-item"
+                  disabled={!switchable}
+                  aria-label={s.isCurrent ? undefined : `Switch to session: ${title}`}
+                  onClick={() =>
+                    setPending({ kind: 'switch', conversationId: s.conversationId, title })
+                  }
+                  className={cn(
+                    'block w-full rounded-md px-2.5 py-2 text-left text-sm',
+                    s.isCurrent
+                      ? 'cursor-default bg-surface-2 ring-1 ring-primary/40'
+                      : 'bg-surface-2 text-foreground',
+                    switchable && 'hover:bg-surface-3'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="line-clamp-2 break-words text-foreground">{title}</p>
+                    {s.isCurrent ? (
+                      <span className="mt-0.5 shrink-0 rounded-sm bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">
+                        Current
+                      </span>
+                    ) : (
+                      switchable && (
+                        <span className="mt-0.5 shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-accent-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                          Switch
+                        </span>
+                      )
+                    )}
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
+                    <span className="flex items-center gap-0.5">
+                      <MessageSquare className="size-2.5" />
+                      {s.messageCount}
+                    </span>
+                    <span>·</span>
+                    <time>{formatRelative(s.lastActiveAt, now)}</time>
+                  </div>
+                </button>
+                {deletable && (
+                  <IconButton
+                    data-testid="agent-session-delete"
+                    variant="ghost"
+                    className="absolute bottom-1 right-1 size-6 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                    aria-label={`Delete session: ${title}`}
+                    onClick={() =>
+                      setPending({ kind: 'delete', conversationId: s.conversationId, title })
+                    }
+                  >
+                    <Trash2 className="size-3" />
+                  </IconButton>
                 )}
               </div>
-              <div className="mt-1 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
-                <span className="flex items-center gap-0.5">
-                  <MessageSquare className="size-2.5" />
-                  {s.messageCount}
-                </span>
-                <span>·</span>
-                <time>{formatRelative(s.lastActiveAt, now)}</time>
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
+
+      <AlertDialog
+        open={!!pending}
+        onOpenChange={(open) => {
+          if (!open && !busy) setPending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pending?.kind === 'delete' ? 'Delete session' : 'Switch session'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pending?.kind === 'delete'
+                ? `Remove "${pending.title}" from this task? It disappears from the session and message history and can no longer be resumed. The agent's own transcript on disk is not touched.`
+                : `Stop the running agent and restart it on "${pending?.title}"? Any work in progress in the current session is interrupted.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="agent-session-confirm"
+              disabled={busy}
+              onClick={(e) => {
+                // Keep the dialog mounted through the await — the default action
+                // closes it immediately, which would unmount the busy state and
+                // let a second click through mid-switch.
+                e.preventDefault()
+                void confirm()
+              }}
+            >
+              {busy
+                ? pending?.kind === 'delete'
+                  ? 'Deleting…'
+                  : 'Switching…'
+                : pending?.kind === 'delete'
+                  ? 'Delete'
+                  : 'Switch'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

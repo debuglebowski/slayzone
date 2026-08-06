@@ -94,6 +94,11 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/agent-sessi
 run_test_electron_strict_loader packages/domains/task/src/server/ops/in-band-clear-migration.test.ts
 # listTaskSessions — sessions-sidebar grouping + reset cutoff (was unregistered).
 run_test_electron_strict_loader packages/domains/task/src/server/ops/list-task-sessions.test.ts
+# v156 `user-selected` origin (session switch) + v157 session_deletions tombstones
+# (session delete). Covers the CHECK-widening rebuild's data copy AND the ops.
+run_test_electron_strict_loader packages/domains/task/src/server/ops/session-switch-delete.test.ts
+# agent-prompts capture + the deleted-session filter on listPromptsForTask.
+run_test_electron_strict_loader packages/domains/agent-turns/src/server/prompt-capture.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts
 # Wave-1 hub/runner split — exec-domain DB access moved behind injectable ops seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts

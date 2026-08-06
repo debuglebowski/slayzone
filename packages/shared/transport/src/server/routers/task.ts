@@ -5,6 +5,8 @@ import {
   taskEvents,
   recordPendingSpawn,
   recordConversation,
+  isHonoredConversation,
+  deleteSession,
   type TaskEventMap
 } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
@@ -102,6 +104,68 @@ export const taskRouter = router({
         conversationId: null,
         origin: 'manual-reset'
       })
+      getTaskOnMutation()?.()
+      const r = await ops().getTaskOp(ctx.db, input.id)
+      if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+      return r
+    }),
+
+  // Switch the task's agent back to an EARLIER session (sessions sidebar).
+  // Appends a `user-selected` row to the append-only ledger, which becomes the
+  // newest honored row → `currentConversationByMode` → the renderer's
+  // `existingConversationId` → `--resume <picked>` on the next spawn. Durable by
+  // construction: it survives a reopen even if the respawn never confirms (a
+  // provider without hooks never does). The caller restarts the terminal after
+  // this returns. `isHonoredConversation` is the anti-laundering guard — only a
+  // conversation this task+mode already owns can be selected. Returns the
+  // refreshed task.
+  switchConversation: publicProcedure
+    .input(z.object({ id: z.string(), mode: z.string(), conversationId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ops().getTaskOp(ctx.db, input.id)
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+      if (!(await isHonoredConversation(ctx.db, input.id, input.mode, input.conversationId))) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Not a session of this task'
+        })
+      }
+      await recordConversation(ctx.db, {
+        taskId: input.id,
+        mode: input.mode,
+        conversationId: input.conversationId,
+        origin: 'user-selected'
+      })
+      getTaskOnMutation()?.()
+      const r = await ops().getTaskOp(ctx.db, input.id)
+      if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+      return r
+    }),
+
+  // Delete a session from the task (sessions sidebar). Writes a
+  // `session_deletions` tombstone — never a `DELETE FROM` — so the provenance
+  // history stays intact while every reader (sidebar list, message history,
+  // resume decision) excludes it in SQL. The provider's own transcript on disk is
+  // untouched; slay didn't write it. Refuses the CURRENT session: a live agent is
+  // running on it, so hiding it would leave the terminal bound to a session the
+  // UI says is gone. Returns the refreshed task.
+  deleteConversation: publicProcedure
+    .input(z.object({ id: z.string(), mode: z.string(), conversationId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ops().getTaskOp(ctx.db, input.id)
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+      if (!(await isHonoredConversation(ctx.db, input.id, input.mode, input.conversationId))) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Not a session of this task'
+        })
+      }
+      if (!(await deleteSession(ctx.db, input.id, input.mode, input.conversationId))) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Switch to another session before deleting the current one'
+        })
+      }
       getTaskOnMutation()?.()
       const r = await ops().getTaskOp(ctx.db, input.id)
       if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })

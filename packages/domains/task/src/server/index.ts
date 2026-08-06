@@ -65,6 +65,8 @@ export {
   getCurrentConversationId,
   listConversationHistory,
   listTaskSessions,
+  isHonoredConversation,
+  deleteSession,
   recordPendingSpawn,
   findPendingSpawn,
   findOwnedSpawnForConversation,
@@ -73,6 +75,8 @@ export {
   confirmSessionConversation,
   confirmSessionConversationByTaskMode,
   markSessionDead,
+  markSessionFirstTurn,
+  listResumeCandidates,
   bindSessionToTask,
   getBoundTaskId
 } from './ops'

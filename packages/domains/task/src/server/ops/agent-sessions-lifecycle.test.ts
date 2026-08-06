@@ -5,6 +5,7 @@ import {
   confirmSessionConversation,
   confirmSessionConversationByTaskMode,
   markSessionDead,
+  markSessionFirstTurn,
   bindSessionToTask,
   findPendingSpawn,
   getCurrentConversationId
@@ -42,6 +43,13 @@ raw.exec(`
   CREATE TABLE session_resets (
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, created_at INTEGER NOT NULL
   );
+  CREATE TABLE session_turns (
+    conversation_id TEXT PRIMARY KEY, first_turn_at INTEGER NOT NULL
+  );
+  CREATE TABLE session_deletions (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL,
+    conversation_id TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
 `)
 
 const db: SlayzoneDb = {
@@ -71,7 +79,18 @@ async function main(): Promise<void> {
   assert((await getCurrentConversationId(db, 't1', 'claude-code')) === null, 'pending not honored yet')
   const o1 = await confirmSessionConversation(db, { sessionId: 'S1', observedConversationId: 'S1' })
   assert(o1 === 'slay-spawned-fresh', `match+no-resume → fresh, got ${o1}`)
-  assert((await getCurrentConversationId(db, 't1', 'claude-code')) === 'S1', 'confirmed fresh is current')
+  // 1b. A confirmed FRESH spawn is not yet resumable (v158): claude writes its
+  //     transcript at the first turn, so until then `--resume S1` would fail with
+  //     "No conversation found with session ID:". Confirming only proves the
+  //     process started, which is the exact thing that used to be mistaken for
+  //     proof — and what let a never-used warm agent become a task's resume
+  //     target for 77 minutes.
+  assert(
+    (await getCurrentConversationId(db, 't1', 'claude-code')) === null,
+    'confirmed-but-turnless fresh spawn must not be a resume target yet'
+  )
+  await markSessionFirstTurn(db, 'S1')
+  assert((await getCurrentConversationId(db, 't1', 'claude-code')) === 'S1', 'fresh becomes current after its first turn')
 
   // 2. Write-once: a second confirm is a no-op (origin no longer pending).
   const o1b = await confirmSessionConversation(db, { sessionId: 'S1', observedConversationId: 'HIJACK' })
@@ -131,7 +150,20 @@ async function main(): Promise<void> {
   assert((await getCurrentConversationId(db, 't2', 'claude-code')) === null, 'pooled session not bound to any task')
   const bound = await bindSessionToTask(db, { sessionId: 'POOL1', taskId: 't2', tabId: 't2' })
   assert(bound === true, 'pooled session binds to task')
-  assert((await getCurrentConversationId(db, 't2', 'claude-code')) === 'POOL1', 'bound pool session is honored for its task')
+  // Binding transfers OWNERSHIP, not resumability. A warm agent is pre-booted and
+  // can idle turn-less for hours; adopting it must not make its empty id the
+  // task's resume target, because `--resume POOL1` would fail and the recovery
+  // path used to answer that by RESETTING the task — cutting off the conversation
+  // that was actually doing the work. This is the a426d99d incident in one line.
+  assert(
+    (await getCurrentConversationId(db, 't2', 'claude-code')) === null,
+    'a bound but turnless pool session must not be honored as a resume target'
+  )
+  await markSessionFirstTurn(db, 'POOL1')
+  assert(
+    (await getCurrentConversationId(db, 't2', 'claude-code')) === 'POOL1',
+    'bound pool session is honored for its task once it has taken a turn'
+  )
 
   // 9. bind is set-once — a second bind is a no-op.
   const bound2 = await bindSessionToTask(db, { sessionId: 'POOL1', taskId: 't3', tabId: 't3' })

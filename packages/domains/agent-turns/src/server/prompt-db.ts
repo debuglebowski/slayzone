@@ -25,6 +25,14 @@ export async function insertPrompt(db: SlayzoneDb, p: InsertPrompt): Promise<voi
 /**
  * All prompts sent to one task's agent of the given mode, oldest first
  * (chronological — reads like a transcript). `rowid` tiebreaks same-ms inserts.
+ *
+ * Prompts belonging to a session the user DELETED from the sessions sidebar are
+ * excluded (`session_deletions`, migration v157): deleting a session removes it
+ * from the task, and leaving its messages behind in the message history would
+ * contradict that. `cli_session_id` is the same value as
+ * `agent_sessions.conversation_id`, and `agent_id` is the mode, so the tombstone
+ * joins directly. Prompts with a NULL `cli_session_id` are never attributable to
+ * a session and always survive (NULL never equals a tombstone's id).
  */
 export async function listPromptsForTask(
   db: SlayzoneDb,
@@ -33,10 +41,16 @@ export async function listPromptsForTask(
 ): Promise<AgentPrompt[]> {
   return (await db
     .prepare(
-      `SELECT id, task_id, agent_id, cli_session_id, text, created_at
-       FROM agent_prompts
-       WHERE task_id = ? AND agent_id = ?
-       ORDER BY created_at ASC, rowid ASC`
+      `SELECT p.id, p.task_id, p.agent_id, p.cli_session_id, p.text, p.created_at
+       FROM agent_prompts p
+       WHERE p.task_id = ? AND p.agent_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM session_deletions d
+            WHERE d.task_id = p.task_id
+              AND d.mode = p.agent_id
+              AND d.conversation_id = p.cli_session_id
+         )
+       ORDER BY p.created_at ASC, p.rowid ASC`
     )
     .all(taskId, agentId)) as AgentPrompt[]
 }

@@ -41,6 +41,7 @@ raw.exec(`
       'slay-spawned-fresh',
       'slay-spawned-resume',
       'in-band-clear',
+      'user-selected',
       'cas-repoint-heal',
       'legacy-migration',
       'foreign-observed',
@@ -62,8 +63,8 @@ raw.exec(`
     created_at      INTEGER NOT NULL,
     bound_at        INTEGER,
     CHECK (origin IN (
-      'slay-spawned-fresh','slay-spawned-resume','in-band-clear','cas-repoint-heal',
-      'legacy-migration','foreign-observed','pending-spawn'
+      'slay-spawned-fresh','slay-spawned-resume','in-band-clear','user-selected',
+      'cas-repoint-heal','legacy-migration','foreign-observed','pending-spawn'
     )),
     CHECK (status IN ('pooled','bound','dead'))
   );
@@ -72,6 +73,10 @@ raw.exec(`
     task_id    TEXT NOT NULL,
     mode       TEXT NOT NULL,
     created_at INTEGER NOT NULL
+  );
+  CREATE TABLE session_turns (
+    conversation_id TEXT PRIMARY KEY,
+    first_turn_at   INTEGER NOT NULL
   );
 `)
 raw

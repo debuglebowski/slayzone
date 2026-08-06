@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { type ConversationOrigin, HONORED_ORIGINS_SQL } from '@slayzone/task/shared'
 import { agentSessionsEvents } from '../events'
@@ -17,16 +18,126 @@ import { agentSessionsEvents } from '../events'
  * not a JS post-filter, so a reset can never be silently undone.
  */
 
+/**
+ * Correlated exclusion of user-deleted sessions, for embedding in a query whose
+ * `agent_sessions` row is aliased `s`. A delete is a tombstone in
+ * `session_deletions` (migration v157), never a `DELETE FROM` — this subsystem is
+ * append-only because the provenance rows are the only evidence available when a
+ * task resumes the wrong conversation.
+ *
+ * Every reader that answers "which sessions does this task have?" or "what should
+ * it resume?" interpolates THIS, so the exclusion is structural SQL rather than a
+ * JS post-filter a caller could forget — the same reason the reset cutoff is
+ * encoded in SQL. Scoped to (task, mode, conversation): one provider conversation
+ * id can legitimately appear under two modes for a task.
+ */
+const NOT_DELETED_SQL = `NOT EXISTS (
+       SELECT 1 FROM session_deletions d
+        WHERE d.task_id = s.task_id
+          AND d.mode = s.mode
+          AND d.conversation_id = s.conversation_id
+     )`
+
+/**
+ * When a session became THIS task's. For a direct task spawn that is the spawn
+ * itself (`recordSessionSpawn` sets `bound_at = created_at` for `status='bound'`);
+ * for a warm-pool agent it is the ADOPTION, which can be minutes or hours after
+ * the process was pre-booted.
+ *
+ * Every ordering and every reset cutoff uses this, never raw `created_at`. Using
+ * spawn time silently excluded the one session that mattered in the a426d99d
+ * incident: pre-booted 08:27:11, reset cutoff 08:29:38, adopted 08:29:40 — two
+ * seconds on the wrong side of a boundary it had nothing to do with, which
+ * orphaned a 1.8 MB transcript for the rest of the task's life.
+ */
+export const OWNED_AT_SQL = `coalesce(s.bound_at, s.created_at)`
+
+/**
+ * THE definition of "a session this task can resume", for embedding in a query
+ * whose `agent_sessions` row is aliased `s`. `resetAtExpr` is the caller's
+ * cutoff expression — a correlated subquery for the single-row reader, a joined
+ * column for the batched one.
+ *
+ * Exported and interpolated rather than re-typed, because this predicate lives in
+ * two readers that MUST agree (`getCurrentConversationId` here, and
+ * `attachCurrentConversationByMode` in shared.ts, which feeds the renderer's
+ * resume hint). They are the same question asked in two shapes; a copy that drifts
+ * means the terminal resumes one conversation while the sidebar shows another.
+ *
+ * `first_turn_at IS NOT NULL` is the resumability proof (migration v158). A
+ * provider writes its transcript at the FIRST TURN, not at startup, so an id that
+ * has never taken one cannot be resumed by definition — `claude --resume <id>`
+ * answers `No conversation found with session ID:`. Skipping such a row falls
+ * through to the newest session that IS resumable, which is what "the task's
+ * conversation" has always meant; rows carrying intent (`user-selected`,
+ * `in-band-clear`, a reset) are marked proven at write time, so they never fall
+ * through. See `markSessionFirstTurn`.
+ */
+export function resumableSessionSql(resetAtExpr: string): string {
+  return `${ownedSessionSql(resetAtExpr)}
+         AND ${HAS_TURN_SQL}`
+}
+
+/**
+ * The resumability proof (migration v158), as a correlated EXISTS for a query
+ * whose `agent_sessions` row is aliased `s` — structural SQL for the same reason
+ * `NOT_DELETED_SQL` is.
+ *
+ * A provider writes its transcript at the FIRST TURN, not at startup. Between
+ * spawn and first turn the id exists in slay but not on disk, so `--resume <id>`
+ * can only answer `No conversation found with session ID:`. The warm pool
+ * stretched that window from seconds to hours.
+ */
+const HAS_TURN_SQL = `EXISTS (
+       SELECT 1 FROM session_turns t
+        WHERE t.conversation_id = s.conversation_id
+     )`
+
+/**
+ * Ownership without the resumability proof: sessions this task legitimately has,
+ * after the last reset, deletions excluded.
+ *
+ * Split out for the healer, whose entire job is to look at ids that may NOT be
+ * proven and ask the disk. Keeping it as the shared base means "which sessions
+ * are this task's" is defined once even though two callers want different
+ * amounts of certainty.
+ */
+export function ownedSessionSql(resetAtExpr: string): string {
+  return `s.conversation_id IS NOT NULL
+         AND s.origin IN (${HONORED_ORIGINS_SQL})
+         AND ${OWNED_AT_SQL} > coalesce(${resetAtExpr}, 0)
+         AND ${NOT_DELETED_SQL}`
+}
+
+/**
+ * Modes whose first turn slay can actually observe (their agent hooks post
+ * `UserPromptSubmit`). For every other provider the proof is unavailable, so its
+ * sessions are marked proven at spawn — the mode-specific knowledge lives at
+ * WRITE time so the read predicate stays one uniform `first_turn_at IS NOT NULL`
+ * with no provider allowlist in SQL.
+ */
+export const TURN_TRACKED_MODES: ReadonlySet<string> = new Set(['claude-code'])
+
 const TTL_PENDING_MS = 10 * 60 * 1000 // explicit pre-minted expected id → wide window.
 const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // null-expected → tight window (temporal-proximity gate only).
 const FIND_PENDING_RETRY_MS = 100
 
 /**
- * Latest honored conversation id for (taskId, mode), strictly after the most
- * recent reset in `session_resets` (if any). The reset cutoff is a structural
- * SQL boundary — identical semantics to the v145
- * `getCurrentConversationId`, with the cutoff sourced from `session_resets`
- * instead of an in-table `manual-reset` row.
+ * The conversation this task should resume: the most recently OWNED (bound)
+ * session, after the last reset, that is honored, not deleted, and provably
+ * resumable. The whole predicate is `resumableSessionSql` — a structural SQL
+ * boundary, so a reset can never be silently undone and an unresumable id can
+ * never be handed out.
+ *
+ * Ordering is by `OWNED_AT_SQL`, not `created_at`: a warm-pool agent is
+ * pre-booted long before the task adopts it, and spawn order says nothing about
+ * which session is the task's current one.
+ *
+ * The `NOT_DELETED_SQL` guard is defence in depth: the UI refuses to delete the
+ * CURRENT session, so a tombstoned id should never be the newest honored row
+ * anyway. But an agent that rotates its own id (`in-band-clear`) can append an
+ * honored row naming any conversation at any time, and a deleted session must
+ * never come back as a resume target through that door.
  */
 export async function getCurrentConversationId(
   db: SlayzoneDb,
@@ -39,17 +150,107 @@ export async function getCurrentConversationId(
        FROM session_resets
        WHERE task_id = ? AND mode = ?
      )
-     SELECT conversation_id
-       FROM agent_sessions
-       WHERE task_id = ? AND mode = ?
-         AND conversation_id IS NOT NULL
-         AND origin IN (${HONORED_ORIGINS_SQL})
-         AND created_at > coalesce((SELECT at FROM reset), 0)
-       ORDER BY created_at DESC
+     SELECT s.conversation_id AS conversation_id
+       FROM agent_sessions s
+       WHERE s.task_id = ? AND s.mode = ?
+         AND ${resumableSessionSql('(SELECT at FROM reset)')}
+       ORDER BY ${OWNED_AT_SQL} DESC
        LIMIT 1`,
     [taskId, mode, taskId, mode]
   )
   return row?.conversation_id ?? null
+}
+
+/**
+ * Every conversation this task could legitimately fall back to, newest-owned
+ * first — the healer's candidate set when the stored id turns out to have no
+ * transcript on disk.
+ *
+ * Sourced from `agent_sessions` rather than
+ * `provider_config.{mode}.conversationHistory`, which is appended by the
+ * SessionStart persist path and is therefore ALWAYS EMPTY for a warm-pool agent:
+ * a pooled process boots with no `SLAYZONE_TASK_ID`, so its SessionStart cannot
+ * be attributed to any task. That gap is why the healer reported
+ * `candidateCount: 0` while the task's real 1.8 MB transcript sat on disk, and
+ * the task got reset instead of repointed. The bind (`bindSessionToTask`) records
+ * the ownership this reads, so pooled and direct sessions are equally visible.
+ */
+export async function listResumeCandidates(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string
+): Promise<string[]> {
+  const rows = await db.all<{ conversation_id: string }>(
+    `WITH reset AS (
+       SELECT max(created_at) AS at
+       FROM session_resets
+       WHERE task_id = ? AND mode = ?
+     )
+     SELECT DISTINCT s.conversation_id AS conversation_id
+       FROM agent_sessions s
+       WHERE s.task_id = ? AND s.mode = ?
+         AND ${ownedSessionSql('(SELECT at FROM reset)')}
+       ORDER BY ${OWNED_AT_SQL} DESC`,
+    [taskId, mode, taskId, mode]
+  )
+  return rows.map((r) => r.conversation_id)
+}
+
+/**
+ * Is `conversationId` a session this task+mode actually owns and still has?
+ *
+ * The guard on every user-driven session action (switch, delete). It answers
+ * "did slay record an honored session with this id, for THIS task and mode, that
+ * has not been deleted?" — so a caller cannot launder a `foreign-observed` id, a
+ * pending-spawn phantom, another task's conversation, or a tombstoned one into
+ * the honored set by naming it in a `user-selected` write.
+ */
+export async function isHonoredConversation(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  conversationId: string
+): Promise<boolean> {
+  const row = await db.get<{ one: number }>(
+    `SELECT 1 AS one
+       FROM agent_sessions s
+       WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id = ?
+         AND s.origin IN (${HONORED_ORIGINS_SQL})
+         AND ${NOT_DELETED_SQL}
+       LIMIT 1`,
+    [taskId, mode, conversationId]
+  )
+  return !!row
+}
+
+/**
+ * Tombstone one session so it disappears from the sidebar, from the task's
+ * message history, and from every resume decision. The provider's own transcript
+ * on disk is NOT touched — slay didn't write it and doesn't own it.
+ *
+ * Refuses (returns false) when the id is the task's CURRENT session: a live agent
+ * process is running on that conversation, and hiding it would leave the running
+ * terminal bound to a session the UI says no longer exists. Switch to another
+ * session first, which makes this one non-current, then delete it.
+ *
+ * Idempotent — a second delete of the same session inserts a second tombstone,
+ * which changes nothing (the exclusion is `NOT EXISTS`, not a count).
+ */
+export async function deleteSession(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  conversationId: string
+): Promise<boolean> {
+  const current = await getCurrentConversationId(db, taskId, mode)
+  if (current === conversationId) return false
+  await db.run(
+    `INSERT INTO session_deletions (id, task_id, mode, conversation_id, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [randomUUID(), taskId, mode, conversationId, Date.now()]
+  )
+  agentSessionsEvents.emit('agent-sessions:changed', { taskId })
+  return true
 }
 
 /**
@@ -118,7 +319,8 @@ export interface TaskSessionSummary {
  * expected id — many belong to spawns that died before the agent confirmed a
  * SessionStart, so surfacing them would show phantom sessions. `foreign-observed`
  * is audit-only (a manual `--resume X`), never a session slay owns. Warm-pool
- * rows (null task) and null-conversation rows are excluded too.
+ * rows (null task), null-conversation rows, and user-deleted sessions
+ * (`NOT_DELETED_SQL`) are excluded too.
  *
  * `messageCount` + `firstPrompt` join `agent_prompts` on
  * `cli_session_id = conversation_id` (they are the same value). `isCurrent`
@@ -157,6 +359,7 @@ export async function listTaskSessions(
      FROM agent_sessions s
      WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
        AND s.origin IN (${HONORED_ORIGINS_SQL})
+       AND ${NOT_DELETED_SQL}
      GROUP BY s.conversation_id
      ORDER BY started_at DESC`,
     [taskId, mode]
@@ -349,6 +552,28 @@ export async function recordSessionSpawn(
 }
 
 /**
+ * Record that a conversation has taken its first turn — i.e. the provider has
+ * written its transcript and `--resume <id>` will now succeed. Write-once: the
+ * mark means "has content", not "was last active", so a later turn must never
+ * move it (that would make it a mtime, and every reader would start racing it).
+ *
+ * Keyed by `conversation_id` rather than the runtime session id, because that is
+ * the only identifier a provider hook carries for BOTH a task-spawned agent and a
+ * warm-pool one (whose env was fixed before any task existed — see
+ * `getBoundTaskId`). Returns true if this call was the one that marked it.
+ */
+export async function markSessionFirstTurn(
+  db: SlayzoneDb,
+  conversationId: string
+): Promise<boolean> {
+  const res = await db.run(
+    `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
+    [conversationId, Date.now()]
+  )
+  return res.changes > 0
+}
+
+/**
  * Write-once confirm of the provider session id for the spawn keyed by runtime
  * `sessionId`. No-op if the row is already confirmed (origin no longer
  * `pending-spawn`) — structural write-once. Returns the resolved origin, or
@@ -361,8 +586,9 @@ export async function confirmSessionConversation(
   const row = await db.get<{
     conversation_id: string | null
     pending_meta: string | null
+    mode: string
   }>(
-    `SELECT conversation_id, pending_meta
+    `SELECT conversation_id, pending_meta, mode
        FROM agent_sessions
        WHERE id = ? AND origin = 'pending-spawn'`,
     [args.sessionId]
@@ -383,6 +609,17 @@ export async function confirmSessionConversation(
       WHERE id = ? AND origin = 'pending-spawn'`,
     [args.observedConversationId, origin, args.sessionId]
   )
+  // Resumability proof for the cases that do not need a turn to be certain:
+  //  - a RESUME proves itself — the provider just reopened that transcript;
+  //  - a provider whose turns slay cannot observe has to be trusted at confirm,
+  //    or its sessions could never be resumed at all.
+  // Everything else — a fresh start of a turn-tracked provider — stays unproven
+  // until `markSessionFirstTurn`. Confirm is the right seam because it is the
+  // first moment the REAL conversation id is known (a pre-mint can be wrong, and
+  // providers that mint their own id have none until here).
+  if (usedResume || !TURN_TRACKED_MODES.has(row.mode)) {
+    await markSessionFirstTurn(db, args.observedConversationId)
+  }
   return origin
 }
 

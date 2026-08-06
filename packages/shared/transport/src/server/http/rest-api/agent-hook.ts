@@ -10,7 +10,8 @@ import {
   findOwnedSpawnForConversation,
   getCurrentConversationId,
   confirmSessionConversation,
-  getBoundTaskId
+  getBoundTaskId,
+  markSessionFirstTurn
 } from '@slayzone/task/server'
 import { capturePrompt } from '@slayzone/agent-turns/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
@@ -180,6 +181,26 @@ const CONVERSATION_ID_CAPTURE_EVENT: Record<string, string> = {
  * write; caching is safe because that bind is set-once and never changes.
  */
 const poolSessionTaskIdCache = new Map<string, string>()
+
+/**
+ * Conversation ids already marked as having taken a turn (v158). The DB write is
+ * write-once and idempotent, so this only exists to keep a repeat turn from
+ * issuing a no-op UPDATE on every prompt for the life of the process.
+ */
+const firstTurnMarked = new Set<string>()
+
+/**
+ * Hook events that PROVE a conversation has content on disk. A turn is what makes
+ * a provider write its transcript — until one happens, `--resume <id>` fails even
+ * though slay has known the id since spawn (see migration v158).
+ *
+ * `UserPromptSubmit` is the canonical human turn and already the once-per-turn
+ * event on this route; `Stop` is the backstop for a turn that began some other
+ * way. Deliberately NOT the per-tool events: they would fire this on the hot path
+ * for no extra information, and NOT `SessionStart` — that is exactly the signal
+ * that lied, since it fires before a single byte is written.
+ */
+const TURN_PROOF_EVENTS = new Set(['UserPromptSubmit', 'Stop'])
 
 /** Dispatch to the per-agent raw-hook-event → TerminalState mapper. */
 function hookToTerminalState(
@@ -601,6 +622,21 @@ export async function processAgentHook(
       raw: hook.raw
     }).catch(() => {
       /* best-effort — never block the hook */
+    })
+  }
+
+  // Resumability proof (v158) — this is the moment `--resume <id>` starts
+  // working, so it is the moment the id may be handed out as a resume target.
+  // Keyed by CONVERSATION id, not `slaySessionId`: a warm-pool agent's hooks
+  // carry only the former, and this must cover pooled and task-spawned agents
+  // through one path. Fire-and-forget: a DB hiccup must never block the ack, and
+  // the next turn re-attempts.
+  if (hook.sessionId && TURN_PROOF_EVENTS.has(hook.hookEvent) && !firstTurnMarked.has(hook.sessionId)) {
+    const provenId = hook.sessionId
+    firstTurnMarked.add(provenId)
+    void markSessionFirstTurn(deps.db, provenId).catch(() => {
+      // Let a later turn retry rather than leaving the session unresumable.
+      firstTurnMarked.delete(provenId)
     })
   }
 

@@ -3436,6 +3436,185 @@ export const migrations: Migration[] = [
       // reflects real spawn/exit.
       db.exec(`UPDATE terminal_tabs SET was_spawned = 0 WHERE was_spawned = 1;`)
     }
+  },
+  {
+    version: 156,
+    up: (db) => {
+      // Admit the `user-selected` provenance origin (see
+      // task/shared/conversation-origins.ts). The sessions sidebar can now switch
+      // the task back to an EARLIER session; the switch is durable only if it
+      // appends an honored row naming that conversation, because the resume hint
+      // (`currentConversationByMode`) is the newest honored row. Reusing
+      // `slay-spawned-resume` would have worked mechanically but asserts a spawn
+      // slay observed — a lie in the one table whose whole job is answering
+      // "where did this conversation id come from?".
+      //
+      // Mechanically identical to v151 (`in-band-clear`), because it is the same
+      // problem: SQLite cannot ALTER a CHECK in place, so both tables are
+      // rebuilt. The same three things make that safe —
+      //   - `PRAGMA foreign_keys = OFF` around the swap: both tables carry an FK
+      //     to `tasks(id)`, and a DROP with FKs enforced would cascade.
+      //   - columns enumerated EXPLICITLY (never `SELECT *`), so the copy stays
+      //     correct if a later migration reorders columns.
+      //   - every index recreated verbatim — a rebuilt table loses the old one's
+      //     indexes, and four of these sit on hot resolver paths.
+      // No backfill: no historical row was ever a user selection.
+      db.exec(`PRAGMA foreign_keys = OFF;`)
+      db.exec(`
+        CREATE TABLE task_conversations_new (
+          id              TEXT PRIMARY KEY,
+          task_id         TEXT NOT NULL,
+          mode            TEXT NOT NULL,
+          conversation_id TEXT,
+          origin          TEXT NOT NULL,
+          pending_meta    TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          CHECK (origin IN (
+            'slay-spawned-fresh',
+            'slay-spawned-resume',
+            'in-band-clear',
+            'user-selected',
+            'cas-repoint-heal',
+            'legacy-migration',
+            'foreign-observed',
+            'manual-reset',
+            'pending-spawn'
+          ))
+        );
+        INSERT INTO task_conversations_new
+          (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
+          SELECT id, task_id, mode, conversation_id, origin, pending_meta, created_at
+            FROM task_conversations;
+        DROP TABLE task_conversations;
+        ALTER TABLE task_conversations_new RENAME TO task_conversations;
+        CREATE INDEX task_conversations_lookup
+          ON task_conversations (task_id, mode, created_at DESC);
+        CREATE INDEX task_conversations_pending
+          ON task_conversations (task_id, mode, conversation_id)
+          WHERE origin = 'pending-spawn';
+
+        CREATE TABLE agent_sessions_new (
+          id              TEXT PRIMARY KEY,
+          mode            TEXT NOT NULL,
+          cwd             TEXT,
+          task_id         TEXT,
+          conversation_id TEXT,
+          origin          TEXT NOT NULL,
+          status          TEXT NOT NULL,
+          pending_meta    TEXT,
+          created_at      INTEGER NOT NULL,
+          bound_at        INTEGER,
+          tab_id          TEXT,
+          ended_at        INTEGER,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          CHECK (origin IN (
+            'slay-spawned-fresh',
+            'slay-spawned-resume',
+            'in-band-clear',
+            'user-selected',
+            'cas-repoint-heal',
+            'legacy-migration',
+            'foreign-observed',
+            'pending-spawn'
+          )),
+          CHECK (status IN ('pooled','bound','dead'))
+        );
+        INSERT INTO agent_sessions_new
+          (id, mode, cwd, task_id, conversation_id, origin, status, pending_meta,
+           created_at, bound_at, tab_id, ended_at)
+          SELECT id, mode, cwd, task_id, conversation_id, origin, status, pending_meta,
+                 created_at, bound_at, tab_id, ended_at
+            FROM agent_sessions;
+        DROP TABLE agent_sessions;
+        ALTER TABLE agent_sessions_new RENAME TO agent_sessions;
+        CREATE INDEX agent_sessions_task
+          ON agent_sessions (task_id, mode, created_at DESC);
+        CREATE INDEX agent_sessions_pool
+          ON agent_sessions (cwd, mode)
+          WHERE status = 'pooled';
+        CREATE INDEX agent_sessions_pending
+          ON agent_sessions (task_id, mode, conversation_id)
+          WHERE origin = 'pending-spawn';
+        CREATE INDEX agent_sessions_tab
+          ON agent_sessions (tab_id, created_at DESC);
+      `)
+      db.exec(`PRAGMA foreign_keys = ON;`)
+    }
+  },
+  {
+    version: 157,
+    up: (db) => {
+      // Session DELETE, as a tombstone rather than a `DELETE FROM`. Every table
+      // in this subsystem is append-only on purpose: the provenance rows are the
+      // only evidence available when a task resumes the wrong conversation, and
+      // a hard delete would destroy exactly the rows you need to diagnose that.
+      // So a deleted session keeps its history and gains a marker that every
+      // reader excludes — structurally, in SQL, the same shape `session_resets`
+      // (v147) uses for the reset cutoff.
+      //
+      // Scoped to (task, mode, conversation): the same provider conversation id
+      // can legitimately appear under two modes for one task, and deleting it in
+      // the sidebar of one must not silently hide the other.
+      db.exec(`
+        CREATE TABLE session_deletions (
+          id              TEXT PRIMARY KEY,
+          task_id         TEXT NOT NULL,
+          mode            TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        CREATE INDEX session_deletions_lookup
+          ON session_deletions (task_id, mode, conversation_id);
+      `)
+    }
+  },
+  {
+    version: 158,
+    up: (db) => {
+      // Resumability proof for a session.
+      //
+      // A provider writes its transcript at the FIRST TURN, not at startup:
+      // `claude --session-id <uuid>` boots, fires SessionStart, and writes
+      // NOTHING until someone submits a prompt. So between spawn and first turn
+      // the id exists in slay but not on disk, and `--resume <id>` can only
+      // answer "No conversation found with session ID:".
+      //
+      // That window used to be seconds. The warm pool made it unbounded: an
+      // agent is pre-booted per (runner, project) and can sit turn-less for
+      // hours before a task adopts it — at which point its id became the task's
+      // resume target. Restarting the terminal then failed, and the recovery
+      // path RESET the task, which cut off the conversation that was actually
+      // doing the work. Measured on one day of this machine: 186 of 214 minted
+      // ids had no transcript, and every one of them had taken zero turns.
+      //
+      // A SEPARATE append-only table, not a column on `agent_sessions` — the same
+      // shape `session_resets` (v147) and `session_deletions` (v157) already use
+      // for facts about a session that arrive later than the session row. It also
+      // keeps the two table-rebuild migrations (v151/v156) and their column-drift
+      // guard untouched: a fact recorded elsewhere cannot be dropped by a rebuild
+      // that enumerates columns.
+      //
+      // Keyed by conversation id, because that is the only identifier shared by a
+      // task-spawned agent and a warm-pool one (whose env was fixed before any
+      // task existed) — and it is what the provider's own hook payload carries.
+      //
+      // Backfill marks every existing session proven, so an upgrade changes
+      // nothing for tasks that already resume correctly; only sessions spawned
+      // after this migration can be born unproven.
+      db.exec(`
+        CREATE TABLE session_turns (
+          conversation_id TEXT PRIMARY KEY,
+          first_turn_at   INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at)
+        SELECT conversation_id, coalesce(bound_at, created_at)
+          FROM agent_sessions
+         WHERE conversation_id IS NOT NULL
+           AND origin <> 'pending-spawn';
+      `)
+    }
   }
 ]
 

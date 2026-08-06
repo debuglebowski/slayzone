@@ -30,6 +30,13 @@ raw.exec(`
   CREATE TABLE session_resets (
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, created_at INTEGER NOT NULL
   );
+  CREATE TABLE session_deletions (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL,
+    conversation_id TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
+  CREATE TABLE session_turns (
+    conversation_id TEXT PRIMARY KEY, first_turn_at INTEGER NOT NULL
+  );
   CREATE TABLE agent_prompts (
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, agent_id TEXT NOT NULL,
     cli_session_id TEXT, text TEXT NOT NULL, created_at INTEGER NOT NULL
@@ -61,10 +68,18 @@ function insSession(o: {
 }): void {
   raw
     .prepare(
-      `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at)
-       VALUES (?, ?, '/p', ?, ?, ?, ?, ?)`
+      `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at)
+       VALUES (?, ?, '/p', ?, ?, ?, ?, ?, ?)`
     )
-    .run(o.id, o.mode, o.taskId, o.conv, o.origin, o.status ?? 'dead', o.createdAt)
+    .run(o.id, o.mode, o.taskId, o.conv, o.origin, o.status ?? 'dead', o.createdAt, o.createdAt)
+  // These fixtures model sessions that ran (they have prompts), so they carry the
+  // v158 resumability proof. A session with no turn is not a resume target — see
+  // `resumableSessionSql`.
+  if (o.conv && o.origin !== 'pending-spawn') {
+    raw
+      .prepare(`INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`)
+      .run(o.conv, o.createdAt)
+  }
 }
 
 function insPrompt(o: { id: string; taskId: string; mode: string; conv: string | null; text: string; createdAt: number }): void {

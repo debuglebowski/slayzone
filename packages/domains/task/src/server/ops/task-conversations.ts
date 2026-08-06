@@ -154,6 +154,14 @@ export async function recordConversation(
     // other mirror is a confirmed/historical audit row → 'dead'. (Transitional:
     // replaced when the spawn path writes B rows directly.)
     const shadowStatus = origin === 'pending-spawn' ? 'bound' : 'dead'
+    // Proven at write (v158): every id that reaches THIS path arrives as an
+    // already-established conversation — an observation the agent reported, a
+    // heal the healer verified on disk, or a session the user picked out of the
+    // sidebar. The unproven window belongs to the SPAWN path
+    // (`recordSessionSpawn`), where slay mints an id before the provider has
+    // written anything. Marking here also keeps intent-bearing rows
+    // (`in-band-clear`, `user-selected`) from ever falling through to an older
+    // session, which is the one thing the read-side skip must not do.
     ops.push({
       type: 'run',
       sql: `INSERT INTO agent_sessions
@@ -161,6 +169,13 @@ export async function recordConversation(
             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
       params: [id, mode, taskId, conversationId, origin, shadowStatus, meta, createdAt, createdAt]
     })
+    if (origin !== 'pending-spawn' && conversationId) {
+      ops.push({
+        type: 'run',
+        sql: `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
+        params: [conversationId, createdAt]
+      })
+    }
   }
 
   await db.batchTxn(ops)

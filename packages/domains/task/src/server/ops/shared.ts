@@ -1,12 +1,11 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
-import {
-  validateReparent,
-  reparentErrorMessage,
-  HONORED_ORIGINS_SQL,
-  type ReparentTaskRow
-} from '@slayzone/task/shared'
+import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
 import { recordConversation } from './task-conversations.js'
+// The resume predicate is DEFINED in agent-sessions.ts and interpolated here, so
+// the renderer's hint and the spawn-time resolver cannot answer the same question
+// differently. See `resumableSessionSql`.
+import { OWNED_AT_SQL, resumableSessionSql } from './agent-sessions.js'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import type { ColumnConfig } from '@slayzone/projects/shared'
@@ -297,11 +296,16 @@ export async function attachWorktreeColors(db: SlayzoneDb, tasks: Task[]): Promi
 
 /**
  * Populate `currentConversationByMode` from the first-class agent-session
- * tables (`agent_sessions` + `session_resets`, migration v147). The renderer
- * reads this field instead of `provider_config.{mode}.conversationId` so reset
- * cutoff and provenance gating are honored on every read. Single query per
- * call (cheap; indexed). Modes with no honored session are simply absent from
- * the record.
+ * tables (`agent_sessions` + `session_resets` + `session_deletions`, migrations
+ * v147/v157). The renderer reads this field instead of
+ * `provider_config.{mode}.conversationId` so reset cutoff, provenance gating and
+ * user deletions are honored on every read. Single query per call (cheap;
+ * indexed). Modes with no honored session are simply absent from the record.
+ *
+ * This is the field the terminal's resume hint comes from, so it is also what
+ * makes a session SWITCH durable: `switchConversation` appends a `user-selected`
+ * row, which becomes the newest honored row here, which becomes
+ * `existingConversationId` on the next spawn → `--resume <picked>`.
  */
 async function attachCurrentConversationByMode(
   db: SlayzoneDb,
@@ -332,14 +336,12 @@ async function attachCurrentConversationByMode(
          s.conversation_id,
          ROW_NUMBER() OVER (
            PARTITION BY s.task_id, s.mode
-           ORDER BY s.created_at DESC
+           ORDER BY ${OWNED_AT_SQL} DESC
          ) AS rn
        FROM agent_sessions s
        LEFT JOIN reset r ON r.task_id = s.task_id AND r.mode = s.mode
        WHERE s.task_id IN (${placeholders})
-         AND s.conversation_id IS NOT NULL
-         AND s.origin IN (${HONORED_ORIGINS_SQL})
-         AND s.created_at > coalesce(r.at, 0)
+         AND ${resumableSessionSql('r.at')}
      )
      SELECT task_id, mode, conversation_id FROM ranked WHERE rn = 1`,
     [...ids, ...ids]

@@ -10,6 +10,7 @@ export type ConversationOrigin =
   | 'slay-spawned-fresh'
   | 'slay-spawned-resume'
   | 'in-band-clear'
+  | 'user-selected'
   | 'cas-repoint-heal'
   | 'legacy-migration'
   | 'foreign-observed'
@@ -25,11 +26,20 @@ export type ConversationOrigin =
  * the new id is as legitimate as a fresh spawn's. It stays a DISTINCT value
  * rather than folding into `slay-spawned-fresh` so the audit trail can still
  * answer "did the user clear, or did slay spawn this?".
+ *
+ * `user-selected` is honored: the user picked an EXISTING session out of the
+ * sessions sidebar to go back to. No spawn happened at write time (the respawn
+ * follows), so it is deliberately not `slay-spawned-resume` — that value asserts
+ * a spawn slay observed, and laundering a user choice through it would make the
+ * audit trail lie. The id it names is always one that already had an honored row
+ * for the same (task, mode) — `isHonoredConversation` enforces that — so the
+ * provenance chain is never widened, only re-pointed.
  */
 export const HONORED_ORIGINS: ReadonlySet<ConversationOrigin> = new Set([
   'slay-spawned-fresh',
   'slay-spawned-resume',
   'in-band-clear',
+  'user-selected',
   'cas-repoint-heal',
   'legacy-migration'
 ])
@@ -39,6 +49,7 @@ export const ALL_ORIGINS: readonly ConversationOrigin[] = [
   'slay-spawned-fresh',
   'slay-spawned-resume',
   'in-band-clear',
+  'user-selected',
   'cas-repoint-heal',
   'legacy-migration',
   'foreign-observed',

@@ -1,5 +1,5 @@
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
-import { openTaskTerminal } from '../fixtures/terminal'
+import { openTaskTerminal, startAgentTerminal, closeAllTaskTabs } from '../fixtures/terminal'
 import type { ElectronApplication } from 'playwright'
 
 /**
@@ -80,8 +80,115 @@ test.describe('Session history sidebar', () => {
     await expect(mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible')).toHaveCount(0)
     await expect(mainWindow.locator(toggleSel)).toHaveCount(1)
   })
+
+  /**
+   * The two actions on a session card. Both go through a confirm dialog.
+   *
+   * The switch assertion is the load-bearing one: it is not enough that the
+   * "Current" badge moves (that only proves a row landed in the ledger) — the
+   * point of a switch is that the RESPAWN resumes the picked conversation. So we
+   * capture the opts at the real `createPty` chokepoint and assert
+   * `existingConversationId`, which is what becomes `--resume <id>`.
+   */
+  test('switch to an earlier session, then delete a non-current one', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    const s = seed(mainWindow)
+    const t = await s.createTask({ projectId, title: 'Switch sessions', status: 'in_progress' })
+    // Three so the delete still leaves >1 — the toggle's gate would otherwise
+    // unmount the sidebar and hide what we're asserting.
+    for (const [i, [conv, text]] of (
+      [
+        ['SW-A', 'oldest session'],
+        ['SW-B', 'middle session'],
+        ['SW-C', 'newest session']
+      ] as const
+    ).entries()) {
+      await seedSession(electronApp, {
+        id: `sw-${conv}`,
+        taskId: t.id,
+        conv,
+        createdAt: 1000 * (i + 1)
+      })
+      await seedPrompt(electronApp, {
+        id: `sw-p-${conv}`,
+        taskId: t.id,
+        conv,
+        text,
+        createdAt: 1000 * (i + 1) + 1
+      })
+    }
+    await s.refreshData()
+
+    // Stub every spawn at the createPty chokepoint and record its opts.
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: true })
+    )
+    const lastOpts = (): Promise<{ existingConversationId?: string | null } | null> =>
+      mainWindow.evaluate(async () => {
+        const all = (await window
+          .getTrpcVanillaClient()
+          .pty.testTakePtyCreateOpts.query()) as unknown[]
+        return (all[all.length - 1] ?? null) as { existingConversationId?: string | null } | null
+      })
+
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Switch sessions' })
+    await startAgentTerminal(mainWindow)
+
+    await mainWindow.locator('[data-testid="session-history-toggle"]:visible').first().click()
+    const sidebar = mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible').first()
+    const items = sidebar.locator('[data-testid="agent-session-item"]')
+    await expect(items).toHaveCount(3)
+    // Newest first, and the newest starts out as the honored current session.
+    await expect(items.first()).toContainText('newest session')
+    await expect(items.first()).toContainText('Current')
+
+    // --- Switch back to the oldest session ---
+    await sidebar.locator('[aria-label="Switch to session: oldest session"]').click()
+    await mainWindow.locator('[data-testid="agent-session-confirm"]').click()
+
+    // The respawn must carry the picked conversation as its resume target.
+    await expect
+      .poll(async () => (await lastOpts())?.existingConversationId, { timeout: 20_000 })
+      .toBe('SW-A')
+
+    // …and the badge follows the binding. Card ORDER is by session start, so the
+    // oldest stays last — only which card is "Current" changes.
+    const sidebar2 = mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible').first()
+    const items2 = sidebar2.locator('[data-testid="agent-session-item"]')
+    await expect(items2.last()).toContainText('Current')
+    await expect(items2.first()).not.toContainText('Current')
+
+    // --- Delete the session we switched away from (now non-current) ---
+    await sidebar2.locator('[aria-label="Delete session: newest session"]').click()
+    await mainWindow.locator('[data-testid="agent-session-confirm"]').click()
+    await expect(items2).toHaveCount(2)
+    await expect(sidebar2.getByText('newest session')).toHaveCount(0)
+
+    // The current session is NOT deletable — no affordance on that card at all.
+    await expect(
+      sidebar2.locator('[aria-label="Delete session: oldest session"]')
+    ).toHaveCount(0)
+
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: false })
+    )
+    await closeAllTaskTabs(mainWindow)
+  })
 })
 
+/**
+ * A session as the real write paths leave it: the `agent_sessions` row PLUS its
+ * `session_turns` proof (migration v158).
+ *
+ * The proof is not optional decoration — `getCurrentConversationId` requires it
+ * (`first_turn_at IS NOT NULL`), because a provider only writes its transcript at
+ * the first turn, so an id that never took one cannot be resumed. Every real path
+ * supplies it (`recordConversation` writes it inline; v158 backfilled every
+ * pre-existing session), so a seed without it is a shape the app never produces:
+ * the sessions still LIST, but none of them is ever "Current".
+ */
 function seedSession(
   electronApp: ElectronApplication,
   row: { id: string; taskId: string; conv: string; createdAt: number }
@@ -94,6 +201,10 @@ function seedSession(
       `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at)
        VALUES (?, 'claude-code', '/p', ?, ?, 'slay-spawned-fresh', 'dead', ?, ?)`,
       [r.id, r.taskId, r.conv, r.createdAt, r.createdAt]
+    )
+    await db.run(
+      `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
+      [r.conv, r.createdAt]
     )
   }, row)
 }

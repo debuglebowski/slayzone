@@ -14,7 +14,13 @@ import {
 import {
   getCurrentConversationId as getCurrentNew,
   listConversationHistory as listNew,
-  findPendingSpawn as findNew
+  findPendingSpawn as findNew,
+  recordSessionSpawn,
+  confirmSessionConversation,
+  bindSessionToTask,
+  markSessionFirstTurn,
+  resumableSessionSql,
+  OWNED_AT_SQL
 } from './agent-sessions.js'
 
 function assert(cond: boolean, msg: string): void {
@@ -60,9 +66,11 @@ raw.exec(`
     pending_meta    TEXT,
     created_at      INTEGER NOT NULL,
     bound_at        INTEGER,
+    tab_id          TEXT,
+    ended_at        INTEGER,
     CHECK (origin IN (
-      'slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal',
-      'legacy-migration','foreign-observed','pending-spawn'
+      'slay-spawned-fresh','slay-spawned-resume','in-band-clear','user-selected',
+      'cas-repoint-heal','legacy-migration','foreign-observed','pending-spawn'
     )),
     CHECK (status IN ('pooled','bound','dead'))
   );
@@ -72,8 +80,20 @@ raw.exec(`
     mode       TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+  CREATE TABLE session_deletions (
+    id              TEXT PRIMARY KEY,
+    task_id         TEXT NOT NULL,
+    mode            TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    created_at      INTEGER NOT NULL
+  );
+  CREATE TABLE session_turns (
+    conversation_id TEXT PRIMARY KEY,
+    first_turn_at   INTEGER NOT NULL
+  );
 `)
 raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t1', '{}')
+raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t3', '{}')
 
 const db: SlayzoneDb = {
   async get<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
@@ -200,13 +220,11 @@ async function main(): Promise<void> {
      ),
      ranked AS (
        SELECT s.task_id, s.mode, s.conversation_id,
-         ROW_NUMBER() OVER (PARTITION BY s.task_id, s.mode ORDER BY s.created_at DESC) AS rn
+         ROW_NUMBER() OVER (PARTITION BY s.task_id, s.mode ORDER BY ${OWNED_AT_SQL} DESC) AS rn
        FROM agent_sessions s
        LEFT JOIN reset r ON r.task_id = s.task_id AND r.mode = s.mode
        WHERE s.task_id IN (${ph})
-         AND s.conversation_id IS NOT NULL
-         AND s.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
-         AND s.created_at > coalesce(r.at, 0)
+         AND ${resumableSessionSql('r.at')}
      )
      SELECT task_id, mode, conversation_id FROM ranked WHERE rn = 1`,
     [...ids, ...ids]
@@ -222,6 +240,97 @@ async function main(): Promise<void> {
   }
   // Spot-check the expected post-reset winner for t2.
   assert(batchedMap.get('t2:claude-code') === 'D2', `t2 claude-code should resolve to D2, got ${batchedMap.get('t2:claude-code')}`)
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 11-13. Warm-pool resume regression — replays the real a426d99d timeline.
+  //
+  // A warm agent is pre-booted BEFORE any task needs it and bound minutes later.
+  // Two things went wrong, both here:
+  //   - the reset cutoff compared `created_at` (pre-boot) instead of bind time,
+  //     so the session doing the actual work was excluded 2s before it started;
+  //   - a pooled agent that never took a turn has no transcript on disk, so
+  //     resuming its id can only ever fail (`No conversation found with session
+  //     ID:`), and the app then force-reset the task to recover.
+  // ───────────────────────────────────────────────────────────────────────────
+  const T_POOL_A = 1785997631658 // 08:27:11 warm spawn (became the real session)
+  const T_RESET = 1785997778737 //  08:29:38 reset cutoff
+  const T_BIND_A = 1785997780096 // 08:29:40 adopted by the task — 2s AFTER the reset
+  const T_TURN_A = 1785997902000 // 08:31:42 first UserPromptSubmit → transcript exists
+  const T_POOL_B = 1785997798840 // 08:29:58 warm spawn (replenish) — never used
+  const T_BIND_B = 1786002377676 // 09:46:17 adopted 77min later, still zero turns
+
+  const at = (id: string, col: string, ms: number): void => {
+    raw.prepare(`UPDATE agent_sessions SET ${col} = ? WHERE id = ?`).run(ms, id)
+  }
+
+  // Warm agent A: pooled → confirmed → bound after the reset → took a turn.
+  await recordSessionSpawn(db, {
+    id: 'S_A', taskId: null, tabId: null, mode: 'claude-code', cwd: '/k',
+    expectedConversationId: 'a85fd6e9', usedResume: false, status: 'pooled'
+  })
+  await confirmSessionConversation(db, { sessionId: 'S_A', observedConversationId: 'a85fd6e9' })
+  at('S_A', 'created_at', T_POOL_A)
+
+  // Warm agent B: pooled → confirmed → bound much later → NEVER took a turn.
+  await recordSessionSpawn(db, {
+    id: 'S_B', taskId: null, tabId: null, mode: 'claude-code', cwd: '/k',
+    expectedConversationId: 'dd9c7775', usedResume: false, status: 'pooled'
+  })
+  await confirmSessionConversation(db, { sessionId: 'S_B', observedConversationId: 'dd9c7775' })
+  at('S_B', 'created_at', T_POOL_B)
+
+  raw
+    .prepare(`INSERT INTO session_resets (id, task_id, mode, created_at) VALUES (?, ?, ?, ?)`)
+    .run('r_a426', 't3', 'claude-code', T_RESET)
+
+  await bindSessionToTask(db, { sessionId: 'S_A', taskId: 't3', tabId: 'tab3' })
+  at('S_A', 'bound_at', T_BIND_A)
+  await markSessionFirstTurn(db, 'a85fd6e9')
+  raw
+    .prepare(`UPDATE session_turns SET first_turn_at = ? WHERE conversation_id = ?`)
+    .run(T_TURN_A, 'a85fd6e9')
+
+  // 11. Cutoff is BIND time, not pre-boot time. A pre-booted-before-reset session
+  //     that the task adopted after the reset is this task's session.
+  assert(
+    (await getCurrentNew(db, 't3', 'claude-code')) === 'a85fd6e9',
+    'session bound AFTER the reset must be honored even though it was pre-booted BEFORE it'
+  )
+
+  await bindSessionToTask(db, { sessionId: 'S_B', taskId: 't3', tabId: 'tab3' })
+  at('S_B', 'bound_at', T_BIND_B)
+
+  // 12. A zero-turn session is not a resume target — even as the newest bind.
+  //     `--resume` against it can only produce SESSION_NOT_FOUND.
+  const afterAdopt = await getCurrentNew(db, 't3', 'claude-code')
+  assert(
+    afterAdopt !== 'dd9c7775',
+    'a zero-turn pooled session must never become the resume target'
+  )
+  assert(
+    afterAdopt === 'a85fd6e9',
+    `adopting an unused warm agent must not orphan the live conversation (got ${afterAdopt})`
+  )
+
+  // 13. Once it takes a turn it has a transcript — and wins on bind time.
+  await markSessionFirstTurn(db, 'dd9c7775')
+  assert(
+    (await getCurrentNew(db, 't3', 'claude-code')) === 'dd9c7775',
+    'after its first turn the most recently bound session becomes current'
+  )
+
+  // 14. markSessionFirstTurn is write-once — a later turn never moves the mark.
+  //     It means "has content", not "was last active"; if it drifted, readers
+  //     would start racing it as an mtime.
+  const markOf = (id: string): number =>
+    (
+      raw
+        .prepare(`SELECT first_turn_at AS t FROM session_turns WHERE conversation_id = ?`)
+        .get(id) as { t: number }
+    ).t
+  const firstMark = markOf('dd9c7775')
+  await markSessionFirstTurn(db, 'dd9c7775')
+  assert(firstMark === markOf('dd9c7775'), 'first_turn_at must be write-once')
 
   console.log('OK — agent_sessions parity checks passed')
 }

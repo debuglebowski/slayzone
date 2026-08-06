@@ -75,6 +75,10 @@ interface TerminalContainerProps {
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onMainReset?: () => void
+  /** Sessions sidebar: restart the main agent on an earlier session. */
+  onSwitchSession?: (conversationId: string) => Promise<void>
+  /** Sessions sidebar: remove a session from the task. */
+  onDeleteSession?: (conversationId: string) => Promise<void>
   rightContent?: React.ReactNode
   mainTabAccessories?: React.ReactNode
   mainTabContextMenu?: React.ReactNode
@@ -108,6 +112,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       onOpenUrl,
       onOpenFile,
       onMainReset,
+      onSwitchSession,
+      onDeleteSession,
       rightContent,
       mainTabAccessories,
       mainTabContextMenu,
@@ -530,7 +536,13 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           </div>
         </div>
         {canShowSessions && sessionsOpen && mainMode && (
-          <SessionsSidebar taskId={taskId} agentId={mainMode} onToggle={toggleSessions} />
+          <SessionsSidebar
+            taskId={taskId}
+            agentId={mainMode}
+            onToggle={toggleSessions}
+            onSwitch={onSwitchSession}
+            onDelete={onDeleteSession}
+          />
         )}
         {canShowPrompts && promptsOpen && mainMode && (
           <AgentPromptsSidebar taskId={taskId} agentId={mainMode} onToggle={togglePrompts} />

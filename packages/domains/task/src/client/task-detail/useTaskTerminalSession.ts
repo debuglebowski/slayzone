@@ -46,6 +46,8 @@ export interface UseTaskTerminalSessionResult {
   handleRestartTerminal: () => Promise<void>
   handleStopAgent: () => Promise<void>
   handleResetTerminal: () => Promise<void>
+  handleSwitchSession: (conversationId: string) => Promise<void>
+  handleDeleteSession: (conversationId: string) => Promise<void>
   handleReattachTerminal: () => void
 }
 
@@ -224,6 +226,52 @@ export function useTaskTerminalSession({
     setTerminalKey((k) => k + 1)
   }, [task, resetTaskState, onTaskUpdated, getMainSessionId, trpcClient, setTerminalKey])
 
+  // Switch to an EARLIER session (sessions sidebar). Same kill→remount shape as
+  // handleRestartTerminal — the difference is the mutation in the middle, which
+  // appends a `user-selected` row so the ledger's honored "current" conversation
+  // becomes the picked one BEFORE the remount reads it. That ordering is the
+  // whole mechanism: the remounted terminal takes its resume hint from the task's
+  // refreshed `currentConversationByMode`, so the respawn runs `--resume <picked>`
+  // and the switch survives a reopen even if the agent never confirms.
+  const handleSwitchSession = useCallback(
+    async (conversationId: string) => {
+      if (!task) return
+      const mainSessionId = getMainSessionId(task.id)
+      resetTaskState(mainSessionId)
+      // See handleRestartTerminal — claim the next mount before the kill so the
+      // was_spawned=false race doesn't strand the user on the Start gate.
+      markForceStart(mainSessionId)
+      await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
+      const updated = await trpcClient.task.switchConversation.mutate({
+        id: task.id,
+        mode: task.terminal_mode,
+        conversationId
+      })
+      onTaskUpdated(updated)
+      await new Promise((r) => setTimeout(r, 100))
+      markSkipCache(mainSessionId)
+      setTerminalKey((k) => k + 1)
+    },
+    [task, resetTaskState, onTaskUpdated, getMainSessionId, trpcClient, setTerminalKey]
+  )
+
+  // Delete a session from the task (sessions sidebar). No kill/remount: the
+  // server refuses to delete the CURRENT session, so the live agent is never
+  // running on what this removes. Only the task is refreshed — the sidebar list
+  // itself refetches off `agentSessions.onChanged`.
+  const handleDeleteSession = useCallback(
+    async (conversationId: string) => {
+      if (!task) return
+      const updated = await trpcClient.task.deleteConversation.mutate({
+        id: task.id,
+        mode: task.terminal_mode,
+        conversationId
+      })
+      onTaskUpdated(updated)
+    },
+    [task, onTaskUpdated, trpcClient]
+  )
+
   // Revive: when main broadcasts pty:respawn-suggested for this task (after a
   // terminal → non-terminal status transition), remount the terminal so the user
   // can keep typing without clicking Retry. See GitHub issue #77.
@@ -362,6 +410,8 @@ export function useTaskTerminalSession({
     handleRestartTerminal,
     handleStopAgent,
     handleResetTerminal,
+    handleSwitchSession,
+    handleDeleteSession,
     handleReattachTerminal
   }
 }

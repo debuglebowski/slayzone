@@ -903,6 +903,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     handleRestartTerminal,
     handleStopAgent,
     handleResetTerminal,
+    handleSwitchSession,
+    handleDeleteSession,
     handleReattachTerminal
   } = useTaskTerminalSession({
     task,
@@ -2257,6 +2259,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           onOpenUrl={openDevServerInBrowser}
                           onOpenFile={handleQuickOpenFile}
                           onMainReset={handleResetTerminal}
+                          onSwitchSession={handleSwitchSession}
+                          onDeleteSession={handleDeleteSession}
                           overlay={
                             isActive && loopConfigured ? (
                               <LoopModeBanner

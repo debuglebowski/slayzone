@@ -22,7 +22,7 @@
  */
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS } from '@slayzone/platform'
-import { LATEST_MIGRATION_VERSION, runMigrations } from '@slayzone/transport/db-bootstrap'
+import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/transport/db-bootstrap'
 import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task/shared'
 
 let failures = 0
@@ -60,18 +60,23 @@ function migratedDb(): Database.Database {
 
 /**
  * Re-apply v151's rebuild over rows that already exist — the data-copy path a
- * live store takes on upgrade.
+ * live store takes on upgrade. It's the only way to exercise the copy: seeding
+ * BEFORE the first `runMigrations` is impossible, since the tables don't exist
+ * until v147 creates them.
  *
- * `runMigrations` applies every migration whose version exceeds `user_version`,
- * so rewinding the pragma to 150 re-runs v151 alone against a populated table.
- * That is the same DROP-and-copy the real upgrade performs (v151 is idempotent by
- * construction — it rebuilds from whatever is present), and it's the only way to
- * exercise the copy: seeding BEFORE the first `runMigrations` is impossible since
- * the tables don't exist until v147 creates them.
+ * Runs THAT migration's `up` directly rather than rewinding `user_version` and
+ * calling `runMigrations`. The rewind approach re-runs every LATER migration too,
+ * and those are not idempotent by design — a plain `ALTER TABLE … ADD COLUMN`
+ * (v152's `zoom_pct`) throws "duplicate column name" on a second pass, and SQLite
+ * has no `ADD COLUMN IF NOT EXISTS`. So the rewind form silently rotted the
+ * moment any column migration landed after v151, failing on an unrelated table.
+ * v151 itself IS idempotent (it rebuilds from whatever is present), which is what
+ * makes the direct replay valid.
  */
-function replayV151(raw: Database.Database): void {
-  raw.pragma('user_version = 150')
-  runMigrations(raw)
+function replayMigration(raw: Database.Database, version: number): void {
+  const m = migrations.find((x) => x.version === version)
+  if (!m) throw new Error(`migration ${version} not found`)
+  raw.transaction(() => m.up(raw))()
 }
 
 function indexNames(raw: Database.Database, table: string): string[] {
@@ -271,7 +276,7 @@ function main(): void {
       convs: raw.prepare(`SELECT * FROM task_conversations ORDER BY id`).all()
     }
 
-    replayV151(raw)
+    replayMigration(raw, 151)
 
     const after = {
       sessions: raw.prepare(`SELECT * FROM agent_sessions ORDER BY id`).all(),

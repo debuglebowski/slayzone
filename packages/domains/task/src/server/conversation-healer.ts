@@ -15,7 +15,8 @@ import {
   getTaskOp,
   collectReferencedConversationIds,
   recordConversation,
-  getCurrentConversationId
+  getCurrentConversationId,
+  listResumeCandidates
 } from './ops/index.js'
 
 /** Max gap between task creation and the real Claude session's first message,
@@ -57,7 +58,18 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
       const task = await getTaskOp(db, taskId)
       if (!task) return { id: storedId, healed: false }
 
-      const history = task.provider_config?.[mode]?.conversationHistory ?? []
+      // Candidates come from `agent_sessions` (every session this task owns after
+      // its last reset, newest-owned first), UNIONed with the legacy
+      // provider_config list for tasks that predate v147.
+      //
+      // The legacy list alone is empty for any warm-pool-adopted task — a pooled
+      // agent boots with no `SLAYZONE_TASK_ID`, so its SessionStart is never
+      // attributed and never appended. That is what produced `candidateCount: 0`
+      // next to an intact 1.8 MB transcript, and turned a repointable situation
+      // into a reset.
+      const legacyHistory = task.provider_config?.[mode]?.conversationHistory ?? []
+      const owned = await listResumeCandidates(db, taskId, mode).catch(() => [] as string[])
+      const history = [...new Set([...owned, ...legacyHistory])]
       const storedInHistory = history.includes(storedId)
       const storedExists = claudeTranscriptExists(cwd, storedId)
 
@@ -120,7 +132,16 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
           event: 'conv_id.heal_skipped',
           taskId,
           message: storedId,
-          payload: { reason: candidates.length ? 'ambiguous' : 'none', candidateCount: candidates.length }
+          // `historyCount` distinguishes "this task genuinely has no other
+          // session" from "the candidate source was blind to them" — the two
+          // looked identical in the a426d99d diagnostics, which is why the real
+          // conversation went unnoticed for 77 minutes.
+          payload: {
+            reason: candidates.length ? 'ambiguous' : 'none',
+            candidateCount: candidates.length,
+            historyCount: history.length,
+            historyOnDisk: historyExists.filter((h) => h.exists).length
+          }
         })
         return { id: storedId, healed: false }
       }
@@ -165,7 +186,26 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
 export function registerConversationResolver(db: SlayzoneDb): void {
   setConversationResolver(async ({ taskId, mode }) => {
     try {
-      return await getCurrentConversationId(db, taskId, mode)
+      const current = await getCurrentConversationId(db, taskId, mode)
+      // Observability for the one new way this can answer null: the task HAS
+      // sessions, but none has proven content yet (v158), so the spawn goes
+      // fresh. Silence here is what made the warm-pool failure take 77 minutes
+      // to notice — "no conversation" and "no RESUMABLE conversation" looked
+      // identical from the outside.
+      if (!current) {
+        const owned = await listResumeCandidates(db, taskId, mode).catch(() => [] as string[])
+        if (owned.length > 0) {
+          recordDiagnosticEvent({
+            level: 'info',
+            source: 'pty',
+            event: 'conv_id.unproven_skipped',
+            taskId,
+            message: owned[0],
+            payload: { mode, ownedCount: owned.length }
+          })
+        }
+      }
+      return current
     } catch {
       return null
     }

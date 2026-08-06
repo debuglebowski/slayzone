@@ -54,6 +54,12 @@ const getCurrentConversationIdSpy = vi.fn<
 const findOwnedSpawnForConversationSpy = vi.fn<
   (db: unknown, taskId: string, mode: string, outgoing: string | null) => Promise<string | null>
 >(() => Promise.resolve(null))
+// Resumability proof (v158). Must be in this mock even for tests that ignore it:
+// the route calls it on every turn-proof event, so a missing export is not an
+// unasserted spy — it is a TypeError inside the handler and a 500 on the ack.
+const markSessionFirstTurnSpy = vi.fn<(db: unknown, conversationId: string) => Promise<void>>(
+  () => Promise.resolve()
+)
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: (...args: unknown[]) => recordConversationSpy(...args),
   findPendingSpawn: (db: unknown, taskId: string, mode: string) =>
@@ -67,7 +73,9 @@ vi.mock('@slayzone/task/server', () => ({
   getCurrentConversationId: (db: unknown, taskId: string, mode: string) =>
     getCurrentConversationIdSpy(db, taskId, mode),
   confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
-  getBoundTaskId: (db: unknown, sessionId: string) => getBoundTaskIdSpy(db, sessionId)
+  getBoundTaskId: (db: unknown, sessionId: string) => getBoundTaskIdSpy(db, sessionId),
+  markSessionFirstTurn: (db: unknown, conversationId: string) =>
+    markSessionFirstTurnSpy(db, conversationId)
 }))
 
 interface ServerHandle {
@@ -152,6 +160,8 @@ describe('POST /api/agent-hook', () => {
     getBoundTaskIdSpy.mockReset()
     getCurrentConversationIdSpy.mockReset()
     findOwnedSpawnForConversationSpy.mockReset()
+    markSessionFirstTurnSpy.mockReset()
+    markSessionFirstTurnSpy.mockResolvedValue(undefined)
     // Default: no known current conversation and no ownership claim → the
     // in-band-clear branch can never fire unless a test sets both up.
     getCurrentConversationIdSpy.mockResolvedValue(null)
@@ -185,6 +195,42 @@ describe('POST /api/agent-hook', () => {
         taskId: 'task-1'
       })
       expect(typeof event.timestamp).toBe('number')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('turn proof: a turn marks the session resumable, SessionStart does not', async () => {
+    const srv = await startServer()
+    try {
+      // SessionStart is the signal that lied (v158): it fires before the provider
+      // has written a byte, so it must never prove a conversation resumable.
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        sessionId: 'proof-a',
+        taskId: 'task-1'
+      })
+      expect(markSessionFirstTurnSpy).not.toHaveBeenCalled()
+
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        sessionId: 'proof-b',
+        taskId: 'task-1'
+      })
+      expect(markSessionFirstTurnSpy).toHaveBeenCalledTimes(1)
+      expect(markSessionFirstTurnSpy.mock.calls[0][1]).toBe('proof-b')
+
+      // Write-once per process: a second turn on the same id issues no further
+      // UPDATE. Ids are unique per test because that latch is module-scoped.
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        sessionId: 'proof-b',
+        taskId: 'task-1'
+      })
+      expect(markSessionFirstTurnSpy).toHaveBeenCalledTimes(1)
     } finally {
       await srv.close()
     }

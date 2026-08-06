@@ -157,3 +157,68 @@ await describe('capturePrompt', () => {
     expect((await listPromptsForTask(db, taskId, 'codex'))[0].text).toBe('for codex')
   })
 })
+
+// Deleting a session from the sessions sidebar writes a `session_deletions`
+// tombstone (migration v157). The message history must follow: a session the user
+// removed from the task should leave no messages behind.
+await describe('listPromptsForTask + deleted sessions', () => {
+  const del = (mode: string, conv: string): void => {
+    raw
+      .prepare(
+        `INSERT INTO session_deletions (id, task_id, mode, conversation_id, created_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(crypto.randomUUID(), taskId, mode, conv, Date.now())
+  }
+
+  test('hides prompts of a deleted session, keeps the rest', async () => {
+    raw.prepare('DELETE FROM agent_prompts').run()
+    raw.prepare('DELETE FROM session_deletions').run()
+    for (const [conv, text] of [
+      ['conv-old', 'from the deleted session'],
+      ['conv-live', 'from the live session']
+    ]) {
+      await capturePrompt(db, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId,
+        sessionId: conv,
+        raw: { prompt: text }
+      })
+    }
+    del('claude-code', 'conv-old')
+    const rows = await listPromptsForTask(db, taskId, 'claude-code')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text).toBe('from the live session')
+  })
+
+  test('keeps unattributed prompts (null cli_session_id)', async () => {
+    raw.prepare('DELETE FROM agent_prompts').run()
+    raw.prepare('DELETE FROM session_deletions').run()
+    await capturePrompt(db, {
+      agentId: 'claude-code',
+      hookEvent: 'UserPromptSubmit',
+      taskId,
+      raw: { prompt: 'no session id' }
+    })
+    del('claude-code', 'conv-old')
+    expect(await listPromptsForTask(db, taskId, 'claude-code')).toHaveLength(1)
+  })
+
+  test('a tombstone does not leak across modes', async () => {
+    raw.prepare('DELETE FROM agent_prompts').run()
+    raw.prepare('DELETE FROM session_deletions').run()
+    for (const mode of ['claude-code', 'codex']) {
+      await capturePrompt(db, {
+        agentId: mode,
+        hookEvent: 'UserPromptSubmit',
+        taskId,
+        sessionId: 'shared-conv',
+        raw: { prompt: `for ${mode}` }
+      })
+    }
+    del('claude-code', 'shared-conv')
+    expect(await listPromptsForTask(db, taskId, 'claude-code')).toHaveLength(0)
+    expect(await listPromptsForTask(db, taskId, 'codex')).toHaveLength(1)
+  })
+})
