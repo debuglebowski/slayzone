@@ -4,15 +4,16 @@
  * B write lifecycle (recordSessionSpawn → confirm → bind) on the REAL migrated
  * schema. See plans/agent-sessions.md.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/apps/app/src/main/db/v148-agent-sessions-runtime-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/v148-agent-sessions-runtime-migration.test.ts
  */
 import Database from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { migrations } from '@slayzone/transport/db-bootstrap'
+import { migrations } from './index'
 import {
   recordSessionSpawn,
   confirmSessionConversation,
   bindSessionToTask,
+  markSessionFirstTurn,
   getCurrentConversationId
 } from '@slayzone/task/server'
 
@@ -45,12 +46,12 @@ function expectEqual(actual: unknown, expected: unknown): void {
 }
 
 /** Build a DB migrated through v148 (all real migrations). */
-function dbAt148(): Database.Database {
+function dbUpTo(maxVersion: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   for (const m of migrations) {
-    if (m.version > 148) break
+    if (m.version > maxVersion) break
     db.transaction(() => {
       m.up(db)
       db.pragma(`user_version = ${m.version}`)
@@ -58,6 +59,17 @@ function dbAt148(): Database.Database {
   }
   return db
 }
+
+/** The v148 schema exactly — for asserting what THAT migration produced. */
+const dbAt148 = (): Database.Database => dbUpTo(148)
+
+/**
+ * Fully migrated. The runtime readers exercised below depend on tables added
+ * after v148 (`session_deletions` v157, `session_turns` v158), so pinning them to
+ * the v148 schema stopped testing "the real migrated schema" and started testing
+ * a shape that no longer exists anywhere.
+ */
+const dbAtLatest = (): Database.Database => dbUpTo(Number.MAX_SAFE_INTEGER)
 
 function adapter(raw: Database.Database): SlayzoneDb {
   return {
@@ -91,7 +103,7 @@ async function run(): Promise<void> {
   })
 
   await test('B lifecycle round-trips on the real migrated schema', async () => {
-    const raw = dbAt148()
+    const raw = dbAtLatest()
     try {
       raw.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
       raw
@@ -106,6 +118,11 @@ async function run(): Promise<void> {
       expectEqual(await getCurrentConversationId(db, 't1', 'claude-code'), null) // pending
       const origin = await confirmSessionConversation(db, { sessionId: 'RT1', observedConversationId: 'RT1' })
       expectEqual(origin, 'slay-spawned-fresh')
+      // Confirm proves the process started, not that it wrote anything: claude
+      // creates its transcript at the first turn, so a turnless fresh spawn is
+      // not yet a resume target (v158).
+      expectEqual(await getCurrentConversationId(db, 't1', 'claude-code'), null)
+      await markSessionFirstTurn(db, 'RT1')
       expectEqual(await getCurrentConversationId(db, 't1', 'claude-code'), 'RT1')
     } finally {
       raw.close()
@@ -113,7 +130,7 @@ async function run(): Promise<void> {
   })
 
   await test('pooled session (no task) binds to a task and becomes honored', async () => {
-    const raw = dbAt148()
+    const raw = dbAtLatest()
     try {
       raw.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
       raw
@@ -129,6 +146,10 @@ async function run(): Promise<void> {
       expectEqual(await getCurrentConversationId(db, 't9', 'claude-code'), null) // unbound
       const bound = await bindSessionToTask(db, { sessionId: 'POOLX', taskId: 't9', tabId: 't9' })
       expectEqual(bound, true)
+      // Adoption transfers ownership, not resumability — a warm agent that never
+      // took a turn has no transcript to resume (v158).
+      expectEqual(await getCurrentConversationId(db, 't9', 'claude-code'), null)
+      await markSessionFirstTurn(db, 'POOLX')
       expectEqual(await getCurrentConversationId(db, 't9', 'claude-code'), 'POOLX')
     } finally {
       raw.close()

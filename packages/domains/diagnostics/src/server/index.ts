@@ -1,3 +1,4 @@
+export { createDiagnosticsSchema, applyDiagnosticsPragmas } from './schema'
 export {
   bindDiagnosticsDbs,
   getDiagnosticsDb,

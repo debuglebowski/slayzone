@@ -25,13 +25,43 @@ import type { TaskOps } from '@slayzone/task/server'
 import type {
   BackupInfo,
   BackupSettings,
-  LocalLeaderboardStats,
   ProcessInfo,
   ProcessEventMap,
   UpdateStatus,
   BrowserShortcutPayload,
   BrowserCreateTaskFromLinkIntent
 } from '@slayzone/types'
+
+/**
+ * Backup ops — injected by the composition root rather than built in the router.
+ *
+ * Unlike leaderboard/feedback/export-import, backup needs things only the host
+ * process knows: whether this hub is supervised (restore is refused otherwise),
+ * the live DB file path, and how to close its own connection before that file is
+ * overwritten. So it stays a registry, but the IMPLEMENTATION now lives with the
+ * database instead of on the far side of a capability bridge.
+ */
+export type BackupOps = {
+  list: () => Promise<BackupInfo[]>
+  create: (name?: string) => Promise<BackupInfo>
+  rename: (filename: string, name: string) => Promise<void>
+  delete: (filename: string) => Promise<void>
+  restore: (filename: string) => Promise<void>
+  getSettings: () => Promise<BackupSettings>
+  setSettings: (partial: Partial<BackupSettings>) => Promise<BackupSettings>
+  revealInFinder: () => void
+}
+
+let backupOps: BackupOps | null = null
+
+export function setBackupOps(ops: BackupOps): void {
+  backupOps = ops
+}
+
+export function getBackupOps(): BackupOps {
+  if (!backupOps) throw new Error('backupOps not initialized — call setBackupOps() at boot')
+  return backupOps
+}
 
 // Floating global agent panel state — the payload `getState()` returns and the
 // `state` event emits (mirrors floating-global-agent-panel.ts currentStatePayload).
@@ -342,15 +372,9 @@ export function getPowerResumeEvents(): TypedEmitter<PowerResumeEventMap> {
 // main's `SlayzoneDb` is async (worker_thread). A standalone server without these
 // wired throws on the first app procedure call.
 export type AppDeps = {
-  // backup
-  backupList: () => Promise<BackupInfo[]>
-  backupCreate: (name?: string) => Promise<BackupInfo>
-  backupRename: (filename: string, name: string) => Promise<void>
-  backupDelete: (filename: string) => Promise<void>
-  backupRestore: (filename: string) => Promise<void>
-  backupGetSettings: () => Promise<BackupSettings>
-  backupSetSettings: (partial: Partial<BackupSettings>) => Promise<BackupSettings>
-  backupRevealInFinder: () => void
+  /** Relaunch the desktop app. Used by backup restore, which overwrites the
+   *  database file and must then restart everything pointing at it. */
+  appRelaunch: () => void
 
   // clipboard
   clipboardWriteFilePaths: (paths: string[]) => void
@@ -360,44 +384,17 @@ export type AppDeps = {
   // screenshot
   screenshotCaptureView: (viewId: string) => Promise<{ success: boolean; path?: string }>
 
-  // leaderboard
-  leaderboardGetLocalStats: () => Promise<LocalLeaderboardStats>
-
-  // export-import
-  exportAll: () => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>
-  exportProject: (
-    projectId: string
-  ) => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>
-  importBundle: () => Promise<{
-    success: boolean
-    canceled?: boolean
-    projectCount?: number
-    taskCount?: number
-    importedProjects?: Array<{ id: string; name: string }>
-    error?: string
-  }>
-  testExportAllToPath?: (
-    filePath: string
-  ) => Promise<{ success: boolean; path?: string; error?: string }>
-  testExportProjectToPath?: (
-    projectId: string,
-    filePath: string
-  ) => Promise<{ success: boolean; path?: string; error?: string }>
-  testImportFromPath?: (filePath: string) => Promise<{
-    success: boolean
-    canceled?: boolean
-    projectCount?: number
-    taskCount?: number
-    importedProjects?: Array<{ id: string; name: string }>
-    error?: string
-  }>
-  testSetTaskParent?: (
-    taskId: string,
-    parentId: string | null
-  ) => Promise<{ success: boolean; error?: string }>
-
   // usage
-  usageFetch: (force?: boolean) => Promise<ProviderUsage[]>
+  /** Providers are resolved from ctx.db by the caller — usage is an Electron
+   *  `net.fetch` over rows that live in the database, so each half runs where it
+   *  belongs instead of dragging a DB handle onto the host. */
+  usageFetch: (
+    providers: {
+      customRows: { id: string; label: string; usage_config: string }[]
+      builtinEnabled: Record<string, boolean>
+    },
+    force?: boolean
+  ) => Promise<ProviderUsage[]>
   usageTest: (
     config: UsageProviderConfig
   ) => Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }>
@@ -422,22 +419,6 @@ export type AppDeps = {
   // backs file-editor `showInFinder`. Forwarded over the capability bridge.
   shellShowItemInFolder: (absPath: string) => void
 
-  // db:feedback (6 ops — pure DB). Threads/messages typed as `unknown` so
-  // transport stays decoupled from @slayzone/feedback (host conforms via casts).
-  feedbackListThreads: () => Promise<unknown>
-  feedbackCreateThread: (input: {
-    id: string
-    title: string
-    discord_thread_id: string | null
-  }) => Promise<void>
-  feedbackGetMessages: (threadId: string) => Promise<unknown>
-  feedbackAddMessage: (input: {
-    id: string
-    thread_id: string
-    content: string
-  }) => Promise<void>
-  feedbackUpdateThreadDiscordId: (threadId: string, discordThreadId: string) => Promise<void>
-  feedbackDeleteThread: (threadId: string) => Promise<void>
 
   // app metadata (read-only)
   appGetVersion: () => string
@@ -450,6 +431,13 @@ export type AppDeps = {
   appGetDownloadsDir: () => Promise<string>
   appGetTrpcPort: () => Promise<number>
   appIsTestsPanelEnabled: () => boolean
+  /**
+   * Labs flags are CLIENT-scoped — they gate native menu items the host builds
+   * before any hub exists, so they live in the client store. The read already came
+   * through AppDeps; this is the matching write, without which the Labs tab would
+   * update a hub row nothing reads.
+   */
+  appSetLabFlag: (key: 'labs_tests_panel' | 'labs_loop_mode', on: boolean) => Promise<void>
   appIsLoopModeEnabled: () => boolean
   appGetZoomFactor: () => number
   appGetProtocolClientStatus: () => {
@@ -566,6 +554,40 @@ export type AppDeps = {
   // window.close — closes the window owning the connection (ctx.windowId).
   // Same effect as the `window:close` IPC (which uses event.sender).
   windowClose: (windowId: number) => void
+
+  /**
+   * The task/tab browser REGISTRY — distinct from `browser` below, which is the
+   * view-id-keyed WebContentsView manager.
+   *
+   * Exists so the REST browser routes can run on the hub, where the
+   * `tasks.browser_tabs` row they read and write lives. They used to be
+   * reverse-proxied to the desktop wholesale, purely because the old
+   * `BrowserAccess` handed back a live `WebContents` — which in turn forced the
+   * desktop to keep its own connection to the shared database. A handle can't
+   * cross the bridge; `(taskId, tabId)` can.
+   *
+   * `capturePageToFile` writes the PNG on the host so a full-page image never
+   * travels as a buffer, matching the `artifactRender*ToFile` slots.
+   */
+  browserTabs: {
+    getResolvedTabId: (taskId: string, tabId?: string) => Promise<string | null>
+    listTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
+    hasTab: (taskId: string, tabId?: string) => Promise<boolean>
+    /** Resolves once a tab registers; rejects on timeout. */
+    waitForRegistration: (
+      taskId: string,
+      opts: { tabId?: string; timeoutMs?: number }
+    ) => Promise<void>
+    execJs: (taskId: string, tabId: string | null, code: string) => Promise<unknown>
+    loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
+    getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
+    /** False when the captured image was empty. */
+    capturePageToFile: (
+      taskId: string,
+      tabId: string | null,
+      destPath: string
+    ) => Promise<boolean>
+  }
 
   // Browser view manager — heavy electron coupling, expose as opaque object
   // and call methods directly from procedures. All return types are unknown

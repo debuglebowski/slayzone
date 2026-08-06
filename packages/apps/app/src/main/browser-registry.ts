@@ -1,4 +1,5 @@
 import { webContents } from 'electron'
+import { writeFileSync } from 'node:fs'
 
 interface TaskEntry {
   activeTabId: string | null
@@ -103,9 +104,10 @@ export function clearBrowserRegistry(): void {
   pendingRegistrations.clear()
 }
 
-export function getBrowserWebContents(taskId: string, tabId?: string): Electron.WebContents | null {
-  return resolveWc(taskId, tabId)
-}
+// `getBrowserWebContents` used to be exported here. It is deliberately gone: handing
+// a live `WebContents` to a caller is what forced the REST browser routes to run on
+// the desktop instead of where their data lives. Use the `(taskId, tabId)`-keyed ops
+// below; `hasBrowserTab` covers the "is there a tab?" probe it was mostly used for.
 
 /** Returns the resolved tab id for a request — explicit when given, else the registry's active tab. */
 export function getResolvedBrowserTabId(taskId: string, tabId?: string): string | null {
@@ -126,6 +128,77 @@ export function listBrowserTabs(taskId: string): BrowserTabInfo[] {
     out.push({ tabId, active: entry.activeTabId === tabId })
   }
   return out
+}
+
+/**
+ * Handle-free operations on a registered tab, keyed by `(taskId, tabId)`.
+ *
+ * These are what the REST browser routes call now. The routes run in the HUB —
+ * where the `tasks.browser_tabs` row they read and write lives — and reach these
+ * over the capability bridge. A `WebContents` cannot cross that bridge; an id
+ * pair can, and every operation the routes actually needed turned out to be
+ * expressible against one (four members of the old `BrowserWc`, five call sites).
+ *
+ * Each resolves the tab at call time rather than closing over a handle, so a tab
+ * destroyed between resolution and use fails loudly here instead of throwing from
+ * inside Electron.
+ */
+function requireWc(taskId: string, tabId: string | null): Electron.WebContents {
+  const wc = resolveWc(taskId, tabId ?? undefined)
+  if (!wc) {
+    throw new Error(
+      `Browser tab not available (task ${taskId}${tabId ? `, tab ${tabId}` : ''}) — it may have closed.`
+    )
+  }
+  return wc
+}
+
+/** True when a live tab is registered — the "is the panel open?" probe. */
+export function hasBrowserTab(taskId: string, tabId?: string): boolean {
+  return resolveWc(taskId, tabId) !== null
+}
+
+export async function browserExecJs(
+  taskId: string,
+  tabId: string | null,
+  code: string
+): Promise<unknown> {
+  const frame = requireWc(taskId, tabId).mainFrame
+  if (!frame) throw new Error('No main frame')
+  return frame.executeJavaScript(code)
+}
+
+export async function browserLoadUrl(
+  taskId: string,
+  tabId: string | null,
+  url: string
+): Promise<void> {
+  await requireWc(taskId, tabId).loadURL(url)
+}
+
+export async function browserGetUrl(taskId: string, tabId: string | null): Promise<string | null> {
+  return resolveWc(taskId, tabId ?? undefined)?.getURL() ?? null
+}
+
+/** Captures to `destPath`; false when the image came back empty. The PNG is
+ *  written here so it never crosses the bridge as a buffer. */
+export async function browserCapturePageToFile(
+  taskId: string,
+  tabId: string | null,
+  destPath: string
+): Promise<boolean> {
+  const image = await requireWc(taskId, tabId).capturePage()
+  if (image.isEmpty()) return false
+  writeFileSync(destPath, image.toPNG())
+  return true
+}
+
+/** Void-returning wrapper: callers past the bridge only need "a tab exists now". */
+export async function awaitBrowserRegistration(
+  taskId: string,
+  opts: { tabId?: string; timeoutMs?: number } = {}
+): Promise<void> {
+  await waitForBrowserRegistration(taskId, opts)
 }
 
 export function waitForBrowserRegistration(

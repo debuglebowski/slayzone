@@ -26,6 +26,7 @@
     "@slayzone/hub-identity": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/types": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/runners": "workspace:*",

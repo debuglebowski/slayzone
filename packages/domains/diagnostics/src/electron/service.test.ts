@@ -14,6 +14,10 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 
+// Diagnostics config is client-local now; point it at a throwaway dir so the test
+// never reads or writes the developer's real ~/.slayzone.
+const testClientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-client-'))
+
 const h = await createTestHarness()
 // The diagnostics events table lives in a SEPARATE diagnostics DB in prod, so
 // the harness migrations don't create it — set it up here (matches the sibling
@@ -41,7 +45,7 @@ h.db.exec(`
 // `diagnosticsDb.batchTxn(...)`, which the raw handle doesn't expose (the insert
 // would throw + get swallowed → 0 events persisted). slayDb wraps the SAME
 // in-memory connection the schema above was created on.
-registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, h.slayDb)
+registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, { clientRoot: testClientRoot })
 
 // instrumentIpcMain wraps handlers as async, so all invoke() calls return Promises.
 // Run tests sequentially via top-level await to avoid ordering issues.

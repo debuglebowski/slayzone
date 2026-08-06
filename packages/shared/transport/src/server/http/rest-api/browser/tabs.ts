@@ -43,7 +43,7 @@ export function registerBrowserTabsRoute(app: Express, deps: RestApiDeps): void 
 
     const live = new Map<string, boolean>()
     let liveActive: string | null = null
-    for (const t of browser.listBrowserTabs(taskId)) {
+    for (const t of await browser.listBrowserTabs(taskId)) {
       live.set(t.tabId, true)
       if (t.active) liveActive = t.tabId
     }

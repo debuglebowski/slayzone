@@ -1,9 +1,9 @@
 /**
  * v123 — tag color dedup + uniqueness migration tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/apps/app/src/main/db/tag-color-dedup-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
  */
 import Database from 'better-sqlite3'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { migrations } from './index'
 
 let passed = 0
 let failed = 0
@@ -36,16 +36,34 @@ function expect(actual: unknown) {
   }
 }
 
+/**
+ * Build a DB migrated to exactly v122 — the schema v123 actually runs against.
+ * Migrations are forward-only, so the previous approach (migrate to latest,
+ * drop v123's index, rewind user_version to 122) replayed the whole v123..v158
+ * tail against a latest schema and died on the first unguarded DDL — v124's
+ * `ALTER TABLE automations ADD COLUMN catchup_on_start`.
+ */
 function freshDbAt122(): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  // Run all migrations first to get full schema, then roll back the unique
-  // index from v123 so we can seed collisions and re-run v123.
-  runMigrations(db)
-  db.exec('DROP INDEX IF EXISTS tags_project_color_unique')
-  db.pragma('user_version = 122')
+  for (const migration of migrations) {
+    if (migration.version > 122) break
+    db.transaction(() => {
+      migration.up(db)
+      db.pragma(`user_version = ${migration.version}`)
+    })()
+  }
   return db
+}
+
+function applyV123(db: Database.Database): void {
+  const migration = migrations.find((m) => m.version === 123)
+  if (!migration) throw new Error('migration v123 not found')
+  db.transaction(() => {
+    migration.up(db)
+    db.pragma('user_version = 123')
+  })()
 }
 
 function seedProject(db: Database.Database, id: string): void {
@@ -155,7 +173,7 @@ test('reassigns newer duplicate to next free preset, keeps oldest', () => {
       createdAt: '2024-02-01'
     })
 
-    runMigrations(db)
+    applyV123(db)
 
     expect(getTag(db, 'a')?.color).toBe('#22c55e')
     expect(getTag(db, 'a')?.text_color).toBe('#ffffff')
@@ -181,7 +199,7 @@ test('migrates custom (non-preset) colors to nearest preset', () => {
     // (#000000) does not. Migration must replace BOTH to land on preset pair.
     insertTag(db, { id: 'r', projectId, name: 'orange', color: '#f97316', textColor: '#000000' })
 
-    runMigrations(db)
+    applyV123(db)
 
     const tag = getTag(db, 'r')
     if (!tag) throw new Error('tag missing')
@@ -202,7 +220,7 @@ test('same color across different projects is allowed', () => {
     insertTag(db, { id: 'a', projectId: 'pa', name: 'g', color: '#22c55e' })
     insertTag(db, { id: 'b', projectId: 'pb', name: 'g', color: '#22c55e' })
 
-    runMigrations(db)
+    applyV123(db)
 
     expect(getTag(db, 'a')?.color).toBe('#22c55e')
     expect(getTag(db, 'b')?.color).toBe('#22c55e')
@@ -218,7 +236,7 @@ test('unique index blocks post-migration duplicate insert', () => {
     seedProject(db, 'p3')
     insertTag(db, { id: 't1', projectId: 'p3', name: 'first', color: '#3b82f6' })
 
-    runMigrations(db)
+    applyV123(db)
 
     let threw = false
     try {
@@ -237,8 +255,8 @@ test('idempotent — second run is no-op', () => {
   try {
     seedProject(db, 'p4')
     insertTag(db, { id: 'x', projectId: 'p4', name: 'x', color: '#22c55e' })
-    runMigrations(db)
-    runMigrations(db) // should not throw or duplicate work
+    applyV123(db)
+    applyV123(db) // re-entrant: must not throw or reshuffle colors
     expect(indexExists(db, 'tags_project_color_unique')).toBe(true)
   } finally {
     db.close()

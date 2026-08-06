@@ -1,3 +1,5 @@
+import { exportImportTxns } from './export-import-txns'
+import { resetForTestTxns } from './reset-for-test-txn'
 import { chatQueueTxns } from '@slayzone/terminal/db'
 import { taskTxns, artifactsTxns, templatesTxns } from '@slayzone/task/db'
 import { artifactTxns } from '@slayzone/task-artifacts/db'
@@ -74,9 +76,18 @@ export type DomainTxnRegistry = typeof chatQueueTxns &
   typeof tagsTxns &
   typeof projectsTxns &
   typeof automationsTxns &
-  typeof marketplaceTxns
+  typeof marketplaceTxns &
+  typeof exportImportTxns &
+  typeof resetForTestTxns
 
 export const domainTxnRegistry: DomainTxnRegistry = {
+  // Export/import moved here from `apps/app/src/main` so the HUB can dispatch it.
+  // The hub's `namedTxn` only knows this registry — app-only txns throw — which is
+  // precisely why export/import could not run anywhere but the Electron host, even
+  // though nothing in it touches Electron (better-sqlite3 as a TYPE, plus crypto).
+  ...exportImportTxns,
+  // E2E-only schema rebuild; harmless to register (nothing calls it in production).
+  ...resetForTestTxns,
   ...chatQueueTxns,
   ...taskTxns,
   ...artifactsTxns,

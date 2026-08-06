@@ -38,6 +38,24 @@ const WRITE_BATCH_SIZE = 1000
 const WRITE_FLUSH_INTERVAL_MS = 2_000
 const WRITE_QUEUE_CAP = 5_000
 
+let localConfigSource: (() => Partial<DiagnosticsConfig>) | null = null
+let localConfigSink: ((next: DiagnosticsConfig) => Promise<void>) | null = null
+
+/**
+ * Merge a partial over the defaults, IGNORING undefined members.
+ *
+ * A plain spread does not do this: `{ ...DEFAULT, enabled: undefined }` yields
+ * `enabled: undefined`, silently replacing a default of `true` with nothing. An
+ * unset key in the client store must mean "use the default", not "disable it" —
+ * for `enabled` that is the difference between diagnostics recording and not.
+ */
+function withDefaults(partial: Partial<DiagnosticsConfig>): DiagnosticsConfig {
+  const out = { ...DEFAULT_CONFIG }
+  for (const [k, v] of Object.entries(partial)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v
+  }
+  return out
+}
 let settingsDb: SlayzoneDb | null = null // main DB — reads/writes diagnostics config from settings table
 let diagnosticsDb: SlayzoneDb | null = null // separate diagnostics-only DB — writes events to slayzone.dev.diagnostics.sqlite
 let cachedConfig: DiagnosticsConfig | null = null
@@ -99,10 +117,23 @@ async function setSetting(db: SlayzoneDb, key: string, value: string): Promise<v
 // and flushes any events buffered before bind. Called once from the main
 // process (registerDiagnosticsHandlers) at boot.
 export function bindDiagnosticsDbs(opts: {
-  settingsDb: SlayzoneDb
+  /**
+   * Where the diagnostics CONFIG lives. Optional: the Electron host no longer
+   * has a shared-DB handle and passes `localConfig` instead. Note the two
+   * processes' caches were ALREADY independent — the renderer's config writes
+   * land in the side-car's singleton and the host's never saw them — so this
+   * does not introduce divergence, it makes the host's copy explicit and local.
+   */
+  settingsDb?: SlayzoneDb
   diagnosticsDb: SlayzoneDb
+  /** Synchronous local config source (the client store), used when settingsDb is absent. */
+  localConfig?: () => Partial<DiagnosticsConfig>
+  /** Persist a config change locally. Required whenever `localConfig` is given. */
+  saveLocalConfig?: (next: DiagnosticsConfig) => Promise<void>
 }): void {
-  settingsDb = opts.settingsDb // main DB — for config settings reads/writes
+  settingsDb = opts.settingsDb ?? null // shared DB — config reads/writes (hub only)
+  localConfigSource = opts.localConfig ?? null
+  localConfigSink = opts.saveLocalConfig ?? null
   diagnosticsDb = opts.diagnosticsDb // separate diagnostics DB — writes to slayzone.dev.diagnostics.sqlite
   cachedConfig = null
 
@@ -132,6 +163,10 @@ export function clearConfigCache(): void {
 // synchronous `getDiagnosticsConfig()` serves the hot path (per-event + IPC
 // wrapper) from that cache. Called on bind and after every config save.
 async function loadDiagnosticsConfig(): Promise<DiagnosticsConfig> {
+  if (localConfigSource) {
+    cachedConfig = withDefaults(localConfigSource())
+    return cachedConfig
+  }
   if (!settingsDb) return DEFAULT_CONFIG
   if (cachedConfig) return cachedConfig
   // The reads can reject — the `settings` table may not exist yet (a supervised
@@ -172,6 +207,7 @@ async function loadDiagnosticsConfig(): Promise<DiagnosticsConfig> {
 // back to defaults. Keeping this sync preserves the fire-and-forget contract of
 // recordDiagnosticEvent and the IPC instrumentation hot path.
 export function getDiagnosticsConfig(): DiagnosticsConfig {
+  if (localConfigSource) return cachedConfig ?? withDefaults(localConfigSource())
   if (!settingsDb) return DEFAULT_CONFIG
   return cachedConfig ?? DEFAULT_CONFIG
 }
@@ -179,6 +215,12 @@ export function getDiagnosticsConfig(): DiagnosticsConfig {
 export async function saveDiagnosticsConfig(
   partial: Partial<DiagnosticsConfig>
 ): Promise<DiagnosticsConfig> {
+  if (localConfigSource) {
+    const next = withDefaults({ ...localConfigSource(), ...partial })
+    await localConfigSink?.(next)
+    cachedConfig = next
+    return next
+  }
   if (!settingsDb) return DEFAULT_CONFIG
   const next: DiagnosticsConfig = {
     ...(await loadDiagnosticsConfig()),

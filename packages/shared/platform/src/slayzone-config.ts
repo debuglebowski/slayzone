@@ -185,7 +185,7 @@ function coerceRunnerConfig(raw: Record<string, unknown>): RunnerConfig {
 }
 
 /** Read + parse a JSON file. A missing/corrupt/non-object file resolves to `null` (never throws) — the caller decides the empty-result shape. */
-function readJsonObject(path: string): Record<string, unknown> | null {
+export function readJsonObject(path: string): Record<string, unknown> | null {
   let raw: string
   try {
     raw = readFileSync(path, 'utf8')
@@ -220,7 +220,7 @@ function readJsonObject(path: string): Record<string, unknown> | null {
  * WINDOWS CAVEAT: the mode (0700/0600) is a POSIX permission bitmask and is a
  * no-op on Windows — NTFS ACLs are not touched. The atomic tmp+rename still holds.
  */
-function writeJsonAtomic(path: string, data: unknown): void {
+export function writeJsonAtomic(path: string, data: unknown): void {
   const dir = dirname(path)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`

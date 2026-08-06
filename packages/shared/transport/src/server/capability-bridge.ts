@@ -1,8 +1,9 @@
 import { z } from 'zod'
+import { initTRPC } from '@trpc/server'
+import superjson from 'superjson'
 import { observable } from '@trpc/server/observable'
 import { EventEmitter } from 'node:events'
 import { settingsEvents } from '@slayzone/settings/server'
-import { router, publicProcedure } from './trpc'
 import {
   getAppDeps,
   getMenuEvents,
@@ -111,6 +112,24 @@ const POWER_EVENTS = ['resume'] as const
 const THEME_EVENTS = ['theme:changed'] as const
 
 type AnyEmitter = AppDeps['browser']['events']
+
+/**
+ * This router has its OWN tRPC instance with an EMPTY context, deliberately.
+ *
+ * Every procedure here resolves its implementation from the AppDeps/menu/power
+ * registries and ignores the context entirely — but it used to be built on the
+ * shared `TrpcContext`, whose `db: SlayzoneDb` is required. That meant the
+ * desktop had to hand a live database handle to `createContext` purely to
+ * satisfy a type nothing read, and so the Electron host kept a connection to the
+ * shared DB open for a router that never queries it.
+ *
+ * Nothing merges this into `appRouter` (it is mounted alone, on the desktop
+ * bridge listener), so a separate instance costs nothing and makes "the bridge
+ * has no database" true by construction rather than by discipline.
+ */
+const t = initTRPC.context<Record<string, never>>().create({ transformer: superjson })
+const router = t.router
+const publicProcedure = t.procedure
 
 export const capabilityBridgeRouter = router({
   // Forward a single AppDeps method call to the host. Sync- and async-typed

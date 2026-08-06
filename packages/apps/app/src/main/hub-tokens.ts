@@ -29,12 +29,28 @@ export function setHubTokenCipher(c: TokenCipher | null): void {
   cipher = c
 }
 
-function readRaw(dir: string): Record<string, string> {
+/**
+ * Reads the token map, falling back to `legacyDir` (the old hub-root location).
+ *
+ * READ-ONLY fallback, never a copy — this file holds bearer tokens, and
+ * relocating credentials as a side effect of an unrelated boot is exactly what
+ * `cli-state.ts` refuses to do. The next `setHubToken` (i.e. the next deliberate
+ * sign-in) writes to the new location.
+ */
+function readRaw(dir: string, legacyDir?: string): Record<string, string> {
   try {
     const parsed = JSON.parse(readFileSync(join(dir, FILE_NAME), 'utf8'))
     if (parsed && typeof parsed === 'object') return parsed as Record<string, string>
   } catch {
-    /* missing / corrupt → empty */
+    /* missing / corrupt → try legacy, then empty */
+  }
+  if (legacyDir) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(legacyDir, FILE_NAME), 'utf8'))
+      if (parsed && typeof parsed === 'object') return parsed as Record<string, string>
+    } catch {
+      /* missing / corrupt → empty */
+    }
   }
   return {}
 }
@@ -73,8 +89,8 @@ export function getHubToken(dir: string, hubId: string): string | null {
 }
 
 /** All hubId → token pairs the renderer needs to open authed connections. */
-export function getAllHubTokens(dir: string): Record<string, string> {
-  const enc = readRaw(dir)
+export function getAllHubTokens(dir: string, legacyDir?: string): Record<string, string> {
+  const enc = readRaw(dir, legacyDir)
   if (!cipher?.isEncryptionAvailable()) return {}
   const out: Record<string, string> = {}
   for (const [hubId, blob] of Object.entries(enc)) {

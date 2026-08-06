@@ -19,6 +19,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import express from 'express'
+import { getStorageDir } from '@slayzone/platform'
 import {
   createTestHarness,
   test,
@@ -27,10 +28,14 @@ import {
 } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
-// Artifact files live at <ROOT>/storage/artifacts, blobs at <ROOT>/storage/blobs.
+// Artifact files live at `<storage dir>/artifacts`, blobs at `<storage dir>/blobs`.
+// The storage dir is DERIVED from the same platform resolver the routes use, not
+// spelled out here: it is `<ROOT>` itself today (the `storage/` subfolder went away
+// when the root became role-scoped), and a hardcoded segment pointed every path
+// assertion below at a directory nothing writes to.
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-artifacts-versions-'))
 process.env.SLAYZONE_ROOT = tmpRoot
-const storageDir = path.join(tmpRoot, 'storage')
+const storageDir = getStorageDir()
 
 const { registerArtifactsVersionsRoutes } = await import('./versions.js')
 const { registerArtifactsContentRoutes } = await import('./content.js')

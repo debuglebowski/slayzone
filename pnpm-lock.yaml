@@ -506,6 +506,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/types':
+        specifier: workspace:*
+        version: link:../../shared/types
       '@trpc/client':
         specifier: ^11.17.0
         version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
@@ -2125,6 +2128,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport

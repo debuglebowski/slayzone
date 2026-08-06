@@ -21,6 +21,7 @@ import {
   setAgentLifecycleEvents,
   setTaskTriggerBus,
   setAppDeps,
+  setBackupOps,
   setPtyDeps,
   setChatDeps,
   setAuthEvents,
@@ -89,7 +90,9 @@ import {
   hasSessionUserInput,
   configureTransport,
   createDbChatDataOps,
+  backfillChatModes,
   setIdleCloseConfigGetter,
+  setPtyEnricher,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import { SettingsService } from '@slayzone/settings/server'
@@ -138,6 +141,11 @@ import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runner
 import { createRunnerAuthAdapters } from './runner-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
+import { wireHostKillStamp } from './host-kill.js'
+import { wireIntegrationPush } from './integrations-push.js'
+import { buildBackupOps } from './backup.js'
+import { getDatabasePathFromEnv } from './db.js'
+import { createPtyEnricher } from '@slayzone/task-terminals/server'
 
 /**
  * Composition root for the standalone server: populates every transport
@@ -419,7 +427,43 @@ export function composeServer(opts: {
   // so regressed dead at the Slice 9 cutover; restored here in the data-authority
   // boot. The watcher feeds `artifactWatcherEvents` → the tRPC
   // `artifacts.onContentChanged` subscription. Purge is fire-and-forget.
+  // E2E baseline: skip the onboarding wizard. Seeded HERE, deterministically, as
+  // part of the boot sequence that ends with this process listening — the host
+  // cannot write it (no DB handle) and doing it from there after the sidecar came
+  // up was a fire-and-forget race that could leave the first spec staring at the
+  // onboarding screen.
+  if (process.env.PLAYWRIGHT === '1') {
+    bootBestEffort('e2e-onboarding-seed', () =>
+      db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')")
+    )
+  }
   bootBestEffort('startup-purge', () => purgeStaleAndOrphanedTasks(db))
+  // Seed v1 versions for artifacts that predate version history. Idempotent, and
+  // a domain txn (`artifact-txns.ts`), so `domainTxnRegistry` dispatches it here
+  // unchanged. Ran on the Electron host before — which is why a STANDALONE hub
+  // never seeded at all, leaving pre-history artifacts permanently version-less.
+  // One-shot: backfill `chatMode` for tasks predating the chat-mode UI, so
+  // upgraded users keep their `--allow-dangerously-skip-permissions` behavior
+  // instead of suddenly hitting denials. Was host-only; standalone never ran it.
+  bootBestEffort('chat-mode-backfill', async () => {
+    const stats = await backfillChatModes(db)
+    if (stats.updated > 0) {
+      console.log(
+        `[chat-handlers] backfillChatModes: ${stats.updated}/${stats.scanned} tasks tagged 'bypass'`
+      )
+    }
+  })
+  bootBestEffort('artifact-version-seed', async () => {
+    const report = await db.namedTxn('artifacts:seed-initial-versions', {
+      dataDir: dataRoot,
+      artifactsDir: join(dataRoot, 'artifacts')
+    })
+    if (report.seeded > 0 || report.skippedMissing > 0) {
+      console.log(
+        `[artifact-versions] seeded=${report.seeded} skippedMissing=${report.skippedMissing}`
+      )
+    }
+  })
   startArtifactWatcher(join(dataRoot, 'artifacts'))
 
   // --- PTY + chat runtime --------------------------------------------------
@@ -485,6 +529,14 @@ export function composeServer(opts: {
   // `listAutoRestoreTasks` is always empty and a restart lands every task on the
   // Start gate. See ./tab-flag-recorders.ts.
   wireTabFlagRecorders(db)
+  // Host-kill stamp: `onHostKillHandler` fires in whichever process owns the pty
+  // sessions, which is this one. The Electron host used to register it against its
+  // own (empty) session registry, so the stamp was never written in local mode.
+  wireHostKillStamp(db)
+  // Pty enricher: decorates PtyInfo with task/tab context for the renderer's
+  // session views. Registered on the host before, against a pty runtime it no
+  // longer owns — the enricher is consulted where the sessions are, i.e. here.
+  setPtyEnricher(createPtyEnricher(db))
 
   // Idle-close (hibernation) config. Wired HERE because the pty runtime lives in
   // this process (slice 9) — `isHibernateEligible` reads this getter, and with it
@@ -595,8 +647,36 @@ export function composeServer(opts: {
   initAiConfigOps(db)
 
   // --- Integrations + feedback ------------------------------------------------
-  if (opts.standalone) ensureIntegrationSchema(db)
-  setIntegrationOps(createIntegrationOps(db))
+  // Unconditional now. It was standalone-only because the Electron host ran it in
+  // supervised mode — the host no longer opens this database, so if the hub skipped
+  // it the integrations tables would simply never be created.
+  ensureIntegrationSchema(db)
+  // Backup lives with the database now. `supervised` gates restore: on a hub a
+  // client merely connects to, a whole-DB overwrite plus an app relaunch is not
+  // something one client should be able to do to everyone.
+  setBackupOps(
+    buildBackupOps({
+      db,
+      dataRoot,
+      dbPath: getDatabasePathFromEnv(),
+      supervised: !opts.standalone,
+      closeDb: () => db.close(),
+      appRelaunch: () => bridge?.appDeps.appRelaunch(),
+      shellOpenPath: (p) => void (bridge ? bridge.appDeps.shellOpenPath(p) : nativeOpenPath(p))
+    })
+  )
+  const integrationHandles = createIntegrationOps(db)
+  setIntegrationOps(integrationHandles)
+  // Push local task edits out to Linear/GitHub. Listens on `taskBus` — the SAME
+  // bus the task ops emit through (`ipcMain?.emit(...)` with an injected bus).
+  // The Electron host held the only listeners, on its real `ipcMain`, which the
+  // ops stopped using when they moved here: push-on-edit has been silently dead.
+  wireIntegrationPush({
+    db,
+    taskBus,
+    notifyTasksChanged: notifyRenderer,
+    pushGithubTask: integrationHandles.pushGithubTask
+  })
   // Credential encryption needs Electron safeStorage, absent in this
   // ELECTRON_RUN_AS_NODE process. Supervised: forward encrypt/decrypt to the
   // host's safeStorage over the capability bridge (base64 on the wire).
@@ -657,27 +737,29 @@ export function composeServer(opts: {
   } else {
     const silentEmitter = new EventEmitter()
     setAppDeps({
-    // backup — file-level DB copies + Finder reveal live with the Electron host
-    // until the slice-7 router split relocates the data half.
-    backupList: stub('backupList'),
-    backupCreate: stub('backupCreate'),
-    backupRename: stub('backupRename'),
-    backupDelete: stub('backupDelete'),
-    backupRestore: stub('backupRestore'),
-    backupGetSettings: stub('backupGetSettings'),
-    backupSetSettings: stub('backupSetSettings'),
-    backupRevealInFinder: stub('backupRevealInFinder'),
+    // No desktop to relaunch when standalone — restore is refused here anyway
+    // (see buildBackupOps `supervised`), so this should never be reached.
+    appRelaunch: stub('appRelaunch'),
+    // Task/tab browser registry — there are no WebContentsViews here, so every
+    // member fails loud rather than pretending an empty registry (which would make
+    // `hasTab` answer "no tab" and turn a missing capability into a 404).
+    browserTabs: {
+      getResolvedTabId: stub('browserTabs.getResolvedTabId'),
+      listTabs: stub('browserTabs.listTabs'),
+      hasTab: stub('browserTabs.hasTab'),
+      waitForRegistration: stub('browserTabs.waitForRegistration'),
+      execJs: stub('browserTabs.execJs'),
+      loadUrl: stub('browserTabs.loadUrl'),
+      getUrl: stub('browserTabs.getUrl'),
+      capturePageToFile: stub('browserTabs.capturePageToFile')
+    },
 
     clipboardWriteFilePaths: stub('clipboardWriteFilePaths'),
     clipboardReadFilePaths: stub('clipboardReadFilePaths'),
     clipboardHasFiles: stub('clipboardHasFiles'),
 
     screenshotCaptureView: stub('screenshotCaptureView'),
-    leaderboardGetLocalStats: stub('leaderboardGetLocalStats'),
 
-    exportAll: stub('exportAll'),
-    exportProject: stub('exportProject'),
-    importBundle: stub('importBundle'),
 
     usageFetch: stub('usageFetch'),
     usageTest: stub('usageTest'),
@@ -697,12 +779,6 @@ export function composeServer(opts: {
     shellOpenPath: nativeOpenPath,
     shellShowItemInFolder: nativeShowItemInFolder,
 
-    feedbackListThreads: feedbackOps.listThreads,
-    feedbackCreateThread: feedbackOps.createThread,
-    feedbackGetMessages: feedbackOps.getMessages,
-    feedbackAddMessage: feedbackOps.addMessage,
-    feedbackUpdateThreadDiscordId: feedbackOps.updateThreadDiscordId,
-    feedbackDeleteThread: feedbackOps.deleteThread,
 
     appGetVersion: () => '0.0.0-server',
     // Real directory (node os.homedir) — it is only a dialog default, and the
@@ -712,6 +788,8 @@ export function composeServer(opts: {
     // Graceful read-path defaults (flag getters / cosmetics) — a throwing stub
     // here would break harmless renderer reads post-flip for no gain.
     appIsTestsPanelEnabled: () => false,
+    // No desktop client to hold the flag when standalone.
+    appSetLabFlag: stub('appSetLabFlag'),
     appIsLoopModeEnabled: () => false,
     appGetZoomFactor: () => 1,
     appGetProtocolClientStatus: () => ({
@@ -1021,9 +1099,51 @@ export function composeServer(opts: {
     windowActions: bridge
       ? { raiseMainWindow: () => void bridge.appDeps.appRaiseMainWindow() }
       : undefined,
-    // browser / artifactExport: Electron-only (live WebContents / offscreen
-    // renderer). Their routes are reverse-proxied to the host's REST in server.ts
-    // (supervised); absent here so a non-proxied hit still 501s in standalone.
+    // Artifact export runs HERE — the `task_artifacts` row it needs is in THIS
+    // process's DB. Only the offscreen render crosses to the Electron host, via
+    // the same three AppDeps slots the tRPC download path already uses. That is
+    // the inversion: previously the whole handler was reverse-proxied to the
+    // desktop, which then needed its own connection to the shared DB purely to
+    // answer a request this process had just forwarded to it.
+    //
+    // Absent when standalone (no host to render on) → the routes 501, unchanged.
+    artifactExport: bridge
+      ? {
+          buildExportHtml: (content, mode, title) =>
+            bridge.appDeps.artifactBuildExportHtml(content, mode, title),
+          renderPdfToFile: (content, mode, title, destPath) =>
+            bridge.appDeps.artifactRenderPdfToFile(content, mode, title, destPath),
+          renderPngToFile: (content, mode, title, destPath) =>
+            bridge.appDeps.artifactRenderPngToFile(content, mode, title, destPath)
+        }
+      : undefined,
+    // Browser routes also run HERE now: they read and write `tasks.browser_tabs`,
+    // which is in THIS process's DB, and reach the host only for operations on the
+    // live WebContents. That pairing is why they used to be proxied wholesale —
+    // the old BrowserAccess handed back a handle, so the handler had to run where
+    // the handle was, which is not where the row is.
+    //
+    // Absent when standalone (no WebContentsViews) → the routes 501, unchanged.
+    browser: bridge
+      ? {
+          // Every member is async — the registry lives on the host, so each one is
+          // a bridge round-trip. `BrowserAccess` was made async wholesale rather
+          // than cached here on purpose: a snapshot of "which tabs exist" goes
+          // stale the moment a user closes one, and these routes exist to drive a
+          // live browser.
+          getResolvedBrowserTabId: (taskId, tabId) =>
+            bridge.appDeps.browserTabs.getResolvedTabId(taskId, tabId),
+          listBrowserTabs: (taskId) => bridge.appDeps.browserTabs.listTabs(taskId),
+          hasBrowserTab: (taskId, tabId) => bridge.appDeps.browserTabs.hasTab(taskId, tabId),
+          waitForBrowserRegistration: (taskId, opts) =>
+            bridge.appDeps.browserTabs.waitForRegistration(taskId, opts),
+          execJs: (taskId, tabId, code) => bridge.appDeps.browserTabs.execJs(taskId, tabId, code),
+          loadUrl: (taskId, tabId, url) => bridge.appDeps.browserTabs.loadUrl(taskId, tabId, url),
+          getUrl: (taskId, tabId) => bridge.appDeps.browserTabs.getUrl(taskId, tabId),
+          capturePageToFile: (taskId, tabId, destPath) =>
+            bridge.appDeps.browserTabs.capturePageToFile(taskId, tabId, destPath)
+        }
+      : undefined,
     pty: {
       listPtys,
       hasPty,

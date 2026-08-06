@@ -1,13 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
-import {
-  capabilityBridgeRouter,
-  createMcpRestApp,
-  type McpRestAppHandle,
-  type RestApiDeps
-} from '@slayzone/transport/server'
-import type { SlayzoneDb } from '@slayzone/platform'
+import { capabilityBridgeRouter } from '@slayzone/transport/server'
 
 /**
  * Desktop-side bridge server (slice 9 local cutover; cap+REST merged).
@@ -20,15 +14,16 @@ import type { SlayzoneDb } from '@slayzone/platform'
  *    (browser-WCV, clipboard, dialogs, backup, task-windows, floating-agent,
  *    native menus, …) over `capabilityBridgeRouter`, and desktop-originated
  *    events (native menus, power-resume, theme) stream back through it.
- *  • HTTP `/api/*` — the REST routes whose handlers need a live WebContents /
- *    offscreen renderer (browser-automation + artifact export). The side-car
- *    reverse-proxies just those route groups here.
+ *
+ * That is now the ONLY thing it serves. It used to also host `/api/*` as a
+ * reverse-proxy target for REST routes the side-car couldn't run itself — which
+ * required handing it a live `SlayzoneDb`, because those handlers read the very
+ * tables the side-car owns. Inverting them (handler stays with the data, only the
+ * Electron step crosses) removed both the proxy and the database handle.
  *
  * The bridge procedures resolve `getAppDeps()`/`getMenuEvents()`/
  * `getPowerResumeEvents()` from the transport registries — the desktop's REAL
- * impls (wired via `setAppDeps()` before this server starts). They ignore the
- * tRPC context, but `createContext` must satisfy the router's context type, so
- * we thread the desktop db + dataRoot through.
+ * impls, wired via `setAppDeps()` before this server starts.
  */
 export type DesktopBridgeServerHandle = {
   /** OS-assigned bound port. Advertise as the authority `127.0.0.1:<port>` (WS on `/cap`). */
@@ -37,24 +32,28 @@ export type DesktopBridgeServerHandle = {
 }
 
 export async function startDesktopBridgeServer(opts: {
-  db: SlayzoneDb
-  dataRoot: string
-  /** REST deps for the Electron-only `/api/*` routes the side-car proxies here. */
-  restDeps: RestApiDeps
   host?: string
 }): Promise<DesktopBridgeServerHandle> {
   const host = opts.host ?? '127.0.0.1'
 
-  // The REST/MCP express app carries every HTTP request; the capability bridge
-  // rides the same listener as a WS upgrade scoped to `/cap`.
-  const restApp: McpRestAppHandle = createMcpRestApp(opts.restDeps)
-  const httpServer: Server = createServer(restApp.app)
+  // Bare listener — no express app. The `/api/*` reverse-proxy target is gone:
+  // every route that used to be proxied here now runs in the hub against its own
+  // db and reaches back through `/cap` for the Electron step alone. Dropping it
+  // also closes a real hole — this listener used to serve the ENTIRE
+  // `createMcpRestApp` surface unauthenticated on loopback, with only the hub's
+  // gate above the proxy keeping it honest.
+  const httpServer: Server = createServer((_req, res) => {
+    res.writeHead(404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: 'desktop bridge serves /cap (WS) only' }))
+  })
 
   const wss = new WebSocketServer({ server: httpServer, path: '/cap' })
   const handler = applyWSSHandler({
     wss,
     router: capabilityBridgeRouter,
-    createContext: () => ({ db: opts.db, dataRoot: opts.dataRoot })
+    // Empty by construction: the bridge router has its own context type and
+    // resolves everything from the AppDeps registries. No database reaches here.
+    createContext: () => ({})
   })
 
   await new Promise<void>((resolve, reject) => {
@@ -82,11 +81,6 @@ export async function startDesktopBridgeServer(opts: {
       }
       try {
         wss.close()
-      } catch {
-        /* ignore */
-      }
-      try {
-        restApp.dispose()
       } catch {
         /* ignore */
       }

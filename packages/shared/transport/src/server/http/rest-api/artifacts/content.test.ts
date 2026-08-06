@@ -15,6 +15,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import express from 'express'
+import { getStorageDir } from '@slayzone/platform'
 import {
   createTestHarness,
   test,
@@ -23,12 +24,19 @@ import {
 } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
-// The artifact store roots its on-disk files at <ROOT>/storage/artifacts — point
+// The artifact store roots its on-disk files at `<storage dir>/artifacts` — point
 // ROOT at a throwaway dir BEFORE importing the routes (they read it lazily, but
 // the store's blob dir is derived per call, so set it up front regardless).
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-artifacts-content-'))
 process.env.SLAYZONE_ROOT = tmpRoot
-const artifactsDir = path.join(tmpRoot, 'storage', 'artifacts')
+// Derive the fixture paths from the SAME resolver the routes use (rest-api's
+// `getArtifactsDataRoot` → platform `getStorageDir`) instead of spelling the
+// layout out here. The `storage/` subfolder was removed when the root became
+// role-scoped; a hardcoded segment silently pointed these assertions at a
+// directory nothing writes to.
+const storageDir = getStorageDir()
+const artifactsDir = path.join(storageDir, 'artifacts')
+const blobsDir = path.join(storageDir, 'blobs')
 
 const { registerArtifactsContentRoutes } = await import('./content.js')
 const { registerArtifactsCrudRoutes } = await import('./crud.js')
@@ -135,9 +143,7 @@ await describe('POST /api/artifacts — streamed body (query params) create', ()
     expect(version.version_num).toBe(1)
     expect(version.size).toBe(BINARY.length)
     const blob = path.join(
-      tmpRoot,
-      'storage',
-      'blobs',
+      blobsDir,
       version.content_hash.slice(0, 2),
       version.content_hash.slice(2)
     )

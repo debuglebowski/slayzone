@@ -1,10 +1,10 @@
 import type { Express } from 'express'
-import { ensureBrowserWc, execJs } from './shared'
+import { ensureBrowserTab, execJs } from './shared'
 import type { RestApiDeps } from '../types'
 
 export function registerBrowserContentRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/browser/content', async (req, res) => {
-    const bwc = await ensureBrowserWc(
+    const bwc = await ensureBrowserTab(
       deps,
       req.query.taskId as string,
       (req.query.panel as 'visible' | 'hidden') ?? 'hidden',
@@ -15,7 +15,9 @@ export function registerBrowserContentRoute(app: Express, deps: RestApiDeps): vo
     if (!bwc) return
     try {
       const content = await execJs(
-        bwc.wc,
+        deps.browser!,
+        req.query.taskId as string,
+        bwc.tabId,
         `(() => {
         const url = location.href;
         const title = document.title;

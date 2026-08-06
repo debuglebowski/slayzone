@@ -1,6 +1,8 @@
 import { getSlayzoneHomeDir, getSupervisedRoot } from '@slayzone/platform'
 import { ensureChannelScopedStorage } from './channel-storage-migration'
+import { dirname, join } from 'node:path'
 import { ensureStorageDir } from './storage-migration'
+import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
 
 /**
  * The desktop app's storage dir = its CHANNEL-SCOPED HUB ROOT,
@@ -47,6 +49,17 @@ export function initStorageDir(legacyStateDir: string, packaged: boolean): strin
     hubRoot: target,
     runnerRoot: getSupervisedRoot('runner'),
     packaged
+  })
+  // omgslayzone → userData. MOVED HERE from the DB worker, which ran it AFTER
+  // `ensureStorageDir` below had already migrated userData into the channel root
+  // and written its sentinel — so on an omgslayzone-era upgrade the legacy DB
+  // landed in userData and was stranded there permanently. Ordering: the channel
+  // migration is the newest source and goes first; this must land in userData
+  // BEFORE the userData→root step reads it. `copyDbTriplet` skips an existing
+  // destination, so step 3 correctly no-ops when step 1 already planted a DB.
+  migrateLegacyDatabaseIfNeeded({
+    oldUserData: join(dirname(legacyStateDir), 'omgslayzone'),
+    newUserData: legacyStateDir
   })
   ensureStorageDir(legacyStateDir, target, packaged)
   return target

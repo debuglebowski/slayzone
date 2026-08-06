@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { ensureBrowserWc, ALLOWED_NAVIGATE_SCHEMES } from './shared'
+import { ensureBrowserTab, ALLOWED_NAVIGATE_SCHEMES } from './shared'
 import { markTabAgentTouched } from './mark-touched'
 import type { RestApiDeps } from '../types'
 
@@ -20,11 +20,11 @@ export function registerBrowserNavigateRoute(app: Express, deps: RestApiDeps): v
       res.status(400).json({ error: 'Invalid URL' })
       return
     }
-    const result = await ensureBrowserWc(deps, taskId, panel, res, url, tabId)
+    const result = await ensureBrowserTab(deps, taskId, panel, res, url, tabId)
     if (!result) return
     try {
-      // Skip loadURL when panel was just auto-opened — the renderer already created a tab with this URL
-      if (!result.autoOpened) await result.wc.loadURL(url)
+      // Skip loadUrl when panel was just auto-opened — the renderer already created a tab with this URL
+      if (!result.autoOpened) await deps.browser!.loadUrl(taskId, result.tabId, url)
       // Auto-open counts as "opening" the tab, not interacting with it. Skip
       // the trip flag so first-navigate-that-opens-panel doesn't auto-lock.
       if (!result.autoOpened)
@@ -36,7 +36,7 @@ export function registerBrowserNavigateRoute(app: Express, deps: RestApiDeps): v
           deps.legacyBroadcast,
           deps.menu
         )
-      res.json({ ok: true, url: result.wc.getURL() })
+      res.json({ ok: true, url: await deps.browser!.getUrl(taskId, result.tabId) })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }

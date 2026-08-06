@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { dirname } from 'node:path'
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { getEffectiveRenderMode, canExportAsPng } from '@slayzone/task/shared'
 import { getArtifactFilePath } from './shared'
 import type { RestApiDeps } from '../types'
@@ -41,16 +41,16 @@ export function registerArtifactsExportPngRoute(app: Express, deps: RestApiDeps)
     }
     const content = readFileSync(srcPath, 'utf-8')
 
-    const html = exporter.buildPngHtml(content, mode, title)
-    if (!html) {
-      res.status(500).json({ error: 'Failed to build PNG HTML (mermaid not available)' })
-      return
-    }
-
     try {
-      const pngBuffer = await exporter.renderToPng(html)
+      // The renderer writes destPath itself; only the mkdir stays here. `false`
+      // means buildPngHtml declined the mode (mermaid unavailable) — same 500 the
+      // pre-inversion null-html branch produced.
       mkdirSync(dirname(outputPath), { recursive: true })
-      writeFileSync(outputPath, pngBuffer)
+      const rendered = await exporter.renderPngToFile(content, mode, title, outputPath)
+      if (!rendered) {
+        res.status(500).json({ error: 'Failed to build PNG HTML (mermaid not available)' })
+        return
+      }
       res.json({ ok: true, path: outputPath })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })

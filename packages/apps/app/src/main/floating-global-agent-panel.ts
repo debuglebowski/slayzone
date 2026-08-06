@@ -5,7 +5,7 @@ import { is } from '@electron-toolkit/utils'
 import { redirectSessionWindow, getBufferSince, ptyEvents } from '@slayzone/terminal/electron'
 import { toElectronAccelerator, shortcutDefinitions } from '@slayzone/shortcuts'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { getDatabase } from './db'
+import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
 import {
   reduce,
   type State,
@@ -110,21 +110,15 @@ function executeAction(action: Action): void {
       if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
         const ok = redirectSessionWindow(action.sessionId, floatingGlobalAgentPanelWindow)
         if (ok) {
-          const sid = action.sessionId
-          // DB read is async (worker-thread proxy); resolve session meta then
-          // notify the floating window. Fire-and-forget — the FSM doesn't await.
-          void readSessionMeta(sid).then((meta) => {
-            currentFloatingSession = meta
-            if (
-              floatingGlobalAgentPanelWindow &&
-              !floatingGlobalAgentPanelWindow.isDestroyed()
-            ) {
-              floatingGlobalAgentPanelWindow.webContents.send(
-                'floating-global-agent-panel:session-changed'
-              ) // legacy IPC (slice 5 drops)
-            }
-            floatingGlobalAgentPanelEvents.emit('session-changed') // tRPC app.floatingAgent.onSessionChanged source
-          })
+          // Synchronous now: the meta came in with the detach call instead of
+          // from an async settings read.
+          currentFloatingSession = resolveSessionMeta(action.sessionId)
+          if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
+            floatingGlobalAgentPanelWindow.webContents.send(
+              'floating-global-agent-panel:session-changed'
+            ) // legacy IPC (slice 5 drops)
+          }
+          floatingGlobalAgentPanelEvents.emit('session-changed') // tRPC app.floatingAgent.onSessionChanged source
         }
       }
       return
@@ -227,10 +221,8 @@ function executeAction(action: Action): void {
         clearTimeout(saveExpandedSizeTimer)
         saveExpandedSizeTimer = null
       }
-      // Fire-and-forget async DB write (worker-thread proxy).
-      void getDatabase()
-        .prepare("DELETE FROM settings WHERE key = 'floatingGlobalAgentPanelExpandedSize'")
-        .run()
+      // Client-local: this is the size of a native window on THIS display.
+      void updateClientSettings({ floatingAgentPanel: { config: readClientSettings().floatingAgentPanel?.config } })
       broadcastState()
       return
   }
@@ -252,23 +244,19 @@ function broadcastState(): void {
   floatingGlobalAgentPanelEvents.emit('state', payload) // tRPC app.floatingAgent.onState source
 }
 
-async function readSessionMeta(
+/** Set by `detach()` immediately before the FSM dispatch that consumes it. */
+let pendingSessionMeta: { cwd?: string; mode?: string } | null = null
+
+function resolveSessionMeta(sessionId: string): {
   sessionId: string
-): Promise<{ sessionId: string; cwd: string; mode: string }> {
-  const db = getDatabase()
-  const row = (await db
-    .prepare("SELECT value FROM settings WHERE key = 'globalAgentPanelState'")
-    .get()) as { value: string } | undefined
-  let cwd = ''
-  let mode = 'claude-code'
-  try {
-    const s = row?.value ? JSON.parse(row.value) : {}
-    cwd = s.cwd ?? ''
-    mode = s.mode ?? 'claude-code'
-  } catch {
-    /* defaults */
+  cwd: string
+  mode: string
+} {
+  return {
+    sessionId,
+    cwd: pendingSessionMeta?.cwd ?? '',
+    mode: pendingSessionMeta?.mode ?? 'claude-code'
   }
-  return { sessionId, cwd, mode }
 }
 
 // --- Anchor Math ---
@@ -351,22 +339,7 @@ function applyBounds(animate: boolean): void {
 }
 
 async function readExpandedSize(): Promise<void> {
-  const db = getDatabase()
-  const row = (await db
-    .prepare("SELECT value FROM settings WHERE key = 'floatingGlobalAgentPanelExpandedSize'")
-    .get()) as { value: string } | undefined
-  try {
-    if (row?.value) {
-      const parsed = JSON.parse(row.value)
-      if (typeof parsed?.width === 'number' && typeof parsed?.height === 'number') {
-        expandedSize = { width: parsed.width, height: parsed.height }
-        return
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  expandedSize = null
+  expandedSize = readClientSettings().floatingAgentPanel?.expandedSize ?? null
 }
 
 let saveExpandedSizeTimer: ReturnType<typeof setTimeout> | null = null
@@ -380,23 +353,19 @@ function persistExpandedSize(width: number, height: number): void {
   if (saveExpandedSizeTimer) clearTimeout(saveExpandedSizeTimer)
   saveExpandedSizeTimer = setTimeout(() => {
     saveExpandedSizeTimer = null
-    const db = getDatabase()
-    // Fire-and-forget async DB write (worker-thread proxy).
-    void db
-      .prepare(
-        "INSERT INTO settings (key, value) VALUES ('floatingGlobalAgentPanelExpandedSize', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-      )
-      .run(JSON.stringify({ width, height }))
+    void updateClientSettings({
+      floatingAgentPanel: {
+        config: readClientSettings().floatingAgentPanel?.config,
+        expandedSize: { width, height }
+      }
+    })
   }, 200)
 }
 
 async function readConfig(): Promise<void> {
-  const db = getDatabase()
-  const row = (await db
-    .prepare("SELECT value FROM settings WHERE key = 'floatingGlobalAgentPanelConfig'")
-    .get()) as { value: string } | undefined
+  const stored = readClientSettings().floatingAgentPanel?.config
   try {
-    currentConfig = row?.value ? { ...DEFAULT_CONFIG, ...JSON.parse(row.value) } : DEFAULT_CONFIG
+    currentConfig = stored ? { ...DEFAULT_CONFIG, ...(stored as object) } : DEFAULT_CONFIG
   } catch {
     currentConfig = DEFAULT_CONFIG
   }
@@ -515,7 +484,15 @@ export const floatingGlobalAgentPanelOps = {
     dispatch({ kind: 'user-reset-size' })
     return { kind: state.kind }
   },
-  detach: () => {
+  /**
+   * `meta` carries the session's cwd + mode. It used to be read here from the
+   * `globalAgentPanelState` settings row — but that row is a pointer INTO hub data
+   * (a pty session id and a path on the hub's filesystem), owned and written by the
+   * renderer. The renderer already has both at detach time, so passing them is
+   * strictly less machinery than reading them back out of a database.
+   */
+  detach: (meta?: { cwd?: string; mode?: string }) => {
+    pendingSessionMeta = meta ?? null
     dispatch({ kind: 'user-detach' })
     return currentStatePayload()
   },

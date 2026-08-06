@@ -87,6 +87,30 @@ export type SlayzoneSupervisedRole = 'hub' | 'runner'
  * function there would silently break the "hooks stay unscoped" invariant
  * (`~/.slayzone/hooks/notify.sh` must stay outside any channel/role subfolder).
  */
+/**
+ * The DESKTOP CLIENT's own root — `~/.slayzone/<dev|stable>/client`.
+ *
+ * Deliberately NOT a `SlayzoneSupervisedRole`: the client is the *supervisor*, not
+ * a supervised process, and `getSupervisedRoot`'s caller restriction should stay
+ * true. Same channel bucketing (beta folds into stable), same anchor.
+ *
+ * Exists because client state was living in the HUB's root. `boot-config.json` —
+ * the file that decides whether a local hub runs at all — and `hub-tokens.json`
+ * (safeStorage bearer tokens) both sat under `getSupervisedRoot('hub')`. In remote
+ * mode that directory exists for no other reason, and any future "reset the local
+ * hub" would take the user's remote-hub registry and their credentials with it.
+ *
+ * Channel stays in the DIRECTORY here, unlike `cli-state.ts` which puts it in the
+ * filename. That module refuses to depend on anyone else's layout because it is
+ * invoked where `SLAYZONE_ROOT` may or may not be set; the desktop app owns this
+ * layout and resolves it once, so a second competing channel rule would only add
+ * a way to disagree with itself.
+ */
+export function getClientRoot(channel: string = getSlayzoneReleaseChannel()): string {
+  const bucket = channel === 'dev' ? 'dev' : 'stable'
+  return path.join(getSlayzoneHomeDir(), bucket, 'client')
+}
+
 export function getSupervisedRoot(
   role: SlayzoneSupervisedRole,
   channel: string = getSlayzoneReleaseChannel()

@@ -166,6 +166,53 @@ if [ -d "$CLI_SRC" ]; then
   fi
 fi
 
+# (6) The Electron main process must not open the SHARED database. The hub owns
+#     the schema in every mode (supervised included), so a second connection in
+#     main is what forced `openServerDatabase({ bootstrapSchema: !supervised })`
+#     — one file, two writers, one of them told not to touch the schema. A
+#     reintroduced connection would not fail loudly; it would silently re-create
+#     that split, and in remote mode it would migrate a local copy of a schema
+#     whose data lives on the server.
+#
+#     `import type` stays exempt (fully erased) — the txn registries legitimately
+#     type their worker-side `db` param as better-sqlite3's `Database`. Stripped
+#     with the same perl approach as (2b): a line-based grep can't see the
+#     multiline form.
+#
+#     CARVE-OUTS (each names the phase that removes it):
+#       client-settings-migration.ts — the LAST read of the shared DB from main:
+#                           read-only, one statement, one-shot, sentinel-gated.
+#                           Removed when the migration itself is retired (once
+#                           every supported upgrade path has run it).
+#       db/diag-worker.ts — PERMANENT. The diagnostics DB is a separate,
+#                           machine-local file, and main must record boot/crash/
+#                           lock events when NO hub exists (remote mode, or
+#                           precisely when the sidecar failed).
+#     `*.test.ts` is exempt only while the migration tests still live under
+#     main/db/; P5 relocates them to transport/src/db-bootstrap/.
+MAIN_SRC="packages/apps/app/src/main"
+if [ -d "$MAIN_SRC" ]; then
+  hit=$(find "$MAIN_SRC" -name "*.ts" -not -name "*.test.ts" \
+      ! -path "*/db/diag-worker.ts" \
+      ! -path "*/client-settings-migration.ts" -print0 2>/dev/null \
+    | xargs -0 perl -0777 -ne '
+      my $src = $_;
+      $src =~ s/import\s+type\s+\{[^}]*\}\s+from\s+'\''[^'\'']*'\''//gs;  # import type { X } from
+      $src =~ s/import\s+type\s+\w+\s+from\s+'\''[^'\'']*'\''//gs;        # import type X from
+      while ($src =~ /from\s+'\''(better-sqlite3|node:sqlite)'\''/g) {
+        print "$ARGV: value import of $1\n";
+      }
+      while ($src =~ /require\s*\(\s*'\''(better-sqlite3|node:sqlite)'\''\s*\)/g) {
+        print "$ARGV: require of $1\n";
+      }
+    ' 2>/dev/null || true)
+  if [ -n "$hit" ]; then
+    echo "Electron main must not open the shared database — the hub owns it in every mode:"
+    echo "$hit"
+    fail=1
+  fi
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "Server boundary guards passed."
 else

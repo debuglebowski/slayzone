@@ -33,8 +33,26 @@ import express from 'express'
 import Database from 'better-sqlite3'
 import { test, expect, describe, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
-import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
+import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
+
+/**
+ * The storage dir a process anchored at `root` resolves — derived by running the
+ * production resolver against that root rather than spelling the layout out here.
+ * It is `<ROOT>` itself today (the `storage/` subfolder went away when the root
+ * became role-scoped), and every hardcoded `'storage'` segment in this file
+ * silently pointed its assertions at a directory nothing writes to.
+ */
+function storageDirFor(root: string): string {
+  const prev = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = root
+  try {
+    return getStorageDir()
+  } finally {
+    if (prev === undefined) delete process.env.SLAYZONE_ROOT
+    else process.env.SLAYZONE_ROOT = prev
+  }
+}
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
 if (!fs.existsSync(SLAY_BIN)) {
@@ -43,12 +61,13 @@ if (!fs.existsSync(SLAY_BIN)) {
 }
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cli-artifacts-'))
-// The REST artifact store + the CLI's disk-local commands both root their on-disk
-// files at <ROOT>/storage — anchor ROOT at the throwaway dir.
+// The REST artifact store roots its on-disk files at the process's storage dir —
+// anchor ROOT at the throwaway dir and let the resolver say where that lands.
 process.env.SLAYZONE_ROOT = tmpDir
-const storageDir = path.join(tmpDir, 'storage')
+const storageDir = getStorageDir()
 fs.mkdirSync(storageDir, { recursive: true })
-const dbPath = path.join(storageDir, 'slayzone.dev.sqlite')
+// Dev filename: the CLI subprocesses below run with SLAYZONE_DEV=1.
+const dbPath = path.join(storageDir, getDbName(false))
 const db = new Database(dbPath)
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
@@ -609,7 +628,7 @@ await describe('CLI artifact commands work without a local database', () => {
   let remoteId = ''
 
   test('sanity: this root really has no database file', () => {
-    expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.sqlite'))).toBe(false)
+    expect(fs.existsSync(path.join(storageDirFor(noDbRoot), getDbName(false)))).toBe(false)
   })
 
   test('artifacts create <title> --task <prefix>', async () => {
@@ -626,7 +645,9 @@ await describe('CLI artifact commands work without a local database', () => {
       title: string
     }
     expect(row.title).toBe('remote.md')
-    expect(fs.existsSync(path.join(noDbRoot, 'storage'))).toBe(false)
+    // Nothing landed under the CLI's OWN root: the artifact tree only ever
+    // appears on the hub. (The root dir itself exists — it is the mkdtemp above.)
+    expect(fs.existsSync(path.join(storageDirFor(noDbRoot), 'artifacts'))).toBe(false)
   })
 
   test('artifacts read <prefix>', async () => {

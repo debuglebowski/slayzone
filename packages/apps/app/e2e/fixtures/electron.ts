@@ -585,13 +585,25 @@ export function supervisedHubRoot(root: string): string {
   return path.join(root, 'dev', 'hub')
 }
 
+/**
+ * `<root>/dev/client` — the app-under-test's CLIENT root (`getClientRoot`).
+ *
+ * Distinct from the hub root above: client state (boot-config, hub tokens,
+ * client-settings) belongs to the desktop app, not to the hub role it supervises.
+ * It used to live in the hub root, which meant the file deciding *whether a local
+ * hub runs* sat inside that hub's own directory.
+ */
+export function clientRoot(root: string): string {
+  return path.join(root, 'dev', 'client')
+}
+
 /** `<root>/dev/hub/slayzone.dev.sqlite` — for specs that open the DB directly. */
 export function cliDbPath(root: string): string {
   return path.join(supervisedHubRoot(root), 'slayzone.dev.sqlite')
 }
 
 /**
- * `<root>/dev/hub/boot-config.json` — the pre-boot server-mode config file.
+ * `<root>/dev/client/boot-config.json` — the pre-boot server-mode config file.
  *
  * Derived HERE, once, for the same reason `cliDbPath` is: the layout is the
  * app's (`getSupervisedRoot('hub')`), and e2e can only mirror it. It was
@@ -606,7 +618,7 @@ export function cliDbPath(root: string): string {
  * `SLAYZONE_USER_DATA_DIR` read back from the shared worker app).
  */
 export function bootConfigPath(root: string): string {
-  return path.join(supervisedHubRoot(root), 'boot-config.json')
+  return path.join(clientRoot(root), 'boot-config.json')
 }
 
 /**

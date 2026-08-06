@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { LocalLeaderboardStats } from '@slayzone/types'
-import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/server'
+import { refreshUsageData, queryDailyTotals } from './cache'
 import { isCompletedStatus, parseColumnsConfig } from '@slayzone/projects/shared'
 
 async function getDailyTokens(
@@ -33,8 +33,15 @@ async function getTodayCompletedTasks(db: SlayzoneDb): Promise<number> {
   )
 }
 
-// Pure op shared by the IPC handler (below) and the tRPC `app.leaderboard`
-// router (via setAppDeps). Both transports delegate here (coexistence til slice 5).
+/**
+ * Local leaderboard stats, computed where the data is.
+ *
+ * Lived in `apps/app/src/main` and was reached through the `leaderboardGetLocalStats`
+ * AppDeps slot — i.e. the hub asked the desktop to run a query against a database the
+ * hub itself owns. Nothing here touches Electron; it was on the host only because the
+ * `db` handle was. A standalone hub consequently had no leaderboard at all (the slot
+ * was a fail-loud stub), which this move fixes as a side effect.
+ */
 export async function getLocalLeaderboardStats(db: SlayzoneDb): Promise<LocalLeaderboardStats> {
   const today = new Date().toISOString().slice(0, 10)
   const todayCompletedTasks = await getTodayCompletedTasks(db)

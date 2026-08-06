@@ -23,7 +23,10 @@ export function LabsSettingsTab() {
 
   const testsPanelQuery = useQuery(trpc.app.meta.isTestsPanelEnabled.queryOptions())
   const loopModeQuery = useQuery(trpc.app.meta.isLoopModeEnabled.queryOptions())
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  // Labs flags are client-scoped (they gate native menu items built before any hub
+  // exists), so they go through the app router to the desktop's client store — NOT
+  // `settings.set`, which would write a hub row nothing reads.
+  const setLabFlagMutation = useMutation(trpc.app.meta.setLabFlag.mutationOptions())
 
   useEffect(() => {
     if (testsPanelQuery.data !== undefined) {
@@ -55,7 +58,7 @@ export function LabsSettingsTab() {
               checked={state[f.key] ?? false}
               onCheckedChange={async (checked) => {
                 setState((prev) => ({ ...prev, [f.key]: checked }))
-                await setSettingMutation.mutateAsync({ key: f.key, value: checked ? '1' : '0' })
+                await setLabFlagMutation.mutateAsync({ key: f.key, on: checked })
               }}
             />
           </div>

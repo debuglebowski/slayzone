@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { dirname } from 'node:path'
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { getEffectiveRenderMode, canExportAsPdf } from '@slayzone/task/shared'
 import { getArtifactFilePath } from './shared'
 import type { RestApiDeps } from '../types'
@@ -41,15 +41,12 @@ export function registerArtifactsExportPdfRoute(app: Express, deps: RestApiDeps)
     }
     const content = readFileSync(srcPath, 'utf-8')
 
-    const isMermaid = mode === 'mermaid-preview'
-    const html = isMermaid
-      ? exporter.buildMermaidPdfHtml(content, title)
-      : exporter.buildPdfHtml(content, mode, title)
-
     try {
-      const pdfBuffer = await exporter.renderToPdf(html, isMermaid)
+      // The mermaid-vs-plain branch travels as `mode` and is resolved on the
+      // desktop side of the bridge — see ArtifactExportAccess. The renderer
+      // writes destPath itself, so only the mkdir stays here.
       mkdirSync(dirname(outputPath), { recursive: true })
-      writeFileSync(outputPath, pdfBuffer)
+      await exporter.renderPdfToFile(content, mode, title, outputPath)
       res.json({ ok: true, path: outputPath })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })

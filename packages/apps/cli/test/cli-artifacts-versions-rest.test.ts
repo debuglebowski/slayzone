@@ -31,8 +31,26 @@ import {
   createSlayzoneDbAdapter
 } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
-import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
+import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
+
+/**
+ * The storage dir a process anchored at `root` resolves — derived by running the
+ * production resolver against that root rather than spelling the layout out here.
+ * It is `<ROOT>` itself today (the `storage/` subfolder went away when the root
+ * became role-scoped), and every hardcoded `'storage'` segment in this file
+ * silently pointed its assertions at a directory nothing writes to.
+ */
+function storageDirFor(root: string): string {
+  const prev = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = root
+  try {
+    return getStorageDir()
+  } finally {
+    if (prev === undefined) delete process.env.SLAYZONE_ROOT
+    else process.env.SLAYZONE_ROOT = prev
+  }
+}
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
 if (!fs.existsSync(SLAY_BIN)) {
@@ -43,9 +61,10 @@ if (!fs.existsSync(SLAY_BIN)) {
 // The HUB's install root: it holds the DB, the artifact working copies and the blobs.
 const hubRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-artifacts-vers-hub-'))
 process.env.SLAYZONE_ROOT = hubRoot
-const storageDir = path.join(hubRoot, 'storage')
+const storageDir = getStorageDir()
 fs.mkdirSync(storageDir, { recursive: true })
-const db = new Database(path.join(storageDir, 'slayzone.dev.sqlite'))
+// Dev filename: the CLI subprocesses below run with SLAYZONE_DEV=1.
+const db = new Database(path.join(storageDir, getDbName(false)))
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,
@@ -158,7 +177,7 @@ interface VersionJson {
 
 await describe('sanity: the CLI root really has no database', () => {
   test('no sqlite file under the CLI root', () => {
-    expect(fs.existsSync(path.join(cliRoot, 'storage', 'slayzone.dev.sqlite'))).toBe(false)
+    expect(fs.existsSync(path.join(storageDirFor(cliRoot), getDbName(false)))).toBe(false)
   })
 })
 
@@ -174,8 +193,9 @@ await describe('artifacts write / append with NO local database', () => {
     expect(r.stdout.trim()).toBe(`Written: ${short(binId)}  bin.png  v2`)
     const onDisk = fs.readFileSync(path.join(storageDir, 'artifacts', taskId, `${binId}.png`))
     expect(onDisk.toString('hex')).toBe(BINARY.toString('hex'))
-    // Nothing was written under the CLI's own root.
-    expect(fs.existsSync(path.join(cliRoot, 'storage'))).toBe(false)
+    // Nothing was written under the CLI's own root: the artifact tree only ever
+    // appears on the hub. (The root dir itself exists — it is the mkdtemp above.)
+    expect(fs.existsSync(path.join(storageDirFor(cliRoot), 'artifacts'))).toBe(false)
   })
 
   test("the hub's version BLOB is byte-exact (no U+FFFD substitution)", () => {
@@ -1050,14 +1070,21 @@ await describe('no-server path: every converted command reports a dead hub', () 
   })
 })
 
-await describe('path stays disk-local by design', () => {
-  test('path prints a filesystem path derived from the CLI root, not the hub', async () => {
-    // `path` is the ONE artifact subcommand that still opens the DB: a local
-    // filesystem path has no remote meaning. With the CLI root holding no
-    // database, it must fail LOUDLY rather than print a wrong path.
+await describe('path is answered by the HUB, not derived from the CLI root', () => {
+  test('prints the hub-side working-copy path when the hub is co-located', async () => {
+    // `path` is the ONE artifact subcommand whose answer is a filesystem path, so
+    // it is the one that has to know WHOSE filesystem. It no longer opens a local
+    // database (which is why the CLI root holding none is no longer an error), and
+    // it no longer composes the path from the CLI's own root — that silently
+    // printed a path from the wrong machine. `GET /api/artifacts/:id` returns
+    // `filePath` composed against the HUB's storage root, and the CLI prints it
+    // only after confirming the hub is on this box (loopback → co-located).
     const r = await runCli(['tasks', 'artifacts', 'path', short(textId)])
-    expect(r.exitCode).toBe(1)
-    expect(r.stderr.includes('Database not found')).toBe(true)
+    expect(r.exitCode).toBe(0)
+    // `textId` was renamed to `renamed.md` earlier in this file.
+    expect(r.stdout).toBe(path.join(storageDir, 'artifacts', taskId, `${textId}.md`))
+    // And nothing was derived under the CLI's own root.
+    expect(fs.existsSync(path.join(storageDirFor(cliRoot), 'artifacts'))).toBe(false)
   })
 })
 

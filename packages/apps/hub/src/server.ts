@@ -1,4 +1,4 @@
-import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
@@ -30,7 +30,6 @@ import {
   openServerDiagnosticsDatabase
 } from './db.js'
 import { composeServer } from './composition.js'
-import { getDesktopBridgeRestUrl } from './desktop-bridge-address.js'
 import { deriveRunnerHubUrl } from './runner-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
@@ -39,50 +38,9 @@ import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
 import { withRestAuth } from './rest-auth.js'
+import { handleDevSql } from './dev-sql.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
-
-/**
- * REST routes whose handlers need Electron (live WebContents / offscreen
- * renderer) — they can't run in this plain-node side-car. When supervised, the
- * desktop app runs a REST server with those slots wired, and we reverse-proxy
- * these route groups there (the whole handler runs in the desktop; only the
- * serializable HTTP request/response crosses). `/api/open-task` +
- * `artifacts/:id/open` stay here (they emit menu events on the side-car's bus +
- * bridge the window raise).
- */
-function needsDesktopRest(rawUrl: string | undefined): boolean {
-  if (!rawUrl) return false
-  const path = rawUrl.split('?')[0]
-  return path.startsWith('/api/browser/') || /^\/api\/artifacts\/[^/]+\/export\//.test(path)
-}
-
-/** Pipe a request to the desktop REST server and pipe its response back. */
-function proxyToDesktopRest(
-  desktopRestUrl: string,
-  req: IncomingMessage,
-  res: ServerResponse
-): void {
-  const target = new URL(desktopRestUrl)
-  const proxyReq = httpRequest(
-    {
-      host: target.hostname,
-      port: target.port,
-      method: req.method,
-      path: req.url,
-      headers: { ...req.headers, host: target.host }
-    },
-    (proxyRes) => {
-      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers)
-      proxyRes.pipe(res)
-    }
-  )
-  proxyReq.on('error', (err) => {
-    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ error: 'desktop-rest-proxy-failed', message: String(err) }))
-  })
-  req.pipe(proxyReq)
-}
 
 export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHandle> {
   const host = cfg.host ?? getServerHost()
@@ -109,11 +67,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     }
   }
   const dbPath = getDatabasePathFromEnv()
-  // Standalone owns its schema (fresh stores get migrated); supervised opens
-  // the Electron host's already-migrated DB and must not touch the schema.
-  const db = cfg.db ?? openServerDatabase({ bootstrapSchema: !supervised })
+  // The hub owns the schema in EVERY mode. `supervised` still gates the sidecar
+  // socket and the mode/bind hardening above — but not this: a second migrator in
+  // the Electron host is exactly the two-writers-one-file split being removed.
+  // Migrations are user_version-gated and individually atomic, so this is a no-op
+  // against an already-current store.
+  const db = cfg.db ?? (await openServerDatabase())
   const ownsDb = cfg.db === undefined
-  log(`db opened: ${dbPath}${supervised ? '' : ' (schema bootstrapped)'}`)
+  log(`db opened: ${dbPath} (schema bootstrapped)`)
 
   // Separate diagnostics events DB so THIS process's recordDiagnosticEvent calls
   // (pty + agent pool run here) persist + are queryable, instead of buffering +
@@ -206,12 +167,6 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     runnersConnected: () => runnerGateway?.listRunners().length ?? 0
   }
 
-  // Reverse-proxy target for Electron-only REST routes (supervised). Absent when
-  // truly standalone → those routes fall through to express + 501 as before.
-  // Derived from the single desktop bridge address (same listener serves cap WS
-  // + REST).
-  const desktopRestUrl = getDesktopBridgeRestUrl()
-
   // SLAYZONE_MODE is the SINGLE lever for the whole hub's transport: `local`
   // (default) serves plain http/ws on loopback (dev, e2e, supervised); `remote`
   // serves https/wss terminated with the hub identity leaf. There is no separate
@@ -238,16 +193,15 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // `/trpc` + `/runners` WS upgrades are demuxed in the `upgrade` handler below.
   //
   // Everything past /health rides the same bearer gate as `/trpc` (see
-  // rest-auth.ts). It sits ABOVE the desktop reverse-proxy on purpose: the
-  // proxied routes (`/api/browser/*`, artifact exports) drive live WebContents —
-  // arbitrary JS eval in a real browser view — so they are the LAST thing that
-  // should reach the desktop unauthenticated. Inert when the hub doesn't enforce
-  // auth: `restAuthAction` short-circuits to 'allow' with no verify call.
+  // rest-auth.ts). Inert when the hub doesn't enforce auth: `restAuthAction`
+  // short-circuits to 'allow' with no verify call. `/api/browser/*` now runs in
+  // THIS process (it drives arbitrary JS eval in a real browser view, so it is the
+  // last thing that should be reachable unauthenticated) rather than being piped
+  // onward to an unauthenticated loopback listener on the desktop.
   const dispatchRequest = (req: IncomingMessage, res: ServerResponse): void => {
-    if (desktopRestUrl && needsDesktopRest(req.url)) {
-      proxyToDesktopRest(desktopRestUrl, req, res)
-      return
-    }
+    // E2E-only raw SQL. Off unless PLAYWRIGHT=1, in which case it sits ABOVE the
+    // auth gate deliberately: the e2e harness drives it on loopback with no bearer.
+    if (handleDevSql(db, req, res)) return
     // Runner transport: `/api/auth/*` goes to the hub-auth express app BEFORE the
     // mcpRest stack, which applies `express.json()` — better-auth needs the raw
     // body. Present whenever hub-auth built (always, barring init failure).

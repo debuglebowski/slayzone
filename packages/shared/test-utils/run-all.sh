@@ -101,7 +101,25 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cha
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-boundary.test.ts
+# Artifact export routes after the inversion: served by the HUB against ctx.db,
+# reaching the desktop over AppDeps for the offscreen render alone.
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
+# Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
+# has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
+run_test_electron_strict_loader packages/apps/hub/src/supervised-bootstrap.test.ts
+# Host-kill stamp: fires where the pty sessions are (the side-car), not on the
+# host, whose session registry has been empty since slice 9.
+run_test_electron_strict_loader packages/apps/hub/src/host-kill.test.ts
+# Push-on-edit listens on the bus the task ops actually emit on. The host held the
+# only listeners, on an ipcMain the ops stopped using at the slice-9 cutover.
+run_test_electron_strict_loader packages/apps/hub/src/integrations-push.test.ts
+# Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
+# process) and that restore is refused on a hub the client merely connects to.
+run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts
+# The E2E-only raw-SQL route. The GATE is the point: arbitrary SQL on a listener
+# that faces the internet in remote mode, so its absence must be asserted.
+run_test_electron_strict_loader packages/apps/hub/src/dev-sql.test.ts
 # Restart-restore seam: the side-car must install the `was_spawned` recorder and
 # set the shutdown gate before teardown, or a restart drops every agent.
 run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
@@ -187,6 +205,34 @@ run_test packages/apps/cli/src/commands/tasks/cli-author.test.ts
 # Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>, flat (retired DB_DIR ignored).
 run_test packages/shared/transport/src/server/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
+# Client-local settings store: corrupt-file handling, downgrade safety (unknown
+# fields survive), and serialized read-modify-write.
+run_test packages/shared/platform/src/client-settings.test.ts
+# The one-time move out of the shared DB. Copy-only, sentinel-gated, and it must
+# REFUSE the sentinel when read-back fails — a wrong "done" is permanent.
+run_test_electron_strict_loader packages/apps/app/src/main/client-settings-migration.test.ts
+# Criterion 4: the same migration against a COPY of a real store. Opt-in — no-ops
+# unless SLAYZONE_REAL_STORE_FIXTURE points at a real slayzone.sqlite. Asserts the
+# ORIGINAL is byte-untouched, because a test that reads your live database is one
+# bad line from repeating the storage-migration incident.
+run_test_electron_strict_loader packages/apps/app/src/main/client-settings-migration.realstore.test.ts
+# Schema-migration tests, relocated out of apps/app/src/main/db when the Electron
+# host stopped opening the shared DB. They had NEVER been registered here, which
+# is how six of the eleven rotted without anyone noticing: each rewound
+# user_version and re-ran the whole tail, replaying forward-only DDL against a
+# current schema — an operation production never performs. All eleven now build
+# the DB at exactly version N-1 and apply migration N alone. Registered so they
+# cannot rot again.
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/history-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v140-task-state-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v147-agent-sessions-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v148-agent-sessions-runtime-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/agent-panel-rename-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-raw-skill-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-slug-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/codex-flags-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|runner>,
 # copy-only (regression guard: a failed copy must never touch the legacy source),

@@ -1,6 +1,6 @@
 import { nativeTheme } from 'electron'
-import type { SlayzoneDb } from '@slayzone/platform'
-import { SettingsService, type ThemePreference } from '../server/service'
+import { type ThemePreference } from '../server/service'
+import { updateClientSettings } from '@slayzone/platform/client-settings'
 import { settingsEvents } from '../server/events'
 
 /**
@@ -21,14 +21,20 @@ export function getThemeSource(): 'system' | 'light' | 'dark' {
 }
 
 /**
- * Apply + persist a theme preference, returning the now-effective theme. Writes
- * through SettingsService (the warmed singleton keyed by this db) so sync
- * getCached() readers stay coherent. Shared by the `theme:set` IPC handler + the
- * `settings.setTheme` tRPC mutation.
+ * Apply + persist a theme preference, returning the now-effective theme.
+ *
+ * Persists to the CLIENT store, not the shared database. `nativeTheme.themeSource`
+ * is a property of this process, applied before the first window exists to avoid a
+ * flash — so its source of truth cannot be a server that may not be running. It
+ * also fixes remote mode, where this wrote to the remote hub while main read the
+ * local database on the next boot, and the toggle simply did not stick.
+ *
+ * Shared by the `theme:set` IPC handler + the `settings.setTheme` tRPC mutation
+ * (the latter reaches here through AppDeps.themeSet, i.e. on the desktop).
  */
-export async function setTheme(db: SlayzoneDb, theme: ThemePreference): Promise<'dark' | 'light'> {
+export async function setTheme(theme: ThemePreference): Promise<'dark' | 'light'> {
   nativeTheme.themeSource = theme
-  await SettingsService.forDatabase(db).setTheme(theme)
+  await updateClientSettings({ theme })
   return getEffectiveTheme()
 }
 

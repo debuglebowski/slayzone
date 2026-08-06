@@ -41,11 +41,11 @@ export function registerArtifactsExportHtmlRoute(app: Express, deps: RestApiDeps
     }
     const content = readFileSync(srcPath, 'utf-8')
 
-    const isMermaid = mode === 'mermaid-preview'
-    const html = isMermaid
-      ? exporter.buildMermaidPdfHtml(content, title)
-      : exporter.buildPdfHtml(content, mode, title)
-
+    // Same builder the pdf route's renderer uses internally; the mermaid-vs-plain
+    // branch is resolved on the desktop side of the bridge (see
+    // ArtifactExportAccess). Unlike pdf/png this one keeps the HTML in hand — it
+    // is a string, not a multi-MB buffer — and writes it here.
+    const html = await exporter.buildExportHtml(content, mode, title)
     mkdirSync(dirname(outputPath), { recursive: true })
     writeFileSync(outputPath, html, 'utf-8')
     res.json({ ok: true, path: outputPath })

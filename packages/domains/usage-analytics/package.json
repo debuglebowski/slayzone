@@ -22,7 +22,8 @@
     "@tanstack/react-query": "^5.100.9",
     "lucide-react": "^0.562.0",
     "recharts": "^2.15.3",
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/projects": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

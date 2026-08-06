@@ -1,9 +1,9 @@
 /**
  * AI config raw skill migration tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/apps/app/src/main/db/ai-config-raw-skill-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/ai-config-raw-skill-migration.test.ts
  */
 import Database from 'better-sqlite3'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { migrations } from './index'
 
 let passed = 0
 let failed = 0
@@ -35,21 +35,40 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+/**
+ * Build a DB migrated to exactly `version` — the schema the migration under
+ * test actually runs against. Migrations are forward-only, so the old trick of
+ * migrating to latest and rewinding user_version replayed unguarded DDL (v80's
+ * `ALTER TABLE ... ADD COLUMN sort_order`) against a schema that already had it.
+ */
+function dbAtVersion(version: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  for (const migration of migrations) {
+    if (migration.version > version) break
+    db.transaction(() => {
+      migration.up(db)
+      db.pragma(`user_version = ${migration.version}`)
+    })()
+  }
   return db
+}
+
+function applyMigration(db: Database.Database, version: number): void {
+  const migration = migrations.find((m) => m.version === version)
+  if (!migration) throw new Error(`migration v${version} not found`)
+  db.transaction(() => {
+    migration.up(db)
+    db.pragma(`user_version = ${version}`)
+  })()
 }
 
 console.log('\nai-config raw skill migration')
 
 test('backfills legacy split skill rows into raw content and strips canonical metadata', () => {
-  const db = createDb()
+  const db = dbAtVersion(77)
   try {
-    db.pragma('user_version = 77')
-
     const projectId = crypto.randomUUID()
     db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(
       projectId,
@@ -79,7 +98,7 @@ test('backfills legacy split skill rows into raw content and strips canonical me
       })
     )
 
-    runMigrations(db)
+    applyMigration(db, 78)
 
     const row = db
       .prepare('SELECT content, metadata_json FROM ai_config_items WHERE id = ?')
@@ -100,10 +119,8 @@ test('backfills legacy split skill rows into raw content and strips canonical me
 })
 
 test('leaves body-only skills without canonical frontmatter invalid after migration', () => {
-  const db = createDb()
+  const db = dbAtVersion(77)
   try {
-    db.pragma('user_version = 77')
-
     const itemId = crypto.randomUUID()
     db.prepare(`
       INSERT INTO ai_config_items (
@@ -111,7 +128,7 @@ test('leaves body-only skills without canonical frontmatter invalid after migrat
       ) VALUES (?, 'skill', 'global', NULL, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `).run(itemId, 'body-only-skill', 'body-only-skill', '# body only\n', '{}')
 
-    runMigrations(db)
+    applyMigration(db, 78)
 
     const row = db
       .prepare('SELECT content, metadata_json FROM ai_config_items WHERE id = ?')

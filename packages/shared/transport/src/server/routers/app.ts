@@ -2,7 +2,13 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import { router, publicProcedure } from '../trpc'
-import { getAppDeps, getAuthEvents, type FloatingAgentState } from '../app-deps'
+import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
+import { buildFeedbackOps } from '@slayzone/feedback/server'
+import { buildExportImportOps } from '../export-import'
+
+/** Same gate the host used when deciding to expose the path-taking variants. */
+const isTestBuild = (): boolean => process.env.PLAYWRIGHT === '1'
+import { getBackupOps, getAppDeps, getAuthEvents, type FloatingAgentState } from '../app-deps'
 
 const anyInput = z.unknown()
 
@@ -13,24 +19,24 @@ const anyInput = z.unknown()
 export const appLevelRouter = router({
   // Backup
   backup: router({
-    list: publicProcedure.query(() => getAppDeps().backupList()),
+    list: publicProcedure.query(() => getBackupOps().list()),
     create: publicProcedure
       .input(z.object({ name: z.string().optional() }).optional())
-      .mutation(({ input }) => getAppDeps().backupCreate(input?.name)),
+      .mutation(({ input }) => getBackupOps().create(input?.name)),
     rename: publicProcedure
       .input(z.object({ filename: z.string(), name: z.string() }))
-      .mutation(({ input }) => getAppDeps().backupRename(input.filename, input.name)),
+      .mutation(({ input }) => getBackupOps().rename(input.filename, input.name)),
     delete: publicProcedure
       .input(z.object({ filename: z.string() }))
-      .mutation(({ input }) => getAppDeps().backupDelete(input.filename)),
+      .mutation(({ input }) => getBackupOps().delete(input.filename)),
     restore: publicProcedure
       .input(z.object({ filename: z.string() }))
-      .mutation(({ input }) => getAppDeps().backupRestore(input.filename)),
-    getSettings: publicProcedure.query(() => getAppDeps().backupGetSettings()),
+      .mutation(({ input }) => getBackupOps().restore(input.filename)),
+    getSettings: publicProcedure.query(() => getBackupOps().getSettings()),
     setSettings: publicProcedure
       .input(anyInput)
-      .mutation(({ input }) => getAppDeps().backupSetSettings(input as never)),
-    revealInFinder: publicProcedure.mutation(() => getAppDeps().backupRevealInFinder())
+      .mutation(({ input }) => getBackupOps().setSettings(input as Partial<Parameters<ReturnType<typeof getBackupOps>['setSettings']>[0]>)),
+    revealInFinder: publicProcedure.mutation(() => getBackupOps().revealInFinder())
   }),
 
   // Clipboard
@@ -49,43 +55,51 @@ export const appLevelRouter = router({
       .mutation(({ input }) => getAppDeps().screenshotCaptureView(input.viewId))
   }),
 
-  // Leaderboard
+  // Leaderboard — reads ctx.db directly. It was an AppDeps slot, which meant this
+  // process asked the Electron host to run a query against the database THIS
+  // process owns; standalone hubs got a fail-loud stub instead of a leaderboard.
   leaderboard: router({
-    getLocalStats: publicProcedure.query(() => getAppDeps().leaderboardGetLocalStats())
+    getLocalStats: publicProcedure.query(({ ctx }) => getLocalLeaderboardStats(ctx.db))
   }),
 
-  // Export/Import
+  // Export/Import — reads and writes ctx.db. Was seven AppDeps slots, i.e. this
+  // process asking the Electron host to read the database this process owns. Only
+  // the file-picker step is genuinely host-side, and it goes back over AppDeps
+  // from inside `export-import.ts`.
+  //
+  // The `test*` variants are no longer test-only in nature — they are just the
+  // path-taking forms — but the gate stays so production can't be driven headless.
   exportImport: router({
-    exportAll: publicProcedure.mutation(() => getAppDeps().exportAll()),
+    exportAll: publicProcedure.mutation(({ ctx }) => buildExportImportOps(ctx.db).exportAll()),
     exportProject: publicProcedure
       .input(z.object({ projectId: z.string() }))
-      .mutation(({ input }) => getAppDeps().exportProject(input.projectId)),
-    import: publicProcedure.mutation(() => getAppDeps().importBundle()),
+      .mutation(({ ctx, input }) => buildExportImportOps(ctx.db).exportProject(input.projectId)),
+    import: publicProcedure.mutation(({ ctx }) => buildExportImportOps(ctx.db).importBundle()),
     testExportAllToPath: publicProcedure
       .input(z.object({ filePath: z.string() }))
-      .mutation(({ input }) => {
-        const fn = getAppDeps().testExportAllToPath
+      .mutation(({ ctx, input }) => {
+        const fn = buildExportImportOps(ctx.db, isTestBuild()).testExportAllToPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.filePath)
       }),
     testExportProjectToPath: publicProcedure
       .input(z.object({ projectId: z.string(), filePath: z.string() }))
-      .mutation(({ input }) => {
-        const fn = getAppDeps().testExportProjectToPath
+      .mutation(({ ctx, input }) => {
+        const fn = buildExportImportOps(ctx.db, isTestBuild()).testExportProjectToPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.projectId, input.filePath)
       }),
     testImportFromPath: publicProcedure
       .input(z.object({ filePath: z.string() }))
-      .mutation(({ input }) => {
-        const fn = getAppDeps().testImportFromPath
+      .mutation(({ ctx, input }) => {
+        const fn = buildExportImportOps(ctx.db, isTestBuild()).testImportFromPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.filePath)
       }),
     testSetTaskParent: publicProcedure
       .input(z.object({ taskId: z.string(), parentId: z.string().nullable() }))
-      .mutation(({ input }) => {
-        const fn = getAppDeps().testSetTaskParent
+      .mutation(({ ctx, input }) => {
+        const fn = buildExportImportOps(ctx.db, isTestBuild()).testSetTaskParent
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.taskId, input.parentId)
       })
@@ -95,7 +109,17 @@ export const appLevelRouter = router({
   usage: router({
     fetch: publicProcedure
       .input(z.object({ force: z.boolean().optional() }).optional())
-      .query(({ input }) => getAppDeps().usageFetch(input?.force)),
+      .query(async ({ ctx, input }) => {
+        // The rows live here; only the HTTP call needs Electron.
+        const customRows = (await ctx.db.all(
+          'SELECT id, label, usage_config FROM terminal_modes WHERE usage_config IS NOT NULL AND enabled = 1'
+        )) as { id: string; label: string; usage_config: string }[]
+        const builtinRows = (await ctx.db.all(
+          "SELECT id, enabled FROM terminal_modes WHERE id IN ('claude-code', 'codex')"
+        )) as { id: string; enabled: number }[]
+        const builtinEnabled = Object.fromEntries(builtinRows.map((r) => [r.id, r.enabled === 1]))
+        return getAppDeps().usageFetch({ customRows, builtinEnabled }, input?.force)
+      }),
     test: publicProcedure
       .input(anyInput)
       .mutation(({ input }) => getAppDeps().usageTest(input as never))
@@ -128,26 +152,30 @@ export const appLevelRouter = router({
       .mutation(({ input }) => getAppDeps().shellOpenPath(input.absPath))
   }),
 
-  // db:feedback
+  // Feedback — plain CRUD over `feedback_threads`/`feedback_messages`, so it reads
+  // ctx.db. It was six AppDeps slots, i.e. this process asking the Electron host to
+  // query the database this process owns; the host and the standalone branch built
+  // the SAME `buildFeedbackOps(db)`, which is how you can tell the indirection was
+  // never load-bearing.
   feedback: router({
-    listThreads: publicProcedure.query(() => getAppDeps().feedbackListThreads()),
+    listThreads: publicProcedure.query(({ ctx }) => buildFeedbackOps(ctx.db).listThreads()),
     createThread: publicProcedure
       .input(anyInput)
-      .mutation(({ input }) => getAppDeps().feedbackCreateThread(input as never)),
+      .mutation(({ ctx, input }) => buildFeedbackOps(ctx.db).createThread(input as never)),
     getMessages: publicProcedure
       .input(z.object({ threadId: z.string() }))
-      .query(({ input }) => getAppDeps().feedbackGetMessages(input.threadId)),
+      .query(({ ctx, input }) => buildFeedbackOps(ctx.db).getMessages(input.threadId)),
     addMessage: publicProcedure
       .input(anyInput)
-      .mutation(({ input }) => getAppDeps().feedbackAddMessage(input as never)),
+      .mutation(({ ctx, input }) => buildFeedbackOps(ctx.db).addMessage(input as never)),
     updateThreadDiscordId: publicProcedure
       .input(z.object({ threadId: z.string(), discordThreadId: z.string() }))
-      .mutation(({ input }) =>
-        getAppDeps().feedbackUpdateThreadDiscordId(input.threadId, input.discordThreadId)
+      .mutation(({ ctx, input }) =>
+        buildFeedbackOps(ctx.db).updateThreadDiscordId(input.threadId, input.discordThreadId)
       ),
     deleteThread: publicProcedure
       .input(z.object({ threadId: z.string() }))
-      .mutation(({ input }) => getAppDeps().feedbackDeleteThread(input.threadId))
+      .mutation(({ ctx, input }) => buildFeedbackOps(ctx.db).deleteThread(input.threadId))
   }),
 
   // App metadata
@@ -155,6 +183,9 @@ export const appLevelRouter = router({
     getVersion: publicProcedure.query(() => getAppDeps().appGetVersion()),
     getTrpcPort: publicProcedure.query(() => getAppDeps().appGetTrpcPort()),
     isTestsPanelEnabled: publicProcedure.query(() => getAppDeps().appIsTestsPanelEnabled()),
+    setLabFlag: publicProcedure
+      .input(z.object({ key: z.enum(['labs_tests_panel', 'labs_loop_mode']), on: z.boolean() }))
+      .mutation(({ input }) => getAppDeps().appSetLabFlag(input.key, input.on)),
     isLoopModeEnabled: publicProcedure.query(() => getAppDeps().appIsLoopModeEnabled()),
     getZoomFactor: publicProcedure.query(() => getAppDeps().appGetZoomFactor()),
     getProtocolClientStatus: publicProcedure.query(() =>

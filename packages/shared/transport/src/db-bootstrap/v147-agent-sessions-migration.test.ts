@@ -4,10 +4,10 @@
  * + `session_resets` tables, preserving id + created_at so the new resolver
  * picks the exact same "current" conversation. See plans/agent-sessions.md.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/apps/app/src/main/db/v147-agent-sessions-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/v147-agent-sessions-migration.test.ts
  */
 import Database from 'better-sqlite3'
-import { migrations } from '@slayzone/transport/db-bootstrap'
+import { migrations } from './index'
 
 let passed = 0
 let failed = 0

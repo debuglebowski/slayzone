@@ -112,6 +112,20 @@ export {
   killPtysByTaskId,
   broadcastRespawnRequest,
   onGlobalStateChange,
+  // Pty enricher seam — decorates PtyInfo with task/tab context. FOURTH instance
+  // of the same defect on this list: electron-free, in runtime/, exported only
+  // from the electron barrel, therefore wireable only by a host that owns no
+  // sessions. If you are adding a seam here, export it from THIS barrel.
+  setPtyEnricher,
+  // Host-kill stamp seam. Same story as the healer/resolver below: it lives in
+  // pty-manager (electron-free) but was exported only from the electron barrel,
+  // so only the host could wire it — against a session registry the host no
+  // longer owns. The side-car owns the sessions, so it must be able to import it.
+  setOnHostKillHandler,
+  // E2E seam: drives a synthetic pty state transition. Must be reachable from the
+  // SERVER barrel because the listeners that react to it (attention flag,
+  // task auto-move) live in the side-car — firing it in the host reaches nothing.
+  notifyGlobalStateListeners,
   // Conversation self-heal + authoritative-resolve seams. `createPty` (which
   // lives in THIS process post-slice-9) calls the injected healer before a
   // resume and the resolver when the renderer passes no hint. The composition
@@ -157,7 +171,15 @@ export {
   setSpawnedTabRecorder as setPtySpawnedTabRecorder,
   getSpawnedTabRecorder as getPtySpawnedTabRecorder
 } from './runtime/pty-manager'
-export { createChatOps, type ChatOps, type ChatMode } from './runtime/chat-handlers'
+export {
+  createChatOps,
+  // One-shot backfill for pre-chat-mode tasks. Electron-free (it lives right
+  // here in runtime/), but was exported only from the electron barrel — so only
+  // the Electron host could run it, and a standalone hub silently never did.
+  backfillChatModes,
+  type ChatOps,
+  type ChatMode
+} from './runtime/chat-handlers'
 // The chat data seam. Exported so a composition root can override ONE method
 // (e.g. runner resolution) over the db-backed defaults instead of reimplementing
 // the whole interface.

@@ -134,12 +134,32 @@ function sanitizeHubEntry(raw: unknown): HubEntry | null {
 }
 
 /** Reads the pre-boot config; any missing/corrupt/invalid state falls back to local. */
-export function readBootConfig(dir: string): BootConfig {
+/**
+ * Reads the pre-boot config, falling back to `legacyDir` when the file has not
+ * been written in the new location yet.
+ *
+ * The fallback is READ-ONLY and never copies — the same stance `cli-state.ts`
+ * takes, and for the same reason generalized: moving a file as a side effect of an
+ * unrelated boot is the kind of thing that should be deliberate. The next
+ * `writeBootSettings` (any server-mode / hubs / default-hub change) lands in the
+ * new location and completes the move naturally. For THIS file that is also the
+ * safer mechanic: it is read at the most fragile moment in boot, and a failed copy
+ * there would brick startup.
+ */
+export function readBootConfig(dir: string, legacyDir?: string): BootConfig {
   let parsed: unknown
   try {
     parsed = JSON.parse(readFileSync(join(dir, FILE_NAME), 'utf8'))
   } catch {
-    return { server_mode: 'local' }
+    if (legacyDir) {
+      try {
+        parsed = JSON.parse(readFileSync(join(legacyDir, FILE_NAME), 'utf8'))
+      } catch {
+        return { server_mode: 'local' }
+      }
+    } else {
+      return { server_mode: 'local' }
+    }
   }
   if (typeof parsed !== 'object' || parsed === null) return { server_mode: 'local' }
   const obj = parsed as Record<string, unknown>
@@ -172,8 +192,15 @@ export function readBootConfig(dir: string): BootConfig {
  * unnormalizable URL so callers surface the validation error instead of
  * persisting garbage.
  */
-export function writeBootSettings(dir: string, patch: BootSettingsPatch): BootConfig {
-  const next: BootConfig = { ...readBootConfig(dir) }
+export function writeBootSettings(
+  dir: string,
+  patch: BootSettingsPatch,
+  legacyDir?: string
+): BootConfig {
+  // Merge over whatever is currently EFFECTIVE, legacy included, so the first
+  // write after the relocation carries the old settings forward instead of
+  // resetting them to defaults.
+  const next: BootConfig = { ...readBootConfig(dir, legacyDir) }
   if (patch.server_mode !== undefined) next.server_mode = patch.server_mode
   if (patch.remote_server_url !== undefined) {
     const normalized = normalizeRemoteUrl(patch.remote_server_url)

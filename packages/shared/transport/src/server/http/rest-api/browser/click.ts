@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { ensureBrowserWc, execJs } from './shared'
+import { ensureBrowserTab, execJs } from './shared'
 import { markTabAgentTouched } from './mark-touched'
 import type { RestApiDeps } from '../types'
 
@@ -10,11 +10,13 @@ export function registerBrowserClickRoute(app: Express, deps: RestApiDeps): void
       res.status(400).json({ error: 'selector required' })
       return
     }
-    const bwc = await ensureBrowserWc(deps, taskId, panel, res, undefined, tabId)
+    const bwc = await ensureBrowserTab(deps, taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
       const result = await execJs<{ ok: boolean; error?: string; tag?: string; text?: string }>(
-        bwc.wc,
+        deps.browser!,
+        taskId,
+        bwc.tabId,
         `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) return { ok: false, error: 'Element not found: ' + ${JSON.stringify(selector)} };

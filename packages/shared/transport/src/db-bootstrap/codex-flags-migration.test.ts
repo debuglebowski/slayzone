@@ -1,9 +1,9 @@
 /**
  * Codex flags migration tests (v134).
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/apps/app/src/main/db/codex-flags-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/codex-flags-migration.test.ts
  */
 import Database from 'better-sqlite3'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { migrations } from './index'
 
 let passed = 0
 let failed = 0
@@ -30,12 +30,33 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+/**
+ * Build a DB migrated to exactly `version` — the schema the migration under
+ * test actually runs against. Migrations are forward-only, so migrating to
+ * latest and rewinding user_version replays DDL against a schema it was never
+ * written for (v135 drops tasks.manager_mode, which v134's replay then hits).
+ */
+function dbAtVersion(version: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  for (const migration of migrations) {
+    if (migration.version > version) break
+    db.transaction(() => {
+      migration.up(db)
+      db.pragma(`user_version = ${migration.version}`)
+    })()
+  }
   return db
+}
+
+function applyMigration(db: Database.Database, version: number): void {
+  const migration = migrations.find((m) => m.version === version)
+  if (!migration) throw new Error(`migration v${version} not found`)
+  db.transaction(() => {
+    migration.up(db)
+    db.pragma(`user_version = ${version}`)
+  })()
 }
 
 function getSetting(db: Database.Database, key: string): string | null {
@@ -52,15 +73,10 @@ function getCodexModeFlags(db: Database.Database): string | null {
   return row?.default_flags ?? null
 }
 
-function rewindAndApply(db: Database.Database, toVersion: number): void {
-  db.pragma(`user_version = ${toVersion}`)
-  runMigrations(db)
-}
-
 console.log('\ncodex flags migration')
 
 test('v134 migrates persisted Codex defaults away from removed --full-auto', () => {
-  const db = createDb()
+  const db = dbAtVersion(133)
   try {
     db.prepare(`
       INSERT INTO settings (key, value) VALUES ('default_codex_flags', '--full-auto --search')
@@ -101,7 +117,7 @@ test('v134 migrates persisted Codex defaults away from removed --full-auto', () 
       JSON.stringify({ codex: { flags: '--custom --full-auto' } })
     )
 
-    rewindAndApply(db, 133)
+    applyMigration(db, 134)
 
     expect(getSetting(db, 'default_codex_flags')).toBe('--sandbox workspace-write')
     expect(getCodexModeFlags(db)).toBe('--sandbox workspace-write')

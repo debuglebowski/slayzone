@@ -2,11 +2,15 @@ import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import { ensureIntegrationSchemaSync } from '@slayzone/integrations/db'
 import { syncTerminalModes } from '@slayzone/terminal/db'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
-import { normalizeProjectStatusData } from '@slayzone/transport/db-bootstrap'
+import { runMigrations } from '../db-bootstrap'
+import { normalizeProjectStatusData } from '../db-bootstrap'
 
 /**
- * Playwright-only full schema rebuild, run inside the DB worker.
+ * Playwright-only full schema rebuild.
+ *
+ * Moved out of `apps/app` with export-import, and for the same reason: the hub's
+ * `namedTxn` dispatches against the DOMAIN registry only, so an app-only txn was
+ * unreachable from the process that now owns the database.
  *
  * Mirrors the original main-thread "drop all tables → re-migrate" block: it must
  * run against the live synchronous connection (the worker's), and it toggles

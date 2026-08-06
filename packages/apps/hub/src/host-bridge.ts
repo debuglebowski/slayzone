@@ -135,6 +135,20 @@ export function createHostBridge(url: string, opts: { getTrpcPort: () => number 
     }
   )
 
+  // Eventless nested capability: the task/tab browser registry (distinct from
+  // `browser`, the view-id-keyed manager). Forwards every method as
+  // `browserTabs.<m>` so the REST browser routes can run HERE, against this
+  // process's DB, instead of being reverse-proxied to the host wholesale.
+  const browserTabsProxy = new Proxy(
+    {},
+    {
+      get(_t, prop: string | symbol) {
+        if (typeof prop !== 'string') return undefined
+        return (...args: unknown[]) => invoke(`browserTabs.${prop}`, ...args)
+      }
+    }
+  )
+
   const appDeps = new Proxy(
     {},
     {
@@ -143,6 +157,8 @@ export function createHostBridge(url: string, opts: { getTrpcPort: () => number 
         switch (prop) {
           case 'browser':
             return browserProxy
+          case 'browserTabs':
+            return browserTabsProxy
           case 'floatingAgent':
             return floatingProxy
           case 'webview':

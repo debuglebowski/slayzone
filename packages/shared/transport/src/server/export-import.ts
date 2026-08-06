@@ -1,4 +1,3 @@
-import { app, dialog, BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
@@ -6,8 +5,23 @@ import type {
   ImportTxnParams,
   SetTaskParentTxnParams,
   SlayExportData
-} from './export-import-txns'
-import { notifyEvents } from './notify-renderer'
+} from '../txns/export-import-txns'
+import { getAppDeps, getNotifyEvents } from './app-deps'
+
+/**
+ * Export / import, running where the data is.
+ *
+ * This whole module lived in `apps/app/src/main` and was reached through seven
+ * AppDeps slots — the hub asking the Electron host to read and write the hub's own
+ * database. Nothing here needs Electron except picking a file path, which is four
+ * calls (`appGetVersion`, `appGetDownloadsDir`, `dialogShowSaveDialog`,
+ * `dialogShowOpenDialog`) that already exist as AppDeps slots. So the dependency
+ * was exactly backwards: the DB half was hostage to the dialog half.
+ *
+ * Its named txns moved to `../txns/export-import-txns` in the same change, because
+ * the hub's `namedTxn` dispatches against the domain registry only — an app-only
+ * txn threw, which is what pinned this to the host in the first place.
+ */
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +66,7 @@ async function exportAll(db: SlayzoneDb): Promise<SlayExportBundle> {
   return {
     meta: {
       version: EXPORT_VERSION,
-      appVersion: app.getVersion(),
+      appVersion: await getAppDeps().appGetVersion(),
       exportDate: new Date().toISOString(),
       scope: 'all',
       dbVersion: DB_VERSION
@@ -126,7 +140,7 @@ async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExp
   return {
     meta: {
       version: EXPORT_VERSION,
-      appVersion: app.getVersion(),
+      appVersion: await getAppDeps().appGetVersion(),
       exportDate: new Date().toISOString(),
       scope: 'project',
       projectId,
@@ -161,30 +175,20 @@ async function importBundle(db: SlayzoneDb, bundle: SlayExportBundle): Promise<I
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-function getWindow(): BrowserWindow | undefined {
-  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined
-}
-
 async function doExport(bundle: SlayExportBundle): Promise<ExportResult> {
-  const win = getWindow()
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const defaultName =
     bundle.meta.scope === 'project'
       ? `${(bundle.data.projects[0]?.name as string) ?? 'project'}-${timestamp}.slay`
       : `slayzone-all-${timestamp}.slay`
-  const defaultPath = path.join(app.getPath('downloads'), defaultName)
+  const defaultPath = path.join(await getAppDeps().appGetDownloadsDir(), defaultName)
 
-  const saveResult = win
-    ? await dialog.showSaveDialog(win, {
-        title: 'Export',
-        defaultPath,
-        filters: [{ name: 'SlayZone', extensions: ['slay'] }]
-      })
-    : await dialog.showSaveDialog({
-        title: 'Export',
-        defaultPath,
-        filters: [{ name: 'SlayZone', extensions: ['slay'] }]
-      })
+  // Window parenting is the host's business — it owns the BrowserWindow.
+  const saveResult = await getAppDeps().dialogShowSaveDialog({
+    title: 'Export',
+    defaultPath,
+    filters: [{ name: 'SlayZone', extensions: ['slay'] }]
+  })
 
   if (saveResult.canceled || !saveResult.filePath) {
     return { success: false, canceled: true }
@@ -214,18 +218,11 @@ async function handleExportProject(db: SlayzoneDb, projectId: string): Promise<E
 
 async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
   try {
-    const win = getWindow()
-    const openResult = win
-      ? await dialog.showOpenDialog(win, {
-          title: 'Import',
-          filters: [{ name: 'SlayZone', extensions: ['slay'] }],
-          properties: ['openFile']
-        })
-      : await dialog.showOpenDialog({
-          title: 'Import',
-          filters: [{ name: 'SlayZone', extensions: ['slay'] }],
-          properties: ['openFile']
-        })
+    const openResult = await getAppDeps().dialogShowOpenDialog({
+      title: 'Import',
+      filters: [{ name: 'SlayZone', extensions: ['slay'] }],
+      properties: ['openFile']
+    })
 
     if (openResult.canceled || openResult.filePaths.length === 0) {
       return { success: false, canceled: true }
@@ -240,7 +237,7 @@ async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
 
     const result = await importBundle(db, bundle)
 
-    notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
+    getNotifyEvents().emit('tasks-changed') // tRPC notify.onTasksChanged source
 
     return result
   } catch (e) {
@@ -302,7 +299,7 @@ export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImpo
           return { success: false, error: `Unsupported export version: ${bundle.meta?.version}` }
         }
         const result = await importBundle(db, bundle)
-        notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
+        getNotifyEvents().emit('tasks-changed') // tRPC notify.onTasksChanged source
         return result
       } catch (e) {
         return { success: false, error: String(e) }

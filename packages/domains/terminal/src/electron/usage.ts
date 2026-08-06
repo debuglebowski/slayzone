@@ -4,7 +4,6 @@ import { execFile, spawn } from 'child_process'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { ProviderUsage, UsageWindow, UsageProviderConfig } from '@slayzone/terminal/shared'
 
@@ -537,7 +536,20 @@ function fetchProvider(
 
 // ── Handler ──────────────────────────────────────────────────────────
 
-async function fetchUsage(db: SlayzoneDb, force?: boolean): Promise<ProviderUsage[]> {
+/**
+ * The provider rows this needs from `terminal_modes`, resolved by the CALLER.
+ *
+ * Split out because usage is genuinely two things wedged together: an Electron
+ * `net.fetch` (which can only run on the host) and a database read (which can only
+ * run where the database is). Passing the rows in lets each half live where it
+ * belongs — the same inversion as the artifact renderers and the browser ops.
+ */
+export type UsageProviders = {
+  customRows: { id: string; label: string; usage_config: string }[]
+  builtinEnabled: Record<string, boolean>
+}
+
+async function fetchUsage(providers: UsageProviders, force?: boolean): Promise<ProviderUsage[]> {
   const now = Date.now()
 
   // Hard floor: never refetch within 10s (blocks spam-clicking)
@@ -553,19 +565,8 @@ async function fetchUsage(db: SlayzoneDb, force?: boolean): Promise<ProviderUsag
   // Deduplicate concurrent requests
   if (inflight) return inflight
 
-  // Gather custom providers from DB
-  const customRows = (await db.all(
-    `SELECT id, label, usage_config FROM terminal_modes WHERE usage_config IS NOT NULL AND enabled = 1`
-  )) as { id: string; label: string; usage_config: string }[]
-
-  // Check enabled status for built-in providers
-  const builtinEnabled = new Map(
-    (
-      (await db.all(
-        `SELECT id, enabled FROM terminal_modes WHERE id IN ('claude-code', 'codex')`
-      )) as { id: string; enabled: number }[]
-    ).map((r) => [r.id, r.enabled === 1])
-  )
+  const customRows = providers.customRows
+  const builtinEnabled = new Map(Object.entries(providers.builtinEnabled))
 
   const fetchers: Promise<ProviderUsage>[] = []
 
@@ -621,21 +622,21 @@ async function fetchUsage(db: SlayzoneDb, force?: boolean): Promise<ProviderUsag
 
 // Pure op surface shared by the IPC handlers (below) and the tRPC `app.usage`
 // router (via setAppDeps). Both transports delegate here (coexistence til slice 5).
-export function buildUsageOps(db: SlayzoneDb) {
+export function buildUsageOps() {
   return {
-    fetch: (force?: boolean): Promise<ProviderUsage[]> => fetchUsage(db, force),
+    fetch: (providers: UsageProviders, force?: boolean): Promise<ProviderUsage[]> =>
+      fetchUsage(providers, force),
     test: (
       config: UsageProviderConfig
     ): Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }> => testUsageConfig(config)
   }
 }
 
-export function registerUsageHandlers(
-  ipcMain: IpcMain,
-  db: SlayzoneDb
-): ReturnType<typeof buildUsageOps> {
-  const ops = buildUsageOps(db)
-  ipcMain.handle('usage:fetch', (_e, force?: boolean) => ops.fetch(force))
+export function registerUsageHandlers(ipcMain: IpcMain): ReturnType<typeof buildUsageOps> {
+  const ops = buildUsageOps()
+  ipcMain.handle('usage:fetch', (_e, providers: UsageProviders, force?: boolean) =>
+    ops.fetch(providers, force)
+  )
   ipcMain.handle('usage:test', (_e, config: UsageProviderConfig) => ops.test(config))
   // Return the ops so the host shares ONE instance with setAppDeps.
   return ops

@@ -13,7 +13,12 @@ import {
   type TxnResult
 } from '@slayzone/platform'
 import { domainTxnRegistry } from '@slayzone/transport/txns'
-import { bootstrapSchema } from '@slayzone/transport/db-bootstrap'
+import {
+  bootstrapSchema,
+  createPreMigrationBackup,
+  LATEST_MIGRATION_VERSION
+} from '@slayzone/transport/db-bootstrap'
+import { createDiagnosticsSchema, applyDiagnosticsPragmas } from '@slayzone/diagnostics/server'
 
 /**
  * Resolves the SQLite path the side-car should open — DERIVED from the storage
@@ -97,12 +102,38 @@ class SyncSlayzoneDb implements SlayzoneDb {
   }
 }
 
-export function openServerDatabase(opts?: { bootstrapSchema?: boolean }): SlayzoneDb {
+/**
+ * Open the shared DB and bring its schema up to date. THE HUB OWNS THE SCHEMA IN
+ * EVERY MODE — there is deliberately no option to skip this.
+ *
+ * It used to take `{ bootstrapSchema: !supervised }`: a supervised hub opened the
+ * Electron host's already-migrated file and was forbidden to touch the schema,
+ * because the host's DB worker got there first. That is one file with two writers,
+ * one of them told not to touch the schema — and it forced the host to migrate
+ * even in REMOTE mode, where it carries a local copy of a schema whose data lives
+ * on the server. Removing the parameter makes the special-case unrepresentable
+ * rather than merely unused.
+ *
+ * The pre-migration backup lives HERE, immediately before `bootstrapSchema`, on
+ * this same connection — `db.backup()` snapshots the live connection, so the two
+ * belong in one function where no future caller can interleave them. It self-skips
+ * on a fresh (v0) or already-current store.
+ *
+ * Async only because of that backup; every query path stays synchronous.
+ */
+export async function openServerDatabase(): Promise<SlayzoneDb> {
   const db = new Database(getDatabasePathFromEnv())
   for (const pragma of DB_PRAGMAS) db.pragma(pragma)
-  // Standalone boots own their schema (the Electron host's DB worker does the
-  // equivalent on its side, plus legacy-path migration + pre-migration backup).
-  if (opts?.bootstrapSchema) bootstrapSchema(db)
+  // Same derivation as the DB path itself, so the backup can never be named for
+  // a different channel than the file it backs up.
+  const filePrefix = getDbName(process.env.SLAYZONE_DEV !== '1').replace(/\.sqlite$/, '')
+  await createPreMigrationBackup(
+    db,
+    LATEST_MIGRATION_VERSION,
+    path.join(getStorageDir(), 'backups'),
+    filePrefix
+  )
+  bootstrapSchema(db)
   return new SyncSlayzoneDb(db)
 }
 
@@ -111,33 +142,23 @@ export function openServerDatabase(opts?: { bootstrapSchema?: boolean }): Slayzo
  * sibling of the main DB). The sidecar owns pty + the agent pool, so its
  * `recordDiagnosticEvent` calls must persist HERE — otherwise they buffer and
  * drop (the events DB was only ever bound in the Electron host, so sidecar
- * diagnostics were invisible). Schema mirrors the host's diag worker and is
- * created idempotently: a no-op in supervised mode (the host already made it),
- * a bootstrap standalone. WAL + busy_timeout (DB_PRAGMAS) make the two-process
- * (host + sidecar) writers safe.
+ * diagnostics were invisible). WAL + busy_timeout (DB_PRAGMAS) make the two-process
+ * (host + sidecar) writers safe; the schema is now literally shared rather than
+ * "mirrored", which is what let the two drift.
  */
 export function openServerDiagnosticsDatabase(): SlayzoneDb {
   const diagPath = getDatabasePathFromEnv().replace(/\.sqlite$/, '.diagnostics.sqlite')
   const db = new Database(diagPath)
+  // ONE schema definition, shared with the Electron host's diag worker
+  // (diagnostics/server/schema.ts). These used to diverge — four indexes and
+  // auto_vacuum on the host side, two indexes and none here — and since both
+  // processes open this same file, whichever created it first silently decided
+  // the other's schema. auto_vacuum in particular cannot be set afterwards.
+  //
+  // Repair (`selfHealDiagnosticsDb`) is deliberately NOT run here: rotating a file
+  // the host may hold open is the hazard, so the host owns repair and starts first.
+  applyDiagnosticsPragmas(db)
   for (const pragma of DB_PRAGMAS) db.pragma(pragma)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS diagnostics_events (
-      id TEXT PRIMARY KEY,
-      ts_ms INTEGER NOT NULL,
-      level TEXT NOT NULL,
-      source TEXT NOT NULL,
-      event TEXT NOT NULL,
-      trace_id TEXT,
-      task_id TEXT,
-      project_id TEXT,
-      session_id TEXT,
-      channel TEXT,
-      message TEXT,
-      payload_json TEXT,
-      redaction_version INTEGER NOT NULL DEFAULT 1
-    );
-    CREATE INDEX IF NOT EXISTS idx_diag_ts ON diagnostics_events(ts_ms);
-    CREATE INDEX IF NOT EXISTS idx_diag_source_event_ts ON diagnostics_events(source, event, ts_ms);
-  `)
+  createDiagnosticsSchema(db)
   return new SyncSlayzoneDb(db)
 }

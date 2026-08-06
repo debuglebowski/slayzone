@@ -436,13 +436,13 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   // var to hand over, so both processes must point at the SAME ROOT to open the
   // same file.
   //
-  // Migrate the DB before the supervised spawn. SLAYZONE_SUPERVISED=1 tells the
-  // sidecar the host already owns + migrated this DB (openServerDatabase skips
-  // schema bootstrap in supervised mode) — production always upholds that, since
-  // the Electron host's DB worker migrates before spawning the sidecar. An
-  // unmigrated DB would make the sidecar's compose-time initializers (automations
-  // catchup, etc.) throw "no such table" and exit before printing "listening" — a
-  // test artifact, not the parent-death behaviour under test.
+  // Migrate the DB before the supervised spawn. This seeding is now belt-and-
+  // braces: `openServerDatabase()` bootstraps the schema in EVERY mode, so a
+  // supervised child migrates itself. It is kept because this test spawns the
+  // BUILT bin, which may predate that change, and because an unmigrated DB would
+  // make the sidecar's compose-time initializers (automations catchup, etc.) throw
+  // "no such table" and exit before printing "listening" — a test artifact, not the
+  // parent-death behaviour under test.
   //
   // Seed by booting the SAME bin in STANDALONE mode (no SLAYZONE_SUPERVISED), which
   // runs the real schema bootstrap at `<dir>/slayzone.sqlite`, then killing it once
@@ -454,10 +454,9 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   await new Promise<void>((resolve, reject) => {
     // Scrub inherited SLAYZONE_* so the seeder boots genuinely STANDALONE. When
     // this test runs inside a supervised session the parent leaks
-    // SLAYZONE_SUPERVISED=1 (+ SLAYZONE_ROOT → the real dev install) — which would
-    // put the seeder in supervised mode (skips schema bootstrap → the seed does
-    // nothing) and point it at the real store. Strip them, then set only the
-    // explicit standalone knobs below.
+    // SLAYZONE_SUPERVISED=1 (+ SLAYZONE_ROOT → the real dev install), which would
+    // point the seeder at the REAL store. Stripping SLAYZONE_ROOT is the load-
+    // bearing half; strip the whole prefix, then set only the knobs below.
     const seedEnv: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) {
       if (v == null) continue
@@ -468,8 +467,8 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
       env: {
         ...seedEnv,
         ELECTRON_RUN_AS_NODE: '1',
-        // Standalone (no SLAYZONE_SUPERVISED) → openServerDatabase bootstraps schema
-        // at the DERIVED <ROOT>/storage/slayzone.sqlite (same dir the child opens).
+        // openServerDatabase bootstraps schema at the DERIVED
+        // <ROOT>/storage/slayzone.sqlite (same dir the child opens).
         SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
         SLAYZONE_ROOT: dir,
         SLAYZONE_HUB_AUTH_SECRET: 'seed-only-secret-at-least-32-chars-long'

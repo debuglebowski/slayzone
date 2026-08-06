@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'node:worker_threads'
 import Database from 'better-sqlite3'
 import { selfHealDiagnosticsDb, scheduleSalvageMergeForAll } from '@slayzone/diagnostics/self-heal'
+import { createDiagnosticsSchema, applyDiagnosticsPragmas } from '@slayzone/diagnostics/server'
 import type { BatchOp, DiagWorkerData, WorkerRequest, WorkerResponse } from './worker-protocol'
 
 /**
@@ -28,29 +29,13 @@ try {
   selfHealDiagnosticsDb(data.dbPath)
   db = new Database(data.dbPath)
   // auto_vacuum MUST be set before any table exists. No-op for pre-existing DBs.
-  db.pragma('auto_vacuum = INCREMENTAL')
-  db.pragma('journal_mode = WAL')
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS diagnostics_events (
-      id TEXT PRIMARY KEY,
-      ts_ms INTEGER NOT NULL,
-      level TEXT NOT NULL,
-      source TEXT NOT NULL,
-      event TEXT NOT NULL,
-      trace_id TEXT,
-      task_id TEXT,
-      project_id TEXT,
-      session_id TEXT,
-      channel TEXT,
-      message TEXT,
-      payload_json TEXT,
-      redaction_version INTEGER NOT NULL DEFAULT 1
-    );
-    CREATE INDEX IF NOT EXISTS idx_diag_ts ON diagnostics_events(ts_ms);
-    CREATE INDEX IF NOT EXISTS idx_diag_level_ts ON diagnostics_events(level, ts_ms);
-    CREATE INDEX IF NOT EXISTS idx_diag_trace ON diagnostics_events(trace_id);
-    CREATE INDEX IF NOT EXISTS idx_diag_source_event_ts ON diagnostics_events(source, event, ts_ms);
-  `)
+  // ONE schema definition, shared with the hub — see diagnostics/server/schema.ts.
+  // Both processes open this file; two divergent CREATE TABLEs meant whichever got
+  // there first decided the other's indexes and auto_vacuum.
+  applyDiagnosticsPragmas(db)
+  createDiagnosticsSchema(db)
+  // Repair stays HERE and only here: the host starts before the side-car, and
+  // rotating a file a peer holds open is exactly the hazard this whole task is about.
   scheduleSalvageMergeForAll(() => db, data.dbPath)
 } catch (err) {
   port.postMessage({

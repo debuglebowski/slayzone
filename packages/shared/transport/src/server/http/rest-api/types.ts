@@ -72,33 +72,77 @@ export interface ProcessesAccess {
 /** The minimal WebContents surface the browser routes drive. Structural (NOT
  *  Electron's type — this package must stay electron-free); the Electron host's
  *  real WebContents conforms. */
-export interface BrowserWc {
-  getURL: () => string
-  loadURL: (url: string) => Promise<void>
-  capturePage: () => Promise<{ isEmpty: () => boolean; toPNG: () => Buffer }>
-  mainFrame?: { executeJavaScript: (code: string) => Promise<unknown> } | null
-}
-
-/** WCV browser-panel access (registry + focus). Electron host only — the
- *  standalone server has no WebContentsViews. Absent → browser routes 501. */
+/**
+ * WCV browser-panel access. Electron host only — the standalone server has no
+ * WebContentsViews. Absent → browser routes 501.
+ *
+ * OPS, NOT A HANDLE. This used to hand back a `BrowserWc` (a live `WebContents`
+ * in disguise), which forced the whole route to run wherever that object lived —
+ * i.e. on the desktop, which then needed its own connection to the shared DB to
+ * read the `tasks.browser_tabs` row the same route updates. A `WebContents`
+ * cannot cross a wire, but each of these operations can, so the route now runs on
+ * the hub (where the row is) and only the operation is bridged.
+ *
+ * Keyed by `(taskId, tabId)` for the same reason: an identifier survives the
+ * crossing, a handle does not. `capturePageToFile` writes to a path rather than
+ * returning a buffer so a full-page PNG never travels over the bridge.
+ */
 export interface BrowserAccess {
-  getBrowserWebContents: (taskId: string, tabId?: string) => BrowserWc | null
-  getResolvedBrowserTabId: (taskId: string, tabId?: string) => string | null
-  listBrowserTabs: (taskId: string) => Array<{ tabId: string; active?: boolean }>
+  getResolvedBrowserTabId: (taskId: string, tabId?: string) => Promise<string | null>
+  listBrowserTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
+  /** True when a live tab is registered — the "is the panel open?" probe. */
+  hasBrowserTab: (taskId: string, tabId?: string) => Promise<boolean>
+  /** Resolves once a tab registers; rejects on timeout. */
   waitForBrowserRegistration: (
     taskId: string,
     opts: { tabId?: string; timeoutMs?: number }
-  ) => Promise<BrowserWc>
+  ) => Promise<void>
+  execJs: (taskId: string, tabId: string | null, code: string) => Promise<unknown>
+  loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
+  getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
+  /** False when the captured image was empty. */
+  capturePageToFile: (
+    taskId: string,
+    tabId: string | null,
+    destPath: string
+  ) => Promise<boolean>
 }
 
-/** Renderer-backed artifact export (pdf/png/html). Needs an offscreen renderer —
- *  Electron host only. Absent → export routes 501. */
+/**
+ * Renderer-backed artifact export (pdf/png/html). Needs an offscreen renderer —
+ * Electron host only. Absent → export routes 501.
+ *
+ * Mirrors the `artifact*` AppDeps slots exactly, because that is now how it is
+ * wired: the ROUTE runs on the hub (where the `task_artifacts` row lives) and
+ * these three methods cross the capability bridge to the desktop. The previous
+ * five-primitive shape forced the opposite — the whole handler ran on the
+ * desktop, which therefore needed a live connection to the shared DB purely to
+ * answer a request the hub had just forwarded to it.
+ *
+ * Two properties are load-bearing and neither survives a "just expose the
+ * primitives" refactor:
+ *  - the `*ToFile` methods write straight to destPath, so multi-MB buffers never
+ *    cross the bridge;
+ *  - HTML building stays on the desktop side of the bridge, because
+ *    `buildMermaidPdfHtml` resolves mermaid via `require.resolve` and silently
+ *    downgrades to plain-code rendering on a miss — from the side-car bundle it
+ *    would miss every time and quietly degrade every mermaid export.
+ */
 export interface ArtifactExportAccess {
-  buildPdfHtml: (content: string, mode: string, title: string) => string
-  buildMermaidPdfHtml: (content: string, title: string) => string
-  buildPngHtml: (content: string, mode: string, title: string) => string | null
-  renderToPdf: (html: string, isMermaid: boolean) => Promise<Buffer>
-  renderToPng: (html: string) => Promise<Buffer>
+  buildExportHtml: (content: string, mode: string, title: string) => Promise<string>
+  renderPdfToFile: (
+    content: string,
+    mode: string,
+    title: string,
+    destPath: string
+  ) => Promise<void>
+  /** False when the mode has no PNG representation (buildPngHtml declined). */
+  renderPngToFile: (
+    content: string,
+    mode: string,
+    title: string,
+    destPath: string
+  ) => Promise<boolean>
 }
 
 export interface RestApiDeps {

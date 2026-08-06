@@ -3,6 +3,7 @@ export {
   getSlayzoneHomeDir,
   getSlayzoneReleaseChannel,
   getSupervisedRoot,
+  getClientRoot,
   type SlayzoneSupervisedRole,
   getMachineSlayzoneDir,
   getHooksDir,

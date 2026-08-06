@@ -53,12 +53,16 @@ async function loadTxnRegistry(): Promise<
   Record<string, (db: Database.Database, params: never) => unknown>
 > {
   if (_txnRegistry) return _txnRegistry
+  // The app's `main/db/txn-registry.ts` is gone — Electron main no longer opens the
+  // shared database, and its two app-only txn sources (export-import,
+  // reset-for-test) moved into the shared domain registry with it. That registry is
+  // now the whole set, so the harness resolves it directly.
   const registryPath = path.resolve(
     import.meta.dirname,
-    '../../apps/app/src/main/db/txn-registry.ts'
+    '../transport/src/txns/index.ts'
   )
   const mod = await import(registryPath)
-  _txnRegistry = mod.txnRegistry
+  _txnRegistry = mod.domainTxnRegistry
   return _txnRegistry!
 }
 

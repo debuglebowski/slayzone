@@ -15,6 +15,7 @@
  * Pre-req: pnpm --filter @slayzone/cli build  (or rely on existing dist/slay.js)
  */
 import * as fs from 'node:fs'
+import * as http from 'node:http'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { spawn, execSync } from 'node:child_process'
@@ -25,7 +26,12 @@ import { configureTaskRuntimeAdapters } from '../../../domains/task/src/server/o
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../shared/test-utils/event-spy.js'
 import { __ipcEmitCalls, __resetIpcEmitCalls } from '../../../shared/test-utils/mock-electron.js'
-import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
+import {
+  DB_PRAGMAS,
+  SIDECAR_FIXED_PORT,
+  getDbName,
+  getStorageDir
+} from '../../../shared/platform/src/index.js'
 import { taskEvents } from '../../../domains/task/src/server/events.js'
 import { registerCreateTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/create.js'
 import { registerUpdateTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/update.js'
@@ -44,14 +50,31 @@ if (!fs.existsSync(SLAY_BIN)) {
   process.exit(0)
 }
 
-// tmpDir is the install ROOT handed to the CLI; it DERIVES
-// `<ROOT>/storage/slayzone.dev.sqlite` from it (SLAYZONE_DEV=1 below picks the
-// `.dev` filename), so the fixture DB has to live exactly there.
+/**
+ * The storage dir a process anchored at `root` resolves — derived by running the
+ * production resolver against that root rather than spelling the layout out here.
+ * It is `<ROOT>` itself today (the `storage/` subfolder went away when the root
+ * became role-scoped), and every hardcoded `'storage'` segment in this file
+ * silently pointed its assertions at a directory nothing writes to.
+ */
+function storageDirFor(root: string): string {
+  const prev = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = root
+  try {
+    return getStorageDir()
+  } finally {
+    if (prev === undefined) delete process.env.SLAYZONE_ROOT
+    else process.env.SLAYZONE_ROOT = prev
+  }
+}
+
+// tmpDir is the install ROOT handed to the CLI; the DB filename is the `.dev` one
+// (SLAYZONE_DEV=1 below), and it sits directly in that root's storage dir.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-rest-test-'))
-const storageDir = path.join(tmpDir, 'storage')
+const storageDir = storageDirFor(tmpDir)
 fs.mkdirSync(storageDir, { recursive: true })
 
-const db = new Database(path.join(storageDir, 'slayzone.dev.sqlite'))
+const db = new Database(path.join(storageDir, getDbName(false)))
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,
@@ -205,6 +228,50 @@ function runCli(
     })
     p.on('close', (code) => resolve({ exitCode: code, stdout, stderr }))
   })
+}
+
+/**
+ * Bind a NON-hub listener on one of the two fixed sidecar ports, so the CLI's
+ * local-hub probe for that channel deterministically finds nothing dialable.
+ *
+ * Tries the dev port first (the channel every other test in this file uses) and
+ * falls back to the prod port, since a developer box is usually running a real
+ * dev sidecar on 51101. `dev` reports which one was claimed so the caller can set
+ * SLAYZONE_DEV to match. Throws — loudly — when both are taken, rather than
+ * letting the assertion silently exercise a live app.
+ */
+async function occupyFixedPort(): Promise<{ dev: boolean; close: () => Promise<void> }> {
+  for (const [port, dev] of [
+    [SIDECAR_FIXED_PORT.dev, true],
+    [SIDECAR_FIXED_PORT.prod, false]
+  ] as const) {
+    // 404 on everything: `findHub` requires a 200 with a hub-shaped body.
+    const server = http.createServer((_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' })
+      res.end('not a hub')
+    })
+    const bound = await new Promise<boolean>((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException): void => {
+        server.off('error', onError)
+        if (err.code === 'EADDRINUSE') resolve(false)
+        else reject(err)
+      }
+      server.once('error', onError)
+      server.listen(port, '127.0.0.1', () => {
+        server.off('error', onError)
+        resolve(true)
+      })
+    })
+    if (!bound) continue
+    return {
+      dev,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }
+  throw new Error(
+    `Both fixed sidecar ports (${SIDECAR_FIXED_PORT.dev}, ${SIDECAR_FIXED_PORT.prod}) are in use — ` +
+      `cannot prove the "no hub answers" path. Stop one of the running hubs and re-run.`
+  )
 }
 
 await describe('CLI tasks create → REST', () => {
@@ -463,7 +530,7 @@ await describe('CLI id-prefix addressing works without a local database', () => 
   }
 
   test('sanity: this root really has no database file', () => {
-    expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.sqlite'))).toBe(false)
+    expect(fs.existsSync(path.join(storageDirFor(noDbRoot), getDbName(false)))).toBe(false)
   })
 
   test('tasks update <prefix> --title', async () => {
@@ -600,7 +667,7 @@ await describe('CLI tasks create works without a local database', () => {
   ).run(tplId, projectId, 'Hotfix', 'codex', 'in_progress', 2)
 
   test('sanity: this root really has no database file', () => {
-    expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.sqlite'))).toBe(false)
+    expect(fs.existsSync(path.join(storageDirFor(noDbRoot), getDbName(false)))).toBe(false)
   })
 
   test('creates a task and prints the Created line with the project name', async () => {
@@ -847,13 +914,32 @@ await describe('CLI app-down path', () => {
     expect(r.stderr.includes('Could not connect to SlayZone hub')).toBe(true)
   })
 
-  test('exits when no server port configured at all (env unset, settings empty)', async () => {
-    db.prepare("DELETE FROM settings WHERE key = 'server_port'").run()
-    const r = await runCli(['tasks', 'create', 'Lost2', '--project', 'CLIREST'], {
-      SLAYZONE_HUB_ADDRESS: undefined
-    })
+  test('exits when no hub is configured and nothing hub-shaped answers the channel port', async () => {
+    // `settings.server_port` is no longer part of this contract — the CLI reads no
+    // database at all. With no SLAYZONE_HUB_ADDRESS and no hub-target file it
+    // probes ONE fixed loopback port for its channel (SIDECAR_FIXED_PORT, keyed on
+    // SLAYZONE_DEV) and requires a hub-shaped /health body.
+    //
+    // So the fixture has to OWN that port rather than hope it is free: a developer
+    // box usually has a real sidecar on the dev port, and this case would then
+    // quietly drive the live app instead of failing. `occupyFixedPort` binds a
+    // listener that is emphatically NOT a hub on whichever channel port it can
+    // claim, which makes the outcome deterministic AND puts the hub-shape
+    // validation itself under test (a squatter must be rejected, not dialled).
+    const decoy = await occupyFixedPort()
+    let r: CliResult
+    try {
+      r = await runCli(['tasks', 'create', 'Lost2', '--project', 'CLIREST'], {
+        SLAYZONE_HUB_ADDRESS: undefined,
+        SLAYZONE_DEV: decoy.dev ? '1' : '0'
+      })
+    } finally {
+      await decoy.close()
+    }
     expect(r.exitCode).toBe(1)
     expect(r.stderr.includes('server port not found')).toBe(true)
+    // Nothing reached a real hub, so no row was created anywhere.
+    expect(db.prepare('SELECT id FROM tasks WHERE title = ?').get('Lost2')).toBe(undefined)
   })
 })
 

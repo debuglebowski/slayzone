@@ -1,9 +1,9 @@
 /**
  * AI config slug migration tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/apps/app/src/main/db/ai-config-slug-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/ai-config-slug-migration.test.ts
  */
 import Database from 'better-sqlite3'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { migrations } from './index'
 
 let passed = 0
 let failed = 0
@@ -35,22 +35,42 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+/**
+ * Build a DB migrated to exactly `version` — the schema the migration under
+ * test actually runs against. Migrations are forward-only, so the old trick of
+ * migrating to latest and rewinding user_version replayed unguarded DDL (v49's
+ * `ALTER TABLE processes ADD COLUMN project_id`) against a schema that already
+ * had it.
+ */
+function dbAtVersion(version: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  for (const migration of migrations) {
+    if (migration.version > version) break
+    db.transaction(() => {
+      migration.up(db)
+      db.pragma(`user_version = ${migration.version}`)
+    })()
+  }
   return db
+}
+
+function applyMigration(db: Database.Database, version: number): void {
+  const migration = migrations.find((m) => m.version === version)
+  if (!migration) throw new Error(`migration v${version} not found`)
+  db.transaction(() => {
+    migration.up(db)
+    db.pragma(`user_version = ${version}`)
+  })()
 }
 
 console.log('\nai-config slug migration')
 
 test('normalizes and de-duplicates slugs per scope/type bucket', () => {
-  const db = createDb()
+  // A database that has applied v46 but not v47 yet.
+  const db = dbAtVersion(46)
   try {
-    // Simulate a database that has applied v46 but not v47 yet.
-    db.pragma('user_version = 46')
-
     const projectId = crypto.randomUUID()
     db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(
       projectId,
@@ -115,7 +135,7 @@ test('normalizes and de-duplicates slugs per scope/type bucket', () => {
       '2025-01-02 00:00:00'
     )
 
-    runMigrations(db)
+    applyMigration(db, 47)
 
     const byId = new Map(
       (

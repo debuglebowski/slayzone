@@ -33,7 +33,15 @@ import {
   registerBrowserTab,
   unregisterBrowserTab,
   setActiveBrowserTab,
-  clearBrowserRegistry
+  clearBrowserRegistry,
+  getResolvedBrowserTabId,
+  listBrowserTabs,
+  hasBrowserTab,
+  awaitBrowserRegistration,
+  browserExecJs,
+  browserLoadUrl,
+  browserGetUrl,
+  browserCapturePageToFile
 } from './browser-registry'
 import {
   BrowserViewManager,
@@ -259,7 +267,22 @@ initStorageDir(legacyStateDir, app.isPackaged)
 
 // tRPC server data root = the resolved storage dir, so every router's ctx.dataRoot
 // resolves project-icons/artifacts to the same dir the renderer reads.
-function getTrpcDataRoot(): string {
+/**
+ * Where CLIENT state lives — `~/.slayzone/<channel>/client`.
+ *
+ * It used to be `getStorageDir()`, i.e. the HUB role's root. That put
+ * `boot-config.json` — the file that decides whether a local hub runs at all —
+ * and `hub-tokens.json` (safeStorage bearer tokens) inside the directory owned by
+ * the thing they configure. In remote mode that directory existed for no other
+ * reason, and any future "reset the local hub" would take the user's remote-hub
+ * registry and credentials with it.
+ */
+function getClientStateRoot(): string {
+  return getClientRoot()
+}
+
+/** The old location, used ONLY as a read-only fallback until each file is rewritten. */
+function getLegacyClientStateRoot(): string {
   return getStorageDir()
 }
 
@@ -267,14 +290,11 @@ import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
 import {
   initDatabases,
-  closeDatabase,
   closeDiagnosticsDatabase,
   getDatabasePath
 } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
-import { buildBackupOps, startAutoBackup, stopAutoBackup } from './backup'
 import { startProactiveGc } from './proactive-gc'
-import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
   filesPathExists,
   filesSaveTempImage,
@@ -287,19 +307,52 @@ import {
 import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
-  handleAttentionTransition,
-  taskOps,
-  registerConversationHealer,
-  registerConversationResolver
+  taskOps
 } from '@slayzone/task/server'
-import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
 import {
   getEffectiveTheme as nativeGetEffectiveTheme,
   getThemeSource as nativeGetThemeSource,
   setTheme as nativeSetTheme
 } from '@slayzone/settings/theme'
-import { SettingsService } from '@slayzone/settings/server'
+import { getClientRoot } from '@slayzone/platform'
+import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
+import { migrateClientSettings } from './client-settings-migration'
+
+/**
+ * One-shot latch for the Linux CLI-symlink warning. Client-scoped by nature —
+ * it records whether THIS machine has been warned about a stale
+ * `/usr/local/bin` symlink, which is not a fact about anyone's account.
+ */
+/**
+ * E2E-only bridge to the side-car's dev routes. The host has no database, so the
+ * things e2e used to do directly against `db` are asked of the process that does.
+ * Gated the same way on both ends (`PLAYWRIGHT=1`).
+ */
+async function devPost(path: string, body?: unknown): Promise<unknown> {
+  const port = (globalThis as Record<string, unknown>).__serverPort as number | undefined
+  if (!port) throw new Error('dev route: side-car port not resolved yet')
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {})
+  })
+  const json = (await res.json()) as { ok: boolean; result?: unknown; error?: string }
+  if (!json.ok) throw new Error(json.error ?? `dev route ${path} failed`)
+  return json.result
+}
+
+const devSql = (method: string, sql: string, params?: unknown[]): Promise<unknown> =>
+  devPost('/api/dev/sql', { method, sql, params })
+const devSqlRun = (sql: string, params?: unknown[]): Promise<unknown> => devSql('run', sql, params)
+const devReset = (): Promise<unknown> => devPost('/api/dev/reset')
+
+async function markCliMigrationDialogShownLocally(): Promise<boolean> {
+  const root = getClientRoot()
+  if (readClientSettings(root).cli?.migrationDialogShown) return false
+  await updateClientSettings({ cli: { migrationDialogShown: true } }, root)
+  return true
+}
 import {
   wireWarmWindowCleanup,
   killAllPtys,
@@ -310,36 +363,16 @@ import {
   stopIdleChecker,
   getPtyPids,
   onSessionChange,
-  onGlobalStateChange,
-  onPtyInputSubmit,
   buildUsageOps,
-  createChatOps,
-  createChatQueueOps,
   shutdownChatTransports,
   killAllChatTransports,
-  setOnHostKillHandler,
   broadcastRespawnRequest,
-  backfillChatModes,
-  hasSessionUserInput,
-  markSessionUserInput,
-  clearSessionUserInputMark,
-  notifyGlobalStateListeners,
-  setPtyEnricher,
-  setPtySpawnedTabRecorder,
-  setPtyHibernatedTabRecorder,
   setReinstallHooks,
-  setIdleCloseConfigGetter,
-  setChatSpawnedTabRecorder,
   beginTerminalShutdown,
-  initWarmProcessManager,
   teardownAllWarm,
-  chatEvents,
-  chatQueueEvents,
-  createPtyOps,
   ptyEvents
 } from '@slayzone/terminal/electron'
 import { setOnTaskReachedTerminalHandler } from '@slayzone/terminal/server'
-import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import {
   attachFloatingGlobalAgentPanel,
   setupFloatingGlobalAgentPanel,
@@ -352,10 +385,8 @@ import {
   taskWindowsOps,
   taskWindowsEvents
 } from './task-windows'
-import { createPtyEnricher, markTabSpawned, markTabHibernated } from '@slayzone/task-terminals/electron'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
 import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/runners/shared'
-import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import {
   registerDiagnosticsHandlers,
   registerProcessDiagnostics,
@@ -377,19 +408,10 @@ import {
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { getSafeStorageCipher } from '@slayzone/integrations/electron'
 import {
-  startSyncPoller,
-  pushTaskAfterEdit,
-  pushNewTaskToProviders,
-  pushArchiveToProviders,
-  pushUnarchiveToProviders,
-  startDiscoveryPoller,
   resetSyncFlags,
   setCredentialCipher,
-  createIntegrationOps,
-  ensureIntegrationSchema
 } from '@slayzone/integrations/server'
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
-import { AutomationEngine } from '@slayzone/automations/electron'
 import { captureBrowserViewScreenshot } from './screenshot'
 import {
   writeFilePaths,
@@ -398,7 +420,6 @@ import {
 } from './clipboard-handlers'
 import {
   setProcessManagerWindow,
-  initProcessManager,
   createProcess,
   spawnProcess,
   updateProcess,
@@ -413,7 +434,6 @@ import {
   processEvents,
   createStatsPoller
 } from '@slayzone/processes/server'
-import { buildExportImportOps } from './export-import'
 import { notifyEvents } from './notify-renderer'
 import { presentWindow } from './present-window'
 import { menuEvents } from './menu-events'
@@ -422,7 +442,6 @@ import { telemetryEvents } from './telemetry-events'
 import { agentLifecycleEvents } from './agent-lifecycle-events'
 import { powerResumeEvents } from './power-resume-events'
 import { startDesktopBridgeServer } from './desktop-bridge-server'
-import { getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
@@ -1466,7 +1485,7 @@ app
     // backend machinery (in-process tRPC, MCP/REST for the CLI, the sidecar,
     // integration pollers + push handlers) is skipped — the renderer connects
     // to the user-configured remote @slayzone/hub, which owns all of that.
-    const bootConfig = readBootConfig(getTrpcDataRoot())
+    const bootConfig = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
     // `server_mode` is authoritative for whether the embedded local hub runs:
     // `local` = spawn the sidecar, `remote` = don't (this machine is a pure
     // client). This holds under multi_hub too — the "Run a local hub" toggle in
@@ -1514,19 +1533,32 @@ app
     // terminal-mode sync — before initDatabases() resolves. No query can race
     // ahead of migrations, so nothing here needs to re-run those steps.
     logBoot('database init start')
-    const { db, diagDb } = await initDatabases()
-    const settings = SettingsService.forDatabase(db)
+    const { diagDb } = await initDatabases()
+    // Move the client-scoped keys out of the shared DB, once per channel, then
+    // read them from the client store for the rest of boot. Everything below that
+    // used to hit `settings` for these is now reading a local file — which is what
+    // lets it happen before any hub exists, and fixes remote mode, where main was
+    // reading a local database while the renderer wrote to the remote one.
+    const clientRoot = getClientRoot()
+    try {
+      const migrated = await migrateClientSettings({ clientRoot, dbPath: getDatabasePath() })
+      if (migrated.status === 'migrated' && migrated.keys.length > 0) {
+        logBoot(`client settings migrated: ${migrated.keys.join(', ')}`)
+      }
+    } catch (err) {
+      // No sentinel was written, so the next boot retries. Surfacing beats
+      // silently continuing with defaults for theme/shortcuts.
+      console.error('[client-settings] migration failed, will retry next boot:', err)
+    }
+    let clientSettings = readClientSettings(clientRoot)
     logBoot('db opened')
     // Pre-warm keys used by synchronous IPC handlers (event.returnValue).
     // Migrations (run in the worker) have already seeded defaults by now.
-    await settings.warmCache([
-      'labs_tests_panel',
-      'labs_loop_mode',
-      'terminal_auto_close_idle',
-      'terminal_idle_close_value',
-      'terminal_idle_close_unit',
-      'terminal_prewarm_enabled'
-    ])
+    // The four `terminal_*` idle/prewarm keys used to be warmed here too. Their
+    // only host readers were the duplicate idle-close + warm-pool wiring below,
+    // which swept an empty session registry — the side-car owns both. They govern
+    // agents running on a runner, so they stay hub-side and the host stops
+    // reading them at all. The two `labs_*` flags now come from the client store.
     logBoot('migrations applied')
 
     // v127 disk-dir migration: assets/ → artifacts/. Idempotent.
@@ -1548,29 +1580,17 @@ app
     }
     logBoot('v127 disk migration done')
 
-    // Seed initial artifact versions (v1) for any artifacts without history.
-    // Idempotent. Runs inside the DB worker (read needsSeed → per-artifact
-    // read-file → write blob+version txn) so the file IO + writes stay atomic
-    // and the sync better-sqlite3 logic never touches the async proxy.
-    {
-      const dataDir = getStorageDir()
-      const artifactsDir = join(dataDir, 'artifacts')
-      const seedReport = await db.namedTxn('artifacts:seed-initial-versions', {
-        dataDir,
-        artifactsDir
-      })
-      if (seedReport.seeded > 0 || seedReport.skippedMissing > 0) {
-        console.log(
-          `[artifact-versions] seeded=${seedReport.seeded} skippedMissing=${seedReport.skippedMissing}`
-        )
-      }
-    }
+    // Artifact v1 seeding moved to the SIDE-CAR's boot (composition.ts
+    // `artifact-version-seed`). It is a domain txn, so the hub dispatches it
+    // unchanged — and running it there also means a STANDALONE hub finally seeds,
+    // which it never did while this lived on the Electron host.
     logBoot('artifact versions seeded')
     logBoot('diagnostics db opened')
     const isLabEnabled = (key: string): boolean => {
-      const raw = settings.getCached(key)
+      const raw =
+        key === 'labs_tests_panel' ? clientSettings.labs?.testsPanel : clientSettings.labs?.loopMode
       if (raw === undefined) return is.dev || isPlaywright
-      return raw === '1'
+      return raw
     }
     logBoot('database init complete')
 
@@ -1608,10 +1628,9 @@ app
       })
     }
 
-    // Skip onboarding in Playwright — tested explicitly in 02-onboarding.spec.ts
-    if (isPlaywright) {
-      await settings.seedOnboardingCompleted()
-    }
+    // Onboarding baseline for e2e is seeded by the SIDE-CAR at its own boot
+    // (composition.ts `e2e-onboarding-seed`) — deterministic, and the host has no
+    // DB handle to do it with.
 
     registerProcessDiagnostics(app)
     logBoot('process diagnostics registered')
@@ -1621,7 +1640,7 @@ app
       const cliMigration = migrateCliBinIfNeeded(getCliSrc())
       if (
         cliMigration.status === 'migrated-old-kept' &&
-        (await settings.markCliMigrationDialogShown())
+        (await markCliMigrationDialogShownLocally())
       ) {
         dialog.showMessageBox({
           type: 'info',
@@ -1633,7 +1652,7 @@ app
     }
 
     // Load and apply persisted theme BEFORE creating window to prevent flash
-    nativeTheme.themeSource = await settings.getTheme()
+    nativeTheme.themeSource = clientSettings.theme ?? 'dark'
     logBoot('theme loaded')
 
     function getMenuAccelerator(
@@ -1797,19 +1816,19 @@ app
       app.dock?.setIcon(icon)
     }
 
-    currentOverrides = await settings.getShortcutOverrides()
+    currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
     buildAppMenu(currentOverrides)
     logBoot('app menu built')
 
     // Rebuild menu + update overrides cache whenever shortcuts change
     ipcMain.on('shortcuts:changed', async () => {
-      currentOverrides = await settings.getShortcutOverrides()
+      currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
       buildAppMenu(currentOverrides)
     })
 
     // Bind diagnostics first so tRPC diagnostics works and IPC below is instrumented.
     // Flushes any events buffered before this point (boot.start, crash detect, lock outcome).
-    registerDiagnosticsHandlers(ipcMain, db, diagDb, { enableIpcHandlers: isPlaywright })
+    registerDiagnosticsHandlers(ipcMain, diagDb, { enableIpcHandlers: isPlaywright })
     setIpcSuccessHook((channel, args, result) => {
       const entry = IPC_TELEMETRY_MAP[channel]
       if (!entry) return
@@ -1837,54 +1856,25 @@ app
     setOnTaskReachedTerminalHandler(onTaskReachedTerminal)
     logBoot('task runtime adapters configured')
 
-    // Persist the host-kill timestamp into provider_config so the revive flow can
-    // choose between resume (hot) and fresh conversation (cold) — see COLD_RESPAWN_MS.
-    setOnHostKillHandler(async (taskId) => {
-      try {
-        const row = (await db
-          .prepare('SELECT provider_config, terminal_mode FROM tasks WHERE id = ?')
-          .get(taskId)) as
-          | { provider_config: string | null; terminal_mode: string | null }
-          | undefined
-        if (!row?.terminal_mode) return
-        const cfg: ProviderConfig = row.provider_config ? JSON.parse(row.provider_config) : {}
-        const next = setProviderLastKilledAt(cfg, row.terminal_mode, Date.now())
-        await db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(
-          JSON.stringify(next),
-          taskId
-        )
-      } catch (err) {
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'pty',
-          event: 'pty.host_kill_persist_failed',
-          taskId,
-          message: (err as Error).message
-        })
-      }
-    })
+    // The host-kill timestamp is stamped by the SIDE-CAR (host-kill.ts), which
+    // owns the pty sessions `onHostKillHandler` fires from. The host registered it
+    // against its own empty session registry, so it never ran in local mode.
 
     // Register domain handlers (inject ipcMain and db)
     const notifyTasksChanged = (): void => {
       notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
     }
 
-    // Self-heal a stale/phantom Claude conversation id before a resume builds
-    // `--resume` — repoints to the task's real conversation (recorded history, or a
-    // near-certain orphan transcript) so a healthy session never shows a false
-    // "session expired". See plans/conv-id-robustness-v2.md.
-    registerConversationHealer(db, notifyTasksChanged)
-    // MAIN-authoritative conversation resolution: createPty resolves a missing
-    // renderer hint from the ledger so a null hint can't mint over a known
-    // conversation (the restart-clobber fix).
-    registerConversationResolver(db)
-    const feedbackOps = buildFeedbackOps(db)
+    // Conversation healer + resolver are registered by the SIDE-CAR
+    // (composition.ts:361-362) — it owns the pty runtime, so it is the process
+    // where a resume actually builds `--resume`. The host copies registered
+    // against the same shared DB and were never consulted.
     logBoot('core domain ops built')
 
     // Single OS→app theme listener. Both the tRPC `settings.onThemeChanged`
     // subscription and native OS theme changes derive from this one bus.
     wireNativeThemeBridge()
-    const usageOps = buildUsageOps(db)
+    const usageOps = buildUsageOps()
     // Warm-process tab-count cleanup on window death — covers both the IPC and
     // tRPC push paths (registered before any renderer window is created).
     wireWarmWindowCleanup(app)
@@ -1894,76 +1884,48 @@ app
     setupTaskWindows({ enableIpcHandlers: isPlaywright })
     logBoot('floating global agent panel + task windows set up')
 
-    // Task automation: auto-move tasks on terminal state change
-    onGlobalStateChange(async (sessionId, newState, oldState) => {
-      await handleTerminalStateChange(
-        db,
-        sessionId,
-        newState,
-        oldState,
-        notifyTasksChanged,
-        onTaskReachedTerminal
-      )
-
-      // Attention flag: PTY just finished a turn (running → idle|error). Gated
-      // on hasSessionUserInput so that initial spawn/banner settle (which can
-      // trigger running → idle on auto-respawn after task open) does not flag
-      // the task. Renderer clears the flag when the user focuses the task tab.
-      try {
-        const hasUserInput = hasSessionUserInput(sessionId)
-        const changed = await handleAttentionTransition(
-          db,
-          sessionId,
-          newState,
-          oldState,
-          hasUserInput
-        )
-        // Every attention decision is recorded: the set path failed silently for
-        // months (no observable trace between "turn ended" and "flag in DB"), so
-        // gate inputs + outcome must be visible in Diagnostics. Low frequency —
-        // fires only on state transitions, a few per turn.
-        recordDiagnosticEvent({
-          level: 'info',
-          source: 'task',
-          event: 'task.attention_transition',
-          sessionId,
-          taskId: sessionId.split(':')[0],
-          message: `${oldState} -> ${newState}`,
-          payload: { hasUserInput, changed }
-        })
-        if (changed) notifyTasksChanged()
-      } catch (err) {
-        console.error('[attention] failed to set needs_attention:', err)
-        recordDiagnosticEvent({
-          level: 'error',
-          source: 'task',
-          event: 'task.attention_transition_failed',
-          sessionId,
-          taskId: sessionId.split(':')[0],
-          message: (err as Error).message
-        })
-      }
-    })
+    // Terminal-state automation (auto-move on state change + the attention flag)
+    // is registered in the SIDE-CAR (composition.ts:377). `onGlobalStateChange`
+    // fires on whichever process owns the pty sessions; the host owns none, so its
+    // listener was registered against its own bundled pty-manager copy and never
+    // fired. Same orphaning as idle-close, the warm pool and `was_spawned`.
 
     // Expose test helpers for e2e
     if (isPlaywright) {
-      ;(globalThis as Record<string, unknown>).__db = db
-      ;(globalThis as Record<string, unknown>).__notifyPtyState = notifyGlobalStateListeners
-      ;(globalThis as Record<string, unknown>).__markSessionUserInput = markSessionUserInput
-      ;(globalThis as Record<string, unknown>).__clearSessionUserInputMark =
-        clearSessionUserInputMark
+      // `__db` keeps its old shape so the four specs that use it inside
+      // `electronApp.evaluate(...)` are unchanged — but it is a FORWARDER now, not
+      // a handle. Each call POSTs to the side-car's E2E-gated `/api/dev/sql`, so
+      // the host answers e2e's database questions without opening a database.
+      ;(globalThis as Record<string, unknown>).__db = {
+        get: (sql: string, params?: unknown[]) => devSql('get', sql, params),
+        all: (sql: string, params?: unknown[]) => devSql('all', sql, params),
+        run: (sql: string, params?: unknown[]) => devSql('run', sql, params),
+        exec: (sql: string) => devSql('exec', sql)
+      }
+      // Forwarders, like `__db` above. The pty state listeners AND the user-input
+      // mark they gate on both live in the side-car; firing these in the host
+      // reached its own empty registry and silently did nothing.
+      ;(globalThis as Record<string, unknown>).__notifyPtyState = (
+        sid: string,
+        next: string,
+        prev: string
+      ) => devPost('/api/dev/pty-state', { sid, next, prev })
+      ;(globalThis as Record<string, unknown>).__markSessionUserInput = (sid: string) =>
+        devPost('/api/dev/user-input-mark', { sid, mark: true })
+      ;(globalThis as Record<string, unknown>).__clearSessionUserInputMark = (sid: string) =>
+        devPost('/api/dev/user-input-mark', { sid, mark: false })
     }
 
-    setPtyEnricher(createPtyEnricher(db))
-    // Wire the per-tab `was_spawned` flag so pty + chat spawn/exit handlers
-    // can flip it without importing the task-terminals package (would cycle).
-    // Composition root resolves the dependency direction.
-    const recordSpawned = (tabId: string, wasSpawned: boolean): void => {
-      markTabSpawned(db, tabId, wasSpawned)
-    }
-    setPtySpawnedTabRecorder(recordSpawned)
-    setChatSpawnedTabRecorder(recordSpawned)
-    setPtyHibernatedTabRecorder((tabId, hibernated) => markTabHibernated(db, tabId, hibernated))
+    // The per-tab `was_spawned` / `hibernated` recorders are installed by the
+    // SIDE-CAR (`wireTabFlagRecorders`, composition.ts:487) — the process that
+    // actually spawns sessions. The host's copies fired against its own empty
+    // registry, which is exactly the bug `tab-flag-recorders.test.ts` was written
+    // to pin: `was_spawned` stayed 0 forever and a restart restored nothing.
+    //
+    // The pty enricher is wired in the SIDE-CAR too now (composition.ts), where
+    // the sessions it decorates actually live. `createPtyEnricher` moved to
+    // `task-terminals/server` — it imports only `SlayzoneDb`, so being filed under
+    // /electron was the whole reason the side-car could not wire it.
     // Spawn-time hook self-heal: re-run the version-gated notify.sh installer
     // just before a hook-driven agent spawns, so a stale cross-release-channel copy left
     // on the SHARED ~/.slayzone/hooks/notify.sh between boots is repaired UPWARD
@@ -1978,96 +1940,39 @@ app
       ])
       await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE })
     })
-    // Idle-close (hibernation) config — read live each sweep tick. Raw `=== '1'`
-    // (NOT isLabEnabled, which defaults ON in dev) keeps it strictly opt-in.
-    // SettingsService.set updates the warmed cache, so UI toggles take effect
-    // without a restart.
-    setIdleCloseConfigGetter(() => {
-      const value = Number(settings.getCached('terminal_idle_close_value')) || 30
-      const unit = settings.getCached('terminal_idle_close_unit') || 'minutes'
-      const unitMs = unit === 'seconds' ? 1_000 : unit === 'hours' ? 3_600_000 : 60_000
-      return {
-        enabled: settings.getCached('terminal_auto_close_idle') === '1',
-        idleMs: value * unitMs
-      }
-    })
-    // Warm-process pool: keep one ready agent shell per project that has open tabs,
-    // so the first agent a task opens skips shell-init cold start. Opt-in, read live;
-    // raw `=== '1'` keeps it strictly off until enabled.
-    initWarmProcessManager({
-      db,
-      isEnabled: () => settings.getCached('terminal_prewarm_enabled') === '1',
-      getProjectRoot: async (projectId) => {
-        const row = await db.get<{ path?: string }>(
-          'SELECT path FROM projects WHERE id = ?',
-          [projectId]
-        )
-        return row?.path ?? null
-      },
-      // Never warms from THIS process. Warm agents run on runners, reached through
-      // the routing PtyBackend — which is composed in the SIDECAR (slice 9), where
-      // the pty runtime lives. The main process holds only the local backend, so it
-      // has no way to route a warm spawn and must not try; the sidecar's own
-      // `initWarmProcessManager` owns the pool.
-      resolveRunnerId: async () => null
-    })
+    // Idle-close config and the warm-process pool are wired in the SIDE-CAR
+    // (composition.ts:509 and :547), which owns the pty runtime and the routing
+    // PtyBackend. The host's copies were registered on its OWN module singletons —
+    // `checkInactiveSessions` sweeps this process's session registry, which holds
+    // nothing, and the pool was constructed with `resolveRunnerId: async () => null`,
+    // i.e. explicitly unable to warm anything. Two registrations of the same
+    // module-global also meant whichever process wrote last silently won.
+    //
+    // These were the only readers of `terminal_auto_close_idle`,
+    // `terminal_idle_close_value`, `terminal_idle_close_unit` and
+    // `terminal_prewarm_enabled` in the host, which is why those four keys are
+    // gone from `warmCache` above: they govern agents running on a runner and
+    // belong to the hub.
     logBoot('terminal tab runtime wired')
-    const chatHandlerOps = {
-      ops: createChatOps(db, {
-      onChatEvent: initChatTurnSubscriber(db)
-      }),
-      queueOps: createChatQueueOps(db)
-    }
-    // One-shot: backfill `chatMode` for tasks that pre-date the chat-mode UI so
-    // upgraded users keep their current `--allow-dangerously-skip-permissions`
-    // behavior instead of suddenly hitting denials.
-    try {
-      const stats = await backfillChatModes(db)
-      if (stats.updated > 0) {
-        console.log(
-          `[chat-handlers] backfillChatModes: ${stats.updated}/${stats.scanned} tasks tagged 'bypass'`
-        )
-      }
-    } catch (err) {
-      console.error('[chat-handlers] backfillChatModes failed:', err)
-    }
-    logBoot('files+worktree+agent-turns tRPC-only')
-    // xterm-mode turn detection: every Enter press in a PTY = turn boundary.
-    onPtyInputSubmit(initPtyTurnSubscriber(db))
+    // Chat ops, the chat/pty turn subscribers and the `chatMode` backfill all run
+    // in the SIDE-CAR, which owns the pty + chat runtime. The host's copies were
+    // constructed against the shared DB and read by nothing.
     logBoot('ai-config tRPC-only')
     // Inject the Electron safeStorage cipher into the electron-free credential store.
     setCredentialCipher(getSafeStorageCipher())
     // Same cipher backs the per-hub bearer-token store (multi-hub auth).
     setHubTokenCipher(getSafeStorageCipher())
-    await ensureIntegrationSchema(db)
-    const integrationOps = createIntegrationOps(db, { enableTestChannels: isPlaywright })
-    const integrationHandles = {
-      ops: integrationOps,
-      pushGithubTask: integrationOps.pushGithubTask
-    }
-    logBoot('integration ops built')
-    const exportImportOps = buildExportImportOps(db, isPlaywright)
+    // Integration schema + ops live in the side-car (composition.ts), which is
+    // where the sync pollers and push handlers now run too.
+    logBoot('integration ops owned by the hub')
     logBoot('misc tRPC ops built')
-    const notifyAutomationsChanged = (): void => {
-      automationsEvents.emit('changed') // tRPC automations.onChanged source
-      notifyTasksChanged()
-    }
-    const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
-    // Local cutover (slice 9): the SIDE-CAR owns the single AutomationEngine — it
-    // sees every task mutation (renderer tRPC + CLI/MCP REST both run there, and
-    // taskEvents is process-local). The host engine stays constructed-but-UNSTARTED
-    // (still satisfies the MCP REST executeManual dep) so two engines never
-    // double-fire on the shared DB. powerMonitor is host-only → forward 'resume'
-    // over the capability bridge so the side-car engine runs catchup after wake.
-    // Remote mode keeps host ownership (no local side-car).
-    if (isRemoteMode) {
-      automationEngine.start(ipcMain)
-      powerMonitor.on('resume', () => automationEngine.runCatchup())
-    } else {
-      powerMonitor.on('resume', () => powerResumeEvents.emit('resume'))
-    }
-    const backupOps = buildBackupOps(db)
-    startAutoBackup(db)
+    // Never started here. The side-car owns the single AutomationEngine — it is
+    // the process that sees every task mutation (renderer tRPC and CLI/MCP REST
+    // both run there, and taskEvents is process-local). The remote-mode branch
+    // that used to start one here ran against the LOCAL database, which in remote
+    // mode has no tasks and therefore no triggers to fire; the remote hub runs its
+    // own. `powerMonitor` is host-only, so wake still forwards over the bridge.
+    powerMonitor.on('resume', () => powerResumeEvents.emit('resume'))
     // Reclaim Blink/Oilpan garbage on busy renderers that never go idle (see
     // proactive-gc.ts). No-op under Playwright.
     startProactiveGc()
@@ -2083,22 +1988,12 @@ app
       logBoot('host capability server import dispatched')
       import('@slayzone/transport/server')
         .then(async (mod) => {
-          // Inject the electron-coupled chat ops + streaming emitters BEFORE the
-          // server starts accepting connections, so the first chat procedure /
-          // subscription can't hit an uninitialized getChatDeps().
-          mod.setChatDeps({
-            ops: chatHandlerOps.ops,
-            queueOps: chatHandlerOps.queueOps,
-            events: chatEvents,
-            queueEvents: chatQueueEvents
-          })
-          // Pty ops + the dual-emit event stream for the pty router. Same ops the
-          // IPC handlers (registerPtyHandlers, still live below) delegate to → one
-          // implementation, both transports coexist (renderer cutover is slice 5).
-          mod.setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
-          // Same ops instance the IPC handlers delegate to → IPC + integrationsRouter
-          // share one implementation while both coexist (renderer cutover is slice 5).
-          mod.setIntegrationOps(integrationHandles.ops)
+          // The chat / pty / integration data-dep registries are NOT set here.
+          // Nothing in this process reads them — the renderer talks to the side-car,
+          // which populates its own from its own db. Setting them only required the
+          // host to construct db-backed ops it never used, which is precisely the
+          // dependency this change removes.
+          //
           // Task CRUD/deps/board ops for the task router (electron-coupled → injected;
           // artifacts/template stores are electron-free + imported directly). Same ops
           // the IPC handlers call — one implementation, both transports.
@@ -2126,27 +2021,11 @@ app
           // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
           // implementation, both transports coexist (renderer cutover is slice 5).
           mod.setAppDeps({
-            backupList: backupOps.list,
-            backupCreate: backupOps.create,
-            backupRename: backupOps.rename,
-            backupDelete: backupOps.delete,
-            backupRestore: backupOps.restore,
-            backupGetSettings: backupOps.getSettings,
-            backupSetSettings: backupOps.setSettings,
-            backupRevealInFinder: backupOps.revealInFinder,
             clipboardWriteFilePaths: writeFilePaths,
             clipboardReadFilePaths: readFilePaths,
             clipboardHasFiles: hasFilePaths,
             screenshotCaptureView: (viewId: string) =>
               captureBrowserViewScreenshot(browserViewManager, viewId),
-            leaderboardGetLocalStats: () => getLocalLeaderboardStats(db),
-            exportAll: exportImportOps.exportAll,
-            exportProject: exportImportOps.exportProject,
-            importBundle: exportImportOps.importBundle,
-            testExportAllToPath: exportImportOps.testExportAllToPath,
-            testExportProjectToPath: exportImportOps.testExportProjectToPath,
-            testImportFromPath: exportImportOps.testImportFromPath,
-            testSetTaskParent: exportImportOps.testSetTaskParent,
             usageFetch: usageOps.fetch,
             usageTest: usageOps.test,
             filesPathExists,
@@ -2160,16 +2039,15 @@ app
               ),
             shellOpenPath,
             shellShowItemInFolder: (absPath: string) => shell.showItemInFolder(absPath),
-            feedbackListThreads: feedbackOps.listThreads,
-            feedbackCreateThread: feedbackOps.createThread,
-            feedbackGetMessages: feedbackOps.getMessages,
-            feedbackAddMessage: feedbackOps.addMessage,
-            feedbackUpdateThreadDiscordId: feedbackOps.updateThreadDiscordId,
-            feedbackDeleteThread: feedbackOps.deleteThread,
+            // Backup restore overwrites the DB file in the side-car, then needs
+            // everything pointing at it restarted. Relaunch is the desktop's job.
+            appRelaunch: () => {
+              app.relaunch()
+              app.exit()
+            },
             appGetVersion: () => app.getVersion(),
             appGetDownloadsDir: async () => app.getPath('downloads'),
-            // Same renderers mcp-rest-deps.ts injects into the REST export routes —
-            // one implementation, two injection points.
+            // Offscreen renderers, reached from the hub over the capability bridge.
             artifactBuildExportHtml: async (content, mode, title) =>
               mode === 'mermaid-preview'
                 ? buildMermaidPdfHtml(content, title)
@@ -2187,8 +2065,30 @@ app
               writeFileSync(destPath, await renderToPng(html))
               return true
             },
+            // Task/tab browser registry, reached from the hub over the capability
+            // injects into the REST browser routes. One implementation, two
+            // bridge. Sole injection point since the REST proxy was deleted.
+            browserTabs: {
+              getResolvedTabId: async (taskId, tabId) => getResolvedBrowserTabId(taskId, tabId),
+              listTabs: async (taskId) => listBrowserTabs(taskId),
+              hasTab: async (taskId, tabId) => hasBrowserTab(taskId, tabId),
+              waitForRegistration: (taskId, opts) => awaitBrowserRegistration(taskId, opts),
+              execJs: (taskId, tabId, code) => browserExecJs(taskId, tabId, code),
+              loadUrl: (taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
+              getUrl: (taskId, tabId) => browserGetUrl(taskId, tabId),
+              capturePageToFile: (taskId, tabId, destPath) =>
+                browserCapturePageToFile(taskId, tabId, destPath)
+            },
             appGetTrpcPort: () => awaitTrpcPort(),
             appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
+            appSetLabFlag: async (key, on) => {
+              const next =
+                key === 'labs_tests_panel'
+                  ? { testsPanel: on, loopMode: clientSettings.labs?.loopMode }
+                  : { testsPanel: clientSettings.labs?.testsPanel, loopMode: on }
+              await updateClientSettings({ labs: next }, clientRoot)
+              clientSettings = readClientSettings(clientRoot)
+            },
             appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
             appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
             appGetProtocolClientStatus: () => protocolClientStatus,
@@ -2200,7 +2100,7 @@ app
             appCheckForUpdates: () => checkForUpdates(),
             appRebuildMenuForShortcuts: () => {
               void (async () => {
-                currentOverrides = await settings.getShortcutOverrides()
+                currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
                 buildAppMenu(currentOverrides)
               })()
             },
@@ -2258,7 +2158,7 @@ app
             // back (wireNativeThemeBridge → settingsEvents → bridge `theme` chan).
             themeGetEffective: () => nativeGetEffectiveTheme(),
             themeGetSource: () => nativeGetThemeSource(),
-            themeSet: (pref) => nativeSetTheme(db, pref),
+            themeSet: (pref) => nativeSetTheme(pref),
             // Credential cipher — Electron safeStorage. The side-car runs as
             // ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
             // forwards encrypt/decrypt here over the bridge. Base64 on the wire.
@@ -2388,19 +2288,15 @@ app
           // bridge listener (setAppDeps/setMenuEvents/setPowerResumeEvents back it):
           //  • WS `/cap` — the side-car forwards its Electron-only AppDeps calls
           //    here and streams desktop menu/power events back (startTrpcServer retired).
-          //  • HTTP `/api/*` — the reverse-proxy target for the Electron-only REST
-          //    routes the side-car can't serve itself (browser-automation over live
-          //    WebContents + artifact export via offscreen renderer). No discovery
-          //    port is written — the side-car owns `server_port` (CLI/agents/MCP).
-          const { buildMcpRestDeps } = await import('./mcp-rest-deps')
-          const bridgeServer = await startDesktopBridgeServer({
-            db,
-            dataRoot: getTrpcDataRoot(),
-            restDeps: buildMcpRestDeps(db, automationEngine)
-          })
+          // That is now the ONLY thing it serves. The `/api/*` reverse-proxy is
+          // gone: those routes run in the side-car against its own db and reach
+          // back through `/cap` for the Electron step alone — so this listener no
+          // longer needs a database handle at all. No discovery port is written
+          // either; the side-car owns `server_port` (CLI/agents/MCP).
+          const bridgeServer = await startDesktopBridgeServer({})
           bridgeCleanup = () => void bridgeServer.stop()
           resolveDesktopBridgeAddress(`127.0.0.1:${bridgeServer.port}`)
-          logBoot(`desktop bridge server started (port ${bridgeServer.port}, cap WS + REST proxy)`)
+          logBoot(`desktop bridge server started (port ${bridgeServer.port}, cap WS only)`)
         })
         .catch((err) => {
           console.error('[desktop-bridge] Failed to start bridge server:', err)
@@ -2498,12 +2394,42 @@ app
                 '[supervisor] sidecar permanent failure (dark-launch, non-fatal):',
                 info
               )
-              // Persistent toast via the notify.onEmbeddedServerFailed sub.
+              const message = String(
+                info.lastError instanceof Error ? info.lastError.message : info.lastError
+              )
+              // NATIVE dialog, deliberately not a renderer toast. The toast below
+              // has never been reachable: this emits on the HOST's notifyEvents,
+              // while the renderer subscribes to `notify.onEmbeddedServerFailed`
+              // served by the SIDE-CAR — and if the side-car failed permanently
+              // there is no bus to carry it. `dialog` needs no renderer, no window
+              // and no hub, so it is the only surface that survives this failure.
+              //
+              // Load-bearing now that the hub owns schema migration: a migration
+              // failure exits the side-car non-zero, and without this it would be
+              // completely silent — a blank window that reads as data loss.
+              // "Not been modified" is literally true: every migration is atomic
+              // with its own user_version bump, so a crash leaves the DB at the
+              // last fully-applied version with a backup beside it.
+              dialog.showErrorBox(
+                'SlayZone could not start its local server',
+                `${message}\n\n` +
+                  `Your data has not been modified. A pre-migration backup, if one was needed, ` +
+                  `is in:\n${join(getStorageDir(), 'backups')}\n\n` +
+                  `Log:\n${join(getStorageDir(), 'logs', 'sidecar.log')}\n\n` +
+                  `Attempts: ${info.attempts}`
+              )
+              recordDiagnosticEvent({
+                level: 'error',
+                source: 'main',
+                event: 'sidecar.permanent_failure',
+                message,
+                payload: { attempts: info.attempts }
+              })
+              // Kept: costs nothing and becomes correct if the two buses are ever
+              // unified. Not the surface being relied on.
               notifyEvents.emit('embedded-server-failed', {
                 attempts: info.attempts,
-                message: String(
-                  info.lastError instanceof Error ? info.lastError.message : info.lastError
-                )
+                message
               })
             },
             // Dev-only, opt-in: relaunch the side-car when its on-disk build
@@ -2624,44 +2550,14 @@ app
       })
     }
 
-    // Remote mode: integration pollers + push handlers run on the remote
-    // server against its DB — running them here would sync into the local DB
-    // nobody is looking at (and double-sync against providers).
-    if (!isRemoteMode) {
-      linearSyncPoller = startSyncPoller(db, notifyTasksChanged)
-      discoveryPoller = startDiscoveryPoller(db, notifyTasksChanged)
-      logBoot('integration pollers started (sync 10s, discovery 60s)')
-    }
-
-    // Push to providers immediately after local task edits (skip in E2E — tests exercise push explicitly)
-    if (!isPlaywright && !isRemoteMode) {
-      ipcMain.on('db:tasks:update:done', (_event, taskId: string) => {
-        void pushTaskAfterEdit(db, taskId, {
-          pushGithubTask: integrationHandles.pushGithubTask
-        })
-      })
-    }
-
-    if (!isPlaywright && !isRemoteMode) {
-      // Push new tasks to providers (two_way sync)
-      ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
-        void pushNewTaskToProviders(db, taskId, projectId).then(async () => {
-          // Only notify if a link was actually created
-          const hasLink = await db
-            .prepare('SELECT 1 FROM external_links WHERE task_id = ? LIMIT 1')
-            .get(taskId)
-          if (hasLink) notifyTasksChanged()
-        })
-      })
-
-      // Archive/unarchive sync to providers
-      ipcMain.on('db:tasks:archive:done', (_event, taskId: string) => {
-        void pushArchiveToProviders(db, taskId)
-      })
-      ipcMain.on('db:tasks:unarchive:done', (_event, taskId: string) => {
-        void pushUnarchiveToProviders(db, taskId)
-      })
-    }
+    // Integration pollers + push-on-edit both live in the SIDE-CAR now
+    // (composition.ts). The push listeners in particular were BROKEN here: the
+    // task ops emit `db:tasks:*:done` on an INJECTED bus, and since slice 9 that
+    // bus is the side-car's plain EventEmitter — never this process's `ipcMain`.
+    // The pollers ran but their `notifyTasksChanged` went to the host's
+    // notifyEvents, which the renderer (connected to the side-car) never hears.
+    // Remote mode is unchanged in effect: the remote hub runs both against its
+    // own DB, and running them here would sync into a local DB nobody reads.
 
     initAutoUpdater()
     logBoot('auto-updater initialized')
@@ -2851,7 +2747,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // seeded on each app:get-hub-registry call (renderer fetches it at boot).
     installHubCertPinning(session.defaultSession)
     try {
-      const cfg = readBootConfig(getTrpcDataRoot())
+      const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
       setPinnedHubs(resolveHubRegistry(cfg).filter((h) => h.kind === 'remote'))
     } catch {
       /* no registry yet — seeded lazily by app:get-hub-registry */
@@ -3281,7 +3177,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // made since boot is reflected. `server_mode`/url are already exposed via
     // `app:get-server-url`; this surfaces `multi_hub` as a plain boolean.
     ipcMain.handle('app:get-boot-config', () => {
-      const cfg = readBootConfig(getTrpcDataRoot())
+      const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
       return { multiHub: cfg.multi_hub === true }
     })
     // Resolved multi-hub registry the renderer's FederationProvider connects to.
@@ -3291,7 +3187,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // sticky port). With multi_hub off this returns exactly today's single
     // effective hub, so the renderer's HubScope('local') stays byte-identical.
     ipcMain.handle('app:get-hub-registry', async () => {
-      const cfg = readBootConfig(getTrpcDataRoot())
+      const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
       const hubs = resolveHubRegistry(cfg)
       const defaultHubId = resolveDefaultHubId(cfg, hubs)
       // Inject the local hub's live ws url (only when a local hub is listed —
@@ -3315,11 +3211,11 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // Per-hub bearer tokens (safeStorage-encrypted, main-only). The renderer
     // fetches them to open authed connections; writes come from the enroll/login
     // flow. Empty when no authed hubs are configured.
-    ipcMain.handle('app:get-hub-tokens', () => getAllHubTokens(getTrpcDataRoot()))
+    ipcMain.handle('app:get-hub-tokens', () => getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot()))
     ipcMain.handle(
       'app:set-hub-token',
       (_event, payload: { hubId: string; token: string }) => {
-        setHubToken(getTrpcDataRoot(), payload.hubId, payload.token)
+        setHubToken(getClientStateRoot(), payload.hubId, payload.token)
         return { ok: true as const }
       }
     )
@@ -3331,7 +3227,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         const result = await hubLogin(payload.url, payload.email, payload.password)
         if (result.ok) {
           try {
-            setHubToken(getTrpcDataRoot(), payload.hubId, result.token)
+            setHubToken(getClientStateRoot(), payload.hubId, result.token)
           } catch (err) {
             return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
           }
@@ -3353,13 +3249,19 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           default_hub_id?: string
         }
       ) => {
-        writeBootSettings(getTrpcDataRoot(), {
-          server_mode: payload?.server_mode,
-          remote_server_url: payload?.remote_server_url,
-          multi_hub: payload?.multi_hub,
-          hubs: payload?.hubs,
-          default_hub_id: payload?.default_hub_id
-        })
+        // legacy dir passed so the FIRST write after the relocation merges over
+        // the old file rather than resetting unset fields to their defaults.
+        writeBootSettings(
+          getClientStateRoot(),
+          {
+            server_mode: payload?.server_mode,
+            remote_server_url: payload?.remote_server_url,
+            multi_hub: payload?.multi_hub,
+            hubs: payload?.hubs,
+            default_hub_id: payload?.default_hub_id
+          },
+          getLegacyClientStateRoot()
+        )
         return { ok: true as const }
       }
     )
@@ -3738,16 +3640,11 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       )
     }
 
-    // Local cutover (slice 9): the SIDE-CAR owns the process-manager runtime
-    // (renderer drives process ops there). Host init would double-spawn
-    // auto-restart processes against the shared DB. Remote mode keeps host
-    // ownership (no local side-car; remote process support is slice 10).
-    if (isRemoteMode) {
-      initProcessManager(db)
-      logBoot('process manager initialized (remote mode, host-owned)')
-    } else {
-      logBoot('process manager init skipped (side-car owns it)')
-    }
+    // The process-manager runtime lives in the SIDE-CAR (composition.ts). The
+    // remote-mode branch that used to init it here ran against the LOCAL database,
+    // which in remote mode holds nothing — no processes to restart, so it could
+    // only ever be a no-op with a connection attached. The remote hub runs its own.
+    logBoot('process manager owned by the hub')
 
     // Reset all main-process state + DB for test isolation (Playwright only)
     if (isPlaywright) {
@@ -3759,7 +3656,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         killAllProcesses()
 
         // 2. Stop timers
-        stopAutoBackup()
         if (linearSyncPoller) {
           clearInterval(linearSyncPoller)
           linearSyncPoller = null
@@ -3792,17 +3688,19 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         oauthCallbackQueue.length = 0
         oauthCallbackWaiters.clear()
 
-        // 7. Drop all tables + re-migrate. This whole schema rebuild (enumerate
-        // tables → drop with FK checks off → user_version=0 → runMigrations →
-        // ensureIntegrationSchema → normalizeProjectStatusData → syncTerminalModes)
-        // mirrors the DB worker's own startup sequence and uses the synchronous
-        // better-sqlite3 connection + pragmas, so it must run inside the worker.
-        await db.namedTxn('db:reset-for-test', {})
+        // 7. Drop all tables + re-migrate. Runs in the SIDE-CAR, which holds the
+        // connection it rebuilds; the host asks over the E2E-gated dev route.
+        await devReset()
 
-        // 7b. Seed post-onboarding baseline so tests skip the onboarding wizard
-        await settings.seedOnboardingCompleted()
-        // Re-warm cache after settings table was dropped + re-migrated
-        await settings.warmCache(['labs_tests_panel', 'labs_loop_mode'])
+        // 7b. Seed post-onboarding baseline so tests skip the onboarding wizard.
+        // `onboarding_completed` is hub-scoped (the renderer reads it over tRPC),
+        // so it is seeded in the hub's database, not the client store.
+        await devSqlRun(
+          "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')"
+        )
+        // Client store is unaffected by the schema rebuild, but re-read anyway so
+        // any test that rewrote it takes effect.
+        clientSettings = readClientSettings(clientRoot)
 
         // 8. Restart the side-car so it re-opens the freshly-migrated DB and
         // re-warms every cache (settings, process registry, pty/chat sessions,
@@ -4389,10 +4287,8 @@ app.on('will-quit', () => {
   })
   stopDiagnostics()
   stopIdleChecker()
-  stopAutoBackup()
   closeArtifactWatcher()
   closeGitWatcher()
-  closeDatabase()
   closeDiagnosticsDatabase()
   // Sentinel last: presence on next boot ⇒ clean shutdown reached this line.
   // Pure fs (no DB needed), so survives any prior close failure.

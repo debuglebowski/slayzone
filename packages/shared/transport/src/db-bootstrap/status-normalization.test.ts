@@ -1,10 +1,10 @@
 /**
  * Startup status normalization tests
- * Run with: npx tsx packages/apps/app/src/main/db/status-normalization.test.ts
+ * Run with: npx tsx packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
  */
 import Database from 'better-sqlite3'
 import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects/shared'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from './index'
 import { normalizeProjectStatusData } from './status-normalization.js'
 
 let passed = 0
@@ -45,6 +45,28 @@ function createDb(): Database.Database {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   runMigrations(db)
+  return db
+}
+
+/**
+ * Build a DB migrated to exactly `version`. The drift tests below have to start
+ * from a genuinely old schema, not from latest: migrations are forward-only, so
+ * rewinding user_version on a fully-migrated DB replays unguarded DDL (v49's
+ * `ALTER TABLE processes ADD COLUMN project_id`) against a schema that has it.
+ * Starting at the real historical version makes the replayed tail a legitimate
+ * forward upgrade — which is what a drifted DB actually does at boot.
+ */
+function dbAtVersion(version: number): Database.Database {
+  const db = new Database(':memory:')
+  db.pragma('journal_mode = WAL')
+  db.pragma('foreign_keys = ON')
+  for (const migration of migrations) {
+    if (migration.version > version) break
+    db.transaction(() => {
+      migration.up(db)
+      db.pragma(`user_version = ${migration.version}`)
+    })()
+  }
   return db
 }
 
@@ -170,7 +192,9 @@ test('no-ops when projects.columns_config is missing', () => {
 })
 
 test('repairs drifted schema where user_version=42 but columns_config is missing', () => {
-  const db = createDb()
+  // v42 claimed to have added projects.columns_config but the column is absent —
+  // the drift v45 exists to repair. Boot from there and go all the way to latest.
+  const db = dbAtVersion(44)
   try {
     db.exec('ALTER TABLE projects DROP COLUMN columns_config')
     expect(hasProjectColumn(db, 'columns_config')).toBe(false)
@@ -179,13 +203,16 @@ test('repairs drifted schema where user_version=42 but columns_config is missing
     runMigrations(db)
 
     expect(hasProjectColumn(db, 'columns_config')).toBe(true)
+    expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
   } finally {
     db.close()
   }
 })
 
 test('handles drift where user_version=41 but columns_config already exists', () => {
-  const db = createDb()
+  // The mirror drift: the column landed but user_version never advanced, so v42
+  // re-runs. Its PRAGMA guard must make that a no-op rather than a failed boot.
+  const db = dbAtVersion(42)
   try {
     expect(hasProjectColumn(db, 'columns_config')).toBe(true)
 
@@ -193,6 +220,7 @@ test('handles drift where user_version=41 but columns_config already exists', ()
     runMigrations(db)
 
     expect(hasProjectColumn(db, 'columns_config')).toBe(true)
+    expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
   } finally {
     db.close()
   }

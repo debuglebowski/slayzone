@@ -2,6 +2,8 @@ import electron, { type IpcMain, type App } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { getClientRoot } from '@slayzone/platform'
+import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
 import type {
   ClientDiagnosticEventInput,
   ClientErrorEventInput,
@@ -324,13 +326,32 @@ async function runExport(request: DiagnosticsExportRequest): Promise<Diagnostics
 
 export function registerDiagnosticsHandlers(
   ipcMain: IpcMain,
-  db: SlayzoneDb,
   eventsDb: SlayzoneDb,
-  options?: { enableIpcHandlers?: boolean }
+  options?: {
+    enableIpcHandlers?: boolean
+    /** Client-settings dir. Injectable so tests never touch the real ~/.slayzone. */
+    clientRoot?: string
+  }
 ): void {
-  // Bind the data core's DBs (main settings DB + separate diagnostics events
-  // DB), warm the config cache and flush any pre-bind buffered events.
-  bindDiagnosticsDbs({ settingsDb: db, diagnosticsDb: eventsDb })
+  // Config comes from the CLIENT store, not the shared DB — it governs the
+  // machine-local diagnostics database this process writes to, and main must be
+  // able to gate boot/crash events before any hub exists.
+  const clientRoot = options?.clientRoot ?? getClientRoot()
+  bindDiagnosticsDbs({
+    diagnosticsDb: eventsDb,
+    localConfig: () => {
+      const d = readClientSettings(clientRoot).diagnostics ?? {}
+      return {
+        enabled: d.enabled,
+        verbose: d.verbose,
+        includePtyOutput: d.includePtyOutput,
+        retentionDays: d.retentionDays
+      }
+    },
+    saveLocalConfig: async (next) => {
+      await updateClientSettings({ diagnostics: next }, clientRoot)
+    }
+  })
 
   instrumentIpcMain(ipcMain)
 
