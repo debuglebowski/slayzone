@@ -25,6 +25,39 @@ export interface TerminalTheme {
   ansi?: readonly string[]
 }
 
+/**
+ * Version xterm.js reports for XTVERSION. Pinned rather than imported: this
+ * module is pure logic with no module-resolution or Node dependencies (it is
+ * bundled into the sidecar and the hub). `sync-query-response.test.ts` resolves
+ * `@xterm/xterm/package.json` and fails loudly if the two drift.
+ */
+export const XTERM_JS_VERSION = '6.1.0-beta.292'
+
+/**
+ * XTVERSION reply — byte-identical to what xterm.js's `sendXtVersion` emits.
+ *
+ * Answered HERE, by the server, rather than left to round-trip to the renderer.
+ * Leaving it to xterm.js broke interactive agents two ways at once:
+ *
+ *  1. The reply travelled back over the async onData path, so it could land in
+ *     the program's stdin long after the program had moved on — the same
+ *     "stale by construction" hazard CPR/DSR are answered here to avoid.
+ *  2. Worse, an unanswered query is not stripped, so it survived into the
+ *     replayable ring buffer. Every mount/reattach/renderer-reload replayed it
+ *     and xterm answered AGAIN — this time completely unsolicited.
+ *
+ * Either way a DCS lands in stdin unbidden, and Claude Code's key handling
+ * wedges on it: keystrokes still reach the process and drive nothing, while
+ * output keeps rendering (a SIGWINCH repaint still paints a full frame). Only a
+ * session restart clears it. Reproduced by injecting this exact reply into a
+ * healthy session — arrows died on the very next keypress.
+ *
+ * Answering synchronously fixes both: the program reads the same bytes it always
+ * did, in the same read-loop iteration it asked, and the query never reaches the
+ * buffer to be replayed.
+ */
+export const XTVERSION_RESPONSE = `\x1bP>|xterm.js(${XTERM_JS_VERSION})\x1b\\`
+
 // xterm default ANSI palette (indices 0-15) used when the renderer has not
 // supplied an explicit palette yet.
 export const XTERM_ANSI_PALETTE: readonly string[] = [
@@ -92,6 +125,16 @@ export function computeSyncQueryResponse(input: string, theme: TerminalTheme): S
   // DA2 — Secondary Device Attributes
   forwarded = forwarded.replace(/\x1b\[>0?c/g, () => {
     response += '\x1b[>0;10;1c'
+    return ''
+  })
+  // XTVERSION — CSI > Ps q. xterm.js answers only when Ps is absent or <= 0
+  // (`sendXtVersion`); mirror that exactly, or we invent replies to sequences a
+  // real terminal stays silent on. Ps > 0 stays forwarded — xterm consumes it
+  // without emitting anything, so it is inert in the replay buffer.
+  // NOT to be confused with DECSCUSR (`CSI Ps SP q`), which has no `>` prefix.
+  forwarded = forwarded.replace(/\x1b\[>(\d*)q/g, (match, ps: string) => {
+    if (ps !== '' && parseInt(ps, 10) > 0) return match
+    response += XTVERSION_RESPONSE
     return ''
   })
   // DSR — Device Status Report

@@ -22,13 +22,25 @@
  *
  * SCOPE IS DELIBERATELY NARROW — cursor position and DSR status only.
  *
- * Other queries (DECRQM `ESC [ ? <n> $ p` for synchronized output, XTVERSION
- * `ESC [ > 0 q`) are NOT stripped and must not be: the server does not answer
- * those, so today they legitimately round-trip to the renderer, xterm.js answers
- * them, and programs use the reply for capability detection. On the local path
- * the buffered value is also the value streamed live to the renderer, so
- * stripping a query from the buffer removes it from the live stream too —
- * widening this set would silently drop working capability detection.
+ * DECRQM (`ESC [ ? <n> $ p`, synchronized output) is NOT stripped and must not
+ * be: the server does not answer it, so it legitimately round-trips to the
+ * renderer, xterm.js answers it, and programs use the reply for capability
+ * detection. On the local path the buffered value is also the value streamed
+ * live to the renderer, so stripping a query from the buffer removes it from the
+ * live stream too — widening this set would silently drop working capability
+ * detection.
+ *
+ * XTVERSION (`ESC [ > 0 q`) used to be in that same "leave it alone" bucket and
+ * is not any more, but it is still absent here — deliberately. It is answered
+ * AND removed upstream, by `computeSyncQueryResponse`, so it never reaches this
+ * stripper at all. Leaving it to the renderer replayed the same failure this
+ * module exists to describe, one layer up: the query survived into the buffer,
+ * every replay made xterm answer it again, and the resulting unsolicited DCS
+ * (`ESC P >|xterm.js(...) ESC \`) landed in the live program's stdin. Claude
+ * Code wedges on it — keystrokes keep arriving and drive nothing while output
+ * still renders, so the pane looks alive but ignores the keyboard until the
+ * session is restarted. Answering upstream is what keeps capability detection
+ * working while denying the buffer a copy to replay.
  *
  * Lives in `@slayzone/platform` rather than `@slayzone/terminal/shared` because
  * BOTH pty output paths need it and they cannot share a domain package: the

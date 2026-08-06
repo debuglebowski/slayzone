@@ -30,8 +30,9 @@ import type { Terminal as XTerm, IDisposable } from '@xterm/xterm'
  *
  * Note this suppresses the *answer*, not the query: a program's `ESC[6n` still
  * reaches the terminal and is still answered by the server, which is the whole
- * point. DECRQM (`$p`) and XTVERSION (`>q`) are untouched — the renderer legitimately
- * answers those, and stripping them would break capability detection.
+ * point. DECRQM (`$p`) is untouched — the renderer legitimately answers it, and
+ * stripping it would break capability detection. XTVERSION (`>q`) used to be in
+ * that bucket too; see {@link suppressXtVersionReply} for why it no longer is.
  *
  * @returns disposables for the registered handlers; dispose to restore xterm's
  * built-in behaviour.
@@ -46,4 +47,33 @@ export function suppressDeviceStatusReplies(
     // DEC private DSR — includes DECXCPR `ESC[?6n`.
     terminal.parser.registerCsiHandler({ prefix: '?', final: 'n' }, handled)
   ]
+}
+
+/**
+ * Stop xterm.js from ANSWERING XTVERSION (`CSI > Ps q`).
+ *
+ * The server answers and strips this query now (`computeSyncQueryResponse`), so
+ * a live one no longer reaches xterm at all. This exists for the *replay* path:
+ * every session created before that change still carries an unanswered `ESC[>0q`
+ * in its ring buffer, and the buffer is replayed into a fresh xterm on every
+ * mount, reattach and renderer reload. xterm dutifully answers each replayed
+ * copy with a DCS (`ESC P >|xterm.js(...) ESC \`), which `onData` then writes
+ * into the LIVE program's stdin as though the user had typed it.
+ *
+ * Claude Code wedges on that unsolicited DCS: keystrokes keep arriving and drive
+ * nothing, while output still renders (a SIGWINCH repaint paints a full frame),
+ * so the session looks alive but ignores the keyboard until it is restarted.
+ *
+ * Same mechanism as the device-status suppression above — kill the reply at the
+ * source rather than filter it afterwards. Kept separate because the two answer
+ * to different owners: device-status is answered by the server for *timing*,
+ * XTVERSION for *provenance* (a replayed query has no asker left to answer to).
+ *
+ * `CSI > Ps q` only; DECSCUSR (`CSI Ps SP q`) has no `>` prefix and is untouched.
+ *
+ * @returns disposables for the registered handler; dispose to restore xterm's
+ * built-in behaviour.
+ */
+export function suppressXtVersionReply(terminal: Pick<XTerm, 'parser'>): IDisposable[] {
+  return [terminal.parser.registerCsiHandler({ prefix: '>', final: 'q' }, () => true)]
 }

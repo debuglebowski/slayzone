@@ -9,7 +9,7 @@
 // the namespace object OR under `.default`, so resolve both rather than pinning to
 // whichever shape today's loader produces.
 import * as headless from '@xterm/headless'
-import { suppressDeviceStatusReplies } from './suppress-device-status'
+import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
 
 type HeadlessNs = { Terminal?: typeof headless.Terminal; default?: { Terminal: typeof headless.Terminal } }
 const ns = headless as unknown as HeadlessNs
@@ -130,6 +130,61 @@ await test('dispose() restores xterm built-in answering', async () => {
   eq(await emitted(term, '\x1b[6n'), '', 'suppressed while registered')
   for (const s of subs) s.dispose()
   eq(await emitted(term, '\x1b[6n'), '\x1b[1;1R', 'answering restored after dispose')
+  term.dispose()
+})
+
+// ── suppressXtVersionReply ──────────────────────────────────────────────────
+// A replayed `ESC[>0q` has no asker left, so xterm's answer is an unsolicited
+// DCS written straight into the live program's stdin — which wedges Claude
+// Code's key handling (keys arrive, drive nothing; output still renders).
+
+await test('baseline: xterm DOES answer XTVERSION with a DCS when not suppressed', async () => {
+  // Establishes the poison is real and this test measures it.
+  const term = new Terminal({ allowProposedApi: true })
+  const out = await emitted(term, '\x1b[>0q')
+  eq(out.startsWith('\x1bP>|xterm.js('), true, `expected DCS version reply, got ${JSON.stringify(out)}`)
+  eq(out.endsWith('\x1b\\'), true, 'ST terminated')
+  term.dispose()
+})
+
+await test('XTVERSION (ESC[>0q) produces no reply once suppressed', async () => {
+  const term = new Terminal({ allowProposedApi: true })
+  suppressXtVersionReply(term)
+  eq(await emitted(term, '\x1b[>0q'), '', 'no DCS injected into stdin')
+  term.dispose()
+})
+
+await test('bare ESC[>q is suppressed too', async () => {
+  const term = new Terminal({ allowProposedApi: true })
+  suppressXtVersionReply(term)
+  eq(await emitted(term, '\x1b[>q'), '')
+  term.dispose()
+})
+
+await test('DECSCUSR (ESC[2 SP q) still applies — cursor style is not a query', async () => {
+  // The `>` prefix is what scopes the handler; a bare `q` must stay xterm's.
+  const term = new Terminal({ allowProposedApi: true })
+  suppressXtVersionReply(term)
+  eq(await emitted(term, '\x1b[2 qX'), '', 'DECSCUSR never replies anyway')
+  eq(term.buffer.active.cursorX, 1, 'X still written — sequence not swallowed as text')
+  term.dispose()
+})
+
+await test('device-status suppression is unaffected by the XTVERSION handler', async () => {
+  const term = new Terminal({ allowProposedApi: true })
+  suppressDeviceStatusReplies(term)
+  suppressXtVersionReply(term)
+  eq(await emitted(term, '\x1b[6n'), '', 'CPR still suppressed')
+  eq(await emitted(term, '\x1b[>0q'), '', 'XTVERSION suppressed')
+  term.dispose()
+})
+
+await test('dispose() restores xterm XTVERSION answering', async () => {
+  const term = new Terminal({ allowProposedApi: true })
+  const subs = suppressXtVersionReply(term)
+  eq(await emitted(term, '\x1b[>0q'), '', 'suppressed while registered')
+  for (const s of subs) s.dispose()
+  eq((await emitted(term, '\x1b[>0q')).startsWith('\x1bP>|xterm.js('), true, 'restored after dispose')
   term.dispose()
 })
 

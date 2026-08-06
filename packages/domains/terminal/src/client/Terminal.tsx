@@ -68,7 +68,7 @@ import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import { stripUnderlineCodes, KITTY_SHIFT_ENTER, DETECTION_ENGINES } from '@slayzone/terminal/shared'
-import { suppressDeviceStatusReplies } from './suppress-device-status'
+import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
 import { track } from '@slayzone/telemetry/client'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
@@ -699,6 +699,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // keystrokes so they cannot be filtered downstream. Disposed with the
         // terminal.
         suppressDeviceStatusReplies(terminal)
+        // Same reason, different owner: the server answers XTVERSION now, so any
+        // `CSI > Ps q` xterm still sees came from a REPLAYED buffer and has no
+        // asker left. Answering it injects an unsolicited DCS into the live
+        // program's stdin, which wedges Claude Code's key handling.
+        suppressXtVersionReply(terminal)
 
         terminal.open(containerRef.current)
         onAttachedRef.current?.({ sessionId, focus: () => terminal.focus() })

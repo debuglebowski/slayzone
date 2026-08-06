@@ -2,7 +2,8 @@
  * Tests for computeSyncQueryResponse — the pure logic behind interceptSyncQueries.
  * Run with: npx tsx packages/domains/terminal/src/main/sync-query-response.test.ts
  */
-import { computeSyncQueryResponse } from './sync-query-response'
+import { createRequire } from 'node:module'
+import { computeSyncQueryResponse, XTVERSION_RESPONSE } from './sync-query-response'
 
 let passed = 0
 let failed = 0
@@ -342,6 +343,61 @@ test('an unknown OSC query still gets an empty reply', () => {
   const r = computeSyncQueryResponse('\x1b]777;something;?\x07', theme)
   eq(r.response, '\x1b]777;\x07')
   eq(r.forwarded, '')
+})
+
+// ── XTVERSION ───────────────────────────────────────────────────────────────
+// Regression: leaving `CSI > Ps q` to the renderer let xterm.js answer it with a
+// DCS (`ESC P >|xterm.js(...) ESC \`) over the async onData path. That reply is
+// stale by construction, AND the query survived into the replayable ring buffer,
+// so every mount/reattach replayed it and xterm answered again — unsolicited,
+// straight into the live program's stdin. Claude Code's key handling wedges on
+// that DCS: keystrokes still arrive but drive nothing, while output keeps
+// rendering. Reproduced by injecting the reply into a healthy session.
+
+test('XTVERSION — CSI > 0 q answered synchronously and stripped', () => {
+  const r = computeSyncQueryResponse('\x1b[>0q', theme)
+  eq(r.response, XTVERSION_RESPONSE)
+  eq(r.forwarded, '', 'must not reach the renderer or the replay buffer')
+})
+
+test('XTVERSION — bare CSI > q (no param) is the same query', () => {
+  const r = computeSyncQueryResponse('\x1b[>q', theme)
+  eq(r.response, XTVERSION_RESPONSE)
+  eq(r.forwarded, '')
+})
+
+test('XTVERSION reply is byte-identical to what xterm.js would have sent', () => {
+  // Only the timing and the authority change — never the bytes the program reads.
+  const require_ = createRequire(import.meta.url)
+  const { version } = require_('@xterm/xterm/package.json') as { version: string }
+  eq(
+    XTVERSION_RESPONSE,
+    `\x1bP>|xterm.js(${version})\x1b\\`,
+    'drifted from the installed @xterm/xterm — update XTERM_JS_VERSION'
+  )
+})
+
+test('CSI > Ps q with Ps > 0 is not a version request — left alone', () => {
+  // xterm.js only answers when params[0] <= 0; mirror that or we invent replies.
+  const r = computeSyncQueryResponse('\x1b[>1q', theme)
+  eq(r.response, '')
+  eq(r.forwarded, '\x1b[>1q')
+})
+
+test('DECSCUSR (CSI Ps SP q) is untouched — no > prefix, not a query', () => {
+  const r = computeSyncQueryResponse('\x1b[2 q', theme)
+  eq(r.response, '')
+  eq(r.forwarded, '\x1b[2 q')
+})
+
+test('XTVERSION torn across chunks is held, not forwarded half-answered', () => {
+  const a = computeSyncQueryResponse('text\x1b[>0', theme)
+  eq(a.forwarded, 'text', 'complete prefix released')
+  eq(a.pendingPartial, '\x1b[>0', 'incomplete query held for the next chunk')
+  eq(a.response, '', 'nothing answered yet')
+  const b = computeSyncQueryResponse(a.pendingPartial + 'q', theme)
+  eq(b.response, XTVERSION_RESPONSE, 'answered once reassembled')
+  eq(b.forwarded, '')
 })
 
 console.log('\n' + '─'.repeat(40))
