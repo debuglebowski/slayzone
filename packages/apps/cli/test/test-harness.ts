@@ -1,8 +1,26 @@
 /**
- * CLI test harness — wraps better-sqlite3 in the SlayDb interface
+ * CLI test harness — wraps a sync SQLite driver in the SlayDb interface
  * and provides console/exit capture utilities.
  */
-import type Database from 'better-sqlite3'
+
+/**
+ * Minimal structural shape of a sync SQLite driver, satisfied by both
+ * better-sqlite3's `Database` and node:sqlite's `DatabaseSync`.
+ *
+ * Declared structurally rather than imported: the CLI opens no database of its
+ * own (it reaches the hub over REST), so `better-sqlite3` is not one of its
+ * dependencies. `src/commands/update.test.ts` imports this harness, which pulls
+ * it into the package's typecheck program — a type-only import of a
+ * non-dependency resolves under hoisting locally but fails TS2307 on CI's
+ * isolated install.
+ */
+interface SyncSqliteDb {
+  prepare(sql: string): {
+    all(params: Record<string, unknown>): unknown[]
+    run(params: Record<string, unknown>): unknown
+  }
+}
+
 interface SlayDb {
   query<T extends object>(sql: string, params?: SqlParams): T[]
   run(sql: string, params?: SqlParams): void
@@ -20,7 +38,7 @@ function adaptParams(params: SqlParams): Record<string, unknown> {
   return out
 }
 
-export function createSlayDbAdapter(db: Database.Database): SlayDb {
+export function createSlayDbAdapter(db: SyncSqliteDb): SlayDb {
   return {
     query<T extends object>(sql: string, params: SqlParams = {}): T[] {
       return db.prepare(sql).all(adaptParams(params)) as T[]
