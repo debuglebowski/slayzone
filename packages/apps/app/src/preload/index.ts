@@ -59,6 +59,7 @@ const api: ElectronAPI = {
         ok: boolean
         normalizedUrl?: string
         error?: string
+        authRequired?: boolean
       }>,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,

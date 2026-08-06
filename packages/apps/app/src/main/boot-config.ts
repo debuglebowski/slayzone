@@ -63,6 +63,12 @@ export type HealthProbeResult = {
   /** Canonical ws(s) URL derived from the probed input — present when input parsed. */
   normalizedUrl?: string
   error?: string
+  /**
+   * Whether the probed hub gates its client API on a bearer token. UNDEFINED
+   * when the hub is too old to report it (pre-`authRequired` /health) — callers
+   * must treat undefined as "unknown", not as "no auth needed".
+   */
+  authRequired?: boolean
 }
 
 export type HubLoginResult = { ok: true; token: string } | { ok: false; error: string }
@@ -305,9 +311,15 @@ export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<Hea
           return
         }
         try {
-          const parsed = JSON.parse(body) as { ok?: boolean }
-          if (parsed.ok === true) resolve({ ok: true, normalizedUrl })
-          else resolve({ ok: false, normalizedUrl, error: 'Server is not ready' })
+          const parsed = JSON.parse(body) as { ok?: boolean; authRequired?: boolean }
+          // `authRequired` is served to every caller (see hub/src/health.ts), so
+          // it survives an off-box probe — which is the case that matters, since
+          // an off-box hub is the one that gates. Absent on older hubs → left
+          // undefined rather than coerced to false.
+          const authRequired =
+            typeof parsed.authRequired === 'boolean' ? parsed.authRequired : undefined
+          if (parsed.ok === true) resolve({ ok: true, normalizedUrl, authRequired })
+          else resolve({ ok: false, normalizedUrl, error: 'Server is not ready', authRequired })
         } catch {
           resolve({ ok: false, normalizedUrl, error: 'Not a SlayZone server (bad /health body)' })
         }

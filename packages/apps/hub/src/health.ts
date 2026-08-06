@@ -19,6 +19,9 @@ export type HealthState = {
   /** True when running under the Electron host supervisor. `slay hub stop`
    *  refuses these: the desktop app owns its own sidecar's lifecycle. */
   supervised: boolean
+  /** Whether this hub gates its client API (`/trpc` + REST) on a bearer token.
+   *  Derived from SLAYZONE_MODE — see `hubAuthRequired` in server.ts. */
+  authRequired: boolean
   /** Live count of connected runners. A GETTER, not a number — the value must
    *  reflect the gateway at request time, not a boot-time snapshot. */
   runnersConnected: () => number
@@ -48,8 +51,12 @@ function isLoopbackRequest(req: IncomingMessage): boolean {
  * how a load balancer, the supervisor, and `slay hub ls` all check liveness), and
  * a hub may bind wider than loopback — so the response is split:
  *
- *   - PUBLIC (any caller): liveness + the running build. Enough to answer "is
- *     this up, and which code is it running".
+ *   - PUBLIC (any caller): liveness + the running build + `authRequired`. Enough
+ *     to answer "is this up, which code is it running, and must I sign in first".
+ *     `authRequired` is deliberately public: a client has to learn it needs a
+ *     token BEFORE it has one, the open `hub.describe` already advertises the
+ *     same bit to any /trpc caller, and an unauthenticated request learns it
+ *     anyway from the 401.
  *   - LOOPBACK ONLY: everything that describes the host — the hub name, its
  *     SLAYZONE_ROOT, the db path, the pid, and the runner count. These exist for
  *     local discovery (`slay hub ls` probes 127.0.0.1), so restricting them to
@@ -77,7 +84,8 @@ export function handleHealth(
     uptimeMs: Date.now() - state.startedAt,
     commit: build.commit,
     builtAt: build.builtAt,
-    buildId: build.buildId
+    buildId: build.buildId,
+    authRequired: state.authRequired
   }
   if (isLoopbackRequest(req)) {
     payload.name = state.name

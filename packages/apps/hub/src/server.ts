@@ -200,6 +200,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     pid: process.pid,
     mode: getSlayzoneMode(),
     supervised,
+    // Same bit `hub.describe` reports over /trpc — mirrored on /health so a
+    // client can learn "this hub needs a sign-in" without opening a socket.
+    authRequired: hubAuthRequired,
     runnersConnected: () => runnerGateway?.listRunners().length ?? 0
   }
 

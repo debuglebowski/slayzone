@@ -50,6 +50,7 @@ const BASE_STATE: Omit<HealthState, 'ready'> = {
   pid: 4321,
   mode: 'local',
   supervised: false,
+  authRequired: false,
   runnersConnected: () => 2
 }
 
@@ -185,6 +186,42 @@ async function main(): Promise<void> {
       assertEq(body.pid, undefined, 'pid withheld')
       assertEq(body.name, undefined, 'name withheld')
       assertEq(body.runnersConnected, undefined, 'runnersConnected withheld')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // The desktop client decides whether to OFFER a sign-in from this bit, and it
+  // has to do so before it holds a token — so it must survive the loopback gate
+  // (an off-box hub is exactly the one that gates).
+  await test('authRequired is public — served to loopback and non-loopback alike', async () => {
+    const srv = await startHealthServer({ authRequired: true })
+    try {
+      assertEq((await getHealth(srv.port)).body.authRequired, true, 'loopback sees it')
+    } finally {
+      await srv.close()
+    }
+    const external = await nonLoopbackAddress()
+    if (!external) {
+      console.log('    (non-loopback leg skipped — host has no non-loopback IPv4)')
+      return
+    }
+    const wide = await startHealthServer({ authRequired: true }, '0.0.0.0')
+    try {
+      assertEq(
+        (await getHealth(wide.port, external)).body.authRequired,
+        true,
+        'off-box caller sees it too'
+      )
+    } finally {
+      await wide.close()
+    }
+  })
+
+  await test('authRequired=false on a non-gating hub (no sign-in offered)', async () => {
+    const srv = await startHealthServer()
+    try {
+      assertEq((await getHealth(srv.port)).body.authRequired, false, 'authRequired=false')
     } finally {
       await srv.close()
     }

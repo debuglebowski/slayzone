@@ -459,6 +459,9 @@ export interface ElectronAPI {
       ok: boolean
       normalizedUrl?: string
       error?: string
+      /** Whether the probed hub gates its client API on a bearer token.
+       *  Undefined = the hub is too old to report it (treat as unknown). */
+      authRequired?: boolean
     }>
     restartSidecar: () => Promise<{ ok: boolean; error?: string }>
     /** Cycle the co-located runner, or start it if it never came up. Stops every
@@ -731,6 +734,9 @@ export interface _LegacyElectronAPI {
       ok: boolean
       normalizedUrl?: string
       error?: string
+      /** Whether the probed hub gates its client API on a bearer token.
+       *  Undefined = the hub is too old to report it (treat as unknown). */
+      authRequired?: boolean
     }>
     getSidecarStatus: () => Promise<{
       health: 'starting' | 'ready' | 'restarting' | 'failed'

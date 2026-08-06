@@ -74,6 +74,7 @@ function healthState(overrides: Partial<HealthState>): HealthState {
     pid: process.pid,
     mode: 'local',
     supervised: false,
+    authRequired: false,
     runnersConnected: () => 0,
     ...overrides
   }

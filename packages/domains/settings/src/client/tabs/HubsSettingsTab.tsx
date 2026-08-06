@@ -14,7 +14,7 @@ import {
   DialogDescription,
   DialogFooter
 } from '@slayzone/ui'
-import { Trash2, RotateCw, Plus, X } from 'lucide-react'
+import { Trash2, RotateCw, Plus, X, Pencil, PlugZap } from 'lucide-react'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 /**
@@ -24,9 +24,17 @@ import { SettingsTabIntro } from './SettingsTabIntro'
  * default (where new projects land).
  *
  * Adding a hub is a row inside the table ("＋ Add new hub") that expands into the
- * label/url/probe form inline — the add affordance lives with the list, not as a
- * detached form. Signing in to an authed remote is a per-row action that opens a
- * modal for that hub (the row identifies which hub, so no picker is needed).
+ * url/probe form inline — the add affordance lives with the list, not as a
+ * detached form. Signing in to an authed remote, editing it, and verifying it are
+ * per-row actions (the row identifies which hub, so no picker is needed); sign-in
+ * and edit open a modal for that hub.
+ *
+ * A remote row renders its name as TEXT, never a live input: an always-editable
+ * field in the list makes every hub look mid-edit, marks the form dirty on a
+ * stray keystroke, and leaves no room for the address. Renaming (and
+ * re-addressing) is the explicit Edit action instead. Editing keeps the hub's
+ * `id` even when the address changes — the id keys the stored bearer token and
+ * `default_hub_id`, so re-deriving it from the new URL would orphan both.
  *
  * The registry lives in the pre-boot `boot-config.json` (a hub can't store the
  * list of hubs), so it is read via `getHubRegistry` and written via
@@ -46,8 +54,22 @@ import { SettingsTabIntro } from './SettingsTabIntro'
 type ProbeState =
   | { kind: 'idle' }
   | { kind: 'probing' }
-  | { kind: 'ok'; normalizedUrl: string }
+  | { kind: 'ok'; normalizedUrl: string; authRequired: boolean | undefined }
   | { kind: 'fail'; reason: string }
+
+/**
+ * Does a hub demand a bearer token from its clients?
+ *
+ * 'unknown' is NOT merged into 'gated' or 'open' — it is the answer for a hub
+ * that couldn't be asked (unreachable) or that predates `/health` reporting
+ * `authRequired`. Those hubs keep the Sign in button, exactly as before this
+ * check existed: hiding it would strip the only way to authenticate against a
+ * hub that may well be gating.
+ */
+type AuthNeed = 'gated' | 'open' | 'unknown'
+
+const authNeedFromProbe = (authRequired: boolean | undefined): AuthNeed =>
+  authRequired === undefined ? 'unknown' : authRequired ? 'gated' : 'open'
 
 export function HubsSettingsTab() {
   const [remotes, setRemotes] = useState<HubEntry[]>([])
@@ -60,11 +82,29 @@ export function HubsSettingsTab() {
   const [saving, setSaving] = useState(false)
   const [restarting, setRestarting] = useState(false)
 
-  // Add-hub row — collapsed to a "＋ Add new hub" button until expanded.
+  // Add-hub row — collapsed to a "＋ Add new hub" button until expanded. Address
+  // only; the name defaults to the host and is changed via the Edit action.
   const [addingHub, setAddingHub] = useState(false)
-  const [newLabel, setNewLabel] = useState('')
   const [newUrl, setNewUrl] = useState('')
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' })
+
+  // Edit-hub modal (rename / re-address one remote). `editHubId` non-empty = open.
+  const [editHubId, setEditHubId] = useState('')
+  const [editLabel, setEditLabel] = useState('')
+  const [editUrl, setEditUrl] = useState('')
+  const [editProbe, setEditProbe] = useState<ProbeState>({ kind: 'idle' })
+
+  // Per-row "Verify" — a live reachability probe of a hub already in the list,
+  // keyed by hub id. Purely informational (it changes no saved state), so it
+  // never marks the form dirty.
+  const [verifyStates, setVerifyStates] = useState<Record<string, ProbeState>>({})
+
+  // Whether each remote hub GATES its client API on a bearer token, keyed by hub
+  // id — the hub's own answer (`/health` → `authRequired`), never a guess. A hub
+  // enforces auth only when it runs in remote mode; a loopback/LAN hub accepts an
+  // untokened connection, so offering "Sign in" there is noise. Absent key = not
+  // asked yet. See `authNeedFromProbe` for why 'unknown' is a distinct state.
+  const [authNeeds, setAuthNeeds] = useState<Record<string, AuthNeed>>({})
 
   // Sign-in modal (per remote hub bearer auth). `signInHubId` non-empty = open;
   // the row that launched it names the hub, so there's no picker.
@@ -101,6 +141,17 @@ export function HubsSettingsTab() {
       remotes: nextRemotes,
       defaultHubId: registry.defaultHubId,
       runLocalHub: nextRunLocalHub
+    }
+    // Ask every remote whether it gates, so the row can decide whether a Sign in
+    // button is even meaningful. Deliberately NOT awaited: the list must render
+    // immediately, and each answer lands independently (one slow/unreachable hub
+    // can't hold up the others). `/health` answers before the auth gate, so this
+    // works while signed out — which is the only state where it matters.
+    for (const hub of nextRemotes) {
+      if (!hub.url) continue
+      void electronBootstrap.probeServerHealth(hub.url).then((result) => {
+        setAuthNeeds((prev) => ({ ...prev, [hub.id]: authNeedFromProbe(result.authRequired) }))
+      })
     }
   }, [])
 
@@ -148,16 +199,23 @@ export function HubsSettingsTab() {
   const probeUrl = async (): Promise<void> => {
     setProbe({ kind: 'probing' })
     const result = await electronBootstrap.probeServerHealth(newUrl)
-    if (result.ok && result.normalizedUrl) setProbe({ kind: 'ok', normalizedUrl: result.normalizedUrl })
+    if (result.ok && result.normalizedUrl)
+      setProbe({
+        kind: 'ok',
+        normalizedUrl: result.normalizedUrl,
+        authRequired: result.authRequired
+      })
     else setProbe({ kind: 'fail', reason: result.error ?? 'Unreachable' })
   }
 
   const collapseAddHub = (): void => {
     setAddingHub(false)
-    setNewLabel('')
     setNewUrl('')
     setProbe({ kind: 'idle' })
   }
+
+  // Host of a hub URL — the fallback name when the user gives none.
+  const hostOf = (url: string): string => new URL(url.replace(/^ws/, 'http')).host
 
   const addHub = (): void => {
     if (probe.kind !== 'ok') return
@@ -169,8 +227,10 @@ export function HubsSettingsTab() {
     // Stable id: the fingerprint is learned on first connect (Phase 6 pins it);
     // until then key by the normalized URL so the entry is idempotent.
     const id = `hub:${url}`
-    const label = newLabel.trim() || new URL(url.replace(/^ws/, 'http')).host
-    setRemotes((prev) => [...prev, { id, kind: 'remote', label, url }])
+    setRemotes((prev) => [...prev, { id, kind: 'remote', label: hostOf(url), url }])
+    // The Validate probe already asked this hub whether it gates — carry the
+    // answer over so the new row decides about Sign in without a second probe.
+    setAuthNeeds((prev) => ({ ...prev, [id]: authNeedFromProbe(probe.authRequired) }))
     collapseAddHub()
     setDirty(true)
   }
@@ -188,9 +248,85 @@ export function HubsSettingsTab() {
     setDirty(true)
   }
 
-  const relabel = (id: string, label: string): void => {
-    setRemotes((prev) => prev.map((h) => (h.id === id ? { ...h, label } : h)))
+  const openEdit = (hub: HubEntry): void => {
+    setEditHubId(hub.id)
+    setEditLabel(hub.label)
+    setEditUrl(hub.url ?? '')
+    setEditProbe({ kind: 'idle' })
+  }
+
+  const closeEdit = (): void => {
+    setEditHubId('')
+    setEditProbe({ kind: 'idle' })
+  }
+
+  const probeEditUrl = async (): Promise<void> => {
+    setEditProbe({ kind: 'probing' })
+    const result = await electronBootstrap.probeServerHealth(editUrl)
+    if (result.ok && result.normalizedUrl)
+      setEditProbe({
+        kind: 'ok',
+        normalizedUrl: result.normalizedUrl,
+        authRequired: result.authRequired
+      })
+    else setEditProbe({ kind: 'fail', reason: result.error ?? 'Unreachable' })
+  }
+
+  const saveEdit = (): void => {
+    const hub = remotes.find((h) => h.id === editHubId)
+    if (!hub) return
+    const typedUrl = editUrl.trim()
+    const urlChanged = typedUrl !== (hub.url ?? '')
+    // A changed address must probe clean first — the same gate as adding a hub,
+    // so a typo can't silently repoint an existing hub at nothing.
+    if (urlChanged && editProbe.kind !== 'ok') return
+    const nextUrl =
+      urlChanged && editProbe.kind === 'ok' ? editProbe.normalizedUrl : (hub.url ?? '')
+    if (remotes.some((h) => h.id !== hub.id && h.url === nextUrl)) {
+      toast.error('That hub is already in the list')
+      return
+    }
+    const label = editLabel.trim() || hostOf(nextUrl)
+    // `id` is intentionally left alone even when the URL moves — see the file
+    // header: it keys the stored token and default_hub_id.
+    setRemotes((prev) => prev.map((h) => (h.id === hub.id ? { ...h, label, url: nextUrl } : h)))
+    if (nextUrl !== hub.url) {
+      // Any earlier Verify result described the OLD address. The new address was
+      // just validated, so its gating answer replaces the old one outright.
+      setVerifyStates((prev) => {
+        const next = { ...prev }
+        delete next[hub.id]
+        return next
+      })
+      setAuthNeeds((prev) => ({
+        ...prev,
+        [hub.id]: authNeedFromProbe(editProbe.kind === 'ok' ? editProbe.authRequired : undefined)
+      }))
+    }
     setDirty(true)
+    closeEdit()
+  }
+
+  const verifyHub = async (hub: HubEntry): Promise<void> => {
+    if (!hub.url) return
+    setVerifyStates((prev) => ({ ...prev, [hub.id]: { kind: 'probing' } }))
+    const result = await electronBootstrap.probeServerHealth(hub.url)
+    setVerifyStates((prev) => ({
+      ...prev,
+      [hub.id]:
+        result.ok && result.normalizedUrl
+          ? {
+              kind: 'ok',
+              normalizedUrl: result.normalizedUrl,
+              authRequired: result.authRequired
+            }
+          : { kind: 'fail', reason: result.error ?? 'Unreachable' }
+    }))
+    // Same round trip also refreshes whether this hub gates — a hub that was
+    // switched to remote mode (or back) since the tab opened is reflected here.
+    if (result.ok) {
+      setAuthNeeds((prev) => ({ ...prev, [hub.id]: authNeedFromProbe(result.authRequired) }))
+    }
   }
 
   const restartLocal = async (): Promise<void> => {
@@ -262,6 +398,8 @@ export function HubsSettingsTab() {
   }
 
   const signInHub = remotes.find((h) => h.id === signInHubId)
+  const editHub = remotes.find((h) => h.id === editHubId)
+  const editUrlChanged = !!editHub && editUrl.trim() !== (editHub.url ?? '')
 
   return (
     <div className="space-y-6">
@@ -335,72 +473,115 @@ export function HubsSettingsTab() {
                 </div>
               </td>
             </tr>
-            {remotes.map((h) => (
-              <tr key={h.id} className="border-border border-t" data-testid="hub-row-remote">
-                <td className="py-2 pr-2">
-                  <Input
-                    value={h.label}
-                    onChange={(e) => relabel(h.id, e.target.value)}
-                    className="h-7 w-full"
-                    data-testid="hub-label-input"
-                  />
-                </td>
-                <td className="text-muted-foreground py-2 pr-2 font-mono text-xs break-all">
-                  {h.url}
-                  {authedHubIds.has(h.id) && (
-                    <span className="ml-2 text-green-500" data-testid="hub-signed-in">
-                      ● signed in
-                    </span>
-                  )}
-                </td>
-                <td className="py-2 pr-2">
-                  <input
-                    type="radio"
-                    name="default_hub"
-                    checked={defaultHubId === h.id}
-                    onChange={() => {
-                      setDefaultHubId(h.id)
-                      setDirty(true)
-                    }}
-                    data-testid="hub-default-remote"
-                  />
-                </td>
-                <td className="py-2">
-                  <div className="flex items-center justify-end gap-1">
-                    {!authedHubIds.has(h.id) && (
+            {remotes.map((h) => {
+              const verifyState = verifyStates[h.id]
+              const authNeed = authNeeds[h.id]
+              // Offer Sign in only when this hub actually gates — or when we
+              // could not find out ('unknown': unreachable, or a hub too old to
+              // report it), where withholding the button would strip the only
+              // way to authenticate. An absent entry means the probe is still in
+              // flight; stay quiet rather than flash a button that may not apply.
+              const showSignIn =
+                !authedHubIds.has(h.id) && (authNeed === 'gated' || authNeed === 'unknown')
+              return (
+                <tr key={h.id} className="border-border border-t" data-testid="hub-row-remote">
+                  <td
+                    className="truncate py-2 pr-2 font-medium"
+                    title={h.label}
+                    data-testid="hub-label"
+                  >
+                    {h.label}
+                  </td>
+                  <td className="text-muted-foreground py-2 pr-2 font-mono text-xs break-all">
+                    {h.url}
+                    {authedHubIds.has(h.id) && (
+                      <span className="ml-2 text-green-500" data-testid="hub-signed-in">
+                        ● signed in
+                      </span>
+                    )}
+                    {verifyState && verifyState.kind !== 'idle' && (
+                      <span className="ml-2" data-testid="hub-verify-result">
+                        {verifyState.kind === 'probing' && <span>checking…</span>}
+                        {verifyState.kind === 'ok' && (
+                          <span className="text-green-500">✓ reachable</span>
+                        )}
+                        {verifyState.kind === 'fail' && (
+                          <span className="text-destructive">✗ {verifyState.reason}</span>
+                        )}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input
+                      type="radio"
+                      name="default_hub"
+                      checked={defaultHubId === h.id}
+                      onChange={() => {
+                        setDefaultHubId(h.id)
+                        setDirty(true)
+                      }}
+                      data-testid="hub-default-remote"
+                    />
+                  </td>
+                  <td className="py-2">
+                    <div className="flex items-center justify-end gap-1">
+                      {showSignIn && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={
+                            authNeed === 'gated'
+                              ? 'This hub requires a signed-in account'
+                              : "Could not confirm whether this hub requires sign-in — it's offered just in case"
+                          }
+                          onClick={() => openSignIn(h.id)}
+                          data-testid="hub-signin-open"
+                        >
+                          Sign in
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
-                        size="sm"
-                        onClick={() => openSignIn(h.id)}
-                        data-testid="hub-signin-open"
+                        size="icon"
+                        disabled={verifyState?.kind === 'probing' || !h.url}
+                        title="Verify this hub is reachable"
+                        onClick={() => void verifyHub(h)}
+                        data-testid="hub-verify"
                       >
-                        Sign in
+                        <PlugZap
+                          className={cn(
+                            'size-4',
+                            verifyState?.kind === 'probing' && 'animate-pulse'
+                          )}
+                        />
                       </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeHub(h.id)}
-                      data-testid="hub-remove"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Edit name and address"
+                        onClick={() => openEdit(h)}
+                        data-testid="hub-edit-open"
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeHub(h.id)}
+                        data-testid="hub-remove"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
             {/* Add-hub row — collapsed to a button, expands into the probe form. */}
             <tr className="border-border border-t" data-testid="hub-add-row">
               {addingHub ? (
                 <td colSpan={4} className="py-2">
                   <div className="flex items-center gap-2">
-                    <Input
-                      value={newLabel}
-                      onChange={(e) => setNewLabel(e.target.value)}
-                      placeholder="Name (optional)"
-                      className="max-w-[12rem]"
-                      data-testid="hub-add-label"
-                    />
                     <Input
                       value={newUrl}
                       onChange={(e) => {
@@ -471,6 +652,71 @@ export function HubsSettingsTab() {
           </Button>
         )}
       </div>
+
+      {/* Edit — modal launched from a remote row. Owns the hub's name (the list
+          shows it read-only) and its address; a changed address must validate
+          before it can be saved. */}
+      <Dialog open={!!editHubId} onOpenChange={(open) => !open && closeEdit()}>
+        <DialogContent data-testid="hub-edit-dialog">
+          <DialogHeader>
+            <DialogTitle>Edit hub</DialogTitle>
+            <DialogDescription>
+              Rename this hub or point it at a different address. Changes take effect after saving;
+              a new address must be validated first.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              value={editLabel}
+              onChange={(e) => setEditLabel(e.target.value)}
+              placeholder="Name"
+              data-testid="hub-edit-label"
+            />
+            <div className="flex items-center gap-2">
+              <Input
+                value={editUrl}
+                onChange={(e) => {
+                  setEditUrl(e.target.value)
+                  setEditProbe({ kind: 'idle' })
+                }}
+                placeholder="https://box.lan:7800 or wss://box.lan:7800/trpc"
+                className="font-mono"
+                data-testid="hub-edit-url"
+              />
+              <Button
+                variant="outline"
+                disabled={editProbe.kind === 'probing' || !editUrl.trim() || !editUrlChanged}
+                onClick={() => {
+                  void probeEditUrl()
+                }}
+                data-testid="hub-edit-probe"
+              >
+                {editProbe.kind === 'probing' ? 'Checking…' : 'Validate'}
+              </Button>
+            </div>
+            <div className="h-4 text-xs" data-testid="hub-edit-probe-result">
+              {editProbe.kind === 'ok' && (
+                <span className="text-green-500">✓ reachable — {editProbe.normalizedUrl}</span>
+              )}
+              {editProbe.kind === 'fail' && (
+                <span className="text-destructive">✗ {editProbe.reason}</span>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeEdit}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!editUrl.trim() || (editUrlChanged && editProbe.kind !== 'ok')}
+              onClick={saveEdit}
+              data-testid="hub-edit-save"
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Sign in — modal launched from a remote row. The row names the hub. */}
       <Dialog open={!!signInHubId} onOpenChange={(open) => !open && closeSignIn()}>
