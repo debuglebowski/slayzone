@@ -1,9 +1,15 @@
 import { useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import {
+  useTRPC,
+  useSubscription,
+  useClientForTask,
+  useHubIdForTask,
+  useHubOwnershipStore
+} from '@slayzone/transport/client'
 import type { DragEndEvent } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
-import type { Task } from '@slayzone/task/shared'
+import type { CreateTaskInput, Task } from '@slayzone/task/shared'
 import { track } from '@slayzone/telemetry/client'
 
 export interface UseSubTasksReturn {
@@ -38,7 +44,16 @@ export function useSubTasks(
   )
   const subTasks = subTasksQuery.data ?? []
 
-  const createMutation = useMutation(trpc.task.create.mutationOptions())
+  // Create routes by the PARENT's hub (a subtask lives in its parent's project,
+  // hence its parent's DB) rather than by the ambient scope. The two agree
+  // whenever this hook renders inside its task tab's HubScope — but "correct by
+  // construction" beats "correct by mount position", and a subtask INSERT
+  // carries the same `project_id` foreign key as any other task.
+  const parentHubId = useHubIdForTask(parentId)
+  const createClient = useClientForTask(parentId)
+  const createMutation = useMutation({
+    mutationFn: (input: CreateTaskInput) => createClient.task.create.mutate(input)
+  })
   const updateMutation = useMutation(trpc.task.update.mutationOptions())
   const deleteMutation = useMutation(trpc.task.delete.mutationOptions())
   const reorderMutation = useMutation(trpc.task.reorder.mutationOptions())
@@ -65,6 +80,7 @@ export function useSubTasks(
         status: params.status
       })
       if (sub) {
+        if (parentHubId) useHubOwnershipStore.getState().noteTaskHub(sub.id, parentHubId)
         queryClient.setQueryData<Task[]>(trpc.task.getSubTasks.queryKey({ parentId }), (prev) => [
           ...(prev ?? []),
           sub
@@ -73,7 +89,7 @@ export function useSubTasks(
       }
       return sub
     },
-    [parentId]
+    [parentId, parentHubId]
   )
 
   const updateSubTask = useCallback(

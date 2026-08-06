@@ -11,7 +11,16 @@ import React, {
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription, useFederationOrNull, HubScope } from '@slayzone/transport/client'
+import {
+  useTRPC,
+  useTRPCClient,
+  useSubscription,
+  useFederationOrNull,
+  HubScope,
+  getClientForHub,
+  getHubIdForProject,
+  useHubOwnershipStore
+} from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
 import {
@@ -942,12 +951,17 @@ function App(): React.JSX.Element {
       const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
       const status = getDefaultStatus(project?.columns_config)
       const createStart = performance.now()
-      const task = await trpcClient.task.create.mutate({
+      // The project can belong to any hub (the rail is a cross-hub union), and a
+      // task INSERT is FK-bound to it — so create on the hub that owns it, then
+      // record the new id's hub before openTask scopes its tab.
+      const projectHubId = getHubIdForProject(projectId)
+      const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
         projectId,
         title: `Terminal ${next}`,
         status,
         isTemporary: true
       })
+      if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
       recordDiagnosticsTimeline('temp_task_created', {
         taskId: task.id,
         taskCreateMs: Math.round(performance.now() - createStart)

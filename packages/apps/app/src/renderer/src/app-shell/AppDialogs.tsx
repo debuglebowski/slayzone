@@ -204,6 +204,7 @@ export function AppDialogs({
             onCreated={handleTaskCreated}
             onCreatedAndOpen={handleTaskCreatedAndOpen}
             draft={createTaskDialogDraft}
+            projects={projects}
             tags={projectTags}
             onTagCreated={(tag: Tag) => setTags((prev) => [...prev, tag])}
           />

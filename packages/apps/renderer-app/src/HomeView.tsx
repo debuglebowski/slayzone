@@ -42,7 +42,12 @@ import { TabBar } from '@slayzone/tabs'
 import { HomeContainer, type HomeContainerHandle } from '@slayzone/home/client'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
-import { useTRPCClient } from '@slayzone/transport/client'
+import {
+  useTRPCClient,
+  getClientForHub,
+  getHubIdForProject,
+  useHubOwnershipStore
+} from '@slayzone/transport/client'
 import { TerminalStatusButton } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { getDefaultStatus } from '@slayzone/projects/shared'
@@ -248,12 +253,17 @@ export function HomeView(): React.JSX.Element {
       .filter(Boolean)
       .map((m) => parseInt(m![1], 10))
     const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
-    const task = await trpcClient.task.create.mutate({
+    // Create on the hub that owns the project (a task INSERT is FK-bound to it),
+    // and record the new id's hub before its tab opens. Single-hub → the ambient
+    // client, unchanged.
+    const projectHubId = getHubIdForProject(selectedProjectId)
+    const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
       projectId: selectedProjectId,
       title: `Terminal ${next}`,
       status: getDefaultStatus(project?.columns_config),
       isTemporary: true
     })
+    if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
     data.setTasks((prev) => [task, ...prev])
     const lookup = useTabStore.getState()._taskLookup
     useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })

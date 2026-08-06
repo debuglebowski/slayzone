@@ -26,6 +26,18 @@ export {
 export { HubScope, useHubId, type HubScopeProps } from './HubScope'
 export { electronBootstrap } from './electron-bootstrap'
 export { useHubRegistryStore } from './hubRegistryStore'
+export {
+  useHubOwnershipStore,
+  getHubIdForProject,
+  getHubIdForTask,
+  getClientForHub,
+  getClientForProject,
+  getClientForTask,
+  useHubIdForProject,
+  useHubIdForTask,
+  useClientForProject,
+  useClientForTask
+} from './hubOwnershipStore'
 // Subscription hook for the tanstack integration — single import point so
 // renderer code gets it from the transport barrel (not @trpc/* directly).
 export { useSubscription } from '@trpc/tanstack-react-query'

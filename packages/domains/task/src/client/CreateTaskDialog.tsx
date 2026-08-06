@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import {
+  useTRPC,
+  useClientForProject,
+  useHubIdForProject,
+  useHubOwnershipStore
+} from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
 import { CalendarIcon, Plus } from 'lucide-react'
-import type { Task } from '@slayzone/task/shared'
+import type { CreateTaskInput, Task } from '@slayzone/task/shared'
 import type { CreateTaskDraft } from '@slayzone/task/shared'
+import type { Project } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
 import { getDefaultStatus } from '@slayzone/projects/shared'
@@ -34,6 +40,13 @@ interface CreateTaskDialogProps {
   draft?: CreateTaskDraft
   tags: Tag[]
   onTagCreated?: (tag: Tag) => void
+  /**
+   * The cross-hub union of projects (from the board hook). Passed in because the
+   * dialog's own `projects.list` only reaches the ambient hub, so a project
+   * owned by another hub would be invisible here — including one a draft names.
+   * Omitted → fall back to the ambient query (single-hub callers unchanged).
+   */
+  projects?: Project[]
 }
 
 export function CreateTaskDialog({
@@ -43,12 +56,10 @@ export function CreateTaskDialog({
   onCreatedAndOpen,
   draft,
   tags,
-  onTagCreated
+  onTagCreated,
+  projects: projectsProp
 }: CreateTaskDialogProps): React.JSX.Element {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
-  const createMutation = useMutation(trpc.task.create.mutationOptions())
-  const setTagsMutation = useMutation(trpc.tags.setForTask.mutationOptions())
   const [createTagOpen, setCreateTagOpen] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('__none__')
   const form = useForm<CreateTaskFormData>({
@@ -65,20 +76,42 @@ export function CreateTaskDialog({
     prevOpenRef.current = open
   }, [open, draft, form])
 
-  const projectsQuery = useQuery(trpc.projects.list.queryOptions(undefined, { enabled: open }))
-  const projects = projectsQuery.data ?? []
+  const projectsQuery = useQuery(
+    trpc.projects.list.queryOptions(undefined, { enabled: open && !projectsProp })
+  )
+  const projects = projectsProp ?? projectsQuery.data ?? []
 
   const selectedProjectId = form.watch('projectId')
   const selectedProject = projects.find((project) => project.id === selectedProjectId)
   const projectStatusOptions = buildStatusOptions(selectedProject?.columns_config)
 
+  // ── Multi-hub routing ─────────────────────────────────────────────────────
+  // A task row is FK-bound to its project (`tasks.project_id REFERENCES
+  // projects(id)`), and the project lives in exactly ONE hub's DB. The dialog is
+  // mounted in the app shell — i.e. under the DEFAULT hub's scope — so it must
+  // resolve its client from the SELECTED PROJECT rather than from the ambient
+  // scope; otherwise creating on another hub's project fails the foreign key.
+  // Every call below (templates, the worktree pre-flight, create, tags) follows
+  // the same client, because they all describe the same row.
+  const projectHubId = useHubIdForProject(selectedProjectId)
+  const client = useClientForProject(selectedProjectId)
+
+  const createMutation = useMutation({
+    mutationFn: (input: CreateTaskInput) => client.task.create.mutate(input)
+  })
+  const setTagsMutation = useMutation({
+    mutationFn: (input: { taskId: string; tagIds: string[] }) =>
+      client.tags.setForTask.mutate(input)
+  })
+
   // Fetch templates when project changes. Skip on close so UI doesn't mutate during exit animation.
-  const templatesQuery = useQuery(
-    trpc.template.getByProject.queryOptions(
-      { projectId: selectedProjectId ?? '' },
-      { enabled: open && !!selectedProjectId }
-    )
-  )
+  // The hub id is part of the key: two hubs can hold different templates for
+  // different projects, and a shared key would serve one hub's list for the other.
+  const templatesQuery = useQuery({
+    queryKey: ['template.getByProject', projectHubId ?? 'ambient', selectedProjectId ?? ''],
+    queryFn: () => client.template.getByProject.query({ projectId: selectedProjectId ?? '' }),
+    enabled: open && !!selectedProjectId
+  })
   const templates = open && selectedProjectId ? (templatesQuery.data ?? []) : []
 
   // Select the project's default template (or none) whenever the loaded list changes.
@@ -117,9 +150,11 @@ export function CreateTaskDialog({
     opts?: { statusOverride?: Task['status']; andOpen?: boolean }
   ): Promise<void> => {
     const isAutoCreateEnabledForProject = async (projectId: string): Promise<boolean> => {
+      // Both reads come from the owning hub — the worktree is provisioned on
+      // that hub's host, and its per-project override lives in its DB.
       const [globalSetting, projectList] = await Promise.all([
-        trpcClient.settings.get.query({ key: 'auto_create_worktree_on_task_create' }),
-        trpcClient.projects.list.query()
+        client.settings.get.query({ key: 'auto_create_worktree_on_task_create' }),
+        client.projects.list.query()
       ])
       const project = projectList.find((p) => p.id === projectId)
       const override = project?.auto_create_worktree_on_task_create
@@ -144,6 +179,10 @@ export function CreateTaskDialog({
       dueDate: data.dueDate ?? undefined,
       templateId: selectedTemplateId === '__none__' ? undefined : selectedTemplateId
     })
+    // Record the new row's hub before anything can open it. Its owning hub's
+    // board reload has not landed yet, so without this the tab would resolve to
+    // the default hub and load its detail from the wrong DB.
+    if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
     if (data.tagIds.length > 0) {
       await setTagsMutation.mutateAsync({ taskId: task.id, tagIds: data.tagIds })
     }
@@ -442,7 +481,11 @@ export function CreateTaskDialog({
                 <FormItem>
                   <FormLabel>Project</FormLabel>
                   <FormControl>
-                    <ProjectSelect value={field.value} onChange={field.onChange} />
+                    <ProjectSelect
+                      value={field.value}
+                      onChange={field.onChange}
+                      projects={projectsProp}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

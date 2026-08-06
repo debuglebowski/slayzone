@@ -70,7 +70,19 @@ export const taskRouter = router({
     }),
 
   create: publicProcedure.input(createInput).mutation(async ({ ctx, input }) => {
-    const r = await ops().createTaskOp(ctx.db, input, deps())
+    let r
+    try {
+      r = await ops().createTaskOp(ctx.db, input, deps())
+    } catch (e) {
+      // A project lives in exactly ONE hub's DB, so a create routed to the wrong
+      // hub is a missing project, not a server fault. Surfaced by `code` (see
+      // PROJECT_NOT_FOUND in task/server/ops/create.ts) — matching on it here
+      // keeps this router free of that electron-coupled import.
+      if ((e as { code?: string })?.code === 'PROJECT_NOT_FOUND') {
+        throw new TRPCError({ code: 'NOT_FOUND', message: (e as Error).message })
+      }
+      throw e
+    }
     if (!r) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'createTaskOp returned null' })
     return r
   }),

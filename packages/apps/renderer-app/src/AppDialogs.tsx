@@ -42,7 +42,12 @@ import {
   AlertDialogTitle
 } from '@slayzone/ui'
 import { useDialogStore, useTabStore, type Tab } from '@slayzone/settings'
-import { useTRPCClient } from '@slayzone/transport/client'
+import {
+  useTRPCClient,
+  getClientForHub,
+  getHubIdForProject,
+  useHubOwnershipStore
+} from '@slayzone/transport/client'
 import { useChangelogAutoOpen } from '@slayzone/onboarding'
 import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
 import { getDoneStatus } from '@slayzone/projects/shared'
@@ -195,13 +200,22 @@ export function AppDialogs({
       .filter((m): m is RegExpExecArray => m !== null)
       .map((m) => parseInt(m[1], 10))
     const nextNum = existing.length ? Math.max(...existing) + 1 : 1
-    const task = await trpcClient.task.create.mutate({
+    // Create on the hub that owns the project (a task INSERT is FK-bound to it),
+    // and record the new id's hub before its tab opens. Single-hub → the ambient
+    // client, unchanged.
+    const projectHubId = getHubIdForProject(selectedProjectId)
+    const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
       projectId: selectedProjectId,
       title: `Terminal ${nextNum}`,
       isTemporary: true
     })
     if (!task) return
+    if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
     data.setTasks((prev) => [task, ...prev])
+    // openTask reads title/status out of the tab store's task lookup; without
+    // this patch the fresh tab renders untitled until the next board load.
+    const lookup = useTabStore.getState()._taskLookup
+    useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
     onOpenTask(task.id)
   }, [selectedProjectId, data, trpcClient, onOpenTask])
 
@@ -342,6 +356,7 @@ export function AppDialogs({
             onCreated={handleTaskCreated}
             onCreatedAndOpen={handleTaskCreatedAndOpen}
             draft={createTaskDraft}
+            projects={data.projects}
             tags={data.tags}
             onTagCreated={(tag) =>
               data.setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, tag]))

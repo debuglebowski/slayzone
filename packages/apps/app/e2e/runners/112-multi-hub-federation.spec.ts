@@ -390,6 +390,120 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
+  base('creating a task on a remote-hub project writes to THAT hub and opens there', async () => {
+    base.setTimeout(180_000)
+
+    // A task row is FK-bound to its project (`tasks.project_id REFERENCES
+    // projects(id)`), and the project exists in exactly ONE hub's DB. The
+    // create-task dialog is mounted in the app shell — under the DEFAULT hub's
+    // scope — so before it routed by project, this create hit the LOCAL hub and
+    // came back as "FOREIGN KEY constraint failed".
+    const TITLE = 'created on the remote hub'
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+    let hub: SecondHub | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const remoteHubUrl = hub.url
+
+      const remoteProjectId = await withHubClient(remoteHubUrl, async (c) => {
+        const project = (await c.projects.create.mutate({
+          name: 'Remote-P',
+          color: '#22c55e',
+          path: '/tmp'
+        })) as { id: string }
+        return project.id
+      })
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-create-task',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify(
+              {
+                server_mode: 'local',
+                multi_hub: true,
+                hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url: remoteHubUrl }],
+                default_hub_id: 'local'
+              },
+              null,
+              2
+            )
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+
+      // The remote project's rail tile proves the federated board landed — and
+      // with it the project→hub ownership the create routes on.
+      await expect(projectBlob(page, 'RE')).toBeVisible({ timeout: 30_000 })
+
+      // Open the create-task dialog already aimed at the REMOTE project, exactly
+      // as the sidebar "+" and a board column's add button do (they pass a draft
+      // carrying the project id, which may belong to any hub in the union).
+      await page.evaluate(
+        (pid) => window.__slayzone_dialogStore?.getState().openCreateTask({ projectId: pid }),
+        remoteProjectId
+      )
+      await page.locator('input[name="title"]').fill(TITLE)
+      await page.locator('button').filter({ hasText: 'Create + open' }).first().click()
+
+      // (1) The row exists on the REMOTE hub.
+      await expect
+        .poll(
+          () =>
+            withHubClient(remoteHubUrl, async (c) => {
+              const board = (await c.task.loadBoardData.query()) as {
+                tasks: Array<{ title: string }>
+              }
+              return board.tasks.some((t) => t.title === TITLE)
+            }),
+          { timeout: 20_000, intervals: [500, 1_000] }
+        )
+        .toBe(true)
+
+      // (2) …and never on the LOCAL hub, which has no such project. The window
+      // client IS the local hub, so this is its raw DB truth.
+      const localTitles = await page.evaluate(
+        () =>
+          window
+            .getTrpcVanillaClient()
+            .task.loadBoardData.query()
+            .then((b: { tasks: Array<{ title: string }> }) => b.tasks.map((t) => t.title)) as Promise<
+            string[]
+          >
+      )
+      expect(localTitles).not.toContain(TITLE)
+
+      // (3) "Create + open" opened the tab. Its detail only loads if the tab
+      // resolved to the REMOTE hub — which requires the new id's hub to be known
+      // BEFORE that hub's board reload lands (the create records it).
+      await expect
+        .poll(
+          async () => {
+            const inputs = await page.locator('input').all()
+            for (const el of inputs) {
+              const v = await el.inputValue().catch(() => '')
+              if (v === TITLE) return true
+            }
+            return false
+          },
+          { timeout: 20_000, intervals: [500, 1_000] }
+        )
+        .toBe(true)
+    } finally {
+      if (launched) await launched.close()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
   base('Hubs settings lists both hubs; new-project picker routes to the chosen hub', async () => {
     base.setTimeout(180_000)
 

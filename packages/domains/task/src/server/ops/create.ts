@@ -13,6 +13,9 @@ import {
 } from './shared.js'
 import { insertTaskRow } from './insert.js'
 
+/** `err.code` on the create-time "this hub has no such project" error. */
+export const PROJECT_NOT_FOUND = 'PROJECT_NOT_FOUND'
+
 export async function createTaskOp(
   db: SlayzoneDb,
   data: CreateTaskInput,
@@ -20,6 +23,28 @@ export async function createTaskOp(
 ): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
   const id = crypto.randomUUID()
+
+  // A task row is FK-bound to its project, and under multi-hub federation a
+  // project exists in exactly ONE hub's DB — so a create aimed at the wrong hub
+  // reaches the INSERT and dies as a bare `FOREIGN KEY constraint failed`, which
+  // names neither the project nor the hub. Fail here instead, with the id in the
+  // message. (The REST path resolves the project before it gets this far; this
+  // covers the tRPC + MCP callers, which share this op.)
+  const project = await db.get<{ id: string }>('SELECT id FROM projects WHERE id = ?', [
+    data.projectId
+  ])
+  if (!project) {
+    // Marked with a `code` rather than a custom class so the tRPC router can map
+    // it to NOT_FOUND without importing this electron-coupled module (the
+    // sidecar loads the router but not these ops).
+    throw Object.assign(
+      new Error(
+        `Project ${data.projectId} does not exist on this hub — a task cannot be created for it here.`
+      ),
+      { code: PROJECT_NOT_FOUND }
+    )
+  }
+
   const projectColumns = await getProjectColumns(db, data.projectId)
 
   // Resolve template (explicit > project default > none)
