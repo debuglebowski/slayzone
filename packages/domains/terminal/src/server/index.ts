@@ -146,7 +146,16 @@ export {
   // side-car (slice 9), and with the getter unset it fails safe to disabled — so
   // hibernation silently never fired. The side-car composition wires it now, and
   // it must be reachable from the server barrel to do that.
-  setIdleCloseConfigGetter
+  setIdleCloseConfigGetter,
+  // `was_spawned` recorder seam — the flag that decides whether a restart
+  // restores your agents. Same orphaning as `setIdleCloseConfigGetter` above:
+  // only the ELECTRON barrel exported it, so when the pty runtime moved to the
+  // side-car (and spawning to the runner) the host kept wiring a manager that
+  // owns no sessions, every `spawnedSetter?.(…)` became a no-op, and restore
+  // silently died. The side-car composition wires it now (tab-flag-recorders.ts)
+  // and needs it reachable from the SERVER barrel to do that.
+  setSpawnedTabRecorder as setPtySpawnedTabRecorder,
+  getSpawnedTabRecorder as getPtySpawnedTabRecorder
 } from './runtime/pty-manager'
 export { createChatOps, type ChatOps, type ChatMode } from './runtime/chat-handlers'
 // The chat data seam. Exported so a composition root can override ONE method
@@ -162,6 +171,13 @@ export {
 export {
   chatEvents,
   configureTransport,
+  // Chat's half of the `was_spawned` seam — a chat-mode agent must flip the same
+  // column a pty-mode one does, or restore works for half your tasks.
+  setSpawnedTabRecorder as setChatSpawnedTabRecorder,
+  getSpawnedTabRecorder as getChatSpawnedTabRecorder,
   type ChatEventMap,
   type TransportDeps
 } from './runtime/chat-transport-manager'
+// Quit-time gate: flip BEFORE any teardown that can fire pty/chat exit handlers,
+// or the kill cascade clears the very `was_spawned` flags the next boot needs.
+export { beginTerminalShutdown } from './runtime/shutdown'

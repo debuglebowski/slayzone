@@ -102,6 +102,9 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-boundary.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
+# Restart-restore seam: the side-car must install the `was_spawned` recorder and
+# set the shutdown gate before teardown, or a restart drops every agent.
+run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
 # Client↔hub /trpc connection-context seam — windowId parse + bearer→principal verify (real hub-auth).
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, loopback bypass,

@@ -158,6 +158,13 @@ let spawnedSetter: SpawnedSetter | null = null
 export function setSpawnedTabRecorder(fn: SpawnedSetter | null): void {
   spawnedSetter = fn
 }
+/** Read back what (if anything) is wired. Exists because "nobody installed the
+ *  recorder in the process that owns the sessions" is the exact failure that
+ *  silently disabled restart-restore — an assertable seam beats a spy, which
+ *  would still pass against the wrong module. */
+export function getSpawnedTabRecorder(): SpawnedSetter | null {
+  return spawnedSetter
+}
 
 /**
  * Injected by composition root to persist a tab's idle-close (hibernation)

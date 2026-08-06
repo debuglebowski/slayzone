@@ -31,6 +31,7 @@
     "@slayzone/runners": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@trpc/client": "^11.17.0",

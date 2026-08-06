@@ -10,6 +10,7 @@ import {
   setHubDescribeDeps,
   setAuthGate
 } from '@slayzone/transport/server'
+import { beginTerminalShutdown } from '@slayzone/terminal/server'
 import { createAuthExpressApp } from '@slayzone/hub-auth/server'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import {
@@ -481,6 +482,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     stop: async () => {
       if (stopped) return
       stopped = true
+      // FIRST, before anything that can fire a pty/chat exit handler. Closing the
+      // runner gateway below disposes every session on that runner, and each exit
+      // would otherwise clear `terminal_tabs.was_spawned` — the exact flag the
+      // next boot reads to bring your agents back (`listAutoRestoreTasks`).
+      // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
+      // ppid-reparent poll in bin.ts all call `handle.stop()`.
+      beginTerminalShutdown()
       state.ready = false
       if (sidecarSocket) {
         try {

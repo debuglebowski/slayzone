@@ -3419,6 +3419,23 @@ export const migrations: Migration[] = [
       // send it a kill signal, so nothing on disk remembered its pid at all.
       db.exec(`ALTER TABLE processes ADD COLUMN pid INTEGER DEFAULT NULL;`)
     }
+  },
+  {
+    version: 155,
+    up: (db) => {
+      // One-time reset of `was_spawned`. The flag is set on spawn and cleared on
+      // exit by a recorder that, since the pty runtime moved to the side-car,
+      // nothing installed — so no live agent was ever flagged, and the only rows
+      // left at 1 are strays written directly by the REST `pty/start-main` path
+      // that nothing has cleared since. Left alone, the now-working restore
+      // would resurrect those long-dead tasks as background tabs on first boot.
+      //
+      // Safe to blanket-clear: migrations run at hub boot, before any session
+      // exists in this process, so a `1` here can only be stale by construction.
+      // Cost is exactly one boot without auto-restore; every boot after this
+      // reflects real spawn/exit.
+      db.exec(`UPDATE terminal_tabs SET was_spawned = 0 WHERE was_spawned = 1;`)
+    }
   }
 ]
 

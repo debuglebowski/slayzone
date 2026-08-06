@@ -497,6 +497,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
+      '@slayzone/task-terminals':
+        specifier: workspace:*
+        version: link:../../domains/task-terminals
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal

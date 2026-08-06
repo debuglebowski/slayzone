@@ -177,6 +177,11 @@ let spawnedSetter: SpawnedSetter | null = null
 export function setSpawnedTabRecorder(fn: SpawnedSetter | null): void {
   spawnedSetter = fn
 }
+/** See the pty-manager twin: readable so a test can assert the composition root
+ *  actually installed a recorder in THIS process. */
+export function getSpawnedTabRecorder(): SpawnedSetter | null {
+  return spawnedSetter
+}
 
 /**
  * Shutdown gate. When true, the exit handler does NOT clear `was_spawned`

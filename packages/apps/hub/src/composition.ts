@@ -137,6 +137,7 @@ import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
 import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runners/server'
 import { createRunnerAuthAdapters } from './runner-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
+import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 
 /**
  * Composition root for the standalone server: populates every transport
@@ -476,6 +477,14 @@ export function composeServer(opts: {
     resolveRunnerId: (taskId) => resolveRunnerForTask(taskId)
   })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
+
+  // `terminal_tabs.was_spawned` recorder — wired HERE for the same reason as the
+  // idle-close getter below: the pty/chat runtimes live in THIS process, so the
+  // Electron host's copy of the recorder fires for sessions it does not own
+  // (i.e. never). Without this, no live agent is ever flagged, so
+  // `listAutoRestoreTasks` is always empty and a restart lands every task on the
+  // Start gate. See ./tab-flag-recorders.ts.
+  wireTabFlagRecorders(db)
 
   // Idle-close (hibernation) config. Wired HERE because the pty runtime lives in
   // this process (slice 9) — `isHibernateEligible` reads this getter, and with it
