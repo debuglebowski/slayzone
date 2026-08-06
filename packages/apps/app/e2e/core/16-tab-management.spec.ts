@@ -12,6 +12,16 @@ async function getVisibleInputValue(page: import('@playwright/test').Page): Prom
   })
 }
 
+/** Read the title of the currently-active tab from the tab store. Task tabs
+ *  stay mounted (display:none) so all their <input>s remain visible per the
+ *  layout; only the store knows which one is actually active. */
+async function getActiveTabTitle(page: import('@playwright/test').Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const s = (window as any).__slayzone_tabStore.getState()
+    return s.tabs[s.activeTabIndex]?.title ?? null
+  })
+}
+
 test.describe('Tab management & keyboard shortcuts', () => {
   let projectAbbrev: string
 
@@ -172,5 +182,78 @@ test.describe('Tab management & keyboard shortcuts', () => {
 
     const value = await getVisibleInputValue(mainWindow)
     expect(value).toBe('Tab task A')
+  })
+
+  test('Cmd+Option+Right cycles forward through task tabs and wraps', async ({ mainWindow }) => {
+    // Ensure all 3 task tabs (A, B, C) are open, then start on the first one.
+    for (const title of ['Tab task A', 'Tab task B', 'Tab task C']) {
+      await goHome(mainWindow)
+      await expect(mainWindow.getByText(title).first()).toBeVisible({ timeout: 5_000 })
+      await mainWindow.getByText(title).first().click()
+      await expect(
+        mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+      ).toBeVisible({ timeout: 5_000 })
+    }
+    await mainWindow.keyboard.press('Meta+1')
+    await expect(
+      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+    ).toBeVisible({ timeout: 5_000 })
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
+
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task B')
+
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task C')
+
+    // Wrap-around: last → first
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
+  })
+
+  test('Cmd+Option+Left cycles backward through task tabs and wraps', async ({ mainWindow }) => {
+    await mainWindow.keyboard.press('Meta+1')
+    await expect(
+      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+    ).toBeVisible({ timeout: 5_000 })
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
+
+    // Wrap-around: first → last
+    await mainWindow.keyboard.press('Meta+Alt+ArrowLeft')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task C')
+
+    await mainWindow.keyboard.press('Meta+Alt+ArrowLeft')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task B')
+
+    await mainWindow.keyboard.press('Meta+Alt+ArrowLeft')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
+  })
+
+  test('Cmd+Option+Right is suppressed while focused in a text input', async ({ mainWindow }) => {
+    await mainWindow.keyboard.press('Meta+1')
+    await expect(
+      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+    ).toBeVisible({ timeout: 5_000 })
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
+
+    // Focus the visible task title input (an <input>) — guard should NOT switch tabs.
+    const titleInput = mainWindow.locator('input:visible').first()
+    await titleInput.focus()
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+
+    // Active task tab is unchanged.
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
+  })
+
+  test('Cmd+Option+Right/Left from home jumps to first / last task tab', async ({ mainWindow }) => {
+    await goHome(mainWindow)
+    // Home tab active — next jumps to FIRST task tab.
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task A')
+
+    await goHome(mainWindow)
+    // Home tab active — prev jumps to LAST task tab.
+    await mainWindow.keyboard.press('Meta+Alt+ArrowLeft')
+    expect(await getActiveTabTitle(mainWindow)).toBe('Tab task C')
   })
 })

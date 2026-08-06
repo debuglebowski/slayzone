@@ -95,7 +95,10 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   // ensures re-render when shortcuts change, so useHotkeys picks up new key strings.
   const getKeys = useCallback(
     (id: string): string => {
-      if (overrides[id]) return overrides[id]
+      // `id in overrides` distinguishes an explicit `null` (user disabled the
+      // shortcut) from a missing override (never customized → use default).
+      // A `null` override resolves to '' so nothing binds.
+      if (id in overrides) return overrides[id] ?? ''
       const def = shortcutDefinitions.find((d) => d.id === id)
       return def?.defaultKeys ?? ''
     },
@@ -189,6 +192,52 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
       e.preventDefault()
       const num = parseInt(e.key, 10)
       if (num < visibleTabs.length) setActiveTabIndex(toFullIndex(num))
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  // Cycle through open task tabs (skip the home tab), wrapping at the edges.
+  const navigateTaskTabs = useCallback(
+    (direction: 1 | -1) => {
+      // Task tabs live at visibleIndex 1..length-1 (visibleTabs[0] is home).
+      if (visibleTabs.length <= 1) return
+      const taskCount = visibleTabs.length - 1
+      const visibleIdx = toVisibleIndex(useTabStore.getState().activeTabIndex)
+      // Treat home / unknown position as "before the first task tab" so
+      // next jumps to first and prev jumps to last — same as Chrome.
+      const currentTaskPos = visibleIdx >= 1 ? visibleIdx - 1 : direction === 1 ? -1 : 0
+      const nextTaskPos = (currentTaskPos + direction + taskCount) % taskCount
+      useTabStore.getState().setActiveView('tabs')
+      setActiveTabIndex(toFullIndex(nextTaskPos + 1))
+    },
+    [visibleTabs.length, toFullIndex, toVisibleIndex, setActiveTabIndex]
+  )
+
+  useGuardedHotkeys(
+    getKeys('next-task-tab'),
+    (e) => {
+      // macOS Cmd+Option+Right is "next word" in text fields; don't hijack.
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return
+      if (el.isContentEditable || el.getAttribute('role') === 'textbox') return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
+      e.preventDefault()
+      navigateTaskTabs(1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  useGuardedHotkeys(
+    getKeys('prev-task-tab'),
+    (e) => {
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return
+      if (el.isContentEditable || el.getAttribute('role') === 'textbox') return
+      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (el.closest?.('.milkdown') || el.closest?.('.ProseMirror')) return
+      e.preventDefault()
+      navigateTaskTabs(-1)
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )
