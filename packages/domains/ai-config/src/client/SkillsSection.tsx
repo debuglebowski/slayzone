@@ -69,7 +69,10 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
 
   const refreshSyncStatus = useCallback(async () => {
     if (!isProject || !projectId || !projectPath) return
-    const linked = await trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath })
+    const linked = await trpcClient.aiConfig.getProjectSkillsStatus.query({
+      projectId,
+      projectPath
+    })
     const healthMap = new Map<string, SyncHealth>()
     const newStatusMap = new Map<string, ProjectSkillStatus>()
     for (const s of linked) {
@@ -246,7 +249,9 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
         }
       })()
       if (hasMarketplace) {
-        const updated = await trpcClient.aiConfig.marketplace.unlinkSkill.mutate({ itemId: target.id })
+        const updated = await trpcClient.aiConfig.marketplace.unlinkSkill.mutate({
+          itemId: target.id
+        })
         if (updated)
           setItems((prev) => prev.map((i) => (i.id === updated.id ? (updated as AiConfigItem) : i)))
         return

@@ -74,8 +74,12 @@ function freshTask(): { taskId: string; tabId: string; repo: string } {
   repos.push(repo)
   const taskId = crypto.randomUUID()
   const tabId = `tab-${taskId.slice(0, 8)}`
-  h.db.prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)').run(taskId, projectId, 'T', repo)
-  h.db.prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)').run(tabId, taskId, 'claude-code', 0)
+  h.db
+    .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
+    .run(taskId, projectId, 'T', repo)
+  h.db
+    .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
+    .run(tabId, taskId, 'claude-code', 0)
   return { taskId, tabId, repo }
 }
 const list = (repo: string): Promise<AgentTurnRange[]> =>
@@ -90,11 +94,23 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
     await recordTurnBoundary(h.db, tabId, 'p2')
 
     const latest = h.db
-      .prepare('SELECT snapshot_sha, head_sha_at_snap FROM agent_turns WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1')
+      .prepare(
+        'SELECT snapshot_sha, head_sha_at_snap FROM agent_turns WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1'
+      )
       .get(repo) as { snapshot_sha: string; head_sha_at_snap: string }
     h.db
-      .prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)')
-      .run(crypto.randomUUID(), repo, tabId, latest.snapshot_sha, latest.head_sha_at_snap, 'noop', Date.now() + 1000)
+      .prepare(
+        'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        crypto.randomUUID(),
+        repo,
+        tabId,
+        latest.snapshot_sha,
+        latest.head_sha_at_snap,
+        'noop',
+        Date.now() + 1000
+      )
 
     expect(await list(repo)).toHaveLength(2)
   })
@@ -110,12 +126,27 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
 
     const rows = h.db
       .prepare('SELECT * FROM agent_turns WHERE worktree_path = ? ORDER BY created_at ASC')
-      .all(repo) as Array<{ id: string; snapshot_sha: string; head_sha_at_snap: string; created_at: number }>
+      .all(repo) as Array<{
+      id: string
+      snapshot_sha: string
+      head_sha_at_snap: string
+      created_at: number
+    }>
     expect(rows.length).toBe(3)
     const between = (rows[0].created_at + rows[1].created_at) / 2 + 0.5
     h.db
-      .prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)')
-      .run(crypto.randomUUID(), repo, tabId, rows[0].snapshot_sha, rows[0].head_sha_at_snap, 'dup', Math.round(between))
+      .prepare(
+        'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        crypto.randomUUID(),
+        repo,
+        tabId,
+        rows[0].snapshot_sha,
+        rows[0].head_sha_at_snap,
+        'dup',
+        Math.round(between)
+      )
 
     const l = await list(repo)
     expect(l).toHaveLength(3)
@@ -180,16 +211,26 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
   test('multi-commit cycles — only turns whose parent == current HEAD survive', async () => {
     const { tabId, repo } = freshTask()
     const file = path.join(repo, 'a.txt')
-    fs.writeFileSync(file, 'c1-1'); await recordTurnBoundary(h.db, tabId, '1')
-    fs.writeFileSync(file, 'c1-2'); await recordTurnBoundary(h.db, tabId, '2')
-    fs.writeFileSync(file, 'c1-3'); await recordTurnBoundary(h.db, tabId, '3')
-    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'cycle-1')
-    fs.writeFileSync(file, 'c2-1'); await recordTurnBoundary(h.db, tabId, '4')
-    fs.writeFileSync(file, 'c2-2'); await recordTurnBoundary(h.db, tabId, '5')
-    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'cycle-2')
-    fs.writeFileSync(file, 'c3-1'); await recordTurnBoundary(h.db, tabId, '6')
-    fs.writeFileSync(file, 'c3-2'); await recordTurnBoundary(h.db, tabId, '7')
-    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'cycle-3')
+    fs.writeFileSync(file, 'c1-1')
+    await recordTurnBoundary(h.db, tabId, '1')
+    fs.writeFileSync(file, 'c1-2')
+    await recordTurnBoundary(h.db, tabId, '2')
+    fs.writeFileSync(file, 'c1-3')
+    await recordTurnBoundary(h.db, tabId, '3')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'cycle-1')
+    fs.writeFileSync(file, 'c2-1')
+    await recordTurnBoundary(h.db, tabId, '4')
+    fs.writeFileSync(file, 'c2-2')
+    await recordTurnBoundary(h.db, tabId, '5')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'cycle-2')
+    fs.writeFileSync(file, 'c3-1')
+    await recordTurnBoundary(h.db, tabId, '6')
+    fs.writeFileSync(file, 'c3-2')
+    await recordTurnBoundary(h.db, tabId, '7')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'cycle-3')
     expect(await list(repo)).toHaveLength(0)
     fs.writeFileSync(file, 'post-c3-edit')
     expect(await list(repo)).toHaveLength(0)
@@ -206,7 +247,8 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
         fs.writeFileSync(fileB, `cycle${cycle}-t${t}-B`)
         await recordTurnBoundary(h.db, tabId, `c${cycle}-t${t}`)
       }
-      git(repo, 'add', '.'); git(repo, 'commit', '-m', `cycle-${cycle}`)
+      git(repo, 'add', '.')
+      git(repo, 'commit', '-m', `cycle-${cycle}`)
     }
     expect(await list(repo)).toHaveLength(0)
     fs.writeFileSync(fileC, 'fresh')
@@ -222,7 +264,8 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
     const file = path.join(repo, 'shared.txt')
     fs.writeFileSync(file, 'v1')
     await recordTurnBoundary(h.db, tabId, 'stale')
-    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'commit-stale')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'commit-stale')
     fs.writeFileSync(file, 'v2')
     await recordTurnBoundary(h.db, tabId, 'fresh')
     const l = await list(repo)
@@ -234,9 +277,13 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'live.txt'), 'live')
     await recordTurnBoundary(h.db, tabId, 'live')
-    const live = h.db.prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1').get(repo) as { snapshot_sha: string }
+    const live = h.db
+      .prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1')
+      .get(repo) as { snapshot_sha: string }
     h.db
-      .prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, NULL, ?, ?)')
+      .prepare(
+        'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, NULL, ?, ?)'
+      )
       .run(crypto.randomUUID(), repo, tabId, live.snapshot_sha, 'legacy', Date.now() + 1000)
     const l = await list(repo)
     expect(l).toHaveLength(1)
@@ -247,10 +294,22 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'live.txt'), 'live')
     await recordTurnBoundary(h.db, tabId, 'live')
-    const live = h.db.prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1').get(repo) as { snapshot_sha: string }
+    const live = h.db
+      .prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1')
+      .get(repo) as { snapshot_sha: string }
     h.db
-      .prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)')
-      .run(crypto.randomUUID(), repo, tabId, live.snapshot_sha, '0000000000000000000000000000000000000000', 'stale', Date.now() + 1000)
+      .prepare(
+        'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        crypto.randomUUID(),
+        repo,
+        tabId,
+        live.snapshot_sha,
+        '0000000000000000000000000000000000000000',
+        'stale',
+        Date.now() + 1000
+      )
     const l = await list(repo)
     expect(l).toHaveLength(1)
     expect(l[0].prompt_preview).toBe('live')
@@ -282,7 +341,8 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
     expect(l).toHaveLength(1)
     expect(l[0].prompt_preview).toBe('agent-turn')
     fs.writeFileSync(path.join(repo, 'unrelated.txt'), 'unrelated change')
-    git(repo, 'add', 'unrelated.txt'); git(repo, 'commit', '-m', 'unrelated commit')
+    git(repo, 'add', 'unrelated.txt')
+    git(repo, 'commit', '-m', 'unrelated commit')
     l = await list(repo)
     expect(l).toHaveLength(1)
     expect(l[0].prompt_preview).toBe('agent-turn')
@@ -293,12 +353,19 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
     const fileA = path.join(repo, 'a.txt')
     const fileB = path.join(repo, 'b.txt')
     const ext = path.join(repo, 'ext.txt')
-    fs.writeFileSync(fileA, 'a-v1'); await recordTurnBoundary(h.db, tabId, 't1')
-    fs.writeFileSync(fileA, 'a-v2'); await recordTurnBoundary(h.db, tabId, 't2')
-    fs.writeFileSync(fileB, 'b-v1'); await recordTurnBoundary(h.db, tabId, 't3')
+    fs.writeFileSync(fileA, 'a-v1')
+    await recordTurnBoundary(h.db, tabId, 't1')
+    fs.writeFileSync(fileA, 'a-v2')
+    await recordTurnBoundary(h.db, tabId, 't2')
+    fs.writeFileSync(fileB, 'b-v1')
+    await recordTurnBoundary(h.db, tabId, 't3')
     expect(await list(repo)).toHaveLength(3)
-    fs.writeFileSync(ext, 'e1'); git(repo, 'add', 'ext.txt'); git(repo, 'commit', '-m', 'ext1')
-    fs.writeFileSync(ext, 'e2'); git(repo, 'add', 'ext.txt'); git(repo, 'commit', '-m', 'ext2')
+    fs.writeFileSync(ext, 'e1')
+    git(repo, 'add', 'ext.txt')
+    git(repo, 'commit', '-m', 'ext1')
+    fs.writeFileSync(ext, 'e2')
+    git(repo, 'add', 'ext.txt')
+    git(repo, 'commit', '-m', 'ext2')
     const l = await list(repo)
     expect(l).toHaveLength(3)
     expect(l.map((t) => t.prompt_preview)).toEqual(['t1', 't2', 't3'])

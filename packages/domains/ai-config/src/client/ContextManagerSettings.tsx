@@ -3,7 +3,10 @@ import { ProjectContextFilesView } from './ProjectContextFilesView'
 import { LegacyContextManager } from './LegacyContextManager'
 import type { ContextManagerSettingsProps } from './ContextManagerSettings.types'
 
-export type { ContextManagerSection, ProjectContextManagerTab } from './ContextManagerSettings.types'
+export type {
+  ContextManagerSection,
+  ProjectContextManagerTab
+} from './ContextManagerSettings.types'
 
 // ---------------------------------------------------------------------------
 // Main component

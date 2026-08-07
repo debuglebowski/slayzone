@@ -132,7 +132,9 @@ test.describe('TreeView actions', () => {
     rootD = (await s.createTask({ projectId, title: 'TA D', status: 'in_progress' })).id
     await mainWindow.evaluate(
       (ids) =>
-        window.getTrpcVanillaClient().task.reorder.mutate({ taskIds: [ids.a, ids.b, ids.c, ids.d] }),
+        window
+          .getTrpcVanillaClient()
+          .task.reorder.mutate({ taskIds: [ids.a, ids.b, ids.c, ids.d] }),
       {
         a: rootA,
         b: rootB,
@@ -361,10 +363,7 @@ test.describe('TreeView actions', () => {
     // controlled update for this discrete event before dispatchEvent returns),
     // then dispatch Enter — onKeyDown now closes over the new value and commits.
     await input.evaluate((el: HTMLInputElement) => {
-      const setter = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        'value'
-      )!.set!
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
       setter.call(el, 'TA B renamed')
       el.dispatchEvent(new Event('input', { bubbles: true }))
       el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))

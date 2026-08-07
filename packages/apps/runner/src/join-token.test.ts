@@ -7,7 +7,11 @@ import type { RunResult, SlayzoneDb } from '@slayzone/platform'
 // close a cycle.
 import { mintJoinToken } from '@slayzone/runners/server'
 import { describe, expect, it } from 'vitest'
-import { decodeJoinToken, JOIN_TOKEN_PREFIX, type JoinTokenPayload } from '@slayzone/platform/join-token'
+import {
+  decodeJoinToken,
+  JOIN_TOKEN_PREFIX,
+  type JoinTokenPayload
+} from '@slayzone/platform/join-token'
 
 /** Mint a token the same way the hub does (szjt1.<base64url(JSON)>). */
 function encode(payload: JoinTokenPayload): string {

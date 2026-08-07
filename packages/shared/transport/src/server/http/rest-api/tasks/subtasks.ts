@@ -1,10 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Express } from 'express'
-import {
-  getDefaultStatus,
-  parseColumnsConfig,
-  resolveStatusId
-} from '@slayzone/projects/shared'
+import { getDefaultStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
@@ -50,7 +46,13 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
   app.get('/api/tasks/:id/subtasks', async (req, res) => {
     try {
       const db = deps.db
-      const parent = await resolveByIdPrefix<{ id: string }>(db, 'tasks', req.params.id, 'Task', 'id')
+      const parent = await resolveByIdPrefix<{ id: string }>(
+        db,
+        'tasks',
+        req.params.id,
+        'Task',
+        'id'
+      )
       if (isResolveFailure(parent)) {
         res.status(parent.status).json({ ok: false, error: parent.error })
         return
@@ -81,8 +83,7 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
       res.status(400).json({ ok: false, error: 'title required' })
       return
     }
-    const priority =
-      body.priority === undefined ? 3 : parseInt(String(body.priority), 10)
+    const priority = body.priority === undefined ? 3 : parseInt(String(body.priority), 10)
     if (isNaN(priority) || priority < 1 || priority > 5) {
       res.status(400).json({ ok: false, error: 'Priority must be 1-5.' })
       return

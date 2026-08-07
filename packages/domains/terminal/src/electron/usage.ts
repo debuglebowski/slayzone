@@ -573,7 +573,9 @@ async function fetchUsage(providers: UsageProviders, force?: boolean): Promise<P
   if (builtinEnabled.get('claude-code') !== false) {
     const claudeToken = await getClaudeToken()
     if (claudeToken) {
-      fetchers.push(fetchProvider(CLAUDE, () => fetchClaudeUsageWithToken(claudeToken), claudeToken))
+      fetchers.push(
+        fetchProvider(CLAUDE, () => fetchClaudeUsageWithToken(claudeToken), claudeToken)
+      )
     } else {
       fetchers.push(
         Promise.resolve(usageError(CLAUDE, `Not logged in — run \`${CLAUDE.cli}\` to authenticate`))

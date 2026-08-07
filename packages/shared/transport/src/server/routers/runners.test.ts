@@ -25,7 +25,9 @@ const caller = runnersRouter.createCaller(ctx)
 const projectId = crypto.randomUUID()
 const taskId = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P', '#000')
-h.db.prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)').run(taskId, projectId, 'T')
+h.db
+  .prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)')
+  .run(taskId, projectId, 'T')
 
 // Fake runner gateway registry — one connected runner + a bound hub URL + cert.
 // `usableRunnerIds` defaults to mirroring `liveRunnerIds`: the common case is a
@@ -33,7 +35,9 @@ h.db.prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)').run(t
 // DIVERGE (silent-but-open runner) sets it explicitly.
 let liveRunnerIds: string[] = []
 let usableRunnerIds: string[] | null = null
-const asDescriptors = (ids: string[]): Array<{
+const asDescriptors = (
+  ids: string[]
+): Array<{
   runnerId: string
   connectedAt: number
   lastSeenAt: number

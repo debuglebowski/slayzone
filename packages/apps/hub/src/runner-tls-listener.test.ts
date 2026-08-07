@@ -30,7 +30,10 @@ import { join } from 'node:path'
 import type { TLSSocket } from 'node:tls'
 import type { AddressInfo } from 'node:net'
 import WebSocket, { WebSocketServer } from 'ws'
-import { certMatchesFingerprint, certSha256FingerprintFromDer } from '@slayzone/runner-transport/shared'
+import {
+  certMatchesFingerprint,
+  certSha256FingerprintFromDer
+} from '@slayzone/runner-transport/shared'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import { deriveRunnerHubUrl } from './runner-listener.js'
 
@@ -96,7 +99,9 @@ function dialAndCaptureLeaf(url: string): Promise<{ der: Uint8Array | null; open
   return new Promise((resolve) => {
     let der: Uint8Array | null = null
     let opened = false
-    const ws = new WebSocket(url, { rejectUnauthorized: false } as unknown as WebSocket.ClientOptions)
+    const ws = new WebSocket(url, {
+      rejectUnauthorized: false
+    } as unknown as WebSocket.ClientOptions)
     ws.on('upgrade', (res) => {
       const cert = (res.socket as TLSSocket).getPeerCertificate()
       der = cert && cert.raw ? cert.raw : null
@@ -177,43 +182,76 @@ async function main(): Promise<void> {
 
   await test('deriveRunnerHubUrl: remote → wss:// from the public ADDRESS (authority only)', async () => {
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'hub.example:8443' }) ===
-        'wss://hub.example:8443/runners',
+      deriveRunnerHubUrl({
+        remote: true,
+        host: '0.0.0.0',
+        port: 51101,
+        publicAddress: 'hub.example:8443'
+      }) === 'wss://hub.example:8443/runners',
       'explicit port preserved'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'hub.example' }) ===
-        'wss://hub.example/runners',
+      deriveRunnerHubUrl({
+        remote: true,
+        host: '0.0.0.0',
+        port: 51101,
+        publicAddress: 'hub.example'
+      }) === 'wss://hub.example/runners',
       'bare host keeps the implicit TLS port (443)'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '[2001:db8::1]:9000' }) ===
-        'wss://[2001:db8::1]:9000/runners',
+      deriveRunnerHubUrl({
+        remote: true,
+        host: '0.0.0.0',
+        port: 51101,
+        publicAddress: '[2001:db8::1]:9000'
+      }) === 'wss://[2001:db8::1]:9000/runners',
       'bracketed IPv6 authority'
     )
   })
 
   await test('deriveRunnerHubUrl: remote with missing/non-authority public address → null', async () => {
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: undefined }) === null,
+      deriveRunnerHubUrl({
+        remote: true,
+        host: '0.0.0.0',
+        port: 51101,
+        publicAddress: undefined
+      }) === null,
       'unset public address → null'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '   ' }) === null,
+      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '   ' }) ===
+        null,
       'blank public address → null'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'not an address' }) === null,
+      deriveRunnerHubUrl({
+        remote: true,
+        host: '0.0.0.0',
+        port: 51101,
+        publicAddress: 'not an address'
+      }) === null,
       'malformed public address → null'
     )
     // The whole point of the authority-only channel: a scheme is NOT accepted, so
     // no reader can ever disagree with the one derived from SLAYZONE_MODE.
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'https://hub.example' }) === null,
+      deriveRunnerHubUrl({
+        remote: true,
+        host: '0.0.0.0',
+        port: 51101,
+        publicAddress: 'https://hub.example'
+      }) === null,
       'a full url (scheme present) → null'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: 'hub.example/runners' }) === null,
+      deriveRunnerHubUrl({
+        remote: true,
+        host: '0.0.0.0',
+        port: 51101,
+        publicAddress: 'hub.example/runners'
+      }) === null,
       'a path → null'
     )
   })

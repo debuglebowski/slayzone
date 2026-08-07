@@ -52,10 +52,9 @@ export function PanelsSettingsTab({
 
       {panelDetailId && panelDetailId.startsWith('web:') && <WebPanelSettings state={s} />}
 
-      {panelDetailId &&
-        ['artifacts', 'settings', 'processes'].includes(panelDetailId) && (
-          <GenericPanelSettings state={s} />
-        )}
+      {panelDetailId && ['artifacts', 'settings', 'processes'].includes(panelDetailId) && (
+        <GenericPanelSettings state={s} />
+      )}
     </div>
   )
 }

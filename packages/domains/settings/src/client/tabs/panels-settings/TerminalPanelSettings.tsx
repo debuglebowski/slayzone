@@ -113,8 +113,8 @@ export function TerminalPanelSettings({
               }}
             />
             <span className="text-xs text-muted-foreground">
-              Keep one ready agent shell per project with open tabs, so the first agent
-              you open in it starts instantly (default provider, project root only).
+              Keep one ready agent shell per project with open tabs, so the first agent you open in
+              it starts instantly (default provider, project root only).
             </span>
           </div>
         </div>
@@ -129,8 +129,8 @@ export function TerminalPanelSettings({
               }}
             />
             <span className="text-xs text-muted-foreground">
-              Close the agent after it sits idle to free memory; reopen from the Start
-              screen (the conversation resumes). Other terminals are never closed.
+              Close the agent after it sits idle to free memory; reopen from the Start screen (the
+              conversation resumes). Other terminals are never closed.
             </span>
           </div>
         </div>
@@ -208,7 +208,11 @@ export function TerminalPanelSettings({
         </div>
       </div>
       <div className={CARD_CLASS}>
-        <PanelLayoutControls orderId="terminal" panelConfig={panelConfig} onSave={savePanelConfig} />
+        <PanelLayoutControls
+          orderId="terminal"
+          panelConfig={panelConfig}
+          onSave={savePanelConfig}
+        />
       </div>
     </>
   )

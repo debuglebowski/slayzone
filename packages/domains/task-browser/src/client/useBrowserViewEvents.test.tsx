@@ -13,8 +13,7 @@ vi.mock('@slayzone/transport/client', () => ({
     app: {
       browser: {
         onEvent: {
-          subscriptionOptions: (_input: unknown, opts: { enabled: boolean; onData: OnData }) =>
-            opts
+          subscriptionOptions: (_input: unknown, opts: { enabled: boolean; onData: OnData }) => opts
         }
       }
     }

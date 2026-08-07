@@ -31,7 +31,8 @@ export function createNoopNativeHost(): NativeSurfaceHost {
         `${Math.round(s.rect.w)}x${Math.round(s.rect.h)}@(${Math.round(s.rect.x)},${Math.round(s.rect.y)})`,
         `dpr=${s.devicePixelRatio}`
       ),
-    setVisible: (tileId, visible) => console.debug('[NativeSurfaceHost] setVisible', tileId, visible),
+    setVisible: (tileId, visible) =>
+      console.debug('[NativeSurfaceHost] setVisible', tileId, visible),
     remove: (tileId) => console.debug('[NativeSurfaceHost] remove', tileId)
   }
 }

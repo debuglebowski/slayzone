@@ -22,7 +22,8 @@ function test(name: string, fn: () => void): void {
   }
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 /** Run `fn` with SLAYZONE_ROOT + SLAYZONE_RELEASE_CHANNEL scrubbed/restored. */
@@ -65,19 +66,31 @@ test("channel='beta' folds onto the stable bucket — no separate beta bucket", 
 test("channel='stable' → the stable bucket", () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
     assertEq(getSupervisedRoot('hub', 'stable'), join('/tmp/root', 'stable', 'hub'), 'stable hub')
-    assertEq(getSupervisedRoot('runner', 'stable'), join('/tmp/root', 'stable', 'runner'), 'stable runner')
+    assertEq(
+      getSupervisedRoot('runner', 'stable'),
+      join('/tmp/root', 'stable', 'runner'),
+      'stable runner'
+    )
   })
 })
 
 test("channel='unknown' (release channel never set) folds onto stable — no empty/default bucket", () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-    assertEq(getSupervisedRoot('hub', 'unknown'), join('/tmp/root', 'stable', 'hub'), 'unknown → stable')
+    assertEq(
+      getSupervisedRoot('hub', 'unknown'),
+      join('/tmp/root', 'stable', 'hub'),
+      'unknown → stable'
+    )
   })
 })
 
 test('any other unrecognized channel value also folds onto stable (fail safe, not fail open to a new bucket)', () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-    assertEq(getSupervisedRoot('hub', 'nightly'), join('/tmp/root', 'stable', 'hub'), 'typo channel → stable')
+    assertEq(
+      getSupervisedRoot('hub', 'nightly'),
+      join('/tmp/root', 'stable', 'hub'),
+      'typo channel → stable'
+    )
   })
 })
 
@@ -89,7 +102,11 @@ test('no channel arg ⇒ reads SLAYZONE_RELEASE_CHANNEL from env', () => {
     assertEq(getSupervisedRoot('hub'), join('/tmp/root', 'dev', 'hub'), 'env dev bucket picked up')
   })
   withEnv({ SLAYZONE_ROOT: '/tmp/root', SLAYZONE_RELEASE_CHANNEL: 'stable' }, () => {
-    assertEq(getSupervisedRoot('hub'), join('/tmp/root', 'stable', 'hub'), 'env stable bucket picked up')
+    assertEq(
+      getSupervisedRoot('hub'),
+      join('/tmp/root', 'stable', 'hub'),
+      'env stable bucket picked up'
+    )
   })
 })
 
@@ -105,7 +122,11 @@ console.log('─'.repeat(40))
 test('resolves under an overridden SLAYZONE_ROOT (E2E/test sandboxing)', () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/sandbox-root' }, () => {
     assertEq(getSlayzoneHomeDir(), '/tmp/sandbox-root', 'home dir under override')
-    assertEq(getSupervisedRoot('hub', 'dev'), join('/tmp/sandbox-root', 'dev', 'hub'), 'supervised root under override')
+    assertEq(
+      getSupervisedRoot('hub', 'dev'),
+      join('/tmp/sandbox-root', 'dev', 'hub'),
+      'supervised root under override'
+    )
   })
 })
 

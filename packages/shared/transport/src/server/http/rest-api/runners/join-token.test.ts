@@ -142,9 +142,9 @@ await describe('POST /api/runners/join-token', () => {
  */
 await describe('joinTokenAuthDecision', () => {
   test('loopback peer: always mint (gate off or on)', () => {
-    expect(
-      joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false })
-    ).toBe('mint')
+    expect(joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false })).toBe(
+      'mint'
+    )
     expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
       'mint'
     )
@@ -154,9 +154,9 @@ await describe('joinTokenAuthDecision', () => {
     // A local-mode hub has no sessions to verify, so a bearer would be
     // unverifiable — accepting one would be security theater. Being on the box
     // stays the only authority here.
-    expect(
-      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false })
-    ).toBe('forbid')
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
+      'forbid'
+    )
     expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: true })).toBe(
       'forbid'
     )
@@ -168,9 +168,9 @@ await describe('joinTokenAuthDecision', () => {
     )
     // 401, not 403: the caller has a credential problem (fixable by signing in),
     // not a policy one (fixable only by moving to the hub's machine).
-    expect(
-      joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: false })
-    ).toBe('unauthorized')
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: false })).toBe(
+      'unauthorized'
+    )
   })
 })
 

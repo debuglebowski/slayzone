@@ -114,7 +114,8 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 /** Newest mtime under a dir tree (stale-build detection). */
@@ -188,7 +189,8 @@ async function startHub(name: string): Promise<Hub> {
   // block-walk's choice is visible from out here.
   const port = await new Promise<number>((resolve, reject) => {
     const deadline = setTimeout(
-      () => reject(new Error(`hub "${name}" printed no listening line in 40s:\n${logs.join('\n')}`)),
+      () =>
+        reject(new Error(`hub "${name}" printed no listening line in 40s:\n${logs.join('\n')}`)),
       40_000
     )
     const poll = setInterval(() => {
@@ -304,7 +306,11 @@ function postJson(
   port: number,
   path: string,
   body: unknown
-): Promise<{ status: number; body: string; headers: Record<string, string | string[] | undefined> }> {
+): Promise<{
+  status: number
+  body: string
+  headers: Record<string, string | string[] | undefined>
+}> {
   const payload = JSON.stringify(body)
   return new Promise((resolve, reject) => {
     const req = httpRequest(
@@ -724,10 +730,7 @@ async function main(): Promise<void> {
       mkdirSync(otherRoot, { recursive: true })
       const res = slay(['hub', 'create', basename(a.root), '--root', otherRoot], { root: rootA })
       assert(res.status !== 0, 'refused a duplicate name')
-      assert(
-        /already (exists|running)/i.test(res.stderr),
-        `explained the clash: ${res.stderr}`
-      )
+      assert(/already (exists|running)/i.test(res.stderr), `explained the clash: ${res.stderr}`)
     })
 
     await test('create requires a name — no silent dirname default', async () => {
@@ -842,7 +845,10 @@ async function main(): Promise<void> {
         assert(res.status !== 0, `refused ${bad}`)
         assert(/host\[:port\]/.test(res.stderr), `explains the grammar: ${res.stderr}`)
         // Failing fast means nothing was written — no half-configured hub root.
-        assert(!existsSync(join(badRoot, 'hub.config.json')), `no hub.config.json written for ${bad}`)
+        assert(
+          !existsSync(join(badRoot, 'hub.config.json')),
+          `no hub.config.json written for ${bad}`
+        )
       }
     })
 
@@ -952,10 +958,7 @@ async function main(): Promise<void> {
       const combined = res.stdout + res.stderr
       assert(/did not come up/i.test(combined), `said it did not start: ${combined}`)
       // The crux: the crash output is surfaced inline.
-      assert(
-        /simulated hub crash/.test(combined),
-        `surfaced the child's own error: ${combined}`
-      )
+      assert(/simulated hub crash/.test(combined), `surfaced the child's own error: ${combined}`)
     })
 
     await test('rm on a name that is neither running nor registered says so', async () => {
@@ -972,10 +975,7 @@ async function main(): Promise<void> {
       // that must never be a test side effect.
       const res = slay(['hub', 'registered'], { root: rootA })
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
-      assert(
-        !res.stdout.includes(NAME_PREFIX),
-        `no unit for any test hub: ${res.stdout}`
-      )
+      assert(!res.stdout.includes(NAME_PREFIX), `no unit for any test hub: ${res.stdout}`)
     })
 
     await test('every store stayed inside the sandbox', async () => {

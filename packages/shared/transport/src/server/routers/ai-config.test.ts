@@ -81,7 +81,9 @@ const skillDoc = (slug: string, body: string): string => {
 const readSkillMetadata = (
   itemId: string
 ): { skillValidation?: { status?: string; issues?: Array<{ code?: string }> } } => {
-  const row = h.db.prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?').get(itemId) as {
+  const row = h.db
+    .prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?')
+    .get(itemId) as {
     metadata_json: string
   }
   return JSON.parse(row.metadata_json)
@@ -198,7 +200,9 @@ await describe('listItems', () => {
   })
 
   test('filters by scope + type', async () => {
-    const items = (await caller.listItems({ scope: 'library', type: 'skill' })) as { type: string }[]
+    const items = (await caller.listItems({ scope: 'library', type: 'skill' })) as {
+      type: string
+    }[]
     for (const item of items) expect(item.type).toBe('skill')
     expect(items.length).toBeGreaterThan(0)
   })
@@ -611,7 +615,9 @@ await describe('listItems: runtime skill-validation derivation', () => {
     const staleMeta = JSON.parse(item.metadata_json) as Record<string, unknown>
     staleMeta.skillValidation = {
       status: 'invalid',
-      issues: [{ code: 'frontmatter_invalid_line', severity: 'error', message: 'stale issue', line: 4 }]
+      issues: [
+        { code: 'frontmatter_invalid_line', severity: 'error', message: 'stale issue', line: 4 }
+      ]
     }
     const staleMetadataJson = JSON.stringify(staleMeta)
     h.db
@@ -654,7 +660,9 @@ await describe('listItems: runtime skill-validation derivation', () => {
     }
     staleMeta.skillValidation = {
       status: 'invalid',
-      issues: [{ code: 'frontmatter_invalid_line', severity: 'error', message: 'stale issue', line: 4 }]
+      issues: [
+        { code: 'frontmatter_invalid_line', severity: 'error', message: 'stale issue', line: 4 }
+      ]
     }
     h.db
       .prepare('UPDATE ai_config_items SET content = ?, metadata_json = ? WHERE id = ?')
@@ -673,7 +681,9 @@ await describe('listItems: runtime skill-validation derivation', () => {
     expect(repaired).toBeTruthy()
     expect(repaired!.content.includes('---\nname: stale-invalid-repair')).toBe(true)
     expect(repaired!.content.includes('# body')).toBe(true)
-    const metadata = JSON.parse(repaired!.metadata_json) as { skillValidation?: { status?: string } }
+    const metadata = JSON.parse(repaired!.metadata_json) as {
+      skillValidation?: { status?: string }
+    }
     expect(metadata.skillValidation?.status).toBe('valid')
   })
 
@@ -693,7 +703,11 @@ await describe('listItems: runtime skill-validation derivation', () => {
     staleMeta.skillValidation = { status: 'valid', issues: [] }
     h.db
       .prepare('UPDATE ai_config_items SET content = ?, metadata_json = ? WHERE id = ?')
-      .run('---\nname: stale-valid-repair\ntags: [one, two\n---\n# body', JSON.stringify(staleMeta), item.id)
+      .run(
+        '---\nname: stale-valid-repair\ntags: [one, two\n---\n# body',
+        JSON.stringify(staleMeta),
+        item.id
+      )
 
     const listed = (await caller.listItems({ scope: 'library', type: 'skill' })) as Array<{
       id: string
@@ -705,9 +719,9 @@ await describe('listItems: runtime skill-validation derivation', () => {
       skillValidation?: { status?: string; issues?: Array<{ code?: string }> }
     }
     expect(metadata.skillValidation?.status).toBe('invalid')
-    expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')).toBe(
-      true
-    )
+    expect(
+      metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')
+    ).toBe(true)
   })
 
   test('drops legacy canonical metadata and marks body-only legacy content invalid at runtime', async () => {
@@ -739,13 +753,17 @@ await describe('listItems: runtime skill-validation derivation', () => {
     }>
     const repaired = listed.find((row) => row.id === item.id)
     expect(repaired).toBeTruthy()
-    expect(repaired!.content).toBe('Create a new release for SlayZone.\nThe version argument is: patch\n')
+    expect(repaired!.content).toBe(
+      'Create a new release for SlayZone.\nThe version argument is: patch\n'
+    )
 
     const metadata = JSON.parse(repaired!.metadata_json) as {
       skillValidation?: { status?: string; issues?: Array<{ code?: string }> }
     }
     expect(metadata.skillValidation?.status).toBe('invalid')
-    expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')).toBe(true)
+    expect(
+      metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')
+    ).toBe(true)
   })
 
   test('marks new body-only skills invalid when no canonical frontmatter exists', async () => {
@@ -760,7 +778,9 @@ await describe('listItems: runtime skill-validation derivation', () => {
       skillValidation?: { status?: string; issues?: Array<{ code?: string }> }
     }
     expect(metadata.skillValidation?.status).toBe('invalid')
-    expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')).toBe(true)
+    expect(
+      metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')
+    ).toBe(true)
   })
 })
 
@@ -805,12 +825,16 @@ await describe('updateItem: skill validation', () => {
       content: 'You are evaluating a competitor for the SlayZone comparison table.\n'
     })) as { content: string; metadata_json: string }
 
-    expect(updated.content).toBe('You are evaluating a competitor for the SlayZone comparison table.\n')
+    expect(updated.content).toBe(
+      'You are evaluating a competitor for the SlayZone comparison table.\n'
+    )
     const metadata = JSON.parse(updated.metadata_json) as {
       skillValidation?: { status?: string; issues?: Array<{ code?: string }> }
     }
     expect(metadata.skillValidation?.status).toBe('invalid')
-    expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')).toBe(true)
+    expect(
+      metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')
+    ).toBe(true)
   })
 
   test('treats new and previously explicit body-only content the same', async () => {
@@ -836,12 +860,12 @@ await describe('updateItem: skill validation', () => {
     const updatedMeta = readSkillMetadata(previouslyExplicit.id)
     expect(createdMeta.skillValidation?.status).toBe('invalid')
     expect(updatedMeta.skillValidation?.status).toBe('invalid')
-    expect(createdMeta.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')).toBe(
-      true
-    )
-    expect(updatedMeta.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')).toBe(
-      true
-    )
+    expect(
+      createdMeta.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')
+    ).toBe(true)
+    expect(
+      updatedMeta.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')
+    ).toBe(true)
   })
 })
 
@@ -866,9 +890,9 @@ await describe('loadLibraryItem', () => {
     })) as { relativePath: string; syncHealth: string }
     expect(result.relativePath).toBe('.claude/skills/manual/deploy.md')
     expect(result.syncHealth).toBe('synced')
-    expect(fs.readFileSync(path.join(root, '.claude/skills/manual/deploy.md'), 'utf-8').trim()).toBe(
-      '# Deploy skill'
-    )
+    expect(
+      fs.readFileSync(path.join(root, '.claude/skills/manual/deploy.md'), 'utf-8').trim()
+    ).toBe('# Deploy skill')
   })
 
   test('writes skill to codex provider path', async () => {
@@ -885,7 +909,10 @@ await describe('loadLibraryItem', () => {
       itemId: item.id,
       providers: ['codex']
     })
-    const codexContent = fs.readFileSync(path.join(root, '.agents/skills/codex-skill/SKILL.md'), 'utf-8')
+    const codexContent = fs.readFileSync(
+      path.join(root, '.agents/skills/codex-skill/SKILL.md'),
+      'utf-8'
+    )
     expect(codexContent.includes('name: codex-skill')).toBe(true)
     expect(codexContent.includes('# Codex skill')).toBe(true)
   })
@@ -911,13 +938,22 @@ await describe('loadLibraryItem', () => {
     expect(result.provider).toBe('codex')
     expect(result.syncHealth).toBe('synced')
     expect(
-      fs.readFileSync(path.join(fixture.projectPath, '.claude/skills/manual/manual-codex.md'), 'utf-8').trim()
+      fs
+        .readFileSync(
+          path.join(fixture.projectPath, '.claude/skills/manual/manual-codex.md'),
+          'utf-8'
+        )
+        .trim()
     ).toBe('# Manual codex skill')
-    const selections = (await caller.listProjectSelections({ projectId: fixture.projectId })) as Array<{
+    const selections = (await caller.listProjectSelections({
+      projectId: fixture.projectId
+    })) as Array<{
       provider: string
       target_path: string
     }>
-    const found = selections.find((entry) => entry.target_path === '.claude/skills/manual/manual-codex.md')
+    const found = selections.find(
+      (entry) => entry.target_path === '.claude/skills/manual/manual-codex.md'
+    )
     expect(found).toBeTruthy()
     expect(found!.provider).toBe('codex')
   })
@@ -934,9 +970,9 @@ await describe('loadLibraryItem', () => {
       skillValidation?: { status?: string; issues?: Array<{ code?: string }> }
     }
     expect(metadata.skillValidation?.status).toBe('invalid')
-    expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')).toBe(
-      true
-    )
+    expect(
+      metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')
+    ).toBe(true)
 
     expect(
       await didThrow(() =>
@@ -993,9 +1029,9 @@ await describe('loadLibraryItem', () => {
       skillValidation?: { status?: string; issues?: Array<{ code?: string }> }
     }
     expect(metadata.skillValidation?.status).toBe('invalid')
-    expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')).toBe(
-      true
-    )
+    expect(
+      metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')
+    ).toBe(true)
 
     expect(
       await didThrow(() =>
@@ -1019,7 +1055,9 @@ await describe('loadLibraryItem', () => {
 
     const metadata = JSON.parse(item.metadata_json) as Record<string, unknown>
     metadata.skillValidation = { status: 'invalid', issues: [] }
-    h.db.prepare('UPDATE ai_config_items SET metadata_json = ? WHERE id = ?').run(JSON.stringify(metadata), item.id)
+    h.db
+      .prepare('UPDATE ai_config_items SET metadata_json = ? WHERE id = ?')
+      .run(JSON.stringify(metadata), item.id)
 
     const result = (await caller.loadLibraryItem({
       projectId: ctxProjectId,
@@ -1041,9 +1079,13 @@ await describe('loadLibraryItem', () => {
     const metadata = JSON.parse(item.metadata_json) as Record<string, unknown>
     metadata.skillValidation = {
       status: 'valid',
-      issues: [{ code: 'frontmatter_invalid_line', severity: 'error', message: 'stale issue', line: 2 }]
+      issues: [
+        { code: 'frontmatter_invalid_line', severity: 'error', message: 'stale issue', line: 2 }
+      ]
     }
-    h.db.prepare('UPDATE ai_config_items SET metadata_json = ? WHERE id = ?').run(JSON.stringify(metadata), item.id)
+    h.db
+      .prepare('UPDATE ai_config_items SET metadata_json = ? WHERE id = ?')
+      .run(JSON.stringify(metadata), item.id)
 
     const result = (await caller.loadLibraryItem({
       projectId: ctxProjectId,
@@ -1064,7 +1106,9 @@ await describe('loadLibraryItem', () => {
 
     const metadata = JSON.parse(item.metadata_json) as Record<string, unknown>
     metadata.skillValidation = { status: 'valid', issues: [] }
-    h.db.prepare('UPDATE ai_config_items SET metadata_json = ? WHERE id = ?').run(JSON.stringify(metadata), item.id)
+    h.db
+      .prepare('UPDATE ai_config_items SET metadata_json = ? WHERE id = ?')
+      .run(JSON.stringify(metadata), item.id)
 
     expect(
       await didThrow(() =>
@@ -1110,7 +1154,10 @@ await describe('syncLinkedFile', () => {
 
   test('syncs all provider links for an item', async () => {
     const fixture = createProjectFixture('sync-linked-all-providers')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
     const item = (await caller.createItem({
       type: 'skill',
       scope: 'library',
@@ -1146,7 +1193,10 @@ await describe('syncLinkedFile', () => {
 
   test('non-claude providers keep frontmatter in synced SKILL.md files', async () => {
     const fixture = createProjectFixture('sync-codex-frontmatter')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
     const item = (await caller.createItem({
       type: 'skill',
       scope: 'library',
@@ -1170,7 +1220,10 @@ await describe('syncLinkedFile', () => {
 
   test('syncs project-local items without provider selections', async () => {
     const fixture = createProjectFixture('sync-linked-local-item')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
     const item = (await caller.createItem({
       type: 'skill',
       scope: 'project',
@@ -1222,10 +1275,15 @@ await describe('syncLinkedFile', () => {
       itemId: item.id
     })) as { relativePath: string }
 
-    const canonicalPath = path.join(fixture.projectPath, '.claude/skills/legacy-selection-skill/SKILL.md')
+    const canonicalPath = path.join(
+      fixture.projectPath,
+      '.claude/skills/legacy-selection-skill/SKILL.md'
+    )
     expect(result.relativePath).toBe('.claude/skills/legacy-selection-skill/SKILL.md')
     expect(fs.existsSync(legacyPath)).toBe(false)
-    expect(fs.readFileSync(canonicalPath, 'utf-8').includes('name: legacy-selection-skill')).toBe(true)
+    expect(fs.readFileSync(canonicalPath, 'utf-8').includes('name: legacy-selection-skill')).toBe(
+      true
+    )
     expect(fs.readFileSync(canonicalPath, 'utf-8').includes('# from library')).toBe(true)
   })
 
@@ -1390,7 +1448,10 @@ await describe('getRootInstructions', () => {
   // that predates the variant-based instructions model. With no linked variant it
   // returns '' + not_linked; we exercise the real contract by linking a variant.
   test('returns empty + not_linked when no library variant is linked', async () => {
-    const result = (await caller.getRootInstructions({ projectId: ctxProjectId, projectPath: root })) as {
+    const result = (await caller.getRootInstructions({
+      projectId: ctxProjectId,
+      projectPath: root
+    })) as {
       content: string
       providerHealth: Record<string, { health: string; reason: string | null }>
     }
@@ -1403,7 +1464,10 @@ await describe('getRootInstructions', () => {
     const variantProject = createProjectFixture('root-instructions-variant')
     await caller.setProjectProviders({ projectId: variantProject.projectId, providers: ['claude'] })
     await caller.saveLibraryInstructions({ content: '# Linked variant rules' })
-    const variants = (await caller.listInstructionVariants()) as Array<{ id: string; content: string }>
+    const variants = (await caller.listInstructionVariants()) as Array<{
+      id: string
+      content: string
+    }>
     const variant = variants.find((v) => v.content === '# Linked variant rules')!
     await caller.setProjectInstructionVariant({
       projectId: variantProject.projectId,
@@ -1438,7 +1502,10 @@ await describe('needsSync', () => {
 
   test('ignores out-of-sync files for disabled providers', async () => {
     const fixture = createProjectFixture('needs-sync-disabled-provider')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
     const item = (await caller.createItem({
       type: 'skill',
       scope: 'library',
@@ -1453,7 +1520,10 @@ await describe('needsSync', () => {
       providers: ['codex']
     })
 
-    const codexPath = path.join(fixture.projectPath, '.agents/skills/disabled-provider-skill/SKILL.md')
+    const codexPath = path.join(
+      fixture.projectPath,
+      '.agents/skills/disabled-provider-skill/SKILL.md'
+    )
     fs.writeFileSync(codexPath, '# modified externally')
 
     await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude'] })
@@ -1463,7 +1533,10 @@ await describe('needsSync', () => {
     })
     expect(whileDisabled).toBe(false)
 
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
     const afterReEnable = await caller.needsSync({
       projectId: fixture.projectId,
       projectPath: fixture.projectPath
@@ -1474,7 +1547,10 @@ await describe('needsSync', () => {
 
 await describe('checkSyncStatus', () => {
   test('detects external edits as conflicts', async () => {
-    const conflicts = (await caller.checkSyncStatus({ projectId: ctxProjectId, projectPath: root })) as {
+    const conflicts = (await caller.checkSyncStatus({
+      projectId: ctxProjectId,
+      projectPath: root
+    })) as {
       path: string
       reason: string
     }[]
@@ -1551,7 +1627,11 @@ await describe('writeMcpServer', () => {
 
 await describe('removeMcpServer', () => {
   test('removes server from config', async () => {
-    await caller.removeMcpServer({ projectPath: root, provider: 'claude', serverKey: 'test-server' })
+    await caller.removeMcpServer({
+      projectPath: root,
+      provider: 'claude',
+      serverKey: 'test-server'
+    })
     const data = JSON.parse(fs.readFileSync(path.join(root, '.mcp.json'), 'utf-8'))
     expect(data.mcpServers['test-server'] ?? null).toBeNull()
     expect(data.mcpServers['my-server']).toBeTruthy()
@@ -1560,7 +1640,11 @@ await describe('removeMcpServer', () => {
 
 await describe('getProjectSkillsStatus (context suite)', () => {
   test('returns status for loaded skills', async () => {
-    await caller.saveRootInstructions({ projectId: ctxProjectId, projectPath: root, content: '# Project rules' })
+    await caller.saveRootInstructions({
+      projectId: ctxProjectId,
+      projectPath: root,
+      content: '# Project rules'
+    })
     const skill = (await caller.createItem({
       type: 'skill',
       scope: 'library',
@@ -1575,7 +1659,10 @@ await describe('getProjectSkillsStatus (context suite)', () => {
       manualPath: '.claude/skills/manual/status-skill.md'
     })
 
-    const results = (await caller.getProjectSkillsStatus({ projectId: ctxProjectId, projectPath: root })) as {
+    const results = (await caller.getProjectSkillsStatus({
+      projectId: ctxProjectId,
+      projectPath: root
+    })) as {
       item: { id: string; slug: string }
       providers: Record<string, { path: string; syncHealth: string; syncReason: string | null }>
     }[]
@@ -1589,7 +1676,10 @@ await describe('getProjectSkillsStatus (context suite)', () => {
 
   test('detects out-of-sync skill', async () => {
     fs.writeFileSync(path.join(root, '.claude/skills/manual/status-skill.md'), '# CHANGED')
-    const results = (await caller.getProjectSkillsStatus({ projectId: ctxProjectId, projectPath: root })) as {
+    const results = (await caller.getProjectSkillsStatus({
+      projectId: ctxProjectId,
+      projectPath: root
+    })) as {
       item: { slug: string }
       providers: Record<string, { syncHealth: string; syncReason: string | null }>
     }[]
@@ -1601,7 +1691,10 @@ await describe('getProjectSkillsStatus (context suite)', () => {
 
   test('marks all linked providers stale after skill body edit', async () => {
     const fixture = createProjectFixture('skills-status-body-edit')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
 
     const item = (await caller.createItem({
       type: 'skill',
@@ -1634,7 +1727,10 @@ await describe('getProjectSkillsStatus (context suite)', () => {
 
   test('frontmatter-only metadata changes mark all providers stale', async () => {
     const fixture = createProjectFixture('skills-status-frontmatter-edit')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
 
     const item = (await caller.createItem({
       type: 'skill',
@@ -1650,7 +1746,10 @@ await describe('getProjectSkillsStatus (context suite)', () => {
       providers: ['claude', 'codex']
     })
 
-    await caller.updateItem({ id: item.id, content: '---\nfoo: bar\n---\n\n# Shared body\n\nSame body\n' })
+    await caller.updateItem({
+      id: item.id,
+      content: '---\nfoo: bar\n---\n\n# Shared body\n\nSame body\n'
+    })
 
     const results = (await caller.getProjectSkillsStatus({
       projectId: fixture.projectId,
@@ -1667,7 +1766,10 @@ await describe('getProjectSkillsStatus (context suite)', () => {
 
   test('marks historically valid skills invalid when current edited content drops frontmatter', async () => {
     const fixture = createProjectFixture('skills-status-missing-frontmatter-after-valid')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
 
     const item = (await caller.createItem({
       type: 'skill',
@@ -1687,7 +1789,9 @@ await describe('getProjectSkillsStatus (context suite)', () => {
 
     const metadata = readSkillMetadata(item.id)
     expect(metadata.skillValidation?.status).toBe('invalid')
-    expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')).toBe(true)
+    expect(
+      metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_missing')
+    ).toBe(true)
 
     const results = (await caller.getProjectSkillsStatus({
       projectId: fixture.projectId,
@@ -1733,7 +1837,10 @@ await describe('syncAll', () => {
 
   test('rejects sync-all when a previously valid linked skill is updated with body-only content', async () => {
     const fixture = createProjectFixture('sync-all-missing-frontmatter-after-valid')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
 
     const item = (await caller.createItem({
       type: 'skill',
@@ -1760,7 +1867,10 @@ await describe('syncAll', () => {
 
   test('includes project-local items in sync output and disk writes', async () => {
     const fixture = createProjectFixture('sync-all-local-items')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'cursor'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'cursor']
+    })
 
     await caller.createItem({
       type: 'skill',
@@ -1780,7 +1890,10 @@ await describe('syncAll', () => {
 
     expect(
       fs
-        .readFileSync(path.join(fixture.projectPath, '.claude/skills/local-project-skill/SKILL.md'), 'utf-8')
+        .readFileSync(
+          path.join(fixture.projectPath, '.claude/skills/local-project-skill/SKILL.md'),
+          'utf-8'
+        )
         .includes('# local project skill')
     ).toBe(true)
     const cursorContent = fs.readFileSync(
@@ -1793,19 +1906,26 @@ await describe('syncAll', () => {
 
     expect(
       result.written.some(
-        (entry) => entry.provider === 'claude' && entry.path === '.claude/skills/local-project-skill/SKILL.md'
+        (entry) =>
+          entry.provider === 'claude' &&
+          entry.path === '.claude/skills/local-project-skill/SKILL.md'
       )
     ).toBe(true)
     expect(
       result.written.some(
-        (entry) => entry.provider === 'cursor' && entry.path === '.cursor/skills/local-project-skill/SKILL.md'
+        (entry) =>
+          entry.provider === 'cursor' &&
+          entry.path === '.cursor/skills/local-project-skill/SKILL.md'
       )
     ).toBe(true)
   })
 
   test('does not recreate removed per-item provider links', async () => {
     const fixture = createProjectFixture('sync-all-keeps-provider-unlink')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
 
     const item = (await caller.createItem({
       type: 'skill',
@@ -1826,9 +1946,15 @@ await describe('syncAll', () => {
       itemId: item.id,
       provider: 'codex'
     })
-    await caller.updateItem({ id: item.id, content: skillDoc('sync-all-provider-unlink', '# updated') })
+    await caller.updateItem({
+      id: item.id,
+      content: skillDoc('sync-all-provider-unlink', '# updated')
+    })
 
-    const codexPath = path.join(fixture.projectPath, '.agents/skills/sync-all-provider-unlink/SKILL.md')
+    const codexPath = path.join(
+      fixture.projectPath,
+      '.agents/skills/sync-all-provider-unlink/SKILL.md'
+    )
     const codexBefore = fs.readFileSync(codexPath, 'utf-8')
 
     const result = (await caller.syncAll({
@@ -1840,7 +1966,9 @@ await describe('syncAll', () => {
     expect(result.written.some((entry) => entry.provider === 'codex')).toBe(false)
     expect(fs.readFileSync(codexPath, 'utf-8')).toBe(codexBefore)
 
-    const selections = (await caller.listProjectSelections({ projectId: fixture.projectId })) as Array<{
+    const selections = (await caller.listProjectSelections({
+      projectId: fixture.projectId
+    })) as Array<{
       provider: string
     }>
     expect(selections.some((row) => row.provider === 'codex')).toBe(false)
@@ -1877,7 +2005,10 @@ await describe('syncAll', () => {
 
   test('after pulling one provider, sync-all updates other linked providers without false conflicts', async () => {
     const fixture = createProjectFixture('sync-all-after-pull')
-    await caller.setProjectProviders({ projectId: fixture.projectId, providers: ['claude', 'codex'] })
+    await caller.setProjectProviders({
+      projectId: fixture.projectId,
+      providers: ['claude', 'codex']
+    })
 
     const item = (await caller.createItem({
       type: 'skill',
@@ -1915,15 +2046,19 @@ await describe('syncAll', () => {
     expect(result.conflicts.length).toBe(0)
     expect(
       result.written.some(
-        (entry) => entry.provider === 'claude' && entry.path === '.claude/skills/sync-after-pull/SKILL.md'
+        (entry) =>
+          entry.provider === 'claude' && entry.path === '.claude/skills/sync-after-pull/SKILL.md'
       )
     ).toBe(true)
     expect(
       result.written.some(
-        (entry) => entry.provider === 'codex' && entry.path === '.agents/skills/sync-after-pull/SKILL.md'
+        (entry) =>
+          entry.provider === 'codex' && entry.path === '.agents/skills/sync-after-pull/SKILL.md'
       )
     ).toBe(true)
-    expect(fs.readFileSync(codexPath, 'utf-8')).toBe('---\nname: modified-on-disk\n---\n# pulled body\n')
+    expect(fs.readFileSync(codexPath, 'utf-8')).toBe(
+      '---\nname: modified-on-disk\n---\n# pulled body\n'
+    )
   })
 
   test('prunes unmanaged skills and disabled-provider MCP configs when enabled', async () => {
@@ -1956,12 +2091,21 @@ await describe('syncAll', () => {
       content: skillDoc('keep-local-skill', '# keep local')
     })
 
-    const managedSkillPath = path.join(fixture.projectPath, '.claude/skills/keep-managed-skill/SKILL.md')
-    const localSkillPath = path.join(fixture.projectPath, '.claude/skills/keep-local-skill/SKILL.md')
+    const managedSkillPath = path.join(
+      fixture.projectPath,
+      '.claude/skills/keep-managed-skill/SKILL.md'
+    )
+    const localSkillPath = path.join(
+      fixture.projectPath,
+      '.claude/skills/keep-local-skill/SKILL.md'
+    )
     const managedInstructionPath = path.join(fixture.projectPath, 'CLAUDE.md')
     const unmanagedInstructionPath = path.join(fixture.projectPath, 'AGENTS.md')
     const unmanagedSkillPath = path.join(fixture.projectPath, '.claude/skills/remove-me.md')
-    const unmanagedCodexSkillPath = path.join(fixture.projectPath, '.agents/skills/remove-codex/SKILL.md')
+    const unmanagedCodexSkillPath = path.join(
+      fixture.projectPath,
+      '.agents/skills/remove-codex/SKILL.md'
+    )
     const unmanagedEmptyEnabledMcpPath = path.join(fixture.projectPath, '.mcp.json')
     const disabledProviderMcpPath = path.join(fixture.projectPath, '.cursor/mcp.json')
 
@@ -1997,10 +2141,18 @@ await describe('syncAll', () => {
     expect(fs.existsSync(disabledProviderMcpPath)).toBe(false)
 
     expect(result.written.some((entry) => entry.provider === 'claude')).toBe(true)
-    expect(result.deleted.some((entry) => entry.kind === 'instruction' && entry.provider === 'codex')).toBe(true)
-    expect(result.deleted.some((entry) => entry.kind === 'skill' && entry.provider === 'claude')).toBe(true)
-    expect(result.deleted.some((entry) => entry.kind === 'mcp' && entry.provider === 'claude')).toBe(true)
-    expect(result.deleted.some((entry) => entry.kind === 'mcp' && entry.provider === 'cursor')).toBe(true)
+    expect(
+      result.deleted.some((entry) => entry.kind === 'instruction' && entry.provider === 'codex')
+    ).toBe(true)
+    expect(
+      result.deleted.some((entry) => entry.kind === 'skill' && entry.provider === 'claude')
+    ).toBe(true)
+    expect(
+      result.deleted.some((entry) => entry.kind === 'mcp' && entry.provider === 'claude')
+    ).toBe(true)
+    expect(
+      result.deleted.some((entry) => entry.kind === 'mcp' && entry.provider === 'cursor')
+    ).toBe(true)
   })
 })
 
@@ -2146,7 +2298,12 @@ const seedReconcileProject = (
   return { projectId, projectPath }
 }
 
-const writeSkillFile = (projectPath: string, provider: string, slug: string, content?: string): void => {
+const writeSkillFile = (
+  projectPath: string,
+  provider: string,
+  slug: string,
+  content?: string
+): void => {
   const providerDirs: Record<string, string> = { claude: '.claude/skills', codex: '.agents/skills' }
   const dir = path.join(projectPath, providerDirs[provider] ?? `.${provider}/skills`, slug)
   fs.mkdirSync(dir, { recursive: true })
@@ -2156,7 +2313,12 @@ const writeSkillFile = (projectPath: string, provider: string, slug: string, con
   )
 }
 
-const writeFlatSkillFile = (projectPath: string, provider: string, slug: string, content?: string): void => {
+const writeFlatSkillFile = (
+  projectPath: string,
+  provider: string,
+  slug: string,
+  content?: string
+): void => {
   const providerDirs: Record<string, string> = { claude: '.claude/skills', codex: '.agents/skills' }
   const dir = path.join(projectPath, providerDirs[provider] ?? `.${provider}/skills`)
   fs.mkdirSync(dir, { recursive: true })
@@ -2638,7 +2800,9 @@ await describe('reconcile: file lifecycle (delete / edit)', () => {
     await caller.reconcileProjectSkills({ projectId: p7.projectId, projectPath: p7.projectPath })
 
     const itemId = (
-      h.db.prepare("SELECT id FROM ai_config_items WHERE slug = 'will-edit'").get() as { id: string }
+      h.db.prepare("SELECT id FROM ai_config_items WHERE slug = 'will-edit'").get() as {
+        id: string
+      }
     ).id
     await caller.syncLinkedFile({
       projectId: p7.projectId,
@@ -2684,7 +2848,9 @@ type ListEntry = {
 
 const mkt1 = seedReconcileProject(['claude'])
 const entry1 = h.db
-  .prepare(`SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`)
+  .prepare(
+    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+  )
   .get() as { id: string; slug: string }
 
 await describe('marketplace: library and project installs are independent', () => {
@@ -2708,7 +2874,9 @@ await describe('marketplace: library and project installs are independent', () =
   })
 
   test('list-entries shows both scopes independently', async () => {
-    const entries = (await caller.marketplace.listEntries({ projectId: mkt1.projectId })) as ListEntry[]
+    const entries = (await caller.marketplace.listEntries({
+      projectId: mkt1.projectId
+    })) as ListEntry[]
     const entry = entries.find((e) => e.id === entry1.id)
     expect(entry).toBeTruthy()
     expect(entry!.installed_library_item_id).toBeTruthy()
@@ -2716,11 +2884,15 @@ await describe('marketplace: library and project installs are independent', () =
   })
 
   test('removing from library does not affect project', async () => {
-    const entries = (await caller.marketplace.listEntries({ projectId: mkt1.projectId })) as ListEntry[]
+    const entries = (await caller.marketplace.listEntries({
+      projectId: mkt1.projectId
+    })) as ListEntry[]
     const entry = entries.find((e) => e.id === entry1.id)!
     await caller.deleteItem({ id: entry.installed_library_item_id! })
 
-    const after = (await caller.marketplace.listEntries({ projectId: mkt1.projectId })) as ListEntry[]
+    const after = (await caller.marketplace.listEntries({
+      projectId: mkt1.projectId
+    })) as ListEntry[]
     const updated = after.find((e) => e.id === entry1.id)!
     expect(updated.installed_library_item_id).toBeNull()
     expect(updated.installed_project_item_id).toBeTruthy()
@@ -2729,11 +2901,15 @@ await describe('marketplace: library and project installs are independent', () =
   test('removing from project does not affect library', async () => {
     await caller.marketplace.installSkill({ entryId: entry1.id, scope: 'library' })
 
-    const entries = (await caller.marketplace.listEntries({ projectId: mkt1.projectId })) as ListEntry[]
+    const entries = (await caller.marketplace.listEntries({
+      projectId: mkt1.projectId
+    })) as ListEntry[]
     const entry = entries.find((e) => e.id === entry1.id)!
     await caller.deleteItem({ id: entry.installed_project_item_id! })
 
-    const after = (await caller.marketplace.listEntries({ projectId: mkt1.projectId })) as ListEntry[]
+    const after = (await caller.marketplace.listEntries({
+      projectId: mkt1.projectId
+    })) as ListEntry[]
     const updated = after.find((e) => e.id === entry1.id)!
     expect(updated.installed_library_item_id).toBeTruthy()
     expect(updated.installed_project_item_id).toBeNull()
@@ -2742,7 +2918,9 @@ await describe('marketplace: library and project installs are independent', () =
 
 const mkt2 = seedReconcileProject(['claude'])
 const entry2 = h.db
-  .prepare(`SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`)
+  .prepare(
+    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+  )
   .get() as { id: string; slug: string }
 
 await describe('marketplace: install is idempotent per scope', () => {
@@ -2775,7 +2953,9 @@ await describe('marketplace: install is idempotent per scope', () => {
 
 const mkt3 = seedReconcileProject(['claude'])
 const entry3 = h.db
-  .prepare(`SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`)
+  .prepare(
+    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+  )
   .get() as { id: string; slug: string }
 
 await describe('marketplace: uninstall via delete-item', () => {
@@ -2808,7 +2988,9 @@ await describe('marketplace: uninstall via delete-item', () => {
 
 const mkt4 = seedReconcileProject(['claude', 'cursor'])
 const entry4 = h.db
-  .prepare(`SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`)
+  .prepare(
+    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+  )
   .get() as { id: string; slug: string }
 
 await describe('marketplace: project install + sync writes files', () => {
@@ -2825,18 +3007,20 @@ await describe('marketplace: project install + sync writes files', () => {
       itemId: item.id
     })
 
-    expect(fs.existsSync(path.join(mkt4.projectPath, '.claude', 'skills', entry4.slug, 'SKILL.md'))).toBe(
-      true
-    )
-    expect(fs.existsSync(path.join(mkt4.projectPath, '.cursor', 'skills', entry4.slug, 'SKILL.md'))).toBe(
-      true
-    )
+    expect(
+      fs.existsSync(path.join(mkt4.projectPath, '.claude', 'skills', entry4.slug, 'SKILL.md'))
+    ).toBe(true)
+    expect(
+      fs.existsSync(path.join(mkt4.projectPath, '.cursor', 'skills', entry4.slug, 'SKILL.md'))
+    ).toBe(true)
   })
 })
 
 const mkt5 = seedReconcileProject(['claude'])
 const entry5 = h.db
-  .prepare(`SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`)
+  .prepare(
+    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+  )
   .get() as { id: string; slug: string }
 
 await describe('marketplace: list-entries without projectId', () => {
@@ -2864,7 +3048,9 @@ await describe('marketplace: list-entries without projectId', () => {
 
 const mkt6 = seedReconcileProject(['claude'])
 const entry6 = h.db
-  .prepare(`SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`)
+  .prepare(
+    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+  )
   .get() as { id: string; slug: string }
 
 await describe('marketplace: slug conflict returns existing item', () => {
@@ -2895,7 +3081,9 @@ await describe('marketplace: slug conflict returns existing item', () => {
       .run(existingId, entry6.slug + '-library-test', entry6.slug + '-library-test')
 
     const entry6c = h.db
-      .prepare(`SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1 OFFSET 1`)
+      .prepare(
+        `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1 OFFSET 1`
+      )
       .get() as { id: string; slug: string }
 
     h.db
@@ -2933,7 +3121,9 @@ await describe('marketplace: orphan marketplace metadata scrub', () => {
 
     await caller.marketplace.refreshRegistry({ registryId: 'builtin-slayzone' })
 
-    const row = h.db.prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?').get(itemId) as {
+    const row = h.db
+      .prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?')
+      .get(itemId) as {
       metadata_json: string
     }
     const meta = JSON.parse(row.metadata_json) as Record<string, unknown>
@@ -2942,7 +3132,9 @@ await describe('marketplace: orphan marketplace metadata scrub', () => {
 
   test('item pointing at valid builtin entry keeps its marketplace metadata', async () => {
     const entry = h.db
-      .prepare(`SELECT id, slug, content_hash FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`)
+      .prepare(
+        `SELECT id, slug, content_hash FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+      )
       .get() as { id: string; slug: string; content_hash: string }
     const itemId = crypto.randomUUID()
     const validMeta = {
@@ -2959,11 +3151,19 @@ await describe('marketplace: orphan marketplace metadata scrub', () => {
       INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
       VALUES (?, 'skill', 'project', ?, ?, ?, '# valid', ?, datetime('now'), datetime('now'))
     `)
-      .run(itemId, mkt7.projectId, entry.slug + '-valid', entry.slug + '-valid', JSON.stringify(validMeta))
+      .run(
+        itemId,
+        mkt7.projectId,
+        entry.slug + '-valid',
+        entry.slug + '-valid',
+        JSON.stringify(validMeta)
+      )
 
     await caller.marketplace.refreshRegistry({ registryId: 'builtin-slayzone' })
 
-    const row = h.db.prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?').get(itemId) as {
+    const row = h.db
+      .prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?')
+      .get(itemId) as {
       metadata_json: string
     }
     const meta = JSON.parse(row.metadata_json) as { marketplace?: { entryId?: string } }

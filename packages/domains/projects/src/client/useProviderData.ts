@@ -56,8 +56,7 @@ export function useProviderData(
   )
 
   const groups = (connectionId ? groupsQuery.data : undefined) ?? []
-  const scopes =
-    connectionId && selectedGroupId ? (scopesQuery.data ?? []) : []
+  const scopes = connectionId && selectedGroupId ? (scopesQuery.data ?? []) : []
 
   // Reset selections when the connection clears.
   useEffect(() => {

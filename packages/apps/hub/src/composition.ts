@@ -330,7 +330,9 @@ export function composeServer(opts: {
   // `void asyncThatQueriesTheDb(db)`, which had no catch.
   const bootBestEffort = (label: string, run: () => Promise<unknown>): void => {
     void run().catch((err) => {
-      console.warn(`[hub] boot step "${label}" skipped: ${err instanceof Error ? err.message : String(err)}`)
+      console.warn(
+        `[hub] boot step "${label}" skipped: ${err instanceof Error ? err.message : String(err)}`
+      )
     })
   }
 
@@ -752,272 +754,270 @@ export function composeServer(opts: {
   } else {
     const silentEmitter = new EventEmitter()
     setAppDeps({
-    // No desktop to relaunch when standalone — restore is refused here anyway
-    // (see buildBackupOps `supervised`), so this should never be reached.
-    appRelaunch: stub('appRelaunch'),
-    // Never reached: the only caller is gated on `bridge`, which is null here.
-    diagnosticsConfigChanged: stub('diagnosticsConfigChanged'),
-    // Task/tab browser registry — there are no WebContentsViews here, so every
-    // member fails loud rather than pretending an empty registry (which would make
-    // `hasTab` answer "no tab" and turn a missing capability into a 404).
-    browserTabs: {
-      getResolvedTabId: stub('browserTabs.getResolvedTabId'),
-      listTabs: stub('browserTabs.listTabs'),
-      hasTab: stub('browserTabs.hasTab'),
-      waitForRegistration: stub('browserTabs.waitForRegistration'),
-      execJs: stub('browserTabs.execJs'),
-      loadUrl: stub('browserTabs.loadUrl'),
-      getUrl: stub('browserTabs.getUrl'),
-      capturePageToFile: stub('browserTabs.capturePageToFile')
-    },
+      // No desktop to relaunch when standalone — restore is refused here anyway
+      // (see buildBackupOps `supervised`), so this should never be reached.
+      appRelaunch: stub('appRelaunch'),
+      // Never reached: the only caller is gated on `bridge`, which is null here.
+      diagnosticsConfigChanged: stub('diagnosticsConfigChanged'),
+      // Task/tab browser registry — there are no WebContentsViews here, so every
+      // member fails loud rather than pretending an empty registry (which would make
+      // `hasTab` answer "no tab" and turn a missing capability into a 404).
+      browserTabs: {
+        getResolvedTabId: stub('browserTabs.getResolvedTabId'),
+        listTabs: stub('browserTabs.listTabs'),
+        hasTab: stub('browserTabs.hasTab'),
+        waitForRegistration: stub('browserTabs.waitForRegistration'),
+        execJs: stub('browserTabs.execJs'),
+        loadUrl: stub('browserTabs.loadUrl'),
+        getUrl: stub('browserTabs.getUrl'),
+        capturePageToFile: stub('browserTabs.capturePageToFile')
+      },
 
-    clipboardWriteFilePaths: stub('clipboardWriteFilePaths'),
-    clipboardReadFilePaths: stub('clipboardReadFilePaths'),
-    clipboardHasFiles: stub('clipboardHasFiles'),
+      clipboardWriteFilePaths: stub('clipboardWriteFilePaths'),
+      clipboardReadFilePaths: stub('clipboardReadFilePaths'),
+      clipboardHasFiles: stub('clipboardHasFiles'),
 
-    screenshotCaptureView: stub('screenshotCaptureView'),
+      screenshotCaptureView: stub('screenshotCaptureView'),
 
+      usageFetch: stub('usageFetch'),
+      usageTest: stub('usageTest'),
 
-    usageFetch: stub('usageFetch'),
-    usageTest: stub('usageTest'),
+      // Implemented natively (node fs) — the Task Detail loader calls this uncaught
+      // to validate a project path, so a throwing stub would fail the whole load.
+      filesPathExists: nativePathExists,
+      filesSaveTempImage: stub('filesSaveTempImage'),
 
-    // Implemented natively (node fs) — the Task Detail loader calls this uncaught
-    // to validate a project path, so a throwing stub would fail the whole load.
-    filesPathExists: nativePathExists,
-    filesSaveTempImage: stub('filesSaveTempImage'),
+      // Open URLs in the OS default browser (per-OS exec). The chromium-fork sidecar
+      // has no Electron `shell.openExternal`; the renderer's GitHub-OAuth flow opens
+      // the authorize URL through this. The desktop-handoff options are Electron-only
+      // (WCV nav policy) and irrelevant headless — ignore them.
+      shellOpenExternal: (url: string) => nativeOpenExternal(url),
+      // Implemented natively (per-OS exec) so the Git/Editor panels' reveal + open
+      // actions work on the standalone/fork sidecar without an Electron host.
+      shellOpenPath: nativeOpenPath,
+      shellShowItemInFolder: nativeShowItemInFolder,
 
-    // Open URLs in the OS default browser (per-OS exec). The chromium-fork sidecar
-    // has no Electron `shell.openExternal`; the renderer's GitHub-OAuth flow opens
-    // the authorize URL through this. The desktop-handoff options are Electron-only
-    // (WCV nav policy) and irrelevant headless — ignore them.
-    shellOpenExternal: (url: string) => nativeOpenExternal(url),
-    // Implemented natively (per-OS exec) so the Git/Editor panels' reveal + open
-    // actions work on the standalone/fork sidecar without an Electron host.
-    shellOpenPath: nativeOpenPath,
-    shellShowItemInFolder: nativeShowItemInFolder,
+      appGetVersion: () => '0.0.0-server',
+      // Real directory (node os.homedir) — it is only a dialog default, and the
+      // dialog itself is the stub that fails loud.
+      appGetDownloadsDir: async () => join(homedir(), 'Downloads'),
+      appGetTrpcPort: async () => boundPort,
+      // Graceful read-path defaults (flag getters / cosmetics) — a throwing stub
+      // here would break harmless renderer reads post-flip for no gain.
+      appIsTestsPanelEnabled: () => false,
+      // No desktop client to hold the flag when standalone.
+      appSetLabFlag: stub('appSetLabFlag'),
+      appIsLoopModeEnabled: () => false,
+      appGetZoomFactor: () => 1,
+      appGetProtocolClientStatus: () => ({
+        scheme: 'slayzone',
+        attempted: false,
+        registered: false,
+        // Closest existing reason: protocol registration is an Electron concern.
+        reason: 'dev-skipped' as const
+      }),
+      appGetRendererZoomFactor: () => null,
+      // Real fs probe (pure Node, no Electron) — the stub hardcoded
+      // `installed: false`, so the "Install the slay CLI" dialog auto-opened for
+      // every fork user even when the CLI was already installed.
+      appCheckCliInstalled: () => checkCliInstalled(),
+      appInstallCli: stub('appInstallCli'),
+      appAdjustZoom: stub('appAdjustZoom'),
+      appRestartForUpdate: stub('appRestartForUpdate'),
+      appCheckForUpdates: stub('appCheckForUpdates'),
+      // Read-path: a renderer served BY this server is asking about the server
+      // itself — report self status instead of a supervisor snapshot. It IS the
+      // running build, so runningBuildId is its own; there's no supervisor here to
+      // compare against disk → never stale.
+      appGetSidecarStatus: () => ({
+        health: 'ready' as const,
+        port: boundPort || null,
+        pid: process.pid,
+        restarts: 0,
+        totalRespawns: 0,
+        dbPath: null,
+        uptimeMs: Math.round(process.uptime() * 1000),
+        runningBuildId: getServerBuildInfo().buildId,
+        diskBuildId: null,
+        stale: false
+      }),
+      appRevealSidecarLog: stub('appRevealSidecarLog'),
 
+      appWindowGetContentBounds: () => null,
+      appWindowGetDisplayScaleFactor: () => null,
+      // Window-cosmetic setters no-op off-window in the Electron host too.
+      appWindowSetTrafficLightPosition: () => {},
+      appWindowSetWindowButtonVisibility: () => {},
+      appFocusRenderer: () => {},
+      // No window to raise on a headless host.
+      appRaiseMainWindow: () => {},
+      // No OS nativeTheme off-Electron. Default the preference to "system" so the
+      // renderer resolves dark/light from `prefers-color-scheme` (ThemeContext);
+      // an explicit light/dark still applies for the session. (Cross-restart
+      // persistence of an explicit choice in the fork is a follow-up.)
+      themeGetEffective: () => 'dark',
+      themeGetSource: () => 'system',
+      themeSet: async (pref) => (pref === 'light' ? 'light' : 'dark'),
+      // No Electron safeStorage on a headless host — report unavailable so the
+      // credential store uses its plaintext fallback (gated by env). The encrypt/
+      // decrypt stubs are never reached because the cipher stays unset standalone.
+      credentialCipher: {
+        isEncryptionAvailable: () => false,
+        encryptStringToB64: stub('credentialCipher.encryptStringToB64'),
+        decryptStringFromB64: stub('credentialCipher.decryptStringFromB64')
+      },
+      // No native menu on a headless host.
+      appRebuildMenuForShortcuts: () => {},
 
-    appGetVersion: () => '0.0.0-server',
-    // Real directory (node os.homedir) — it is only a dialog default, and the
-    // dialog itself is the stub that fails loud.
-    appGetDownloadsDir: async () => join(homedir(), 'Downloads'),
-    appGetTrpcPort: async () => boundPort,
-    // Graceful read-path defaults (flag getters / cosmetics) — a throwing stub
-    // here would break harmless renderer reads post-flip for no gain.
-    appIsTestsPanelEnabled: () => false,
-    // No desktop client to hold the flag when standalone.
-    appSetLabFlag: stub('appSetLabFlag'),
-    appIsLoopModeEnabled: () => false,
-    appGetZoomFactor: () => 1,
-    appGetProtocolClientStatus: () => ({
-      scheme: 'slayzone',
-      attempted: false,
-      registered: false,
-      // Closest existing reason: protocol registration is an Electron concern.
-      reason: 'dev-skipped' as const
-    }),
-    appGetRendererZoomFactor: () => null,
-    // Real fs probe (pure Node, no Electron) — the stub hardcoded
-    // `installed: false`, so the "Install the slay CLI" dialog auto-opened for
-    // every fork user even when the CLI was already installed.
-    appCheckCliInstalled: () => checkCliInstalled(),
-    appInstallCli: stub('appInstallCli'),
-    appAdjustZoom: stub('appAdjustZoom'),
-    appRestartForUpdate: stub('appRestartForUpdate'),
-    appCheckForUpdates: stub('appCheckForUpdates'),
-    // Read-path: a renderer served BY this server is asking about the server
-    // itself — report self status instead of a supervisor snapshot. It IS the
-    // running build, so runningBuildId is its own; there's no supervisor here to
-    // compare against disk → never stale.
-    appGetSidecarStatus: () => ({
-      health: 'ready' as const,
-      port: boundPort || null,
-      pid: process.pid,
-      restarts: 0,
-      totalRespawns: 0,
-      dbPath: null,
-      uptimeMs: Math.round(process.uptime() * 1000),
-      runningBuildId: getServerBuildInfo().buildId,
-      diskBuildId: null,
-      stale: false
-    }),
-    appRevealSidecarLog: stub('appRevealSidecarLog'),
-
-    appWindowGetContentBounds: () => null,
-    appWindowGetDisplayScaleFactor: () => null,
-    // Window-cosmetic setters no-op off-window in the Electron host too.
-    appWindowSetTrafficLightPosition: () => {},
-    appWindowSetWindowButtonVisibility: () => {},
-    appFocusRenderer: () => {},
-    // No window to raise on a headless host.
-    appRaiseMainWindow: () => {},
-    // No OS nativeTheme off-Electron. Default the preference to "system" so the
-    // renderer resolves dark/light from `prefers-color-scheme` (ThemeContext);
-    // an explicit light/dark still applies for the session. (Cross-restart
-    // persistence of an explicit choice in the fork is a follow-up.)
-    themeGetEffective: () => 'dark',
-    themeGetSource: () => 'system',
-    themeSet: async (pref) => (pref === 'light' ? 'light' : 'dark'),
-    // No Electron safeStorage on a headless host — report unavailable so the
-    // credential store uses its plaintext fallback (gated by env). The encrypt/
-    // decrypt stubs are never reached because the cipher stays unset standalone.
-    credentialCipher: {
-      isEncryptionAvailable: () => false,
-      encryptStringToB64: stub('credentialCipher.encryptStringToB64'),
-      decryptStringFromB64: stub('credentialCipher.decryptStringFromB64')
-    },
-    // No native menu on a headless host.
-    appRebuildMenuForShortcuts: () => {},
-
-    // Chromium-fork GitHub OAuth start. Unlike the Electron host (which blocks
-    // waiting for the deep-link and returns the code inline), the fork CANNOT
-    // receive the callback here — slayzone:// routes to the C++ shell → the
-    // sidecar socket (sidecar-socket.ts) → the `app.auth.onCallback` sub. So we
-    // only START the flow: fetch the GitHub authorize URL + PKCE verifier, open
-    // the browser, and return `pending`. The renderer stashes the verifier and
-    // completes the code when the sub delivers it. Reuses the shared
-    // requestGithubSignInStart — same PKCE handshake as the Electron host.
-    authGithubSystemSignIn: async (input: { convexUrl: string; redirectTo: string }) => {
-      try {
-        if (!input?.convexUrl) return { ok: false as const, error: 'Convex URL is required' }
-        if (input.redirectTo !== 'slayzone://auth/callback') {
-          return { ok: false as const, error: `Unsupported redirect URI: ${input.redirectTo}` }
-        }
-        const start = await requestGithubSignInStart(
-          input.convexUrl,
-          input.redirectTo,
-          'chromium-sidecar'
-        )
-        const openErr = await nativeOpenExternal(start.redirect)
-        if (openErr) {
+      // Chromium-fork GitHub OAuth start. Unlike the Electron host (which blocks
+      // waiting for the deep-link and returns the code inline), the fork CANNOT
+      // receive the callback here — slayzone:// routes to the C++ shell → the
+      // sidecar socket (sidecar-socket.ts) → the `app.auth.onCallback` sub. So we
+      // only START the flow: fetch the GitHub authorize URL + PKCE verifier, open
+      // the browser, and return `pending`. The renderer stashes the verifier and
+      // completes the code when the sub delivers it. Reuses the shared
+      // requestGithubSignInStart — same PKCE handshake as the Electron host.
+      authGithubSystemSignIn: async (input: { convexUrl: string; redirectTo: string }) => {
+        try {
+          if (!input?.convexUrl) return { ok: false as const, error: 'Convex URL is required' }
+          if (input.redirectTo !== 'slayzone://auth/callback') {
+            return { ok: false as const, error: `Unsupported redirect URI: ${input.redirectTo}` }
+          }
+          const start = await requestGithubSignInStart(
+            input.convexUrl,
+            input.redirectTo,
+            'chromium-sidecar'
+          )
+          const openErr = await nativeOpenExternal(start.redirect)
+          if (openErr) {
+            return {
+              ok: false as const,
+              verifier: start.verifier,
+              error: `Failed to open browser for GitHub sign-in: ${openErr}`
+            }
+          }
+          return { ok: true as const, verifier: start.verifier, pending: true as const }
+        } catch (error) {
           return {
             ok: false as const,
-            verifier: start.verifier,
-            error: `Failed to open browser for GitHub sign-in: ${openErr}`
+            error: error instanceof Error ? error.message : 'GitHub sign-in failed'
           }
         }
-        return { ok: true as const, verifier: start.verifier, pending: true as const }
-      } catch (error) {
-        return {
-          ok: false as const,
-          error: error instanceof Error ? error.message : 'GitHub sign-in failed'
-        }
+      },
+      dialogShowOpenDialog: stub('dialogShowOpenDialog'),
+      dialogShowSaveDialog: stub('dialogShowSaveDialog'),
+
+      // Artifact export needs an offscreen BrowserWindow — there is no Electron host
+      // to forward to here, so these fail loud rather than silently producing nothing.
+      artifactBuildExportHtml: stub('artifactBuildExportHtml'),
+      artifactRenderPdfToFile: stub('artifactRenderPdfToFile'),
+      artifactRenderPngToFile: stub('artifactRenderPngToFile'),
+      windowClose: () => {},
+
+      browser: {
+        createView: stub('browser.createView'),
+        destroyView: stub('browser.destroyView'),
+        destroyAllForTask: stub('browser.destroyAllForTask'),
+        setBounds: stub('browser.setBounds'),
+        setVisible: stub('browser.setVisible'),
+        setLocked: stub('browser.setLocked'),
+        hideAll: stub('browser.hideAll'),
+        showAll: stub('browser.showAll'),
+        setHandoffPolicy: stub('browser.setHandoffPolicy'),
+        navigate: stub('browser.navigate'),
+        goBack: stub('browser.goBack'),
+        goForward: stub('browser.goForward'),
+        reload: stub('browser.reload'),
+        stop: stub('browser.stop'),
+        executeJs: stub('browser.executeJs'),
+        insertCss: stub('browser.insertCss'),
+        removeCss: stub('browser.removeCss'),
+        setZoom: stub('browser.setZoom'),
+        focus: stub('browser.focus'),
+        findInPage: stub('browser.findInPage'),
+        stopFindInPage: stub('browser.stopFindInPage'),
+        setKeyboardPassthrough: stub('browser.setKeyboardPassthrough'),
+        sendInputEvent: stub('browser.sendInputEvent'),
+        openDevTools: stub('browser.openDevTools'),
+        closeDevTools: stub('browser.closeDevTools'),
+        isDevToolsOpen: stub('browser.isDevToolsOpen'),
+        getUrl: stub('browser.getUrl'),
+        getBounds: stub('browser.getBounds'),
+        getZoomFactor: stub('browser.getZoomFactor'),
+        getActualNativeBounds: stub('browser.getActualNativeBounds'),
+        getViewVisible: stub('browser.getViewVisible'),
+        getViewsForTask: () => [],
+        getAllViewIds: () => [],
+        listViews: () => [],
+        getNativeChildViewCount: () => 0,
+        isAllHidden: () => true,
+        isFocused: () => false,
+        isViewNativelyVisible: () => false,
+        getPartition: stub('browser.getPartition'),
+        getWebContentsId: stub('browser.getWebContentsId'),
+        activateExtension: stub('browser.activateExtension'),
+        getExtensions: () => [],
+        loadExtension: stub('browser.loadExtension'),
+        removeExtension: stub('browser.removeExtension'),
+        discoverBrowserExtensions: () => [],
+        importExtension: stub('browser.importExtension'),
+        reparentToCurrentWindow: stub('browser.reparentToCurrentWindow'),
+        // Event-shaped nav-state replay for late onEvent subscribers — none exist
+        // in a WCV-less host.
+        getAllStateSnapshots: () => [],
+        events: silentEmitter as AppDeps['browser']['events']
+      },
+
+      floatingAgent: {
+        setEnabled: stub('floatingAgent.setEnabled'),
+        setSessionId: stub('floatingAgent.setSessionId'),
+        setPanelOpen: stub('floatingAgent.setPanelOpen'),
+        toggleCollapse: stub('floatingAgent.toggleCollapse'),
+        resetSize: stub('floatingAgent.resetSize'),
+        detach: stub('floatingAgent.detach'),
+        reattach: stub('floatingAgent.reattach'),
+        getState: (): FloatingAgentState => ({
+          kind: 'disabled',
+          sessionId: null,
+          mode: null,
+          hasCustomSize: false
+        }),
+        getSession: () => null,
+        getConfig: () => null,
+        events: silentEmitter as AppDeps['floatingAgent']['events']
+      },
+
+      webview: {
+        registerBrowserTab: () => {},
+        unregisterBrowserTab: () => {},
+        setActiveBrowserTab: () => {},
+        closeDevTools: stub('webview.closeDevTools'),
+        isDevToolsOpened: () => false,
+        disableDeviceEmulation: stub('webview.disableDeviceEmulation'),
+        registerShortcuts: stub('webview.registerShortcuts'),
+        setKeyboardPassthrough: stub('webview.setKeyboardPassthrough'),
+        setDesktopHandoffPolicy: stub('webview.setDesktopHandoffPolicy'),
+        openDevToolsBottom: stub('webview.openDevToolsBottom'),
+        openDevToolsDetached: stub('webview.openDevToolsDetached'),
+        enableDeviceEmulation: stub('webview.enableDeviceEmulation'),
+        events: silentEmitter as AppDeps['webview']['events']
+      },
+
+      taskWindows: {
+        open: stub('taskWindows.open'),
+        close: stub('taskWindows.close'),
+        list: () => [],
+        setPrimaryActive: () => {},
+        getPrimaryActive: () => null,
+        claimPanel: stub('taskWindows.claimPanel'),
+        releasePanel: stub('taskWindows.releasePanel'),
+        releaseAllForTask: stub('taskWindows.releaseAllForTask'),
+        getOwnership: () => [],
+        getWindowId: () => null,
+        claimAndCloseOther: stub('taskWindows.claimAndCloseOther'),
+        claimSession: stub('taskWindows.claimSession'),
+        events: silentEmitter as AppDeps['taskWindows']['events']
       }
-    },
-    dialogShowOpenDialog: stub('dialogShowOpenDialog'),
-    dialogShowSaveDialog: stub('dialogShowSaveDialog'),
-
-    // Artifact export needs an offscreen BrowserWindow — there is no Electron host
-    // to forward to here, so these fail loud rather than silently producing nothing.
-    artifactBuildExportHtml: stub('artifactBuildExportHtml'),
-    artifactRenderPdfToFile: stub('artifactRenderPdfToFile'),
-    artifactRenderPngToFile: stub('artifactRenderPngToFile'),
-    windowClose: () => {},
-
-    browser: {
-      createView: stub('browser.createView'),
-      destroyView: stub('browser.destroyView'),
-      destroyAllForTask: stub('browser.destroyAllForTask'),
-      setBounds: stub('browser.setBounds'),
-      setVisible: stub('browser.setVisible'),
-      setLocked: stub('browser.setLocked'),
-      hideAll: stub('browser.hideAll'),
-      showAll: stub('browser.showAll'),
-      setHandoffPolicy: stub('browser.setHandoffPolicy'),
-      navigate: stub('browser.navigate'),
-      goBack: stub('browser.goBack'),
-      goForward: stub('browser.goForward'),
-      reload: stub('browser.reload'),
-      stop: stub('browser.stop'),
-      executeJs: stub('browser.executeJs'),
-      insertCss: stub('browser.insertCss'),
-      removeCss: stub('browser.removeCss'),
-      setZoom: stub('browser.setZoom'),
-      focus: stub('browser.focus'),
-      findInPage: stub('browser.findInPage'),
-      stopFindInPage: stub('browser.stopFindInPage'),
-      setKeyboardPassthrough: stub('browser.setKeyboardPassthrough'),
-      sendInputEvent: stub('browser.sendInputEvent'),
-      openDevTools: stub('browser.openDevTools'),
-      closeDevTools: stub('browser.closeDevTools'),
-      isDevToolsOpen: stub('browser.isDevToolsOpen'),
-      getUrl: stub('browser.getUrl'),
-      getBounds: stub('browser.getBounds'),
-      getZoomFactor: stub('browser.getZoomFactor'),
-      getActualNativeBounds: stub('browser.getActualNativeBounds'),
-      getViewVisible: stub('browser.getViewVisible'),
-      getViewsForTask: () => [],
-      getAllViewIds: () => [],
-      listViews: () => [],
-      getNativeChildViewCount: () => 0,
-      isAllHidden: () => true,
-      isFocused: () => false,
-      isViewNativelyVisible: () => false,
-      getPartition: stub('browser.getPartition'),
-      getWebContentsId: stub('browser.getWebContentsId'),
-      activateExtension: stub('browser.activateExtension'),
-      getExtensions: () => [],
-      loadExtension: stub('browser.loadExtension'),
-      removeExtension: stub('browser.removeExtension'),
-      discoverBrowserExtensions: () => [],
-      importExtension: stub('browser.importExtension'),
-      reparentToCurrentWindow: stub('browser.reparentToCurrentWindow'),
-      // Event-shaped nav-state replay for late onEvent subscribers — none exist
-      // in a WCV-less host.
-      getAllStateSnapshots: () => [],
-      events: silentEmitter as AppDeps['browser']['events']
-    },
-
-    floatingAgent: {
-      setEnabled: stub('floatingAgent.setEnabled'),
-      setSessionId: stub('floatingAgent.setSessionId'),
-      setPanelOpen: stub('floatingAgent.setPanelOpen'),
-      toggleCollapse: stub('floatingAgent.toggleCollapse'),
-      resetSize: stub('floatingAgent.resetSize'),
-      detach: stub('floatingAgent.detach'),
-      reattach: stub('floatingAgent.reattach'),
-      getState: (): FloatingAgentState => ({
-        kind: 'disabled',
-        sessionId: null,
-        mode: null,
-        hasCustomSize: false
-      }),
-      getSession: () => null,
-      getConfig: () => null,
-      events: silentEmitter as AppDeps['floatingAgent']['events']
-    },
-
-    webview: {
-      registerBrowserTab: () => {},
-      unregisterBrowserTab: () => {},
-      setActiveBrowserTab: () => {},
-      closeDevTools: stub('webview.closeDevTools'),
-      isDevToolsOpened: () => false,
-      disableDeviceEmulation: stub('webview.disableDeviceEmulation'),
-      registerShortcuts: stub('webview.registerShortcuts'),
-      setKeyboardPassthrough: stub('webview.setKeyboardPassthrough'),
-      setDesktopHandoffPolicy: stub('webview.setDesktopHandoffPolicy'),
-      openDevToolsBottom: stub('webview.openDevToolsBottom'),
-      openDevToolsDetached: stub('webview.openDevToolsDetached'),
-      enableDeviceEmulation: stub('webview.enableDeviceEmulation'),
-      events: silentEmitter as AppDeps['webview']['events']
-    },
-
-    taskWindows: {
-      open: stub('taskWindows.open'),
-      close: stub('taskWindows.close'),
-      list: () => [],
-      setPrimaryActive: () => {},
-      getPrimaryActive: () => null,
-      claimPanel: stub('taskWindows.claimPanel'),
-      releasePanel: stub('taskWindows.releasePanel'),
-      releaseAllForTask: stub('taskWindows.releaseAllForTask'),
-      getOwnership: () => [],
-      getWindowId: () => null,
-      claimAndCloseOther: stub('taskWindows.claimAndCloseOther'),
-      claimSession: stub('taskWindows.claimSession'),
-      events: silentEmitter as AppDeps['taskWindows']['events']
-    }
     })
   }
 

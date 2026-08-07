@@ -66,8 +66,15 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
     },
     ref
   ) {
-    const { activeTab, setActiveTab, isTabVisible, tabOrder, hasConflicts, isRebase, hasGithubRemote } =
-      useGitPanelTabs(ref, { task, defaultTab, onTabChange, projectPath })
+    const {
+      activeTab,
+      setActiveTab,
+      isTabVisible,
+      tabOrder,
+      hasConflicts,
+      isRebase,
+      hasGithubRemote
+    } = useGitPanelTabs(ref, { task, defaultTab, onTabChange, projectPath })
 
     const { handleCommitAndContinueMerge, handleAbortMerge } = useGitMergeActions({
       task,

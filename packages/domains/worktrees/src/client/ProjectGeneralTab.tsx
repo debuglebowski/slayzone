@@ -108,7 +108,9 @@ export function ProjectGeneralTab({
       }
       const [branch, status, remote] = await Promise.all([
         queryClient.fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })),
-        queryClient.fetchQuery(trpc.worktrees.getStatusSummary.queryOptions({ repoPath: projectPath })),
+        queryClient.fetchQuery(
+          trpc.worktrees.getStatusSummary.queryOptions({ repoPath: projectPath })
+        ),
         queryClient.fetchQuery(trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }))
       ])
       const uab = branch

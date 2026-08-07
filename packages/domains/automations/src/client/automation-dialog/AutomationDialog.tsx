@@ -162,7 +162,9 @@ export function AutomationDialog({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={!name.trim() || !actions.some((a) => actionIsValid(a, providers, providersLoaded))}
+            disabled={
+              !name.trim() || !actions.some((a) => actionIsValid(a, providers, providersLoaded))
+            }
           >
             {automation ? 'Save' : 'Create'}
           </Button>

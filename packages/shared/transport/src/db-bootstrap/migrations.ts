@@ -2811,9 +2811,9 @@ export const migrations: Migration[] = [
       `)
 
       // Backfill pin/collapse state from the `viewState` blob.
-      const viewStateRow = db
-        .prepare("SELECT value FROM settings WHERE key = 'viewState'")
-        .get() as { value: string } | undefined
+      const viewStateRow = db.prepare("SELECT value FROM settings WHERE key = 'viewState'").get() as
+        | { value: string }
+        | undefined
       let viewState: Record<string, unknown> | null = null
       if (viewStateRow?.value) {
         try {
@@ -2829,9 +2829,7 @@ export const migrations: Migration[] = [
       if (viewState) {
         const pinned = viewState.treePinnedTaskIds
         if (Array.isArray(pinned)) {
-          const setPinned = db.prepare(
-            'UPDATE tasks SET pinned = 1, pin_order = ? WHERE id = ?'
-          )
+          const setPinned = db.prepare('UPDATE tasks SET pinned = 1, pin_order = ? WHERE id = ?')
           pinned.forEach((id, index) => {
             if (typeof id === 'string') setPinned.run(index, id)
           })
@@ -2839,9 +2837,7 @@ export const migrations: Migration[] = [
 
         const collapsed = viewState.treeCollapsedTaskIds
         if (Array.isArray(collapsed)) {
-          const setCollapsed = db.prepare(
-            'UPDATE tasks SET tree_collapsed = 1 WHERE id = ?'
-          )
+          const setCollapsed = db.prepare('UPDATE tasks SET tree_collapsed = 1 WHERE id = ?')
           for (const id of collapsed) {
             if (typeof id === 'string') setCollapsed.run(id)
           }
@@ -2861,9 +2857,7 @@ export const migrations: Migration[] = [
       const graphRows = db
         .prepare("SELECT key, value FROM settings WHERE key LIKE 'commit_graph:task:%'")
         .all() as Array<{ key: string; value: string | null }>
-      const setGraphConfig = db.prepare(
-        'UPDATE tasks SET commit_graph_config = ? WHERE id = ?'
-      )
+      const setGraphConfig = db.prepare('UPDATE tasks SET commit_graph_config = ? WHERE id = ?')
       for (const row of graphRows) {
         const taskId = row.key.slice(prefix.length)
         if (taskId && row.value) setGraphConfig.run(row.value, taskId)
@@ -3032,8 +3026,7 @@ export const migrations: Migration[] = [
         }
       }
     }
-  }
-  ,
+  },
   {
     version: 146,
     up: (db) => {

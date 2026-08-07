@@ -25,8 +25,7 @@ test.describe('Git worktree operations', () => {
   const getTask = async (page: import('@playwright/test').Page, id: string) =>
     page.evaluate((taskId) => window.getTrpcVanillaClient().task.get.query({ id: taskId }), id)
 
-  const execGit = (command: string) =>
-    execSync(command, { cwd: repoDir, stdio: 'pipe' }).toString()
+  const execGit = (command: string) => execSync(command, { cwd: repoDir, stdio: 'pipe' }).toString()
 
   // Open + activate the worktree task deterministically by id (shared fixture). The
   // prior card-click / search-dialog heuristic was the root of this describe's
@@ -34,8 +33,7 @@ test.describe('Git worktree operations', () => {
   // "Terminal N" scratch task), and the globally-matched "Branch to worktree" button
   // (only the active tab's panel is visible) then created the worktree on the WRONG
   // task — leaving this task's worktree_path null and losing the whole describe.
-  const activateWorktreeTask = (page: import('@playwright/test').Page) =>
-    openTaskById(page, taskId)
+  const activateWorktreeTask = (page: import('@playwright/test').Page) => openTaskById(page, taskId)
 
   const removeWorktreeButton = (page: import('@playwright/test').Page) => {
     const gitPanel = page.getByTestId('task-git-panel').last()
@@ -242,7 +240,9 @@ test.describe('Git worktree operations', () => {
 
     await mainWindow.evaluate(
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-        await window.getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+        await window
+          .getTrpcVanillaClient()
+          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
         await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
@@ -269,8 +269,7 @@ test.describe('Git worktree operations', () => {
     expect(worktreePathFromDb).toBe(expectedWorktreePath)
 
     // Verify worktree dir exists on disk (read effective path from DB)
-    const worktreePath =
-      task?.worktree_path ?? path.join(repoDir, 'worktrees', branchName)
+    const worktreePath = task?.worktree_path ?? path.join(repoDir, 'worktrees', branchName)
     const exists = existsSync(worktreePath)
     expect(exists).toBe(true)
   })
@@ -290,7 +289,9 @@ test.describe('Git worktree operations', () => {
 
     await mainWindow.evaluate(
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-        await window.getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+        await window
+          .getTrpcVanillaClient()
+          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
         await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
@@ -345,7 +346,9 @@ test.describe('Git worktree operations', () => {
 
     await mainWindow.evaluate(
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-        await window.getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+        await window
+          .getTrpcVanillaClient()
+          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
         await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,

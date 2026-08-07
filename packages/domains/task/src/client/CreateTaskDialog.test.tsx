@@ -45,7 +45,8 @@ vi.mock('@slayzone/transport/client', () => ({
   // The seam under test: the dialog must resolve its client from the selected
   // project, and the real implementation of this hook is covered by
   // hubOwnershipStore.test.ts.
-  useClientForProject: (projectId?: string) => (hubIdFor(projectId) === 'remote-a' ? remote : ambient),
+  useClientForProject: (projectId?: string) =>
+    hubIdFor(projectId) === 'remote-a' ? remote : ambient,
   useHubIdForProject: (projectId?: string) => hubIdFor(projectId),
   useHubOwnershipStore: { getState: () => ({ noteTaskHub }) }
 }))

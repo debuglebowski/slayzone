@@ -49,7 +49,9 @@ mkdirSync(bytecodeDir, { recursive: true })
 const tsTemplatesZip = join(bytecodeDir, 'ts_templates.zip')
 if (!existsSync(tsTemplatesZip)) {
   console.log('Precompiling Mojo bindings templates…')
-  execFileSync('python3', [generatorPy, '--use_bundled_pylibs', '-o', bytecodeDir, 'precompile'], { stdio: 'inherit' })
+  execFileSync('python3', [generatorPy, '--use_bundled_pylibs', '-o', bytecodeDir, 'precompile'], {
+    stdio: 'inherit'
+  })
 }
 
 // Collect .mojom inputs.
@@ -71,10 +73,14 @@ execFileSync(
   'python3',
   [
     parserPy,
-    '--input-root', pkgRoot,
-    '--output-root', workDir,
-    '--add-module-metadata', 'webui_module_path=/resources/mojo/slayzone',
-    '--mojoms', ...mojoms,
+    '--input-root',
+    pkgRoot,
+    '--output-root',
+    workDir,
+    '--add-module-metadata',
+    'webui_module_path=/resources/mojo/slayzone',
+    '--mojoms',
+    ...mojoms
   ],
   { stdio: 'inherit' }
 )
@@ -86,13 +92,18 @@ execFileSync(
   [
     generatorPy,
     '--use_bundled_pylibs',
-    '-o', workDir,
+    '-o',
+    workDir,
     'generate',
-    '-g', 'typescript',
-    '--bytecode_path', bytecodeDir,
-    '-d', pkgRoot,
-    '-I', pkgRoot,
-    ...mojoms,
+    '-g',
+    'typescript',
+    '--bytecode_path',
+    bytecodeDir,
+    '-d',
+    pkgRoot,
+    '-I',
+    pkgRoot,
+    ...mojoms
   ],
   { stdio: 'inherit' }
 )

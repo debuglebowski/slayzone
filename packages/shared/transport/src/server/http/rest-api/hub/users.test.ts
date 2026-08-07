@@ -68,11 +68,10 @@ async function call<T>(
 
 await describe('POST /api/hub/users', () => {
   test('creates an account and returns the generated password once', async () => {
-    const res = await call<{ ok: boolean; data: { email: string; name: string; password: string } }>(
-      stubUsers(),
-      'POST',
-      { email: 'alice@example.com', name: 'Alice' }
-    )
+    const res = await call<{
+      ok: boolean
+      data: { email: string; name: string; password: string }
+    }>(stubUsers(), 'POST', { email: 'alice@example.com', name: 'Alice' })
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
     expect(res.body.data.email).toBe('alice@example.com')
@@ -272,10 +271,7 @@ await describe('the capability gate (slot absent / not ready)', () => {
   })
 
   test('503 while hub-auth is not ready, naming where to look', async () => {
-    const res = await call<{ ok: boolean; error: string }>(
-      stubUsers({ ready: () => false }),
-      'GET'
-    )
+    const res = await call<{ ok: boolean; error: string }>(stubUsers({ ready: () => false }), 'GET')
     expect(res.status).toBe(503)
     // The failure is often PERMANENT (createHubAuth threw and was swallowed into a
     // diagnostic), so the message must not merely imply "retry".

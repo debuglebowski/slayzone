@@ -93,9 +93,7 @@ test('create notifies only when a link was actually written', async () => {
   // connection has to exist first.
   const connectionId = crypto.randomUUID()
   h.db
-    .prepare(
-      'INSERT INTO integration_connections (id, provider, credential_ref) VALUES (?, ?, ?)'
-    )
+    .prepare('INSERT INTO integration_connections (id, provider, credential_ref) VALUES (?, ?, ?)')
     .run(connectionId, 'github', 'ref1')
   h.db
     .prepare(

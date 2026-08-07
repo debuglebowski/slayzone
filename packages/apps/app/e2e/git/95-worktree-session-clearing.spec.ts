@@ -67,7 +67,8 @@ test.describe('Worktree/project change clears conversation IDs', () => {
     await seedConversationState(mainWindow, taskId)
 
     await mainWindow.evaluate(
-      ({ id }) => window.getTrpcVanillaClient().task.update.mutate({ id, baseDir: '/tmp/new-base' }),
+      ({ id }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, baseDir: '/tmp/new-base' }),
       { id: taskId }
     )
 

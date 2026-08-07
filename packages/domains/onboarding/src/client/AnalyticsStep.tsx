@@ -21,8 +21,7 @@ export function AnalyticsStep({ onChoose }: AnalyticsStepProps): React.JSX.Eleme
         </div>
         <h2 className="text-2xl font-semibold tracking-tight mb-2">Analytics</h2>
         <p className="text-muted-foreground">
-          We want to track as little as possible, but also get a feeling for what features are
-          used.
+          We want to track as little as possible, but also get a feeling for what features are used.
         </p>
       </div>
 

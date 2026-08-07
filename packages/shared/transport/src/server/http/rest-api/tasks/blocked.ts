@@ -72,11 +72,7 @@ export function registerTaskBlockedRoutes(app: Express, deps: RestApiDeps): void
       comment?: unknown
     }
     const hasComment = 'comment' in body
-    if (
-      body.comment !== undefined &&
-      body.comment !== null &&
-      typeof body.comment !== 'string'
-    ) {
+    if (body.comment !== undefined && body.comment !== null && typeof body.comment !== 'string') {
       res.status(400).json({ ok: false, error: 'comment must be a string or null' })
       return
     }

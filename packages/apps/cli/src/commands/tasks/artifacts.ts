@@ -633,9 +633,7 @@ export function artifactsSubcommand(): Command {
         `/api/artifacts/${encodeURIComponent(artifactId)}/content?${versionWriteQuery(opts.mutateVersion)}`,
         stdinStream()
       )
-      console.log(
-        `Written: ${data.id.slice(0, 8)}  ${data.title}  v${data.version.version_num}`
-      )
+      console.log(`Written: ${data.id.slice(0, 8)}  ${data.title}  v${data.version.version_num}`)
     })
 
   // slay tasks artifacts append <artifactId>
@@ -658,9 +656,7 @@ export function artifactsSubcommand(): Command {
         `/api/artifacts/${encodeURIComponent(artifactId)}/content?${versionWriteQuery(opts.mutateVersion)}`,
         stdinStream()
       )
-      console.log(
-        `Appended: ${data.id.slice(0, 8)}  ${data.title}  v${data.version.version_num}`
-      )
+      console.log(`Appended: ${data.id.slice(0, 8)}  ${data.title}  v${data.version.version_num}`)
     })
 
   // slay tasks artifacts delete <artifactId>
@@ -877,7 +873,9 @@ pdf/png/html require the SlayZone app to be running.
         })
 
         if (opts.json) {
-          console.log(JSON.stringify({ path: outputPath, type: 'zip', taskId: artifacts[0].task_id }))
+          console.log(
+            JSON.stringify({ path: outputPath, type: 'zip', taskId: artifacts[0].task_id })
+          )
         } else {
           console.log(outputPath)
         }
@@ -913,7 +911,10 @@ pdf/png/html require the SlayZone app to be running.
         )
         const outputPath = opts.output ? path.resolve(opts.output) : path.resolve(artifact.title)
         fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-        await pipeline(Readable.fromWeb(body as StreamWebReadable), fs.createWriteStream(outputPath))
+        await pipeline(
+          Readable.fromWeb(body as StreamWebReadable),
+          fs.createWriteStream(outputPath)
+        )
 
         if (opts.json) {
           console.log(JSON.stringify({ path: outputPath, type: 'raw', artifactId: artifact.id }))

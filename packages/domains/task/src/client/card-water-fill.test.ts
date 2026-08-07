@@ -14,7 +14,10 @@ const approx = (a: number, b: number): boolean => Math.abs(a - b) < 0.001
 // --- no cap needed (everything hugs) ---
 assert(waterLevel([], 600, 144) === Infinity, 'empty → Infinity')
 assert(waterLevel([100, 100], 600, 144) === Infinity, 'sum < available → Infinity (all hug)')
-assert(waterLevel([100, 100], 200, 144) === Infinity, 'sum == available → Infinity (exact fit, no cap)')
+assert(
+  waterLevel([100, 100], 200, 144) === Infinity,
+  'sum == available → Infinity (exact fit, no cap)'
+)
 
 // --- single tall card ---
 assert(waterLevel([1000], 600, 144) === 600, 'one tall card → capped at all available')

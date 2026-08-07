@@ -54,7 +54,9 @@ describe('DuplexRpc request/response correlation', () => {
     const { rpc, written } = makeRpc()
     const p = rpc.request('m')
     const id = JSON.parse(written[0]!).id as number
-    rpc.handleLine(JSON.stringify({ id, error: { code: -32001, message: 'unimplemented: m', data: { x: 1 } } }))
+    rpc.handleLine(
+      JSON.stringify({ id, error: { code: -32001, message: 'unimplemented: m', data: { x: 1 } } })
+    )
     const err = await p.then(
       () => null,
       (e: unknown) => e
@@ -126,7 +128,14 @@ describe('DuplexRpc timeouts and disposal', () => {
 describe('DuplexRpc peer dispatch', () => {
   it('routes peer requests (method + id) to onPeerRequest', () => {
     const { rpc, peerRequests } = makeRpc()
-    rpc.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 'req-1', method: 'pty.spawn', params: { sessionId: 's' } }))
+    rpc.handleLine(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'req-1',
+        method: 'pty.spawn',
+        params: { sessionId: 's' }
+      })
+    )
     expect(peerRequests).toEqual([{ method: 'pty.spawn', params: { sessionId: 's' }, id: 'req-1' }])
   })
 

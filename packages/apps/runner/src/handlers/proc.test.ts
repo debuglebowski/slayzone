@@ -49,7 +49,8 @@ function dataFor(notifies: Notify[], id: string, stream: 'stdout' | 'stderr'): s
 }
 
 function exitFor(notifies: Notify[], id: string): Record<string, unknown> | undefined {
-  return notifies.find((n) => n.method === ProcNotifications.procExit && n.params.sessionId === id)?.params
+  return notifies.find((n) => n.method === ProcNotifications.procExit && n.params.sessionId === id)
+    ?.params
 }
 
 let dir: string
@@ -146,7 +147,11 @@ describe('createProcHandlers — proc.spawn streaming', () => {
     const { notifies, ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)
     const id = 'p-fail'
-    await proc.handlers[ProcMethods.procSpawn]({ sessionId: id, command: 'sh', args: ['-c', 'exit 3'] })
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      command: 'sh',
+      args: ['-c', 'exit 3']
+    })
     await waitFor(() => exitFor(notifies, id) !== undefined)
     expect(exitFor(notifies, id)).toMatchObject({ exitCode: 3 })
     proc.disposeAll()
@@ -178,7 +183,11 @@ describe('createProcHandlers — env + cwd', () => {
     const { notifies, ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)
     const id = 'p-cwd'
-    await proc.handlers[ProcMethods.procSpawn]({ sessionId: id, command: 'pwd', cwd: realpathSync(dir) })
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      command: 'pwd',
+      cwd: realpathSync(dir)
+    })
     await waitFor(() => exitFor(notifies, id) !== undefined)
     expect(dataFor(notifies, id, 'stdout').trim()).toBe(realpathSync(dir))
     proc.disposeAll()
@@ -205,7 +214,11 @@ describe('createProcHandlers — proc.kill', () => {
     const { notifies, ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)
     const id = 'p-kill'
-    await proc.handlers[ProcMethods.procSpawn]({ sessionId: id, command: 'sh', args: ['-c', 'sleep 30'] })
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      command: 'sh',
+      args: ['-c', 'sleep 30']
+    })
     // Give the child a moment to be live before signalling.
     await new Promise((r) => setTimeout(r, 100))
     const res = await proc.handlers[ProcMethods.procKill]({ sessionId: id })
@@ -231,10 +244,18 @@ describe('createProcHandlers — same-id replacement', () => {
     const { notifies, ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)
     const id = 'dup'
-    await proc.handlers[ProcMethods.procSpawn]({ sessionId: id, command: 'sh', args: ['-c', 'sleep 30'] })
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      command: 'sh',
+      args: ['-c', 'sleep 30']
+    })
     await new Promise((r) => setTimeout(r, 50))
     // Replace under the same id (kills the first) with a short-lived command.
-    await proc.handlers[ProcMethods.procSpawn]({ sessionId: id, command: 'sh', args: ['-c', 'printf done'] })
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      command: 'sh',
+      args: ['-c', 'printf done']
+    })
     await waitFor(() => exitFor(notifies, id) !== undefined)
     await new Promise((r) => setTimeout(r, 100))
 
@@ -254,9 +275,9 @@ describe('createProcHandlers — allowedRoots guard + dispose', () => {
     const proc = createProcHandlers(ctx)
     // procSpawn validates + guards synchronously, so it throws rather than
     // returning a rejected promise.
-    expect(() => proc.handlers[ProcMethods.procSpawn]({ sessionId: 'x', command: 'pwd', cwd: '/' })).toThrow(
-      /allowedRoots/
-    )
+    expect(() =>
+      proc.handlers[ProcMethods.procSpawn]({ sessionId: 'x', command: 'pwd', cwd: '/' })
+    ).toThrow(/allowedRoots/)
     proc.disposeAll()
   })
 

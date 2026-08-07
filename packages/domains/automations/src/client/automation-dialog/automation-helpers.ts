@@ -1,8 +1,4 @@
-import type {
-  TriggerConfig,
-  ConditionConfig,
-  ActionConfig
-} from '@slayzone/automations/shared'
+import type { TriggerConfig, ConditionConfig, ActionConfig } from '@slayzone/automations/shared'
 import type { AiProviderOption, ConditionPresetType } from './automation-types'
 
 export function triggerDescription(trigger: TriggerConfig): string {

@@ -77,10 +77,9 @@ export class AutomationEngine {
     taskEvents.on('task:updated', ({ taskId, projectId, oldStatus }) => {
       if (oldStatus === undefined) return
       void (async () => {
-        const row = await this.db.get<{ status: string }>(
-          'SELECT status FROM tasks WHERE id = ?',
-          [taskId]
-        )
+        const row = await this.db.get<{ status: string }>('SELECT status FROM tasks WHERE id = ?', [
+          taskId
+        ])
         if (!row) return
         if (oldStatus === row.status) return
 

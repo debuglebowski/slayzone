@@ -37,8 +37,14 @@ interface BrowserApi {
     profileKey?: string
   }): Promise<string>
   destroyView(viewId: string): Promise<void>
-  setBounds(viewId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
-  attachView?(viewId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
+  setBounds(
+    viewId: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void>
+  attachView?(
+    viewId: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void>
   setVisible(viewId: string, visible: boolean): Promise<void>
   navigate(viewId: string, url: string): Promise<void>
   goBack(viewId: string): Promise<void>
@@ -47,7 +53,12 @@ interface BrowserApi {
   onEvent(cb: (evt: Record<string, unknown>) => void): () => void
   // Extensions inlay-modal surface (chromeless child window pinned under the
   // React modal card). Optional — absent on plain-browser dev.
-  setExtensionsBounds?(bounds: { x: number; y: number; width: number; height: number }): Promise<void>
+  setExtensionsBounds?(bounds: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }): Promise<void>
   closeExtensions?(): Promise<void>
   listExtensions?(profileKey: string): Promise<ExtensionInfo[]>
   openExtensionOptions?(extensionId: string): Promise<void>
@@ -294,7 +305,13 @@ export function createEmbeddedTabHost(taskId: string, defaultUrl: string): Embed
     e.lastRect = rect
     if (e.creating) return
     e.creating = api
-      .createView({ taskId, tabId: tileId, url: e.state.url, bounds: toBounds(rect), profileKey: currentProfileKey })
+      .createView({
+        taskId,
+        tabId: tileId,
+        url: e.state.url,
+        bounds: toBounds(rect),
+        profileKey: currentProfileKey
+      })
       .then((viewId) => {
         e.creating = null
         if (!viewId) return '' // transport absent — stay inert

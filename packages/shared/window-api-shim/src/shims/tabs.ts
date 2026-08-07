@@ -13,7 +13,7 @@ import type { TerminalMode } from '@slayzone/terminal/shared'
 import type {
   TerminalTab,
   CreateTerminalTabInput,
-  UpdateTerminalTabInput,
+  UpdateTerminalTabInput
 } from '@slayzone/task-terminals/shared'
 
 const tabsByTask = new Map<string, TerminalTab[]>()
@@ -60,7 +60,7 @@ export const tabsShim = {
       position: 0,
       createdAt: nowIso(),
       wasSpawned: false,
-      hibernated: false,
+      hibernated: false
     }
     replaceList(taskId, [...existing, tab])
     return tab
@@ -83,7 +83,7 @@ export const tabsShim = {
       position: existing.length,
       createdAt: nowIso(),
       wasSpawned: false,
-      hibernated: false,
+      hibernated: false
     }
     replaceList(input.taskId, [...existing, tab])
     return tab
@@ -103,7 +103,7 @@ export const tabsShim = {
       position: listFor(found.task).length,
       createdAt: nowIso(),
       wasSpawned: false,
-      hibernated: false,
+      hibernated: false
     }
     replaceList(found.task, [...listFor(found.task), newTab])
     return newTab
@@ -114,7 +114,7 @@ export const tabsShim = {
     if (!found) return false
     replaceList(
       found.task,
-      listFor(found.task).filter((t) => t.id !== tabId),
+      listFor(found.task).filter((t) => t.id !== tabId)
     )
     return true
   },
@@ -126,12 +126,12 @@ export const tabsShim = {
       ...found.tab,
       label: input.label !== undefined ? input.label : found.tab.label,
       mode: input.mode ?? found.tab.mode,
-      position: input.position ?? found.tab.position,
+      position: input.position ?? found.tab.position
     }
     const list = listFor(found.task).map((t) => (t.id === input.id ? updated : t))
     replaceList(found.task, list)
     return updated
   },
 
-  move: async (_input: unknown): Promise<boolean> => true,
+  move: async (_input: unknown): Promise<boolean> => true
 }

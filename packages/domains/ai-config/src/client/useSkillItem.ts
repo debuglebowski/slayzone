@@ -120,7 +120,11 @@ export function useSkillItem({
     async (provider: CliProvider) => {
       const [disk, expected] = await Promise.all([
         trpcClient.aiConfig.readProviderSkill.query({ projectPath, provider, itemId: item.id }),
-        trpcClient.aiConfig.getExpectedSkillContent.query({ projectPath, provider, itemId: item.id })
+        trpcClient.aiConfig.getExpectedSkillContent.query({
+          projectPath,
+          provider,
+          itemId: item.id
+        })
       ])
       setDiskContents((prev) => ({ ...prev, [provider]: disk.exists ? disk.content : '' }))
       setExpectedContents((prev) => ({ ...prev, [provider]: expected }))

@@ -201,7 +201,10 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), codexTaskId)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          codexTaskId
+        )
         return task?.codex_conversation_id ?? null
       })
       .toBe(detectedId)
@@ -237,7 +240,10 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), geminiTaskId)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          geminiTaskId
+        )
         return task?.gemini_conversation_id ?? null
       })
       .toBe(detectedId)

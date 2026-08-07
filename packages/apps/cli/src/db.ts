@@ -118,4 +118,3 @@ export async function notifyApp(): Promise<void> {
     console.error(`  Re-run ${dev ? 'without --dev' : 'with --dev'} to target the same database.`)
   }
 }
-

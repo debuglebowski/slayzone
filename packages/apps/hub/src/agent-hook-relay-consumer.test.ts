@@ -1,6 +1,9 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest'
 import type { RestApiDeps, TerminalStateBridge } from '@slayzone/transport/server'
-import { attachAgentHookRelayConsumer, type AgentHookRelayGateway } from './agent-hook-relay-consumer'
+import {
+  attachAgentHookRelayConsumer,
+  type AgentHookRelayGateway
+} from './agent-hook-relay-consumer'
 
 // processAgentHook reaches into the task + diagnostics domains (DB writes). Mock
 // those exactly as the transport's own agent-hook.test.ts does, so this unit
@@ -24,9 +27,8 @@ function makeFakeGateway(): {
   gateway: AgentHookRelayGateway
   emit: (payload: { runnerId: string; name: string; payload?: unknown }) => void
 } {
-  let handler:
-    | ((payload: { runnerId: string; name: string; payload?: unknown }) => void)
-    | null = null
+  let handler: ((payload: { runnerId: string; name: string; payload?: unknown }) => void) | null =
+    null
   const gateway: AgentHookRelayGateway = {
     events: {
       on: (_event, listener) => {

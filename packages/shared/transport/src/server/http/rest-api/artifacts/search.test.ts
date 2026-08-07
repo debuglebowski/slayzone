@@ -96,9 +96,8 @@ let folderId = ''
 
 await describe('GET /api/artifacts/search', () => {
   test('setup fixtures', async () => {
-    alphaId = (
-      await makeArtifact(taskA, 'alpha-notes.md', 'first line\nNEEDLE here\nthird line\n')
-    ).id
+    alphaId = (await makeArtifact(taskA, 'alpha-notes.md', 'first line\nNEEDLE here\nthird line\n'))
+      .id
     betaId = (await makeArtifact(taskA, 'beta.md', 'nothing to see\nneedle lowercase\n')).id
     otherTaskId = (await makeArtifact(taskB, 'gamma-NEEDLE.md', 'no body match\n')).id
     const folderRes = await rest.request<{ data: { id: string } }>(

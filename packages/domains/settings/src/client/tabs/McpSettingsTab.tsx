@@ -9,9 +9,7 @@ export function McpSettingsTab() {
   const [preferredPort, setPreferredPort] = useState('')
   const [actualPort, setActualPort] = useState('')
 
-  const preferredPortQuery = useQuery(
-    trpc.settings.get.queryOptions({ key: 'mcp_preferred_port' })
-  )
+  const preferredPortQuery = useQuery(trpc.settings.get.queryOptions({ key: 'mcp_preferred_port' }))
   const actualPortQuery = useQuery(trpc.settings.get.queryOptions({ key: 'server_port' }))
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 

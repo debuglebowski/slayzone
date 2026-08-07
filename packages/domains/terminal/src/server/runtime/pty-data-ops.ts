@@ -63,7 +63,8 @@ export function createDbPtySessionLedger(db: SlayzoneDb): PtySessionLedger {
     recordPendingSpawn: (args) => recordPendingSpawnDb(db, args),
     prunePendingSpawns: (scope) => prunePendingSpawnsDb(db, scope),
     bindSessionToTask: (args) => bindSessionToTaskDb(db, args),
-    buildMcpEnv: (taskId, mode, remote) => buildMcpEnvDb(db, taskId, mode, undefined, undefined, remote)
+    buildMcpEnv: (taskId, mode, remote) =>
+      buildMcpEnvDb(db, taskId, mode, undefined, undefined, remote)
   }
 }
 
@@ -119,9 +120,9 @@ export function createDbPtySpawnLookups(db: SlayzoneDb): PtySpawnLookups {
       return row ? mapModeRow(row) : null
     },
     getTaskProjectId: async (taskId) => {
-      const row = (await db
-        .prepare('SELECT project_id FROM tasks WHERE id = ?')
-        .get(taskId)) as { project_id?: string } | undefined
+      const row = (await db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId)) as
+        | { project_id?: string }
+        | undefined
       return row?.project_id ?? null
     },
     // Hub-local by default — no runner assignment exists yet. Wave 2's

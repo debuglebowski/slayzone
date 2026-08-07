@@ -152,10 +152,7 @@ function probeFreePort(host: string): Promise<number> {
  * build's `buildId` from the body when present — so the supervisor can compare
  * the live process against the on-disk build and flag a stale sidecar.
  */
-function probeHealth(
-  host: string,
-  port: number
-): Promise<{ ok: boolean; buildId: string | null }> {
+function probeHealth(host: string, port: number): Promise<{ ok: boolean; buildId: string | null }> {
   return new Promise((resolve) => {
     const req = http.get({ host, port, path: '/health', timeout: 1_000 }, (res) => {
       if (res.statusCode !== 200) {
@@ -434,9 +431,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
       // Only act on a definite mismatch against a ready child — never on a
       // missing manifest or before the child has reported its build.
       if (health === 'ready' && runningBuildId && diskBuildId && diskBuildId !== runningBuildId) {
-        opts.logger(
-          `[supervisor] build changed on disk (${diskBuildId}) — hot-restarting sidecar`
-        )
+        opts.logger(`[supervisor] build changed on disk (${diskBuildId}) — hot-restarting sidecar`)
         hotRestartInFlight = true
         void doRestart().finally(() => {
           hotRestartInFlight = false

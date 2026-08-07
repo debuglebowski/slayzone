@@ -130,8 +130,14 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       folderPathMap
     } = useArtifacts(taskId, initialActiveArtifactId)
 
-    const { expandedFolders, toggleFolder, childFolders, artifactsByFolder, moveToFolders, flatArtifactIds } =
-      useArtifactTree({ taskId, folders, artifacts, folderPathMap })
+    const {
+      expandedFolders,
+      toggleFolder,
+      childFolders,
+      artifactsByFolder,
+      moveToFolders,
+      flatArtifactIds
+    } = useArtifactTree({ taskId, folders, artifacts, folderPathMap })
 
     const {
       selectedIds,

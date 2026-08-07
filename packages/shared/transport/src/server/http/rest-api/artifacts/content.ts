@@ -49,7 +49,9 @@ interface ArtifactRow {
  * Stage a request body to a temp file (constant memory) and return its path.
  * Callers MUST unlink it — both create routes do so in a `finally`.
  */
-async function stageRequestBody(req: Parameters<Parameters<Express['post']>[1]>[0]): Promise<string> {
+async function stageRequestBody(
+  req: Parameters<Parameters<Express['post']>[1]>[0]
+): Promise<string> {
   const stagingDir = join(tmpdir(), 'slayzone-artifact-uploads')
   mkdirSync(stagingDir, { recursive: true })
   const tmpPath = join(stagingDir, randomUUID())
@@ -157,9 +159,11 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
         // differently: `read` prints nothing and exits 0 for a missing working
         // copy (long-standing behavior), while `download` reports it as an error.
         // A machine-readable code keeps that fork off the human message text.
-        res
-          .status(404)
-          .json({ ok: false, code: 'ARTIFACT_FILE_MISSING', error: 'Artifact file not found on disk.' })
+        res.status(404).json({
+          ok: false,
+          code: 'ARTIFACT_FILE_MISSING',
+          error: 'Artifact file not found on disk.'
+        })
         return
       }
 

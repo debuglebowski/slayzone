@@ -18,7 +18,12 @@ const {
   getClientForTask
 } = await import('./hubOwnershipStore')
 
-const EMPTY = { hubIdByProject: new Map(), hubIdByTask: new Map(), seededProjects: new Map(), seededTasks: new Map() }
+const EMPTY = {
+  hubIdByProject: new Map(),
+  hubIdByTask: new Map(),
+  seededProjects: new Map(),
+  seededTasks: new Map()
+}
 
 describe('hubOwnershipStore', () => {
   beforeEach(() => {
@@ -47,7 +52,9 @@ describe('hubOwnershipStore', () => {
     useHubOwnershipStore.getState().noteTaskHub('t-new', 'remote-a')
     expect(getHubIdForTask('t-new')).toBe('remote-a')
 
-    useHubOwnershipStore.getState().setOwnership(new Map([['p-1', 'local']]), new Map([['t-1', 'local']]))
+    useHubOwnershipStore
+      .getState()
+      .setOwnership(new Map([['p-1', 'local']]), new Map([['t-1', 'local']]))
     expect(getHubIdForTask('t-new')).toBe('remote-a')
     expect(getHubIdForTask('t-1')).toBe('local')
   })
@@ -75,9 +82,13 @@ describe('hubOwnershipStore', () => {
   })
 
   it('routes an owned entity to its hub client and everything else to the default', () => {
-    useHubOwnershipStore
-      .getState()
-      .setOwnership(new Map([['p-remote', 'remote-a'], ['p-local', 'local']]), new Map([['t-remote', 'remote-a']]))
+    useHubOwnershipStore.getState().setOwnership(
+      new Map([
+        ['p-remote', 'remote-a'],
+        ['p-local', 'local']
+      ]),
+      new Map([['t-remote', 'remote-a']])
+    )
 
     expect(getClientForProject('p-remote')).toBe(REMOTE_CLIENT)
     expect(getClientForTask('t-remote')).toBe(REMOTE_CLIENT)

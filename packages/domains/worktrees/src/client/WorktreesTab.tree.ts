@@ -4,10 +4,7 @@ import type { DetectedWorktree } from '../shared/types'
 import type { WorktreeNode } from './WorktreesTab.types'
 
 // Build hierarchical tree structure from detected worktrees + tasks
-export function buildWorktreeTree(
-  worktrees: DetectedWorktree[],
-  tasks: Task[]
-): WorktreeNode[] {
+export function buildWorktreeTree(worktrees: DetectedWorktree[], tasks: Task[]): WorktreeNode[] {
   const nodes: Map<string, WorktreeNode> = new Map()
   const activeTasks = tasks.filter((t) => !t.archived_at)
 

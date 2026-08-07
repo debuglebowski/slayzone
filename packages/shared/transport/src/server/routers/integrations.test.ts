@@ -851,9 +851,9 @@ test('syncNow: missing remote archives local task (treats issue as deleted upstr
   expect(result.scanned).toBe(1)
   expect(result.pulled).toBe(1)
   expect(result.errors.length).toBe(0)
-  const task = h.db
-    .prepare('SELECT archived_at FROM tasks WHERE id = ?')
-    .get(missTaskId) as { archived_at: string | null }
+  const task = h.db.prepare('SELECT archived_at FROM tasks WHERE id = ?').get(missTaskId) as {
+    archived_at: string | null
+  }
   expect(task.archived_at).toBeTruthy()
 })
 

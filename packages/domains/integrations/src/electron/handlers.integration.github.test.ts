@@ -16,7 +16,11 @@ import {
   runScopedDiscovery
 } from '../server/integration-test-helpers'
 import * as githubClient from './github-client'
-import { pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders } from '../server/sync'
+import {
+  pushNewTaskToProviders,
+  pushArchiveToProviders,
+  pushUnarchiveToProviders
+} from '../server/sync'
 import { parseGitHubExternalKey } from './sync-helpers'
 import type { ProviderStatus } from '../shared'
 

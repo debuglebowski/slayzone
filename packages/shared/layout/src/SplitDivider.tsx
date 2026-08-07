@@ -22,8 +22,17 @@ interface SplitDividerProps {
 }
 
 export function SplitDivider(props: SplitDividerProps) {
-  const { splitId, index, rect, direction, childMinsPx, totalContentPx, getFractions, onResize, onDragChange } =
-    props
+  const {
+    splitId,
+    index,
+    rect,
+    direction,
+    childMinsPx,
+    totalContentPx,
+    getFractions,
+    onResize,
+    onDragChange
+  } = props
   const horizontal = direction === 'row'
   const dragRef = useRef<{ pos: number; fractions: number[] } | null>(null)
   const moveRef = useRef<((e: MouseEvent) => void) | null>(null)

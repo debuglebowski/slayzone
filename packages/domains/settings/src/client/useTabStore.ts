@@ -738,8 +738,7 @@ useTabStore.subscribe(
         // idempotent per-window and each hub only tracks its own projects.
         const defaultClient = getTrpcClient()
         for (const [hubId, counts] of countsByHub) {
-          const client =
-            hubId && getHubClient(hubId) ? getHubClient(hubId)!.client : defaultClient
+          const client = hubId && getHubClient(hubId) ? getHubClient(hubId)!.client : defaultClient
           client.pty.warmSetProjectTabCounts.mutate({ counts }).catch(() => {})
         }
         // No open task tabs at all → clear the default hub's counts (preserves the

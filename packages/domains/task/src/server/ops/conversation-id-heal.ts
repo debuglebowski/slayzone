@@ -29,9 +29,7 @@ const LEGACY_COLS = ['claude', 'codex', 'cursor', 'gemini', 'opencode'] as const
  */
 export async function collectReferencedConversationIds(db: SlayzoneDb): Promise<Set<string>> {
   const cols = LEGACY_COLS.map((c) => `${c}_conversation_id`).join(', ')
-  const rows = await db.all<Record<string, unknown>>(
-    `SELECT provider_config, ${cols} FROM tasks`
-  )
+  const rows = await db.all<Record<string, unknown>>(`SELECT provider_config, ${cols} FROM tasks`)
   const ids = new Set<string>()
   for (const row of rows) {
     for (const c of LEGACY_COLS) {

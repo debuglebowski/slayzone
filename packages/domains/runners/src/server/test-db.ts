@@ -20,10 +20,12 @@ export function createMigratedDb(): TestDb {
 }
 
 /** Insert a minimal project + task pair for binding-helper tests. */
-export function seedProjectAndTask(raw: Database.Database, projectId: string, taskId: string): void {
-  raw
-    .prepare(`INSERT INTO projects (id, name, color) VALUES (?, ?, ?)`)
-    .run(projectId, 'P', '#000')
+export function seedProjectAndTask(
+  raw: Database.Database,
+  projectId: string,
+  taskId: string
+): void {
+  raw.prepare(`INSERT INTO projects (id, name, color) VALUES (?, ?, ?)`).run(projectId, 'P', '#000')
   raw
     .prepare(`INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)`)
     .run(taskId, projectId, 'T')

@@ -165,9 +165,7 @@ export function ProviderListView({
                           <Switch
                             id={`list-enable-${mode.id}`}
                             checked={mode.enabled}
-                            onCheckedChange={(checked) =>
-                              updateMode(mode.id, { enabled: checked })
-                            }
+                            onCheckedChange={(checked) => updateMode(mode.id, { enabled: checked })}
                           />
                         </div>
                         <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />
@@ -210,9 +208,7 @@ export function ProviderListView({
                           <Switch
                             id={`list-enable-${mode.id}`}
                             checked={mode.enabled}
-                            onCheckedChange={(checked) =>
-                              updateMode(mode.id, { enabled: checked })
-                            }
+                            onCheckedChange={(checked) => updateMode(mode.id, { enabled: checked })}
                           />
                         </div>
                         <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />
@@ -355,8 +351,8 @@ export function ProviderListView({
               onChange={(e) => setNewDefaultFlags(e.target.value)}
             />
             <p className="text-[10px] text-muted-foreground">
-              Default value for <code className="px-1 bg-muted rounded">{'{flags}'}</code>.
-              Editable per task.
+              Default value for <code className="px-1 bg-muted rounded">{'{flags}'}</code>. Editable
+              per task.
             </p>
           </div>
 

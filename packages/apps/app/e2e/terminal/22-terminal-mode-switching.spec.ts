@@ -138,7 +138,8 @@ test.describe('Terminal mode switching', () => {
   test('switching back to a mode restores that mode default flags', async ({ mainWindow }) => {
     // Set custom flags for claude-code
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, claudeFlags: '--custom-flag-test' }),
+      (id) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, claudeFlags: '--custom-flag-test' }),
       taskId
     )
 

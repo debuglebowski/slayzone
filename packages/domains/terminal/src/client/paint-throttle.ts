@@ -64,10 +64,8 @@ export function decideThrottle(
   state: ThrottleState,
   opts: ThrottleOptions
 ): ThrottleDecision {
-  const nextFloodScore =
-    (1 - opts.floodEmaAlpha) * state.floodScore + opts.floodEmaAlpha * bytes
-  const flooding =
-    nextFloodScore > opts.floodBytesThreshold || bytes > opts.floodBytesThreshold
+  const nextFloodScore = (1 - opts.floodEmaAlpha) * state.floodScore + opts.floodEmaAlpha * bytes
+  const flooding = nextFloodScore > opts.floodBytesThreshold || bytes > opts.floodBytesThreshold
   const slowDrip = now - state.lastActivityTime > opts.slowDripThresholdMs
   if (slowDrip && !flooding && state.skipCounter < opts.throttleSkipFrames) {
     return { skip: true, nextSkipCounter: state.skipCounter + 1, nextFloodScore }

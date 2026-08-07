@@ -49,9 +49,9 @@ test.describe('Auto worktree on task create', () => {
     await expect
       .poll(async () => {
         const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      created.id
-    )
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          created.id
+        )
         return task?.worktree_path ?? null
       })
       .toBe(
@@ -110,9 +110,9 @@ test.describe('Auto worktree on task create', () => {
     await expect
       .poll(async () => {
         const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      created.id
-    )
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          created.id
+        )
         return task?.worktree_path ?? null
       })
       .toBe(

@@ -17,7 +17,14 @@ import {
   useLayoutStore,
   useLayoutTree
 } from '@slayzone/layout'
-import type { LayoutNode, LayoutTree, PanelProps, PanelRegistry, Tile, TileType } from '@slayzone/layout'
+import type {
+  LayoutNode,
+  LayoutTree,
+  PanelProps,
+  PanelRegistry,
+  Tile,
+  TileType
+} from '@slayzone/layout'
 import {
   closeExtensionsModal,
   createEmbeddedTabHost,
@@ -145,7 +152,13 @@ const toggleBtnBase: CSSProperties = {
   fontWeight: 500
 }
 
-function PanelToggle({ active, onToggle }: { active: Set<string>; onToggle: (type: TileType) => void }) {
+function PanelToggle({
+  active,
+  onToggle
+}: {
+  active: Set<string>
+  onToggle: (type: TileType) => void
+}) {
   return (
     <div
       style={{
@@ -165,9 +178,18 @@ function PanelToggle({ active, onToggle }: { active: Set<string>; onToggle: (typ
             key={p.type}
             type="button"
             onClick={() => onToggle(p.type)}
-            style={{ ...toggleBtnBase, background: on ? COLORS.activeBg : 'transparent', color: on ? COLORS.text : COLORS.muted }}
+            style={{
+              ...toggleBtnBase,
+              background: on ? COLORS.activeBg : 'transparent',
+              color: on ? COLORS.text : COLORS.muted
+            }}
           >
-            <span style={{ font: '12px ui-monospace, monospace', color: on ? COLORS.accent : COLORS.faint }}>
+            <span
+              style={{
+                font: '12px ui-monospace, monospace',
+                color: on ? COLORS.accent : COLORS.faint
+              }}
+            >
               {p.glyph}
             </span>
             {p.label}
@@ -255,7 +277,8 @@ export function TaskDetailsView() {
         <div>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Demo dialog</div>
           <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>
-            Rendered on the overlay plane — above the panes (and, once wired, above a live native browser).
+            Rendered on the overlay plane — above the panes (and, once wired, above a live native
+            browser).
           </div>
         </div>
       )
@@ -285,7 +308,15 @@ export function TaskDetailsView() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <span style={{ width: 11, height: 11, borderRadius: '50%', border: '2px solid #e0a042', flex: '0 0 auto' }} />
+          <span
+            style={{
+              width: 11,
+              height: 11,
+              borderRadius: '50%',
+              border: '2px solid #e0a042',
+              flex: '0 0 auto'
+            }}
+          />
           <span style={{ fontSize: 20, fontWeight: 700, whiteSpace: 'nowrap' }}>Sample Task</span>
           <span style={{ fontSize: 12, color: COLORS.muted }}>· placeholder</span>
         </div>
@@ -311,14 +342,24 @@ export function TaskDetailsView() {
           <button
             type="button"
             onClick={openExtensions}
-            style={{ ...toggleBtnBase, background: COLORS.barBg, border: `1px solid ${COLORS.border}`, color: COLORS.muted }}
+            style={{
+              ...toggleBtnBase,
+              background: COLORS.barBg,
+              border: `1px solid ${COLORS.border}`,
+              color: COLORS.muted
+            }}
           >
             Extensions
           </button>
           <button
             type="button"
             onClick={openDemoDialog}
-            style={{ ...toggleBtnBase, background: COLORS.barBg, border: `1px solid ${COLORS.border}`, color: COLORS.muted }}
+            style={{
+              ...toggleBtnBase,
+              background: COLORS.barBg,
+              border: `1px solid ${COLORS.border}`,
+              color: COLORS.muted
+            }}
           >
             Open dialog
           </button>
@@ -377,7 +418,13 @@ function ExtIcon({
         type="button"
         onClick={primary}
         disabled={!primary}
-        title={ext.hasPopup ? ext.name : ext.hasOptions ? `${ext.name} — settings` : `${ext.name} (no UI)`}
+        title={
+          ext.hasPopup
+            ? ext.name
+            : ext.hasOptions
+              ? `${ext.name} — settings`
+              : `${ext.name} (no UI)`
+        }
         style={{
           width: 28,
           height: 28,
@@ -474,7 +521,12 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
     if (!el) return
     const box = (): { x: number; y: number; width: number; height: number } => {
       const r = el.getBoundingClientRect()
-      return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
+      return {
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        width: Math.round(r.width),
+        height: Math.round(r.height)
+      }
     }
     // Navigate the inlay to the active selection. Web Store/Manage open (or
     // reuse) the inlay; an extension selection navigates the already-open inlay
@@ -573,7 +625,12 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
                 key={v}
                 type="button"
                 onClick={() => setSelected({ kind: v })}
-                style={{ ...segBtn, flex: '0 0 auto', background: on ? COLORS.activeBg : 'transparent', color: on ? COLORS.text : COLORS.muted }}
+                style={{
+                  ...segBtn,
+                  flex: '0 0 auto',
+                  background: on ? COLORS.activeBg : 'transparent',
+                  color: on ? COLORS.text : COLORS.muted
+                }}
               >
                 {v === 'store' ? 'Web Store' : 'Manage'}
               </button>
@@ -581,8 +638,24 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
           })}
           {exts.length > 0 && (
             <>
-              <div style={{ width: 1, height: 18, background: COLORS.border, flex: '0 0 auto', margin: '0 2px' }} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 2, overflowX: 'auto', minWidth: 0 }}>
+              <div
+                style={{
+                  width: 1,
+                  height: 18,
+                  background: COLORS.border,
+                  flex: '0 0 auto',
+                  margin: '0 2px'
+                }}
+              />
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  overflowX: 'auto',
+                  minWidth: 0
+                }}
+              >
                 {exts.map((e) => (
                   <ExtIcon
                     key={e.id}
@@ -596,7 +669,11 @@ function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose:
             </>
           )}
         </div>
-        <button type="button" onClick={onClose} style={{ ...segBtn, color: COLORS.muted, flex: '0 0 auto' }}>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{ ...segBtn, color: COLORS.muted, flex: '0 0 auto' }}
+        >
           ✕
         </button>
       </div>

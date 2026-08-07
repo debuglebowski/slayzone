@@ -83,9 +83,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     await waitForNoPtySession(mainWindow, sessionId)
   })
 
-  test('status → in_progress broadcasts pty:respawn-suggested (Part B)', async ({
-    mainWindow
-  }) => {
+  test('status → in_progress broadcasts pty:respawn-suggested (Part B)', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({
       projectId,

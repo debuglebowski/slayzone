@@ -13,7 +13,7 @@ import type {
   NativeDialogHostRemote,
   EmbeddedTabHostRemote,
   JsonRpcHostRemote,
-  LayoutHostRemote,
+  LayoutHostRemote
 } from '@slayzone/mojo-bindings'
 
 let tasklistPromise: Promise<TasklistHostRemote> | null = null
@@ -63,14 +63,18 @@ export function settingsRemote(): Promise<SettingsHostRemote> {
 
 export function nativeDialogRemote(): Promise<NativeDialogHostRemote> {
   if (!nativeDialogPromise) {
-    nativeDialogPromise = import('@slayzone/mojo-bindings').then((m) => m.NativeDialogHost.getRemote())
+    nativeDialogPromise = import('@slayzone/mojo-bindings').then((m) =>
+      m.NativeDialogHost.getRemote()
+    )
   }
   return nativeDialogPromise
 }
 
 export function embeddedTabRemote(): Promise<EmbeddedTabHostRemote> {
   if (!embeddedTabPromise) {
-    embeddedTabPromise = import('@slayzone/mojo-bindings').then((m) => m.EmbeddedTabHost.getRemote())
+    embeddedTabPromise = import('@slayzone/mojo-bindings').then((m) =>
+      m.EmbeddedTabHost.getRemote()
+    )
   }
   return embeddedTabPromise
 }
@@ -129,7 +133,7 @@ export async function setNativeOverlay(overlayId: string): Promise<boolean> {
 // `request.params ?? []` missed.
 export async function jsonRpcCall<T = unknown>(
   method: string,
-  request: { params: unknown[] } | unknown[] | Record<string, unknown> = { params: [] },
+  request: { params: unknown[] } | unknown[] | Record<string, unknown> = { params: [] }
 ): Promise<T> {
   let serialized: string
   if (Array.isArray(request)) {

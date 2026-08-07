@@ -62,13 +62,10 @@ export function GitPanelToolbar({
   const trpc = useTRPC()
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
   const { diffContinuousFlow, diffTreeCollapsed, diffSideBySide, diffWrap } = useAppearance()
-  const setBoolSetting = useCallback(
-    (key: string, value: boolean) => {
-      setSettingMutation.mutate({ key, value: value ? '1' : '0' })
-      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-    },
-    []
-  )
+  const setBoolSetting = useCallback((key: string, value: boolean) => {
+    setSettingMutation.mutate({ key, value: value ? '1' : '0' })
+    window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+  }, [])
 
   return (
     <>

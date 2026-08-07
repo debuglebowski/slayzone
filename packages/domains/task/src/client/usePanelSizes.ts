@@ -37,7 +37,10 @@ export function effectiveLayout(
   overrides: PanelSizes
 ): PanelLayout {
   const orderId = taskIdToOrderId(runtimeId)
-  const base: PanelLayout = { ...panelLayoutFallback(orderId), ...(config?.layout?.[orderId] ?? {}) }
+  const base: PanelLayout = {
+    ...panelLayoutFallback(orderId),
+    ...(config?.layout?.[orderId] ?? {})
+  }
   base.min = coerceBound(base.min)
   base.max = coerceBound(base.max)
   const ov = overrides[runtimeId]
@@ -236,7 +239,10 @@ export function resolvePanels(
   overrides: PanelSizes,
   containerWidth: number
 ): ResolvedLayout {
-  const panels = orderedIds.map((id) => ({ key: id, layout: effectiveLayout(id, config, overrides) }))
+  const panels = orderedIds.map((id) => ({
+    key: id,
+    layout: effectiveLayout(id, config, overrides)
+  }))
   return resolveLayout(panels, containerWidth)
 }
 

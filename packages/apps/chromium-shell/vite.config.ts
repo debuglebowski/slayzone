@@ -70,9 +70,9 @@ export default defineConfig({
       protocol: 'ws',
       host: 'localhost',
       port: 51734,
-      clientPort: 51734,
+      clientPort: 51734
     },
     // Vite needs CORS for the chrome:// origin to fetch modules.
-    cors: true,
-  },
+    cors: true
+  }
 })

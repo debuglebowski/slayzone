@@ -179,7 +179,9 @@ export function automationsCommand(): Command {
         }
       } else {
         if (!TRIGGER_TYPES.includes(opts.trigger as (typeof TRIGGER_TYPES)[number])) {
-          console.error(`Invalid trigger type: ${opts.trigger}. Must be: ${TRIGGER_TYPES.join(', ')}`)
+          console.error(
+            `Invalid trigger type: ${opts.trigger}. Must be: ${TRIGGER_TYPES.join(', ')}`
+          )
           process.exit(1)
         }
 
@@ -370,7 +372,9 @@ export function automationsCommand(): Command {
       console.log(
         `${'ID'.padEnd(idW)}  ${'STATUS'.padEnd(statusW)}  ${'DURATION'.padEnd(10)}  STARTED`
       )
-      console.log(`${'-'.repeat(idW)}  ${'-'.repeat(statusW)}  ${'-'.repeat(10)}  ${'-'.repeat(19)}`)
+      console.log(
+        `${'-'.repeat(idW)}  ${'-'.repeat(statusW)}  ${'-'.repeat(10)}  ${'-'.repeat(19)}`
+      )
       for (const r of runs) {
         const id = r.id.slice(0, 8).padEnd(idW)
         const status = r.status.padEnd(statusW)

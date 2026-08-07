@@ -1,13 +1,5 @@
-import {
-  DndContext,
-  closestCenter,
-  type DragEndEvent
-} from '@dnd-kit/core'
-import {
-  SortableContext,
-  arrayMove,
-  verticalListSortingStrategy
-} from '@dnd-kit/sortable'
+import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import {
   Label,
   Select,
@@ -94,8 +86,8 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
         <div>
           <Label className="text-base font-semibold">Tabs</Label>
           <p className="text-xs text-muted-foreground mt-1">
-            Drag to reorder. Toggle to show/hide. Conflicts tab always appears when a
-            merge/rebase is in progress.
+            Drag to reorder. Toggle to show/hide. Conflicts tab always appears when a merge/rebase
+            is in progress.
           </p>
           <div className="mt-3">
             <DndContext

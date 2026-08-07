@@ -313,7 +313,14 @@ await test('adopt matches: claude-code + project-root cwd + fresh', async () => 
   setProjectTabCounts(1, { p1: 1 })
   await settle()
   const adopted = lastSpawn()!.warmId
-  const claim = claimWarmShell({ projectId: 'p1', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: false, runnerId: 'runner-1', flags: '--dangerously' })
+  const claim = claimWarmShell({
+    projectId: 'p1',
+    mode: 'claude-code',
+    cwd: PROJECT_ROOT,
+    resuming: false,
+    runnerId: 'runner-1',
+    flags: '--dangerously'
+  })
   expect(claim?.warmId).toBe(adopted)
   // Consumed: removed from the pool, then re-armed immediately (still has an open tab).
   await settle()
@@ -324,7 +331,13 @@ await test('adopt miss: wrong mode', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({ projectId: 'p1', mode: 'codex', cwd: PROJECT_ROOT, resuming: false, runnerId: 'runner-1' })
+  const claim = claimWarmShell({
+    projectId: 'p1',
+    mode: 'codex',
+    cwd: PROJECT_ROOT,
+    resuming: false,
+    runnerId: 'runner-1'
+  })
   expect(claim).toBeNull()
   expect(getWarmStatus().p1).toBe('ready') // untouched
 })
@@ -333,7 +346,13 @@ await test('adopt miss: resume', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({ projectId: 'p1', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: true, runnerId: 'runner-1' })
+  const claim = claimWarmShell({
+    projectId: 'p1',
+    mode: 'claude-code',
+    cwd: PROJECT_ROOT,
+    resuming: true,
+    runnerId: 'runner-1'
+  })
   expect(claim).toBeNull()
   expect(getWarmStatus().p1).toBe('ready')
 })
@@ -342,14 +361,26 @@ await test('adopt miss: cwd mismatch (e.g. worktree path)', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({ projectId: 'p1', mode: 'claude-code', cwd: homedir(), resuming: false, runnerId: 'runner-1' })
+  const claim = claimWarmShell({
+    projectId: 'p1',
+    mode: 'claude-code',
+    cwd: homedir(),
+    resuming: false,
+    runnerId: 'runner-1'
+  })
   expect(claim).toBeNull()
   expect(getWarmStatus().p1).toBe('ready')
 })
 
 await test('adopt miss: no warm for project', async () => {
   init()
-  const claim = claimWarmShell({ projectId: 'nope', mode: 'claude-code', cwd: PROJECT_ROOT, resuming: false, runnerId: 'runner-1' })
+  const claim = claimWarmShell({
+    projectId: 'nope',
+    mode: 'claude-code',
+    cwd: PROJECT_ROOT,
+    resuming: false,
+    runnerId: 'runner-1'
+  })
   expect(claim).toBeNull()
 })
 

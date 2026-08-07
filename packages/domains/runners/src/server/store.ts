@@ -195,9 +195,7 @@ export async function retireStaleLocalRunners(
 }
 
 export async function getRunner(db: SlayzoneDb, id: string): Promise<RunnerRecord | null> {
-  return (
-    (await db.get<RunnerRecord>(`SELECT * FROM runners WHERE id = ?`, [id])) ?? null
-  )
+  return (await db.get<RunnerRecord>(`SELECT * FROM runners WHERE id = ?`, [id])) ?? null
 }
 
 /** Active runners by default; `includeRevoked` returns the full ledger. */

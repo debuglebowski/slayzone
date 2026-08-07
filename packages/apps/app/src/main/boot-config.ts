@@ -303,7 +303,10 @@ export function resolveHubRegistry(config: BootConfig): HubEntry[] {
  * in legacy remote mode). The Phase-5 management UI always writes an explicit
  * `default_hub_id`, so the fallback only bites a raw hand-edited file.
  */
-export function resolveDefaultHubId(config: BootConfig, registry = resolveHubRegistry(config)): string {
+export function resolveDefaultHubId(
+  config: BootConfig,
+  registry = resolveHubRegistry(config)
+): string {
   if (config.default_hub_id && registry.some((h) => h.id === config.default_hub_id)) {
     return config.default_hub_id
   }
@@ -319,7 +322,10 @@ export function resolveDefaultHubId(config: BootConfig, registry = resolveHubReg
 export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<HealthProbeResult> {
   const normalizedUrl = normalizeRemoteUrl(rawUrl)
   if (!normalizedUrl) {
-    return Promise.resolve({ ok: false, error: 'Invalid URL — use http(s):// or ws(s)://host[:port]' })
+    return Promise.resolve({
+      ok: false,
+      error: 'Invalid URL — use http(s):// or ws(s)://host[:port]'
+    })
   }
   const healthUrl = toHealthUrl(normalizedUrl)
   const get = healthUrl.startsWith('https:') ? https.get : http.get
@@ -352,7 +358,9 @@ export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<Hea
         }
       })
     })
-    req.on('error', (err) => resolve({ ok: false, normalizedUrl, error: String(err.message ?? err) }))
+    req.on('error', (err) =>
+      resolve({ ok: false, normalizedUrl, error: String(err.message ?? err) })
+    )
     req.on('timeout', () => {
       req.destroy()
       resolve({ ok: false, normalizedUrl, error: `Health check timed out after ${timeoutMs}ms` })

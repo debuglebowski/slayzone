@@ -4,14 +4,7 @@
  * ring buffer (window.__slayzone_terminalDiag) to confirm events are recorded
  * with geometry. Not part of the regression suite — a /verify driver.
  */
-import {
-  test,
-  expect,
-  seed,
-  resetApp,
-  clickProject,
-  TEST_PROJECT_PATH
-} from '../fixtures/electron'
+import { test, expect, seed, resetApp, clickProject, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { getMainSessionId, waitForPtySession, openTaskTerminal } from '../fixtures/terminal'
 
 interface DiagEvent {
@@ -151,22 +144,18 @@ test.describe('WebGL atlas diagnostics instrumentation', () => {
     await expect
       .poll(
         async () =>
-          (await readDiag(taskId)).some(
-            (e) => e.event === 'atlas-correct' && e.t >= probeFit.t
-          ),
+          (await readDiag(taskId)).some((e) => e.event === 'atlas-correct' && e.t >= probeFit.t),
         { timeout: 5_000 }
       )
       .toBe(true)
 
     const final = await readDiag(taskId)
-    const postFitCorrection = final.find(
-      (e) => e.event === 'atlas-correct' && e.t >= probeFit.t
-    )
+    const postFitCorrection = final.find((e) => e.event === 'atlas-correct' && e.t >= probeFit.t)
+    console.log('[verify] post-fit atlas-correct:', JSON.stringify(postFitCorrection, null, 1))
     console.log(
-      '[verify] post-fit atlas-correct:',
-      JSON.stringify(postFitCorrection, null, 1)
+      '[verify] webgl-load present:',
+      final.some((e) => e.event === 'webgl-load')
     )
-    console.log('[verify] webgl-load present:', final.some((e) => e.event === 'webgl-load'))
     console.log(
       '[verify] atlas-correct count:',
       final.filter((e) => e.event === 'atlas-correct').length

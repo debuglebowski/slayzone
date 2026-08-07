@@ -65,9 +65,7 @@ h.db
 function seedArtifact(title: string, renderMode: string | null, content = 'hello'): string {
   const id = crypto.randomUUID()
   h.db
-    .prepare(
-      'INSERT INTO task_artifacts (id, task_id, title, render_mode) VALUES (?, ?, ?, ?)'
-    )
+    .prepare('INSERT INTO task_artifacts (id, task_id, title, render_mode) VALUES (?, ?, ?, ?)')
     .run(id, taskId, title, renderMode)
   const p = getArtifactFilePath(taskId, id, title)
   fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -110,9 +108,21 @@ const exporter = {
 
 const withExporter = express()
 withExporter.use(express.json())
-registerArtifactsExportPdfRoute(withExporter, { db: h.slayDb, notifyRenderer: () => {}, artifactExport: exporter })
-registerArtifactsExportPngRoute(withExporter, { db: h.slayDb, notifyRenderer: () => {}, artifactExport: exporter })
-registerArtifactsExportHtmlRoute(withExporter, { db: h.slayDb, notifyRenderer: () => {}, artifactExport: exporter })
+registerArtifactsExportPdfRoute(withExporter, {
+  db: h.slayDb,
+  notifyRenderer: () => {},
+  artifactExport: exporter
+})
+registerArtifactsExportPngRoute(withExporter, {
+  db: h.slayDb,
+  notifyRenderer: () => {},
+  artifactExport: exporter
+})
+registerArtifactsExportHtmlRoute(withExporter, {
+  db: h.slayDb,
+  notifyRenderer: () => {},
+  artifactExport: exporter
+})
 const rest = await mountRestApp(withExporter)
 
 // A standalone hub has no Electron host to forward to → every export route 501s.

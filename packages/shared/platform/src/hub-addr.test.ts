@@ -9,12 +9,7 @@
  *
  * Run with: npx tsx packages/shared/platform/src/hub-addr.test.ts
  */
-import {
-  hubUrlFromAddr,
-  isBareAuthority,
-  isLoopbackRunnerUrl,
-  parseHubAddress
-} from './hub-addr'
+import { hubUrlFromAddr, isBareAuthority, isLoopbackRunnerUrl, parseHubAddress } from './hub-addr'
 
 let passed = 0
 let failed = 0
@@ -96,16 +91,40 @@ check('reject: double scheme', !isBareAuthority('http://http://x'))
 // assign (port === undefined, callers default to 0); an explicit `:0` says the
 // same thing outright. The dial side never parses — it hands the authority to
 // hubUrlFromAddr verbatim so the scheme's default port stays implicit.
-check('parse: host:port', deepEq(parseHubAddress('127.0.0.1:51100'), { host: '127.0.0.1', port: 51100 }))
-check('parse: host only → port undefined', deepEq(parseHubAddress('127.0.0.1'), { host: '127.0.0.1', port: undefined }))
-check('parse: explicit :0 → OS-assigned', deepEq(parseHubAddress('127.0.0.1:0'), { host: '127.0.0.1', port: 0 }))
-check('parse: wildcard host', deepEq(parseHubAddress('0.0.0.0:8080'), { host: '0.0.0.0', port: 8080 }))
+check(
+  'parse: host:port',
+  deepEq(parseHubAddress('127.0.0.1:51100'), { host: '127.0.0.1', port: 51100 })
+)
+check(
+  'parse: host only → port undefined',
+  deepEq(parseHubAddress('127.0.0.1'), { host: '127.0.0.1', port: undefined })
+)
+check(
+  'parse: explicit :0 → OS-assigned',
+  deepEq(parseHubAddress('127.0.0.1:0'), { host: '127.0.0.1', port: 0 })
+)
+check(
+  'parse: wildcard host',
+  deepEq(parseHubAddress('0.0.0.0:8080'), { host: '0.0.0.0', port: 8080 })
+)
 // IPv6 must come back UNBRACKETED — node's `server.listen(host)` wants the bare
 // literal, while the URL authority form requires the brackets.
-check('parse: bracketed ipv6 → unbracketed host', deepEq(parseHubAddress('[::1]:8080'), { host: '::1', port: 8080 }))
-check('parse: bracketed ipv6, no port', deepEq(parseHubAddress('[::]'), { host: '::', port: undefined }))
-check('parse: hostname', deepEq(parseHubAddress('hub.example.com:8443'), { host: 'hub.example.com', port: 8443 }))
-check('parse: trims surrounding whitespace', deepEq(parseHubAddress('  127.0.0.1:9  '), { host: '127.0.0.1', port: 9 }))
+check(
+  'parse: bracketed ipv6 → unbracketed host',
+  deepEq(parseHubAddress('[::1]:8080'), { host: '::1', port: 8080 })
+)
+check(
+  'parse: bracketed ipv6, no port',
+  deepEq(parseHubAddress('[::]'), { host: '::', port: undefined })
+)
+check(
+  'parse: hostname',
+  deepEq(parseHubAddress('hub.example.com:8443'), { host: 'hub.example.com', port: 8443 })
+)
+check(
+  'parse: trims surrounding whitespace',
+  deepEq(parseHubAddress('  127.0.0.1:9  '), { host: '127.0.0.1', port: 9 })
+)
 // Malformed → null so a caller falls back to its default rather than binding
 // something the operator did not ask for.
 check('parse: reject scheme', parseHubAddress('http://127.0.0.1:1') === null)
@@ -131,7 +150,10 @@ check('off-box: private LAN ip', !isLoopbackRunnerUrl('ws://10.0.0.5:51100/runne
 check('off-box: public ip', !isLoopbackRunnerUrl('wss://203.0.113.9/runners'))
 // A wildcard BIND is not a dialable loopback target: a token carrying it is
 // broken for everyone, so calling it "loopback" would misdirect the operator.
-check('off-box: wildcard 0.0.0.0 is not loopback', !isLoopbackRunnerUrl('ws://0.0.0.0:51100/runners'))
+check(
+  'off-box: wildcard 0.0.0.0 is not loopback',
+  !isLoopbackRunnerUrl('ws://0.0.0.0:51100/runners')
+)
 // Unparseable → false: never claim a URL is loopback when we cannot tell.
 check('unparseable: garbage → false', !isLoopbackRunnerUrl('not a url'))
 check('unparseable: empty → false', !isLoopbackRunnerUrl(''))

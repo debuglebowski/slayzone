@@ -104,9 +104,7 @@ test.describe('Terminal fit — init measures the settled panel width', () => {
       const cfg = JSON.parse(raw)
       delete cfg.layout
       await s.setSetting('panel_config', JSON.stringify(cfg))
-      await mainWindow.evaluate(() =>
-        window.dispatchEvent(new CustomEvent('panel-config-changed'))
-      )
+      await mainWindow.evaluate(() => window.dispatchEvent(new CustomEvent('panel-config-changed')))
     }
   })
 
@@ -122,10 +120,11 @@ test.describe('Terminal fit — init measures the settled panel width', () => {
     const measureOverflow = (sid: string): number | null =>
       // Runs in-page: returns screenW - containerW (px the screen exceeds its box).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((window as any).__slayzone_terminalLinks?.[sid]?._terminal?.element
+      (window as any).__slayzone_terminalLinks?.[sid]?._terminal?.element
         ? (() => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const el = (window as any).__slayzone_terminalLinks[sid]._terminal.element as HTMLElement
+            const el = (window as any).__slayzone_terminalLinks[sid]._terminal
+              .element as HTMLElement
             const s = el.querySelector('.xterm-screen')
             const c = el.parentElement
             if (!s || !c) return null
@@ -134,7 +133,7 @@ test.describe('Terminal fit — init measures the settled panel width', () => {
               Math.round(c.getBoundingClientRect().width)
             )
           })()
-        : null)
+        : null
 
     // Sample the overflow repeatedly across the whole mount→settle window. The
     // bug is the screen rendering wider than its container; piece A removes the

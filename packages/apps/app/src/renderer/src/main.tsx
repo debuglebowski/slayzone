@@ -112,7 +112,6 @@ if (isFloatingGlobalAgentPanel) {
     electronBootstrap.getHubRegistry(),
     electronBootstrap.getHubTokens()
   ]).then(async ([server, windowId, registry, hubTokens]) => {
-
     // Remote mode with a missing/unreachable server → render the recovery
     // screen instead of mounting TrpcProvider against a dead URL (it would
     // WS-reconnect-loop forever behind a blank window). Probe runs main-side.

@@ -52,7 +52,13 @@ export function CreatePrDialog({
     if (!open || task.worktree_parent_branch) return
     if (defaultBranchQuery.isSuccess) setBaseBranch(defaultBranchQuery.data ?? 'main')
     else if (defaultBranchQuery.isError) setBaseBranch('main')
-  }, [open, task.worktree_parent_branch, defaultBranchQuery.isSuccess, defaultBranchQuery.isError, defaultBranchQuery.data])
+  }, [
+    open,
+    task.worktree_parent_branch,
+    defaultBranchQuery.isSuccess,
+    defaultBranchQuery.isError,
+    defaultBranchQuery.data
+  ])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -401,10 +401,7 @@ function run(): void {
     ok(siblingB.calls.refresh === 1, 'sibling B got a frame')
     // The mutating pane must be painted exactly once even though it appears in
     // the registry — a double refresh would be wasted GPU work every heartbeat.
-    ok(
-      mutating.calls.refresh === 1,
-      `mutating pane painted once, got ${mutating.calls.refresh}`
-    )
+    ok(mutating.calls.refresh === 1, `mutating pane painted once, got ${mutating.calls.refresh}`)
   })
 
   test('repaints the mutating terminal when it is absent from the registry', () => {
@@ -430,10 +427,7 @@ function run(): void {
       }
     } as unknown as ReturnType<typeof makeStubTerminal>['terminal']
     const after = makeStubTerminal()
-    correctAtlas(addon, mutating.terminal, 'sess-1', 'heartbeat', () => [
-      throwing,
-      after.terminal
-    ])
+    correctAtlas(addon, mutating.terminal, 'sess-1', 'heartbeat', () => [throwing, after.terminal])
     ok(after.calls.refresh === 1, 'pane after the throwing one still repainted')
   })
 
@@ -466,9 +460,7 @@ function run(): void {
         throw new Error('addon disposed')
       }
     } as unknown as WebglAddon
-    correctAtlas(throwingAddon, mutating.terminal, 'sess-1', 'heartbeat', () => [
-      sibling.terminal
-    ])
+    correctAtlas(throwingAddon, mutating.terminal, 'sess-1', 'heartbeat', () => [sibling.terminal])
     ok(mutating.calls.refresh === 0, 'mutating pane not repainted')
     ok(sibling.calls.refresh === 0, 'sibling not repainted')
   })

@@ -142,7 +142,10 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
     if (!branch) return {}
     const repoBranch = (await getCurrentBranch({ repoPath })).branch
     if (branch === repoBranch) {
-      return { branchDeleted: false, branchError: `refusing to delete checked-out branch '${branch}'` }
+      return {
+        branchDeleted: false,
+        branchError: `refusing to delete checked-out branch '${branch}'`
+      }
     }
     const result = await execCapture('git', ['branch', '-D', branch], { cwd: repoPath })
     if (result.status === 0) return { branchDeleted: true }
@@ -181,7 +184,11 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
     env.SOURCE_BRANCH = params.sourceBranch ?? ''
 
     return new Promise((resolvePromise) => {
-      const child = spawn(scriptPath, [], { cwd: worktreePath, stdio: ['ignore', 'pipe', 'pipe'], env })
+      const child = spawn(scriptPath, [], {
+        cwd: worktreePath,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env
+      })
       const chunks: string[] = []
       const onData = (data: Buffer): void => {
         const text = data.toString()

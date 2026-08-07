@@ -319,7 +319,9 @@ test('hook-driven adapter → never flip on input (hooks are sole running signal
 })
 
 test('hook-driven + output-driven both suppress flip', () => {
-  expect(shouldFlipToRunningOnInput({ hookDriven: true, transitionOnInput: false }, 'idle', 5)).toBe(false)
+  expect(
+    shouldFlipToRunningOnInput({ hookDriven: true, transitionOnInput: false }, 'idle', 5)
+  ).toBe(false)
 })
 
 test('hookDriven undefined keeps TUI flip behavior (regression guard)', () => {

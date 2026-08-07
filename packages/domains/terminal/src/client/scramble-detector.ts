@@ -74,8 +74,7 @@ export function monitorFrameTime(opts: FrameTimeMonitorOptions): () => void {
   const sampleCount = opts.sampleCount ?? 20
   const requestFrame =
     opts.requestFrame ?? ((cb: () => void): number => window.requestAnimationFrame(cb))
-  const cancelFrame =
-    opts.cancelFrame ?? ((id: number): void => window.cancelAnimationFrame(id))
+  const cancelFrame = opts.cancelFrame ?? ((id: number): void => window.cancelAnimationFrame(id))
   const now = opts.now ?? ((): number => performance.now())
 
   const samples: number[] = []
@@ -335,7 +334,8 @@ export function createScrambleProbe(opts: ScrambleProbeOptions): ScrambleProbe {
   // Hidden-window throttling is handled by the caller via `opts.isCurrent()` /
   // `opts.isAborted()` checks inside the callback.
   // eslint-disable-next-line no-restricted-syntax
-  const setInt = opts.setInterval ?? ((cb: () => void, ms: number): number => window.setInterval(cb, ms))
+  const setInt =
+    opts.setInterval ?? ((cb: () => void, ms: number): number => window.setInterval(cb, ms))
   const clearInt = opts.clearInterval ?? ((id: number): void => window.clearInterval(id))
   const sampler = (opts.createSampler ?? defaultCreateSampler)(opts.terminal)
 

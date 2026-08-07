@@ -27,11 +27,7 @@ import {
   type ShutdownOptions,
   type TransportShutdownResult
 } from './chat-transport-manager'
-import {
-  createDbChatDataOps,
-  type ChatDataOps,
-  type ProviderConfigEntry
-} from './chat-data-ops'
+import { createDbChatDataOps, type ChatDataOps, type ProviderConfigEntry } from './chat-data-ops'
 import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from '../adapters/flag-parser'
@@ -572,9 +568,7 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
     // user-message instead of leaving an `interrupted` marker — Claude CLI parity
     // for "abort an unanswered turn and edit the prompt". Authoritative verdict
     // (`popped`) flows back to the caller so the renderer can restore the input.
-    abortAndPop: async (
-      o: ChatCreateOpts
-    ): Promise<{ popped: boolean; text: string | null }> => {
+    abortAndPop: async (o: ChatCreateOpts): Promise<{ popped: boolean; text: string | null }> => {
       const result = popLastUserMessage(o.tabId)
       if (!result.popped) recordInterrupted(o.tabId)
       // Stop button discards queued follow-ups alongside the in-flight turn —
@@ -1005,12 +999,8 @@ export function registerChatHandlers(
   ipcMain.handle('chat:getAutoEligibility', () => ops.getAutoEligibility())
   ipcMain.handle('chat:setMode', (_, o: ChatCreateOpts & { chatMode: string }) => ops.setMode(o))
   ipcMain.handle('chat:getModel', (_, taskId: string, mode: string) => ops.getModel(taskId, mode))
-  ipcMain.handle('chat:setModel', (_, o: ChatCreateOpts & { chatModel: string }) =>
-    ops.setModel(o)
-  )
-  ipcMain.handle('chat:getEffort', (_, taskId: string, mode: string) =>
-    ops.getEffort(taskId, mode)
-  )
+  ipcMain.handle('chat:setModel', (_, o: ChatCreateOpts & { chatModel: string }) => ops.setModel(o))
+  ipcMain.handle('chat:getEffort', (_, taskId: string, mode: string) => ops.getEffort(taskId, mode))
   ipcMain.handle('chat:setEffort', (_, o: ChatCreateOpts & { chatEffort: ChatEffort }) =>
     ops.setEffort(o)
   )
@@ -1019,8 +1009,7 @@ export function registerChatHandlers(
   )
   ipcMain.handle(
     'chat:setCollaboration',
-    (_, o: ChatCreateOpts & { chatCollaboration: ChatCollaborationMode }) =>
-      ops.setCollaboration(o)
+    (_, o: ChatCreateOpts & { chatCollaboration: ChatCollaborationMode }) => ops.setCollaboration(o)
   )
   ipcMain.handle('chat:getFastMode', (_, taskId: string, mode: string) =>
     ops.getFastMode(taskId, mode)

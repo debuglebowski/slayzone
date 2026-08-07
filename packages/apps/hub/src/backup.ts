@@ -102,9 +102,9 @@ async function writeBackupNames(db: SlayzoneDb, names: Record<string, string>): 
 }
 
 async function getBackupSettings(db: SlayzoneDb): Promise<BackupSettings> {
-  const row = (await db.prepare('SELECT value FROM settings WHERE key = ?').get(
-    'backup_settings'
-  )) as { value: string } | undefined
+  const row = (await db
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get('backup_settings')) as { value: string } | undefined
   if (!row) return { ...DEFAULT_BACKUP_SETTINGS }
   try {
     return { ...DEFAULT_BACKUP_SETTINGS, ...JSON.parse(row.value) }

@@ -17,11 +17,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { test, expect } from '../../test-utils/ipc-harness.js'
-import {
-  readClientSettings,
-  updateClientSettings,
-  clientSettingsPath
-} from './client-settings.js'
+import { readClientSettings, updateClientSettings, clientSettingsPath } from './client-settings.js'
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-settings-'))
 const file = clientSettingsPath(dir)

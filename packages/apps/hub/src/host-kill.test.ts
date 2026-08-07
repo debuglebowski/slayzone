@@ -39,7 +39,9 @@ function seedTask(terminalMode: string | null, providerConfig = '{}'): string {
   return id
 }
 
-const providerConfigOf = (id: string): Record<string, { lastPtyKilledAt?: number } & Record<string, unknown>> => {
+const providerConfigOf = (
+  id: string
+): Record<string, { lastPtyKilledAt?: number } & Record<string, unknown>> => {
   const row = h.db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as
     | { provider_config: string | null }
     | undefined

@@ -21,9 +21,7 @@ export async function listAction(opts: ListOpts): Promise<void> {
   if (opts.limit) params.set('limit', opts.limit)
 
   const qs = params.toString()
-  const { data } = await apiGet<{ ok: true; data: TaskJson[] }>(
-    `/api/tasks${qs ? `?${qs}` : ''}`
-  )
+  const { data } = await apiGet<{ ok: true; data: TaskJson[] }>(`/api/tasks${qs ? `?${qs}` : ''}`)
 
   if (opts.json) {
     console.log(JSON.stringify(data, null, 2))

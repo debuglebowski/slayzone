@@ -529,13 +529,14 @@ async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boo
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const rows = await page.evaluate(async () =>
-        (await window.getTrpcVanillaClient().runners.list.query()) as Array<{
-          id?: string
-          name?: string
-          connected?: boolean
-          usable?: boolean
-        }>
+      const rows = await page.evaluate(
+        async () =>
+          (await window.getTrpcVanillaClient().runners.list.query()) as Array<{
+            id?: string
+            name?: string
+            connected?: boolean
+            usable?: boolean
+          }>
       )
       if (rows.some((r) => r.usable === true)) {
         // Diagnostic: this gate has passed implausibly fast (~17ms, before the
@@ -1068,7 +1069,10 @@ export function seed(page: Page) {
     }) => page.evaluate((d) => window.getTrpcVanillaClient().artifacts.create.mutate(d), data),
 
     getArtifacts: (taskId: string) =>
-      page.evaluate((id) => window.getTrpcVanillaClient().artifacts.getByTask.query({ taskId: id }), taskId),
+      page.evaluate(
+        (id) => window.getTrpcVanillaClient().artifacts.getByTask.query({ taskId: id }),
+        taskId
+      ),
 
     deleteArtifact: (id: string) =>
       page.evaluate((i) => window.getTrpcVanillaClient().artifacts.delete.mutate({ id: i }), id),
@@ -1133,7 +1137,9 @@ export async function clickProject(page: Page, abbrev: string) {
 /** Click the + button in the sidebar to add a project */
 export async function clickAddProject(page: Page) {
   const button = sidebar(page)
-    .locator('button[aria-label="Add project"], button[title="Add project"], button[title^="Add project"]')
+    .locator(
+      'button[aria-label="Add project"], button[title="Add project"], button[title^="Add project"]'
+    )
     .first()
   await button.click()
 }
@@ -1202,9 +1208,9 @@ export async function openTaskById(page: Page, taskId: string): Promise<void> {
       fn(id)
     }, taskId)
     // Opening by id is deterministic, so a visible mode-trigger here is THIS task's.
-    await expect(
-      page.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-    ).toBeVisible({ timeout: 7_000 })
+    await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible(
+      { timeout: 7_000 }
+    )
     // 20s, NOT 40s. A retry budget above the 30s test timeout can never report its
     // own failure — Playwright kills the test first and blames whatever line is
     // executing, which is how a helper's failure gets filed as an unrelated bug.

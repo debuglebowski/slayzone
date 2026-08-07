@@ -37,7 +37,7 @@ function toTag(row: SidecarTagRow): Tag {
     color: row.color || '#6366f1',
     text_color: row.text_color || '#ffffff',
     sort_order: row.sort_order ?? 0,
-    created_at: nowIso(),
+    created_at: nowIso()
   }
 }
 
@@ -51,7 +51,7 @@ export const tagsShim = {
       name: data.name,
       color: data.color ?? '',
       textColor: data.textColor ?? '',
-      projectId: data.projectId,
+      projectId: data.projectId
     })
     if (!res.ok) throw new Error(res.error || 'tags:create failed')
     return toTag(res.tag)
@@ -61,7 +61,7 @@ export const tagsShim = {
       id: data.id,
       name: data.name ?? '',
       color: data.color ?? '',
-      textColor: data.textColor ?? '',
+      textColor: data.textColor ?? ''
     })
     if (!res.ok) throw new Error(res.error || 'tags:update failed')
     return toTag(res.tag)
@@ -73,7 +73,7 @@ export const tagsShim = {
   reorderTags: async (_tagIds: string[]): Promise<void> => {
     // TODO(cap-shell-14): sidecar tags handler has no reorder method; the UI
     // path that triggers this is the settings tag list drag-handle.
-  },
+  }
 }
 
 export const taskTagsShim = {
@@ -96,5 +96,5 @@ export const taskTagsShim = {
         await jsonRpcCall<SidecarAttachResult>('tags:attach', { taskId, tagId: id })
       }
     }
-  },
+  }
 }

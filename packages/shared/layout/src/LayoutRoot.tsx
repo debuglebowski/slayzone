@@ -79,7 +79,10 @@ export function LayoutRoot({ registry, host }: LayoutRootProps) {
 
   return (
     <LayoutDndContext>
-      <div ref={setRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+      <div
+        ref={setRef}
+        style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}
+      >
         {tree.root ? (
           <>
             {collectPanes(tree.root).map((pane) => {
@@ -108,7 +111,9 @@ export function LayoutRoot({ registry, host }: LayoutRootProps) {
                   direction={d.direction}
                   childMinsPx={childMinsPx}
                   totalContentPx={totalContentPx}
-                  getFractions={() => findSplit(getLayoutStore().tree.root, d.splitId)?.fractions ?? []}
+                  getFractions={() =>
+                    findSplit(getLayoutStore().tree.root, d.splitId)?.fractions ?? []
+                  }
                   onResize={(fractions) => getLayoutStore().resizeSplit(d.splitId, fractions)}
                   onDragChange={(id) => getLayoutStore().setDraggingSplit(id)}
                 />
@@ -124,7 +129,12 @@ export function LayoutRoot({ registry, host }: LayoutRootProps) {
   )
 }
 
-function PaneView(props: { pane: PaneNode; rect: Rect; registry: PanelRegistry; host: NativeSurfaceHost }) {
+function PaneView(props: {
+  pane: PaneNode
+  rect: Rect
+  registry: PanelRegistry
+  host: NativeSurfaceHost
+}) {
   const { pane, rect, registry, host } = props
   const active = pane.tiles.find((t) => t.id === pane.activeTileId) ?? pane.tiles[0]
   const tileDragActive = useLayoutStore((s) => s.draggingTileId !== null)
@@ -161,7 +171,15 @@ function PaneView(props: { pane: PaneNode; rect: Rect; registry: PanelRegistry; 
           ))
         ) : active ? (
           <TileDragHandle tileId={active.id}>
-            <span style={{ padding: '8px', fontSize: 12, fontWeight: 600, color: '#cfcfd4', cursor: 'grab' }}>
+            <span
+              style={{
+                padding: '8px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#cfcfd4',
+                cursor: 'grab'
+              }}
+            >
               {active.title}
             </span>
           </TileDragHandle>
@@ -173,7 +191,11 @@ function PaneView(props: { pane: PaneNode; rect: Rect; registry: PanelRegistry; 
         {pane.tiles.map((t) => (
           <div
             key={t.id}
-            style={{ position: 'absolute', inset: 0, display: t.id === active?.id ? 'block' : 'none' }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: t.id === active?.id ? 'block' : 'none'
+            }}
           >
             <TileBody tile={t} registry={registry} host={host} active={t.id === active?.id} />
           </div>
@@ -194,7 +216,12 @@ function TileBody(props: {
   const Comp = resolvePanel(registry, tile.type)
   if (tile.renderKind === 'native') {
     const anchor = (
-      <NativeAnchor tileId={tile.id} host={host} label={`${tile.title} (native pane)`} active={active} />
+      <NativeAnchor
+        tileId={tile.id}
+        host={host}
+        label={`${tile.title} (native pane)`}
+        active={active}
+      />
     )
     if (Comp) return <Comp tile={tile} anchor={anchor} />
     return anchor

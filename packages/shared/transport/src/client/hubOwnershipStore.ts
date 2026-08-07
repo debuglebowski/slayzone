@@ -99,10 +99,7 @@ export function getHubIdForTask(taskId: MaybeId): string | undefined {
  * reached for the default hub and for unowned ids, which is exactly where the
  * default client is the right answer.
  */
-export function getClientForHub(
-  hubId: MaybeId,
-  fallback?: TrpcVanillaClient
-): TrpcVanillaClient {
+export function getClientForHub(hubId: MaybeId, fallback?: TrpcVanillaClient): TrpcVanillaClient {
   const resolved = hubId ? getHubClient(hubId)?.client : null
   return resolved ?? fallback ?? getTrpcClient()
 }

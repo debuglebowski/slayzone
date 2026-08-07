@@ -93,7 +93,12 @@ function artifactsDirOf(dataDir: string): string {
   return path.join(dataDir, 'artifacts')
 }
 
-function artifactFilePath(dataDir: string, taskId: string, artifactId: string, title: string): string {
+function artifactFilePath(
+  dataDir: string,
+  taskId: string,
+  artifactId: string,
+  title: string
+): string {
   const ext = getExtensionFromTitle(title) || '.txt'
   return path.join(artifactsDirOf(dataDir), taskId, `${artifactId}${ext}`)
 }
@@ -822,10 +827,7 @@ export const artifactsTxns = {
    * would be N round trips per artifact. `taskId`/`folderId` arrive already
    * expanded from id prefixes by the route.
    */
-  'task-artifacts:search': (
-    db: Database,
-    p: VersionsSearchTxnParams
-  ): ArtifactSearchReport =>
+  'task-artifacts:search': (db: Database, p: VersionsSearchTxnParams): ArtifactSearchReport =>
     wrapVersionError(() =>
       searchArtifacts(db, new BlobStore(p.dataDir), {
         query: p.query,
@@ -867,7 +869,9 @@ export const artifactsTxns = {
     p: FolderGetOrCreateTxnParams
   ): Row => {
     const existing = db
-      .prepare('SELECT * FROM artifact_folders WHERE task_id = ? AND parent_id IS NULL AND name = ?')
+      .prepare(
+        'SELECT * FROM artifact_folders WHERE task_id = ? AND parent_id IS NULL AND name = ?'
+      )
       .get(p.taskId, p.name) as Row
     if (existing) return existing
 

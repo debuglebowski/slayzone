@@ -15,7 +15,8 @@ function test(name: string, fn: () => void): void {
 function expect(actual: unknown): { toBe: (e: unknown) => void } {
   return {
     toBe: (e: unknown) => {
-      if (actual !== e) throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(actual)}`)
+      if (actual !== e)
+        throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(actual)}`)
     }
   }
 }

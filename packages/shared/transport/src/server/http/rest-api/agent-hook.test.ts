@@ -36,13 +36,12 @@ vi.mock('@slayzone/diagnostics/server', () => ({
 // so the test never pulls the task domain (+ DB) into vitest.
 const recordConversationSpy = vi.fn()
 const confirmSessionConversationSpy = vi.fn()
-const findPendingSpawnSpy =
-  vi.fn<(db: unknown, taskId: string, mode: string) => Promise<unknown>>()
+const findPendingSpawnSpy = vi.fn<(db: unknown, taskId: string, mode: string) => Promise<unknown>>()
 // Warm-pool-adopted-session → taskId lookup (the "resolve taskId from
 // slaySessionId" fallback). Defaults to "not bound yet"; tests override with
 // mockResolvedValueOnce/mockResolvedValue as needed.
-const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(
-  () => Promise.resolve(null)
+const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(() =>
+  Promise.resolve(null)
 )
 // In-band `/clear` path: the current honored conversation (the id being rotated
 // away from) + the ownership lookup that proves slay spawned the process holding
@@ -57,8 +56,8 @@ const findOwnedSpawnForConversationSpy = vi.fn<
 // Resumability proof (v158). Must be in this mock even for tests that ignore it:
 // the route calls it on every turn-proof event, so a missing export is not an
 // unasserted spy — it is a TypeError inside the handler and a 500 on the ack.
-const markSessionFirstTurnSpy = vi.fn<(db: unknown, conversationId: string) => Promise<void>>(
-  () => Promise.resolve()
+const markSessionFirstTurnSpy = vi.fn<(db: unknown, conversationId: string) => Promise<void>>(() =>
+  Promise.resolve()
 )
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: (...args: unknown[]) => recordConversationSpy(...args),
@@ -1155,7 +1154,11 @@ describe('POST /api/agent-hook', () => {
   test('claude-code SessionStart without any session id → no persist', async () => {
     const srv = await startServer()
     try {
-      await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'SessionStart', taskId: 'cc-task' })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task'
+      })
       expect(findPendingSpawnSpy).not.toHaveBeenCalled()
       expect(recordConversationSpy).not.toHaveBeenCalled()
     } finally {

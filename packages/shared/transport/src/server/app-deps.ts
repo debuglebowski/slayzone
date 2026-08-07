@@ -149,8 +149,7 @@ export function setTaskDeps(deps: { ops: TaskOps; onMutation?: () => void }): vo
 }
 
 export function getTaskOps(): TaskOps {
-  if (!taskOps)
-    throw new Error('taskOps not initialized — call setTaskDeps() in main host first')
+  if (!taskOps) throw new Error('taskOps not initialized — call setTaskDeps() in main host first')
   return taskOps
 }
 
@@ -432,7 +431,6 @@ export type AppDeps = {
   // backs file-editor `showInFinder`. Forwarded over the capability bridge.
   shellShowItemInFolder: (absPath: string) => void
 
-
   // app metadata (read-only)
   appGetVersion: () => string
   /**
@@ -595,11 +593,7 @@ export type AppDeps = {
     loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
     getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
     /** False when the captured image was empty. */
-    capturePageToFile: (
-      taskId: string,
-      tabId: string | null,
-      destPath: string
-    ) => Promise<boolean>
+    capturePageToFile: (taskId: string, tabId: string | null, destPath: string) => Promise<boolean>
   }
 
   // Browser view manager — heavy electron coupling, expose as opaque object
@@ -888,9 +882,7 @@ export function setRunnersDeps(deps: RunnersDeps): void {
 
 export function getRunnersDeps(): RunnersDeps {
   if (!runnersDeps)
-    throw new Error(
-      'runnersDeps not initialized — composeServer/server host have not wired it yet'
-    )
+    throw new Error('runnersDeps not initialized — composeServer/server host have not wired it yet')
   return runnersDeps
 }
 

@@ -61,9 +61,7 @@ export const BrowserTabPlaceholder = forwardRef<
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const registerTab = useMutation(trpc.app.webview.registerBrowserTab.mutationOptions()).mutateAsync
-  const unregisterTab = useMutation(
-    trpc.app.webview.unregisterBrowserTab.mutationOptions()
-  ).mutate
+  const unregisterTab = useMutation(trpc.app.webview.unregisterBrowserTab.mutationOptions()).mutate
   const setViewLocked = useMutation(trpc.app.browser.setLocked.mutationOptions()).mutate
 
   const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({

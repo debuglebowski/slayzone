@@ -210,18 +210,10 @@ export function PanelToggle({
       autoScroll={false}
       onDragEnd={handleDragEnd}
     >
-      <SortableContext
-        items={panels.map((p) => p.id)}
-        strategy={horizontalListSortingStrategy}
-      >
+      <SortableContext items={panels.map((p) => p.id)} strategy={horizontalListSortingStrategy}>
         <div className={containerClass}>
           {panels.map((panel) => (
-            <SortablePanelButton
-              key={panel.id}
-              panel={panel}
-              styles={styles}
-              onChange={onChange}
-            />
+            <SortablePanelButton key={panel.id} panel={panel} styles={styles} onChange={onChange} />
           ))}
         </div>
       </SortableContext>

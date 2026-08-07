@@ -1,4 +1,12 @@
-import { Cpu, FileCode, GitCompare, Globe, Paperclip, Settings2, SquareTerminal } from 'lucide-react'
+import {
+  Cpu,
+  FileCode,
+  GitCompare,
+  Globe,
+  Paperclip,
+  Settings2,
+  SquareTerminal
+} from 'lucide-react'
 import type { PanelConfig, PanelView } from '@slayzone/task/shared'
 import { isPanelEnabled, panelLayoutFallback } from '@slayzone/task/shared'
 import type { PanelRowDescriptor } from './panels-settings.types'

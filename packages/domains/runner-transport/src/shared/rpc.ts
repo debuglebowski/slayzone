@@ -127,12 +127,11 @@ export class DuplexRpc {
     if (this.disposed) {
       return Promise.reject(new RpcDisposedError(this.label))
     }
-    const effectiveTimeout = timeoutMs ?? this.opts.defaultRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    const effectiveTimeout =
+      timeoutMs ?? this.opts.defaultRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     const id = this.nextId++
     const envelope = JSON.stringify(
-      params === undefined
-        ? { jsonrpc: '2.0', id, method }
-        : { jsonrpc: '2.0', id, method, params }
+      params === undefined ? { jsonrpc: '2.0', id, method } : { jsonrpc: '2.0', id, method, params }
     )
     return new Promise<T>((resolve, reject) => {
       const timer =
@@ -209,7 +208,8 @@ export class DuplexRpc {
 
     const rawId = msg.id
     const hasId =
-      (typeof rawId === 'string' && rawId.length > 0) || (typeof rawId === 'number' && Number.isFinite(rawId))
+      (typeof rawId === 'string' && rawId.length > 0) ||
+      (typeof rawId === 'number' && Number.isFinite(rawId))
     const isResponse = hasId && ('result' in msg || 'error' in msg) && !('method' in msg)
 
     if (isResponse) {
@@ -222,7 +222,11 @@ export class DuplexRpc {
         if (this.opts.onPeerRequest) {
           this.opts.onPeerRequest(msg.method, msg.params, rawId as JsonRpcId)
         } else {
-          this.respondError(rawId as JsonRpcId, JSON_RPC_METHOD_NOT_FOUND, `method not found: ${msg.method}`)
+          this.respondError(
+            rawId as JsonRpcId,
+            JSON_RPC_METHOD_NOT_FOUND,
+            `method not found: ${msg.method}`
+          )
         }
       } else {
         this.opts.onNotification?.(msg.method, msg.params)

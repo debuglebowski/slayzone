@@ -1,12 +1,5 @@
 import { SlidersHorizontal, List, Layers } from 'lucide-react'
-import {
-  IconButton,
-  Switch,
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-  Label
-} from '@slayzone/ui'
+import { IconButton, Switch, Popover, PopoverTrigger, PopoverContent, Label } from '@slayzone/ui'
 import type { CommitGraphConfig } from '../shared/types'
 
 // --- Display popover (matches kanban pattern) ---

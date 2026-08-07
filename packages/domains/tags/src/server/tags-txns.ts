@@ -52,9 +52,9 @@ function setTagsForTask(db: Database, taskId: string, tagIds: string[]): void {
     deleteStmt.run(taskId)
     for (const tagId of tagIds) insertStmt.run(taskId, tagId)
 
-    const taskRow = db
-      .prepare('SELECT id, project_id FROM tasks WHERE id = ?')
-      .get(taskId) as { id: string; project_id: string } | undefined
+    const taskRow = db.prepare('SELECT id, project_id FROM tasks WHERE id = ?').get(taskId) as
+      | { id: string; project_id: string }
+      | undefined
     if (taskRow) {
       recordActivityEvents(db, buildTaskTagsChangedEvents(taskRow, previousTagIds, tagIds))
     }

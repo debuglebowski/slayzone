@@ -181,24 +181,30 @@ async function loadProjectMappingByTask(
 }
 
 async function markLinkSynced(db: SlayzoneDb, link: LinkRow): Promise<void> {
-  await db.prepare(`
+  await db
+    .prepare(`
     UPDATE external_links
     SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now')
     WHERE id = ?
-  `).run(link.id)
-  await db.prepare(`
+  `)
+    .run(link.id)
+  await db
+    .prepare(`
     UPDATE integration_connections
     SET last_synced_at = datetime('now'), updated_at = datetime('now')
     WHERE id = ?
-  `).run(link.connection_id)
+  `)
+    .run(link.connection_id)
 }
 
 async function markLinkError(db: SlayzoneDb, linkId: string, message: string): Promise<void> {
-  await db.prepare(`
+  await db
+    .prepare(`
     UPDATE external_links
     SET sync_state = 'error', last_error = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(message, linkId)
+  `)
+    .run(message, linkId)
 }
 
 async function createExternalLink(
@@ -211,12 +217,14 @@ async function createExternalLink(
   taskId: string
 ): Promise<string> {
   const id = crypto.randomUUID()
-  await db.prepare(`
+  await db
+    .prepare(`
     INSERT INTO external_links (
       id, provider, connection_id, external_type, external_id, external_key,
       external_url, task_id, sync_state, last_sync_at, last_error, created_at, updated_at
     ) VALUES (?, ?, ?, 'issue', ?, ?, ?, ?, 'active', datetime('now'), NULL, datetime('now'), datetime('now'))
-  `).run(id, provider, connectionId, externalId, externalKey, externalUrl, taskId)
+  `)
+    .run(id, provider, connectionId, externalId, externalKey, externalUrl, taskId)
   return id
 }
 
@@ -230,32 +238,36 @@ async function applyRemoteUpdate(
   priority?: number
 ): Promise<void> {
   if (priority !== undefined) {
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE tasks
       SET title = ?, description = ?, status = ?, priority = ?, assignee = ?, updated_at = ?
       WHERE id = ?
-    `).run(
-      issue.title,
-      issue.description ? markdownToHtml(issue.description) : null,
-      localStatus,
-      priority,
-      issue.assignee?.name ?? null,
-      issue.updatedAt,
-      taskId
-    )
+    `)
+      .run(
+        issue.title,
+        issue.description ? markdownToHtml(issue.description) : null,
+        localStatus,
+        priority,
+        issue.assignee?.name ?? null,
+        issue.updatedAt,
+        taskId
+      )
   } else {
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE tasks
       SET title = ?, description = ?, status = ?, assignee = ?, updated_at = ?
       WHERE id = ?
-    `).run(
-      issue.title,
-      issue.description ? markdownToHtml(issue.description) : null,
-      localStatus,
-      issue.assignee?.name ?? null,
-      issue.updatedAt,
-      taskId
-    )
+    `)
+      .run(
+        issue.title,
+        issue.description ? markdownToHtml(issue.description) : null,
+        localStatus,
+        issue.assignee?.name ?? null,
+        issue.updatedAt,
+        taskId
+      )
   }
 }
 
@@ -442,9 +454,11 @@ export async function runProviderSync(
 
         if (!remoteIssue) {
           // Issue gone — archive local task
-          await db.prepare(
-            "UPDATE tasks SET archived_at = datetime('now') WHERE id = ? AND archived_at IS NULL"
-          ).run(link.task_id)
+          await db
+            .prepare(
+              "UPDATE tasks SET archived_at = datetime('now') WHERE id = ? AND archived_at IS NULL"
+            )
+            .run(link.task_id)
           await markLinkSynced(db, link)
           result.pulled += 1
           continue
@@ -522,7 +536,9 @@ export async function runProviderSync(
 
         // Archive sync
         if (remoteIssue.isArchived && !task.archived_at) {
-          await db.prepare("UPDATE tasks SET archived_at = datetime('now') WHERE id = ?").run(task.id)
+          await db
+            .prepare("UPDATE tasks SET archived_at = datetime('now') WHERE id = ?")
+            .run(task.id)
         } else if (!remoteIssue.isArchived && task.archived_at) {
           await db.prepare('UPDATE tasks SET archived_at = NULL WHERE id = ?').run(task.id)
         }
@@ -550,7 +566,10 @@ export async function runSyncNow(db: SlayzoneDb, input: SyncNowInput): Promise<S
 }
 
 /** @deprecated Use runProviderSync(db, 'github', input) */
-export async function runGithubSyncNow(db: SlayzoneDb, input: SyncNowInput): Promise<SyncNowResult> {
+export async function runGithubSyncNow(
+  db: SlayzoneDb,
+  input: SyncNowInput
+): Promise<SyncNowResult> {
   return runProviderSync(db, 'github', input)
 }
 
@@ -906,9 +925,11 @@ async function discoverIssues(
     cursor = nextCursor
   } while (cursor)
 
-  await db.prepare(
-    "UPDATE integration_project_mappings SET last_discovery_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(mapping.id)
+  await db
+    .prepare(
+      "UPDATE integration_project_mappings SET last_discovery_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    )
+    .run(mapping.id)
 
   if (discovered > 0) {
     console.log(
@@ -968,14 +989,16 @@ async function markConnectionAuthError(
   connectionId: string,
   message: string
 ): Promise<void> {
-  await db.prepare(
-    `UPDATE integration_connections
+  await db
+    .prepare(
+      `UPDATE integration_connections
      SET enabled = 0,
          auth_error = ?,
          auth_error_at = datetime('now'),
          updated_at = datetime('now')
      WHERE id = ?`
-  ).run(message, connectionId)
+    )
+    .run(message, connectionId)
 }
 
 export function startDiscoveryPoller(db: SlayzoneDb, onChanged?: () => void): NodeJS.Timeout {

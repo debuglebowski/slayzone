@@ -18,12 +18,7 @@
  *   packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../test-utils/ipc-harness.js'
+import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../test-utils/rest-harness.js'
 import { handleAttentionTransition, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 import { tmpdir } from 'node:os'

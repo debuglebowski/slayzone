@@ -65,26 +65,24 @@ export async function storeCredential(db: SlayzoneDb, ref: string, secret: strin
   // (headless standalone hub with no OS keychain). Availability is the sole gate.
   if (await cipherAvailable()) {
     const encrypted = await cipher!.encryptString(secret)
-    await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
-      toSettingKey(ref),
-      encrypted.toString('base64')
-    )
+    await db
+      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run(toSettingKey(ref), encrypted.toString('base64'))
     return
   }
 
   if (!(await allowPlaintextFallback())) {
     throw new Error('OS secure credential storage is unavailable on this machine')
   }
-  await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
-    toSettingKey(ref),
-    `${PLAINTEXT_PREFIX}${secret}`
-  )
+  await db
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run(toSettingKey(ref), `${PLAINTEXT_PREFIX}${secret}`)
 }
 
 export async function readCredential(db: SlayzoneDb, ref: string): Promise<string> {
-  const row = (await db.prepare('SELECT value FROM settings WHERE key = ?').get(toSettingKey(ref))) as
-    | { value: string }
-    | undefined
+  const row = (await db
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get(toSettingKey(ref))) as { value: string } | undefined
   if (!row?.value) {
     throw new Error('Credential not found')
   }

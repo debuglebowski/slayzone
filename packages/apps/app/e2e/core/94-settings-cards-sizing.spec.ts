@@ -105,8 +105,7 @@ async function seedDescription(page: Page, id: string, text: string) {
 }
 
 // The description editor's internal scroll layer.
-const descriptionScroll = (page: Page): Locator =>
-  descriptionCard(page).locator('.mk-doc-scroll')
+const descriptionScroll = (page: Page): Locator => descriptionCard(page).locator('.mk-doc-scroll')
 
 async function isScrollable(locator: Locator): Promise<boolean> {
   return locator.evaluate((el) => el.scrollHeight > el.clientHeight + 4)

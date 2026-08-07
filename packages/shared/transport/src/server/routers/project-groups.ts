@@ -34,7 +34,9 @@ export const projectGroupsRouter = router({
     .mutation(({ ctx, input }) => createFolderWithProjects(ctx.db, input.projectIds)),
 
   update: publicProcedure
-    .input(z.object({ id: z.string(), name: z.string().optional(), collapsed: z.boolean().optional() }))
+    .input(
+      z.object({ id: z.string(), name: z.string().optional(), collapsed: z.boolean().optional() })
+    )
     .mutation(({ ctx, input }) => updateProjectGroup(ctx.db, input)),
 
   delete: publicProcedure

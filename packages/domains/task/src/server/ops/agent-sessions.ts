@@ -645,10 +645,10 @@ export async function confirmSessionConversationByTaskMode(
 /** Mark a session's process exited. Lifecycle-only mutation (never touches a
  *  resume-critical value). */
 export async function markSessionDead(db: SlayzoneDb, sessionId: string): Promise<void> {
-  await db.run(
-    `UPDATE agent_sessions SET status = 'dead', ended_at = ? WHERE id = ?`,
-    [Date.now(), sessionId]
-  )
+  await db.run(`UPDATE agent_sessions SET status = 'dead', ended_at = ? WHERE id = ?`, [
+    Date.now(),
+    sessionId
+  ])
 }
 
 /**

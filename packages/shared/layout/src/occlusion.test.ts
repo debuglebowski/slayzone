@@ -7,17 +7,21 @@ const menu: Overlay = { id: 'm', kind: 'menu', render: () => null }
 
 describe('nativeTileVisible', () => {
   it('visible when idle', () => {
-    expect(nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [], draggingSplitId: null })).toBe(true)
+    expect(
+      nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [], draggingSplitId: null })
+    ).toBe(true)
   })
 
   it('hides for an open dialog overlay', () => {
-    expect(nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [dialog], draggingSplitId: null })).toBe(
-      false
-    )
+    expect(
+      nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [dialog], draggingSplitId: null })
+    ).toBe(false)
   })
 
   it('does NOT hide for menus/popups (rect-anchored)', () => {
-    expect(nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [menu], draggingSplitId: null })).toBe(true)
+    expect(
+      nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [menu], draggingSplitId: null })
+    ).toBe(true)
   })
 
   it('dialogsHideNative=false (native overlay plane era) keeps tiles visible under dialogs', () => {
@@ -30,7 +34,9 @@ describe('nativeTileVisible', () => {
   })
 
   it("default 'live' strategy keeps tiles visible during divider drag", () => {
-    expect(nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [], draggingSplitId: 's1' })).toBe(true)
+    expect(
+      nativeTileVisible(DEFAULT_OCCLUSION_POLICY, { overlays: [], draggingSplitId: 's1' })
+    ).toBe(true)
   })
 
   it("'hide-during-drag' hides tiles while a divider drags", () => {

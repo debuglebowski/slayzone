@@ -61,7 +61,7 @@ async function ensureObserver(): Promise<void> {
       (viewId: string, url: string, canGoBack: boolean, canGoForward: boolean) => {
         console.debug('[browser-shim] did-navigate', { viewId, url, canGoBack, canGoForward })
         fanOut({ viewId, type: 'did-navigate', url, canGoBack, canGoForward })
-      },
+      }
     )
     router.onPageTitleUpdated.addListener((viewId: string, title: string) => {
       fanOut({ viewId, type: 'page-title-updated', title })
@@ -80,7 +80,7 @@ async function ensureObserver(): Promise<void> {
       (viewId: string, errorCode: number, errorDescription: string, url: string) => {
         console.debug('[browser-shim] did-fail-load', { viewId, errorCode, errorDescription, url })
         fanOut({ viewId, type: 'did-fail-load', errorCode, errorDescription, url })
-      },
+      }
     )
     // Extension bar: the host's ExtensionRegistry observer fired — installs /
     // uninstalls. No viewId; the rail re-lists for its current identity.
@@ -139,7 +139,7 @@ async function cdpEvaluate(expression: string): Promise<CdpEvalResult> {
   const ev = cdpEvaluator()
   if (!ev) return null
   const r = await ev(expression).catch((err) => ({
-    error: err instanceof Error ? err.message : String(err),
+    error: err instanceof Error ? err.message : String(err)
   }))
   return r
 }
@@ -159,18 +159,18 @@ async function createView(opts: CreateViewParams): Promise<string> {
       x: opts.bounds.x,
       y: opts.bounds.y,
       width: opts.bounds.width,
-      height: opts.bounds.height,
+      height: opts.bounds.height
     },
     visible: true,
     // Pooled-profile key for the task's identity (own Google login / 1Password).
     // Empty = the shell's default profile.
-    profileKey: (opts as { profileKey?: string }).profileKey ?? '',
+    profileKey: (opts as { profileKey?: string }).profileKey ?? ''
   })
   console.debug('[browser-shim] createView resolved', {
     taskId: opts.taskId,
     tabId: opts.tabId,
     viewId,
-    url: opts.url,
+    url: opts.url
   })
   // Shim-side synthesis of view-attached. The browser-side host has inserted
   // the entry by the time createView resolves, so this matches the semantic
@@ -205,7 +205,7 @@ async function destroyAllForTask(taskId: string): Promise<void> {
 
 async function setBounds(
   viewId: string,
-  bounds: { x: number; y: number; width: number; height: number },
+  bounds: { x: number; y: number; width: number; height: number }
 ): Promise<void> {
   const remote = await embeddedTabRemote()
   remote.setBounds(viewId, bounds)
@@ -220,7 +220,7 @@ async function setVisible(viewId: string, visible: boolean): Promise<void> {
 // target=_blank, surfaced via the 'new-view' event) into a renderer tile.
 async function attachView(
   viewId: string,
-  bounds: { x: number; y: number; width: number; height: number },
+  bounds: { x: number; y: number; width: number; height: number }
 ): Promise<void> {
   const remote = await embeddedTabRemote()
   remote.attachView(viewId, bounds)
@@ -248,9 +248,9 @@ async function closeExtensions(): Promise<void> {
 
 // SlayZone extension bar: list the modal identity's installed extensions, and
 // open one's options/settings page in the open inlay.
-async function listExtensions(profileKey: string): Promise<
-  Array<{ id: string; name: string; enabled: boolean; hasOptions: boolean }>
-> {
+async function listExtensions(
+  profileKey: string
+): Promise<Array<{ id: string; name: string; enabled: boolean; hasOptions: boolean }>> {
   if (!hasMojo()) return []
   const remote = await embeddedTabRemote()
   const { extensions } = await remote.listExtensions(profileKey)
@@ -311,13 +311,17 @@ async function focus(viewId: string): Promise<void> {
   lastFocusedViewId = viewId
   fanOut({ viewId, type: 'view-focused' })
   focusedSubs.forEach((cb) => {
-    try { cb({ viewId }) } catch { /* one bad subscriber doesn't break others */ }
+    try {
+      cb({ viewId })
+    } catch {
+      /* one bad subscriber doesn't break others */
+    }
   })
 }
 
 async function openDevTools(
   viewId: string,
-  _mode: 'bottom' | 'right' | 'undocked' | 'detach',
+  _mode: 'bottom' | 'right' | 'undocked' | 'detach'
 ): Promise<void> {
   const remote = await embeddedTabRemote()
   // Mojom covers toggle only; the renderer calls open+close pairs around the
@@ -460,7 +464,9 @@ export const browserShim = {
   onBrowserViewShortcut: noopSub,
   onBrowserViewFocused: (cb: FocusedSub): (() => void) => {
     focusedSubs.add(cb)
-    return () => { focusedSubs.delete(cb) }
+    return () => {
+      focusedSubs.delete(cb)
+    }
   },
 
   openDevTools,
@@ -475,5 +481,5 @@ export const browserShim = {
   activateExtension: async (): Promise<boolean> => false,
   onCreateTaskFromLink: noopSub,
 
-  onEvent,
+  onEvent
 } as unknown as BrowserNS

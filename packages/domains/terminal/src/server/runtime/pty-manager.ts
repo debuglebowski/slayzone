@@ -2,11 +2,7 @@ import * as pty from 'node-pty'
 import { accessSync, constants as fsConstants, existsSync, writeSync } from 'fs'
 import { execFile } from 'child_process'
 import { randomUUID } from 'node:crypto'
-import {
-  getPtyHostBridge,
-  onPtyHostBus,
-  type PtySessionWindow
-} from '../pty-host'
+import { getPtyHostBridge, onPtyHostBus, type PtySessionWindow } from '../pty-host'
 import { homedir, platform, userInfo } from 'os'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
@@ -1285,8 +1281,14 @@ export async function createPty(
   // Register the session-identity seam: prefer explicit task/tab (opaque-id path);
   // fall back to splitting a legacy `taskId:tabId` sessionId. A null taskId
   // (pooled) is stored as '' so it never decodes to a bogus uuid-as-taskId.
-  sessionTaskMap.set(sessionId, opts.taskId !== undefined ? (opts.taskId ?? '') : splitTaskId(sessionId))
-  sessionTabMap.set(sessionId, opts.tabId !== undefined ? (opts.tabId ?? '') : splitTabRowId(sessionId))
+  sessionTaskMap.set(
+    sessionId,
+    opts.taskId !== undefined ? (opts.taskId ?? '') : splitTaskId(sessionId)
+  )
+  sessionTabMap.set(
+    sessionId,
+    opts.tabId !== undefined ? (opts.tabId ?? '') : splitTabRowId(sessionId)
+  )
   const taskId = taskIdFromSessionId(sessionId)
   // Hub/runner split (wave 2): which runner this session spawns on (null =
   // hub-local, today's only path). Threaded into every PtySpawnSpec below.
@@ -1416,7 +1418,7 @@ export async function createPty(
     // A pre-warmed pooled agent already established its conversation id at warm
     // time — adopt it directly (no resolve / heal / mint).
     const effectiveConversationId = opts.adoptPty?.preWarmedAgent
-      ? opts.adoptPty.conversationId ?? null
+      ? (opts.adoptPty.conversationId ?? null)
       : resolvedExistingId || conversationId || mintedFreshId
 
     // Pick template: resume if resuming and resume_command exists, otherwise initial
@@ -1907,7 +1909,12 @@ export async function createPty(
         try {
           // Carry the structured error code (e.g. SESSION_NOT_FOUND) so the
           // renderer's dead overlay can render an error-specific message.
-          exitWin.webContents.send('pty:exit', sessionId, exitCode, exitSession?.error?.code ?? null)
+          exitWin.webContents.send(
+            'pty:exit',
+            sessionId,
+            exitCode,
+            exitSession?.error?.code ?? null
+          )
         } catch {
           // Window destroyed, ignore
         }
@@ -2397,7 +2404,11 @@ export async function createPty(
               !!resolvedExistingId &&
               !claudeTranscriptExists(cwd, resolvedExistingId)
             if (transcriptGone) {
-              session.error = { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
+              session.error = {
+                code: 'SESSION_NOT_FOUND',
+                message: 'Session not found',
+                recoverable: false
+              }
             } else {
               const scanned = session.adapter.detectError(session.buffer.toString())
               if (scanned) session.error = scanned
@@ -3132,10 +3143,7 @@ const pendingEnsureAliveAcks = new Map<number, (result: 'ok' | 'already-alive' |
 /** Resolve a pending ensure-alive waiter by reqId. Shared by the legacy
  *  `pty:ensure-alive:ack` IPC and the tRPC `pty.ackEnsureAlive` mutation
  *  (dual-emit) — both feed the same `pendingEnsureAliveAcks` map. */
-export function ackEnsureAlive(
-  reqId: number,
-  result: 'ok' | 'already-alive' | 'error'
-): void {
+export function ackEnsureAlive(reqId: number, result: 'ok' | 'already-alive' | 'error'): void {
   const resolve = pendingEnsureAliveAcks.get(reqId)
   if (!resolve) return
   pendingEnsureAliveAcks.delete(reqId)
@@ -3171,9 +3179,9 @@ export function requestEnsureAlive(
   const liveWindow =
     mainWindow && !mainWindow.isDestroyed()
       ? mainWindow
-      : (getPtyHostBridge().getAllWindows().find(
-          (w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:')
-        ) ?? null)
+      : (getPtyHostBridge()
+          .getAllWindows()
+          .find((w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:')) ?? null)
   if (!liveWindow) return Promise.resolve('no-window')
   // Note: callers should pre-check liveness (the main sessionId convention
   // lives in the renderer, e.g. `${taskId}:${taskId}` — see TaskDetailPage's

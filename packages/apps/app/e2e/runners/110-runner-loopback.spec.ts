@@ -175,9 +175,7 @@ function spawnLoopbackRunner(opts: {
 }
 
 /** All runners the hub currently knows about (store rows + live status). */
-function listRunners(page: Page): Promise<
-  Array<{ id: string; name: string; connected: boolean }>
-> {
+function listRunners(page: Page): Promise<Array<{ id: string; name: string; connected: boolean }>> {
   return page.evaluate(
     () =>
       window.getTrpcVanillaClient().runners.list.query() as Promise<
@@ -432,63 +430,66 @@ base.describe('Runner loopback (runner ON)', () => {
     }
   })
 
-  base('a hub always accepts runners: mintJoinToken works with no flag, no supervisor', async () => {
-    base.setTimeout(120_000)
+  base(
+    'a hub always accepts runners: mintJoinToken works with no flag, no supervisor',
+    async () => {
+      base.setTimeout(120_000)
 
-    // Boot with the supervisor explicitly OPTED OUT (`SLAYZONE_E2E_NO_RUNNER=1`)
-    // — e2e is otherwise runner-ON by default, which would auto-spawn a local
-    // runner and invalidate the zero-connected assertion below. This proves the
-    // always-on contract: the hub still builds the gateway + binds the /runners
-    // listener at boot, so mintJoinToken succeeds and a runner COULD connect —
-    // there just isn't one spawned in this test.
-    const launched = await launchIsolatedElectron({
-      name: 'runner-always-on',
-      seedUserData: (userDataDir) => {
-        fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
-        fs.writeFileSync(
-          bootConfigPath(userDataDir),
-          JSON.stringify({ server_mode: 'local' }, null, 2)
-        )
-      },
-      extraEnv: (userDataDir) => ({
-        SLAYZONE_ROOT: userDataDir,
-        SLAYZONE_E2E_NO_RUNNER: '1'
+      // Boot with the supervisor explicitly OPTED OUT (`SLAYZONE_E2E_NO_RUNNER=1`)
+      // — e2e is otherwise runner-ON by default, which would auto-spawn a local
+      // runner and invalidate the zero-connected assertion below. This proves the
+      // always-on contract: the hub still builds the gateway + binds the /runners
+      // listener at boot, so mintJoinToken succeeds and a runner COULD connect —
+      // there just isn't one spawned in this test.
+      const launched = await launchIsolatedElectron({
+        name: 'runner-always-on',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify({ server_mode: 'local' }, null, 2)
+          )
+        },
+        extraEnv: (userDataDir) => ({
+          SLAYZONE_ROOT: userDataDir,
+          SLAYZONE_E2E_NO_RUNNER: '1'
+        })
       })
-    })
 
-    try {
-      const page = launched.page
-      await page.waitForSelector('#root', { timeout: 20_000 })
+      try {
+        const page = launched.page
+        await page.waitForSelector('#root', { timeout: 20_000 })
 
-      // Supervisor opted out → no runner auto-spawns, so nothing is connected.
-      await page.waitForTimeout(3_000)
-      const rows = await listRunners(page)
-      expect(rows.filter((r) => r.connected).length).toBe(0)
+        // Supervisor opted out → no runner auto-spawns, so nothing is connected.
+        await page.waitForTimeout(3_000)
+        const rows = await listRunners(page)
+        expect(rows.filter((r) => r.connected).length).toBe(0)
 
-      // But the runner listener IS bound (always-on) → mintJoinToken succeeds and
-      // returns a decodable szjt1 token embedding the wss runner URL. Poll: the
-      // async runner init (createHubAuth migrations + listener bind) resolves
-      // shortly after boot.
-      await expect
-        .poll(
-          () =>
-            page.evaluate(async () => {
-              try {
-                const res = (await window
-                  .getTrpcVanillaClient()
-                  .runners.mintJoinToken.mutate({ label: 'always-on' })) as { token?: string }
-                return typeof res.token === 'string' && res.token.startsWith('szjt1.')
-              } catch {
-                return false
-              }
-            }),
-          { timeout: 60_000, intervals: [1_000, 2_000] }
-        )
-        .toBe(true)
-    } finally {
-      await launched.close()
+        // But the runner listener IS bound (always-on) → mintJoinToken succeeds and
+        // returns a decodable szjt1 token embedding the wss runner URL. Poll: the
+        // async runner init (createHubAuth migrations + listener bind) resolves
+        // shortly after boot.
+        await expect
+          .poll(
+            () =>
+              page.evaluate(async () => {
+                try {
+                  const res = (await window
+                    .getTrpcVanillaClient()
+                    .runners.mintJoinToken.mutate({ label: 'always-on' })) as { token?: string }
+                  return typeof res.token === 'string' && res.token.startsWith('szjt1.')
+                } catch {
+                  return false
+                }
+              }),
+            { timeout: 60_000, intervals: [1_000, 2_000] }
+          )
+          .toBe(true)
+      } finally {
+        await launched.close()
+      }
     }
-  })
+  )
 })
 
 /** True when `marker` appears in the buffer on a line that is not the `echo

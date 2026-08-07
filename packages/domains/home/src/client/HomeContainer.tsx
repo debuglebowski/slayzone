@@ -83,11 +83,7 @@ type HomeContainerImplProps = HomeContainerProps & { data: ReturnType<typeof use
  * for the Home experience across both renderers.
  */
 export function HomeContainer({ data, ...rest }: HomeContainerProps): React.JSX.Element {
-  return data ? (
-    <HomeContainerImpl data={data} {...rest} />
-  ) : (
-    <HomeContainerSelfWiring {...rest} />
-  )
+  return data ? <HomeContainerImpl data={data} {...rest} /> : <HomeContainerSelfWiring {...rest} />
 }
 
 /** Electron-app path: owns its own board data. */
@@ -140,21 +136,27 @@ function HomeContainerImpl({
   } = data
 
   const { push: pushUndo, undo } = useUndo()
-  const { contextMenuUpdate, archiveTask, archiveTasks, deleteTask, bulkContextMenuUpdate, bulkDelete } =
-    useUndoableTaskActions(
-      {
-        tasks,
-        updateTask,
-        setTasks,
-        archiveTask: rawArchiveTask,
-        archiveTasks: rawArchiveTasks,
-        deleteTask: rawDeleteTask,
-        bulkDelete: rawBulkDelete,
-        contextMenuUpdate: rawContextMenuUpdate,
-        bulkContextMenuUpdate: rawBulkContextMenuUpdate
-      },
-      { push: pushUndo, undo }
-    )
+  const {
+    contextMenuUpdate,
+    archiveTask,
+    archiveTasks,
+    deleteTask,
+    bulkContextMenuUpdate,
+    bulkDelete
+  } = useUndoableTaskActions(
+    {
+      tasks,
+      updateTask,
+      setTasks,
+      archiveTask: rawArchiveTask,
+      archiveTasks: rawArchiveTasks,
+      deleteTask: rawDeleteTask,
+      bulkDelete: rawBulkDelete,
+      contextMenuUpdate: rawContextMenuUpdate,
+      bulkContextMenuUpdate: rawBulkContextMenuUpdate
+    },
+    { push: pushUndo, undo }
+  )
 
   const [filter, setFilter] = useFilterState(selectedProjectId)
   const { config: homePanelConfig, isBuiltinEnabled, getOrderedHomeIds } = usePanelConfig()

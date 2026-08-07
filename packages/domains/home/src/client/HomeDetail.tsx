@@ -6,7 +6,16 @@ import React, {
   type RefObject,
   type KeyboardEventHandler
 } from 'react'
-import { Kanban, GitBranch, FileCode, Cpu, FlaskConical, Zap, Lock, AlertTriangle } from 'lucide-react'
+import {
+  Kanban,
+  GitBranch,
+  FileCode,
+  Cpu,
+  FlaskConical,
+  Zap,
+  Lock,
+  AlertTriangle
+} from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, PanelToggle, cn } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
@@ -342,10 +351,7 @@ export function HomeDetail({
               </div>
             </div>
           ) : (
-            <div
-              ref={homePanel.homeContainerRef}
-              className="flex-1 min-h-0 flex overflow-x-auto"
-            >
+            <div ref={homePanel.homeContainerRef} className="flex-1 min-h-0 flex overflow-x-auto">
               {homePanel.homeRenderOrder.map((id, j) => {
                 const projectPath =
                   homeResolvedRepo.path ??
@@ -377,9 +383,7 @@ export function HomeDetail({
                     )}
                     {leftId && leftL && (
                       <ResizeHandle
-                        leftWidth={
-                          homePanel.homeResolvedWidths[HOME_PANEL_SIZE_KEY[leftId]] ?? 400
-                        }
+                        leftWidth={homePanel.homeResolvedWidths[HOME_PANEL_SIZE_KEY[leftId]] ?? 400}
                         rightWidth={w}
                         leftMinWidth={
                           homePanel.homeResolved.minPx[HOME_PANEL_SIZE_KEY[leftId]] ?? 200
@@ -479,9 +483,7 @@ export function HomeDetail({
                       )}
                       {id === 'git' && (
                         <Suspense
-                          fallback={
-                            <div className="h-full animate-pulse bg-muted/30 rounded" />
-                          }
+                          fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}
                         >
                           <UnifiedGitPanel
                             ref={homePanel.homeGitPanelRef}
@@ -517,9 +519,7 @@ export function HomeDetail({
                       )}
                       {id === 'processes' && (
                         <Suspense
-                          fallback={
-                            <div className="h-full animate-pulse bg-muted/30 rounded" />
-                          }
+                          fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}
                         >
                           <ProcessesPanel
                             taskId={null}
@@ -530,9 +530,7 @@ export function HomeDetail({
                       )}
                       {id === 'tests' && (
                         <Suspense
-                          fallback={
-                            <div className="h-full animate-pulse bg-muted/30 rounded" />
-                          }
+                          fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}
                         >
                           <TestPanel
                             projectId={selectedProjectId}
@@ -549,9 +547,7 @@ export function HomeDetail({
                       )}
                       {id === 'automations' && (
                         <Suspense
-                          fallback={
-                            <div className="h-full animate-pulse bg-muted/30 rounded" />
-                          }
+                          fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}
                         >
                           <AutomationsPanel projectId={selectedProjectId} />
                         </Suspense>

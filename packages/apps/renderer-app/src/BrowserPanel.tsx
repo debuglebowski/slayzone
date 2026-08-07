@@ -48,10 +48,20 @@ export function makeBrowserPanel(host: EmbeddedTabHostApi) {
             flex: '0 0 auto'
           }}
         >
-          <button type="button" style={btnStyle} disabled={!state.canGoBack} onClick={() => host.goBack(tile.id)}>
+          <button
+            type="button"
+            style={btnStyle}
+            disabled={!state.canGoBack}
+            onClick={() => host.goBack(tile.id)}
+          >
             ←
           </button>
-          <button type="button" style={btnStyle} disabled={!state.canGoForward} onClick={() => host.goForward(tile.id)}>
+          <button
+            type="button"
+            style={btnStyle}
+            disabled={!state.canGoForward}
+            onClick={() => host.goForward(tile.id)}
+          >
             →
           </button>
           <button type="button" style={btnStyle} onClick={() => host.reload(tile.id)}>

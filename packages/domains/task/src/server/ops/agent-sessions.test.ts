@@ -1,10 +1,6 @@
 import Database from 'better-sqlite3'
 import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
-import {
-  recordConversation,
-  recordPendingSpawn,
-  prunePendingSpawns
-} from './task-conversations.js'
+import { recordConversation, recordPendingSpawn, prunePendingSpawns } from './task-conversations.js'
 // Old (v145) readers — the parity baseline.
 import {
   getCurrentConversationId as getCurrentOld,
@@ -107,9 +103,7 @@ const db: SlayzoneDb = {
     return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }
   },
   async batchTxn(ops: BatchOp[]): Promise<unknown[]> {
-    return raw.transaction(() =>
-      ops.map((op) => raw.prepare(op.sql)[op.type](...op.params))
-    )()
+    return raw.transaction(() => ops.map((op) => raw.prepare(op.sql)[op.type](...op.params)))()
   }
 } as unknown as SlayzoneDb
 
@@ -126,33 +120,67 @@ async function parity(mode: string, expected: string | null, label: string): Pro
 
 async function main(): Promise<void> {
   // 1. Latest honored row is current — both resolvers.
-  await recordConversation(db, { taskId: 't1', mode: 'claude-code', conversationId: 'C1', origin: 'slay-spawned-fresh' })
+  await recordConversation(db, {
+    taskId: 't1',
+    mode: 'claude-code',
+    conversationId: 'C1',
+    origin: 'slay-spawned-fresh'
+  })
   await sleep(2)
-  await recordConversation(db, { taskId: 't1', mode: 'claude-code', conversationId: 'C2', origin: 'slay-spawned-resume' })
+  await recordConversation(db, {
+    taskId: 't1',
+    mode: 'claude-code',
+    conversationId: 'C2',
+    origin: 'slay-spawned-resume'
+  })
   await parity('claude-code', 'C2', 'latest honored')
 
   // 2. Foreign-observed never current.
   await sleep(2)
-  await recordConversation(db, { taskId: 't1', mode: 'claude-code', conversationId: 'F1', origin: 'foreign-observed' })
+  await recordConversation(db, {
+    taskId: 't1',
+    mode: 'claude-code',
+    conversationId: 'F1',
+    origin: 'foreign-observed'
+  })
   await parity('claude-code', 'C2', 'foreign-observed ignored')
 
   // 3. Pending-spawn never current.
   await sleep(2)
-  await recordPendingSpawn(db, { taskId: 't1', mode: 'claude-code', expectedSessionId: 'P1', usedResume: false })
+  await recordPendingSpawn(db, {
+    taskId: 't1',
+    mode: 'claude-code',
+    expectedSessionId: 'P1',
+    usedResume: false
+  })
   await parity('claude-code', 'C2', 'pending-spawn ignored')
 
   // 4. Reset is a CUTOFF — modeled as a session_resets event for the new path.
   await sleep(2)
-  await recordConversation(db, { taskId: 't1', mode: 'claude-code', conversationId: null, origin: 'manual-reset' })
+  await recordConversation(db, {
+    taskId: 't1',
+    mode: 'claude-code',
+    conversationId: null,
+    origin: 'manual-reset'
+  })
   await parity('claude-code', null, 'after reset, no later honored row → null')
   // The reset landed in session_resets, NOT agent_sessions.
-  const resetRows = raw.prepare(`SELECT count(*) AS n FROM session_resets WHERE task_id='t1' AND mode='claude-code'`).get() as { n: number }
+  const resetRows = raw
+    .prepare(`SELECT count(*) AS n FROM session_resets WHERE task_id='t1' AND mode='claude-code'`)
+    .get() as { n: number }
   assert(resetRows.n === 1, `reset must be a session_resets row, got ${resetRows.n}`)
-  const resetInSessions = raw.prepare(`SELECT count(*) AS n FROM agent_sessions WHERE origin='manual-reset'`).get() as { n: number }
+  const resetInSessions = raw
+    .prepare(`SELECT count(*) AS n FROM agent_sessions WHERE origin='manual-reset'`)
+    .get() as { n: number }
   assert(resetInSessions.n === 0, 'manual-reset must never appear in agent_sessions')
 
   await sleep(2)
-  await recordConversation(db, { taskId: 't1', mode: 'claude-code', conversationId: 'C3', origin: 'slay-spawned-fresh' })
+  await recordConversation(db, {
+    taskId: 't1',
+    mode: 'claude-code',
+    conversationId: 'C3',
+    origin: 'slay-spawned-fresh'
+  })
   await parity('claude-code', 'C3', 'fresh row strictly after reset becomes current')
 
   // 5. History parity (minus the reset row, which is not a session). Old ledger
@@ -172,14 +200,24 @@ async function main(): Promise<void> {
   )
 
   // 6. findPendingSpawn (new) round-trips — null expected ("fresh" sentinel).
-  await recordPendingSpawn(db, { taskId: 't1', mode: 'codex', expectedSessionId: null, usedResume: false })
+  await recordPendingSpawn(db, {
+    taskId: 't1',
+    mode: 'codex',
+    expectedSessionId: null,
+    usedResume: false
+  })
   const p1 = await findNew(db, 't1', 'codex')
   assert(p1 !== null, 'fresh pending row should be found via agent_sessions')
   assert(p1?.expectedSessionId === null, 'expectedSessionId null preserved')
   assert(p1?.usedResume === false, 'usedResume preserved')
 
   // 7. findPendingSpawn (new) with explicit id.
-  await recordPendingSpawn(db, { taskId: 't1', mode: 'gemini', expectedSessionId: 'EXPECTED', usedResume: true })
+  await recordPendingSpawn(db, {
+    taskId: 't1',
+    mode: 'gemini',
+    expectedSessionId: 'EXPECTED',
+    usedResume: true
+  })
   const p2 = await findNew(db, 't1', 'gemini')
   assert(p2?.expectedSessionId === 'EXPECTED', 'expected id round-tripped')
   assert(p2?.usedResume === true, 'usedResume true preserved')
@@ -197,19 +235,44 @@ async function main(): Promise<void> {
   )
 
   // 9. Cross-mode reset isolation — a reset on claude-code must not affect codex.
-  await recordConversation(db, { taskId: 't1', mode: 'opencode', conversationId: 'O1', origin: 'slay-spawned-fresh' })
+  await recordConversation(db, {
+    taskId: 't1',
+    mode: 'opencode',
+    conversationId: 'O1',
+    origin: 'slay-spawned-fresh'
+  })
   await parity('opencode', 'O1', 'unrelated mode unaffected by claude-code reset')
 
   // 10. Batched resolver parity (shared.ts attachCurrentConversationByMode) —
   //     the ROW_NUMBER window query over many (task, mode) pairs must agree
   //     with the single-row resolver for every pair. Seed a second task with
   //     its own reset + post-reset session.
-  await recordConversation(db, { taskId: 't2', mode: 'claude-code', conversationId: 'D1', origin: 'slay-spawned-fresh' })
+  await recordConversation(db, {
+    taskId: 't2',
+    mode: 'claude-code',
+    conversationId: 'D1',
+    origin: 'slay-spawned-fresh'
+  })
   await sleep(2)
-  await recordConversation(db, { taskId: 't2', mode: 'claude-code', conversationId: null, origin: 'manual-reset' })
+  await recordConversation(db, {
+    taskId: 't2',
+    mode: 'claude-code',
+    conversationId: null,
+    origin: 'manual-reset'
+  })
   await sleep(2)
-  await recordConversation(db, { taskId: 't2', mode: 'claude-code', conversationId: 'D2', origin: 'slay-spawned-resume' })
-  await recordConversation(db, { taskId: 't2', mode: 'codex', conversationId: 'E1', origin: 'slay-spawned-fresh' })
+  await recordConversation(db, {
+    taskId: 't2',
+    mode: 'claude-code',
+    conversationId: 'D2',
+    origin: 'slay-spawned-resume'
+  })
+  await recordConversation(db, {
+    taskId: 't2',
+    mode: 'codex',
+    conversationId: 'E1',
+    origin: 'slay-spawned-fresh'
+  })
 
   const ids = ['t1', 't2']
   const ph = ids.map(() => '?').join(',')
@@ -230,7 +293,12 @@ async function main(): Promise<void> {
     [...ids, ...ids]
   )
   const batchedMap = new Map(batched.map((r) => [`${r.task_id}:${r.mode}`, r.conversation_id]))
-  for (const [taskId, mode] of [['t1', 'claude-code'], ['t1', 'opencode'], ['t2', 'claude-code'], ['t2', 'codex']] as const) {
+  for (const [taskId, mode] of [
+    ['t1', 'claude-code'],
+    ['t1', 'opencode'],
+    ['t2', 'claude-code'],
+    ['t2', 'codex']
+  ] as const) {
     const single = await getCurrentNew(db, taskId, mode)
     const batchedVal = batchedMap.get(`${taskId}:${mode}`) ?? null
     assert(
@@ -239,7 +307,10 @@ async function main(): Promise<void> {
     )
   }
   // Spot-check the expected post-reset winner for t2.
-  assert(batchedMap.get('t2:claude-code') === 'D2', `t2 claude-code should resolve to D2, got ${batchedMap.get('t2:claude-code')}`)
+  assert(
+    batchedMap.get('t2:claude-code') === 'D2',
+    `t2 claude-code should resolve to D2, got ${batchedMap.get('t2:claude-code')}`
+  )
 
   // ───────────────────────────────────────────────────────────────────────────
   // 11-13. Warm-pool resume regression — replays the real a426d99d timeline.
@@ -265,16 +336,28 @@ async function main(): Promise<void> {
 
   // Warm agent A: pooled → confirmed → bound after the reset → took a turn.
   await recordSessionSpawn(db, {
-    id: 'S_A', taskId: null, tabId: null, mode: 'claude-code', cwd: '/k',
-    expectedConversationId: 'a85fd6e9', usedResume: false, status: 'pooled'
+    id: 'S_A',
+    taskId: null,
+    tabId: null,
+    mode: 'claude-code',
+    cwd: '/k',
+    expectedConversationId: 'a85fd6e9',
+    usedResume: false,
+    status: 'pooled'
   })
   await confirmSessionConversation(db, { sessionId: 'S_A', observedConversationId: 'a85fd6e9' })
   at('S_A', 'created_at', T_POOL_A)
 
   // Warm agent B: pooled → confirmed → bound much later → NEVER took a turn.
   await recordSessionSpawn(db, {
-    id: 'S_B', taskId: null, tabId: null, mode: 'claude-code', cwd: '/k',
-    expectedConversationId: 'dd9c7775', usedResume: false, status: 'pooled'
+    id: 'S_B',
+    taskId: null,
+    tabId: null,
+    mode: 'claude-code',
+    cwd: '/k',
+    expectedConversationId: 'dd9c7775',
+    usedResume: false,
+    status: 'pooled'
   })
   await confirmSessionConversation(db, { sessionId: 'S_B', observedConversationId: 'dd9c7775' })
   at('S_B', 'created_at', T_POOL_B)

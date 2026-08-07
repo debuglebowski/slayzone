@@ -45,8 +45,7 @@ export function TerminalProgressDot({
   const baseStyle = getTerminalStateStyle(state)
   // Attention normally overrides every state. With `pauseOverridesAttention`,
   // a hibernated session keeps its pause icon — the pause symbol wins.
-  const attentionWins =
-    needsAttention && !(pauseOverridesAttention && state === 'hibernated')
+  const attentionWins = needsAttention && !(pauseOverridesAttention && state === 'hibernated')
   const stateStyle = attentionWins ? ATTENTION_STATE_STYLE : baseStyle
   const showProgress = !isDone && progress != null && progress > 0
   const showState = !!stateStyle || alwaysShow

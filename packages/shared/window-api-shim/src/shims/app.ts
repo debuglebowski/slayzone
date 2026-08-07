@@ -22,7 +22,11 @@ type PayloadSub<P> = (cb: (payload: P) => void) => () => void
 function voidEventSub(channel: string): VoidSub {
   return (cb) => {
     const handler = (): void => {
-      try { cb() } catch { /* ignore throwing subscriber */ }
+      try {
+        cb()
+      } catch {
+        /* ignore throwing subscriber */
+      }
     }
     window.addEventListener(channel, handler)
     return () => window.removeEventListener(channel, handler)
@@ -33,7 +37,11 @@ function payloadEventSub<P = unknown>(channel: string): PayloadSub<P> {
   return (cb) => {
     const handler = (evt: Event): void => {
       const detail = (evt as CustomEvent<P>).detail
-      try { cb(detail) } catch { /* ignore throwing subscriber */ }
+      try {
+        cb(detail)
+      } catch {
+        /* ignore throwing subscriber */
+      }
     }
     window.addEventListener(channel, handler)
     return () => window.removeEventListener(channel, handler)
@@ -61,7 +69,7 @@ export const appShim = {
   // Multi-hub is a pre-boot decision for the Electron sidecar; the fork's
   // sidecar is external + single-hub, so it's always off from the shell.
   getBootConfig: async (): Promise<{ multiHub: boolean }> => ({
-    multiHub: false,
+    multiHub: false
   }),
   // Fork is single-hub: the one local sidecar, at the fixed loopback url.
   getHubRegistry: async (): Promise<{
@@ -69,35 +77,35 @@ export const appShim = {
     defaultHubId: string
   }> => ({
     hubs: [{ id: 'local', kind: 'local', label: 'Local', url: resolveServerUrl().url }],
-    defaultHubId: 'local',
+    defaultHubId: 'local'
   }),
   // Fork is single-hub → no remote bearer tokens / login.
   getHubTokens: async (): Promise<Record<string, string>> => ({}),
   setHubToken: async (): Promise<{ ok: true }> => ({ ok: true }),
   hubLogin: async (): Promise<{ ok: false; error: string }> => ({
     ok: false,
-    error: 'Not supported in the Chromium shell',
+    error: 'Not supported in the Chromium shell'
   }),
   // The fork's sidecar is an external process the shell doesn't supervise.
   restartSidecar: async (): Promise<{ ok: boolean; error?: string }> => ({
     ok: false,
-    error: 'Not supported in the Chromium shell',
+    error: 'Not supported in the Chromium shell'
   }),
   // Same for the runner: the fork does not spawn it, so it cannot cycle it.
   restartLocalRunner: async (): Promise<{ ok: boolean; error?: string }> => ({
     ok: false,
-    error: 'Not supported in the Chromium shell',
+    error: 'Not supported in the Chromium shell'
   }),
   getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
   bootMark: (_label: string): void => undefined,
   dataReady: (): Promise<void> => Promise.resolve(),
   cliStatus: async (): Promise<{ installed: boolean; path: string | null }> => ({
     installed: false,
-    path: null,
+    path: null
   }),
   installCli: async (): Promise<{ ok: boolean; error?: string }> => ({
     ok: false,
-    error: 'cap-shell-2: CLI install deferred to cap-shell-6',
+    error: 'cap-shell-2: CLI install deferred to cap-shell-6'
   }),
   restartForUpdate: (): Promise<void> => Promise.resolve(),
   onUpdateStatus: noopSub,
@@ -119,7 +127,11 @@ export const appShim = {
   onBrowserEnsurePanelOpen: (cb: (taskId: string, url?: string) => void) => {
     const handler = (evt: Event): void => {
       const d = (evt as CustomEvent<[string, string?]>).detail ?? ['']
-      try { cb(d[0], d[1]) } catch { /* ignore */ }
+      try {
+        cb(d[0], d[1])
+      } catch {
+        /* ignore */
+      }
     }
     window.addEventListener('app:browser-ensure-panel-open', handler)
     return () => window.removeEventListener('app:browser-ensure-panel-open', handler)
@@ -127,12 +139,16 @@ export const appShim = {
   onOpenAsset: (cb: (taskId: string, assetId: string) => void) => {
     const handler = (evt: Event): void => {
       const d = (evt as CustomEvent<[string, string]>).detail ?? ['', '']
-      try { cb(d[0], d[1]) } catch { /* ignore */ }
+      try {
+        cb(d[0], d[1])
+      } catch {
+        /* ignore */
+      }
     }
     window.addEventListener('app:open-asset', handler)
     return () => window.removeEventListener('app:open-asset', handler)
   },
   onScreenshotTrigger: voidEventSub('app:screenshot-trigger'),
   onSyncSessionId: voidEventSub('app:sync-session-id'),
-  getProtocolClientStatus: async (): Promise<{ registered: boolean }> => ({ registered: false }),
+  getProtocolClientStatus: async (): Promise<{ registered: boolean }> => ({ registered: false })
 }

@@ -81,9 +81,10 @@ export async function getTagsForTask(db: SlayzoneDb, taskId: string): Promise<Ta
 }
 
 export async function getAllTaskTagIds(db: SlayzoneDb): Promise<Record<string, string[]>> {
-  const rows = (await db
-    .prepare('SELECT task_id, tag_id FROM task_tags')
-    .all()) as { task_id: string; tag_id: string }[]
+  const rows = (await db.prepare('SELECT task_id, tag_id FROM task_tags').all()) as {
+    task_id: string
+    tag_id: string
+  }[]
   const map: Record<string, string[]> = {}
   for (const row of rows) {
     if (!map[row.task_id]) map[row.task_id] = []

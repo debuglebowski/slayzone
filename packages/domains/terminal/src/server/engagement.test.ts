@@ -81,13 +81,23 @@ test('throttle: first ever report (lastReportAt 0, real clock) fires', () => {
 })
 
 test('throttle: inside the window is suppressed', () => {
-  expect(shouldReportEngagement(1_000, 1_000 + ENGAGEMENT_TOUCH_THROTTLE_MS - 1, ENGAGEMENT_TOUCH_THROTTLE_MS)).toBe(
-    false
-  )
+  expect(
+    shouldReportEngagement(
+      1_000,
+      1_000 + ENGAGEMENT_TOUCH_THROTTLE_MS - 1,
+      ENGAGEMENT_TOUCH_THROTTLE_MS
+    )
+  ).toBe(false)
 })
 
 test('throttle: exactly at the window fires', () => {
-  expect(shouldReportEngagement(1_000, 1_000 + ENGAGEMENT_TOUCH_THROTTLE_MS, ENGAGEMENT_TOUCH_THROTTLE_MS)).toBe(true)
+  expect(
+    shouldReportEngagement(
+      1_000,
+      1_000 + ENGAGEMENT_TOUCH_THROTTLE_MS,
+      ENGAGEMENT_TOUCH_THROTTLE_MS
+    )
+  ).toBe(true)
 })
 
 test('throttle: well past the window fires', () => {

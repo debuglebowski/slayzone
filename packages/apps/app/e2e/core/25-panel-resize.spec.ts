@@ -191,9 +191,7 @@ test.describe('Panel layout config', () => {
       const cfg = JSON.parse(raw)
       delete cfg.layout
       await s.setSetting('panel_config', JSON.stringify(cfg))
-      await mainWindow.evaluate(() =>
-        window.dispatchEvent(new CustomEvent('panel-config-changed'))
-      )
+      await mainWindow.evaluate(() => window.dispatchEvent(new CustomEvent('panel-config-changed')))
     }
   })
 
@@ -226,9 +224,7 @@ test.describe('Panel layout config', () => {
     await expect
       .poll(() => container(mainWindow).evaluate((el) => el.scrollWidth > el.clientWidth + 1))
       .toBe(true)
-    const overflowX = await container(mainWindow).evaluate(
-      (el) => getComputedStyle(el).overflowX
-    )
+    const overflowX = await container(mainWindow).evaluate((el) => getComputedStyle(el).overflowX)
     expect(['auto', 'scroll']).toContain(overflowX)
   })
 

@@ -155,12 +155,26 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
     // Simulate the pre-fix state: three random-id rows all named 'local-runner'
     // (one accumulated per relaunch) plus a legitimate REMOTE runner.
     const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, { id: keep, name: 'local-runner', platform: 'p', version: 'v', now: 3 })
+    await registerOrReplaceRunner(t.db, {
+      id: keep,
+      name: 'local-runner',
+      platform: 'p',
+      version: 'v',
+      now: 3
+    })
     await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 1 })
     await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 2 })
-    const remote = await registerRunner(t.db, { name: 'mac-studio-remote', platform: 'p', version: 'v', now: 4 })
+    const remote = await registerRunner(t.db, {
+      name: 'mac-studio-remote',
+      platform: 'p',
+      version: 'v',
+      now: 4
+    })
 
-    const removed = await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })
+    const removed = await retireStaleLocalRunners(t.db, {
+      name: 'local-runner',
+      keepRunnerId: keep
+    })
     expect(removed).toBe(2) // the two orphaned random-id local rows
 
     const rows = await listRunners(t.db)
@@ -173,22 +187,46 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
 
   it('retireStaleLocalRunners NEVER touches a disconnected remote runner (identity-only)', async () => {
     const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, { id: keep, name: 'local-runner', platform: 'p', version: 'v', now: 1 })
+    await registerOrReplaceRunner(t.db, {
+      id: keep,
+      name: 'local-runner',
+      platform: 'p',
+      version: 'v',
+      now: 1
+    })
     // A remote runner (different name) — represents a sleeping laptop, no live
     // connection. It must survive: dedup matches by name, never by status.
-    const sleeping = await registerRunner(t.db, { name: 'colleague-laptop', platform: 'p', version: 'v', now: 2 })
+    const sleeping = await registerRunner(t.db, {
+      name: 'colleague-laptop',
+      platform: 'p',
+      version: 'v',
+      now: 2
+    })
 
-    const removed = await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })
+    const removed = await retireStaleLocalRunners(t.db, {
+      name: 'local-runner',
+      keepRunnerId: keep
+    })
     expect(removed).toBe(0) // nothing else shares the local name
     expect(await getRunner(t.db, sleeping.id)).not.toBeNull()
   })
 
   it('retireStaleLocalRunners is idempotent — a second call is a no-op', async () => {
     const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, { id: keep, name: 'local-runner', platform: 'p', version: 'v', now: 1 })
+    await registerOrReplaceRunner(t.db, {
+      id: keep,
+      name: 'local-runner',
+      platform: 'p',
+      version: 'v',
+      now: 1
+    })
     await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 2 })
-    expect(await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })).toBe(1)
-    expect(await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })).toBe(0)
+    expect(await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })).toBe(
+      1
+    )
+    expect(await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })).toBe(
+      0
+    )
     expect(await listRunners(t.db)).toHaveLength(1)
   })
 
@@ -198,8 +236,19 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
     // routing backend forwards the spawn to a nonexistent runner with no fallback.
     seedProjectAndTask(t.raw, 'proj-b', 'task-b')
     const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, { id: keep, name: 'local-runner', platform: 'p', version: 'v', now: 3 })
-    const orphan = await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 1 })
+    await registerOrReplaceRunner(t.db, {
+      id: keep,
+      name: 'local-runner',
+      platform: 'p',
+      version: 'v',
+      now: 3
+    })
+    const orphan = await registerRunner(t.db, {
+      name: 'local-runner',
+      platform: 'p',
+      version: 'v',
+      now: 1
+    })
     await setTaskRunner(t.db, 'task-b', orphan.id)
     await setProjectDefaultRunner(t.db, 'proj-b', orphan.id)
 
@@ -217,9 +266,20 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
   it('leaves bindings to UNRELATED (remote) runners untouched during a local collapse', async () => {
     seedProjectAndTask(t.raw, 'proj-c', 'task-c')
     const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, { id: keep, name: 'local-runner', platform: 'p', version: 'v', now: 2 })
+    await registerOrReplaceRunner(t.db, {
+      id: keep,
+      name: 'local-runner',
+      platform: 'p',
+      version: 'v',
+      now: 2
+    })
     await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 1 })
-    const remote = await registerRunner(t.db, { name: 'remote-x', platform: 'p', version: 'v', now: 3 })
+    const remote = await registerRunner(t.db, {
+      name: 'remote-x',
+      platform: 'p',
+      version: 'v',
+      now: 3
+    })
     await setTaskRunner(t.db, 'task-c', remote.id)
 
     await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })
@@ -308,9 +368,9 @@ describe('task/project runner binding', () => {
     // in-process fallback, such a task must still resolve to a real runner or no
     // agent could ever start on an existing install.
     it('falls back to the sole connected runner when nothing is bound', async () => {
-      expect(
-        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [{ runnerId: 'r-only' }])
-      ).toBe('r-only')
+      expect(await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [{ runnerId: 'r-only' }])).toBe(
+        'r-only'
+      )
     })
 
     it('prefers the local runner by name when several are connected', async () => {

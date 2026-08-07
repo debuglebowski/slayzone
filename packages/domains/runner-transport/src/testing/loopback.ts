@@ -8,7 +8,11 @@
 import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, type ServerOptions } from 'ws'
-import { createHubRunnerGateway, type HubRunnerGateway, type HubRunnerGatewayOptions } from '../server/hub-gateway'
+import {
+  createHubRunnerGateway,
+  type HubRunnerGateway,
+  type HubRunnerGatewayOptions
+} from '../server/hub-gateway'
 import { RunnerTransportErrorCodes, type EnrollParams } from '../shared/frames'
 import { RpcError } from '../shared/rpc'
 

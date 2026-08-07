@@ -109,10 +109,7 @@ export function decideConversationHeal(input: HealInput): HealDecision {
   // human turn. Unknown branch (null) fails — we don't guess across branches.
   const c = cwdInWindow[0]
   const ok =
-    !c.referenced &&
-    c.hasHumanTurn &&
-    task.gitBranch != null &&
-    c.gitBranch === task.gitBranch
+    !c.referenced && c.hasHumanTurn && task.gitBranch != null && c.gitBranch === task.gitBranch
   if (!ok) return { action: 'overlay' }
 
   return { action: 'orphan', id: c.id }

@@ -15,13 +15,7 @@
  *   - isActive false→true edge re-runs fit() + scheduleAtlasCorrection()
  *   - a per-frame watchdog corrects on cell-key drift while active
  */
-import {
-  test,
-  expect,
-  seed,
-  resetApp,
-  TEST_PROJECT_PATH
-} from '../fixtures/electron'
+import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { getMainSessionId, openTaskTerminal, waitForPtySession } from '../fixtures/terminal'
 
 interface DiagEvent {
@@ -166,8 +160,7 @@ test.describe('terminal atlas stability across task switches', () => {
       const toIndex = tabIndexByTaskId[toTaskId]
 
       await mainWindow.evaluate((idx) => {
-        const store = (window as unknown as { __slayzone_tabStore?: TabStore })
-          .__slayzone_tabStore
+        const store = (window as unknown as { __slayzone_tabStore?: TabStore }).__slayzone_tabStore
         store?.getState().setActiveTabIndex(idx)
       }, toIndex)
 
@@ -201,9 +194,7 @@ test.describe('terminal atlas stability across task switches', () => {
       }
     }
 
-    expect(failures, `task-switch dirty atlas events across ${ITERATIONS} iterations`).toEqual(
-      []
-    )
+    expect(failures, `task-switch dirty atlas events across ${ITERATIONS} iterations`).toEqual([])
 
     // Sanity — every target task actually ran the reactivate handler, proving
     // the test exercised the code path rather than passing vacuously.

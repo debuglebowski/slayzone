@@ -10,7 +10,9 @@ import {
 import type { ResolvedLayout } from './usePanelSizes'
 import type { PanelLayout, PanelConfig } from '../shared/types'
 
-const L = (p: Partial<PanelLayout> & { unit: PanelLayout['unit']; value: number }): PanelLayout => ({
+const L = (
+  p: Partial<PanelLayout> & { unit: PanelLayout['unit']; value: number }
+): PanelLayout => ({
   ...p
 })
 
@@ -152,7 +154,9 @@ describe('resolvePanels + effectiveLayout', () => {
   })
 
   it('coerces legacy numeric bounds to px dimensions', () => {
-    const cfg = { layout: { terminal: { unit: 'fr', value: 1, min: 333 } } } as unknown as PanelConfig
+    const cfg = {
+      layout: { terminal: { unit: 'fr', value: 1, min: 333 } }
+    } as unknown as PanelConfig
     expect(effectiveLayout('terminal', cfg, {}).min).toEqual({ value: 333, unit: 'px' })
   })
 

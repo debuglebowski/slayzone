@@ -25,7 +25,9 @@ test.describe('Chat queue persistence', () => {
 
     await mainWindow.evaluate(
       async (id) =>
-        window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' } as never),
+        window
+          .getTrpcVanillaClient()
+          .task.update.mutate({ id, terminalMode: 'claude-code' } as never),
       taskId
     )
     await s.refreshData()
@@ -140,15 +142,17 @@ test.describe('Chat queue persistence', () => {
       return new Promise<string>((resolve) => {
         const sub = window.getTrpcVanillaClient().chat.onQueueChanged.subscribe(undefined, {
           onData: ({ tabId }) => {
-          if (tabId === id) {
+            if (tabId === id) {
               sub.unsubscribe()
-            resolve(tabId)
-          }
+              resolve(tabId)
+            }
           }
         })
-        void window
-          .getTrpcVanillaClient()
-          .chat.queue.push.mutate({ tabId: id, send: 'broadcast probe', original: 'broadcast probe' })
+        void window.getTrpcVanillaClient().chat.queue.push.mutate({
+          tabId: id,
+          send: 'broadcast probe',
+          original: 'broadcast probe'
+        })
       })
     }, mainTabId)
     expect(observed).toBe(mainTabId)

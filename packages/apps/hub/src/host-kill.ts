@@ -26,7 +26,9 @@ export function wireHostKillStamp(
     try {
       const row = (await db
         .prepare('SELECT provider_config, terminal_mode FROM tasks WHERE id = ?')
-        .get(taskId)) as { provider_config: string | null; terminal_mode: string | null } | undefined
+        .get(taskId)) as
+        | { provider_config: string | null; terminal_mode: string | null }
+        | undefined
       // No mode means no provider to stamp against — a task that never ran an agent.
       if (!row?.terminal_mode) return
       const cfg: ProviderConfig = row.provider_config ? JSON.parse(row.provider_config) : {}

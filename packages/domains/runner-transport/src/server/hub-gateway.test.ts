@@ -10,7 +10,12 @@ import { RunnerTransportErrorCodes } from '../shared/frames'
 import { JSON_RPC_INTERNAL_ERROR, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { startLoopbackHub, type LoopbackHub } from '../testing/loopback'
 
-const IDENTITY = { name: 'test-runner', platform: 'darwin-arm64', version: '0.0.0', capabilities: ['pty'] }
+const IDENTITY = {
+  name: 'test-runner',
+  platform: 'darwin-arm64',
+  version: '0.0.0',
+  capabilities: ['pty']
+}
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -100,7 +105,14 @@ describe('enrollment', () => {
         jsonrpc: '2.0',
         id: 1,
         method: 'enroll',
-        params: { joinToken: 'jt-valid', name: 'n', platform: 'p', version: 'v', capabilities: [], protocolVersion: 99 }
+        params: {
+          joinToken: 'jt-valid',
+          name: 'n',
+          platform: 'p',
+          version: 'v',
+          capabilities: [],
+          protocolVersion: 99
+        }
       })
     )
     const frame = await reply
@@ -208,10 +220,12 @@ describe('hub → runner requests', () => {
     dialer.start()
     await dialer.events.once('connected')
 
-    const err = await hub.gateway.request('runner-1', 'pty.resize', { sessionId: 's', cols: 80, rows: 24 }, 50).then(
-      () => null,
-      (e: unknown) => e
-    )
+    const err = await hub.gateway
+      .request('runner-1', 'pty.resize', { sessionId: 's', cols: 80, rows: 24 }, 50)
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
     expect(err).toBeInstanceOf(RpcTimeoutError)
   })
 
@@ -251,11 +265,18 @@ describe('runner → hub notifications', () => {
     const received: Array<{ runnerId: string; sessionId: string; seq: number; data: string }> = []
     hub.gateway.events.on('pty.data', (payload) => received.push(payload))
     for (const seq of [1, 2, 3]) {
-      expect(dialer.notify('pty.data', { sessionId: 'sess-1', seq, data: `chunk-${seq}` })).toBe(true)
+      expect(dialer.notify('pty.data', { sessionId: 'sess-1', seq, data: `chunk-${seq}` })).toBe(
+        true
+      )
     }
     await vi.waitFor(() => expect(received).toHaveLength(3))
     expect(received.map((r) => r.seq)).toEqual([1, 2, 3])
-    expect(received[0]).toEqual({ runnerId: 'runner-1', sessionId: 'sess-1', seq: 1, data: 'chunk-1' })
+    expect(received[0]).toEqual({
+      runnerId: 'runner-1',
+      sessionId: 'sess-1',
+      seq: 1,
+      data: 'chunk-1'
+    })
 
     const exit = hub.gateway.events.once('pty.exit')
     dialer.notify('pty.exit', { sessionId: 'sess-1', exitCode: 0 })
@@ -275,7 +296,13 @@ describe('malformed frames', () => {
     raw.send('garbage{')
     raw.send(JSON.stringify([1, 2, 3]))
     raw.send(JSON.stringify({ jsonrpc: '2.0' })) // no method, no id
-    raw.send(JSON.stringify({ jsonrpc: '2.0', method: 'pty.data', params: { sessionId: 's', seq: 1, data: 'x' } })) // pre-auth notification
+    raw.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'pty.data',
+        params: { sessionId: 's', seq: 1, data: 'x' }
+      })
+    ) // pre-auth notification
     await vi.waitFor(() => expect(protocolErrors.length).toBeGreaterThanOrEqual(4))
 
     // Gateway still fully functional afterwards.
@@ -294,7 +321,9 @@ describe('malformed frames', () => {
       raw.once('message', (data) => resolve(JSON.parse(data.toString())))
     )
     raw.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'heartbeat', params: {} }))
-    expect(((await reply).error as { code: number }).code).toBe(RunnerTransportErrorCodes.unauthorized)
+    expect(((await reply).error as { code: number }).code).toBe(
+      RunnerTransportErrorCodes.unauthorized
+    )
   })
 
   it('malformed pty.data notifications are dropped with protocol-error, valid ones still flow', async () => {

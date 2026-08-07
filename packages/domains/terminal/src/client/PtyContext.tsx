@@ -345,15 +345,12 @@ export function PtyProvider({ children }: { children: ReactNode }) {
 
   // Store-backed shim: state lives in the reactive store now. Preserves the
   // `(newState, oldState)` callback contract that useLoopMode relies on.
-  const subscribeState = useCallback(
-    (sessionId: string, cb: StateChangeCallback): (() => void) => {
-      return useTerminalStateStore.subscribe(
-        (s) => s.byId[sessionId] ?? 'starting',
-        (next, previous) => cb(next, previous)
-      )
-    },
-    []
-  )
+  const subscribeState = useCallback((sessionId: string, cb: StateChangeCallback): (() => void) => {
+    return useTerminalStateStore.subscribe(
+      (s) => s.byId[sessionId] ?? 'starting',
+      (next, previous) => cb(next, previous)
+    )
+  }, [])
 
   const subscribePrompt = useCallback((sessionId: string, cb: PromptCallback): (() => void) => {
     let subs = promptSubsRef.current.get(sessionId)

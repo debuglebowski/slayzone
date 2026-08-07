@@ -340,7 +340,10 @@ test.describe('TreeView drag and drop', () => {
           ids: [a, b, c, s1, s2, s3],
           updates: { status: 'in_progress', priority: 3 }
         })
-        await client.task.updateMany.mutate({ ids: [todo], updates: { status: 'todo', priority: 3 } })
+        await client.task.updateMany.mutate({
+          ids: [todo],
+          updates: { status: 'todo', priority: 3 }
+        })
         await client.task.reorder.mutate({ taskIds: [a, b, c, todo] })
         await client.task.reorder.mutate({ taskIds: [s1, s2, s3] })
       },
@@ -494,7 +497,9 @@ test.describe('TreeView drag and drop', () => {
     // All three tasks share priority 2. Switch to priority grouping.
     await mainWindow.evaluate(
       async ({ ids }) => {
-        await window.getTrpcVanillaClient().task.updateMany.mutate({ ids, updates: { priority: 2 } })
+        await window
+          .getTrpcVanillaClient()
+          .task.updateMany.mutate({ ids, updates: { priority: 2 } })
       },
       { ids: [rootA, rootB, rootC] }
     )
@@ -583,7 +588,10 @@ test.describe('TreeView drag and drop', () => {
       )
       await expect(tempGroup).toHaveCount(0)
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), tempId!.id)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        tempId!.id
+      )
     }
   })
 
@@ -999,7 +1007,10 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: true })
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        rootDone.id
+      )
     }
   })
 
@@ -1053,7 +1064,10 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'in_progress', afterRootC: true })
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        rootDone.id
+      )
     }
   })
 
@@ -1114,7 +1128,10 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        rootDone.id
+      )
     }
   })
 
@@ -1164,7 +1181,10 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        rootDone.id
+      )
     }
   })
 
@@ -1214,7 +1234,10 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        rootDone.id
+      )
     }
   })
 
@@ -1270,7 +1293,10 @@ test.describe('TreeView drag and drop', () => {
         )
         .toEqual({ dStatus: 'todo', beforeRootTodo: false })
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootDone.id)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        rootDone.id
+      )
     }
   })
 
@@ -1290,9 +1316,7 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       rowDropPoint(mainWindow, rootB)
     )
-    await expect
-      .poll(() => getPinnedIds(mainWindow), { timeout: 5_000 })
-      .toEqual([rootB, rootA])
+    await expect.poll(() => getPinnedIds(mainWindow), { timeout: 5_000 }).toEqual([rootB, rootA])
     await setPinned(mainWindow, [])
     await patchStore(mainWindow, { treeGroupPinned: false })
   })
@@ -1342,5 +1366,4 @@ test.describe('TreeView drag and drop', () => {
     await setPinned(mainWindow, [])
     await patchStore(mainWindow, { treeGroupPinned: false })
   })
-
 })

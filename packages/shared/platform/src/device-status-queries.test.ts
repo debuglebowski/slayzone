@@ -269,7 +269,10 @@ test('preserves arrow keys and kitty shift-enter', () => {
 })
 
 test('preserves bracketed-paste wrappers and pasted content', () => {
-  assert(stripDeviceStatusResponses('\x1b[200~pasted text\x1b[201~'), '\x1b[200~pasted text\x1b[201~')
+  assert(
+    stripDeviceStatusResponses('\x1b[200~pasted text\x1b[201~'),
+    '\x1b[200~pasted text\x1b[201~'
+  )
 })
 
 test('keeps typed text while dropping an embedded response', () => {

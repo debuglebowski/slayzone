@@ -20,14 +20,13 @@ await describe('buildTopLevelEntries', async () => {
   })
 
   test('interleaves groups + projects by shared sort_order; members ordered', () => {
-    const projects = [
-      proj('top', 0),
-      proj('m2', 1, 'g1'),
-      proj('m1', 0, 'g1'),
-      proj('tail', 2)
-    ]
+    const projects = [proj('top', 0), proj('m2', 1, 'g1'), proj('m1', 0, 'g1'), proj('tail', 2)]
     const entries = buildTopLevelEntries(projects, [group('g1', 1)])
-    expect(entries.map((e) => `${e.kind}:${e.id}`)).toEqual(['project:top', 'group:g1', 'project:tail'])
+    expect(entries.map((e) => `${e.kind}:${e.id}`)).toEqual([
+      'project:top',
+      'group:g1',
+      'project:tail'
+    ])
     const g = entries.find((e) => e.kind === 'group')
     expect(g?.kind === 'group' && g.projects.map((p) => p.id)).toEqual(['m1', 'm2'])
   })

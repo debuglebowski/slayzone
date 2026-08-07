@@ -38,8 +38,8 @@ function LeaderboardAuthGate(): React.JSX.Element {
         </div>
         <h1 className="text-lg font-semibold">Leaderboard requires sign-in</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          The leaderboard ranks signed-in users by tokens used and tasks completed. This build
-          has no Convex backend configured, so sign-in is unavailable here.
+          The leaderboard ranks signed-in users by tokens used and tasks completed. This build has
+          no Convex backend configured, so sign-in is unavailable here.
         </p>
         <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground/80">
           <Lock className="size-3.5" />

@@ -76,7 +76,10 @@ async function handshake(h: Harness, threadId = 'thread-1'): Promise<void> {
 /** Fixture notification lines (the `method`-bearing turn stream). */
 function fixtureNotifications(): string[] {
   const raw = readFileSync(
-    join(process.cwd(), 'packages/domains/terminal/test/fixtures/codex-app-server/simple-turn.ndjson'),
+    join(
+      process.cwd(),
+      'packages/domains/terminal/test/fixtures/codex-app-server/simple-turn.ndjson'
+    ),
     'utf8'
   )
   return raw
@@ -222,7 +225,10 @@ async function run(): Promise<void> {
     assert(kinds.includes('stream-message-stop'), 'expected stream-message-stop')
     // The delta text must carry the model's reply.
     const delta = h.emitted.find((e) => e.kind === 'stream-block-delta')
-    assert(delta!.kind === 'stream-block-delta' && delta!.text === 'OK', 'delta text should be "OK"')
+    assert(
+      delta!.kind === 'stream-block-delta' && delta!.text === 'OK',
+      'delta text should be "OK"'
+    )
     // turn/completed must produce exactly one result so the in-flight counter balances.
     const results = h.emitted.filter((e) => e.kind === 'result')
     eq(results.length, 1)
@@ -417,7 +423,11 @@ async function run(): Promise<void> {
     eq(ack, { ok: true }, 'set_model acks ok')
     h.driver.sendUserMessage('go')
     const turn = h.sent.find((m) => m.method === 'turn/start')!
-    eq((turn.params as Record<string, unknown>).model, 'gpt-6-codex', 'next turn uses the new model')
+    eq(
+      (turn.params as Record<string, unknown>).model,
+      'gpt-6-codex',
+      'next turn uses the new model'
+    )
   })
 
   await test('applyControl set_effort takes effect on the next turn', async () => {
@@ -545,7 +555,12 @@ async function run(): Promise<void> {
       h.driver.handleLine(
         JSON.stringify({ method: 'item/completed', params: { item, threadId: 't', turnId: 'tn' } })
       )
-    completed({ type: 'commandExecution', id: 'ok1', status: 'completed', aggregatedOutput: 'done' })
+    completed({
+      type: 'commandExecution',
+      id: 'ok1',
+      status: 'completed',
+      aggregatedOutput: 'done'
+    })
     completed({ type: 'commandExecution', id: 'bad1', status: 'failed', aggregatedOutput: 'boom' })
 
     const results = h.emitted.filter((e) => e.kind === 'tool-result')
@@ -574,7 +589,10 @@ async function run(): Promise<void> {
       })
     )
     const result = h.emitted.find((e) => e.kind === 'result')!
-    assert(result.kind === 'result' && result.subtype === 'interrupted', 'subtype should be interrupted')
+    assert(
+      result.kind === 'result' && result.subtype === 'interrupted',
+      'subtype should be interrupted'
+    )
     assert(result.kind === 'result' && !result.isError, 'an interrupt is not an error')
   })
 
@@ -601,7 +619,12 @@ async function run(): Promise<void> {
     h.driver.handleLine(
       JSON.stringify({
         method: 'error',
-        params: { error: { message: 'rate limited' }, willRetry: false, threadId: 't', turnId: 'tn' }
+        params: {
+          error: { message: 'rate limited' },
+          willRetry: false,
+          threadId: 't',
+          turnId: 'tn'
+        }
       })
     )
     const err = h.emitted.find((e) => e.kind === 'error')
@@ -635,7 +658,10 @@ async function run(): Promise<void> {
     h.driver.sendUserMessage('go')
     // No turn/start reply fed — only the streamed turn/started notification.
     h.driver.handleLine(
-      JSON.stringify({ method: 'turn/started', params: { threadId: 't', turn: { id: 'turn-streamed' } } })
+      JSON.stringify({
+        method: 'turn/started',
+        params: { threadId: 't', turn: { id: 'turn-streamed' } }
+      })
     )
     void h.driver.applyControl({ subtype: 'interrupt' })
     const interrupt = h.sent.find((m) => m.method === 'turn/interrupt')!

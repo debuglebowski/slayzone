@@ -36,13 +36,22 @@ const caller = automationsRouter.createCaller(ctx as never)
 
 const projectId = crypto.randomUUID()
 const projectId2 = crypto.randomUUID()
-h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(projectId, 'P1', '#000', '/tmp/p1')
-h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(projectId2, 'P2', '#111', '/tmp/p2')
+h.db
+  .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+  .run(projectId, 'P1', '#000', '/tmp/p1')
+h.db
+  .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+  .run(projectId2, 'P2', '#111', '/tmp/p2')
 
 const triggerConfig = { type: 'task_status_change', params: { toStatus: 'done' } }
 const actions = [{ type: 'run_command', params: { command: 'echo hi' } }]
 const mk = (extra: Record<string, unknown>): Promise<Automation> =>
-  caller.create({ project_id: projectId, trigger_config: triggerConfig, actions, ...extra } as never) as Promise<Automation>
+  caller.create({
+    project_id: projectId,
+    trigger_config: triggerConfig,
+    actions,
+    ...extra
+  } as never) as Promise<Automation>
 
 test('automations router: create required fields + defaults + per-project sort_order + provided desc/conditions', async () => {
   const a = await mk({ name: 'Auto 1' })
@@ -75,7 +84,9 @@ test('automations router: create required fields + defaults + per-project sort_o
 
   const conditional = await mk({
     name: 'Conditional',
-    conditions: [{ type: 'task_property', params: { field: 'status', operator: 'equals', value: 'done' } }]
+    conditions: [
+      { type: 'task_property', params: { field: 'status', operator: 'equals', value: 'done' } }
+    ]
   })
   expect(conditional.conditions).toHaveLength(1)
   expect(conditional.conditions[0].type).toBe('task_property')
@@ -85,9 +96,11 @@ test('automations router: getByProject filter / isolation / empty / ordered', as
   const p1 = await caller.getByProject({ projectId })
   expect(p1.length).toBeGreaterThan(0)
   for (const a of p1) expect(a.project_id).toBe(projectId)
-  for (const a of await caller.getByProject({ projectId: projectId2 })) expect(a.project_id).toBe(projectId2)
+  for (const a of await caller.getByProject({ projectId: projectId2 }))
+    expect(a.project_id).toBe(projectId2)
   expect(await caller.getByProject({ projectId: 'nonexistent' })).toHaveLength(0)
-  for (let i = 1; i < p1.length; i++) expect(p1[i].sort_order).toBeGreaterThanOrEqual(p1[i - 1].sort_order)
+  for (let i = 1; i < p1.length; i++)
+    expect(p1[i].sort_order).toBeGreaterThanOrEqual(p1[i - 1].sort_order)
 })
 
 test('automations router: get by id / null for missing', async () => {
@@ -108,8 +121,12 @@ test('automations router: update name / enabled / trigger / multi / no-op / cond
   expect(((await caller.update({ id, enabled: true } as never)) as Automation).enabled).toBe(true)
 
   expect(
-    ((await caller.update({ id, trigger_config: { type: 'manual', params: {} } } as never)) as Automation)
-      .trigger_config.type
+    (
+      (await caller.update({
+        id,
+        trigger_config: { type: 'manual', params: {} }
+      } as never)) as Automation
+    ).trigger_config.type
   ).toBe('manual')
 
   const multi = (await caller.update({
@@ -142,16 +159,24 @@ test('automations router: delete true/false + CASCADE runs', async () => {
 
   const withRuns = await mk({ name: 'WithRuns' })
   h.db
-    .prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))")
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+    )
     .run('run-x', withRuns.id)
-  expect(h.db.prepare('SELECT * FROM automation_runs WHERE automation_id = ?').all(withRuns.id)).toHaveLength(1)
+  expect(
+    h.db.prepare('SELECT * FROM automation_runs WHERE automation_id = ?').all(withRuns.id)
+  ).toHaveLength(1)
   await caller.delete({ id: withRuns.id })
-  expect(h.db.prepare('SELECT * FROM automation_runs WHERE automation_id = ?').all(withRuns.id)).toHaveLength(0)
+  expect(
+    h.db.prepare('SELECT * FROM automation_runs WHERE automation_id = ?').all(withRuns.id)
+  ).toHaveLength(0)
 })
 
 test('automations router: toggle on/off', async () => {
   const all = await caller.getByProject({ projectId })
-  expect(((await caller.toggle({ id: all[0].id, enabled: false })) as Automation).enabled).toBe(false)
+  expect(((await caller.toggle({ id: all[0].id, enabled: false })) as Automation).enabled).toBe(
+    false
+  )
   expect(((await caller.toggle({ id: all[0].id, enabled: true })) as Automation).enabled).toBe(true)
 })
 
@@ -173,8 +198,16 @@ test('automations router: getRuns array / DESC order / custom limit / default 50
   expect(Array.isArray(await caller.getRuns({ automationId: base[0].id }))).toBe(true)
 
   const ordered = await mk({ name: 'RunTest' })
-  h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', '2026-01-01')").run('r1', ordered.id)
-  h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'error', '2026-01-02')").run('r2', ordered.id)
+  h.db
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', '2026-01-01')"
+    )
+    .run('r1', ordered.id)
+  h.db
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'error', '2026-01-02')"
+    )
+    .run('r2', ordered.id)
   const runs = (await caller.getRuns({ automationId: ordered.id })) as AutomationRun[]
   expect(runs).toHaveLength(2)
   expect(runs[0].id).toBe('r2')
@@ -182,26 +215,50 @@ test('automations router: getRuns array / DESC order / custom limit / default 50
 
   const limited = await mk({ name: 'LimitTest' })
   for (let i = 0; i < 5; i++)
-    h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))").run(`lim-${i}`, limited.id)
+    h.db
+      .prepare(
+        "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+      )
+      .run(`lim-${i}`, limited.id)
   expect(await caller.getRuns({ automationId: limited.id, limit: 2 })).toHaveLength(2)
 
   const def = await mk({ name: 'DefaultLimitTest' })
   for (let i = 0; i < 60; i++)
-    h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))").run(`dl-${i}`, def.id)
+    h.db
+      .prepare(
+        "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+      )
+      .run(`dl-${i}`, def.id)
   expect(await caller.getRuns({ automationId: def.id })).toHaveLength(50)
 })
 
 test('automations router: clearRuns clears own / isolates others', async () => {
   const a = await mk({ name: 'ClearTest' })
-  h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))").run('cr-1', a.id)
-  h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))").run('cr-2', a.id)
+  h.db
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+    )
+    .run('cr-1', a.id)
+  h.db
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+    )
+    .run('cr-2', a.id)
   await caller.clearRuns({ automationId: a.id })
   expect(await caller.getRuns({ automationId: a.id })).toHaveLength(0)
 
   const a1 = await mk({ name: 'Clear1' })
   const a2 = await mk({ name: 'Clear2' })
-  h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))").run('iso-1', a1.id)
-  h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))").run('iso-2', a2.id)
+  h.db
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+    )
+    .run('iso-1', a1.id)
+  h.db
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+    )
+    .run('iso-2', a2.id)
   await caller.clearRuns({ automationId: a1.id })
   expect(await caller.getRuns({ automationId: a1.id })).toHaveLength(0)
   expect(await caller.getRuns({ automationId: a2.id })).toHaveLength(1)
@@ -225,14 +282,25 @@ test('automations router: reorder duplicate IDs → last occurrence wins', async
 
 test('automations router: getRuns limit=0 → empty (SQL LIMIT 0)', async () => {
   const a = await mk({ name: 'Limit0Test' })
-  h.db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))").run('lz-1', a.id)
+  h.db
+    .prepare(
+      "INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'success', datetime('now'))"
+    )
+    .run('lz-1', a.id)
   expect(await caller.getRuns({ automationId: a.id, limit: 0 })).toHaveLength(0)
 })
 
 test('automations router: deleting project cascades to its automations', async () => {
   const tempProjId = crypto.randomUUID()
-  h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(tempProjId, 'TempProj', '#000', '/tmp/tp')
-  const a = (await caller.create({ project_id: tempProjId, name: 'CascadeTest', trigger_config: triggerConfig, actions } as never)) as Automation
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+    .run(tempProjId, 'TempProj', '#000', '/tmp/tp')
+  const a = (await caller.create({
+    project_id: tempProjId,
+    name: 'CascadeTest',
+    trigger_config: triggerConfig,
+    actions
+  } as never)) as Automation
   expect(a.id).toBeTruthy()
   h.db.prepare('DELETE FROM projects WHERE id = ?').run(tempProjId)
   expect(await caller.get({ id: a.id })).toBeNull()

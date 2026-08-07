@@ -25,7 +25,10 @@ import type {
 import { CodexAppServerClient, type JsonRpcId } from './codex-app-server-client'
 import { defaultModelForMode } from '../../../shared/chat-model-catalog'
 import { CODEX_FAST_SERVICE_TIER } from '../../../shared/chat-fast-mode'
-import { CODEX_DEFAULT_INSTRUCTIONS, CODEX_PLAN_INSTRUCTIONS } from './codex-collaboration-instructions'
+import {
+  CODEX_DEFAULT_INSTRUCTIONS,
+  CODEX_PLAN_INSTRUCTIONS
+} from './codex-collaboration-instructions'
 import type {
   CodexApprovalDecision,
   CodexApprovalPolicy,
@@ -492,7 +495,9 @@ class CodexChatSession implements ChatSessionDriver {
   }
 
   /** Codex tool-ish items → `tool-call`. Returns null for non-tool items. */
-  private toToolCall(item: Record<string, unknown> & { type: string; id: string }): AgentEvent | null {
+  private toToolCall(
+    item: Record<string, unknown> & { type: string; id: string }
+  ): AgentEvent | null {
     switch (item.type) {
       case 'commandExecution':
         return {
@@ -538,12 +543,17 @@ class CodexChatSession implements ChatSessionDriver {
   private toToolResult(
     item: Record<string, unknown> & { type: string; id: string }
   ): AgentEvent | null {
-    const toolTypes = ['commandExecution', 'fileChange', 'mcpToolCall', 'dynamicToolCall', 'webSearch']
+    const toolTypes = [
+      'commandExecution',
+      'fileChange',
+      'mcpToolCall',
+      'dynamicToolCall',
+      'webSearch'
+    ]
     if (!toolTypes.includes(item.type)) return null
     const status = typeof item.status === 'string' ? item.status : ''
     const isError = status === 'failed' || status === 'declined' || item.success === false
-    const rawContent =
-      typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput : ''
+    const rawContent = typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput : ''
     return {
       kind: 'tool-result',
       toolUseId: item.id,

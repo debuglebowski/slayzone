@@ -102,7 +102,8 @@ test.describe('Provider config roundtrip', () => {
 
   test('update flags for gemini mode', async ({ mainWindow }) => {
     await mainWindow.evaluate(
-      ({ id, flags }) => window.getTrpcVanillaClient().task.update.mutate({ id, geminiFlags: flags }),
+      ({ id, flags }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, geminiFlags: flags }),
       { id: taskId, flags: '--sandbox --verbose' }
     )
     const task = await mainWindow.evaluate(
@@ -165,7 +166,9 @@ test.describe('Provider config roundtrip', () => {
 
     const task = await mainWindow.evaluate(
       (pid) =>
-        window.getTrpcVanillaClient().task.create.mutate({ projectId: pid, title: 'Default flags task' }),
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'Default flags task' }),
       projectId
     )
     expect(task?.claude_flags).toBe('--test-default-flag')

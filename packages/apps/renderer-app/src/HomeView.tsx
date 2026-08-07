@@ -134,7 +134,15 @@ export function HomeView(): React.JSX.Element {
       bulkContextMenuUpdate,
       bulkDelete
     }),
-    [rawData, contextMenuUpdate, archiveTask, archiveTasks, deleteTask, bulkContextMenuUpdate, bulkDelete]
+    [
+      rawData,
+      contextMenuUpdate,
+      archiveTask,
+      archiveTasks,
+      deleteTask,
+      bulkContextMenuUpdate,
+      bulkDelete
+    ]
   )
   const { projects, boardStatus, boardError } = data
 
@@ -575,7 +583,13 @@ export function HomeView(): React.JSX.Element {
         sessionIndex: (globalAgentPanelState.sessionIndex ?? 0) + 1
       })
     },
-    [agentMode, agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState, trpcClient]
+    [
+      agentMode,
+      agentSessionId,
+      globalAgentPanelState.sessionIndex,
+      setGlobalAgentPanelState,
+      trpcClient
+    ]
   )
 
   // Idle-agent list for the Agent Status panel. useIdleTasks fetches unfiltered;
@@ -622,10 +636,18 @@ export function HomeView(): React.JSX.Element {
   }, [boardStatus])
 
   if (boardStatus === 'error') {
-    return <Centered>Couldn’t load the board: {boardError?.message ?? 'unknown error'}. Retrying…</Centered>
+    return (
+      <Centered>
+        Couldn’t load the board: {boardError?.message ?? 'unknown error'}. Retrying…
+      </Centered>
+    )
   }
   if (boardStatus === 'pending') {
-    return <Centered>{stalled ? 'Can’t reach the sidecar — is the server running?' : 'Connecting…'}</Centered>
+    return (
+      <Centered>
+        {stalled ? 'Can’t reach the sidecar — is the server running?' : 'Connecting…'}
+      </Centered>
+    )
   }
   if (projects.length === 0) {
     return <Centered>No projects in this workspace yet.</Centered>
@@ -742,10 +764,7 @@ export function HomeView(): React.JSX.Element {
             grid that tiles the open task tabs (mirrors canonical App.tsx). */}
         <div
           ref={explodeGridRef}
-          className={cn(
-            'relative min-h-0 flex-1 overflow-hidden',
-            explodeMode && 'grid gap-1 p-1'
-          )}
+          className={cn('relative min-h-0 flex-1 overflow-hidden', explodeMode && 'grid gap-1 p-1')}
           style={
             explodeMode
               ? (() => {
@@ -773,9 +792,7 @@ export function HomeView(): React.JSX.Element {
             return (
               <div
                 key={tab.type === 'home' ? 'home' : tab.taskId}
-                data-explode-task-id={
-                  explodeMode && tab.type === 'task' ? tab.taskId : undefined
-                }
+                data-explode-task-id={explodeMode && tab.type === 'task' ? tab.taskId : undefined}
                 className={
                   explodeMode
                     ? cn(

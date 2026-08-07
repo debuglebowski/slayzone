@@ -204,10 +204,7 @@ export const artifactTxns = {
       honorUnchanged: p.honorUnchanged
     }),
 
-  'artifacts:set-current-version': (
-    db: Database,
-    p: SetCurrentVersionTxnParams
-  ): ArtifactVersion =>
+  'artifacts:set-current-version': (db: Database, p: SetCurrentVersionTxnParams): ArtifactVersion =>
     setCurrentVersion(asDbLike(db), betterSqliteTxn(db), p.artifactId, p.ref),
 
   'artifacts:mutate-version': (db: Database, p: MutateVersionTxnParams): ArtifactVersion =>
@@ -222,7 +219,13 @@ export const artifactTxns = {
     renameVersion(asDbLike(db), betterSqliteTxn(db), p.artifactId, p.ref, p.newName),
 
   'artifacts:prune-versions': (db: Database, p: PruneVersionsTxnParams): PruneReport =>
-    pruneVersions(asDbLike(db), betterSqliteTxn(db), new BlobStore(p.dataDir), p.artifactId, p.opts),
+    pruneVersions(
+      asDbLike(db),
+      betterSqliteTxn(db),
+      new BlobStore(p.dataDir),
+      p.artifactId,
+      p.opts
+    ),
 
   'artifacts:seed-initial-versions': (db: Database, p: SeedInitialVersionsTxnParams): SeedReport =>
     seedInitialVersionsInWorker(db, new BlobStore(p.dataDir), p.artifactsDir),

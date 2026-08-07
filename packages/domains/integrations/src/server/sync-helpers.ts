@@ -74,7 +74,8 @@ export async function upsertFieldState(
   localUpdatedAt: string,
   externalUpdatedAt: string
 ): Promise<void> {
-  await db.prepare(`
+  await db
+    .prepare(`
     INSERT INTO external_field_state (
       id, external_link_id, field_name, last_local_value_json, last_external_value_json,
       last_local_updated_at, last_external_updated_at, updated_at
@@ -85,15 +86,16 @@ export async function upsertFieldState(
       last_local_updated_at = excluded.last_local_updated_at,
       last_external_updated_at = excluded.last_external_updated_at,
       updated_at = datetime('now')
-  `).run(
-    crypto.randomUUID(),
-    externalLinkId,
-    field,
-    JSON.stringify(localValue),
-    JSON.stringify(externalValue),
-    localUpdatedAt,
-    externalUpdatedAt
-  )
+  `)
+    .run(
+      crypto.randomUUID(),
+      externalLinkId,
+      field,
+      JSON.stringify(localValue),
+      JSON.stringify(externalValue),
+      localUpdatedAt,
+      externalUpdatedAt
+    )
 }
 
 export function linearStateToTaskStatus(stateType: string, columns: ColumnConfig[] | null): string {

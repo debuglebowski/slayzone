@@ -1,4 +1,8 @@
-import { appendProviderConversationId, CONVERSATION_HISTORY_CAP, type ProviderConfig } from './types'
+import {
+  appendProviderConversationId,
+  CONVERSATION_HISTORY_CAP,
+  type ProviderConfig
+} from './types'
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -25,11 +29,17 @@ assert(JSON.stringify(hist(cfg)) === JSON.stringify(['a', 'b', 'c']), 'appends m
 
 // Dedup: re-appending an existing id moves it to the end (no duplicate).
 cfg = appendProviderConversationId(cfg, M, 'a')
-assert(JSON.stringify(hist(cfg)) === JSON.stringify(['b', 'c', 'a']), 're-append moves id to end, deduped')
+assert(
+  JSON.stringify(hist(cfg)) === JSON.stringify(['b', 'c', 'a']),
+  're-append moves id to end, deduped'
+)
 
 // Idempotent re-append of the current most-recent.
 cfg = appendProviderConversationId(cfg, M, 'a')
-assert(JSON.stringify(hist(cfg)) === JSON.stringify(['b', 'c', 'a']), 're-append of last is a no-op')
+assert(
+  JSON.stringify(hist(cfg)) === JSON.stringify(['b', 'c', 'a']),
+  're-append of last is a no-op'
+)
 
 // Cap: never exceeds CONVERSATION_HISTORY_CAP, keeps the most recent.
 let capped: ProviderConfig = {}
@@ -38,7 +48,10 @@ for (let i = 0; i < CONVERSATION_HISTORY_CAP + 5; i++) {
 }
 const cappedHist = hist(capped)
 assert(cappedHist.length === CONVERSATION_HISTORY_CAP, 'history capped at CONVERSATION_HISTORY_CAP')
-assert(cappedHist[cappedHist.length - 1] === `id-${CONVERSATION_HISTORY_CAP + 4}`, 'cap keeps newest')
+assert(
+  cappedHist[cappedHist.length - 1] === `id-${CONVERSATION_HISTORY_CAP + 4}`,
+  'cap keeps newest'
+)
 assert(cappedHist[0] === `id-5`, 'cap drops oldest')
 
 // Preserves other fields of the mode entry.

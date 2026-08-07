@@ -24,11 +24,7 @@ import {
   assertModeHostConsistency
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
-import {
-  getDatabasePathFromEnv,
-  openServerDatabase,
-  openServerDiagnosticsDatabase
-} from './db.js'
+import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
 import { composeServer } from './composition.js'
 import { deriveRunnerHubUrl } from './runner-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
@@ -251,7 +247,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     } catch {
       return false
     }
-    if (u.protocol === 'chrome:' || u.protocol === 'chrome-extension:' || u.protocol === 'devtools:') {
+    if (
+      u.protocol === 'chrome:' ||
+      u.protocol === 'chrome-extension:' ||
+      u.protocol === 'devtools:'
+    ) {
       return true
     }
     if (u.protocol === 'file:') return true

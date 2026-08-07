@@ -19,7 +19,7 @@ const SKIP = new Set(['packages/apps/cli/test/package.json'])
 function trackedManifests() {
   const out = execFileSync('git', ['ls-files', '*package.json'], {
     cwd: ROOT,
-    encoding: 'utf8',
+    encoding: 'utf8'
   })
   return out
     .split('\n')
@@ -85,7 +85,7 @@ function main() {
   console.log(
     changed
       ? `Synced ${changed} manifest(s) to ${canonical}.`
-      : `Already at ${canonical} — no changes.`,
+      : `Already at ${canonical} — no changes.`
   )
 }
 

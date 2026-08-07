@@ -92,9 +92,9 @@ async function run(): Promise<void> {
   await test('adds tab_id + ended_at columns to agent_sessions', () => {
     const db = dbAt148()
     try {
-      const cols = (db.prepare(`PRAGMA table_info(agent_sessions)`).all() as Array<{ name: string }>).map(
-        (c) => c.name
-      )
+      const cols = (
+        db.prepare(`PRAGMA table_info(agent_sessions)`).all() as Array<{ name: string }>
+      ).map((c) => c.name)
       if (!cols.includes('tab_id')) throw new Error('tab_id column missing')
       if (!cols.includes('ended_at')) throw new Error('ended_at column missing')
     } finally {
@@ -105,18 +105,31 @@ async function run(): Promise<void> {
   await test('B lifecycle round-trips on the real migrated schema', async () => {
     const raw = dbAtLatest()
     try {
-      raw.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
       raw
-        .prepare(`INSERT INTO tasks (id, project_id, title, status, priority) VALUES ('t1','p1','T','todo',3)`)
+        .prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')")
+        .run()
+      raw
+        .prepare(
+          `INSERT INTO tasks (id, project_id, title, status, priority) VALUES ('t1','p1','T','todo',3)`
+        )
         .run()
       const db = adapter(raw)
 
       await recordSessionSpawn(db, {
-        id: 'RT1', taskId: 't1', tabId: 't1', mode: 'claude-code', cwd: '/tmp/p',
-        expectedConversationId: 'RT1', usedResume: false, status: 'bound'
+        id: 'RT1',
+        taskId: 't1',
+        tabId: 't1',
+        mode: 'claude-code',
+        cwd: '/tmp/p',
+        expectedConversationId: 'RT1',
+        usedResume: false,
+        status: 'bound'
       })
       expectEqual(await getCurrentConversationId(db, 't1', 'claude-code'), null) // pending
-      const origin = await confirmSessionConversation(db, { sessionId: 'RT1', observedConversationId: 'RT1' })
+      const origin = await confirmSessionConversation(db, {
+        sessionId: 'RT1',
+        observedConversationId: 'RT1'
+      })
       expectEqual(origin, 'slay-spawned-fresh')
       // Confirm proves the process started, not that it wrote anything: claude
       // creates its transcript at the first turn, so a turnless fresh spawn is
@@ -132,15 +145,25 @@ async function run(): Promise<void> {
   await test('pooled session (no task) binds to a task and becomes honored', async () => {
     const raw = dbAtLatest()
     try {
-      raw.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
       raw
-        .prepare(`INSERT INTO tasks (id, project_id, title, status, priority) VALUES ('t9','p1','T','todo',3)`)
+        .prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')")
+        .run()
+      raw
+        .prepare(
+          `INSERT INTO tasks (id, project_id, title, status, priority) VALUES ('t9','p1','T','todo',3)`
+        )
         .run()
       const db = adapter(raw)
 
       await recordSessionSpawn(db, {
-        id: 'POOLX', taskId: null, tabId: null, mode: 'claude-code', cwd: '/tmp/p',
-        expectedConversationId: 'POOLX', usedResume: false, status: 'pooled'
+        id: 'POOLX',
+        taskId: null,
+        tabId: null,
+        mode: 'claude-code',
+        cwd: '/tmp/p',
+        expectedConversationId: 'POOLX',
+        usedResume: false,
+        status: 'pooled'
       })
       await confirmSessionConversation(db, { sessionId: 'POOLX', observedConversationId: 'POOLX' })
       expectEqual(await getCurrentConversationId(db, 't9', 'claude-code'), null) // unbound

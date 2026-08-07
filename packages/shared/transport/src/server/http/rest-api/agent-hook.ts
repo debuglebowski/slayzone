@@ -405,7 +405,8 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
     source: typeof effRaw?.source === 'string' ? effRaw.source : undefined,
     taskId: body.taskId ?? (typeof ctx?.taskId === 'string' ? ctx.taskId : undefined),
     slaySessionId:
-      body.slaySessionId ?? (typeof ctx?.slaySessionId === 'string' ? ctx.slaySessionId : undefined),
+      body.slaySessionId ??
+      (typeof ctx?.slaySessionId === 'string' ? ctx.slaySessionId : undefined),
     sessionId: cliSessionId,
     cwd: body.cwd ?? (typeof effRaw?.cwd === 'string' ? effRaw.cwd : undefined),
     raw: effRaw ?? body.raw,
@@ -631,7 +632,11 @@ export async function processAgentHook(
   // carry only the former, and this must cover pooled and task-spawned agents
   // through one path. Fire-and-forget: a DB hiccup must never block the ack, and
   // the next turn re-attempts.
-  if (hook.sessionId && TURN_PROOF_EVENTS.has(hook.hookEvent) && !firstTurnMarked.has(hook.sessionId)) {
+  if (
+    hook.sessionId &&
+    TURN_PROOF_EVENTS.has(hook.hookEvent) &&
+    !firstTurnMarked.has(hook.sessionId)
+  ) {
     const provenId = hook.sessionId
     firstTurnMarked.add(provenId)
     void markSessionFirstTurn(deps.db, provenId).catch(() => {

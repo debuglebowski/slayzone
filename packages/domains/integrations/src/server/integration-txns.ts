@@ -112,7 +112,9 @@ function tryDeleteConnectionIfUnusedSync(db: Database, connectionId: string): vo
     return
   }
 
-  db.prepare('DELETE FROM settings WHERE key = ?').run(credentialSettingKey(connection.credential_ref))
+  db.prepare('DELETE FROM settings WHERE key = ?').run(
+    credentialSettingKey(connection.credential_ref)
+  )
   db.prepare('DELETE FROM integration_connections WHERE id = ?').run(connectionId)
 }
 

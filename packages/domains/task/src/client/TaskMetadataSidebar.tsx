@@ -60,7 +60,8 @@ export function TaskMetadataSidebar({
   // but not yet on the shared Task/Project types — read via a narrow local cast.
   const taskRunnerId = (task as { runner_id?: string | null }).runner_id ?? null
   const projectDefaultRunnerId =
-    (selectedProject as { default_runner_id?: string | null } | undefined)?.default_runner_id ?? null
+    (selectedProject as { default_runner_id?: string | null } | undefined)?.default_runner_id ??
+    null
 
   return (
     <div className="space-y-2">

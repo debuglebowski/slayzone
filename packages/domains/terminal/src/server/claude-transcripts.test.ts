@@ -12,11 +12,13 @@ function assert(cond: boolean, msg: string): void {
 
 // ---- encodeClaudeProjectDir (verified against real ~/.claude/projects names) ----
 assert(
-  encodeClaudeProjectDir('/Users/Kalle/dev/projects/slayzone') === '-Users-Kalle-dev-projects-slayzone',
+  encodeClaudeProjectDir('/Users/Kalle/dev/projects/slayzone') ===
+    '-Users-Kalle-dev-projects-slayzone',
   'plain path encodes'
 )
 assert(
-  encodeClaudeProjectDir('/Users/Kalle/.superset/worktrees/babel') === '-Users-Kalle--superset-worktrees-babel',
+  encodeClaudeProjectDir('/Users/Kalle/.superset/worktrees/babel') ===
+    '-Users-Kalle--superset-worktrees-babel',
   'dot becomes dash (no run collapsing)'
 )
 assert(

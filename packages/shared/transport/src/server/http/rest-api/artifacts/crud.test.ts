@@ -29,7 +29,9 @@ h.db
   .run(projectId, 'Alpha', '#000', '/tmp/alpha')
 const taskId = `66666666-${crypto.randomUUID().slice(9)}`
 h.db
-  .prepare('INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)')
+  .prepare(
+    'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+  )
   .run(taskId, projectId, 'ArtifactTask', 'todo', 3, 0)
 
 let notifyCount = 0
@@ -180,7 +182,9 @@ await describe('/api/artifacts + /api/artifact-folders CRUD', () => {
     expect(res.body.data.folder_id).toBeNull()
     expect(res.body.data.folderName).toBeNull()
     // Re-nest for later delete assertions (leave it where the original test expected).
-    await rest.request<ArtResp>('PATCH', `/api/artifacts/${artifactId}`, { folderId: childFolderId })
+    await rest.request<ArtResp>('PATCH', `/api/artifacts/${artifactId}`, {
+      folderId: childFolderId
+    })
   })
 
   test('PATCH /api/artifacts/:id 404: unknown target folder', async () => {

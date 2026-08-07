@@ -14,10 +14,7 @@
  * the window closes, a match is an echo and is ignored. Other error codes are not
  * string-echo-prone, so they are always honored.
  */
-export function shouldHonorDetectedError(
-  code: string,
-  checkingForSessionError: boolean
-): boolean {
+export function shouldHonorDetectedError(code: string, checkingForSessionError: boolean): boolean {
   if (code === 'SESSION_NOT_FOUND') return checkingForSessionError === true
   return true
 }

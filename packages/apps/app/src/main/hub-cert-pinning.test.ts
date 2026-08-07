@@ -17,10 +17,18 @@ function fp(der: Buffer): string {
 
 // Fake Electron session capturing the installed verify proc.
 type VerifyProc = (
-  req: { hostname: string; certificate: { data: string }; verificationResult: string; errorCode: number },
+  req: {
+    hostname: string
+    certificate: { data: string }
+    verificationResult: string
+    errorCode: number
+  },
   cb: (v: number) => void
 ) => void
-function fakeSession(): { session: { setCertificateVerifyProc: (p: VerifyProc) => void }; run: (req: Parameters<VerifyProc>[0]) => number } {
+function fakeSession(): {
+  session: { setCertificateVerifyProc: (p: VerifyProc) => void }
+  run: (req: Parameters<VerifyProc>[0]) => number
+} {
   let proc: VerifyProc | null = null
   return {
     session: { setCertificateVerifyProc: (p) => (proc = p) },
@@ -56,7 +64,9 @@ describe('hub-cert-pinning', () => {
 
   it('accepts (0) a pinned host whose leaf fingerprint matches', () => {
     const der = Buffer.from('pinned-cert-der')
-    setPinnedHubs([{ url: 'wss://box.lan:7800/trpc', kind: 'remote' as const, fingerprint: fp(der) }])
+    setPinnedHubs([
+      { url: 'wss://box.lan:7800/trpc', kind: 'remote' as const, fingerprint: fp(der) }
+    ])
     const f = fakeSession()
     installHubCertPinning(f.session as never)
     const v = f.run({

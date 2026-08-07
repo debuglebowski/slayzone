@@ -259,8 +259,16 @@ async function main(): Promise<void> {
       // Seed the pre-fix state: two random-id rows named 'dup-local' (orphans from
       // prior boots) via the REMOTE (fresh-uuid) path, imitating the historical bug.
       const remoteAdapters = createRunnerAuthAdapters({ db, auth }) // no localRunnerName
-      await remoteAdapters.verifyEnrollment({ ...ENROLL_BASE, name: 'dup-local', joinToken: await mintToken(db, 'd1') })
-      await remoteAdapters.verifyEnrollment({ ...ENROLL_BASE, name: 'dup-local', joinToken: await mintToken(db, 'd2') })
+      await remoteAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'dup-local',
+        joinToken: await mintToken(db, 'd1')
+      })
+      await remoteAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'dup-local',
+        joinToken: await mintToken(db, 'd2')
+      })
       assert(
         (await listRunners(db)).filter((r) => r.name === 'dup-local').length === 2,
         'two orphaned local rows seeded'
@@ -275,7 +283,11 @@ async function main(): Promise<void> {
       const localRows = (await listRunners(db)).filter((r) => r.name === 'dup-local')
       assertEq(localRows.length, 1, 'collapsed to a single local row')
       assertEq(localRows[0].id, enrolled.runnerId, 'the surviving row is the deterministic-id one')
-      assertEq(localRows[0].id, deterministicLocalRunnerId('dup-local'), 'kept the deterministic id')
+      assertEq(
+        localRows[0].id,
+        deterministicLocalRunnerId('dup-local'),
+        'kept the deterministic id'
+      )
     })
 
     await test('REMOTE enroll keeps a fresh uuid + is never deduped by the local path', async () => {
@@ -292,7 +304,10 @@ async function main(): Promise<void> {
         name: 'remote-beta',
         joinToken: await mintToken(db, 'r2')
       })
-      assert(r1.runnerId !== deterministicLocalRunnerId('remote-alpha'), 'remote id is a fresh uuid')
+      assert(
+        r1.runnerId !== deterministicLocalRunnerId('remote-alpha'),
+        'remote id is a fresh uuid'
+      )
       // Both remote runners survive — dedup is scoped to the single local name only.
       assert((await getRunner(db, r1.runnerId)) !== null, 'remote-alpha survives')
       assert((await getRunner(db, r2.runnerId)) !== null, 'remote-beta survives')

@@ -9,7 +9,7 @@ import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import type {
   TerminalModeInfo,
   CreateTerminalModeInput,
-  UpdateTerminalModeInput,
+  UpdateTerminalModeInput
 } from '@slayzone/terminal/shared'
 
 let modes: TerminalModeInfo[] = DEFAULT_TERMINAL_MODES.map((m) => ({ ...m }))
@@ -36,13 +36,16 @@ export const terminalModesShim = {
       order: input.order ?? modes.length,
       patternWorking: input.patternWorking ?? null,
       patternError: input.patternError ?? null,
-      usageConfig: input.usageConfig ?? null,
+      usageConfig: input.usageConfig ?? null
     }
     modes = modes.filter((m) => m.id !== input.id).concat(mode)
     return { ...mode }
   },
 
-  update: async (id: string, updates: UpdateTerminalModeInput): Promise<TerminalModeInfo | null> => {
+  update: async (
+    id: string,
+    updates: UpdateTerminalModeInput
+  ): Promise<TerminalModeInfo | null> => {
     const idx = modes.findIndex((m) => m.id === id)
     if (idx === -1) return null
     modes[idx] = { ...modes[idx]!, ...updates }
@@ -55,9 +58,11 @@ export const terminalModesShim = {
     return modes.length < before
   },
 
-  test: async (_command: string): Promise<{ success: boolean; output?: string; error?: string }> => ({
+  test: async (
+    _command: string
+  ): Promise<{ success: boolean; output?: string; error?: string }> => ({
     success: true,
-    output: '',
+    output: ''
   }),
 
   restoreDefaults: async (): Promise<void> => {
@@ -66,5 +71,5 @@ export const terminalModesShim = {
 
   resetToDefaultState: async (): Promise<void> => {
     modes = DEFAULT_TERMINAL_MODES.map((m) => ({ ...m }))
-  },
+  }
 }

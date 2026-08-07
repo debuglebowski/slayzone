@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  type ReactNode
-} from 'react'
+import { createContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useTRPC } from '@slayzone/transport/client'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import type { TelemetryTier } from '../shared/types'
@@ -91,14 +84,11 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const changeTier = useCallback(
-    (newTier: TelemetryTier) => {
-      setTier(newTier)
-      setTelemetryTierInternal(newTier)
-      setTierMutation.mutate({ key: SETTINGS_KEY, value: newTier })
-    },
-    []
-  )
+  const changeTier = useCallback((newTier: TelemetryTier) => {
+    setTier(newTier)
+    setTelemetryTierInternal(newTier)
+    setTierMutation.mutate({ key: SETTINGS_KEY, value: newTier })
+  }, [])
 
   return (
     <TelemetryContext.Provider value={{ tier, setTier: changeTier, track }}>

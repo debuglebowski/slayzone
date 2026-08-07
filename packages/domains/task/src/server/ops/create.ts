@@ -145,13 +145,7 @@ export async function createTaskOp(
         SET repo_name = ?, worktree_path = ?, worktree_parent_branch = ?, base_dir = ?, updated_at = datetime('now')
         WHERE id = ?
       `,
-        [
-          parent.repo_name,
-          parent.worktree_path,
-          parent.worktree_parent_branch,
-          parent.base_dir,
-          id
-        ]
+        [parent.repo_name, parent.worktree_path, parent.worktree_parent_branch, parent.base_dir, id]
       )
     }
   } else {

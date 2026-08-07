@@ -78,7 +78,8 @@ function countWebglPanes(): number | null {
   for (const root of Array.from(document.querySelectorAll('.xterm'))) {
     for (const c of Array.from(root.querySelectorAll('canvas'))) {
       try {
-        const gl = (c as HTMLCanvasElement).getContext('webgl2') ??
+        const gl =
+          (c as HTMLCanvasElement).getContext('webgl2') ??
           (c as HTMLCanvasElement).getContext('webgl')
         if (gl && !gl.isContextLost()) {
           count++
@@ -108,7 +109,9 @@ function findWebglCanvas(terminal: Pick<XTerm, 'element'>): HTMLCanvasElement | 
 }
 
 /** Read GPU vendor + renderer via `WEBGL_debug_renderer_info` (no-op if extension missing). */
-function readGpuInfo(canvas: HTMLCanvasElement | null): { vendor?: string; renderer?: string } | null {
+function readGpuInfo(
+  canvas: HTMLCanvasElement | null
+): { vendor?: string; renderer?: string } | null {
   if (!canvas) return null
   try {
     const gl = (canvas.getContext('webgl2') ?? canvas.getContext('webgl')) as

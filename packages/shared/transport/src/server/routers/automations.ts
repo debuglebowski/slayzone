@@ -62,17 +62,15 @@ export const automationsRouter = router({
     .input(z.object({ automationId: z.string(), limit: z.number().int().nonnegative().optional() }))
     .query(({ ctx, input }) => listAutomationRuns(ctx.db, input.automationId, input.limit)),
 
-  runManual: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) => {
-      if (!ctx.automationEngine) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: 'Automation engine not available in this server context'
-        })
-      }
-      return ctx.automationEngine.executeManual(input.id)
-    }),
+  runManual: publicProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => {
+    if (!ctx.automationEngine) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Automation engine not available in this server context'
+      })
+    }
+    return ctx.automationEngine.executeManual(input.id)
+  }),
 
   clearRuns: publicProcedure
     .input(z.object({ automationId: z.string() }))

@@ -18,11 +18,11 @@ export {
   copyIn,
   copy,
   gitStatus,
-  searchFiles,
+  searchFiles
 } from './file-ops'
 
 export {
   subscribeFileWatcher,
   closeAllFileWatchers,
-  type FileWatchEvent,
+  type FileWatchEvent
 } from './watcher'

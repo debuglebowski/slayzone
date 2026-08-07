@@ -26,7 +26,9 @@ const themeInput = z.enum(['light', 'dark', 'system'])
 export const settingsRouter = router({
   get: publicProcedure
     .input(z.object({ key: z.string() }))
-    .query(async ({ ctx, input }) => (await SettingsService.forDatabase(ctx.db).get(input.key)) ?? null),
+    .query(
+      async ({ ctx, input }) => (await SettingsService.forDatabase(ctx.db).get(input.key)) ?? null
+    ),
 
   set: publicProcedure
     .input(z.object({ key: z.string(), value: z.string() }))
@@ -40,9 +42,7 @@ export const settingsRouter = router({
 
   getThemeSource: publicProcedure.query(() => getAppDeps().themeGetSource()),
 
-  setTheme: publicProcedure
-    .input(themeInput)
-    .mutation(({ input }) => getAppDeps().themeSet(input)),
+  setTheme: publicProcedure.input(themeInput).mutation(({ input }) => getAppDeps().themeSet(input)),
 
   /**
    * Replaces the `theme:changed` broadcast. Fires when nativeTheme.on('updated')

@@ -15,7 +15,7 @@ import type {
   CreateArtifactInput,
   UpdateArtifactInput,
   CreateArtifactFolderInput,
-  UpdateArtifactFolderInput,
+  UpdateArtifactFolderInput
 } from '@slayzone/task/shared'
 import { jsonRpcCall } from '../transport/mojo'
 
@@ -30,13 +30,16 @@ export const assetsShim = {
     jsonRpcCall<TaskArtifact>('db:assets:create', data as unknown as Record<string, unknown>),
 
   update: (data: UpdateArtifactInput): Promise<TaskArtifact | null> =>
-    jsonRpcCall<TaskArtifact | null>('db:assets:update', data as unknown as Record<string, unknown>),
+    jsonRpcCall<TaskArtifact | null>(
+      'db:assets:update',
+      data as unknown as Record<string, unknown>
+    ),
 
   delete: (id: string): Promise<boolean> =>
     jsonRpcCall<boolean>('db:assets:delete', { params: [id] }),
 
   reorder: async (
-    data: string[] | { folderId: string | null; assetIds: string[] },
+    data: string[] | { folderId: string | null; assetIds: string[] }
   ): Promise<void> => {
     await jsonRpcCall('db:assets:reorder', { params: [data] })
   },
@@ -74,7 +77,7 @@ export const assetsShim = {
   }): Promise<{ folders: ArtifactFolder[]; assets: TaskArtifact[] }> =>
     jsonRpcCall<{ folders: ArtifactFolder[]; assets: TaskArtifact[] }>(
       'db:assets:uploadDir',
-      data as unknown as Record<string, unknown>,
+      data as unknown as Record<string, unknown>
     ),
 
   downloadFile: (id: string): Promise<boolean> =>
@@ -93,7 +96,7 @@ export const assetsShim = {
     jsonRpcCall<boolean>('db:assets:downloadAsHtml', { params: [id] }),
 
   downloadAllAsZip: (taskId: string): Promise<boolean> =>
-    jsonRpcCall<boolean>('db:assets:downloadAllAsZip', { params: [taskId] }),
+    jsonRpcCall<boolean>('db:assets:downloadAllAsZip', { params: [taskId] })
 }
 
 export const assetFoldersShim = {
@@ -101,12 +104,15 @@ export const assetFoldersShim = {
     jsonRpcCall<ArtifactFolder[]>('db:assetFolders:getByTask', { params: [taskId] }),
 
   create: (data: CreateArtifactFolderInput): Promise<ArtifactFolder> =>
-    jsonRpcCall<ArtifactFolder>('db:assetFolders:create', data as unknown as Record<string, unknown>),
+    jsonRpcCall<ArtifactFolder>(
+      'db:assetFolders:create',
+      data as unknown as Record<string, unknown>
+    ),
 
   update: (data: UpdateArtifactFolderInput): Promise<ArtifactFolder | null> =>
     jsonRpcCall<ArtifactFolder | null>(
       'db:assetFolders:update',
-      data as unknown as Record<string, unknown>,
+      data as unknown as Record<string, unknown>
     ),
 
   delete: (id: string): Promise<boolean> =>
@@ -114,5 +120,5 @@ export const assetFoldersShim = {
 
   reorder: async (data: { parentId: string | null; folderIds: string[] }): Promise<void> => {
     await jsonRpcCall('db:assetFolders:reorder', data as unknown as Record<string, unknown>)
-  },
+  }
 }

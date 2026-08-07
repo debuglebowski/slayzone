@@ -58,10 +58,7 @@ const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes (matches runnersRout
 export function isLoopbackAddress(addr: string | undefined): boolean {
   if (!addr) return false
   return (
-    addr === '127.0.0.1' ||
-    addr === '::1' ||
-    addr === '::ffff:127.0.0.1' ||
-    addr.startsWith('127.')
+    addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1' || addr.startsWith('127.')
   )
 }
 
@@ -118,17 +115,13 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
       return
     }
     if (!deps.runners) {
-      res
-        .status(503)
-        .json({ error: 'runner listener not ready — no join token available' })
+      res.status(503).json({ error: 'runner listener not ready — no join token available' })
       return
     }
     const hubUrl = deps.runners.getHubUrl()
     const certFingerprint = deps.runners.getCertFingerprint()
     if (!hubUrl || !certFingerprint) {
-      res
-        .status(503)
-        .json({ error: 'runner listener has not bound its URL / hub identity yet' })
+      res.status(503).json({ error: 'runner listener has not bound its URL / hub identity yet' })
       return
     }
 

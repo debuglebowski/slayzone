@@ -131,7 +131,10 @@ export function useFileEditor(
           return
         }
 
-        const result = await trpcClient.fileEditor.readFile.query({ rootPath: projectPath, filePath })
+        const result = await trpcClient.fileEditor.readFile.query({
+          rootPath: projectPath,
+          filePath
+        })
         if (result.tooLarge || result.content == null) return
         const current = openFilesRef.current.find((f) => f.path === filePath)
         if (

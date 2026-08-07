@@ -56,7 +56,7 @@ function synthTaskStub(id: string): Task {
     loop_config: null,
     snoozed_until: null,
     created_at: nowIso(),
-    updated_at: nowIso(),
+    updated_at: nowIso()
   } as unknown as Task
 }
 
@@ -71,24 +71,22 @@ export const taskDependenciesShim = {
     await jsonRpcCall('task-dependencies:set-blockers', { taskId, blockerTaskIds })
   },
   getBlockers: async (taskId: string): Promise<Task[]> => {
-    const { ids } = await jsonRpcCall<{ ids: string[] }>(
-      'task-dependencies:get-blockers',
-      { taskId },
-    )
+    const { ids } = await jsonRpcCall<{ ids: string[] }>('task-dependencies:get-blockers', {
+      taskId
+    })
     return (ids ?? []).map(synthTaskStub)
   },
   getBlocking: async (taskId: string): Promise<Task[]> => {
-    const { ids } = await jsonRpcCall<{ ids: string[] }>(
-      'task-dependencies:get-blocking',
-      { taskId },
-    )
+    const { ids } = await jsonRpcCall<{ ids: string[] }>('task-dependencies:get-blocking', {
+      taskId
+    })
     return (ids ?? []).map(synthTaskStub)
   },
   getAllBlockedTaskIds: async (): Promise<string[]> => {
     const { ids } = await jsonRpcCall<{ ids: string[] }>(
       'task-dependencies:get-all-blocked-ids',
-      {},
+      {}
     )
     return ids ?? []
-  },
+  }
 }

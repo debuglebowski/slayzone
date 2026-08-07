@@ -9,7 +9,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
-import type { CreateTaskInput, CreateArtifactInput, CreateArtifactFolderInput } from '@slayzone/task/shared'
+import type {
+  CreateTaskInput,
+  CreateArtifactInput,
+  CreateArtifactFolderInput
+} from '@slayzone/task/shared'
 import { artifactsRouter } from './artifacts.js'
 import { taskOps } from '@slayzone/task/server'
 
@@ -25,7 +29,9 @@ h.db
     'P',
     '#000',
     '/tmp/p',
-    JSON.stringify([{ id: 'todo', label: 'To Do', color: 'gray', position: 0, category: 'unstarted' }])
+    JSON.stringify([
+      { id: 'todo', label: 'To Do', color: 'gray', position: 0, category: 'unstarted' }
+    ])
   )
 const seeded = await taskOps.createTaskOp(
   h.slayDb,
@@ -58,9 +64,10 @@ test('artifacts router: readContent falls back to the blob when no working file'
 })
 
 test('artifacts router: folders create → list', async () => {
-  const f = await caller.foldersCreate(
-    { taskId, name: 'Folder' } as unknown as CreateArtifactFolderInput
-  )
+  const f = await caller.foldersCreate({
+    taskId,
+    name: 'Folder'
+  } as unknown as CreateArtifactFolderInput)
   expect(f).toBeTruthy()
   expect((await caller.foldersGetByTask({ taskId })).length).toBeGreaterThanOrEqual(1)
 })

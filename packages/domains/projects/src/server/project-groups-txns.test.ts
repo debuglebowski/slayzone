@@ -14,7 +14,10 @@ import { projectsTxns } from './projects-txns.js'
 // to a plain callable map for direct invocation in tests.
 const txn = projectsTxns as unknown as Record<
   string,
-  (db: Database.Database, p: unknown) => { projects: Record<string, unknown>[]; groups: Record<string, unknown>[] }
+  (
+    db: Database.Database,
+    p: unknown
+  ) => { projects: Record<string, unknown>[]; groups: Record<string, unknown>[] }
 >
 
 async function freshDb(): Promise<Database.Database> {
@@ -43,9 +46,11 @@ const groupOf = (db: Database.Database, id: string): string | null =>
   (db.prepare('SELECT group_id FROM projects WHERE id = ?').get(id) as { group_id: string | null })
     .group_id
 const gOrder = (db: Database.Database, id: string): number =>
-  (db.prepare('SELECT sort_order FROM project_groups WHERE id = ?').get(id) as {
-    sort_order: number
-  }).sort_order
+  (
+    db.prepare('SELECT sort_order FROM project_groups WHERE id = ?').get(id) as {
+      sort_order: number
+    }
+  ).sort_order
 
 await describe('project-groups: create', async () => {
   const db = await freshDb()

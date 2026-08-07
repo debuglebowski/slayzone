@@ -24,13 +24,21 @@ const STALE_ORPHAN_ID = 'stale-orphan-temp'
 const FRESH_ID = 'fresh-temp'
 const REGULAR_STALE_ID = 'stale-regular'
 
-const seedProject = (h: Awaited<ReturnType<typeof createTestHarness>>, pid: string, name: string): void => {
+const seedProject = (
+  h: Awaited<ReturnType<typeof createTestHarness>>,
+  pid: string,
+  name: string
+): void => {
   h.db
     .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
     .run(pid, name, '#000', '/tmp/' + name, JSON.stringify([]))
 }
 const survivingIds = (h: Awaited<ReturnType<typeof createTestHarness>>): Set<string> =>
-  new Set((h.db.prepare('SELECT id FROM tasks WHERE deleted_at IS NULL').all() as { id: string }[]).map((r) => r.id))
+  new Set(
+    (h.db.prepare('SELECT id FROM tasks WHERE deleted_at IS NULL').all() as { id: string }[]).map(
+      (r) => r.id
+    )
+  )
 
 test('purge: open stale temp survives, orphan stale temp purged, fresh + regular untouched', async () => {
   const h = await createTestHarness()
@@ -50,7 +58,9 @@ test('purge: open stale temp survives, orphan stale temp purged, fresh + regular
     activeTabIndex: 1,
     selectedProjectId: projectId
   }
-  h.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('viewState', JSON.stringify(viewState))
+  h.db
+    .prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+    .run('viewState', JSON.stringify(viewState))
 
   await purgeStaleAndOrphanedTasks(h.slayDb)
 
@@ -69,7 +79,9 @@ test('purge: corrupt viewState falls back to time-only purge', async () => {
     .prepare(`INSERT INTO tasks (id, project_id, title, status, terminal_mode, is_temporary, created_at, updated_at)
       VALUES (?, ?, ?, 'in_progress', 'claude-code', 1, datetime('now', '-3 days'), datetime('now', '-3 days'))`)
     .run('orphan-corrupt-vs', projectId, 'Orphan')
-  h.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('viewState', '{not valid json')
+  h.db
+    .prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+    .run('viewState', '{not valid json')
 
   await purgeStaleAndOrphanedTasks(h.slayDb)
   expect(survivingIds(h).has('orphan-corrupt-vs')).toBe(false)

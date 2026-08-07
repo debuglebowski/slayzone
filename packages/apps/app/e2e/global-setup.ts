@@ -3,11 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { ensureRunnerBuilt } from './fixtures/runner-build'
-import {
-  parsePgrepOutput,
-  readProcessEnviron,
-  selectTestRunPids
-} from './fixtures/stale-processes'
+import { parsePgrepOutput, readProcessEnviron, selectTestRunPids } from './fixtures/stale-processes'
 
 /**
  * Kill processes from a previous TEST run whose command line matches `pattern`.

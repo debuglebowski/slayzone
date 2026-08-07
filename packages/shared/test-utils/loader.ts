@@ -15,8 +15,10 @@ const mockDagreUrl = new URL('./mock-dagre.ts', import.meta.url).href
 // linear-client is imported as `./linear-client` from handlers-store.ts AND as
 // `../linear-client` from the adapter, so a bare `=== './linear-client'` check
 // missed the adapter path — both must redirect to the same mock.
-const matchesRelative = (basename: string) => (s: string): boolean =>
-  /^\.\.?\//.test(s) && new RegExp(`(^|/)${basename}(\\.ts|\\.js)?$`).test(s)
+const matchesRelative =
+  (basename: string) =>
+  (s: string): boolean =>
+    /^\.\.?\//.test(s) && new RegExp(`(^|/)${basename}(\\.ts|\\.js)?$`).test(s)
 
 const redirects: Array<{ match: (s: string) => boolean; url: string }> = [
   { match: matchesRelative('linear-client'), url: mockLinearClientUrl },

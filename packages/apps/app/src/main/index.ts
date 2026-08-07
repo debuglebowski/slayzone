@@ -288,11 +288,7 @@ function getLegacyClientStateRoot(): string {
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
-import {
-  initDatabases,
-  closeDiagnosticsDatabase,
-  getDatabasePath
-} from './db'
+import { initDatabases, closeDiagnosticsDatabase, getDatabasePath } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
 import {
@@ -304,11 +300,7 @@ import {
   renderToPdf,
   renderToPng
 } from '@slayzone/task/electron'
-import {
-  configureTaskRuntimeAdapters,
-  closeArtifactWatcher,
-  taskOps
-} from '@slayzone/task/server'
+import { configureTaskRuntimeAdapters, closeArtifactWatcher, taskOps } from '@slayzone/task/server'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
 import {
   getEffectiveTheme as nativeGetEffectiveTheme,
@@ -407,17 +399,10 @@ import {
 } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { getSafeStorageCipher } from '@slayzone/integrations/electron'
-import {
-  resetSyncFlags,
-  setCredentialCipher,
-} from '@slayzone/integrations/server'
+import { resetSyncFlags, setCredentialCipher } from '@slayzone/integrations/server'
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
 import { captureBrowserViewScreenshot } from './screenshot'
-import {
-  writeFilePaths,
-  readFilePaths,
-  hasFilePaths
-} from './clipboard-handlers'
+import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handlers'
 import {
   setProcessManagerWindow,
   createProcess,
@@ -597,14 +582,12 @@ const desktopBridgeAddressPromise = new Promise<string>((r) => {
 })
 // Resolves once the side-car supervisor handle exists, so `app:get-server-url`
 // (called early on renderer boot) can await it before reading the port.
-let resolveSidecarHandle!: (
-  h: import('./sidecar-server-supervisor').SidecarServerHandle
-) => void
-const sidecarHandlePromise = new Promise<
-  import('./sidecar-server-supervisor').SidecarServerHandle
->((r) => {
-  resolveSidecarHandle = r
-})
+let resolveSidecarHandle!: (h: import('./sidecar-server-supervisor').SidecarServerHandle) => void
+const sidecarHandlePromise = new Promise<import('./sidecar-server-supervisor').SidecarServerHandle>(
+  (r) => {
+    resolveSidecarHandle = r
+  }
+)
 
 // Shared by the `app:get-sidecar-status` / `app:reveal-sidecar-log` IPC
 // handlers and the tRPC `app.meta.*` procs (one impl, both transports).
@@ -1079,9 +1062,11 @@ function waitForOAuthCallback(timeoutMs: number): Promise<OAuthCallbackPayload> 
 // System GitHub OAuth sign-in flow. Shared by the `auth:github-system-sign-in`
 // IPC handler and the tRPC `app.auth.githubSystemSignIn` mutation (coexistence
 // until slice 5) — single implementation, both transports delegate here.
-async function githubSystemSignIn(input: { convexUrl: string; redirectTo: string }): Promise<
-  | { ok: false; error: string; verifier?: string }
-  | { ok: true; verifier: string; code: string }
+async function githubSystemSignIn(input: {
+  convexUrl: string
+  redirectTo: string
+}): Promise<
+  { ok: false; error: string; verifier?: string } | { ok: true; verifier: string; code: string }
 > {
   try {
     if (!input?.convexUrl) {
@@ -1984,333 +1969,339 @@ app
     // (no in-process appRouter server reads them) — left in place to minimise
     // churn; only setAppDeps/setMenuEvents/setPowerResumeEvents back the bridge.
     // Remote mode: skipped (renderer connects to the remote server).
-    if (!isRemoteMode) setImmediate(() => {
-      logBoot('host capability server import dispatched')
-      import('@slayzone/transport/server')
-        .then(async (mod) => {
-          // The chat / pty / integration data-dep registries are NOT set here.
-          // Nothing in this process reads them — the renderer talks to the side-car,
-          // which populates its own from its own db. Setting them only required the
-          // host to construct db-backed ops it never used, which is precisely the
-          // dependency this change removes.
-          //
-          // Task CRUD/deps/board ops for the task router (electron-coupled → injected;
-          // artifacts/template stores are electron-free + imported directly). Same ops
-          // the IPC handlers call — one implementation, both transports.
-          mod.setTaskDeps({ ops: taskOps, onMutation: notifyTasksChanged })
-          // Cross-domain notify bus — same instance `notifyRenderer()` + the
-          // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
-          // (renderer cutover is slice 5).
-          mod.setNotifyEvents(notifyEvents)
-          // Automations-changed + telemetry IPC-event buses — same host-owned
-          // emitters the legacy `automations:changed` / `telemetry:ipc-event`
-          // sends dual-emit on, so the `automations.onChanged` /
-          // `telemetry.onIpcEvent` subs and IPC coexist (bridge drops later).
-          mod.setAutomationsEvents(automationsEvents)
-          mod.setTelemetryEvents(telemetryEvents)
-          // Menu / app-shortcut bus — native menus, the before-input-event
-          // accelerator handler, the auto-updater, and protocol deep-links emit
-          // here. Post-cutover the host capability bridge streams these to the
-          // side-car, whose `menu.*` subscriptions deliver them to the renderer.
-          mod.setMenuEvents(menuEvents)
-          mod.setAgentLifecycleEvents(agentLifecycleEvents)
-          // Power-resume bus — host `powerMonitor 'resume'` (see above) forwarded
-          // over the capability bridge so the side-car engine runs cron catchup.
-          mod.setPowerResumeEvents(powerResumeEvents)
-          // App-level ops — the SAME single instances the IPC handlers built and
-          // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
-          // implementation, both transports coexist (renderer cutover is slice 5).
-          mod.setAppDeps({
-            clipboardWriteFilePaths: writeFilePaths,
-            clipboardReadFilePaths: readFilePaths,
-            clipboardHasFiles: hasFilePaths,
-            screenshotCaptureView: (viewId: string) =>
-              captureBrowserViewScreenshot(browserViewManager, viewId),
-            usageFetch: usageOps.fetch,
-            usageTest: usageOps.test,
-            filesPathExists,
-            filesSaveTempImage,
-            shellOpenExternal: (url, options) =>
-              shellOpenExternal(
-                url,
-                options as
-                  | { blockDesktopHandoff?: boolean; desktopHandoff?: DesktopHandoffPolicy }
-                  | undefined
-              ),
-            shellOpenPath,
-            shellShowItemInFolder: (absPath: string) => shell.showItemInFolder(absPath),
-            // Backup restore overwrites the DB file in the side-car, then needs
-            // everything pointing at it restarted. Relaunch is the desktop's job.
-            appRelaunch: () => {
-              app.relaunch()
-              app.exit()
-            },
-            // The side-car saved a diagnostics config; adopt it here so THIS
-            // process stops (or starts) recording into the machine-local
-            // diagnostics DB to match. Goes through saveDiagnosticsConfig rather
-            // than writing the client store directly so the in-process config
-            // cache — the synchronous hot path every recordDiagnosticEvent
-            // consults — is updated in the same step.
-            diagnosticsConfigChanged: async (next) => {
-              await saveDiagnosticsConfig(next)
-            },
-            appGetVersion: () => app.getVersion(),
-            appGetDownloadsDir: async () => app.getPath('downloads'),
-            // Offscreen renderers, reached from the hub over the capability bridge.
-            artifactBuildExportHtml: async (content, mode, title) =>
-              mode === 'mermaid-preview'
-                ? buildMermaidPdfHtml(content, title)
-                : buildPdfHtml(content, mode, title),
-            artifactRenderPdfToFile: async (content, mode, title, destPath) => {
-              const isMermaid = mode === 'mermaid-preview'
-              const html = isMermaid
-                ? buildMermaidPdfHtml(content, title)
-                : buildPdfHtml(content, mode, title)
-              writeFileSync(destPath, await renderToPdf(html, isMermaid))
-            },
-            artifactRenderPngToFile: async (content, mode, title, destPath) => {
-              const html = buildPngHtml(content, mode, title)
-              if (!html) return false
-              writeFileSync(destPath, await renderToPng(html))
-              return true
-            },
-            // Task/tab browser registry, reached from the hub over the capability
-            // injects into the REST browser routes. One implementation, two
-            // bridge. Sole injection point since the REST proxy was deleted.
-            browserTabs: {
-              getResolvedTabId: async (taskId, tabId) => getResolvedBrowserTabId(taskId, tabId),
-              listTabs: async (taskId) => listBrowserTabs(taskId),
-              hasTab: async (taskId, tabId) => hasBrowserTab(taskId, tabId),
-              waitForRegistration: (taskId, opts) => awaitBrowserRegistration(taskId, opts),
-              execJs: (taskId, tabId, code) => browserExecJs(taskId, tabId, code),
-              loadUrl: (taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
-              getUrl: (taskId, tabId) => browserGetUrl(taskId, tabId),
-              capturePageToFile: (taskId, tabId, destPath) =>
-                browserCapturePageToFile(taskId, tabId, destPath)
-            },
-            appGetTrpcPort: () => awaitTrpcPort(),
-            appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
-            appSetLabFlag: async (key, on) => {
-              const next =
-                key === 'labs_tests_panel'
-                  ? { testsPanel: on, loopMode: clientSettings.labs?.loopMode }
-                  : { testsPanel: clientSettings.labs?.testsPanel, loopMode: on }
-              await updateClientSettings({ labs: next }, clientRoot)
-              clientSettings = readClientSettings(clientRoot)
-            },
-            appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
-            appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
-            appGetProtocolClientStatus: () => protocolClientStatus,
-            appGetRendererZoomFactor: () => mainWindow?.webContents.zoomFactor ?? null,
-            appCheckCliInstalled: () => checkCliInstalled(),
-            appInstallCli: () => installCli(getCliSrc()),
-            appAdjustZoom: (command) => applyAppZoom(command),
-            appRestartForUpdate: () => restartForUpdate(),
-            appCheckForUpdates: () => checkForUpdates(),
-            appRebuildMenuForShortcuts: () => {
-              void (async () => {
-                currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
-                buildAppMenu(currentOverrides)
-              })()
-            },
-            appGetSidecarStatus: getSidecarStatusSnapshot,
-            appRevealSidecarLog: revealSidecarLogInFinder,
-            appWindowGetContentBounds: () => mainWindow?.getContentBounds() ?? null,
-            appWindowGetDisplayScaleFactor: () => {
-              if (!mainWindow || mainWindow.isDestroyed()) return null
-              return screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor
-            },
-            authGithubSystemSignIn: (input) => githubSystemSignIn(input),
-            dialogShowOpenDialog: (options) =>
-              dialog.showOpenDialog(options as Electron.OpenDialogOptions),
-            // Parent the save sheet to the focused window when there is one —
-            // the side-car has no window handle to pass, so the choice is made
-            // here rather than threaded across the bridge.
-            dialogShowSaveDialog: (options) => {
-              const opts = options as Electron.SaveDialogOptions
-              const focused = BrowserWindow.getFocusedWindow()
-              return focused
-                ? dialog.showSaveDialog(focused, opts)
-                : dialog.showSaveDialog(opts)
-            },
-            windowClose: (windowId) => {
-              const wc = webContents.fromId(windowId)
-              const win = wc ? BrowserWindow.fromWebContents(wc) : null
-              if (win) win.close()
-            },
-            appWindowSetTrafficLightPosition: (windowId, pos) => {
-              if (process.platform !== 'darwin' || windowId == null) return
-              const wc = webContents.fromId(windowId)
-              const win = wc ? BrowserWindow.fromWebContents(wc) : null
-              if (win) win.setWindowButtonPosition(pos ?? { x: 10, y: 12 })
-            },
-            appWindowSetWindowButtonVisibility: (windowId, visible) => {
-              if (process.platform !== 'darwin' || windowId == null) return
-              const wc = webContents.fromId(windowId)
-              const win = wc ? BrowserWindow.fromWebContents(wc) : null
-              if (win) win.setWindowButtonVisibility(visible)
-            },
-            appFocusRenderer: (windowId) => {
-              if (windowId == null) return
-              const wc = webContents.fromId(windowId)
-              const win = wc ? BrowserWindow.fromWebContents(wc) : null
-              if (!wc || !win || win.isDestroyed() || !win.isFocused()) return
-              wc.focus()
-            },
-            // Raise/show+focus the main window — the CLI/agent `tasks/open`
-            // foreground path, forwarded from the side-car REST over the bridge.
-            appRaiseMainWindow: () => {
-              presentWindow(mainWindow ?? BrowserWindow.getAllWindows()[0])
-            },
-            // Theme — Electron nativeTheme. The side-car's `settings.*Theme`
-            // procedures forward here over the bridge; `theme:changed` streams
-            // back (wireNativeThemeBridge → settingsEvents → bridge `theme` chan).
-            themeGetEffective: () => nativeGetEffectiveTheme(),
-            themeGetSource: () => nativeGetThemeSource(),
-            themeSet: (pref) => nativeSetTheme(pref),
-            // Credential cipher — Electron safeStorage. The side-car runs as
-            // ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
-            // forwards encrypt/decrypt here over the bridge. Base64 on the wire.
-            credentialCipher: {
-              isEncryptionAvailable: () => getSafeStorageCipher()?.isEncryptionAvailable() ?? false,
-              encryptStringToB64: (secret) => {
-                const c = getSafeStorageCipher()
-                if (!c)
-                  throw new Error('OS secure credential storage is unavailable on this machine')
-                return c.encryptString(secret).toString('base64')
+    if (!isRemoteMode)
+      setImmediate(() => {
+        logBoot('host capability server import dispatched')
+        import('@slayzone/transport/server')
+          .then(async (mod) => {
+            // The chat / pty / integration data-dep registries are NOT set here.
+            // Nothing in this process reads them — the renderer talks to the side-car,
+            // which populates its own from its own db. Setting them only required the
+            // host to construct db-backed ops it never used, which is precisely the
+            // dependency this change removes.
+            //
+            // Task CRUD/deps/board ops for the task router (electron-coupled → injected;
+            // artifacts/template stores are electron-free + imported directly). Same ops
+            // the IPC handlers call — one implementation, both transports.
+            mod.setTaskDeps({ ops: taskOps, onMutation: notifyTasksChanged })
+            // Cross-domain notify bus — same instance `notifyRenderer()` + the
+            // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
+            // (renderer cutover is slice 5).
+            mod.setNotifyEvents(notifyEvents)
+            // Automations-changed + telemetry IPC-event buses — same host-owned
+            // emitters the legacy `automations:changed` / `telemetry:ipc-event`
+            // sends dual-emit on, so the `automations.onChanged` /
+            // `telemetry.onIpcEvent` subs and IPC coexist (bridge drops later).
+            mod.setAutomationsEvents(automationsEvents)
+            mod.setTelemetryEvents(telemetryEvents)
+            // Menu / app-shortcut bus — native menus, the before-input-event
+            // accelerator handler, the auto-updater, and protocol deep-links emit
+            // here. Post-cutover the host capability bridge streams these to the
+            // side-car, whose `menu.*` subscriptions deliver them to the renderer.
+            mod.setMenuEvents(menuEvents)
+            mod.setAgentLifecycleEvents(agentLifecycleEvents)
+            // Power-resume bus — host `powerMonitor 'resume'` (see above) forwarded
+            // over the capability bridge so the side-car engine runs cron catchup.
+            mod.setPowerResumeEvents(powerResumeEvents)
+            // App-level ops — the SAME single instances the IPC handlers built and
+            // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
+            // implementation, both transports coexist (renderer cutover is slice 5).
+            mod.setAppDeps({
+              clipboardWriteFilePaths: writeFilePaths,
+              clipboardReadFilePaths: readFilePaths,
+              clipboardHasFiles: hasFilePaths,
+              screenshotCaptureView: (viewId: string) =>
+                captureBrowserViewScreenshot(browserViewManager, viewId),
+              usageFetch: usageOps.fetch,
+              usageTest: usageOps.test,
+              filesPathExists,
+              filesSaveTempImage,
+              shellOpenExternal: (url, options) =>
+                shellOpenExternal(
+                  url,
+                  options as
+                    | { blockDesktopHandoff?: boolean; desktopHandoff?: DesktopHandoffPolicy }
+                    | undefined
+                ),
+              shellOpenPath,
+              shellShowItemInFolder: (absPath: string) => shell.showItemInFolder(absPath),
+              // Backup restore overwrites the DB file in the side-car, then needs
+              // everything pointing at it restarted. Relaunch is the desktop's job.
+              appRelaunch: () => {
+                app.relaunch()
+                app.exit()
               },
-              decryptStringFromB64: (b64) => {
-                const c = getSafeStorageCipher()
-                if (!c)
-                  throw new Error('OS secure credential storage is unavailable on this machine')
-                return c.decryptString(Buffer.from(b64, 'base64'))
+              // The side-car saved a diagnostics config; adopt it here so THIS
+              // process stops (or starts) recording into the machine-local
+              // diagnostics DB to match. Goes through saveDiagnosticsConfig rather
+              // than writing the client store directly so the in-process config
+              // cache — the synchronous hot path every recordDiagnosticEvent
+              // consults — is updated in the same step.
+              diagnosticsConfigChanged: async (next) => {
+                await saveDiagnosticsConfig(next)
+              },
+              appGetVersion: () => app.getVersion(),
+              appGetDownloadsDir: async () => app.getPath('downloads'),
+              // Offscreen renderers, reached from the hub over the capability bridge.
+              artifactBuildExportHtml: async (content, mode, title) =>
+                mode === 'mermaid-preview'
+                  ? buildMermaidPdfHtml(content, title)
+                  : buildPdfHtml(content, mode, title),
+              artifactRenderPdfToFile: async (content, mode, title, destPath) => {
+                const isMermaid = mode === 'mermaid-preview'
+                const html = isMermaid
+                  ? buildMermaidPdfHtml(content, title)
+                  : buildPdfHtml(content, mode, title)
+                writeFileSync(destPath, await renderToPdf(html, isMermaid))
+              },
+              artifactRenderPngToFile: async (content, mode, title, destPath) => {
+                const html = buildPngHtml(content, mode, title)
+                if (!html) return false
+                writeFileSync(destPath, await renderToPng(html))
+                return true
+              },
+              // Task/tab browser registry, reached from the hub over the capability
+              // injects into the REST browser routes. One implementation, two
+              // bridge. Sole injection point since the REST proxy was deleted.
+              browserTabs: {
+                getResolvedTabId: async (taskId, tabId) => getResolvedBrowserTabId(taskId, tabId),
+                listTabs: async (taskId) => listBrowserTabs(taskId),
+                hasTab: async (taskId, tabId) => hasBrowserTab(taskId, tabId),
+                waitForRegistration: (taskId, opts) => awaitBrowserRegistration(taskId, opts),
+                execJs: (taskId, tabId, code) => browserExecJs(taskId, tabId, code),
+                loadUrl: (taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
+                getUrl: (taskId, tabId) => browserGetUrl(taskId, tabId),
+                capturePageToFile: (taskId, tabId, destPath) =>
+                  browserCapturePageToFile(taskId, tabId, destPath)
+              },
+              appGetTrpcPort: () => awaitTrpcPort(),
+              appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
+              appSetLabFlag: async (key, on) => {
+                const next =
+                  key === 'labs_tests_panel'
+                    ? { testsPanel: on, loopMode: clientSettings.labs?.loopMode }
+                    : { testsPanel: clientSettings.labs?.testsPanel, loopMode: on }
+                await updateClientSettings({ labs: next }, clientRoot)
+                clientSettings = readClientSettings(clientRoot)
+              },
+              appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
+              appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
+              appGetProtocolClientStatus: () => protocolClientStatus,
+              appGetRendererZoomFactor: () => mainWindow?.webContents.zoomFactor ?? null,
+              appCheckCliInstalled: () => checkCliInstalled(),
+              appInstallCli: () => installCli(getCliSrc()),
+              appAdjustZoom: (command) => applyAppZoom(command),
+              appRestartForUpdate: () => restartForUpdate(),
+              appCheckForUpdates: () => checkForUpdates(),
+              appRebuildMenuForShortcuts: () => {
+                void (async () => {
+                  currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
+                  buildAppMenu(currentOverrides)
+                })()
+              },
+              appGetSidecarStatus: getSidecarStatusSnapshot,
+              appRevealSidecarLog: revealSidecarLogInFinder,
+              appWindowGetContentBounds: () => mainWindow?.getContentBounds() ?? null,
+              appWindowGetDisplayScaleFactor: () => {
+                if (!mainWindow || mainWindow.isDestroyed()) return null
+                return screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor
+              },
+              authGithubSystemSignIn: (input) => githubSystemSignIn(input),
+              dialogShowOpenDialog: (options) =>
+                dialog.showOpenDialog(options as Electron.OpenDialogOptions),
+              // Parent the save sheet to the focused window when there is one —
+              // the side-car has no window handle to pass, so the choice is made
+              // here rather than threaded across the bridge.
+              dialogShowSaveDialog: (options) => {
+                const opts = options as Electron.SaveDialogOptions
+                const focused = BrowserWindow.getFocusedWindow()
+                return focused ? dialog.showSaveDialog(focused, opts) : dialog.showSaveDialog(opts)
+              },
+              windowClose: (windowId) => {
+                const wc = webContents.fromId(windowId)
+                const win = wc ? BrowserWindow.fromWebContents(wc) : null
+                if (win) win.close()
+              },
+              appWindowSetTrafficLightPosition: (windowId, pos) => {
+                if (process.platform !== 'darwin' || windowId == null) return
+                const wc = webContents.fromId(windowId)
+                const win = wc ? BrowserWindow.fromWebContents(wc) : null
+                if (win) win.setWindowButtonPosition(pos ?? { x: 10, y: 12 })
+              },
+              appWindowSetWindowButtonVisibility: (windowId, visible) => {
+                if (process.platform !== 'darwin' || windowId == null) return
+                const wc = webContents.fromId(windowId)
+                const win = wc ? BrowserWindow.fromWebContents(wc) : null
+                if (win) win.setWindowButtonVisibility(visible)
+              },
+              appFocusRenderer: (windowId) => {
+                if (windowId == null) return
+                const wc = webContents.fromId(windowId)
+                const win = wc ? BrowserWindow.fromWebContents(wc) : null
+                if (!wc || !win || win.isDestroyed() || !win.isFocused()) return
+                wc.focus()
+              },
+              // Raise/show+focus the main window — the CLI/agent `tasks/open`
+              // foreground path, forwarded from the side-car REST over the bridge.
+              appRaiseMainWindow: () => {
+                presentWindow(mainWindow ?? BrowserWindow.getAllWindows()[0])
+              },
+              // Theme — Electron nativeTheme. The side-car's `settings.*Theme`
+              // procedures forward here over the bridge; `theme:changed` streams
+              // back (wireNativeThemeBridge → settingsEvents → bridge `theme` chan).
+              themeGetEffective: () => nativeGetEffectiveTheme(),
+              themeGetSource: () => nativeGetThemeSource(),
+              themeSet: (pref) => nativeSetTheme(pref),
+              // Credential cipher — Electron safeStorage. The side-car runs as
+              // ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
+              // forwards encrypt/decrypt here over the bridge. Base64 on the wire.
+              credentialCipher: {
+                isEncryptionAvailable: () =>
+                  getSafeStorageCipher()?.isEncryptionAvailable() ?? false,
+                encryptStringToB64: (secret) => {
+                  const c = getSafeStorageCipher()
+                  if (!c)
+                    throw new Error('OS secure credential storage is unavailable on this machine')
+                  return c.encryptString(secret).toString('base64')
+                },
+                decryptStringFromB64: (b64) => {
+                  const c = getSafeStorageCipher()
+                  if (!c)
+                    throw new Error('OS secure credential storage is unavailable on this machine')
+                  return c.decryptString(Buffer.from(b64, 'base64'))
+                }
+              },
+              // Browser view ops — same BrowserViewManager singleton + shared
+              // browserExtensionOps the `browser:*` IPC handlers use (coexistence
+              // until slice 5). browserExtensionOps is defined below in this
+              // app.whenReady scope; these closures only run after it inits.
+              browser: {
+                createView: (opts) => browserViewManager.createView(opts as never),
+                destroyView: (viewId) => browserViewManager.destroyView(viewId),
+                destroyAllForTask: (taskId) => browserViewManager.destroyAllForTask(taskId),
+                setBounds: (viewId, bounds) =>
+                  browserViewManager.setBounds(viewId, bounds as never),
+                setVisible: (viewId, visible) => browserViewManager.setVisible(viewId, visible),
+                setLocked: (viewId, locked) => browserViewManager.setLocked(viewId, locked),
+                hideAll: () => browserViewManager.hideAll(),
+                showAll: () => browserViewManager.showAll(),
+                setHandoffPolicy: (viewId, policy) =>
+                  browserViewManager.setHandoffPolicy(viewId, policy as never),
+                navigate: (viewId, url) => browserViewManager.navigate(viewId, url),
+                goBack: (viewId) => browserViewManager.goBack(viewId),
+                goForward: (viewId) => browserViewManager.goForward(viewId),
+                reload: (viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
+                stop: (viewId) => browserViewManager.stop(viewId),
+                executeJs: (viewId, code) => browserViewManager.executeJs(viewId, code),
+                insertCss: (viewId, css) => browserViewManager.insertCss(viewId, css),
+                removeCss: (viewId, key) => browserViewManager.removeCss(viewId, key),
+                setZoom: (viewId, factor) => browserViewManager.setZoom(viewId, factor),
+                focus: (viewId) => browserViewManager.focus(viewId),
+                findInPage: (viewId, text, options) =>
+                  browserViewManager.findInPage(viewId, text, options as never),
+                stopFindInPage: (viewId, action) =>
+                  browserViewManager.stopFindInPage(viewId, action),
+                setKeyboardPassthrough: (viewId, enabled) =>
+                  browserViewManager.setKeyboardPassthrough(viewId, enabled),
+                sendInputEvent: (viewId, input) =>
+                  browserViewManager.sendInputEvent(viewId, input as never),
+                openDevTools: (viewId, mode) => browserViewManager.openDevTools(viewId, mode),
+                closeDevTools: (viewId) => browserViewManager.closeDevTools(viewId),
+                isDevToolsOpen: (viewId) => browserViewManager.isDevToolsOpen(viewId),
+                getUrl: (viewId) => browserViewManager.getUrl(viewId),
+                getBounds: (viewId) => browserViewManager.getBounds(viewId),
+                getZoomFactor: (viewId) => browserViewManager.getZoomFactor(viewId),
+                getActualNativeBounds: (viewId) => browserViewManager.getActualNativeBounds(viewId),
+                getViewVisible: (viewId) => browserViewManager.getViewVisible(viewId),
+                getViewsForTask: (taskId) => browserViewManager.getViewsForTask(taskId),
+                getAllViewIds: () => browserViewManager.getAllViewIds(),
+                listViews: () => browserViewManager.listViews(),
+                getNativeChildViewCount: () => browserViewManager.getNativeChildViewCount(),
+                isAllHidden: () => browserViewManager.isAllHidden(),
+                isFocused: (viewId) => browserViewManager.isFocused(viewId),
+                isViewNativelyVisible: (viewId) => browserViewManager.isViewNativelyVisible(viewId),
+                getPartition: (viewId) => browserViewManager.getPartition(viewId),
+                getWebContentsId: (viewId) => browserViewManager.getWebContentsId(viewId),
+                activateExtension: (extensionId) =>
+                  browserExtensionOps.activateExtension(extensionId),
+                getExtensions: () => browserExtensionOps.getExtensions(),
+                loadExtension: () => browserExtensionOps.loadExtension(),
+                removeExtension: (extensionId) => browserExtensionOps.removeExtension(extensionId),
+                discoverBrowserExtensions: () => browserExtensionOps.discoverBrowserExtensions(),
+                importExtension: (extPath) => browserExtensionOps.importExtension(extPath),
+                reparentToCurrentWindow: (viewId) => {
+                  const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+                  if (win) browserViewManager.reparentView(viewId, win)
+                },
+                getAllStateSnapshots: () => browserViewManager.getAllStateSnapshots(),
+                events: browserViewEvents
+              },
+              floatingAgent: {
+                ...floatingGlobalAgentPanelOps,
+                events: floatingGlobalAgentPanelEvents
+              },
+              webview: {
+                registerBrowserTab,
+                unregisterBrowserTab,
+                setActiveBrowserTab,
+                closeDevTools: (webviewId) => webviewOps.closeDevTools(webviewId),
+                isDevToolsOpened: (webviewId) => webviewOps.isDevToolsOpened(webviewId),
+                disableDeviceEmulation: (webviewId) => webviewOps.disableDeviceEmulation(webviewId),
+                // tRPC has no caller renderer to IPC-send to — only emits via
+                // webviewEvents (the onShortcut sub delivers to subscribers).
+                registerShortcuts: (webviewId) => webviewOps.registerShortcuts(webviewId),
+                setKeyboardPassthrough: (webviewId, enabled) =>
+                  webviewOps.setKeyboardPassthrough(webviewId, enabled),
+                setDesktopHandoffPolicy: (webviewId, policy) =>
+                  webviewOps.setDesktopHandoffPolicy(
+                    webviewId,
+                    policy as DesktopHandoffPolicy | null
+                  ),
+                openDevToolsBottom: (webviewId, options) =>
+                  webviewOps.openDevToolsBottom(webviewId, options),
+                openDevToolsDetached: (webviewId) => webviewOps.openDevToolsDetached(webviewId),
+                enableDeviceEmulation: (webviewId, params) =>
+                  webviewOps.enableDeviceEmulation(webviewId, params),
+                events: webviewEvents
+              },
+              taskWindows: {
+                ...taskWindowsOps,
+                events: taskWindowsEvents
               }
-            },
-            // Browser view ops — same BrowserViewManager singleton + shared
-            // browserExtensionOps the `browser:*` IPC handlers use (coexistence
-            // until slice 5). browserExtensionOps is defined below in this
-            // app.whenReady scope; these closures only run after it inits.
-            browser: {
-              createView: (opts) => browserViewManager.createView(opts as never),
-              destroyView: (viewId) => browserViewManager.destroyView(viewId),
-              destroyAllForTask: (taskId) => browserViewManager.destroyAllForTask(taskId),
-              setBounds: (viewId, bounds) => browserViewManager.setBounds(viewId, bounds as never),
-              setVisible: (viewId, visible) => browserViewManager.setVisible(viewId, visible),
-              setLocked: (viewId, locked) => browserViewManager.setLocked(viewId, locked),
-              hideAll: () => browserViewManager.hideAll(),
-              showAll: () => browserViewManager.showAll(),
-              setHandoffPolicy: (viewId, policy) =>
-                browserViewManager.setHandoffPolicy(viewId, policy as never),
-              navigate: (viewId, url) => browserViewManager.navigate(viewId, url),
-              goBack: (viewId) => browserViewManager.goBack(viewId),
-              goForward: (viewId) => browserViewManager.goForward(viewId),
-              reload: (viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
-              stop: (viewId) => browserViewManager.stop(viewId),
-              executeJs: (viewId, code) => browserViewManager.executeJs(viewId, code),
-              insertCss: (viewId, css) => browserViewManager.insertCss(viewId, css),
-              removeCss: (viewId, key) => browserViewManager.removeCss(viewId, key),
-              setZoom: (viewId, factor) => browserViewManager.setZoom(viewId, factor),
-              focus: (viewId) => browserViewManager.focus(viewId),
-              findInPage: (viewId, text, options) =>
-                browserViewManager.findInPage(viewId, text, options as never),
-              stopFindInPage: (viewId, action) => browserViewManager.stopFindInPage(viewId, action),
-              setKeyboardPassthrough: (viewId, enabled) =>
-                browserViewManager.setKeyboardPassthrough(viewId, enabled),
-              sendInputEvent: (viewId, input) =>
-                browserViewManager.sendInputEvent(viewId, input as never),
-              openDevTools: (viewId, mode) => browserViewManager.openDevTools(viewId, mode),
-              closeDevTools: (viewId) => browserViewManager.closeDevTools(viewId),
-              isDevToolsOpen: (viewId) => browserViewManager.isDevToolsOpen(viewId),
-              getUrl: (viewId) => browserViewManager.getUrl(viewId),
-              getBounds: (viewId) => browserViewManager.getBounds(viewId),
-              getZoomFactor: (viewId) => browserViewManager.getZoomFactor(viewId),
-              getActualNativeBounds: (viewId) => browserViewManager.getActualNativeBounds(viewId),
-              getViewVisible: (viewId) => browserViewManager.getViewVisible(viewId),
-              getViewsForTask: (taskId) => browserViewManager.getViewsForTask(taskId),
-              getAllViewIds: () => browserViewManager.getAllViewIds(),
-              listViews: () => browserViewManager.listViews(),
-              getNativeChildViewCount: () => browserViewManager.getNativeChildViewCount(),
-              isAllHidden: () => browserViewManager.isAllHidden(),
-              isFocused: (viewId) => browserViewManager.isFocused(viewId),
-              isViewNativelyVisible: (viewId) => browserViewManager.isViewNativelyVisible(viewId),
-              getPartition: (viewId) => browserViewManager.getPartition(viewId),
-              getWebContentsId: (viewId) => browserViewManager.getWebContentsId(viewId),
-              activateExtension: (extensionId) => browserExtensionOps.activateExtension(extensionId),
-              getExtensions: () => browserExtensionOps.getExtensions(),
-              loadExtension: () => browserExtensionOps.loadExtension(),
-              removeExtension: (extensionId) => browserExtensionOps.removeExtension(extensionId),
-              discoverBrowserExtensions: () => browserExtensionOps.discoverBrowserExtensions(),
-              importExtension: (extPath) => browserExtensionOps.importExtension(extPath),
-              reparentToCurrentWindow: (viewId) => {
-                const win = BrowserWindow.getFocusedWindow() ?? mainWindow
-                if (win) browserViewManager.reparentView(viewId, win)
-              },
-              getAllStateSnapshots: () => browserViewManager.getAllStateSnapshots(),
-              events: browserViewEvents
-            },
-            floatingAgent: {
-              ...floatingGlobalAgentPanelOps,
-              events: floatingGlobalAgentPanelEvents
-            },
-            webview: {
-              registerBrowserTab,
-              unregisterBrowserTab,
-              setActiveBrowserTab,
-              closeDevTools: (webviewId) => webviewOps.closeDevTools(webviewId),
-              isDevToolsOpened: (webviewId) => webviewOps.isDevToolsOpened(webviewId),
-              disableDeviceEmulation: (webviewId) => webviewOps.disableDeviceEmulation(webviewId),
-              // tRPC has no caller renderer to IPC-send to — only emits via
-              // webviewEvents (the onShortcut sub delivers to subscribers).
-              registerShortcuts: (webviewId) => webviewOps.registerShortcuts(webviewId),
-              setKeyboardPassthrough: (webviewId, enabled) =>
-                webviewOps.setKeyboardPassthrough(webviewId, enabled),
-              setDesktopHandoffPolicy: (webviewId, policy) =>
-                webviewOps.setDesktopHandoffPolicy(webviewId, policy as DesktopHandoffPolicy | null),
-              openDevToolsBottom: (webviewId, options) =>
-                webviewOps.openDevToolsBottom(webviewId, options),
-              openDevToolsDetached: (webviewId) => webviewOps.openDevToolsDetached(webviewId),
-              enableDeviceEmulation: (webviewId, params) =>
-                webviewOps.enableDeviceEmulation(webviewId, params),
-              events: webviewEvents
-            },
-            taskWindows: {
-              ...taskWindowsOps,
-              events: taskWindowsEvents
-            }
+            })
+            // Process-manager lifecycle ops + the dual-emit event stream for the
+            // processes router. Same module-singleton ops/emitter the IPC handlers
+            // delegate to → one implementation, both transports (slice 5 cutover).
+            mod.setProcessesDeps({
+              create: createProcess,
+              spawn: spawnProcess,
+              update: updateProcess,
+              stop: stopProcess,
+              kill: killProcess,
+              restart: restartProcess,
+              listForTask,
+              listAll: listAllProcesses,
+              killTask: killTaskProcesses,
+              events: processEvents
+            })
+            // Cutover: no in-process appRouter server. The desktop app serves ONE
+            // bridge listener (setAppDeps/setMenuEvents/setPowerResumeEvents back it):
+            //  • WS `/cap` — the side-car forwards its Electron-only AppDeps calls
+            //    here and streams desktop menu/power events back (startTrpcServer retired).
+            // That is now the ONLY thing it serves. The `/api/*` reverse-proxy is
+            // gone: those routes run in the side-car against its own db and reach
+            // back through `/cap` for the Electron step alone — so this listener no
+            // longer needs a database handle at all. No discovery port is written
+            // either; the side-car owns `server_port` (CLI/agents/MCP).
+            const bridgeServer = await startDesktopBridgeServer({})
+            bridgeCleanup = () => void bridgeServer.stop()
+            resolveDesktopBridgeAddress(`127.0.0.1:${bridgeServer.port}`)
+            logBoot(`desktop bridge server started (port ${bridgeServer.port}, cap WS only)`)
           })
-          // Process-manager lifecycle ops + the dual-emit event stream for the
-          // processes router. Same module-singleton ops/emitter the IPC handlers
-          // delegate to → one implementation, both transports (slice 5 cutover).
-          mod.setProcessesDeps({
-            create: createProcess,
-            spawn: spawnProcess,
-            update: updateProcess,
-            stop: stopProcess,
-            kill: killProcess,
-            restart: restartProcess,
-            listForTask,
-            listAll: listAllProcesses,
-            killTask: killTaskProcesses,
-            events: processEvents
+          .catch((err) => {
+            console.error('[desktop-bridge] Failed to start bridge server:', err)
           })
-          // Cutover: no in-process appRouter server. The desktop app serves ONE
-          // bridge listener (setAppDeps/setMenuEvents/setPowerResumeEvents back it):
-          //  • WS `/cap` — the side-car forwards its Electron-only AppDeps calls
-          //    here and streams desktop menu/power events back (startTrpcServer retired).
-          // That is now the ONLY thing it serves. The `/api/*` reverse-proxy is
-          // gone: those routes run in the side-car against its own db and reach
-          // back through `/cap` for the Electron step alone — so this listener no
-          // longer needs a database handle at all. No discovery port is written
-          // either; the side-car owns `server_port` (CLI/agents/MCP).
-          const bridgeServer = await startDesktopBridgeServer({})
-          bridgeCleanup = () => void bridgeServer.stop()
-          resolveDesktopBridgeAddress(`127.0.0.1:${bridgeServer.port}`)
-          logBoot(`desktop bridge server started (port ${bridgeServer.port}, cap WS only)`)
-        })
-        .catch((err) => {
-          console.error('[desktop-bridge] Failed to start bridge server:', err)
-        })
-    })
+      })
 
     // Slice 9 LIVE side-car: the renderer now connects here for all data. The
     // side-car is spawned with the desktop bridge address so it can forward
@@ -2319,144 +2310,140 @@ app
     // port before spawning.
     // A permanent failure surfaces via notify.onEmbeddedServerFailed (persistent toast).
     // Remote mode: skipped — the backend runs elsewhere.
-    if (!isRemoteMode) setImmediate(() => {
-      logBoot('sidecar server supervisor import dispatched')
-      Promise.all([import('./sidecar-server-supervisor'), desktopBridgeAddressPromise])
-        .then(([{ startSidecarServer }, desktopBridgeAddress]) => {
-          const scriptPath = is.dev
-            ? join(app.getAppPath(), '../hub/dist/bin.cjs')
-            : join(process.resourcesPath, 'hub', 'bin.cjs')
-          const supervisor = startSidecarServer({
-            execPath: process.execPath,
-            scriptPath,
-            host: '127.0.0.1',
-            // The supervised sidecar binds a FIXED port per channel, inside the
-            // reserved head of HUB_PORT_BLOCK (51100-51109). That is what makes it
-            // findable without a database: `slay` and `slay hub ls` reach it by
-            // probing a known constant (or by the ordinary block sweep) instead of
-            // reading `settings.server_port` out of the SQLite file — the only
-            // reason the CLI still opened a DB at all. A bound port cannot go
-            // stale, and only one process can hold it, so a stray second sidecar
-            // now fails loud with EADDRINUSE instead of silently coexisting
-            // against the same DB.
-            //
-            // NOT under Playwright: `e2e-parallel.sh` runs the full suite as one
-            // process PER e2e/ SUBDIRECTORY — six concurrent Electron apps — so a
-            // single fixed test port would EADDRINUSE five of them. (SIDECAR_FIXED_PORT
-            // .test exists for a single-app run; paths.ts's "e2e is one worker" note
-            // predates the group runner and is true only within one group.) E2E
-            // keeps the OS-assigned port and the `settings.server_port` channel.
-            fixedPort: isPlaywright
-              ? undefined
-              : SIDECAR_FIXED_PORT[app.isPackaged ? 'prod' : 'dev'],
-            // Diagnostics only — the SAME derivation the sidecar performs from the
-            // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
-            // so the Diagnostics "Database" row can name the file.
-            dbPath: getDatabasePath(),
-            env: {
-              ...process.env,
-              // The sidecar IS this app's hub, so hand it this app's own
-              // channel-scoped HUB root explicitly instead of letting it re-derive
-              // an ambient one. It can't derive this itself: getSupervisedRoot is
-              // desktop-app-only (a standalone hub anchors to its own --root), and
-              // an inherited-unset SLAYZONE_ROOT would land it back on the flat,
-              // channel-shared ~/.slayzone the migration just moved state out of.
-              // Everything else it needs (DB path, logs, artifacts) derives from
-              // this one var, so no path-pointing var is threaded, by design.
-              SLAYZONE_ROOT: getSupervisedRoot('hub'),
-              // Pass the dev-vs-packaged bit it can't infer (it has no Electron
-              // `app.isPackaged`), so it derives the right DB filename.
-              SLAYZONE_DEV: app.isPackaged ? undefined : '1',
-              // Desktop bridge: one listener carrying the capability bridge (renderer
-              // Electron-only calls + desktop events, WS `/cap`) AND the REST
-              // reverse-proxy target (browser-automation + export, HTTP `/api/*`).
-              // Authority only — always loopback, so the side-car derives ws/http.
-              SLAYZONE_DESKTOP_BRIDGE_ADDRESS: desktopBridgeAddress,
-              // Packaged resolution: only bin.js is copied to Resources/hub,
-              // so createRequire's walk-up never finds node_modules. Point the
-              // resolver at the unpacked natives (better-sqlite3, node-pty) the
-              // app ships anyway — same ABI, ELECTRON_RUN_AS_NODE shares it.
-              ...(app.isPackaged
-                ? {
-                    NODE_PATH: join(
-                      process.resourcesPath,
-                      'app.asar.unpacked',
-                      'node_modules'
-                    )
-                  }
-                : {})
-              // The sidecar always builds the runner gateway/auth (a hub always
-              // accepts runners) — no env flag needed. `/runners` rides the ONE hub
-              // listener (same port as /trpc), demuxed by path; supervised binds
-              // loopback (127.0.0.1), so the co-located runner reaches it locally.
-            },
-            logger: (line) => logBoot(line),
-            onReady: (info) => {
-              // Post-cutover the SIDE-CAR is the canonical MCP/REST backend. Point
-              // the host's `__serverPort` at it so anything resolving the discoverable
-              // port in the host process (e2e helpers, diagnostics) targets the
-              // side-car — NOT the host's writePort:false reverse-proxy REST.
-              ;(globalThis as Record<string, unknown>).__serverPort = info.port
-            },
-            onPermanentFailure: (info) => {
-              console.error(
-                '[supervisor] sidecar permanent failure (dark-launch, non-fatal):',
-                info
-              )
-              const message = String(
-                info.lastError instanceof Error ? info.lastError.message : info.lastError
-              )
-              // NATIVE dialog, deliberately not a renderer toast. The toast below
-              // has never been reachable: this emits on the HOST's notifyEvents,
-              // while the renderer subscribes to `notify.onEmbeddedServerFailed`
-              // served by the SIDE-CAR — and if the side-car failed permanently
-              // there is no bus to carry it. `dialog` needs no renderer, no window
-              // and no hub, so it is the only surface that survives this failure.
+    if (!isRemoteMode)
+      setImmediate(() => {
+        logBoot('sidecar server supervisor import dispatched')
+        Promise.all([import('./sidecar-server-supervisor'), desktopBridgeAddressPromise])
+          .then(([{ startSidecarServer }, desktopBridgeAddress]) => {
+            const scriptPath = is.dev
+              ? join(app.getAppPath(), '../hub/dist/bin.cjs')
+              : join(process.resourcesPath, 'hub', 'bin.cjs')
+            const supervisor = startSidecarServer({
+              execPath: process.execPath,
+              scriptPath,
+              host: '127.0.0.1',
+              // The supervised sidecar binds a FIXED port per channel, inside the
+              // reserved head of HUB_PORT_BLOCK (51100-51109). That is what makes it
+              // findable without a database: `slay` and `slay hub ls` reach it by
+              // probing a known constant (or by the ordinary block sweep) instead of
+              // reading `settings.server_port` out of the SQLite file — the only
+              // reason the CLI still opened a DB at all. A bound port cannot go
+              // stale, and only one process can hold it, so a stray second sidecar
+              // now fails loud with EADDRINUSE instead of silently coexisting
+              // against the same DB.
               //
-              // Load-bearing now that the hub owns schema migration: a migration
-              // failure exits the side-car non-zero, and without this it would be
-              // completely silent — a blank window that reads as data loss.
-              // "Not been modified" is literally true: every migration is atomic
-              // with its own user_version bump, so a crash leaves the DB at the
-              // last fully-applied version with a backup beside it.
-              dialog.showErrorBox(
-                'SlayZone could not start its local server',
-                `${message}\n\n` +
-                  `Your data has not been modified. A pre-migration backup, if one was needed, ` +
-                  `is in:\n${join(getStorageDir(), 'backups')}\n\n` +
-                  `Log:\n${join(getStorageDir(), 'logs', 'sidecar.log')}\n\n` +
-                  `Attempts: ${info.attempts}`
-              )
-              recordDiagnosticEvent({
-                level: 'error',
-                source: 'main',
-                event: 'sidecar.permanent_failure',
-                message,
-                payload: { attempts: info.attempts }
-              })
-              // Kept: costs nothing and becomes correct if the two buses are ever
-              // unified. Not the surface being relied on.
-              notifyEvents.emit('embedded-server-failed', {
-                attempts: info.attempts,
-                message
-              })
-            },
-            // Dev-only, opt-in: relaunch the side-car when its on-disk build
-            // changes (server-src watcher rebuilds bin.cjs). Off by default so a
-            // rebuild never surprises a live debug session; staleness still shows
-            // in the Diagnostics tab regardless. Never enabled in a packaged app.
-            hotRestartOnBuildChange:
-              is.dev && process.env.SLAYZONE_SIDECAR_HOT_RESTART === '1'
+              // NOT under Playwright: `e2e-parallel.sh` runs the full suite as one
+              // process PER e2e/ SUBDIRECTORY — six concurrent Electron apps — so a
+              // single fixed test port would EADDRINUSE five of them. (SIDECAR_FIXED_PORT
+              // .test exists for a single-app run; paths.ts's "e2e is one worker" note
+              // predates the group runner and is true only within one group.) E2E
+              // keeps the OS-assigned port and the `settings.server_port` channel.
+              fixedPort: isPlaywright
+                ? undefined
+                : SIDECAR_FIXED_PORT[app.isPackaged ? 'prod' : 'dev'],
+              // Diagnostics only — the SAME derivation the sidecar performs from the
+              // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
+              // so the Diagnostics "Database" row can name the file.
+              dbPath: getDatabasePath(),
+              env: {
+                ...process.env,
+                // The sidecar IS this app's hub, so hand it this app's own
+                // channel-scoped HUB root explicitly instead of letting it re-derive
+                // an ambient one. It can't derive this itself: getSupervisedRoot is
+                // desktop-app-only (a standalone hub anchors to its own --root), and
+                // an inherited-unset SLAYZONE_ROOT would land it back on the flat,
+                // channel-shared ~/.slayzone the migration just moved state out of.
+                // Everything else it needs (DB path, logs, artifacts) derives from
+                // this one var, so no path-pointing var is threaded, by design.
+                SLAYZONE_ROOT: getSupervisedRoot('hub'),
+                // Pass the dev-vs-packaged bit it can't infer (it has no Electron
+                // `app.isPackaged`), so it derives the right DB filename.
+                SLAYZONE_DEV: app.isPackaged ? undefined : '1',
+                // Desktop bridge: one listener carrying the capability bridge (renderer
+                // Electron-only calls + desktop events, WS `/cap`) AND the REST
+                // reverse-proxy target (browser-automation + export, HTTP `/api/*`).
+                // Authority only — always loopback, so the side-car derives ws/http.
+                SLAYZONE_DESKTOP_BRIDGE_ADDRESS: desktopBridgeAddress,
+                // Packaged resolution: only bin.js is copied to Resources/hub,
+                // so createRequire's walk-up never finds node_modules. Point the
+                // resolver at the unpacked natives (better-sqlite3, node-pty) the
+                // app ships anyway — same ABI, ELECTRON_RUN_AS_NODE shares it.
+                ...(app.isPackaged
+                  ? {
+                      NODE_PATH: join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
+                    }
+                  : {})
+                // The sidecar always builds the runner gateway/auth (a hub always
+                // accepts runners) — no env flag needed. `/runners` rides the ONE hub
+                // listener (same port as /trpc), demuxed by path; supervised binds
+                // loopback (127.0.0.1), so the co-located runner reaches it locally.
+              },
+              logger: (line) => logBoot(line),
+              onReady: (info) => {
+                // Post-cutover the SIDE-CAR is the canonical MCP/REST backend. Point
+                // the host's `__serverPort` at it so anything resolving the discoverable
+                // port in the host process (e2e helpers, diagnostics) targets the
+                // side-car — NOT the host's writePort:false reverse-proxy REST.
+                ;(globalThis as Record<string, unknown>).__serverPort = info.port
+              },
+              onPermanentFailure: (info) => {
+                console.error(
+                  '[supervisor] sidecar permanent failure (dark-launch, non-fatal):',
+                  info
+                )
+                const message = String(
+                  info.lastError instanceof Error ? info.lastError.message : info.lastError
+                )
+                // NATIVE dialog, deliberately not a renderer toast. The toast below
+                // has never been reachable: this emits on the HOST's notifyEvents,
+                // while the renderer subscribes to `notify.onEmbeddedServerFailed`
+                // served by the SIDE-CAR — and if the side-car failed permanently
+                // there is no bus to carry it. `dialog` needs no renderer, no window
+                // and no hub, so it is the only surface that survives this failure.
+                //
+                // Load-bearing now that the hub owns schema migration: a migration
+                // failure exits the side-car non-zero, and without this it would be
+                // completely silent — a blank window that reads as data loss.
+                // "Not been modified" is literally true: every migration is atomic
+                // with its own user_version bump, so a crash leaves the DB at the
+                // last fully-applied version with a backup beside it.
+                dialog.showErrorBox(
+                  'SlayZone could not start its local server',
+                  `${message}\n\n` +
+                    `Your data has not been modified. A pre-migration backup, if one was needed, ` +
+                    `is in:\n${join(getStorageDir(), 'backups')}\n\n` +
+                    `Log:\n${join(getStorageDir(), 'logs', 'sidecar.log')}\n\n` +
+                    `Attempts: ${info.attempts}`
+                )
+                recordDiagnosticEvent({
+                  level: 'error',
+                  source: 'main',
+                  event: 'sidecar.permanent_failure',
+                  message,
+                  payload: { attempts: info.attempts }
+                })
+                // Kept: costs nothing and becomes correct if the two buses are ever
+                // unified. Not the surface being relied on.
+                notifyEvents.emit('embedded-server-failed', {
+                  attempts: info.attempts,
+                  message
+                })
+              },
+              // Dev-only, opt-in: relaunch the side-car when its on-disk build
+              // changes (server-src watcher rebuilds bin.cjs). Off by default so a
+              // rebuild never surprises a live debug session; staleness still shows
+              // in the Diagnostics tab regardless. Never enabled in a packaged app.
+              hotRestartOnBuildChange: is.dev && process.env.SLAYZONE_SIDECAR_HOT_RESTART === '1'
+            })
+            sidecarServerHandle = supervisor
+            resolveSidecarHandle(supervisor)
+            sidecarCleanup = () => void supervisor.stop()
+            logBoot('sidecar server supervisor started')
           })
-          sidecarServerHandle = supervisor
-          resolveSidecarHandle(supervisor)
-          sidecarCleanup = () => void supervisor.stop()
-          logBoot('sidecar server supervisor started')
-        })
-        .catch((err) => {
-          console.error('[sidecar] Failed to start supervisor:', err)
-        })
-    })
+          .catch((err) => {
+            console.error('[sidecar] Failed to start supervisor:', err)
+          })
+      })
 
     // Local-runner supervisor. Spawns a co-located @slayzone/runner subprocess so
     // THIS machine can host runner work, pointed at the local hub's runner URL —
@@ -3220,14 +3207,13 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // Per-hub bearer tokens (safeStorage-encrypted, main-only). The renderer
     // fetches them to open authed connections; writes come from the enroll/login
     // flow. Empty when no authed hubs are configured.
-    ipcMain.handle('app:get-hub-tokens', () => getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot()))
-    ipcMain.handle(
-      'app:set-hub-token',
-      (_event, payload: { hubId: string; token: string }) => {
-        setHubToken(getClientStateRoot(), payload.hubId, payload.token)
-        return { ok: true as const }
-      }
+    ipcMain.handle('app:get-hub-tokens', () =>
+      getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot())
     )
+    ipcMain.handle('app:set-hub-token', (_event, payload: { hubId: string; token: string }) => {
+      setHubToken(getClientStateRoot(), payload.hubId, payload.token)
+      return { ok: true as const }
+    })
     // Sign in to a remote hub (email+password → bearer). Runs main-side (CSP +
     // cert-pin), then persists the token for that hub. Returns ok/error to the UI.
     ipcMain.handle(
@@ -3825,13 +3811,10 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       )
       ipcMain.handle('processes:stop', (_event, processId: string) => stopProcess(processId))
       ipcMain.handle('processes:kill', (_event, processId: string) => killProcess(processId))
-      ipcMain.handle('processes:restart', (_event, processId: string) =>
-        restartProcess(processId)
-      )
+      ipcMain.handle('processes:restart', (_event, processId: string) => restartProcess(processId))
       ipcMain.handle(
         'processes:listForTask',
-        (_event, taskId: string | null, projectId: string | null) =>
-          listForTask(taskId, projectId)
+        (_event, taskId: string | null, projectId: string | null) => listForTask(taskId, projectId)
       )
       ipcMain.handle('processes:listAll', () => listAllProcesses())
       ipcMain.handle('processes:killTask', (_event, taskId: string) => {

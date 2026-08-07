@@ -366,15 +366,18 @@ export function useTasksData(): UseTasksDataReturn {
   // True when the given ids span more than one hub — such an op (cross-hub
   // reorder / folder) is structurally meaningless (groups + sort_order are
   // per-DB), so callers reject it.
-  const spansHubs = useCallback((ids: string[], lookup: Map<string, string>): boolean => {
-    let seen: string | undefined
-    for (const id of ids) {
-      const h = lookup.get(id) ?? defaultHubId
-      if (seen === undefined) seen = h
-      else if (seen !== h) return true
-    }
-    return false
-  }, [defaultHubId])
+  const spansHubs = useCallback(
+    (ids: string[], lookup: Map<string, string>): boolean => {
+      let seen: string | undefined
+      for (const id of ids) {
+        const h = lookup.get(id) ?? defaultHubId
+        if (seen === undefined) seen = h
+        else if (seen !== h) return true
+      }
+      return false
+    },
+    [defaultHubId]
+  )
 
   // Boot instrumentation: fire bootMark/dataReady once the board query first
   // lands, preserving the legacy single-shot signal. `app.bootMark`/`dataReady`
@@ -579,9 +582,11 @@ export function useTasksData(): UseTasksDataReturn {
         })
       })
 
-      clientForTask(taskIds[0]).task.reorder.mutate({ taskIds }).catch(() => {
-        setTasks(snapshot)
-      })
+      clientForTask(taskIds[0])
+        .task.reorder.mutate({ taskIds })
+        .catch(() => {
+          setTasks(snapshot)
+        })
     },
     [clientForTask]
   )
@@ -780,9 +785,7 @@ export function useTasksData(): UseTasksDataReturn {
       setTasks((prev) => {
         snapshot = prev
         return prev.map((t) =>
-          orderById.has(t.id)
-            ? { ...t, pinned: true, pin_order: orderById.get(t.id) as number }
-            : t
+          orderById.has(t.id) ? { ...t, pinned: true, pin_order: orderById.get(t.id) as number } : t
         )
       })
       // Pinned list is tree-global and may span hubs — reorder each hub's slice
@@ -790,7 +793,9 @@ export function useTasksData(): UseTasksDataReturn {
       // meaningful within each hub anyway).
       const byHub = groupIdsByHub(taskIds, ownedTasks(), defaultHubId)
       Promise.all(
-        [...byHub].map(([hubId, ids]) => clientForHub(hubId).task.reorderPinned.mutate({ taskIds: ids }))
+        [...byHub].map(([hubId, ids]) =>
+          clientForHub(hubId).task.reorderPinned.mutate({ taskIds: ids })
+        )
       ).catch(() => setTasks(snapshot))
     },
     [clientForHub, defaultHubId]
@@ -820,15 +825,13 @@ export function useTasksData(): UseTasksDataReturn {
               : t
           )
         }
-        return prev.map((t) =>
-          idSet.has(t.id) ? { ...t, pinned: false, pin_order: 0 } : t
-        )
+        return prev.map((t) => (idSet.has(t.id) ? { ...t, pinned: false, pin_order: 0 } : t))
       })
       // Pin/unpin can span hubs (tree-global) — split by owning hub and issue
       // one write per hub (pin_order is per-DB).
       const writes = pinned
-        ? [...groupIdsByHub(orderedPinnedIds, ownedTasks(), defaultHubId)].map(
-            ([hubId, ids]) => clientForHub(hubId).task.reorderPinned.mutate({ taskIds: ids })
+        ? [...groupIdsByHub(orderedPinnedIds, ownedTasks(), defaultHubId)].map(([hubId, ids]) =>
+            clientForHub(hubId).task.reorderPinned.mutate({ taskIds: ids })
           )
         : [...groupIdsByHub(taskIds, ownedTasks(), defaultHubId)].map(([hubId, ids]) =>
             clientForHub(hubId).task.updateMany.mutate({
@@ -899,9 +902,11 @@ export function useTasksData(): UseTasksDataReturn {
         setProjects(snapshot)
         return
       }
-      clientForProject(projectIds[0]).projects.reorder.mutate({ projectIds }).catch(() => {
-        setProjects(snapshot)
-      })
+      clientForProject(projectIds[0])
+        .projects.reorder.mutate({ projectIds })
+        .catch(() => {
+          setProjects(snapshot)
+        })
     },
     [clientForProject, spansHubs]
   )
@@ -977,7 +982,9 @@ export function useTasksData(): UseTasksDataReturn {
           // same ids, new sort_order), then recompose groups.
           setProjects((prev) => {
             const others = prev.filter((p) => (ownedProjects().get(p.id) ?? defaultHubId) !== hubId)
-            return hubId === defaultHubId ? [...snap.projects, ...others] : [...others, ...snap.projects]
+            return hubId === defaultHubId
+              ? [...snap.projects, ...others]
+              : [...others, ...snap.projects]
           })
           recomposeGroups()
         })
@@ -1001,7 +1008,9 @@ export function useTasksData(): UseTasksDataReturn {
       if (spansHubs(projectIds, ownedProjects())) return // cross-hub folder rejected
       const hubId = ownedProjects().get(projectIds[0]) ?? defaultHubId
       runGroupMutation(hubId, () =>
-        clientForProject(projectIds[0]).projectGroups.createFolderWithProjects.mutate({ projectIds })
+        clientForProject(projectIds[0]).projectGroups.createFolderWithProjects.mutate({
+          projectIds
+        })
       )
     },
     [clientForProject, runGroupMutation, spansHubs, defaultHubId]
@@ -1024,7 +1033,9 @@ export function useTasksData(): UseTasksDataReturn {
       )
       const hubId = hubIds[0] ?? defaultHubId
       if (hubIds.some((h) => h !== hubId)) return // cross-hub top-level reorder rejected
-      runGroupMutation(hubId, () => clientForHub(hubId).projectGroups.reorderTopLevel.mutate({ entries }))
+      runGroupMutation(hubId, () =>
+        clientForHub(hubId).projectGroups.reorderTopLevel.mutate({ entries })
+      )
     },
     [clientForHub, runGroupMutation, defaultHubId]
   )
@@ -1034,7 +1045,11 @@ export function useTasksData(): UseTasksDataReturn {
       // Moving a project into a group that lives on a different hub is invalid.
       if (groupId && (groupHubIdRef.current.get(groupId) ?? defaultHubId) !== projHub) return
       runGroupMutation(projHub, () =>
-        clientForProject(projectId).projectGroups.moveProject.mutate({ projectId, groupId, targetIndex })
+        clientForProject(projectId).projectGroups.moveProject.mutate({
+          projectId,
+          groupId,
+          targetIndex
+        })
       )
     },
     [clientForProject, runGroupMutation, defaultHubId]
@@ -1057,7 +1072,9 @@ export function useTasksData(): UseTasksDataReturn {
         snap = prev
         return prev.map((g) => (g.id === id ? { ...g, name } : g))
       })
-      clientForGroup(id).projectGroups.update.mutate({ id, name }).catch(() => setProjectGroups(snap))
+      clientForGroup(id)
+        .projectGroups.update.mutate({ id, name })
+        .catch(() => setProjectGroups(snap))
     },
     [clientForGroup]
   )

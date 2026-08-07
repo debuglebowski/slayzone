@@ -26,7 +26,9 @@ function assert(cond: unknown, msg: string): void {
 
 function eq<T>(actual: T, expected: T, msg?: string): void {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${msg ?? 'mismatch'}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
+    throw new Error(
+      `${msg ?? 'mismatch'}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+    )
   }
 }
 
@@ -54,7 +56,12 @@ async function run(): Promise<void> {
     void client.request('initialize', { foo: 1 })
     void client.request('thread/start', { cwd: '/x' })
     eq(JSON.parse(sent[0]), { jsonrpc: '2.0', id: 1, method: 'initialize', params: { foo: 1 } })
-    eq(JSON.parse(sent[1]), { jsonrpc: '2.0', id: 2, method: 'thread/start', params: { cwd: '/x' } })
+    eq(JSON.parse(sent[1]), {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'thread/start',
+      params: { cwd: '/x' }
+    })
   })
 
   await test('request omits params key when undefined', () => {
@@ -74,7 +81,9 @@ async function run(): Promise<void> {
   await test('error response rejects with CodexRpcError carrying code', async () => {
     const { client } = makeClient()
     const p = client.request('thread/resume')
-    client.handleLine(JSON.stringify({ id: 1, error: { code: -32001, message: 'thread not found' } }))
+    client.handleLine(
+      JSON.stringify({ id: 1, error: { code: -32001, message: 'thread not found' } })
+    )
     let caught: unknown
     try {
       await p
@@ -108,7 +117,11 @@ async function run(): Promise<void> {
     let got: { m: string; p: unknown; id: JsonRpcId } | null = null
     const { client } = makeClient({ onServerRequest: (m, p, id) => (got = { m, p, id }) })
     client.handleLine(
-      JSON.stringify({ method: 'item/commandExecution/requestApproval', id: 7, params: { cmd: 'ls' } })
+      JSON.stringify({
+        method: 'item/commandExecution/requestApproval',
+        id: 7,
+        params: { cmd: 'ls' }
+      })
     )
     assert(got !== null, 'onServerRequest not called')
     eq(got!.m, 'item/commandExecution/requestApproval')

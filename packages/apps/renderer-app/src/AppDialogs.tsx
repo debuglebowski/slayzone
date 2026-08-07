@@ -331,11 +331,15 @@ export function AppDialogs({
       label: `Completed "${task.title}"`,
       undo: async () => {
         await trpcClient.task.update.mutate({ id: task.id, status: prevStatus })
-        data.setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: prevStatus } : t)))
+        data.setTasks((prev) =>
+          prev.map((t) => (t.id === task.id ? { ...t, status: prevStatus } : t))
+        )
       },
       redo: async () => {
         await trpcClient.task.update.mutate({ id: task.id, status: doneStatus })
-        data.setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: doneStatus } : t)))
+        data.setTasks((prev) =>
+          prev.map((t) => (t.id === task.id ? { ...t, status: doneStatus } : t))
+        )
       }
     })
     toast(`Completed "${task.title}"`, { action: { label: 'Undo', onClick: () => void undo() } })
@@ -442,7 +446,9 @@ export function AppDialogs({
             onOpenChange={(open) => {
               if (!open) useDialogStore.getState().closeProjectSettings()
             }}
-            initialTab={(projectSettingsInitialTab ?? undefined) as ProjectSettingsProps['initialTab']}
+            initialTab={
+              (projectSettingsInitialTab ?? undefined) as ProjectSettingsProps['initialTab']
+            }
             integrationOnboardingProvider={
               projectSettingsOnboardingProvider as ProjectSettingsProps['integrationOnboardingProvider']
             }

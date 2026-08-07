@@ -40,9 +40,10 @@ function topLevelEntries(db: Database): TopEntry[] {
   const projects = db
     .prepare('SELECT id, sort_order FROM projects WHERE group_id IS NULL')
     .all() as Array<{ id: string; sort_order: number }>
-  const groups = db
-    .prepare('SELECT id, sort_order FROM project_groups')
-    .all() as Array<{ id: string; sort_order: number }>
+  const groups = db.prepare('SELECT id, sort_order FROM project_groups').all() as Array<{
+    id: string
+    sort_order: number
+  }>
   const entries: Array<TopEntry & { sort_order: number }> = [
     ...projects.map((p) => ({ kind: 'project' as const, id: p.id, sort_order: p.sort_order })),
     ...groups.map((g) => ({ kind: 'group' as const, id: g.id, sort_order: g.sort_order }))
@@ -294,7 +295,16 @@ export const projectsTxns = {
         INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      stmt.run(p.id, p.name, p.color, p.path, p.columnsConfigJson, nextOrder, p.createdAt, p.updatedAt)
+      stmt.run(
+        p.id,
+        p.name,
+        p.color,
+        p.path,
+        p.columnsConfigJson,
+        nextOrder,
+        p.createdAt,
+        p.updatedAt
+      )
       return db.prepare('SELECT * FROM projects WHERE id = ?').get(p.id) as Row
     })(),
 

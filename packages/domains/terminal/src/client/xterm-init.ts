@@ -29,9 +29,9 @@ export interface CreateXtermOptions {
   signal: AbortSignal
   /** Read at click time, never snapshotted — keeps the no-staleness contract. */
   getOnOpenUrl: () => ((url: string) => void) | undefined
-  getOnOpenFile: () => (
-    (filePath: string, options?: { position?: { line: number; col?: number } }) => void
-  ) | undefined
+  getOnOpenFile: () =>
+    | ((filePath: string, options?: { position?: { line: number; col?: number } }) => void)
+    | undefined
 }
 
 export interface CreatedXterm {

@@ -96,7 +96,9 @@ export function useMcpFlatState({ projectPath, enabledProviders }: UseMcpFlatSta
   const getServerSyncHealth = (server: MergedServer): SyncHealth => {
     const writableEnabled = mcpProviders.filter((provider) => writableProviders.has(provider))
     if (writableEnabled.length === 0) return 'not_synced'
-    const providerHealth = writableEnabled.map((provider) => getProviderSyncHealth(server, provider))
+    const providerHealth = writableEnabled.map((provider) =>
+      getProviderSyncHealth(server, provider)
+    )
     if (providerHealth.every((health) => health === 'synced')) return 'synced'
     if (providerHealth.every((health) => health === 'not_synced')) return 'not_synced'
     return 'stale'

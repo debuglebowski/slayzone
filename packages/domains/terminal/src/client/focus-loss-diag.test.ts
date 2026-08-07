@@ -82,7 +82,9 @@ test('display:none ancestor → ancestor-display-none (the tab-hide class)', () 
 
 test('visibility:hidden ancestor → ancestor-visibility-hidden', () => {
   expect(
-    classifyFocusLoss(ctx({ hiddenAncestor: { tag: 'DIV', reason: 'visibility:hidden', depth: 2 } }))
+    classifyFocusLoss(
+      ctx({ hiddenAncestor: { tag: 'DIV', reason: 'visibility:hidden', depth: 2 } })
+    )
   ).toBe('ancestor-visibility-hidden')
 })
 
@@ -111,22 +113,20 @@ test('hidden ancestor wins over a programmatic-looking stack', () => {
 })
 
 test('connected + visible + inert element → element-unfocusable', () => {
-  expect(
-    classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inert: true } }))
-  ).toBe('element-unfocusable')
+  expect(classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inert: true } }))).toBe(
+    'element-unfocusable'
+  )
 })
 
 test('connected + visible + disabled element → element-unfocusable', () => {
-  expect(
-    classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, disabled: true } }))
-  ).toBe('element-unfocusable')
+  expect(classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, disabled: true } }))).toBe(
+    'element-unfocusable'
+  )
 })
 
 test('connected + visible + ancestor [inert] → element-unfocusable', () => {
   expect(
-    classifyFocusLoss(
-      ctx({ focusBlocker: { ...NO_BLOCKER, inertAncestor: { tag: 'DIV' } } })
-    )
+    classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inertAncestor: { tag: 'DIV' } } }))
   ).toBe('element-unfocusable')
 })
 

@@ -108,7 +108,10 @@ type Envelope =
 export function browserMojoLink(): TRPCLink<AppRouter> {
   const link =
     () =>
-    (opts: { op: { type: string; path: string; input: unknown }; next: (op: unknown) => unknown }) => {
+    (opts: {
+      op: { type: string; path: string; input: unknown }
+      next: (op: unknown) => unknown
+    }) => {
       const { op, next } = opts
       if (!op.path.startsWith(PREFIX)) return next(op) as never
       const method = op.path.slice(PREFIX.length)
@@ -117,7 +120,9 @@ export function browserMojoLink(): TRPCLink<AppRouter> {
         const host = browserHost()
         if (!host) {
           observer.error(
-            TRPCClientError.from(new Error(`[browser-mojo-link] window.api.browser unavailable for ${op.path}`))
+            TRPCClientError.from(
+              new Error(`[browser-mojo-link] window.api.browser unavailable for ${op.path}`)
+            )
           )
           return
         }
@@ -128,7 +133,9 @@ export function browserMojoLink(): TRPCLink<AppRouter> {
           if (typeof sub !== 'function') return // unknown stream: open, emits nothing
           let unsub: (() => void) | undefined
           try {
-            unsub = sub((evt: unknown) => observer.next({ result: { type: 'data', data: evt } })) as () => void
+            unsub = sub((evt: unknown) =>
+              observer.next({ result: { type: 'data', data: evt } })
+            ) as () => void
           } catch (err) {
             observer.error(TRPCClientError.from(err as Error))
             return
@@ -144,7 +151,9 @@ export function browserMojoLink(): TRPCLink<AppRouter> {
 
         const handler = PROCS[method]
         if (!handler) {
-          observer.error(TRPCClientError.from(new Error(`[browser-mojo-link] unmapped app.browser.${method}`)))
+          observer.error(
+            TRPCClientError.from(new Error(`[browser-mojo-link] unmapped app.browser.${method}`))
+          )
           return
         }
         Promise.resolve()

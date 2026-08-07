@@ -27,7 +27,9 @@ test.describe('Terminal error handling', () => {
   })
 
   test.afterAll(async ({ mainWindow }) => {
-    await mainWindow.evaluate(() => window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null }))
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null })
+    )
   })
 
   test('invalid shell override falls back to the user shell and still allows recreation after reset', async ({
@@ -36,7 +38,9 @@ test.describe('Terminal error handling', () => {
     const sessionId = getMainSessionId(taskId)
 
     await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: '/definitely/not/a/real/shell' })
+      window
+        .getTrpcVanillaClient()
+        .pty.setShellOverride.mutate({ value: '/definitely/not/a/real/shell' })
     )
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Terminal error task' })
@@ -51,7 +55,9 @@ test.describe('Terminal error handling', () => {
       .toBe(true)
     await expect(mainWindow.getByText(/Failed to start terminal:/)).toHaveCount(0)
 
-    await mainWindow.evaluate(() => window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null }))
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.setShellOverride.mutate({ value: null })
+    )
     const createResult = await mainWindow.evaluate(
       ({ id, cwd }) =>
         window.getTrpcVanillaClient().pty.create.mutate({ sessionId: id, cwd, mode: 'terminal' }),

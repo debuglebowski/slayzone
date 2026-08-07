@@ -15,7 +15,12 @@ import { startLoopbackHub, type LoopbackHub } from '../testing/loopback'
 import { createMemoryCredentialStore } from './credential-store'
 import { HubDialer, type HubDialerOptions } from './hub-dialer'
 
-const IDENTITY = { name: 'test-runner', platform: 'darwin-arm64', version: '0.0.0', capabilities: ['pty'] }
+const IDENTITY = {
+  name: 'test-runner',
+  platform: 'darwin-arm64',
+  version: '0.0.0',
+  capabilities: ['pty']
+}
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -144,7 +149,9 @@ describe('heartbeat-loss detection (runner side)', () => {
               jsonrpc: '2.0',
               id: frame.id,
               result:
-                frame.method === 'enroll' ? { runnerId: 'runner-1', apiKey: 'key-1' } : { runnerId: 'runner-1' }
+                frame.method === 'enroll'
+                  ? { runnerId: 'runner-1', apiKey: 'key-1' }
+                  : { runnerId: 'runner-1' }
             })
           )
         }
@@ -198,13 +205,32 @@ describe('wss certificate pinning', () => {
     const certPath = join(dir, 'cert.pem')
     execFileSync(
       'openssl',
-      ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certPath, '-days', '1', '-subj', '/CN=localhost'],
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        keyPath,
+        '-out',
+        certPath,
+        '-days',
+        '1',
+        '-subj',
+        '/CN=localhost'
+      ],
       { stdio: 'pipe' }
     )
     return { certPem: readFileSync(certPath, 'utf8'), keyPem: readFileSync(keyPath, 'utf8') }
   }
 
-  async function startTlsHub(): Promise<{ hub: LoopbackHub; https: HttpsServer; url: string; fingerprint: string }> {
+  async function startTlsHub(): Promise<{
+    hub: LoopbackHub
+    https: HttpsServer
+    url: string
+    fingerprint: string
+  }> {
     const dir = mkdtempSync(join(tmpdir(), 'runner-tls-'))
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
     const { certPem, keyPem } = generateCert(dir)
@@ -214,7 +240,12 @@ describe('wss certificate pinning', () => {
     const hub = await startLoopbackHub({}, { server: https })
     cleanups.push(() => hub.close())
     const port = (https.address() as AddressInfo).port
-    return { hub, https, url: `wss://127.0.0.1:${port}`, fingerprint: certSha256Fingerprint(certPem) }
+    return {
+      hub,
+      https,
+      url: `wss://127.0.0.1:${port}`,
+      fingerprint: certSha256Fingerprint(certPem)
+    }
   }
 
   it('connects to a self-signed hub when the pin matches', async () => {

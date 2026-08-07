@@ -22,9 +22,7 @@ async function maybeInteractiveSetup(): Promise<void> {
   const cfg = loadHubConfigFile()
   // The legacy `publicUrl` key counts as answered too — an operator who already
   // filled this in on an older build must never be re-prompted.
-  if (
-    (process.env.SLAYZONE_HUB_PUBLIC_ADDRESS ?? cfg.publicAddress ?? cfg.publicUrl) !== undefined
-  )
+  if ((process.env.SLAYZONE_HUB_PUBLIC_ADDRESS ?? cfg.publicAddress ?? cfg.publicUrl) !== undefined)
     return
 
   await runInteractiveConfig({

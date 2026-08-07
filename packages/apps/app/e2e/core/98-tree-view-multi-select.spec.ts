@@ -336,7 +336,10 @@ test.describe('TreeView multi-select', () => {
         )
         .toEqual([0, 1, 2, 3])
     } finally {
-      await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.delete.mutate({ id }), rootD)
+      await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().task.delete.mutate({ id }),
+        rootD
+      )
     }
   })
 

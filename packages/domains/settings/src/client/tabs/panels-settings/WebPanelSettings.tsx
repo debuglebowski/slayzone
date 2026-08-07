@@ -71,9 +71,7 @@ export function WebPanelSettings({ state }: { state: PanelSettingsState }) {
                   if (!c) setEditPanelProtocolError('')
                 }}
               />
-              <span className="text-xs text-muted-foreground">
-                Block desktop app handoff links
-              </span>
+              <span className="text-xs text-muted-foreground">Block desktop app handoff links</span>
             </div>
             {editPanelBlockDesktopHandoff && (
               <div className="space-y-1">
@@ -105,11 +103,7 @@ export function WebPanelSettings({ state }: { state: PanelSettingsState }) {
         </div>
       </div>
       <div className={CARD_CLASS}>
-        <PanelLayoutControls
-          orderId={wp.id}
-          panelConfig={panelConfig}
-          onSave={savePanelConfig}
-        />
+        <PanelLayoutControls orderId={wp.id} panelConfig={panelConfig} onSave={savePanelConfig} />
       </div>
     </>
   )

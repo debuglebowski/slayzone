@@ -231,7 +231,9 @@ await describe('slay init works without a local database', () => {
     // Per-skill lines preserved (name, not slug) — same output as before the cutover.
     expect(r.stdout.includes(`  Installed ${BUILTIN_SKILLS[0].name}`)).toBe(true)
     const rows = db
-      .prepare(`SELECT scope, project_id FROM ai_config_items WHERE type = 'skill' AND project_id = ?`)
+      .prepare(
+        `SELECT scope, project_id FROM ai_config_items WHERE type = 'skill' AND project_id = ?`
+      )
       .all(projectId) as Array<{ scope: string; project_id: string }>
     expect(rows.length).toBe(BUILTIN_SKILLS.length)
     // notifyApp() still pings the hub after a change.

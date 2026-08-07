@@ -34,7 +34,8 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 function tmp(): string {
@@ -125,7 +126,12 @@ test('wrong-typed values are dropped (empty joinToken/hubUrl, non-array allowedR
   const p = join(dir, 'runner.config.json')
   writeFileSync(
     p,
-    JSON.stringify({ joinToken: '', hubUrl: '', allowedRoots: 'not-an-array', pinnedCertSha256: 42 })
+    JSON.stringify({
+      joinToken: '',
+      hubUrl: '',
+      allowedRoots: 'not-an-array',
+      pinnedCertSha256: 42
+    })
   )
   const cfg = loadRunnerConfigFile(p)
   assert(cfg.joinToken === undefined, 'empty joinToken dropped')
@@ -210,7 +216,10 @@ console.log('─'.repeat(40))
 test('runner.config.json absent, legacy config.json present ⇒ runner keys coerced from it', () => {
   const dir = tmp()
   const legacyPath = join(dir, 'config.json')
-  writeFileSync(legacyPath, JSON.stringify({ joinToken: 'legacy-jt', hubUrl: 'wss://legacy/runners' }))
+  writeFileSync(
+    legacyPath,
+    JSON.stringify({ joinToken: 'legacy-jt', hubUrl: 'wss://legacy/runners' })
+  )
   const cfgPath = join(dir, 'runner.config.json')
   const cfg = loadRunnerConfigFile(cfgPath)
   assertEq(cfg.joinToken, 'legacy-jt', 'joinToken from legacy file')

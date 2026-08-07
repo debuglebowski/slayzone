@@ -30,7 +30,10 @@ test.describe('Warm pool (runner-hosted)', () => {
     )
   })
 
-  test('warm agent is spawned on a runner, never in the hub process', async ({ mainWindow, electronApp }) => {
+  test('warm agent is spawned on a runner, never in the hub process', async ({
+    mainWindow,
+    electronApp
+  }) => {
     const project = (await seed(mainWindow).createProject({
       name: 'WarmPool',
       color: '#22c55e',

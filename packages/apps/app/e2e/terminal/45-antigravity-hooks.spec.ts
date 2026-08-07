@@ -1,4 +1,11 @@
-import { test, expect, resetApp, seed, TEST_PROJECT_PATH, notifyScriptPath } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  resetApp,
+  seed,
+  TEST_PROJECT_PATH,
+  notifyScriptPath
+} from '../fixtures/electron'
 import fs from 'fs'
 import http from 'http'
 

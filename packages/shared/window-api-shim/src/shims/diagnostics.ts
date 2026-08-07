@@ -14,5 +14,5 @@ export const diagnosticsShim = {
   },
   getConfig: async (): Promise<unknown> => ({}),
   setConfig: async (_cfg: unknown): Promise<void> => {},
-  export: async (): Promise<string> => '',
+  export: async (): Promise<string> => ''
 }

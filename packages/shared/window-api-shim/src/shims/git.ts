@@ -39,7 +39,7 @@ export const gitShim = {
       'removeWorktree',
       repoPath,
       worktreePath,
-      branchHint,
+      branchHint
     ),
 
   init: (path: string) => callVoid('init', path),
@@ -55,7 +55,7 @@ export const gitShim = {
     projectPath: string,
     worktreePath: string,
     parentBranch: string,
-    sourceBranch: string,
+    sourceBranch: string
   ) =>
     call<{
       success?: boolean
@@ -66,10 +66,8 @@ export const gitShim = {
     }>('mergeWithAI', projectPath, worktreePath, parentBranch, sourceBranch),
   isMergeInProgress: (path: string) => call<boolean>('isMergeInProgress', path),
   getConflictedFiles: (path: string) => call<string[]>('getConflictedFiles', path),
-  getWorkingDiff: (
-    path: string,
-    opts?: { contextLines?: string; ignoreWhitespace?: boolean },
-  ) => call('getWorkingDiff', path, opts),
+  getWorkingDiff: (path: string, opts?: { contextLines?: string; ignoreWhitespace?: boolean }) =>
+    call('getWorkingDiff', path, opts),
   stageFile: (path: string, filePath: string) => callVoid('stageFile', path, filePath),
   unstageFile: (path: string, filePath: string) => callVoid('unstageFile', path, filePath),
   discardFile: (path: string, filePath: string, untracked?: boolean) =>
@@ -80,7 +78,7 @@ export const gitShim = {
     repoPath: string,
     filePath: string,
     staged: boolean,
-    opts?: { contextLines?: string; ignoreWhitespace?: boolean },
+    opts?: { contextLines?: string; ignoreWhitespace?: boolean }
   ) => call<string>('getFileDiff', repoPath, filePath, staged, opts),
   getUntrackedFileDiff: (repoPath: string, filePath: string) =>
     call<string>('getUntrackedFileDiff', repoPath, filePath),
@@ -100,7 +98,7 @@ export const gitShim = {
     filePath: string,
     base: string | null,
     ours: string | null,
-    theirs: string | null,
+    theirs: string | null
   ) => call('analyzeConflict', mode, filePath, base, ours, theirs),
 
   // Rebase
@@ -112,8 +110,7 @@ export const gitShim = {
 
   // Context + diagnostics
   getMergeContext: (repoPath: string) => call('getMergeContext', repoPath),
-  getRecentCommits: (repoPath: string, count?: number) =>
-    call('getRecentCommits', repoPath, count),
+  getRecentCommits: (repoPath: string, count?: number) => call('getRecentCommits', repoPath, count),
   getAheadBehind: (repoPath: string, branch: string, upstream: string) =>
     call('getAheadBehind', repoPath, branch, upstream),
   getStatusSummary: (repoPath: string) => call('getStatusSummary', repoPath),
@@ -153,7 +150,7 @@ export const gitShim = {
     path: string,
     limit: number,
     branches: string[] | undefined,
-    baseBranch: string,
+    baseBranch: string
   ) => call('getResolvedCommitDag', path, limit, branches, baseBranch),
   getResolvedForkGraph: (
     targetPath: string,
@@ -161,7 +158,7 @@ export const gitShim = {
     activeBranch: string,
     compareBranch: string,
     activeBranchLabel: string,
-    compareBranchLabel: string,
+    compareBranchLabel: string
   ) =>
     call(
       'getResolvedForkGraph',
@@ -170,7 +167,7 @@ export const gitShim = {
       activeBranch,
       compareBranch,
       activeBranchLabel,
-      compareBranchLabel,
+      compareBranchLabel
     ),
   getResolvedUpstreamGraph: (repoPath: string, branch: string) =>
     call('getResolvedUpstreamGraph', repoPath, branch),
@@ -184,7 +181,7 @@ export const gitShim = {
     repoPath: string,
     worktreePath: string,
     paths: string[],
-    mode?: 'all' | 'custom',
+    mode?: 'all' | 'custom'
   ) => callVoid('copyIgnoredFiles', repoPath, worktreePath, paths, mode),
 
   // GitHub CLI
@@ -193,8 +190,7 @@ export const gitShim = {
   listOpenPrs: (repoPath: string) => call('listOpenPrs', repoPath),
   getPrByUrl: (repoPath: string, url: string) => call('getPrByUrl', repoPath, url),
   createPr: (input: unknown) => call('createPr', input),
-  getPrComments: (repoPath: string, prNumber: number) =>
-    call('getPrComments', repoPath, prNumber),
+  getPrComments: (repoPath: string, prNumber: number) => call('getPrComments', repoPath, prNumber),
   addPrComment: (repoPath: string, prNumber: number, body: string) =>
     callVoid('addPrComment', repoPath, prNumber, body),
   mergePr: (input: unknown) => callVoid('mergePr', input),
@@ -204,16 +200,12 @@ export const gitShim = {
 
   // Stash
   listStashes: (repoPath: string) => call('listStashes', repoPath),
-  createStash: (
-    repoPath: string,
-    message: string,
-    includeUntracked: boolean,
-    keepIndex: boolean,
-  ) => call('createStash', repoPath, message, includeUntracked, keepIndex),
+  createStash: (repoPath: string, message: string, includeUntracked: boolean, keepIndex: boolean) =>
+    call('createStash', repoPath, message, includeUntracked, keepIndex),
   applyStash: (repoPath: string, index: number) => call('applyStash', repoPath, index),
   popStash: (repoPath: string, index: number) => call('popStash', repoPath, index),
   dropStash: (repoPath: string, index: number) => call('dropStash', repoPath, index),
   branchFromStash: (repoPath: string, index: number, branchName: string) =>
     call('branchFromStash', repoPath, index, branchName),
-  getStashDiff: (repoPath: string, index: number) => call('getStashDiff', repoPath, index),
+  getStashDiff: (repoPath: string, index: number) => call('getStashDiff', repoPath, index)
 }

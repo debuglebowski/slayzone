@@ -101,11 +101,7 @@ export interface BrowserAccess {
   loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
   getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
   /** False when the captured image was empty. */
-  capturePageToFile: (
-    taskId: string,
-    tabId: string | null,
-    destPath: string
-  ) => Promise<boolean>
+  capturePageToFile: (taskId: string, tabId: string | null, destPath: string) => Promise<boolean>
 }
 
 /**
@@ -130,12 +126,7 @@ export interface BrowserAccess {
  */
 export interface ArtifactExportAccess {
   buildExportHtml: (content: string, mode: string, title: string) => Promise<string>
-  renderPdfToFile: (
-    content: string,
-    mode: string,
-    title: string,
-    destPath: string
-  ) => Promise<void>
+  renderPdfToFile: (content: string, mode: string, title: string, destPath: string) => Promise<void>
   /** False when the mode has no PNG representation (buildPngHtml declined). */
   renderPngToFile: (
     content: string,

@@ -32,7 +32,9 @@ export async function purgeStaleAndOrphanedTasks(db: SlayzoneDb): Promise<void> 
   }
   if (stale.length > 0) {
     const placeholders = stale.map(() => '?').join(',')
-    await db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...stale.map((r) => r.id))
+    await db
+      .prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`)
+      .run(...stale.map((r) => r.id))
     console.log(`Purged ${stale.length} soft-deleted task(s)`)
   }
 

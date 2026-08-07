@@ -23,9 +23,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       session_id: z
         .string()
         .optional()
-        .describe(
-          'Fallback when $SLAYZONE_TASK_ID is empty — pass $SLAYZONE_SESSION_ID instead'
-        ),
+        .describe('Fallback when $SLAYZONE_TASK_ID is empty — pass $SLAYZONE_SESSION_ID instead'),
       title: z.string().describe('Subtask title'),
       description: z.string().nullable().optional().describe('Subtask description (null to clear)'),
       status: z
@@ -41,7 +39,16 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       assignee: z.string().nullable().optional().describe('Assignee name (null to clear)'),
       due_date: z.string().nullable().optional().describe('Due date ISO string (null to clear)')
     },
-    async ({ parent_task_id, session_id, due_date, title, description, status, priority, assignee }) => {
+    async ({
+      parent_task_id,
+      session_id,
+      due_date,
+      title,
+      description,
+      status,
+      priority,
+      assignee
+    }) => {
       const resolvedParentId = await resolveCurrentTaskId(deps.db, parent_task_id, session_id)
       if (!resolvedParentId) {
         return {

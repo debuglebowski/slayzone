@@ -66,10 +66,12 @@ export const useLayoutStore = create<LayoutStore>()(
       set({ tree: moveTileBetweenPanes(get().tree, tileId, toPaneId, toIndex) }),
     splitPaneAt: (paneId, edge, tile) => set({ tree: splitPane(get().tree, paneId, edge, tile) }),
     setActiveTab: (paneId, tileId) => set({ tree: setActiveTile(get().tree, paneId, tileId) }),
-    resizeSplit: (splitId, fractions) => set({ tree: replaceFractions(get().tree, splitId, fractions) }),
+    resizeSplit: (splitId, fractions) =>
+      set({ tree: replaceFractions(get().tree, splitId, fractions) }),
     setDraggingSplit: (splitId) => set({ draggingSplitId: splitId }),
     setDraggingTile: (tileId) => set({ draggingTileId: tileId }),
-    setOcclusionPolicy: (policy) => set((s) => ({ occlusionPolicy: { ...s.occlusionPolicy, ...policy } })),
+    setOcclusionPolicy: (policy) =>
+      set((s) => ({ occlusionPolicy: { ...s.occlusionPolicy, ...policy } })),
     focusNode: (nodeId) => set({ focusedNodeId: nodeId }),
     openOverlay: (overlay) =>
       set((s) => ({ overlays: [...s.overlays.filter((o) => o.id !== overlay.id), overlay] })),
@@ -108,6 +110,7 @@ export const getLayoutStore = (): LayoutStore => useLayoutStore.getState()
 
 // Debug/e2e handle (mirrors window.__slayzone_terminalStateStore).
 if (typeof window !== 'undefined') {
-  ;(window as unknown as { __slayzone_layoutStore?: typeof useLayoutStore }).__slayzone_layoutStore =
-    useLayoutStore
+  ;(
+    window as unknown as { __slayzone_layoutStore?: typeof useLayoutStore }
+  ).__slayzone_layoutStore = useLayoutStore
 }

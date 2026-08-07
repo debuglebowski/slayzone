@@ -79,9 +79,7 @@ raw.exec(`
     first_turn_at   INTEGER NOT NULL
   );
 `)
-raw
-  .prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)')
-  .run('t1', '{}')
+raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t1', '{}')
 
 const db: SlayzoneDb = {
   async get<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
@@ -95,9 +93,7 @@ const db: SlayzoneDb = {
     return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }
   },
   async batchTxn(ops: BatchOp[]): Promise<unknown[]> {
-    return raw.transaction(() =>
-      ops.map((op) => raw.prepare(op.sql)[op.type](...op.params))
-    )()
+    return raw.transaction(() => ops.map((op) => raw.prepare(op.sql)[op.type](...op.params)))()
   }
 } as unknown as SlayzoneDb
 
@@ -175,10 +171,7 @@ async function main(): Promise<void> {
 
   // 5. listConversationHistory returns every row including foreign + pending.
   const history = await listConversationHistory(db, 't1', 'claude-code')
-  assert(
-    history.length === 6,
-    `audit history should have all 6 rows, got ${history.length}`
-  )
+  assert(history.length === 6, `audit history should have all 6 rows, got ${history.length}`)
   const origins = history.map((h) => h.origin).sort()
   assert(
     origins.includes('foreign-observed') && origins.includes('pending-spawn'),
@@ -220,11 +213,7 @@ async function main(): Promise<void> {
          (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
        VALUES (?, 't1', 'qwen-code', NULL, 'pending-spawn', ?, ?)`
     )
-    .run(
-      'stale-null-expected',
-      JSON.stringify({ usedResume: false, spawnedAt: past60s }),
-      past60s
-    )
+    .run('stale-null-expected', JSON.stringify({ usedResume: false, spawnedAt: past60s }), past60s)
   assert(
     (await findPendingSpawn(db, 't1', 'qwen-code')) === null,
     '60s-old null-expected pending must be outside the tight TTL window'
@@ -267,9 +256,7 @@ async function main(): Promise<void> {
       conversationId: origin === 'manual-reset' ? null : `id-${origin}`,
       origin,
       pendingMeta:
-        origin === 'pending-spawn'
-          ? { usedResume: false, spawnedAt: Date.now() }
-          : undefined
+        origin === 'pending-spawn' ? { usedResume: false, spawnedAt: Date.now() } : undefined
     })
   }
 
@@ -281,18 +268,13 @@ async function main(): Promise<void> {
     origin: 'slay-spawned-fresh'
   })
   const taskRow = raw
-    .prepare(
-      'SELECT provider_config, claude_conversation_id FROM tasks WHERE id = ?'
-    )
+    .prepare('SELECT provider_config, claude_conversation_id FROM tasks WHERE id = ?')
     .get('t1') as { provider_config: string; claude_conversation_id: string }
   assert(
     taskRow.claude_conversation_id === 'LEG1',
     'legacy column must be dual-written for honored origins'
   )
-  assert(
-    taskRow.provider_config.includes('LEG1'),
-    'provider_config JSON must be dual-written'
-  )
+  assert(taskRow.provider_config.includes('LEG1'), 'provider_config JSON must be dual-written')
 
   // 10b. Phase 1: a `manual-reset` for the same (task, mode) clears the legacy
   //      JSON field AND the legacy column so live consumers immediately stop
@@ -305,9 +287,7 @@ async function main(): Promise<void> {
     origin: 'manual-reset'
   })
   const afterReset = raw
-    .prepare(
-      'SELECT provider_config, claude_conversation_id FROM tasks WHERE id = ?'
-    )
+    .prepare('SELECT provider_config, claude_conversation_id FROM tasks WHERE id = ?')
     .get('t1') as { provider_config: string; claude_conversation_id: string | null }
   assert(
     afterReset.claude_conversation_id === null,
@@ -327,22 +307,23 @@ async function main(): Promise<void> {
   )
 
   // 11. Foreign / pending writes do NOT touch the legacy field.
-  const beforeLegacy = (raw
-    .prepare('SELECT claude_conversation_id AS x FROM tasks WHERE id = ?')
-    .get('t1') as { x: string }).x
+  const beforeLegacy = (
+    raw.prepare('SELECT claude_conversation_id AS x FROM tasks WHERE id = ?').get('t1') as {
+      x: string
+    }
+  ).x
   await recordConversation(db, {
     taskId: 't1',
     mode: 'claude-code',
     conversationId: 'FORE1',
     origin: 'foreign-observed'
   })
-  const afterLegacy = (raw
-    .prepare('SELECT claude_conversation_id AS x FROM tasks WHERE id = ?')
-    .get('t1') as { x: string }).x
-  assert(
-    beforeLegacy === afterLegacy,
-    'foreign-observed must NOT mutate the legacy field'
-  )
+  const afterLegacy = (
+    raw.prepare('SELECT claude_conversation_id AS x FROM tasks WHERE id = ?').get('t1') as {
+      x: string
+    }
+  ).x
+  assert(beforeLegacy === afterLegacy, 'foreign-observed must NOT mutate the legacy field')
 
   console.log('OK — task_conversations all checks passed')
 }

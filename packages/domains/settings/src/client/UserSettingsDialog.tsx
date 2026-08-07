@@ -91,14 +91,11 @@ export function UserSettingsDialog({
     return () => window.removeEventListener('sz:settings-changed', onSettingsChanged)
   }, [open, defaultModeQuery.refetch])
 
-  const onDefaultTerminalModeChange = useCallback(
-    (mode: TerminalMode) => {
-      setDefaultTerminalMode(mode)
-      setSettingMutation.mutate({ key: 'default_terminal_mode', value: mode })
-      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-    },
-    []
-  )
+  const onDefaultTerminalModeChange = useCallback((mode: TerminalMode) => {
+    setDefaultTerminalMode(mode)
+    setSettingMutation.mutate({ key: 'default_terminal_mode', value: mode })
+    window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+  }, [])
 
   useEffect(() => {
     if (!open) return

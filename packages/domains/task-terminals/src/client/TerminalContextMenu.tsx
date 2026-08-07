@@ -114,14 +114,11 @@ export function TerminalContextMenu({
     if (conversationId) void navigator.clipboard.writeText(conversationId)
   }, [conversationId])
 
-  const updateFontSize = useCallback(
-    (size: number) => {
-      const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size))
-      settingsSetMutation.mutate({ key: 'terminal_font_size', value: String(clamped) })
-      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-    },
-    []
-  )
+  const updateFontSize = useCallback((size: number) => {
+    const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size))
+    settingsSetMutation.mutate({ key: 'terminal_font_size', value: String(clamped) })
+    window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+  }, [])
 
   return (
     <ContextMenu onOpenChange={handleOpenChange}>

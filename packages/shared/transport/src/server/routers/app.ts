@@ -35,7 +35,11 @@ export const appLevelRouter = router({
     getSettings: publicProcedure.query(() => getBackupOps().getSettings()),
     setSettings: publicProcedure
       .input(anyInput)
-      .mutation(({ input }) => getBackupOps().setSettings(input as Partial<Parameters<ReturnType<typeof getBackupOps>['setSettings']>[0]>)),
+      .mutation(({ input }) =>
+        getBackupOps().setSettings(
+          input as Partial<Parameters<ReturnType<typeof getBackupOps>['setSettings']>[0]>
+        )
+      ),
     revealInFinder: publicProcedure.mutation(() => getBackupOps().revealInFinder())
   }),
 
@@ -188,9 +192,7 @@ export const appLevelRouter = router({
       .mutation(({ input }) => getAppDeps().appSetLabFlag(input.key, input.on)),
     isLoopModeEnabled: publicProcedure.query(() => getAppDeps().appIsLoopModeEnabled()),
     getZoomFactor: publicProcedure.query(() => getAppDeps().appGetZoomFactor()),
-    getProtocolClientStatus: publicProcedure.query(() =>
-      getAppDeps().appGetProtocolClientStatus()
-    ),
+    getProtocolClientStatus: publicProcedure.query(() => getAppDeps().appGetProtocolClientStatus()),
     getRendererZoomFactor: publicProcedure.query(() => getAppDeps().appGetRendererZoomFactor()),
     checkCliInstalled: publicProcedure.query(() => getAppDeps().appCheckCliInstalled()),
     installCli: publicProcedure.mutation(() => getAppDeps().appInstallCli()),
@@ -327,7 +329,9 @@ export const appLevelRouter = router({
       .mutation(({ input }) => getAppDeps().browser.focus(input.viewId)),
     findInPage: publicProcedure
       .input(z.object({ viewId: z.string(), text: z.string(), options: anyInput.optional() }))
-      .mutation(({ input }) => getAppDeps().browser.findInPage(input.viewId, input.text, input.options)),
+      .mutation(({ input }) =>
+        getAppDeps().browser.findInPage(input.viewId, input.text, input.options)
+      ),
     stopFindInPage: publicProcedure
       .input(
         z.object({
@@ -603,7 +607,11 @@ export const appLevelRouter = router({
       .input(z.object({ taskId: z.string(), panelId: z.string() }))
       .mutation(({ ctx, input }) => {
         if (ctx.windowId == null) throw new Error('windowId required')
-        return getAppDeps().taskWindows.claimAndCloseOther(input.taskId, input.panelId, ctx.windowId)
+        return getAppDeps().taskWindows.claimAndCloseOther(
+          input.taskId,
+          input.panelId,
+          ctx.windowId
+        )
       }),
     claimSession: publicProcedure
       .input(z.object({ sessionId: z.string() }))

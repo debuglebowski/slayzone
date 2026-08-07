@@ -588,9 +588,9 @@ test.describe('Project settings & context menu', () => {
     await expect
       .poll(async () => {
         const refreshedProjects = await s.getProjects()
-        const refreshedProject = refreshedProjects.find((p: { id: string }) => p.id === project.id) as
-          | { columns_config: Array<{ id: string }> | null }
-          | undefined
+        const refreshedProject = refreshedProjects.find(
+          (p: { id: string }) => p.id === project.id
+        ) as { columns_config: Array<{ id: string }> | null } | undefined
         return Boolean(refreshedProject?.columns_config?.some((column) => column.id === 'review'))
       })
       .toBe(false)

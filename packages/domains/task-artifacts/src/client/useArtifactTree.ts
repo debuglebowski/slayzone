@@ -13,7 +13,12 @@ interface UseArtifactTreeArgs {
  * Owns the persisted expand set and derives the grouped tree maps,
  * depth-first artifact ordering, and the "move to" folder list.
  */
-export function useArtifactTree({ taskId, folders, artifacts, folderPathMap }: UseArtifactTreeArgs) {
+export function useArtifactTree({
+  taskId,
+  folders,
+  artifacts,
+  folderPathMap
+}: UseArtifactTreeArgs) {
   // Expanded folders state — persisted in localStorage per task.
   // null sentinel = nothing persisted yet; auto-expand all once folders load.
   const expandedStorageKey = `slayzone:artifacts-panel:expanded:${taskId}`

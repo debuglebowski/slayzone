@@ -44,9 +44,7 @@ h.db
   .prepare('INSERT INTO tags (id, project_id, name, color) VALUES (?, ?, ?, ?)')
   .run(tagId, p1, 'Bug', '#f00')
 h.db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)').run(t1, tagId)
-h.db
-  .prepare('INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)')
-  .run(t1, t3)
+h.db.prepare('INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)').run(t1, t3)
 
 const app = express()
 app.use(express.json())

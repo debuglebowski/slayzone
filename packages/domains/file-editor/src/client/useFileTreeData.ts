@@ -59,9 +59,7 @@ export function useFileTreeData({
   // --- Git status ---
   const [gitStatus, setGitStatus] = useState<Map<string, GitFileStatus>>(new Map())
 
-  const gitStatusQuery = useQuery(
-    trpc.fileEditor.gitStatus.queryOptions({ rootPath: projectPath })
-  )
+  const gitStatusQuery = useQuery(trpc.fileEditor.gitStatus.queryOptions({ rootPath: projectPath }))
 
   // External retrigger: refetch when refreshKey changes identity. react-query
   // dedups against the in-flight mount fetch, so the initial run is a no-op.
@@ -183,9 +181,7 @@ export function useFileTreeData({
   // Reload expanded dirs on external file changes + clear collapsed folder caches
   useEffect(() => {
     if (!refreshKey) return
-    void queryClient.invalidateQueries(
-      trpc.fileEditor.readDir.queryFilter()
-    )
+    void queryClient.invalidateQueries(trpc.fileEditor.readDir.queryFilter())
     void queryClient.invalidateQueries(
       trpc.fileEditor.gitStatus.queryFilter({ rootPath: projectPath })
     )

@@ -63,10 +63,7 @@ export async function recordConversation(
   const legacyJsonField = args.legacyJsonField ?? 'conversationId'
   const id = randomUUID()
   const createdAt = Date.now()
-  const meta =
-    origin === 'pending-spawn' && pendingMeta
-      ? JSON.stringify(pendingMeta)
-      : null
+  const meta = origin === 'pending-spawn' && pendingMeta ? JSON.stringify(pendingMeta) : null
 
   const ops: BatchOp[] = [
     {
@@ -119,11 +116,7 @@ export async function recordConversation(
                     json_set(coalesce(provider_config, '{}'), ?, NULL),
                     ?, NULL)
             WHERE id = ?`,
-      params: [
-        `$."${mode}".conversationId`,
-        `$."${mode}".chatConversationId`,
-        taskId
-      ]
+      params: [`$."${mode}".conversationId`, `$."${mode}".chatConversationId`, taskId]
     })
     const legacyCol = MODE_LEGACY_COL[mode]
     if (legacyCol) {

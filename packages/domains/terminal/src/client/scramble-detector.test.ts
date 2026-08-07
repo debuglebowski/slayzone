@@ -119,11 +119,7 @@ function runFrameTimeTests(): void {
   console.log('\nmonitorFrameTime')
   console.log('─'.repeat(40))
 
-  function ftHarness(opts: {
-    deltas: number[]
-    sampleCount?: number
-    thresholdMs?: number
-  }): {
+  function ftHarness(opts: { deltas: number[]; sampleCount?: number; thresholdMs?: number }): {
     state: {
       aborted: boolean
       current: boolean

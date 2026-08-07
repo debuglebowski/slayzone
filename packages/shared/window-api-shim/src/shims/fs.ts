@@ -88,10 +88,10 @@ export const fsShim = {
   searchFiles: (
     rootPath: string,
     query: string,
-    options?: SearchFilesOptions,
+    options?: SearchFilesOptions
   ): Promise<FileSearchResult[]> =>
     jsonRpcCall<FileSearchResult[]>('fs:searchFiles', {
-      params: [rootPath, query, options ?? {}],
+      params: [rootPath, query, options ?? {}]
     }),
 
   watch: (rootPath: string): void => {
@@ -114,5 +114,5 @@ export const fsShim = {
     return () => {
       fileChangedListeners.delete(cb)
     }
-  },
+  }
 }

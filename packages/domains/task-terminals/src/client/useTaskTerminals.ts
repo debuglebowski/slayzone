@@ -126,16 +126,13 @@ export function useTaskTerminals(
   )
 
   // Split: add a new pane to the same group as the target tab
-  const splitTab = useCallback(
-    async (tabId: string): Promise<TerminalTab | null> => {
-      const newTab = await splitMutation.mutateAsync({ tabId })
-      if (newTab) {
-        setTabs((prev) => [...prev, newTab])
-      }
-      return newTab
-    },
-    []
-  )
+  const splitTab = useCallback(async (tabId: string): Promise<TerminalTab | null> => {
+    const newTab = await splitMutation.mutateAsync({ tabId })
+    if (newTab) {
+      setTabs((prev) => [...prev, newTab])
+    }
+    return newTab
+  }, [])
 
   const closeTabInternal = useCallback(
     async (tabId: string, skipKill: boolean): Promise<boolean> => {
@@ -223,15 +220,12 @@ export function useTaskTerminals(
     []
   )
 
-  const renameTab = useCallback(
-    async (tabId: string, label: string | null): Promise<void> => {
-      const updated = await updateMutation.mutateAsync({ id: tabId, label })
-      if (updated) {
-        setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
-      }
-    },
-    []
-  )
+  const renameTab = useCallback(async (tabId: string, label: string | null): Promise<void> => {
+    const updated = await updateMutation.mutateAsync({ id: tabId, label })
+    if (updated) {
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
+    }
+  }, [])
 
   const getSessionId = useCallback(
     (tabId: string): string => {

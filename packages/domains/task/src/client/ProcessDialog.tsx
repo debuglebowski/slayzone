@@ -117,7 +117,17 @@ export function ProcessDialog({
     } finally {
       setSaving(false)
     }
-  }, [isValid, form, process, cwd, resolveScope, onSaved, onOpenChange, updateProcess, createProcess])
+  }, [
+    isValid,
+    form,
+    process,
+    cwd,
+    resolveScope,
+    onSaved,
+    onOpenChange,
+    updateProcess,
+    createProcess
+  ])
 
   const handleSpawn = useCallback(async () => {
     if (!isValid) return
@@ -156,7 +166,18 @@ export function ProcessDialog({
     } finally {
       setSaving(false)
     }
-  }, [isValid, form, process, cwd, resolveScope, onSpawned, onOpenChange, updateProcess, restartProcess, spawnProcess])
+  }, [
+    isValid,
+    form,
+    process,
+    cwd,
+    resolveScope,
+    onSpawned,
+    onOpenChange,
+    updateProcess,
+    restartProcess,
+    spawnProcess
+  ])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

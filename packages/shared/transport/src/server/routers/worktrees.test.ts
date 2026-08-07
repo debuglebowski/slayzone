@@ -994,7 +994,9 @@ await describe('copyIgnoredFiles', () => {
     expect(fs.existsSync(path.join(wtPath, '.claude', '.claude'))).toBe(false)
     // Tracked content unmodified
     expect(fs.readFileSync(path.join(wtPath, 'src', 'index.js'), 'utf-8')).toBe('tracked from main')
-    expect(fs.readFileSync(path.join(wtPath, '.claude', 'agents.md'), 'utf-8')).toBe('tracked agents')
+    expect(fs.readFileSync(path.join(wtPath, '.claude', 'agents.md'), 'utf-8')).toBe(
+      'tracked agents'
+    )
 
     execSync(`git worktree remove "${wtPath}" --force`, { cwd: partialRepo })
   })
@@ -1134,7 +1136,11 @@ await describe('getIgnoredFileTree / copyIgnoredFiles via router', () => {
     const wtPath = path.join(cfRoot, 'wt-proc-copy')
     await createWorktree(cfRepo, wtPath, 'proc-copy-test')
 
-    await caller.copyIgnoredFiles({ repoPath: cfRepo, worktreePath: wtPath, paths: ['dist', 'app.log'] })
+    await caller.copyIgnoredFiles({
+      repoPath: cfRepo,
+      worktreePath: wtPath,
+      paths: ['dist', 'app.log']
+    })
     expect(fs.existsSync(path.join(wtPath, 'dist', 'bundle.js'))).toBe(true)
     expect(fs.existsSync(path.join(wtPath, 'app.log'))).toBe(true)
 

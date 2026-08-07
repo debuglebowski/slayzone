@@ -106,11 +106,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         ok: true,
         data: {
           ...row,
-          filePath: resolveArtifactFilePath(
-            String(row.task_id),
-            row.id,
-            String(row.title ?? '')
-          )
+          filePath: resolveArtifactFilePath(String(row.task_id), row.id, String(row.title ?? ''))
         }
       })
     } catch (err) {
@@ -159,7 +155,8 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         taskId: task.row.id,
         title: body.title,
         folderId,
-        renderMode: typeof body.renderMode === 'string' ? (body.renderMode as RenderMode) : undefined,
+        renderMode:
+          typeof body.renderMode === 'string' ? (body.renderMode as RenderMode) : undefined,
         content: typeof body.content === 'string' ? body.content : undefined
       })
       if (!artifact) {
@@ -203,7 +200,8 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       }
       if (typeof body.title === 'string') input.title = body.title
       if (body.renderMode !== undefined) {
-        input.renderMode = typeof body.renderMode === 'string' ? (body.renderMode as RenderMode) : null
+        input.renderMode =
+          typeof body.renderMode === 'string' ? (body.renderMode as RenderMode) : null
       }
       // Move target (CLI `mv`): resolve a folder id *prefix* to its full id
       // ("root"/empty/null → top level). `folderName` is echoed so the CLI can
@@ -291,7 +289,11 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         if (!parent) return
         parentId = parent.id
       }
-      const folder = await store().createFolder(db, { taskId: task.row.id, name: body.name, parentId })
+      const folder = await store().createFolder(db, {
+        taskId: task.row.id,
+        name: body.name,
+        parentId
+      })
       if (!folder) {
         res.status(500).json({ ok: false, error: 'Failed to create folder' })
         return

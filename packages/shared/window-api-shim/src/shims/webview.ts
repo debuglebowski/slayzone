@@ -29,5 +29,5 @@ export const webviewShim = {
   enableDeviceEmulation: async (): Promise<boolean> => false,
   disableDeviceEmulation: async (): Promise<boolean> => false,
   registerBrowserPanel: async (): Promise<void> => undefined,
-  unregisterBrowserPanel: async (): Promise<void> => undefined,
+  unregisterBrowserPanel: async (): Promise<void> => undefined
 } as unknown as WebviewNS

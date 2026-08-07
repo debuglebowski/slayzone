@@ -47,10 +47,7 @@ function fakeClientFor(id: string): unknown {
 // Records the LAST opts getOrCreateHubClient was called with, per hub id — so a
 // test can assert the token/isDefault routing contract (the security-relevant
 // branch: the default hub must get NO token, each remote must get ONLY its own).
-const clientOpts: Record<
-  string,
-  { url: string; isDefault?: boolean; token?: string }
-> = {}
+const clientOpts: Record<string, { url: string; isDefault?: boolean; token?: string }> = {}
 
 vi.mock('./trpc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./trpc')>()
@@ -162,7 +159,11 @@ describe('federation: per-hub bearer-token routing (no cross-hub token leak)', (
   ]
 
   it('sends each remote hub ONLY its own token, and the default hub NONE', async () => {
-    const tokens = { 'remote-a': 'tok-A', 'remote-b': 'tok-B', local: 'tok-LOCAL-should-be-ignored' }
+    const tokens = {
+      'remote-a': 'tok-A',
+      'remote-b': 'tok-B',
+      local: 'tok-LOCAL-should-be-ignored'
+    }
     render(
       <FederationProvider hubs={THREE_HUBS} defaultHubId="local" tokens={tokens}>
         <HubScope hubId="local">

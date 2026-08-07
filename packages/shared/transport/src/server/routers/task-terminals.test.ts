@@ -17,7 +17,9 @@ const projectId = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P', '#000')
 const taskId = crypto.randomUUID()
 h.db
-  .prepare('INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)')
+  .prepare(
+    'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+  )
   .run(taskId, projectId, 'T1', 'inbox', 3, 0)
 
 test('task-terminals router: ensureMain creates → idempotent → mode update', async () => {

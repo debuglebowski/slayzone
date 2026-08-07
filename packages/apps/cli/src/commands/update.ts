@@ -181,7 +181,9 @@ function printRestartHints(updatedPackages: PackageName[]): void {
 
 export function updateCommand(): Command {
   const cmd = new Command('update')
-    .description('Update globally installed @slayzone packages (cli, hub, runner) — npm, pnpm, or bun')
+    .description(
+      'Update globally installed @slayzone packages (cli, hub, runner) — npm, pnpm, or bun'
+    )
     .option('--check', 'Report available updates without installing anything')
     .action((opts: { check?: boolean }) => {
       const roots = new Map<ManagerId, string>()
@@ -190,7 +192,9 @@ export function updateCommand(): Command {
         if (root) roots.set(mgr.id, root)
       }
       if (roots.size === 0) {
-        fail('Could not resolve a global install root for npm, pnpm, or bun. Is at least one on PATH?')
+        fail(
+          'Could not resolve a global install root for npm, pnpm, or bun. Is at least one on PATH?'
+        )
       }
 
       const found: FoundPackage[] = []
@@ -263,7 +267,11 @@ export function updateCommand(): Command {
         } catch {
           fail(
             `${mgr.bin} install failed. Install the packages yourself and retry:\n` +
-              names.map((n) => `  ${mgr.bin} ${mgr.id === 'npm' ? 'install' : 'add'} -g ${n}@${target}`).join('\n')
+              names
+                .map(
+                  (n) => `  ${mgr.bin} ${mgr.id === 'npm' ? 'install' : 'add'} -g ${n}@${target}`
+                )
+                .join('\n')
           )
         }
       }

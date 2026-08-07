@@ -77,7 +77,11 @@ export function NativeAnchor({ tileId, host, label, active = true }: NativeAncho
       if (el) {
         const r = el.getBoundingClientRect()
         const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
-        host.place({ tileId, rect: { x: r.x, y: r.y, w: r.width, h: r.height }, devicePixelRatio: dpr })
+        host.place({
+          tileId,
+          rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+          devicePixelRatio: dpr
+        })
       }
     }
   }, [visible, tileId, host])

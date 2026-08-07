@@ -1,11 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
 import { TerminalSquare, ChevronDown, ChevronRight } from 'lucide-react'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-  PriorityIcon
-} from '@slayzone/ui'
+import { Tooltip, TooltipContent, TooltipTrigger, PriorityIcon } from '@slayzone/ui'
 import { type FilterState, groupTasksBy, getViewConfig, type Column } from '@slayzone/tasks'
 import { resolveColumns } from '@slayzone/projects/shared'
 import type { Task } from '@slayzone/task/shared'

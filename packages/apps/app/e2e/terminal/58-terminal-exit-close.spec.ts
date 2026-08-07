@@ -65,9 +65,9 @@ test.describe('Terminal exit closes tab', () => {
       .not.toBeNull()
 
     const tabsAfterCreate = await mainWindow.evaluate(
-          (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
-          taskId
-        )
+      (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+      taskId
+    )
     const nonMainTabId = tabsAfterCreate.find(
       (tab: { id: string; isMain: boolean }) => !tab.isMain
     )!.id as string

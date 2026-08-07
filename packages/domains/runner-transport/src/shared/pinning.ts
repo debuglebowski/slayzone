@@ -47,9 +47,6 @@ export function certSha256Fingerprint(
 }
 
 /** Constant-shape comparison of an expected pin against a presented cert DER. */
-export function certMatchesFingerprint(
-  expected: string,
-  presentedDer: Uint8Array
-): boolean {
+export function certMatchesFingerprint(expected: string, presentedDer: Uint8Array): boolean {
   return normalizeCertSha256Fingerprint(expected) === certSha256FingerprintFromDer(presentedDer)
 }

@@ -42,7 +42,7 @@ const STUBBED_NAMESPACES = [
   'backup',
   'testPanel',
   'automations',
-  'usageAnalytics',
+  'usageAnalytics'
 ] as const
 
 export function buildApi(): ElectronAPI {

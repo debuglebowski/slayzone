@@ -1,5 +1,3 @@
-
-
 import { getClaudeSettingsPath } from '../dirs'
 import { updateFileAtomically } from '../fs-utils'
 import { formatHookCommand } from './hook-paths'

@@ -30,10 +30,7 @@ function test(name: string, fn: () => void) {
 // (tB) that is still open. This is the precondition for the home-icon bug.
 function seedFocusedOnAWithBTaskOpen() {
   store.setState({
-    tabs: [
-      { type: 'home' },
-      { type: 'task', taskId: 'tB', title: 'B-task' }
-    ],
+    tabs: [{ type: 'home' }, { type: 'task', taskId: 'tB', title: 'B-task' }],
     activeTabIndex: 1,
     selectedProjectId: 'pA',
     activeView: 'tabs',

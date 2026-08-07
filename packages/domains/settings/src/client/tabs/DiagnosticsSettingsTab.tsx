@@ -191,8 +191,8 @@ export function DiagnosticsSettingsTab() {
         <CardHeader>
           <CardTitle>Background server</CardTitle>
           <CardDescription>
-            A supervised local server runs alongside the app. It is not yet
-            serving the UI — this is informational only.
+            A supervised local server runs alongside the app. It is not yet serving the UI — this is
+            informational only.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -258,11 +258,7 @@ export function DiagnosticsSettingsTab() {
               {sidecarStatus?.dbPath ?? '—'}
             </span>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => revealSidecarLogMutation.mutate()}
-          >
+          <Button size="sm" variant="outline" onClick={() => revealSidecarLogMutation.mutate()}>
             Reveal log file
           </Button>
         </CardContent>

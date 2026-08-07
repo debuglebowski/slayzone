@@ -18,7 +18,14 @@ export const processesRouter = router({
       cwd: string
       autoRestart: boolean
     }
-    return getProcessesDeps().create(i.projectId, i.taskId, i.label, i.command, i.cwd, i.autoRestart)
+    return getProcessesDeps().create(
+      i.projectId,
+      i.taskId,
+      i.label,
+      i.command,
+      i.cwd,
+      i.autoRestart
+    )
   }),
   spawn: publicProcedure.input(anyInput).mutation(({ input }) => {
     const i = input as {
@@ -78,7 +85,8 @@ export const processesRouter = router({
   ),
   onStats: publicProcedure.subscription(() =>
     observable<Record<string, { cpu: number; rss: number }>>((emit) => {
-      const handler = (stats: Record<string, { cpu: number; rss: number }>): void => emit.next(stats)
+      const handler = (stats: Record<string, { cpu: number; rss: number }>): void =>
+        emit.next(stats)
       const ev = getProcessesDeps().events
       ev.on('stats', handler)
       return () => ev.off('stats', handler)

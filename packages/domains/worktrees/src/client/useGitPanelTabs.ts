@@ -52,9 +52,7 @@ export function useGitPanelTabs(
   // Settings: tab order + visibility. Re-fetched on the `sz:settings-changed`
   // window event (legacy broadcast still in use elsewhere).
   const tabOrderQuery = useQuery(trpc.settings.get.queryOptions({ key: 'git_tab_order' }))
-  const tabVisibilityQuery = useQuery(
-    trpc.settings.get.queryOptions({ key: 'git_tab_visibility' })
-  )
+  const tabVisibilityQuery = useQuery(trpc.settings.get.queryOptions({ key: 'git_tab_visibility' }))
   const tabOrder = normalizeGitTabOrder(tabOrderQuery.data ?? null)
   const tabVisibility = normalizeGitTabVisibility(tabVisibilityQuery.data ?? null)
 

@@ -11,7 +11,9 @@ export async function deleteTaskOp(
   deps: OpDeps
 ): Promise<DeleteTaskResult> {
   const { ipcMain, onMutation } = deps
-  const previousRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
+  const previousRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
+    id
+  ])
   const previousTask = parseTask(previousRow)
   const linkCount = (
     await db.get<{ count: number }>(

@@ -39,6 +39,6 @@ export function makeStubNamespace(namespace: string, path: string[] = []): unkno
     },
     apply(_t, _thisArg, args) {
       return buildStubFn(namespace, path)(...args)
-    },
+    }
   })
 }

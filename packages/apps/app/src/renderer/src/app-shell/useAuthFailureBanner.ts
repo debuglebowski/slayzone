@@ -18,10 +18,7 @@ export function useAuthFailureBanner(
   editingProject: Project | null,
   selectedProjectId: string,
   projects: Project[],
-  openProjectSettings: (
-    project: Project,
-    options?: { initialTab?: ProjectSettingsTab }
-  ) => void
+  openProjectSettings: (project: Project, options?: { initialTab?: ProjectSettingsTab }) => void
 ): AuthFailureBannerApi {
   const { failed: authFailedConnections, refetch: refetchAuthFailures } = useAuthFailedConnections()
   useEffect(() => {

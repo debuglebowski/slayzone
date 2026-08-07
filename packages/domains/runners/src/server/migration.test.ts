@@ -17,9 +17,7 @@ function tableNames(raw: Database.Database): string[] {
 }
 
 function columnNames(raw: Database.Database, table: string): string[] {
-  return (raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
-    (r) => r.name
-  )
+  return (raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((r) => r.name)
 }
 
 describe('runner schema migration (v149)', () => {

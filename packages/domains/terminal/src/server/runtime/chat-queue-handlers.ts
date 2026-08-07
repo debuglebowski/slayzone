@@ -110,7 +110,10 @@ export async function drainChatQueue(
  * handlers (`registerChatQueueHandlers`) and the tRPC `chat.queue` router
  * (injected via `setChatDeps`). Wires the drainer side-effect once on creation.
  */
-export function createChatQueueOps(db: SlayzoneDb, data: ChatQueueData = createDbChatQueueData(db)) {
+export function createChatQueueOps(
+  db: SlayzoneDb,
+  data: ChatQueueData = createDbChatQueueData(db)
+) {
   // Wire drain into the transport so state transitions can pull from queue.
   // drainChatQueue is async; the drainer slot is fire-and-forget (invoked via
   // setImmediate in the transport), so float the promise explicitly.
@@ -153,8 +156,9 @@ export type ChatQueueOps = ReturnType<typeof createChatQueueOps>
 
 /** Wire the IPC handlers to a shared `ChatQueueOps`. Logic-free delegation. */
 export function registerChatQueueHandlers(ipcMain: IpcMainLike, queueOps: ChatQueueOps): void {
-  ipcMain.handle('chat:queue:list', (_, tabId: string): Promise<QueuedChatMessage[]> =>
-    queueOps.list(tabId)
+  ipcMain.handle(
+    'chat:queue:list',
+    (_, tabId: string): Promise<QueuedChatMessage[]> => queueOps.list(tabId)
   )
   ipcMain.handle(
     'chat:queue:push',

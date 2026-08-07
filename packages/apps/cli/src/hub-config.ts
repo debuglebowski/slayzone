@@ -144,7 +144,9 @@ export function resolveHubTarget(): HubTarget | null {
     // so this explicit guard, not normalizeHubUrl, is what catches it.)
     const baseUrl = isBareAuthority(addr) ? normalizeHubUrl(hubUrlFromAddr(addr, 'http')) : null
     if (!baseUrl) {
-      console.error(`Invalid SLAYZONE_HUB_ADDRESS (expected host[:port], no scheme/path): ${envAddress}`)
+      console.error(
+        `Invalid SLAYZONE_HUB_ADDRESS (expected host[:port], no scheme/path): ${envAddress}`
+      )
       process.exit(1)
     }
     // Env address never picks up the file token — cli-hub-target.json may target a different hub.
@@ -155,9 +157,7 @@ export function resolveHubTarget(): HubTarget | null {
   if (file) {
     const baseUrl = normalizeHubUrl(file.url)
     if (!baseUrl) {
-      console.error(
-        `Warning: ignoring invalid hub URL in ${getHubConfigPath()} — using local app.`
-      )
+      console.error(`Warning: ignoring invalid hub URL in ${getHubConfigPath()} — using local app.`)
       return null
     }
     const fileToken = typeof file.token === 'string' && file.token !== '' ? file.token : null

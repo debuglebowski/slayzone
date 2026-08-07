@@ -126,12 +126,11 @@ function runHook(opts: {
   execFileSync('bash', ['-c', command], { input: opts.stdin, env: { ...process.env, ...opts.env } })
 }
 
-async function withInstalledScript(
-  fn: (scriptCmd: string) => Promise<void>
-): Promise<void> {
+async function withInstalledScript(fn: (scriptCmd: string) => Promise<void>): Promise<void> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-rt-'))
   tmpDirs.push(root)
-  const { path: installedAt } = await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, 
+  const { path: installedAt } = await installNotifyScript({
+    source: NOTIFY_SCRIPT_SOURCE,
     targetPath: path.join(root, 'hooks', 'notify.sh')
   })
   await fn(formatHookCommand(installedAt))

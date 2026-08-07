@@ -83,7 +83,8 @@ export const taskRouter = router({
       }
       throw e
     }
-    if (!r) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'createTaskOp returned null' })
+    if (!r)
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'createTaskOp returned null' })
     return r
   }),
 
@@ -196,21 +197,17 @@ export const taskRouter = router({
     .input(z.object({ ids: z.array(z.string()) }))
     .mutation(({ ctx, input }) => ops().deleteManyTasksOp(ctx.db, input.ids, deps())),
 
-  restore: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const r = await ops().restoreTaskOp(ctx.db, input.id, deps())
-      if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
-      return r
-    }),
+  restore: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+    const r = await ops().restoreTaskOp(ctx.db, input.id, deps())
+    if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+    return r
+  }),
 
-  archive: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const r = await ops().archiveTaskOp(ctx.db, input.id, deps())
-      if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
-      return r
-    }),
+  archive: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+    const r = await ops().archiveTaskOp(ctx.db, input.id, deps())
+    if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+    return r
+  }),
 
   archiveMany: publicProcedure
     .input(z.object({ ids: z.array(z.string()) }))

@@ -28,13 +28,10 @@ export function EditorDisplayPopover({
   const [displayOpen, setDisplayOpen] = useState(false)
   const trpc = useTRPC()
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
-  const writeAppearance = useCallback(
-    (key: string, value: string) => {
-      void setSettingMutation.mutateAsync({ key, value })
-      window.dispatchEvent(new Event('sz:settings-changed'))
-    },
-    []
-  )
+  const writeAppearance = useCallback((key: string, value: string) => {
+    void setSettingMutation.mutateAsync({ key, value })
+    window.dispatchEvent(new Event('sz:settings-changed'))
+  }, [])
 
   return (
     <MarkdownSettingsPopover

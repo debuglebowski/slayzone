@@ -155,7 +155,8 @@ export function moveTileBetweenPanes(
   const target = findNode(root, toPaneId)
   if (target && isPane(target)) {
     const copy = clone(tile)
-    const at = toIndex == null ? target.tiles.length : Math.max(0, Math.min(toIndex, target.tiles.length))
+    const at =
+      toIndex == null ? target.tiles.length : Math.max(0, Math.min(toIndex, target.tiles.length))
     target.tiles.splice(at, 0, copy)
     target.activeTileId = copy.id
     return { root }
@@ -165,7 +166,12 @@ export function moveTileBetweenPanes(
 
 export type PaneEdge = 'north' | 'south' | 'east' | 'west'
 
-function splitNodeInPlace(root: LayoutNode, paneId: string, edge: PaneEdge, newPane: PaneNode): boolean {
+function splitNodeInPlace(
+  root: LayoutNode,
+  paneId: string,
+  edge: PaneEdge,
+  newPane: PaneNode
+): boolean {
   // Replace the target pane with a 2-child split (new pane on the given edge).
   const replace = (node: LayoutNode): LayoutNode | null => {
     if (node.id === paneId && isPane(node)) {
@@ -196,7 +202,12 @@ function splitNodeInPlace(root: LayoutNode, paneId: string, edge: PaneEdge, newP
  * (west/north → before, east/south → after; row for east/west, col for
  * north/south). If `tile.id` already exists in the tree it is MOVED.
  */
-export function splitPane(tree: LayoutTree, paneId: string, edge: PaneEdge, tile: Tile): LayoutTree {
+export function splitPane(
+  tree: LayoutTree,
+  paneId: string,
+  edge: PaneEdge,
+  tile: Tile
+): LayoutTree {
   if (!tree.root) return { root: makePane([clone(tile)]) }
 
   const existing = findTile(tree.root, tile.id)
@@ -221,7 +232,11 @@ export function splitPane(tree: LayoutTree, paneId: string, edge: PaneEdge, tile
 }
 
 /** Replace a split's fractions (resize commit). */
-export function replaceFractions(tree: LayoutTree, splitId: string, fractions: number[]): LayoutTree {
+export function replaceFractions(
+  tree: LayoutTree,
+  splitId: string,
+  fractions: number[]
+): LayoutTree {
   if (!tree.root) return tree
   const root = clone(tree.root)
   const node = findNode(root, splitId)

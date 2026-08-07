@@ -46,7 +46,8 @@ test.describe('Terminal tab keyboard isolation', () => {
     // Exercise the API the hotkey calls so the isolation invariant is
     // verified independently of the keybinding du jour.
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().taskTerminals.create.mutate({ taskId: id, label: 'second' }),
+      (id) =>
+        window.getTrpcVanillaClient().taskTerminals.create.mutate({ taskId: id, label: 'second' }),
       taskIdB
     )
 

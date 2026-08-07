@@ -111,7 +111,14 @@ const ptySpec = (over: Partial<PtySpawnSpec> = {}): PtySpawnSpec => ({
   args: [],
   transport: false,
   ...over,
-  options: { cwd: '/tmp', env: {}, cols: 80, rows: 24, name: 'xterm-256color', ...(over.options ?? {}) }
+  options: {
+    cwd: '/tmp',
+    env: {},
+    cols: 80,
+    rows: 24,
+    name: 'xterm-256color',
+    ...(over.options ?? {})
+  }
 })
 
 const procSpec = (over: Partial<ProcSpawnSpec> = {}): ProcSpawnSpec => ({
@@ -171,13 +178,21 @@ describe('createRoutingPtyBackend', () => {
     await vi.waitFor(() => expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e']))
     await vi.waitFor(() => expect(handle.pid).toBe(4242))
 
-    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({ sessionId: 'sess-1', seq: 1 })
+    expect(requireCall(gateway, 'pty.getBufferSince').params).toEqual({
+      sessionId: 'sess-1',
+      seq: 1
+    })
 
     // Duplicate / stale frame is ignored (no double delivery).
     gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-1', seq: 2, data: 'DUP' })
     expect(chunks).toEqual(['a', 'b', 'c', 'd', 'e'])
 
-    gateway.emit('pty.exit', { runnerId: 'runner-1', sessionId: 'sess-1', exitCode: 0, signal: null })
+    gateway.emit('pty.exit', {
+      runnerId: 'runner-1',
+      sessionId: 'sess-1',
+      exitCode: 0,
+      signal: null
+    })
     expect(exit).toEqual({ exitCode: 0, signal: undefined })
 
     // Post-exit frames are dropped (session disposed).
@@ -196,7 +211,12 @@ describe('createRoutingPtyBackend', () => {
     // the request is still in flight — the real race, since the runner begins
     // streaming the instant it rekeys.
     const pending = backend.adopt!('runner-1', 'warm-1', 'sess-warm', 'bash')
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-warm', seq: 6, data: 'AFTER' })
+    gateway.emit('pty.data', {
+      runnerId: 'runner-1',
+      sessionId: 'sess-warm',
+      seq: 6,
+      data: 'AFTER'
+    })
 
     const handle = await pending
     handle.onData((d) => chunks.push(d))
@@ -220,7 +240,12 @@ describe('createRoutingPtyBackend', () => {
     // Seq continues from the seed's high-water mark rather than restarting, so a
     // frame at or below it is a duplicate and must not be re-delivered.
     gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-warm', seq: 5, data: 'DUP' })
-    gateway.emit('pty.data', { runnerId: 'runner-1', sessionId: 'sess-warm', seq: 7, data: '-NEXT' })
+    gateway.emit('pty.data', {
+      runnerId: 'runner-1',
+      sessionId: 'sess-warm',
+      seq: 7,
+      data: '-NEXT'
+    })
     await new Promise((r) => setTimeout(r, 0))
     expect(chunks.join('')).toBe('BOOT-BANNERAFTER-NEXT')
   })
@@ -339,7 +364,11 @@ describe('createRoutingPtyBackend', () => {
     })
 
     const handle = (await backend.spawn(
-      ptySpec({ file: 'zsh', args: ['-l'], options: { cwd: '/work', env: { FOO: 'bar' }, cols: 100, rows: 30, name: 'xterm-256color' } })
+      ptySpec({
+        file: 'zsh',
+        args: ['-l'],
+        options: { cwd: '/work', env: { FOO: 'bar' }, cols: 100, rows: 30, name: 'xterm-256color' }
+      })
     )) as PtyHandle
 
     expect(requireCall(gateway, 'pty.spawn')).toMatchObject({
@@ -359,10 +388,17 @@ describe('createRoutingPtyBackend', () => {
     expect(requireCall(gateway, 'pty.write').params).toEqual({ sessionId: 'sess-1', data: 'input' })
 
     handle.resize(120, 40)
-    expect(requireCall(gateway, 'pty.resize').params).toEqual({ sessionId: 'sess-1', cols: 120, rows: 40 })
+    expect(requireCall(gateway, 'pty.resize').params).toEqual({
+      sessionId: 'sess-1',
+      cols: 120,
+      rows: 40
+    })
 
     handle.kill('SIGTERM')
-    expect(requireCall(gateway, 'pty.kill').params).toEqual({ sessionId: 'sess-1', signal: 'SIGTERM' })
+    expect(requireCall(gateway, 'pty.kill').params).toEqual({
+      sessionId: 'sess-1',
+      signal: 'SIGTERM'
+    })
 
     handle.kill()
     expect(gateway.requestsOf('pty.kill')[1]?.params).toEqual({ sessionId: 'sess-1' })
@@ -587,13 +623,26 @@ describe('createRoutingProcessBackend', () => {
     await vi.waitFor(() => expect(handle.pid).toBe(555))
 
     gateway.emit('proc.data', { runnerId: 'runner-1', sessionId: 'proc-1', data: 'one' })
-    gateway.emit('proc.data', { runnerId: 'runner-1', sessionId: 'proc-1', data: 'two', stream: 'stderr' })
+    gateway.emit('proc.data', {
+      runnerId: 'runner-1',
+      sessionId: 'proc-1',
+      data: 'two',
+      stream: 'stderr'
+    })
     expect(chunks).toEqual(['one', 'two'])
 
     handle.kill('SIGKILL')
-    expect(requireCall(gateway, 'proc.kill').params).toEqual({ sessionId: 'proc-1', signal: 'SIGKILL' })
+    expect(requireCall(gateway, 'proc.kill').params).toEqual({
+      sessionId: 'proc-1',
+      signal: 'SIGKILL'
+    })
 
-    gateway.emit('proc.exit', { runnerId: 'runner-1', sessionId: 'proc-1', exitCode: 1, signal: null })
+    gateway.emit('proc.exit', {
+      runnerId: 'runner-1',
+      sessionId: 'proc-1',
+      exitCode: 1,
+      signal: null
+    })
     expect(exit).toEqual({ code: 1, signal: null })
 
     gateway.emit('proc.data', { runnerId: 'runner-1', sessionId: 'proc-1', data: 'after-exit' })
@@ -690,9 +739,7 @@ describe('createRoutingProcessBackend', () => {
 
     connectProc(gateway, 'epoch-a')
 
-    await vi.waitFor(() =>
-      expect(exit()).toEqual({ code: null, signal: 'exited-while-detached' })
-    )
+    await vi.waitFor(() => expect(exit()).toEqual({ code: null, signal: 'exited-while-detached' }))
   })
 })
 
@@ -709,9 +756,11 @@ function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeE
     getCurrentBranch: vi.fn(async () => null),
     isGitRepo: vi.fn(async () => false),
     getWorktreeColor: vi.fn(() => '#abcdef'),
-    ensureProjectWorktreeColors: vi.fn(async () => new Map([['/wt', '#abcdef']]) as ReadonlyMap<string, string>),
+    ensureProjectWorktreeColors: vi.fn(
+      async () => new Map([['/wt', '#abcdef']]) as ReadonlyMap<string, string>
+    ),
     pathExists: vi.fn(async () => false),
-  hubPathExists: vi.fn(() => false),
+    hubPathExists: vi.fn(() => false),
     removeArtifactDir: vi.fn(async () => {}),
     ...over
   }
@@ -727,12 +776,20 @@ describe('createRemoteWorktreeAdapters', () => {
     gateway.onMethod('git.getCurrentBranch', () => ({ branch: 'main' }))
     gateway.onMethod('git.createWorktree', () => ({}))
     gateway.onMethod('git.removeWorktree', () => ({ branchDeleted: true }))
-    gateway.onMethod('git.runWorktreeSetupScript', () => ({ ran: true, success: true, output: 'ok' }))
+    gateway.onMethod('git.runWorktreeSetupScript', () => ({
+      ran: true,
+      success: true,
+      output: 'ok'
+    }))
     gateway.onMethod('git.copyIgnoredFiles', () => ({}))
     gateway.onMethod('fs.pathExists', () => ({ exists: true }))
     gateway.onMethod('fs.removeDir', () => ({}))
     const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveRunnerId: () => 'runner-1' })
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local,
+      resolveRunnerId: () => 'runner-1'
+    })
 
     expect(await adapters.isGitRepo(TASK, '/repo')).toBe(true)
     expect(requireCall(gateway, 'git.isGitRepo').params).toEqual({ path: '/repo' })
@@ -749,7 +806,10 @@ describe('createRemoteWorktreeAdapters', () => {
     })
 
     expect(await adapters.removeWorktree(TASK, '/proj', '/wt')).toEqual({ branchDeleted: true })
-    expect(requireCall(gateway, 'git.removeWorktree').params).toEqual({ projectPath: '/proj', worktreePath: '/wt' })
+    expect(requireCall(gateway, 'git.removeWorktree').params).toEqual({
+      projectPath: '/proj',
+      worktreePath: '/wt'
+    })
 
     expect(await adapters.runWorktreeSetupScript(TASK, '/wt', '/repo', null)).toEqual({
       ran: true,
@@ -789,12 +849,18 @@ describe('createRemoteWorktreeAdapters', () => {
   it('keeps getWorktreeColor + ensureProjectWorktreeColors local (never over the wire)', async () => {
     const gateway = new FakeGateway()
     const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({ gateway, local, resolveRunnerId: () => 'runner-1' })
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local,
+      resolveRunnerId: () => 'runner-1'
+    })
 
     expect(adapters.getWorktreeColor('/proj', '/wt')).toBe('#abcdef')
     expect(local.getWorktreeColor).toHaveBeenCalledWith('/proj', '/wt')
 
-    expect(await adapters.ensureProjectWorktreeColors('/proj')).toEqual(new Map([['/wt', '#abcdef']]))
+    expect(await adapters.ensureProjectWorktreeColors('/proj')).toEqual(
+      new Map([['/wt', '#abcdef']])
+    )
     expect(local.ensureProjectWorktreeColors).toHaveBeenCalledWith('/proj')
 
     expect(gateway.calls).toHaveLength(0)
@@ -850,7 +916,11 @@ describe('createRemoteWorktreeAdapters', () => {
 
 describe('no-runner: every exec kind fails loudly, nothing reaches the gateway', () => {
   class ExplodingGateway extends FakeGateway {
-    override request<T = unknown>(_runnerId: string, method: string, _params?: unknown): Promise<T> {
+    override request<T = unknown>(
+      _runnerId: string,
+      method: string,
+      _params?: unknown
+    ): Promise<T> {
       throw new Error(`a no-runner spawn must never reach the gateway (got ${method})`)
     }
   }
@@ -906,9 +976,7 @@ describe('worktree routing is per-task', () => {
     expect(routed.map((c) => c.runnerId)).toEqual(['runner-7', 'runner-9'])
 
     // A task bound to nothing does not silently run on the hub.
-    await expect(wt.isGitRepo('task-unassigned', '/repo-c')).rejects.toThrow(
-      NoRunnerAvailableError
-    )
+    await expect(wt.isGitRepo('task-unassigned', '/repo-c')).rejects.toThrow(NoRunnerAvailableError)
     expect(local.isGitRepo).not.toHaveBeenCalled()
   })
 

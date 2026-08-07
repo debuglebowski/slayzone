@@ -15,19 +15,13 @@ export function PanelDetailHeader({ state }: { state: PanelSettingsState }) {
         {d?.homeToggle && (
           <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             Home
-            <Switch
-              checked={d.homeToggle.enabled}
-              onCheckedChange={d.homeToggle.onChange}
-            />
+            <Switch checked={d.homeToggle.enabled} onCheckedChange={d.homeToggle.onChange} />
           </label>
         )}
         {d?.taskToggle && (
           <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             Task
-            <Switch
-              checked={d.taskToggle.enabled}
-              onCheckedChange={d.taskToggle.onChange}
-            />
+            <Switch checked={d.taskToggle.enabled} onCheckedChange={d.taskToggle.onChange} />
           </label>
         )}
       </div>

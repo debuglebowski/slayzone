@@ -22,16 +22,14 @@ async function invoke<T = Any>(method: string, ...args: unknown[]): Promise<T> {
 }
 
 const reads = {
-  listConnections: (provider?: string) =>
-    invoke('integrations:list-connections', provider),
+  listConnections: (provider?: string) => invoke('integrations:list-connections', provider),
   getConnectionUsage: (connectionId: string) =>
     invoke('integrations:get-connection-usage', connectionId),
   getProjectConnection: (projectId: string, provider: string) =>
     invoke('integrations:get-project-connection', projectId, provider),
   getProjectMapping: (projectId: string, provider: string) =>
     invoke('integrations:get-project-mapping', projectId, provider),
-  getLink: (taskId: string, provider: string) =>
-    invoke('integrations:get-link', taskId, provider),
+  getLink: (taskId: string, provider: string) => invoke('integrations:get-link', taskId, provider),
   getTaskSyncStatus: (taskId: string, provider: string) =>
     invoke('integrations:get-task-sync-status', taskId, provider),
   getBatchTaskSyncStatus: (taskIds: string[], provider: string) =>
@@ -42,20 +40,16 @@ const reads = {
     invoke('integrations:list-github-projects', connectionId),
   listGithubRepositoryIssues: (input: Any) =>
     invoke('integrations:list-github-repository-issues', input),
-  listGithubIssues: (input: Any) =>
-    invoke('integrations:list-github-issues', input),
-  listLinearTeams: (connectionId: string) =>
-    invoke('integrations:list-linear-teams', connectionId),
+  listGithubIssues: (input: Any) => invoke('integrations:list-github-issues', input),
+  listLinearTeams: (connectionId: string) => invoke('integrations:list-linear-teams', connectionId),
   listLinearProjects: (connectionId: string, teamId: string) =>
     invoke('integrations:list-linear-projects', connectionId, teamId),
-  listLinearIssues: (input: Any) =>
-    invoke('integrations:list-linear-issues', input),
+  listLinearIssues: (input: Any) => invoke('integrations:list-linear-issues', input),
   listProviderGroups: (connectionId: string) =>
     invoke('integrations:list-provider-groups', connectionId),
   listProviderScopes: (connectionId: string, groupId: string) =>
     invoke('integrations:list-provider-scopes', connectionId, groupId),
-  listProviderIssues: (input: Any) =>
-    invoke('integrations:list-provider-issues', input),
+  listProviderIssues: (input: Any) => invoke('integrations:list-provider-issues', input)
 }
 
 /** sub-cap B mutations (worker DP, 2026-04-26). github-only path; Linear /
@@ -76,20 +70,14 @@ const reads = {
  * but only walks unlinked rows — when every spec-seeded issue is imported
  * (linked) the loop is a no-op and never reaches adapter.createIssue. */
 const mutations = {
-  clearProjectProvider: (input: Any) =>
-    invoke('integrations:clear-project-provider', input),
-  setProjectMapping: (input: Any) =>
-    invoke('integrations:set-project-mapping', input),
-  applyStatusSync: (input: Any) =>
-    invoke('integrations:apply-status-sync', input),
+  clearProjectProvider: (input: Any) => invoke('integrations:clear-project-provider', input),
+  setProjectMapping: (input: Any) => invoke('integrations:set-project-mapping', input),
+  applyStatusSync: (input: Any) => invoke('integrations:apply-status-sync', input),
   importGithubRepositoryIssues: (input: Any) =>
     invoke('integrations:import-github-repository-issues', input),
-  pushTask: (input: Any) =>
-    invoke('integrations:push-task', input),
-  pullTask: (input: Any) =>
-    invoke('integrations:pull-task', input),
-  pushUnlinkedTasks: (input: Any) =>
-    invoke('integrations:push-unlinked-tasks', input),
+  pushTask: (input: Any) => invoke('integrations:push-task', input),
+  pullTask: (input: Any) => invoke('integrations:pull-task', input),
+  pushUnlinkedTasks: (input: Any) => invoke('integrations:push-unlinked-tasks', input)
 }
 
 const fallback = makeStubNamespace('integrations') as Record<string, unknown>
@@ -101,5 +89,5 @@ export const integrationsShim = new Proxy({} as Record<string, unknown>, {
     if (typeof prop !== 'string') return undefined
     if (wired.has(prop)) return wiredImpl[prop]
     return fallback[prop]
-  },
+  }
 })

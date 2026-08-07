@@ -64,7 +64,9 @@ console.log('\nv140 task-intrinsic-state migration')
 test('backfills pinned + pin_order from treePinnedTaskIds array order', () => {
   const db = dbAtV139()
   try {
-    db.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
+    db.prepare(
+      "INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')"
+    ).run()
     seedTask(db, 't1')
     seedTask(db, 't2')
     seedTask(db, 't3')
@@ -74,9 +76,11 @@ test('backfills pinned + pin_order from treePinnedTaskIds array order', () => {
 
     applyV140(db)
 
-    const rows = db
-      .prepare('SELECT id, pinned, pin_order FROM tasks ORDER BY id')
-      .all() as Array<{ id: string; pinned: number; pin_order: number }>
+    const rows = db.prepare('SELECT id, pinned, pin_order FROM tasks ORDER BY id').all() as Array<{
+      id: string
+      pinned: number
+      pin_order: number
+    }>
     expectEqual(rows, [
       { id: 't1', pinned: 1, pin_order: 1 },
       { id: 't2', pinned: 0, pin_order: 0 },
@@ -90,7 +94,9 @@ test('backfills pinned + pin_order from treePinnedTaskIds array order', () => {
 test('backfills tree_collapsed from treeCollapsedTaskIds', () => {
   const db = dbAtV139()
   try {
-    db.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
+    db.prepare(
+      "INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')"
+    ).run()
     seedTask(db, 't1')
     seedTask(db, 't2')
     db.prepare("INSERT INTO settings (key, value) VALUES ('viewState', ?)").run(
@@ -99,9 +105,10 @@ test('backfills tree_collapsed from treeCollapsedTaskIds', () => {
 
     applyV140(db)
 
-    const rows = db
-      .prepare('SELECT id, tree_collapsed FROM tasks ORDER BY id')
-      .all() as Array<{ id: string; tree_collapsed: number }>
+    const rows = db.prepare('SELECT id, tree_collapsed FROM tasks ORDER BY id').all() as Array<{
+      id: string
+      tree_collapsed: number
+    }>
     expectEqual(rows, [
       { id: 't1', tree_collapsed: 0 },
       { id: 't2', tree_collapsed: 1 }
@@ -114,11 +121,13 @@ test('backfills tree_collapsed from treeCollapsedTaskIds', () => {
 test('backfills commit_graph_config and deletes the per-task settings keys', () => {
   const db = dbAtV139()
   try {
-    db.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
+    db.prepare(
+      "INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')"
+    ).run()
     seedTask(db, 't1')
     const cfg = JSON.stringify({ collapsed: true, showBranches: false })
-    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run('commit_graph:task:t1', cfg)
-    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('commit_graph:task:t1', cfg)
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(
       'commit_graph:project:p1',
       JSON.stringify({ collapsed: false })
     )
@@ -130,9 +139,7 @@ test('backfills commit_graph_config and deletes the per-task settings keys', () 
     }
     expectEqual(task.commit_graph_config, cfg)
     // Per-task key gone; per-project key untouched (separate follow-up).
-    const taskKey = db
-      .prepare("SELECT 1 FROM settings WHERE key = 'commit_graph:task:t1'")
-      .get()
+    const taskKey = db.prepare("SELECT 1 FROM settings WHERE key = 'commit_graph:task:t1'").get()
     expectEqual(taskKey, undefined)
     const projKey = db
       .prepare("SELECT value FROM settings WHERE key = 'commit_graph:project:p1'")
@@ -146,7 +153,9 @@ test('backfills commit_graph_config and deletes the per-task settings keys', () 
 test('strips moved fields from the viewState blob, keeps the rest', () => {
   const db = dbAtV139()
   try {
-    db.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
+    db.prepare(
+      "INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')"
+    ).run()
     seedTask(db, 't1')
     db.prepare("INSERT INTO settings (key, value) VALUES ('viewState', ?)").run(
       JSON.stringify({
@@ -175,13 +184,17 @@ test('strips moved fields from the viewState blob, keeps the rest', () => {
 test('no viewState row → columns stay at defaults', () => {
   const db = dbAtV139()
   try {
-    db.prepare("INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')").run()
+    db.prepare(
+      "INSERT INTO projects (id, name, color, path) VALUES ('p1','P','#000','/tmp/p')"
+    ).run()
     seedTask(db, 't1')
 
     applyV140(db)
 
     const row = db
-      .prepare('SELECT pinned, pin_order, tree_collapsed, commit_graph_config FROM tasks WHERE id = ?')
+      .prepare(
+        'SELECT pinned, pin_order, tree_collapsed, commit_graph_config FROM tasks WHERE id = ?'
+      )
       .get('t1') as {
       pinned: number
       pin_order: number

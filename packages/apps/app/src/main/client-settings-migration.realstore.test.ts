@@ -31,9 +31,7 @@ const fixture = process.env.SLAYZONE_REAL_STORE_FIXTURE
   : null
 
 if (!fixture) {
-  console.log(
-    '  — skipped: set SLAYZONE_REAL_STORE_FIXTURE to a real slayzone.sqlite to run this'
-  )
+  console.log('  — skipped: set SLAYZONE_REAL_STORE_FIXTURE to a real slayzone.sqlite to run this')
 } else if (!fs.existsSync(fixture)) {
   throw new Error(`SLAYZONE_REAL_STORE_FIXTURE does not exist: ${fixture}`)
 } else {
@@ -47,7 +45,8 @@ if (!fixture) {
 
   fs.copyFileSync(fixture, copy)
   for (const suffix of ['-wal', '-shm']) {
-    if (fs.existsSync(`${fixture}${suffix}`)) fs.copyFileSync(`${fixture}${suffix}`, `${copy}${suffix}`)
+    if (fs.existsSync(`${fixture}${suffix}`))
+      fs.copyFileSync(`${fixture}${suffix}`, `${copy}${suffix}`)
   }
 
   type Counts = Record<string, number>
@@ -62,9 +61,9 @@ if (!fixture) {
     try {
       const userVersion = db.pragma('user_version', { simple: true }) as number
       const settings = Object.fromEntries(
-        (db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]).map(
-          (r) => [r.key, r.value]
-        )
+        (
+          db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
+        ).map((r) => [r.key, r.value])
       )
       const counts: Counts = {}
       for (const t of TABLES) {

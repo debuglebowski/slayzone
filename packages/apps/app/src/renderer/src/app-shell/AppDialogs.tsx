@@ -36,10 +36,7 @@ import {
   TemplatesSettingsTab,
   TerminalStatusDialog
 } from './lazy'
-import type {
-  ProjectIntegrationOnboardingProvider,
-  ContextManagerSection
-} from './constants'
+import type { ProjectIntegrationOnboardingProvider, ContextManagerSection } from './constants'
 
 type CreateTaskProps = ComponentProps<typeof CreateTaskDialog>
 type EditTaskProps = ComponentProps<typeof EditTaskDialog>

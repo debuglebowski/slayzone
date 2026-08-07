@@ -21,9 +21,7 @@ export async function restoreTaskOp(
       UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?
     `,
     params: [id],
-    events: before
-      ? buildTaskRestoredEvents({ id, project_id: before.project_id } as Task)
-      : []
+    events: before ? buildTaskRestoredEvents({ id, project_id: before.project_id } as Task) : []
   })
   const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
   const task = parseTask(row)

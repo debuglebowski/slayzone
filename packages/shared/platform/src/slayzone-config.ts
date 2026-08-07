@@ -156,7 +156,8 @@ function coerceHubConfig(raw: Record<string, unknown>): HubConfig {
     cfg.publicAddress = raw.publicAddress
   // Exact literals only — a near-miss must read as unset, not half-applied.
   if (raw.mode === 'local' || raw.mode === 'remote') cfg.mode = raw.mode
-  if (typeof raw.hubName === 'string' && raw.hubName.trim().length > 0) cfg.hubName = raw.hubName.trim()
+  if (typeof raw.hubName === 'string' && raw.hubName.trim().length > 0)
+    cfg.hubName = raw.hubName.trim()
   // Legacy keys, still read so an existing file keeps booting.
   if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
   if (typeof raw.publicUrl === 'string' && raw.publicUrl.length > 0) cfg.publicUrl = raw.publicUrl
@@ -173,7 +174,8 @@ function coerceHubState(raw: Record<string, unknown>): HubState {
 function coerceRunnerConfig(raw: Record<string, unknown>): RunnerConfig {
   const cfg: RunnerConfig = {}
   if (typeof raw.joinToken === 'string' && raw.joinToken.length > 0) cfg.joinToken = raw.joinToken
-  if (typeof raw.runnerName === 'string' && raw.runnerName.length > 0) cfg.runnerName = raw.runnerName
+  if (typeof raw.runnerName === 'string' && raw.runnerName.length > 0)
+    cfg.runnerName = raw.runnerName
   if (typeof raw.hubUrl === 'string' && raw.hubUrl.length > 0) cfg.hubUrl = raw.hubUrl
   if (Array.isArray(raw.allowedRoots)) {
     const roots = raw.allowedRoots.filter((r): r is string => typeof r === 'string' && r.length > 0)
@@ -289,7 +291,10 @@ export function loadRunnerConfigFile(path: string = getRunnerConfigFilePath()): 
   return legacy ? coerceRunnerConfig(legacy) : {}
 }
 
-export function saveRunnerConfigFile(cfg: RunnerConfig, path: string = getRunnerConfigFilePath()): void {
+export function saveRunnerConfigFile(
+  cfg: RunnerConfig,
+  path: string = getRunnerConfigFilePath()
+): void {
   writeJsonAtomic(path, cfg)
 }
 
@@ -352,7 +357,10 @@ export function ensureHubAuthSecret(path: string = getHubStateFilePath()): strin
   return finalState.runnerTransportSecret ?? candidate
 }
 
-function updateHubStateFile(patch: Partial<HubState>, path: string = getHubStateFilePath()): HubState {
+function updateHubStateFile(
+  patch: Partial<HubState>,
+  path: string = getHubStateFilePath()
+): HubState {
   const current = readJsonObject(path)
   const merged: HubState = current ? coerceHubState(current) : {}
   for (const [k, v] of Object.entries(patch)) {

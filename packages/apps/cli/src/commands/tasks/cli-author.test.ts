@@ -38,7 +38,11 @@ try {
   delete process.env.SLAYZONE_AGENT_ID
   delete process.env.SLAYZONE_AGENT_MODE
   const u = cliAuthor()
-  check('no agent env => user author', u.type === 'user' && u.id === null, `got ${JSON.stringify(u)}`)
+  check(
+    'no agent env => user author',
+    u.type === 'user' && u.id === null,
+    `got ${JSON.stringify(u)}`
+  )
 } finally {
   if (prevId === undefined) delete process.env.SLAYZONE_AGENT_ID
   else process.env.SLAYZONE_AGENT_ID = prevId

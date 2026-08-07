@@ -655,7 +655,9 @@ test.describe('CLI: slay', () => {
           window
             .getTrpcVanillaClient()
             .task.create.mutate(
-              d as Parameters<ReturnType<typeof window.getTrpcVanillaClient>['task']['create']['mutate']>[0]
+              d as Parameters<
+                ReturnType<typeof window.getTrpcVanillaClient>['task']['create']['mutate']
+              >[0]
             ),
         { projectId, title: 'CLI seeded subtask', status: 'todo', parentId: parent.id }
       )
@@ -846,7 +848,14 @@ test.describe('CLI: slay', () => {
     })
 
     test('mv moves an artifact into a folder via REST', () => {
-      const r = runCli('tasks', 'artifacts', 'mv', artifactId.slice(0, 8), '--folder', childFolderId.slice(0, 8))
+      const r = runCli(
+        'tasks',
+        'artifacts',
+        'mv',
+        artifactId.slice(0, 8),
+        '--folder',
+        childFolderId.slice(0, 8)
+      )
       expect(r.status).toBe(0)
       expect(r.stdout.trim()).toBe(`Moved: ${artifactId.slice(0, 8)} -> Sub`)
     })

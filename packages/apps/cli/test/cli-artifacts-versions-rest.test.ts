@@ -158,9 +158,12 @@ const BINARY = Buffer.from([
 const BINARY2 = Buffer.from([0x00, 0xfe, 0xff, 0x0d, 0x0a, 0x42])
 
 async function createArtifact(title: string, content: string | Buffer): Promise<string> {
-  const r = await runCli(['tasks', 'artifacts', 'create', title, '--task', short(taskId), '--json'], {
-    input: content
-  })
+  const r = await runCli(
+    ['tasks', 'artifacts', 'create', title, '--task', short(taskId), '--json'],
+    {
+      input: content
+    }
+  )
   if (r.exitCode !== 0) throw new Error(`create failed: ${r.stderr}`)
   return (JSON.parse(r.stdout) as { id: string }).id
 }
@@ -246,9 +249,12 @@ await describe('artifacts write / append with NO local database', () => {
   })
 
   test('append --mutate-version <ref> also honors the ref', async () => {
-    const r = await runCli(['tasks', 'artifacts', 'append', short(binId), '--mutate-version', '1'], {
-      input: '!'
-    })
+    const r = await runCli(
+      ['tasks', 'artifacts', 'append', short(binId), '--mutate-version', '1'],
+      {
+        input: '!'
+      }
+    )
     expect(r.exitCode).toBe(0)
     expect(r.stdout.trim()).toBe(`Appended: ${short(binId)}  bin.png  v1`)
   })
@@ -269,9 +275,12 @@ await describe('artifacts write / append with NO local database', () => {
   })
 
   test('write on a bad --mutate-version ref exits 1 with the Error [CODE] line', async () => {
-    const r = await runCli(['tasks', 'artifacts', 'write', short(binId), '--mutate-version', '999'], {
-      input: 'x'
-    })
+    const r = await runCli(
+      ['tasks', 'artifacts', 'write', short(binId), '--mutate-version', '999'],
+      {
+        input: 'x'
+      }
+    )
     expect(r.exitCode).toBe(1)
     expect(r.stderr.trim()).toBe('Error [NOT_FOUND]: Version not found: 999')
   })
@@ -333,14 +342,7 @@ await describe('artifacts update with NO local database', () => {
   })
 
   test('--render-mode persists, human line unchanged', async () => {
-    const r = await runCli([
-      'tasks',
-      'artifacts',
-      'update',
-      short(textId),
-      '--render-mode',
-      'code'
-    ])
+    const r = await runCli(['tasks', 'artifacts', 'update', short(textId), '--render-mode', 'code'])
     expect(r.exitCode).toBe(0)
     expect(r.stdout.trim()).toBe(`Updated: ${short(textId)}  renamed.md`)
     expect(
@@ -604,15 +606,7 @@ await describe('artifacts versions * with NO local database', () => {
   })
 
   test('versions rename to a reserved name exits 1 with the Error [CODE] line', async () => {
-    const r = await runCli([
-      'tasks',
-      'artifacts',
-      'versions',
-      'rename',
-      short(textId),
-      '1',
-      'HEAD'
-    ])
+    const r = await runCli(['tasks', 'artifacts', 'versions', 'rename', short(textId), '1', 'HEAD'])
     expect(r.exitCode).toBe(1)
     expect(r.stderr.startsWith('Error [NAME_RESERVED]: ')).toBe(true)
   })
@@ -908,7 +902,9 @@ await describe('artifacts search with NO local database', () => {
       '--case-sensitive',
       '--json'
     ])
-    const sensitiveTitles = (JSON.parse(sensitive.stdout) as { title: string }[]).map((x) => x.title)
+    const sensitiveTitles = (JSON.parse(sensitive.stdout) as { title: string }[]).map(
+      (x) => x.title
+    )
     expect(sensitiveTitles.includes('beta.md')).toBe(false)
 
     const regex = await runCli([

@@ -23,7 +23,9 @@ describe('serialize/deserialize', () => {
   it('rejects garbage and version mismatch', () => {
     expect(deserialize('not json')).toBeNull()
     expect(deserialize(JSON.stringify({ version: 99, tree: { root: null } }))).toBeNull()
-    expect(deserialize(JSON.stringify({ version: 1, tree: { root: { kind: 'bogus' } } }))).toBeNull()
+    expect(
+      deserialize(JSON.stringify({ version: 1, tree: { root: { kind: 'bogus' } } }))
+    ).toBeNull()
   })
 })
 

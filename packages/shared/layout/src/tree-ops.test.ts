@@ -66,7 +66,11 @@ describe('removeTile', () => {
   })
 
   it('preserves survivor proportions when removing one of three', () => {
-    const root = makeSplit('row', [makePane([tile('a')]), makePane([tile('b')]), makePane([tile('c')])])
+    const root = makeSplit('row', [
+      makePane([tile('a')]),
+      makePane([tile('b')]),
+      makePane([tile('c')])
+    ])
     root.fractions = [0.2, 0.3, 0.5]
     const out = removeTile({ root }, 'b')
     if (out.root && isSplit(out.root)) {
@@ -110,7 +114,10 @@ describe('splitPane', () => {
       const second = out.root.children[1]
       expect(isSplit(second) && second.direction).toBe('col')
       if (isSplit(second)) {
-        expect(isPane(second.children[0]) && (second.children[0] as ReturnType<typeof makePane>).tiles[0].id).toBe('b')
+        expect(
+          isPane(second.children[0]) &&
+            (second.children[0] as ReturnType<typeof makePane>).tiles[0].id
+        ).toBe('b')
       }
     }
   })
@@ -145,7 +152,10 @@ describe('setActiveTile + lookups', () => {
   })
 
   it('collects distinct tile types', () => {
-    const root = makeSplit('row', [makePane([tile('a', 'terminal')]), makePane([tile('b', 'browser')])])
+    const root = makeSplit('row', [
+      makePane([tile('a', 'terminal')]),
+      makePane([tile('b', 'browser')])
+    ])
     expect(collectTileTypes(root)).toEqual(new Set(['terminal', 'browser']))
   })
 })

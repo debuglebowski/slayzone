@@ -20,5 +20,5 @@ export const settingsShim = {
     const payload = JSON.stringify(value)
     const { ok } = await remote.setString(key, payload)
     return ok
-  },
+  }
 }

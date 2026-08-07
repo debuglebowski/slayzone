@@ -82,9 +82,7 @@ export function ProjectIntegrationConnectionModal({
   const connectGithub = useMutation(trpc.integrations.connectGithub.mutationOptions())
   const connectJira = useMutation(trpc.integrations.connectJira.mutationOptions())
   const connectLinear = useMutation(trpc.integrations.connectLinear.mutationOptions())
-  const setProjectConnection = useMutation(
-    trpc.integrations.setProjectConnection.mutationOptions()
-  )
+  const setProjectConnection = useMutation(trpc.integrations.setProjectConnection.mutationOptions())
   const updateConnection = useMutation(trpc.integrations.updateConnection.mutationOptions())
   const [credential, setCredential] = useState('')
   const [jiraDomain, setJiraDomain] = useState('')

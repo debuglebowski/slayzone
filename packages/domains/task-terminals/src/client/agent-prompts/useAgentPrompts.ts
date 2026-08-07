@@ -12,9 +12,7 @@ import { useSubscription, useTRPC } from '@slayzone/transport/client'
 export function useAgentPrompts(taskId: string, agentId: string, enabled: boolean) {
   const trpc = useTRPC()
 
-  const query = useQuery(
-    trpc.agentPrompts.list.queryOptions({ taskId, agentId }, { enabled })
-  )
+  const query = useQuery(trpc.agentPrompts.list.queryOptions({ taskId, agentId }, { enabled }))
 
   useSubscription(
     trpc.agentPrompts.onChanged.subscriptionOptions(undefined, {

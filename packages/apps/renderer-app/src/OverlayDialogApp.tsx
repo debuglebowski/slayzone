@@ -14,7 +14,8 @@ interface NativeOverlayHook {
 
 function overlayHook(): NativeOverlayHook | null {
   return (
-    (window as unknown as { __slayzoneNativeOverlay?: NativeOverlayHook }).__slayzoneNativeOverlay ?? null
+    (window as unknown as { __slayzoneNativeOverlay?: NativeOverlayHook })
+      .__slayzoneNativeOverlay ?? null
   )
 }
 
@@ -60,8 +61,9 @@ export function OverlayDialogApp() {
       >
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Native overlay dialog</div>
         <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}>
-          This dialog renders on the native overlay plane — composited <em>above</em> the live embedded
-          browser. The page underneath keeps playing; input is blocked while this is open (modal).
+          This dialog renders on the native overlay plane — composited <em>above</em> the live
+          embedded browser. The page underneath keeps playing; input is blocked while this is open
+          (modal).
         </div>
         <button
           type="button"

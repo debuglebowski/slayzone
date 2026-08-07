@@ -41,9 +41,7 @@ vi.mock('@slayzone/transport/client', () => {
       }
     }
   })
-  const useSubscription = (sub: {
-    opts: { enabled?: boolean; onData: WatchOnData }
-  }): void => {
+  const useSubscription = (sub: { opts: { enabled?: boolean; onData: WatchOnData } }): void => {
     const enabled = sub.opts.enabled !== false
     if (!enabled) return
     watchController.everEnabled = true

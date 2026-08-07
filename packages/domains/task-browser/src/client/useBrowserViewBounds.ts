@@ -78,10 +78,10 @@ export function useBrowserViewBounds(
     void trpcClient.app.browser.setBounds.mutate({
       viewId,
       bounds: {
-      x: OFF_SCREEN_X,
-      y: OFF_SCREEN_Y,
-      width,
-      height
+        x: OFF_SCREEN_X,
+        y: OFF_SCREEN_Y,
+        width,
+        height
       }
     })
     lastBoundsRef.current = null

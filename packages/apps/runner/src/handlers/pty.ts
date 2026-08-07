@@ -337,7 +337,9 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     const params = ptyGetBufferSinceParamsSchema.parse(rawParams)
     const session = sessions.get(params.sessionId)
     if (!session) return { frames: [] }
-    const frames = session.buffer.getChunksSince(params.seq).map((c) => ({ seq: c.seq, data: c.data }))
+    const frames = session.buffer
+      .getChunksSince(params.seq)
+      .map((c) => ({ seq: c.seq, data: c.data }))
     return { frames }
   }
 

@@ -21,8 +21,8 @@ vi.mock('@slayzone/terminal/server', () => ({
 vi.mock('@slayzone/diagnostics/server', () => ({
   recordDiagnosticEvent: () => {}
 }))
-const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(
-  () => Promise.resolve(null)
+const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(() =>
+  Promise.resolve(null)
 )
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: () => {},

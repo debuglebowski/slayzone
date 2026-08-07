@@ -8,12 +8,7 @@
  * the calling agent must read its own env and pass whichever id it has.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/get-current-task-id.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../test-utils/ipc-harness.js'
+import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { registerGetCurrentTaskIdTool } from './get-current-task-id.js'
 

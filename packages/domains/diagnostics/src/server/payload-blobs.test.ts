@@ -60,8 +60,10 @@ console.log('─'.repeat(40))
 
 test('a large screenshot data URL is written out and replaced by a path', () => {
   const w = recordingWriter()
-  const out = offloadPayloadBlobs({ reason: 'canary', screenshotDataUrl: pngDataUrl(200_000) }, w) as
-    Record<string, unknown>
+  const out = offloadPayloadBlobs(
+    { reason: 'canary', screenshotDataUrl: pngDataUrl(200_000) },
+    w
+  ) as Record<string, unknown>
   eq(w.writes.length, 1, 'one blob written')
   eq(w.writes[0].extension, 'png')
   ok(w.writes[0].size > 190_000, `full image written, got ${w.writes[0].size}B`)
@@ -102,8 +104,10 @@ test('a short data URL is left alone (no inode for nothing)', () => {
 
 test('null / absent screenshot fields are preserved', () => {
   const w = recordingWriter()
-  const out = offloadPayloadBlobs({ screenshotDataUrl: null, reason: 'frame-time' }, w) as
-    Record<string, unknown>
+  const out = offloadPayloadBlobs({ screenshotDataUrl: null, reason: 'frame-time' }, w) as Record<
+    string,
+    unknown
+  >
   eq(out.screenshotDataUrl, null)
   eq(out.reason, 'frame-time')
   eq(w.writes.length, 0)
@@ -115,8 +119,10 @@ test('a writer failure degrades to a marker, never throws', () => {
       throw new Error('ENOSPC')
     }
   }
-  const out = offloadPayloadBlobs({ screenshotDataUrl: pngDataUrl(200_000) }, throwing) as
-    Record<string, unknown>
+  const out = offloadPayloadBlobs({ screenshotDataUrl: pngDataUrl(200_000) }, throwing) as Record<
+    string,
+    unknown
+  >
   ok(
     String(out.screenshotDataUrl).startsWith('[BLOB_WRITE_FAILED:'),
     `marker recorded, got ${out.screenshotDataUrl}`
@@ -125,8 +131,10 @@ test('a writer failure degrades to a marker, never throws', () => {
 
 test('a malformed data URL is marked, not written', () => {
   const w = recordingWriter()
-  const out = offloadPayloadBlobs({ screenshotDataUrl: 'x'.repeat(5000) }, w) as
-    Record<string, unknown>
+  const out = offloadPayloadBlobs({ screenshotDataUrl: 'x'.repeat(5000) }, w) as Record<
+    string,
+    unknown
+  >
   eq(w.writes.length, 0)
   eq(out.screenshotDataUrl, '[UNDECODABLE_DATA_URL]')
 })
@@ -162,8 +170,10 @@ test('the input payload is not mutated', () => {
 
 test('non-blob long strings are NOT offloaded (scope stays narrow)', () => {
   const w = recordingWriter()
-  const out = offloadPayloadBlobs({ someOtherField: pngDataUrl(50_000) }, w) as
-    Record<string, unknown>
+  const out = offloadPayloadBlobs({ someOtherField: pngDataUrl(50_000) }, w) as Record<
+    string,
+    unknown
+  >
   eq(w.writes.length, 0, 'only known blob fields are offloaded')
   ok(typeof out.someOtherField === 'string', 'left for the redactor to handle')
 })

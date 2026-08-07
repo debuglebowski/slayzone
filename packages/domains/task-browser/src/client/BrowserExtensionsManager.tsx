@@ -114,15 +114,12 @@ export function useBrowserExtensions() {
   // extension action in the live view) but is an app.browser router proc; keep
   // it on tRPC. Fire-and-forget after the rAF, matching the prior behavior.
   const activateMutation = useMutation(trpc.app.browser.activateExtension.mutationOptions())
-  const handleActivateExtension = useCallback(
-    (extensionId: string) => {
-      setExtensionsManagerOpen(false)
-      requestAnimationFrame(() => {
-        activateMutation.mutate({ extensionId })
-      })
-    },
-    []
-  )
+  const handleActivateExtension = useCallback((extensionId: string) => {
+    setExtensionsManagerOpen(false)
+    requestAnimationFrame(() => {
+      activateMutation.mutate({ extensionId })
+    })
+  }, [])
 
   const importMutation = useMutation(
     trpc.app.browser.importExtension.mutationOptions({
@@ -135,17 +132,14 @@ export function useBrowserExtensions() {
       }
     })
   )
-  const handleImportExtension = useCallback(
-    async (path: string, name: string) => {
-      try {
-        await importMutation.mutateAsync({ extPath: path })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : `Failed to import ${name}`
-        setExtensionsError(message)
-      }
-    },
-    []
-  )
+  const handleImportExtension = useCallback(async (path: string, name: string) => {
+    try {
+      await importMutation.mutateAsync({ extPath: path })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Failed to import ${name}`
+      setExtensionsError(message)
+    }
+  }, [])
 
   const loadMutation = useMutation(
     trpc.app.browser.loadExtension.mutationOptions({
@@ -174,17 +168,14 @@ export function useBrowserExtensions() {
       }
     })
   )
-  const handleRemoveExtension = useCallback(
-    async (extensionId: string) => {
-      try {
-        await removeMutation.mutateAsync({ extensionId })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to remove extension'
-        setExtensionsError(message)
-      }
-    },
-    []
-  )
+  const handleRemoveExtension = useCallback(async (extensionId: string) => {
+    try {
+      await removeMutation.mutateAsync({ extensionId })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to remove extension'
+      setExtensionsError(message)
+    }
+  }, [])
 
   return {
     extensionsManagerOpen,

@@ -69,7 +69,10 @@ function remoteWan(url: string): string {
 }
 
 interface GateHarness {
-  get(path: string, authorization?: string): Promise<{ status: number; body: string; reached: boolean }>
+  get(
+    path: string,
+    authorization?: string
+  ): Promise<{ status: number; body: string; reached: boolean }>
   close(): Promise<void>
 }
 
@@ -270,7 +273,9 @@ async function main(): Promise<void> {
     // createHubUser, which generates the password and returns it once.
     const created = await createHubUser(auth, { email: EMAIL, name: 'Client' })
     assert(!('error' in created), 'created the fixture account')
-    const signIn = await auth.api.signInEmail({ body: { email: EMAIL, password: created.password } })
+    const signIn = await auth.api.signInEmail({
+      body: { email: EMAIL, password: created.password }
+    })
     const validToken = signIn.token
     assert(typeof validToken === 'string' && validToken.length > 0, 'got a real session token')
 

@@ -217,9 +217,7 @@ export function loadRunnerConfig(
     // fallback in bin.ts. No env channel either way.
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
-    ...(fromToken
-      ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint }
-      : {}),
+    ...(fromToken ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint } : {}),
     // <ROOT>/runner.config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
@@ -228,7 +226,9 @@ export function loadRunnerConfig(
 
   const result = runnerConfigSchema.safeParse(merged)
   if (!result.success) {
-    const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
+    const issues = result.error.issues
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ')
     throw new Error(
       `invalid runner configuration (${issues}). Set ${ENV_VARS.hubAddress} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/runner.config.json.`
     )

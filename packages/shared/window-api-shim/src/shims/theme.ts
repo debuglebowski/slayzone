@@ -32,5 +32,5 @@ export const themeShim = {
   onChange: (_cb: (theme: ThemeEffective) => void): (() => void) => {
     // TODO(cap-shell-7): wire to a SettingsHost change broadcaster.
     return () => undefined
-  },
+  }
 }

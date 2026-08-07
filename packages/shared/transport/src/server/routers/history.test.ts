@@ -35,7 +35,9 @@ h.db
 const createTask = (title: string, extra?: Record<string, unknown>): Promise<Task> =>
   task.create({ projectId, title, ...extra } as never) as Promise<Task>
 
-const listTaskEvents = (taskId: string): Array<{ kind: string; summary: string; payload_json: string | null }> =>
+const listTaskEvents = (
+  taskId: string
+): Array<{ kind: string; summary: string; payload_json: string | null }> =>
   h.db
     .prepare(
       `SELECT kind, summary, payload_json FROM activity_events WHERE task_id = ? ORDER BY created_at ASC, rowid ASC`
@@ -112,10 +114,14 @@ test('history: setForTask records added + removed tag ids', async () => {
 test('history: task create rolls back when history insert fails', async () => {
   expect(
     await didThrow(() =>
-      withFailingActivityEventInsert(() => task.create({ projectId, title: 'Rollback create' } as never))
+      withFailingActivityEventInsert(() =>
+        task.create({ projectId, title: 'Rollback create' } as never)
+      )
     )
   ).toBe(true)
-  expect(h.db.prepare('SELECT id FROM tasks WHERE title = ?').get('Rollback create')).toBeUndefined()
+  expect(
+    h.db.prepare('SELECT id FROM tasks WHERE title = ?').get('Rollback create')
+  ).toBeUndefined()
 })
 
 test('history: task update rolls back when history insert fails', async () => {
@@ -138,7 +144,12 @@ test('history: task update rolls back when history insert fails', async () => {
 
 test('history: tag change rolls back when history insert fails', async () => {
   const t = await createTask('Rollback tags')
-  const tag = await tags.create({ projectId, name: 'RollbackTag', color: '#cc3333', textColor: '#fff' })
+  const tag = await tags.create({
+    projectId,
+    name: 'RollbackTag',
+    color: '#cc3333',
+    textColor: '#fff'
+  })
   expect(
     await didThrow(() =>
       withFailingActivityEventInsert(() => tags.setForTask({ taskId: t.id, tagIds: [tag.id] }))

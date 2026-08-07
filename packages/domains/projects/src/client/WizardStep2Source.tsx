@@ -50,7 +50,11 @@ export function WizardStep2Source({
         <div className="space-y-3">
           <div className="space-y-1">
             <Label htmlFor="wizard-linear-team">Team</Label>
-            <Select value={teamId} onValueChange={setTeamId} disabled={!connectionId || loadingTeams}>
+            <Select
+              value={teamId}
+              onValueChange={setTeamId}
+              disabled={!connectionId || loadingTeams}
+            >
               <SelectTrigger id="wizard-linear-team" className="w-full max-w-md">
                 <SelectValue placeholder={loadingTeams ? 'Loading teams...' : 'Choose a team'} />
               </SelectTrigger>

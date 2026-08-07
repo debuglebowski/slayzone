@@ -12,10 +12,7 @@ type State = 'starting' | 'running' | 'idle' | 'error' | 'dead'
 async function readFlag(electronApp: ElectronApplication, taskId: string): Promise<number> {
   return electronApp.evaluate(async ({}, id: string): Promise<number> => {
     const db = (globalThis as Record<string, unknown>).__db as {
-      get: (
-        sql: string,
-        params?: unknown[]
-      ) => Promise<{ needs_attention: number } | undefined>
+      get: (sql: string, params?: unknown[]) => Promise<{ needs_attention: number } | undefined>
     }
     const row = await db.get('SELECT needs_attention FROM tasks WHERE id = ?', [id])
     return row?.needs_attention ?? 0

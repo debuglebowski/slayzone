@@ -90,7 +90,9 @@ async function main(): Promise<void> {
     // which generates the password and returns it once.
     const created = await createHubUser(auth, { email: EMAIL, name: 'Client' })
     assert(!('error' in created), 'created the fixture account')
-    const signIn = await auth.api.signInEmail({ body: { email: EMAIL, password: created.password } })
+    const signIn = await auth.api.signInEmail({
+      body: { email: EMAIL, password: created.password }
+    })
     const validToken = signIn.token
     assert(typeof validToken === 'string' && validToken.length > 0, 'got a real session token')
 
@@ -126,7 +128,11 @@ async function main(): Promise<void> {
         'empty string → null'
       )
       assertEq(
-        await resolveConnectionPrincipal({ hubAuthRequired: true, hubAuth: auth, token: undefined }),
+        await resolveConnectionPrincipal({
+          hubAuthRequired: true,
+          hubAuth: auth,
+          token: undefined
+        }),
         null,
         'undefined → null'
       )
@@ -169,7 +175,10 @@ async function main(): Promise<void> {
         token: connectionParams.token
       })
       assertEq(windowId, 3, 'windowId flows through')
-      assert(principal !== null && principal.userId.length > 0, 'principal attributed on the same connect')
+      assert(
+        principal !== null && principal.userId.length > 0,
+        'principal attributed on the same connect'
+      )
     })
   } finally {
     rmSync(tmpDir, { recursive: true, force: true })

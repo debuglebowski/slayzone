@@ -128,12 +128,11 @@ export function useArtifactClipboard({
     // Cut-mode source delete only if internal clipboard markers still match OS clipboard
     if (clipboard?.mode === 'cut') {
       const sourcePathSet = new Set(osPaths)
-      const internalPaths = (
-        await Promise.all(clipboard.ids.map((id) => getFilePath(id)))
-      ).filter((p): p is string => !!p)
+      const internalPaths = (await Promise.all(clipboard.ids.map((id) => getFilePath(id)))).filter(
+        (p): p is string => !!p
+      )
       const matchesInternal =
-        internalPaths.length === osPaths.length &&
-        internalPaths.every((p) => sourcePathSet.has(p))
+        internalPaths.length === osPaths.length && internalPaths.every((p) => sourcePathSet.has(p))
       if (matchesInternal) {
         for (const id of clipboard.ids) {
           await deleteArtifact(id)

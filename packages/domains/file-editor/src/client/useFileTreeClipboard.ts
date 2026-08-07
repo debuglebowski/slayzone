@@ -138,9 +138,7 @@ export function useFileTreeClipboard({
             if (abs === projectPath || abs.startsWith(projectPrefix)) {
               const srcRel = abs === projectPath ? '' : abs.slice(projectPrefix.length)
               if (!srcRel) continue
-              const name = srcRel.includes('/')
-                ? srcRel.slice(srcRel.lastIndexOf('/') + 1)
-                : srcRel
+              const name = srcRel.includes('/') ? srcRel.slice(srcRel.lastIndexOf('/') + 1) : srcRel
               const rawDest = targetDir ? `${targetDir}/${name}` : name
               const destPath = resolveCollisionPath(rawDest, targetDir)
               await copyMutation.mutateAsync({ rootPath: projectPath, srcPath: srcRel, destPath })

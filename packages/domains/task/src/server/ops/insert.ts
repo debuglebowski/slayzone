@@ -102,6 +102,8 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
 
   await db.namedTxn('task:insert-row', { insertSql: INSERT_SQL, insertParams, events })
 
-  const fetched = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [row.id])
+  const fetched = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
+    row.id
+  ])
   return parseTask(fetched)
 }

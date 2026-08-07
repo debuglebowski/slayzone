@@ -109,7 +109,9 @@ test.describe('Provider config edge cases', () => {
     // Create a fresh task (provider_config will have default flags but no conversationIds)
     const fresh = await mainWindow.evaluate(
       (pid) =>
-        window.getTrpcVanillaClient().task.create.mutate({ projectId: pid, title: 'Fresh config task' }),
+        window
+          .getTrpcVanillaClient()
+          .task.create.mutate({ projectId: pid, title: 'Fresh config task' }),
       projectId
     )
     // Set conversationId on it

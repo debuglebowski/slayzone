@@ -217,13 +217,13 @@ test.describe('Git diff panel — worktree task', () => {
 
     const p = panel(mainWindow)
     // Worktree file present
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'wt-target.txt' })
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'wt-target.txt' })).toBeVisible({
+      timeout: 5_000
+    })
     // Main-checkout file MUST be absent — proves diff is scoped to worktree
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'main-only.txt' })
-    ).toHaveCount(0)
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'main-only.txt' })).toHaveCount(
+      0
+    )
   })
 })
 
@@ -328,12 +328,12 @@ test.describe('Git diff panel — auto-created worktree', () => {
 
     const p = panel(mainWindow)
     await expect(p.getByText('Unstaged')).toBeVisible({ timeout: 5_000 })
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })
-    ).toBeVisible({ timeout: 5_000 })
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'auto-new.txt' })
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })).toBeVisible({
+      timeout: 5_000
+    })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'auto-new.txt' })).toBeVisible({
+      timeout: 5_000
+    })
   })
 })
 
@@ -464,9 +464,9 @@ test.describe('Git diff panel — worktree attached after open', () => {
     await refresh(mainWindow)
     const p = panel(mainWindow)
     await expect(p.getByText('Unstaged')).toBeVisible({ timeout: 10_000 })
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })
-    ).toBeVisible({ timeout: 10_000 })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })).toBeVisible({
+      timeout: 10_000
+    })
   })
 })
 
@@ -566,12 +566,12 @@ test.describe('Git diff panel — project root is a linked worktree', () => {
     await refresh(mainWindow)
     const p = panel(mainWindow)
     await expect(p.getByText('Unstaged')).toBeVisible({ timeout: 5_000 })
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })
-    ).toBeVisible({ timeout: 5_000 })
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'extra.txt' })
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })).toBeVisible({
+      timeout: 5_000
+    })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'extra.txt' })).toBeVisible({
+      timeout: 5_000
+    })
   })
 })
 
@@ -660,13 +660,13 @@ test.describe('Git diff panel — multi-repo wrapper with worktree on child', ()
 
     await refresh(mainWindow)
     const p = panel(mainWindow)
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'wt-target.txt' })
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'wt-target.txt' })).toBeVisible({
+      timeout: 5_000
+    })
     // Decoys MUST NOT appear — proves diff is scoped to the child's worktree
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'main-only.txt' })
-    ).toHaveCount(0)
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'main-only.txt' })).toHaveCount(
+      0
+    )
     await expect(
       p.locator('.font-mono.text-xs').filter({ hasText: 'child2-only.txt' })
     ).toHaveCount(0)

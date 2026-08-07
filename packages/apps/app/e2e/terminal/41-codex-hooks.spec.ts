@@ -239,7 +239,10 @@ test.describe('Codex agent hooks', () => {
           )
           const pc = (t as { provider_config?: unknown } | null)?.provider_config
           const parsed = typeof pc === 'string' ? JSON.parse(pc) : pc
-          return (parsed as { codex?: { conversationId?: string } } | null)?.codex?.conversationId ?? null
+          return (
+            (parsed as { codex?: { conversationId?: string } } | null)?.codex?.conversationId ??
+            null
+          )
         },
         { timeout: 5000 }
       )

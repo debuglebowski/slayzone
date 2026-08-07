@@ -70,9 +70,9 @@ test('auth gate ON + no principal: gated proc 401s, but open describe still work
   expect(caught).not.toBeNull()
   // TRPCError carries `.code` (string) + the message we set.
   const err = caught as { code?: string; message?: string }
-  expect(err.code === 'UNAUTHORIZED' || (err.message ?? '').includes('requires authentication')).toBe(
-    true
-  )
+  expect(
+    err.code === 'UNAUTHORIZED' || (err.message ?? '').includes('requires authentication')
+  ).toBe(true)
   // The rejected write did not persist.
   expect((await caller.describe()).label).toBe('no-auth-ok')
 })

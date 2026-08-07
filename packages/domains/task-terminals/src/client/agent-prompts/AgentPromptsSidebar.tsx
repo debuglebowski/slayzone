@@ -110,9 +110,7 @@ export function AgentPromptsSidebar({
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
         {prompts.length === 0 ? (
-          <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-            No messages yet
-          </div>
+          <div className="px-2 py-6 text-center text-xs text-muted-foreground">No messages yet</div>
         ) : (
           prompts.map((p) => (
             <div

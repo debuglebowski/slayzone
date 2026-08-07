@@ -34,7 +34,9 @@ export function useFileTreeDragDrop({
         e.dataTransfer.effectAllowed = 'move'
         // If entry is in selection, encode all selected paths
         const paths =
-          selectedPaths.has(entry.path) && selectedPaths.size > 1 ? [...selectedPaths] : [entry.path]
+          selectedPaths.has(entry.path) && selectedPaths.size > 1
+            ? [...selectedPaths]
+            : [entry.path]
         e.dataTransfer.setData('application/x-slayzone-tree', JSON.stringify(paths))
       }
     },

@@ -29,7 +29,15 @@ export {
   parseAuthCallbackUrl,
   type GithubSignInStart
 } from './auth-github'
-export { setAppDeps, getAppDeps, setBackupOps, getBackupOps, type AppDeps, type BackupOps, type FloatingAgentState } from './app-deps'
+export {
+  setAppDeps,
+  getAppDeps,
+  setBackupOps,
+  getBackupOps,
+  type AppDeps,
+  type BackupOps,
+  type FloatingAgentState
+} from './app-deps'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
 export {
   setRunnersDeps,

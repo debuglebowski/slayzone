@@ -254,7 +254,13 @@ vi.mock('@tanstack/react-query', () => {
     isPending: false,
     reset: vi.fn()
   }
-  const query = { data: undefined, isLoading: false, isPending: false, error: null, refetch: vi.fn() }
+  const query = {
+    data: undefined,
+    isLoading: false,
+    isPending: false,
+    error: null,
+    refetch: vi.fn()
+  }
   const queryClient = {
     invalidateQueries: vi.fn(),
     fetchQuery: vi.fn(),

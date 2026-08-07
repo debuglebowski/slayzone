@@ -64,15 +64,17 @@ class SyncSlayzoneDb implements SlayzoneDb {
   }
 
   async batchTxn(ops: BatchOp[]): Promise<unknown[]> {
-    return this.db.transaction(() => ops.map((op) => this.db.prepare(op.sql)[op.type](...op.params)))()
+    return this.db.transaction(() =>
+      ops.map((op) => this.db.prepare(op.sql)[op.type](...op.params))
+    )()
   }
 
   async namedTxn<K extends TxnName>(name: K, params: TxnParams<K>): Promise<Awaited<TxnResult<K>>> {
     // Domain txns only — the two app-only sources (export-import, reset-for-test)
     // have all their call sites inside apps/app and are deliberately absent here.
-    const fn = (domainTxnRegistry as Record<string, (db: Database.Database, p: unknown) => unknown>)[
-      name as string
-    ]
+    const fn = (
+      domainTxnRegistry as Record<string, (db: Database.Database, p: unknown) => unknown>
+    )[name as string]
     if (!fn) {
       throw new Error(
         `Unknown named transaction "${String(name)}" — not registered in the standalone server (app-only txns live in apps/app)`

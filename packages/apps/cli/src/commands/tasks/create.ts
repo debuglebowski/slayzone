@@ -35,7 +35,11 @@ export async function createAction(title: string, opts: CreateOpts): Promise<voi
   //
   // All of that used to run here against the hub's SQLite file, which is why
   // `tasks create` could never work against a hub on another machine.
-  const { data: task, existing, project } = await apiPost<{
+  const {
+    data: task,
+    existing,
+    project
+  } = await apiPost<{
     ok: true
     data: { id: string; title: string; status: string }
     existing?: boolean
@@ -53,9 +57,7 @@ export async function createAction(title: string, opts: CreateOpts): Promise<voi
   })
 
   if (existing) {
-    console.log(
-      `Exists: ${task.id.slice(0, 8)}  ${task.title}  [${task.status}]  ${project.name}`
-    )
+    console.log(`Exists: ${task.id.slice(0, 8)}  ${task.title}  [${task.status}]  ${project.name}`)
     return
   }
   console.log(`Created: ${task.id.slice(0, 8)}  ${title}  [${task.status}]  ${project.name}`)

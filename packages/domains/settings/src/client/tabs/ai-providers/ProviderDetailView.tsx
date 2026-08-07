@@ -63,10 +63,7 @@ export function ProviderDetailView({
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <Label
-                htmlFor={`enable-${mode.id}`}
-                className="text-xs font-medium cursor-pointer"
-              >
+              <Label htmlFor={`enable-${mode.id}`} className="text-xs font-medium cursor-pointer">
                 Enabled
               </Label>
               <Switch
@@ -273,9 +270,7 @@ export function ProviderDetailView({
                             className="font-mono text-xs"
                             placeholder="e.g. ^Error:.*"
                             value={mode.patternError ?? ''}
-                            onValueCommit={(v) =>
-                              updateMode(mode.id, { patternError: v || null })
-                            }
+                            onValueCommit={(v) => updateMode(mode.id, { patternError: v || null })}
                           />
                           {mode.patternError && !isValidRegex(mode.patternError) && (
                             <p className="text-[10px] text-destructive">

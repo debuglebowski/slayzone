@@ -77,9 +77,10 @@ test.describe('Run-local-hub toggle', () => {
     // Use the app's OWN live sidecar as the "remote" hub to add — its /health is
     // reachable, so the probe passes deterministically and Add arms. (We're
     // testing the toggle→boot-config write, not real federation.)
-    const server = (await mainWindow.evaluate(() =>
-      window.__testInvoke('app:get-server-url')
-    )) as { mode: string; url: string }
+    const server = (await mainWindow.evaluate(() => window.__testInvoke('app:get-server-url'))) as {
+      mode: string
+      url: string
+    }
     const host = new URL(server.url.replace(/^ws/, 'http')).host
 
     const dialog = await openHubsTab(mainWindow)

@@ -115,7 +115,9 @@ async function updateLibrarySkillContent(
         .aiConfig.listItems.query({ scope: 'library', type: 'skill' })
       const match = items.find((i) => i.slug === targetSlug)
       if (!match) throw new Error(`Library skill not found: ${targetSlug}`)
-      await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content: next })
+      await window
+        .getTrpcVanillaClient()
+        .aiConfig.updateItem.mutate({ id: match.id, content: next })
     },
     { slug, content }
   )
@@ -235,12 +237,16 @@ test.describe('Context manager file sync', () => {
     // Create and link a library skill
     await mainWindow.evaluate(
       async ({ slug, content }) => {
-        const existing = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
+        const existing = await window
+          .getTrpcVanillaClient()
+          .aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const match = existing.find((item) => item.slug === slug)
         if (match) {
           await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
         } else {
-          await window.getTrpcVanillaClient().aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content })
+          await window
+            .getTrpcVanillaClient()
+            .aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content })
         }
       },
       { slug: skillSlug, content: skillDocument(skillSlug, skillContentV1) }
@@ -249,7 +255,9 @@ test.describe('Context manager file sync', () => {
     // Link library skill to project
     await mainWindow.evaluate(
       async ({ projectId: pid, projectPath, slug }) => {
-        const items = await window.getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
+        const items = await window
+          .getTrpcVanillaClient()
+          .aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const item = items.find((i) => i.slug === slug)
         if (!item) throw new Error('Skill not found')
         await window.getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
@@ -307,10 +315,14 @@ test.describe('Context manager file sync', () => {
       // Seed a library instruction variant via API
       const variantId = await mainWindow.evaluate(
         async ({ slug, content }) => {
-          const existing = await window.getTrpcVanillaClient().aiConfig.listInstructionVariants.query()
+          const existing = await window
+            .getTrpcVanillaClient()
+            .aiConfig.listInstructionVariants.query()
           const match = existing.find((v) => v.slug === slug)
           if (match) {
-            await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+            await window
+              .getTrpcVanillaClient()
+              .aiConfig.updateItem.mutate({ id: match.id, content })
             return match.id
           }
           const created = await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
@@ -774,7 +786,9 @@ test.describe('Context manager file sync', () => {
           })
           const match = existing.find((item) => item.slug === slug)
           const item = match
-            ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content: initialContent })
+            ? await window
+                .getTrpcVanillaClient()
+                .aiConfig.updateItem.mutate({ id: match.id, content: initialContent })
             : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
                 type: 'skill',
                 scope: 'library',
@@ -792,7 +806,9 @@ test.describe('Context manager file sync', () => {
             itemId: item.id,
             providers: ['claude', 'codex']
           })
-          await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: updatedContent })
+          await window
+            .getTrpcVanillaClient()
+            .aiConfig.updateItem.mutate({ id: item.id, content: updatedContent })
         },
         {
           id: projectId,
@@ -859,7 +875,9 @@ test.describe('Context manager file sync', () => {
           })
           const match = existing.find((item) => item.slug === slug)
           const item = match
-            ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+            ? await window
+                .getTrpcVanillaClient()
+                .aiConfig.updateItem.mutate({ id: match.id, content })
             : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
                 type: 'skill',
                 scope: 'library',
@@ -921,7 +939,9 @@ test.describe('Context manager file sync', () => {
           })
           const match = existing.find((item) => item.slug === slug)
           const item = match
-            ? await window.getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+            ? await window
+                .getTrpcVanillaClient()
+                .aiConfig.updateItem.mutate({ id: match.id, content })
             : await window.getTrpcVanillaClient().aiConfig.createItem.mutate({
                 type: 'skill',
                 scope: 'library',
@@ -978,7 +998,11 @@ test.describe('Context manager file sync', () => {
               const status = statuses.find((entry) => entry.item.slug === slug)
               return status?.providers.claude?.syncHealth ?? null
             },
-            { id: projectId, projectPath: TEST_PROJECT_PATH, slug: codexOnlyWithUnmanagedClaudeSlug }
+            {
+              id: projectId,
+              projectPath: TEST_PROJECT_PATH,
+              slug: codexOnlyWithUnmanagedClaudeSlug
+            }
           )
         })
         .toBe('stale')

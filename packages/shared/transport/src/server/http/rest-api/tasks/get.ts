@@ -12,7 +12,13 @@ export function registerGetTaskRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/tasks/:id', async (req, res) => {
     try {
       const db = deps.db
-      const resolved = await resolveByIdPrefix<{ id: string }>(db, 'tasks', req.params.id, 'Task', 'id')
+      const resolved = await resolveByIdPrefix<{ id: string }>(
+        db,
+        'tasks',
+        req.params.id,
+        'Task',
+        'id'
+      )
       if (isResolveFailure(resolved)) {
         res.status(resolved.status).json({ ok: false, error: resolved.error })
         return

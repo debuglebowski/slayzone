@@ -8,7 +8,11 @@ export async function setBlockersOp(
 ): Promise<void> {
   // Pure delete-then-insert with all params known up-front — atomic batch op list.
   const ops: BatchOp[] = [
-    { type: 'run', sql: 'DELETE FROM task_dependencies WHERE blocks_task_id = ?', params: [taskId] },
+    {
+      type: 'run',
+      sql: 'DELETE FROM task_dependencies WHERE blocks_task_id = ?',
+      params: [taskId]
+    },
     ...blockerTaskIds.map(
       (blockerTaskId): BatchOp => ({
         type: 'run',

@@ -283,12 +283,7 @@ export function serviceLogPaths(kind: ServiceKind, root: string): { out: string;
  * Fail, quoting the tail of the service's own output. Pointing at a log file and
  * making the operator go read it is a worse experience than just showing the reason.
  */
-export function failWithLog(
-  kind: ServiceKind,
-  name: string,
-  logPath: string,
-  what: string
-): never {
+export function failWithLog(kind: ServiceKind, name: string, logPath: string, what: string): never {
   let detail = ''
   try {
     detail = readFileSync(logPath, 'utf8').trim().split('\n').slice(-12).join('\n')
@@ -396,7 +391,7 @@ function run(file: string, args: string[]): void {
     const stderr = (e as { stderr?: Buffer | string }).stderr
     throw new SupervisorError(
       `${file} ${args.join(' ')}`,
-      (typeof stderr === 'string' ? stderr : stderr?.toString() ?? '').trim()
+      (typeof stderr === 'string' ? stderr : (stderr?.toString() ?? '')).trim()
     )
   }
 }
@@ -549,7 +544,17 @@ export function supervisorStatus(
   try {
     out = execFileSync(
       'systemctl',
-      ['--user', 'show', systemdUnitName(kind, name), '-p', 'ActiveState', '-p', 'MainPID', '-p', 'ExecMainStatus'],
+      [
+        '--user',
+        'show',
+        systemdUnitName(kind, name),
+        '-p',
+        'ActiveState',
+        '-p',
+        'MainPID',
+        '-p',
+        'ExecMainStatus'
+      ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
     )
   } catch {

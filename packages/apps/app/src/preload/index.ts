@@ -34,7 +34,10 @@ window.addEventListener(
 const api: ElectronAPI = {
   app: {
     getServerUrl: () =>
-      ipcRenderer.invoke('app:get-server-url') as Promise<{ mode: 'local' | 'remote'; url: string }>,
+      ipcRenderer.invoke('app:get-server-url') as Promise<{
+        mode: 'local' | 'remote'
+        url: string
+      }>,
     getBootConfig: () =>
       ipcRenderer.invoke('app:get-boot-config') as Promise<{ multiHub: boolean }>,
     getHubRegistry: () =>
@@ -42,8 +45,7 @@ const api: ElectronAPI = {
         hubs: HubEntry[]
         defaultHubId: string
       }>,
-    getHubTokens: () =>
-      ipcRenderer.invoke('app:get-hub-tokens') as Promise<Record<string, string>>,
+    getHubTokens: () => ipcRenderer.invoke('app:get-hub-tokens') as Promise<Record<string, string>>,
     setHubToken: (payload) =>
       ipcRenderer.invoke('app:set-hub-token', payload) as Promise<{ ok: true }>,
     hubLogin: (payload) =>

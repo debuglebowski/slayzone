@@ -107,7 +107,12 @@ function DragChip({ title }: { title: string }) {
 export function TileDragHandle({ tileId, children }: { tileId: string; children: ReactNode }) {
   const { attributes, listeners, setNodeRef } = useDraggable({ id: tileDragId(tileId) })
   return (
-    <span ref={setNodeRef} {...attributes} {...listeners} style={{ display: 'inline-flex', minWidth: 0 }}>
+    <span
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={{ display: 'inline-flex', minWidth: 0 }}
+    >
       {children}
     </span>
   )
@@ -122,9 +127,19 @@ function zoneRect(zone: DropZone): React.CSSProperties {
     case 'south':
       return { left: 0, right: 0, bottom: 0, height: `${EDGE_FRACTION * 100}%` }
     case 'west':
-      return { left: 0, top: `${EDGE_FRACTION * 100}%`, bottom: `${EDGE_FRACTION * 100}%`, width: `${EDGE_FRACTION * 100}%` }
+      return {
+        left: 0,
+        top: `${EDGE_FRACTION * 100}%`,
+        bottom: `${EDGE_FRACTION * 100}%`,
+        width: `${EDGE_FRACTION * 100}%`
+      }
     case 'east':
-      return { right: 0, top: `${EDGE_FRACTION * 100}%`, bottom: `${EDGE_FRACTION * 100}%`, width: `${EDGE_FRACTION * 100}%` }
+      return {
+        right: 0,
+        top: `${EDGE_FRACTION * 100}%`,
+        bottom: `${EDGE_FRACTION * 100}%`,
+        width: `${EDGE_FRACTION * 100}%`
+      }
     case 'center':
       return {
         left: `${EDGE_FRACTION * 100}%`,

@@ -216,13 +216,7 @@ export async function listActivityEventsForTask(
         ORDER BY created_at DESC, id DESC
         LIMIT ?
       `,
-        [
-          taskId,
-          options.before.createdAt,
-          options.before.createdAt,
-          options.before.id,
-          limit + 1
-        ]
+        [taskId, options.before.createdAt, options.before.createdAt, options.before.id, limit + 1]
       )) as ActivityEventRow[])
     : ((await db.all(
         `

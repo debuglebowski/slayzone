@@ -43,7 +43,7 @@ describe('notify.sh under Gemini', () => {
     const dir = tmpDir()
     try {
       const target = path.join(dir, 'notify.sh')
-      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: target })
+      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
 
       const binDir = path.join(dir, 'bin')
       fs.mkdirSync(binDir)
@@ -70,7 +70,7 @@ describe('notify.sh under Gemini', () => {
     const dir = tmpDir()
     try {
       const target = path.join(dir, 'notify.sh')
-      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: target })
+      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
 
       // Stub curl with one that always exits 1 — simulates POST failure
       // without removing bash from PATH (spawnSync needs bash).
@@ -94,12 +94,14 @@ describe('notify.sh under Gemini', () => {
     }
   })
 
-  test.each(GEMINI_EVENTS)('POSTs benign envelope carrying event="%s" in raw', async (eventName) => {
+  test.each(
+    GEMINI_EVENTS
+  )('POSTs benign envelope carrying event="%s" in raw', async (eventName) => {
     if (process.platform === 'win32') return
     const dir = tmpDir()
     try {
       const target = path.join(dir, 'notify.sh')
-      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: target })
+      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
 
       const binDir = path.join(dir, 'bin')
       fs.mkdirSync(binDir)
@@ -138,7 +140,7 @@ describe('notify.sh under Gemini', () => {
     const dir = tmpDir()
     try {
       const target = path.join(dir, 'notify.sh')
-      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: target })
+      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
 
       const binDir = path.join(dir, 'bin')
       fs.mkdirSync(binDir)
@@ -172,7 +174,7 @@ describe('notify.sh under Gemini', () => {
     const dir = tmpDir()
     try {
       const target = path.join(dir, 'notify.sh')
-      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: target })
+      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
       const binDir = path.join(dir, 'bin')
       fs.mkdirSync(binDir)
       const capture = path.join(dir, 'capture.json')
@@ -224,7 +226,7 @@ describe('notify.sh under Gemini', () => {
     const dir = tmpDir()
     try {
       const target = path.join(dir, 'notify.sh')
-      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE,  targetPath: target })
+      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
       const binDir = path.join(dir, 'bin')
       fs.mkdirSync(binDir)
       const capture = path.join(dir, 'capture.json')

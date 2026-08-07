@@ -14,9 +14,15 @@ export function useIdlePreload(): void {
     const ric: typeof requestIdleCallback =
       typeof requestIdleCallback === 'function'
         ? requestIdleCallback
-        : (cb) => window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 200)
+        : (cb) =>
+            window.setTimeout(
+              () => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline),
+              200
+            )
     const cic: typeof cancelIdleCallback =
-      typeof cancelIdleCallback === 'function' ? cancelIdleCallback : (id) => window.clearTimeout(id)
+      typeof cancelIdleCallback === 'function'
+        ? cancelIdleCallback
+        : (id) => window.clearTimeout(id)
 
     const handle = ric(() => {
       for (const load of PRELOADS) load().catch(() => {})

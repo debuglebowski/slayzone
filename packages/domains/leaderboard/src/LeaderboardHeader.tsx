@@ -85,15 +85,9 @@ export function LeaderboardHeader({
                   {authBusy || auth.isLoading ? (
                     <span className="text-[11px] font-medium">...</span>
                   ) : auth.isAuthenticated && avatarSrc ? (
-                    <img
-                      src={avatarSrc}
-                      alt={viewerName}
-                      className="h-full w-full object-cover"
-                    />
+                    <img src={avatarSrc} alt={viewerName} className="h-full w-full object-cover" />
                   ) : (
-                    <span className="text-[11px] font-semibold uppercase">
-                      {avatarFallback}
-                    </span>
+                    <span className="text-[11px] font-semibold uppercase">{avatarFallback}</span>
                   )}
                 </IconButton>
               </DropdownMenuTrigger>

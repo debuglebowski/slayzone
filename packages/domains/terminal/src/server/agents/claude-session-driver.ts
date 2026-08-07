@@ -10,7 +10,12 @@
  */
 import type { AgentEvent } from '../../shared/agent-events'
 import { claudeCodeAdapter } from './claude-code-adapter'
-import type { AgentBackend, ChatDriverContext, ChatSessionDriver, PermissionDecision } from './types'
+import type {
+  AgentBackend,
+  ChatDriverContext,
+  ChatSessionDriver,
+  PermissionDecision
+} from './types'
 
 interface PendingControl {
   resolve: (data: unknown) => void

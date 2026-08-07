@@ -51,7 +51,9 @@ type AugmentationNotLoaded =
   'TxnRegistry augmentation not loaded in this compilation: add "packages/shared/types/src/txn-registry.d.ts" (or the global.d.ts that references it) to this package tsconfig "include"'
 
 /** A registered transaction name (or a loud remedy if the map isn't loaded). */
-export type TxnName = [keyof TxnRegistry] extends [never] ? AugmentationNotLoaded : keyof TxnRegistry
+export type TxnName = [keyof TxnRegistry] extends [never]
+  ? AugmentationNotLoaded
+  : keyof TxnRegistry
 
 /** The params type for a given transaction name. */
 export type TxnParams<K extends TxnName> = K extends keyof TxnRegistry

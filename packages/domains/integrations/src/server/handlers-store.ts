@@ -441,24 +441,28 @@ async function upsertLinkForIssue(
     .get(connectionId, issue.id)) as ExternalLink | undefined
 
   if (existing) {
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE external_links
       SET task_id = ?, external_key = ?, external_url = ?, sync_state = 'active',
           last_error = NULL, updated_at = datetime('now')
       WHERE id = ?
-    `).run(taskId, issue.identifier, issue.url, existing.id)
+    `)
+      .run(taskId, issue.identifier, issue.url, existing.id)
     return (await db
       .prepare('SELECT * FROM external_links WHERE id = ?')
       .get(existing.id)) as ExternalLink
   }
 
   const id = crypto.randomUUID()
-  await db.prepare(`
+  await db
+    .prepare(`
     INSERT INTO external_links (
       id, provider, connection_id, external_type, external_id, external_key,
       external_url, task_id, sync_state, last_sync_at, last_error, created_at, updated_at
     ) VALUES (?, 'linear', ?, 'issue', ?, ?, ?, ?, 'active', datetime('now'), NULL, datetime('now'), datetime('now'))
-  `).run(id, connectionId, issue.id, issue.identifier, issue.url, taskId)
+  `)
+    .run(id, connectionId, issue.id, issue.identifier, issue.url, taskId)
 
   return (await db.prepare('SELECT * FROM external_links WHERE id = ?').get(id)) as ExternalLink
 }
@@ -479,20 +483,22 @@ async function upsertTaskFromIssue(
   const descHtml = issue.description ? markdownToHtml(issue.description) : null
 
   if (byLink) {
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE tasks
       SET project_id = ?, title = ?, description = ?, status = ?, priority = ?, assignee = ?, updated_at = ?
       WHERE id = ?
-    `).run(
-      localProjectId,
-      issue.title,
-      descHtml,
-      linearStateToTaskStatus(issue.state.type, projectColumns),
-      linearPriorityToLocal(issue.priority),
-      issue.assignee?.name ?? null,
-      issue.updatedAt,
-      byLink.task_id
-    )
+    `)
+      .run(
+        localProjectId,
+        issue.title,
+        descHtml,
+        linearStateToTaskStatus(issue.state.type, projectColumns),
+        linearPriorityToLocal(issue.priority),
+        issue.assignee?.name ?? null,
+        issue.updatedAt,
+        byLink.task_id
+      )
     return { outcome: 'updated', taskId: byLink.task_id }
   }
 
@@ -523,24 +529,28 @@ async function upsertLinkForGitHubIssue(
 
   const externalKey = `${issue.repository.fullName}#${issue.number}`
   if (existing) {
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE external_links
       SET task_id = ?, external_key = ?, external_url = ?, sync_state = 'active',
           last_error = NULL, updated_at = datetime('now')
       WHERE id = ?
-    `).run(taskId, externalKey, issue.url, existing.id)
+    `)
+      .run(taskId, externalKey, issue.url, existing.id)
     return (await db
       .prepare('SELECT * FROM external_links WHERE id = ?')
       .get(existing.id)) as ExternalLink
   }
 
   const id = crypto.randomUUID()
-  await db.prepare(`
+  await db
+    .prepare(`
     INSERT INTO external_links (
       id, provider, connection_id, external_type, external_id, external_key,
       external_url, task_id, sync_state, last_sync_at, last_error, created_at, updated_at
     ) VALUES (?, 'github', ?, 'issue', ?, ?, ?, ?, 'active', datetime('now'), NULL, datetime('now'), datetime('now'))
-  `).run(id, connectionId, issue.id, externalKey, issue.url, taskId)
+  `)
+    .run(id, connectionId, issue.id, externalKey, issue.url, taskId)
 
   return (await db.prepare('SELECT * FROM external_links WHERE id = ?').get(id)) as ExternalLink
 }
@@ -570,19 +580,21 @@ async function upsertTaskFromGitHubIssue(
       }
     }
 
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE tasks
       SET title = ?, description = ?, status = ?, priority = ?, assignee = ?, updated_at = ?
       WHERE id = ?
-    `).run(
-      issue.title,
-      descHtml,
-      githubStateToLocal(issue.state, projectColumns),
-      3,
-      issue.assignee?.login ?? null,
-      issue.updatedAt,
-      byLink.task_id
-    )
+    `)
+      .run(
+        issue.title,
+        descHtml,
+        githubStateToLocal(issue.state, projectColumns),
+        3,
+        issue.assignee?.login ?? null,
+        issue.updatedAt,
+        byLink.task_id
+      )
     return {
       outcome: 'updated',
       taskId: byLink.task_id
@@ -636,18 +648,20 @@ async function upsertTaskFromNormalizedIssue(
     if (byLink.project_id && byLink.project_id !== localProjectId) {
       return { outcome: 'skipped_already_linked', taskId: byLink.task_id }
     }
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE tasks
       SET title = ?, description = ?, status = ?, assignee = ?, updated_at = ?
       WHERE id = ?
-    `).run(
-      issue.title,
-      descHtml,
-      localStatus,
-      issue.assignee?.name ?? null,
-      issue.updatedAt,
-      byLink.task_id
-    )
+    `)
+      .run(
+        issue.title,
+        descHtml,
+        localStatus,
+        issue.assignee?.name ?? null,
+        issue.updatedAt,
+        byLink.task_id
+      )
     return { outcome: 'updated', taskId: byLink.task_id }
   }
 
@@ -680,24 +694,28 @@ async function upsertLinkForNormalizedIssue(
 
   const externalKey = adapter.buildExternalKey(issue)
   if (existing) {
-    await db.prepare(`
+    await db
+      .prepare(`
       UPDATE external_links
       SET task_id = ?, external_key = ?, external_url = ?, sync_state = 'active',
           last_error = NULL, updated_at = datetime('now')
       WHERE id = ?
-    `).run(taskId, externalKey, issue.url, existing.id)
+    `)
+      .run(taskId, externalKey, issue.url, existing.id)
     return (await db
       .prepare('SELECT * FROM external_links WHERE id = ?')
       .get(existing.id)) as ExternalLink
   }
 
   const id = crypto.randomUUID()
-  await db.prepare(`
+  await db
+    .prepare(`
     INSERT INTO external_links (
       id, provider, connection_id, external_type, external_id, external_key,
       external_url, task_id, sync_state, last_sync_at, last_error, created_at, updated_at
     ) VALUES (?, ?, ?, 'issue', ?, ?, ?, ?, 'active', datetime('now'), NULL, datetime('now'), datetime('now'))
-  `).run(id, provider, connectionId, issue.id, externalKey, issue.url, taskId)
+  `)
+    .run(id, provider, connectionId, issue.id, externalKey, issue.url, taskId)
   return (await db.prepare('SELECT * FROM external_links WHERE id = ?').get(id)) as ExternalLink
 }
 
@@ -748,14 +766,16 @@ async function setProjectConnection(
   `)
     .get(input.projectId, input.provider)) as { id: string } | undefined
 
-  await db.prepare(`
+  await db
+    .prepare(`
     INSERT INTO integration_project_connections (
       id, project_id, provider, connection_id, created_at, updated_at
     ) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
     ON CONFLICT(project_id, provider) DO UPDATE SET
       connection_id = excluded.connection_id,
       updated_at = datetime('now')
-  `).run(existing?.id ?? crypto.randomUUID(), input.projectId, input.provider, input.connectionId)
+  `)
+    .run(existing?.id ?? crypto.randomUUID(), input.projectId, input.provider, input.connectionId)
 }
 
 async function getConnectionUsage(
@@ -895,10 +915,7 @@ export type IntegrationOps = ReturnType<typeof createIntegrationOps>
  * gates their *registration* on `enableTestChannels`. The router exposes them
  * unconditionally (production renderer simply never calls them).
  */
-export function createIntegrationOps(
-  db: SlayzoneDb,
-  _options?: { enableTestChannels?: boolean }
-) {
+export function createIntegrationOps(db: SlayzoneDb, _options?: { enableTestChannels?: boolean }) {
   const githubTestRepositoriesByConnection = new Map<string, GithubRepositorySummary[]>()
   const githubTestIssuesByRepository = new Map<string, GithubIssueSummary[]>()
 
@@ -1054,9 +1071,11 @@ export function createIntegrationOps(
     if (!updatedIssue) return
 
     await persistNormalizedBaseline(db, link.id, task, updatedIssue)
-    await db.prepare(
-      "UPDATE external_links SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-    ).run(link.id)
+    await db
+      .prepare(
+        "UPDATE external_links SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      )
+      .run(link.id)
   }
 
   return {
@@ -1076,11 +1095,13 @@ export function createIntegrationOps(
       if (currentProjectConnectionId) {
         const existing = await getConnection(db, currentProjectConnectionId)
         await deleteCredential(db, existing.credential_ref)
-        await db.prepare(`
+        await db
+          .prepare(`
           UPDATE integration_connections
           SET credential_ref = ?, enabled = 1, updated_at = datetime('now')
           WHERE id = ?
-        `).run(credentialRef, existing.id)
+        `)
+          .run(credentialRef, existing.id)
 
         if (input.projectId) {
           await setProjectConnection(db, {
@@ -1093,11 +1114,13 @@ export function createIntegrationOps(
       }
 
       const id = crypto.randomUUID()
-      await db.prepare(`
+      await db
+        .prepare(`
         INSERT INTO integration_connections (
           id, provider, credential_ref, enabled, created_at, updated_at, last_synced_at
         ) VALUES (?, 'github', ?, 1, datetime('now'), datetime('now'), NULL)
-      `).run(id, credentialRef)
+      `)
+        .run(id, credentialRef)
 
       if (input.projectId) {
         await setProjectConnection(db, {
@@ -1126,11 +1149,13 @@ export function createIntegrationOps(
       if (currentProjectConnectionId) {
         const existing = await getConnection(db, currentProjectConnectionId)
         await deleteCredential(db, existing.credential_ref)
-        await db.prepare(`
+        await db
+          .prepare(`
           UPDATE integration_connections
           SET credential_ref = ?, enabled = 1, updated_at = datetime('now')
           WHERE id = ?
-        `).run(credentialRef, existing.id)
+        `)
+          .run(credentialRef, existing.id)
 
         if (input.projectId) {
           await setProjectConnection(db, {
@@ -1143,11 +1168,13 @@ export function createIntegrationOps(
       }
 
       const id = crypto.randomUUID()
-      await db.prepare(`
+      await db
+        .prepare(`
         INSERT INTO integration_connections (
           id, provider, credential_ref, enabled, created_at, updated_at, last_synced_at
         ) VALUES (?, 'linear', ?, 1, datetime('now'), datetime('now'), NULL)
-      `).run(id, credentialRef)
+      `)
+        .run(id, credentialRef)
 
       if (input.projectId) {
         await setProjectConnection(db, {
@@ -1182,11 +1209,13 @@ export function createIntegrationOps(
       if (currentProjectConnectionId) {
         const existing = await getConnection(db, currentProjectConnectionId)
         await deleteCredential(db, existing.credential_ref)
-        await db.prepare(`
+        await db
+          .prepare(`
           UPDATE integration_connections
           SET credential_ref = ?, enabled = 1, updated_at = datetime('now')
           WHERE id = ?
-        `).run(credentialRef, existing.id)
+        `)
+          .run(credentialRef, existing.id)
         if (input.projectId) {
           await setProjectConnection(db, {
             projectId: input.projectId,
@@ -1198,11 +1227,13 @@ export function createIntegrationOps(
       }
 
       const id = crypto.randomUUID()
-      await db.prepare(`
+      await db
+        .prepare(`
         INSERT INTO integration_connections (
           id, provider, credential_ref, enabled, created_at, updated_at, last_synced_at
         ) VALUES (?, 'jira', ?, 1, datetime('now'), datetime('now'), NULL)
-      `).run(id, credentialRef)
+      `)
+        .run(id, credentialRef)
 
       if (input.projectId) {
         await setProjectConnection(db, {
@@ -1241,7 +1272,8 @@ export function createIntegrationOps(
       const credentialRef = crypto.randomUUID()
       await storeCredential(db, credentialRef, credential)
       await deleteCredential(db, connection.credential_ref)
-      await db.prepare(`
+      await db
+        .prepare(`
       UPDATE integration_connections
       SET credential_ref = ?,
           enabled = 1,
@@ -1249,7 +1281,8 @@ export function createIntegrationOps(
           auth_error_at = NULL,
           updated_at = datetime('now')
       WHERE id = ?
-    `).run(credentialRef, connection.id)
+    `)
+        .run(credentialRef, connection.id)
       return toPublicConnection(await getConnection(db, connection.id))
     },
 
@@ -1897,12 +1930,16 @@ export function createIntegrationOps(
       if (!updatedIssue) throw new Error(`Failed to update ${providerName} issue`)
 
       await persistNormalizedBaseline(db, link.id, task, updatedIssue)
-      await db.prepare(
-        `UPDATE external_links SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
-      ).run(link.id)
-      await db.prepare(
-        `UPDATE integration_connections SET last_synced_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
-      ).run(connection.id)
+      await db
+        .prepare(
+          `UPDATE external_links SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+        )
+        .run(link.id)
+      await db
+        .prepare(
+          `UPDATE integration_connections SET last_synced_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+        )
+        .run(connection.id)
 
       const statusAfter = await buildTaskSyncStatus(db, adapter, link, task, updatedIssue)
       return {
@@ -1970,28 +2007,32 @@ export function createIntegrationOps(
       )
       const hasPriority = remoteIssue.extras.priority !== undefined
       if (hasPriority) {
-        await db.prepare(
-          `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, assignee = ?, updated_at = ? WHERE id = ?`
-        ).run(
-          remoteIssue.title,
-          remoteIssue.description ? markdownToHtml(remoteIssue.description) : null,
-          localStatus,
-          linearPriorityToLocal(remoteIssue.extras.priority as number),
-          remoteIssue.assignee?.name ?? null,
-          remoteIssue.updatedAt,
-          task.id
-        )
+        await db
+          .prepare(
+            `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, assignee = ?, updated_at = ? WHERE id = ?`
+          )
+          .run(
+            remoteIssue.title,
+            remoteIssue.description ? markdownToHtml(remoteIssue.description) : null,
+            localStatus,
+            linearPriorityToLocal(remoteIssue.extras.priority as number),
+            remoteIssue.assignee?.name ?? null,
+            remoteIssue.updatedAt,
+            task.id
+          )
       } else {
-        await db.prepare(
-          `UPDATE tasks SET title = ?, description = ?, status = ?, assignee = ?, updated_at = ? WHERE id = ?`
-        ).run(
-          remoteIssue.title,
-          remoteIssue.description ? markdownToHtml(remoteIssue.description) : null,
-          localStatus,
-          remoteIssue.assignee?.name ?? null,
-          remoteIssue.updatedAt,
-          task.id
-        )
+        await db
+          .prepare(
+            `UPDATE tasks SET title = ?, description = ?, status = ?, assignee = ?, updated_at = ? WHERE id = ?`
+          )
+          .run(
+            remoteIssue.title,
+            remoteIssue.description ? markdownToHtml(remoteIssue.description) : null,
+            localStatus,
+            remoteIssue.assignee?.name ?? null,
+            remoteIssue.updatedAt,
+            task.id
+          )
       }
       const updatedTask = await getTaskById(db, task.id)
       await persistNormalizedBaseline(db, link.id, updatedTask, remoteIssue)
@@ -2000,17 +2041,24 @@ export function createIntegrationOps(
         .prepare('SELECT columns_config FROM projects WHERE id = ?')
         .get(task.project_id)) as { columns_config: string | null } | undefined
       if (
-        isTerminalStatus(localStatus, parseColumnsConfig(pullProjectColumns?.columns_config ?? null))
+        isTerminalStatus(
+          localStatus,
+          parseColumnsConfig(pullProjectColumns?.columns_config ?? null)
+        )
       ) {
         onTaskReachedTerminal(task.id)
       }
 
-      await db.prepare(
-        `UPDATE external_links SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
-      ).run(link.id)
-      await db.prepare(
-        `UPDATE integration_connections SET last_synced_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
-      ).run(connection.id)
+      await db
+        .prepare(
+          `UPDATE external_links SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+        )
+        .run(link.id)
+      await db
+        .prepare(
+          `UPDATE integration_connections SET last_synced_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+        )
+        .run(connection.id)
 
       const statusAfter = await buildTaskSyncStatus(db, adapter, link, updatedTask, remoteIssue)
       return {
@@ -2031,12 +2079,14 @@ export function createIntegrationOps(
     },
 
     unlinkTask: async (taskId: string, provider: IntegrationProvider) => {
-      await db.prepare(`
+      await db
+        .prepare(`
       DELETE FROM external_field_state
       WHERE external_link_id IN (
         SELECT id FROM external_links WHERE task_id = ? AND provider = ?
       )
-    `).run(taskId, provider)
+    `)
+        .run(taskId, provider)
 
       const res = await db
         .prepare('DELETE FROM external_links WHERE task_id = ? AND provider = ?')
@@ -2078,9 +2128,7 @@ export function createIntegrationOps(
       return { pushed, errors }
     },
 
-    fetchProviderStatuses: async (
-      input: FetchProviderStatusesInput
-    ): Promise<ProviderStatus[]> => {
+    fetchProviderStatuses: async (input: FetchProviderStatusesInput): Promise<ProviderStatus[]> => {
       const connection = await getConnection(db, input.connectionId)
       assertConnectionProvider(connection, input.provider)
       const credential = await readCredential(db, connection.credential_ref)
@@ -2108,56 +2156,68 @@ export function createIntegrationOps(
           if (!newColumns.some((c) => c.id === newStatus)) continue
           const reachedTerminal = isTerminalStatus(newStatus, newColumns)
           const affectedIds = reachedTerminal
-            ? ((await db
-                .prepare('SELECT id FROM tasks WHERE project_id = ? AND status = ?')
-                .all(input.projectId, oldStatus)) as Array<{ id: string }>).map((r) => r.id)
+            ? (
+                (await db
+                  .prepare('SELECT id FROM tasks WHERE project_id = ? AND status = ?')
+                  .all(input.projectId, oldStatus)) as Array<{ id: string }>
+              ).map((r) => r.id)
             : []
-          await db.prepare(
-            "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE project_id = ? AND status = ?"
-          ).run(newStatus, input.projectId, oldStatus)
+          await db
+            .prepare(
+              "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE project_id = ? AND status = ?"
+            )
+            .run(newStatus, input.projectId, oldStatus)
           for (const id of affectedIds) onTaskReachedTerminal(id)
         }
       }
 
       // Update project columns_config
-      await db.prepare(
-        "UPDATE projects SET columns_config = ?, updated_at = datetime('now') WHERE id = ?"
-      ).run(JSON.stringify(newColumns), input.projectId)
+      await db
+        .prepare(
+          "UPDATE projects SET columns_config = ?, updated_at = datetime('now') WHERE id = ?"
+        )
+        .run(JSON.stringify(newColumns), input.projectId)
 
       // Normalize any tasks with statuses not in the new column set
       const defaultStatus = getDefaultStatus(newColumns)
       const newStatusIds = newColumns.map((c) => c.id)
       const placeholders = newStatusIds.map(() => '?').join(',')
-      await db.prepare(
-        `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE project_id = ? AND status NOT IN (${placeholders})`
-      ).run(defaultStatus, input.projectId, ...newStatusIds)
+      await db
+        .prepare(
+          `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE project_id = ? AND status NOT IN (${placeholders})`
+        )
+        .run(defaultStatus, input.projectId, ...newStatusIds)
 
       // Rebuild integration_state_mappings using the mapping from providerStatusesToColumns
-      await db.prepare('DELETE FROM integration_state_mappings WHERE project_mapping_id = ?').run(
-        mapping.id
-      )
+      await db
+        .prepare('DELETE FROM integration_state_mappings WHERE project_mapping_id = ?')
+        .run(mapping.id)
 
       for (const status of input.statuses) {
         const colId = providerIdToColumnId.get(status.id)
         if (!colId) continue
-        await db.prepare(`
+        await db
+          .prepare(`
         INSERT INTO integration_state_mappings (
           id, provider, project_mapping_id, local_status, state_id, state_type, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-      `).run(
-          crypto.randomUUID(),
-          input.provider,
-          mapping.id,
-          colId,
-          status.id,
-          status.type ?? 'unknown'
-        )
+      `)
+          .run(
+            crypto.randomUUID(),
+            input.provider,
+            mapping.id,
+            colId,
+            status.id,
+            status.type ?? 'unknown'
+          )
       }
 
       // Mark status setup complete
-      await db.prepare(
-        "UPDATE integration_project_mappings SET status_setup_complete = 1, updated_at = datetime('now') WHERE id = ?"
-      ).run(mapping.id)
+      await db
+        .prepare(
+          "UPDATE integration_project_mappings SET status_setup_complete = 1, updated_at = datetime('now') WHERE id = ?"
+        )
+        .run(mapping.id)
 
       const project = await db.prepare('SELECT * FROM projects WHERE id = ?').get(input.projectId)
       return project
@@ -2365,7 +2425,8 @@ export function createIntegrationOps(
         await deleteCredential(db, existing.credential_ref)
       }
 
-      await db.prepare(`
+      await db
+        .prepare(`
         INSERT INTO integration_connections (
           id, provider, credential_ref, enabled, created_at, updated_at, last_synced_at
         ) VALUES (?, 'github', ?, 1, datetime('now'), datetime('now'), NULL)
@@ -2373,7 +2434,8 @@ export function createIntegrationOps(
           credential_ref = excluded.credential_ref,
           enabled = 1,
           updated_at = datetime('now')
-      `).run(connectionId, credentialRef)
+      `)
+        .run(connectionId, credentialRef)
 
       if (input.projectId) {
         await setProjectConnection(db, {

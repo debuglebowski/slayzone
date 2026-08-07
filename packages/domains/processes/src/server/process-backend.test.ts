@@ -162,7 +162,8 @@ async function main(): Promise<void> {
   setProcessBackend(null) // restore localProcessBackend
 
   const idR = await spawnProcess('proj', 'task', 'R', 'echo slayzone-real-ok', '/tmp', false)
-  const sawLog = (): boolean => logs.some((l) => l.id === idR && l.line.includes('slayzone-real-ok'))
+  const sawLog = (): boolean =>
+    logs.some((l) => l.id === idR && l.line.includes('slayzone-real-ok'))
   const sawDone = (): boolean => statuses.some((s) => s.id === idR && s.status === 'completed')
   // `exit` can fire before the final stdout `data` flushes, so wait for BOTH the
   // log line and the completed status (deadline-bounded so a stuck child fails).
@@ -188,7 +189,10 @@ async function main(): Promise<void> {
     false
   )
   const envLine = (): string =>
-    logs.filter((l) => l.id === idE).map((l) => l.line).join('')
+    logs
+      .filter((l) => l.id === idE)
+      .map((l) => l.line)
+      .join('')
   const sawEnv = (): boolean => envLine().includes('PATHLEN:')
   const doneE = (): boolean => statuses.some((s) => s.id === idE && s.status === 'completed')
   const deadlineE = Date.now() + 15000
@@ -198,8 +202,14 @@ async function main(): Promise<void> {
   delete process.env.SLAYZONE_HUB_TOKEN
   delete process.env.SLAYZONE_HUB_ADDRESS
   assert(sawEnv(), 'sanitize case: child emitted its env line')
-  assert(envLine().includes('TOK::'), 'sanitize strips inherited SLAYZONE_HUB_TOKEN from a run process')
-  assert(envLine().includes('ADDR::'), 'sanitize strips inherited SLAYZONE_HUB_ADDRESS from a run process')
+  assert(
+    envLine().includes('TOK::'),
+    'sanitize strips inherited SLAYZONE_HUB_TOKEN from a run process'
+  )
+  assert(
+    envLine().includes('ADDR::'),
+    'sanitize strips inherited SLAYZONE_HUB_ADDRESS from a run process'
+  )
   assert(!/PATHLEN:0:/.test(envLine()), 'sanitize keeps a non-empty PATH for a run process')
   killProcess(idE)
 

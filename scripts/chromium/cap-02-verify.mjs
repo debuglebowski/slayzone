@@ -102,7 +102,7 @@ async function main() {
   const rename = await call('tasks:update', {
     taskId: target.id,
     title: 'renamed task',
-    description: '',
+    description: ''
   })
   if (rename.result?.ok && rename.result.task.title === 'renamed task') {
     log(ok(`renamed ${target.id} → "${rename.result.task.title}"`))
@@ -114,7 +114,7 @@ async function main() {
   log('\n== EXIT CRITERION 4 — drag task to new column ==')
   const drag = await call('tasks:update-status', {
     taskId: createdTasks[1].id,
-    columnId: 'in_progress',
+    columnId: 'in_progress'
   })
   if (drag.result?.ok && drag.result.task.status === 'in_progress') {
     log(ok(`moved ${createdTasks[1].id} → in_progress`))
@@ -137,7 +137,7 @@ async function main() {
   const edit = await call('tasks:update', {
     taskId: createdTasks[0].id,
     title: 'cross-region sentinel',
-    description: '',
+    description: ''
   })
   if (!edit.result?.ok) {
     log(bad('sentinel edit failed'))

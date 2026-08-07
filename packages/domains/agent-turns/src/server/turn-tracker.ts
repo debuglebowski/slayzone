@@ -45,9 +45,7 @@ async function resolveTabContext(
        FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
        WHERE t.id = ?`
     )
-    .get(tab.task_id)) as
-    | { worktree_path: string | null; project_path: string | null }
-    | undefined
+    .get(tab.task_id)) as { worktree_path: string | null; project_path: string | null } | undefined
   if (!row) return null
   const repoPath = row.worktree_path || row.project_path
   if (!repoPath) return null
@@ -129,9 +127,7 @@ export async function recordTurnBoundary(
  * Chat-mode entrypoint: pair `user-message` → `result`. Use the captured
  * user prompt as `prompt_preview`.
  */
-export function initChatTurnSubscriber(
-  db: SlayzoneDb
-): (tabId: string, event: AgentEvent) => void {
+export function initChatTurnSubscriber(db: SlayzoneDb): (tabId: string, event: AgentEvent) => void {
   const lastUserPromptByTab = new Map<string, string>()
   return (tabId, event) => {
     if (event.kind === 'user-message') {

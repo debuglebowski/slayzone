@@ -18,11 +18,7 @@ import {
   describe
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { isPromptCaptureMode } from '@slayzone/terminal/shared'
-import {
-  capturePrompt,
-  extractUserPromptText,
-  isUserPromptSubmitEvent
-} from './prompt-capture.js'
+import { capturePrompt, extractUserPromptText, isUserPromptSubmitEvent } from './prompt-capture.js'
 import { listPromptsForTask } from './prompt-db.js'
 
 await describe('extractUserPromptText', () => {
@@ -67,7 +63,9 @@ const db = createSlayzoneDbAdapter(raw)
 const projectId = crypto.randomUUID()
 const taskId = crypto.randomUUID()
 raw.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P', '#000')
-raw.prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)').run(taskId, projectId, 'T1')
+raw
+  .prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)')
+  .run(taskId, projectId, 'T1')
 
 await describe('capturePrompt', () => {
   test('stores UserPromptSubmit prompt for the task+agent', async () => {

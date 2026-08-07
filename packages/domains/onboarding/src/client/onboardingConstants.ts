@@ -1,4 +1,11 @@
-export const STEP_NAMES = ['welcome', 'disclaimer', 'provider', 'analytics', 'cli', 'success'] as const
+export const STEP_NAMES = [
+  'welcome',
+  'disclaimer',
+  'provider',
+  'analytics',
+  'cli',
+  'success'
+] as const
 export const STEP_COUNT = STEP_NAMES.length
 
 // Community links surfaced by the onboarding checklist (Join community / Follow on X).

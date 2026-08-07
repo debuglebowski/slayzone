@@ -1,9 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  powerMonitor,
-  autoUpdater as nativeAutoUpdater
-} from 'electron'
+import { app, BrowserWindow, powerMonitor, autoUpdater as nativeAutoUpdater } from 'electron'
 import { is } from '@electron-toolkit/utils'
 // electron-updater is CJS. electron-vite v5 outputs ESM for main, and Node's
 // CJS→ESM interop doesn't detect Object.defineProperty getters as named exports.

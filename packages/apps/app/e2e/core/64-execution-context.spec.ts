@@ -263,7 +263,8 @@ test.describe('Project execution context settings', () => {
 
     // Clean up — reset to host
     await mainWindow.evaluate(
-      ({ id }) => window.getTrpcVanillaClient().projects.update.mutate({ id, executionContext: null }),
+      ({ id }) =>
+        window.getTrpcVanillaClient().projects.update.mutate({ id, executionContext: null }),
       { id: projectId }
     )
     await seed(mainWindow).refreshData()

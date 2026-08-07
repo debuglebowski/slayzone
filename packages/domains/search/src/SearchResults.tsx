@@ -100,10 +100,11 @@ export function SearchResults({
         </>
       )}
 
-      {isSearching && groups.actions.length === 0 && groups.files.length === 0 &&
-        groups.tasks.length === 0 && groups.projects.length === 0 && (
-          <CommandEmpty>No results found.</CommandEmpty>
-        )}
+      {isSearching &&
+        groups.actions.length === 0 &&
+        groups.files.length === 0 &&
+        groups.tasks.length === 0 &&
+        groups.projects.length === 0 && <CommandEmpty>No results found.</CommandEmpty>}
 
       {isSearching && groups.actions.length > 0 && (
         <CommandGroup heading="Actions">
@@ -135,7 +136,11 @@ export function SearchResults({
               ? offsetPositions(r.positions, item.filePath.length - item.label.length)
               : r.positions
             return (
-              <CommandItem key={item.id} value={item.id} onSelect={() => onSelectFile(item.filePath)}>
+              <CommandItem
+                key={item.id}
+                value={item.id}
+                onSelect={() => onSelectFile(item.filePath)}
+              >
                 <FileIcon
                   fileName={item.label}
                   className="size-4 shrink-0 flex items-center [&>svg]:size-full"

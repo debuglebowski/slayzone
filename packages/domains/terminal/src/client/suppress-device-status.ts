@@ -37,9 +37,7 @@ import type { Terminal as XTerm, IDisposable } from '@xterm/xterm'
  * @returns disposables for the registered handlers; dispose to restore xterm's
  * built-in behaviour.
  */
-export function suppressDeviceStatusReplies(
-  terminal: Pick<XTerm, 'parser'>
-): IDisposable[] {
+export function suppressDeviceStatusReplies(terminal: Pick<XTerm, 'parser'>): IDisposable[] {
   const handled = (): boolean => true
   return [
     // ANSI DSR — includes CPR `ESC[6n` and status `ESC[5n`.

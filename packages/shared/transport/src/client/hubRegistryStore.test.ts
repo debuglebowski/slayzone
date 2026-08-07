@@ -2,8 +2,18 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { useHubRegistryStore } from './hubRegistryStore'
 
 const LOCAL = { id: 'local', kind: 'local' as const, label: 'Local', url: 'ws://127.0.0.1:1/trpc' }
-const REMOTE_A = { id: 'remote-a', kind: 'remote' as const, label: 'A', url: 'wss://a.example/trpc' }
-const REMOTE_B = { id: 'remote-b', kind: 'remote' as const, label: 'B', url: 'wss://b.example/trpc' }
+const REMOTE_A = {
+  id: 'remote-a',
+  kind: 'remote' as const,
+  label: 'A',
+  url: 'wss://a.example/trpc'
+}
+const REMOTE_B = {
+  id: 'remote-b',
+  kind: 'remote' as const,
+  label: 'B',
+  url: 'wss://b.example/trpc'
+}
 
 describe('hubRegistryStore', () => {
   beforeEach(() => {
@@ -43,6 +53,9 @@ describe('hubRegistryStore', () => {
   it('setTokens replaces the token map wholesale (the sign-in path)', () => {
     useHubRegistryStore.getState().seed([LOCAL, REMOTE_A], 'local', { 'remote-a': 'old' })
     useHubRegistryStore.getState().setTokens({ 'remote-a': 'new', 'remote-b': 'tok-b' })
-    expect(useHubRegistryStore.getState().tokens).toEqual({ 'remote-a': 'new', 'remote-b': 'tok-b' })
+    expect(useHubRegistryStore.getState().tokens).toEqual({
+      'remote-a': 'new',
+      'remote-b': 'tok-b'
+    })
   })
 })

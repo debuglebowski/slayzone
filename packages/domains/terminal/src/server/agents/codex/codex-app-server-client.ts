@@ -84,9 +84,7 @@ export class CodexAppServerClient {
     if (this.disposed) return Promise.reject(new Error('CodexAppServerClient disposed'))
     const id = this.nextId++
     const envelope = JSON.stringify(
-      params === undefined
-        ? { jsonrpc: '2.0', id, method }
-        : { jsonrpc: '2.0', id, method, params }
+      params === undefined ? { jsonrpc: '2.0', id, method } : { jsonrpc: '2.0', id, method, params }
     )
     return new Promise<T>((resolve, reject) => {
       const timer =
@@ -161,7 +159,7 @@ export class CodexAppServerClient {
     }
 
     const hasId = msg.id !== undefined && msg.id !== null
-    const isResponse = hasId && (('result' in msg) || ('error' in msg)) && !('method' in msg)
+    const isResponse = hasId && ('result' in msg || 'error' in msg) && !('method' in msg)
 
     if (isResponse) {
       this.resolvePending(msg.id as JsonRpcId, msg)

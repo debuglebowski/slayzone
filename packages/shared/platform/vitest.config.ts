@@ -29,6 +29,6 @@ const harnessScripts = readdirSync(srcDir)
 
 export default defineConfig({
   test: {
-    exclude: [...configDefaults.exclude, ...harnessScripts],
-  },
+    exclude: [...configDefaults.exclude, ...harnessScripts]
+  }
 })

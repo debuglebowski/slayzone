@@ -96,7 +96,10 @@ async function ensureGitPanelVisible(page: import('@playwright/test').Page) {
     // independent open. The old blind Meta+g retry could land a press, miss
     // the short visibility window while the panel mounted, and the next
     // attempt's press would toggle it straight back off.
-    const gitToggle = page.locator('button:visible').filter({ hasText: /^Git\b/ }).first()
+    const gitToggle = page
+      .locator('button:visible')
+      .filter({ hasText: /^Git\b/ })
+      .first()
     if (await gitToggle.isVisible().catch(() => false)) {
       await gitToggle.click().catch(() => {})
     } else {
@@ -429,65 +432,65 @@ test.describe('Merge with conflicts and uncommitted changes', () => {
 // fresh NO_GIT project, even with ensureGitPanelVisible retry. Active-tab
 // switch may race the Meta+g press.
 test.describe('Git init', () => {
-    // Must be outside any git repo for isGitRepo to return false
-    const NO_GIT_DIR = path.join('/tmp', 'slayzone-e2e-no-git')
-    let projectAbbrev: string
+  // Must be outside any git repo for isGitRepo to return false
+  const NO_GIT_DIR = path.join('/tmp', 'slayzone-e2e-no-git')
+  let projectAbbrev: string
 
-    test.beforeAll(async ({ mainWindow }) => {
-      // Create a directory outside any git repo
-      try {
-        execSync(`rm -rf "${NO_GIT_DIR}"`)
-      } catch {
-        /* ignore */
-      }
-      mkdirSync(NO_GIT_DIR, { recursive: true })
+  test.beforeAll(async ({ mainWindow }) => {
+    // Create a directory outside any git repo
+    try {
+      execSync(`rm -rf "${NO_GIT_DIR}"`)
+    } catch {
+      /* ignore */
+    }
+    mkdirSync(NO_GIT_DIR, { recursive: true })
 
-      const s = seed(mainWindow)
-      const p = await s.createProject({ name: 'Init Test', color: '#06b6d4', path: NO_GIT_DIR })
-      projectAbbrev = p.name.slice(0, 2).toUpperCase()
-      await s.createTask({ projectId: p.id, title: 'Init task', status: 'todo' })
-      await s.refreshData()
+    const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'Init Test', color: '#06b6d4', path: NO_GIT_DIR })
+    projectAbbrev = p.name.slice(0, 2).toUpperCase()
+    await s.createTask({ projectId: p.id, title: 'Init task', status: 'todo' })
+    await s.refreshData()
 
-      await goHome(mainWindow)
-      await clickProject(mainWindow, projectAbbrev)
-      await expect(mainWindow.getByText('Init task').first()).toBeVisible({ timeout: 5_000 })
-      await mainWindow.getByText('Init task').first().click()
-      await expect(
-        mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
-      ).toBeVisible({ timeout: 5_000 })
+    await goHome(mainWindow)
+    await clickProject(mainWindow, projectAbbrev)
+    await expect(mainWindow.getByText('Init task').first()).toBeVisible({ timeout: 5_000 })
+    await mainWindow.getByText('Init task').first().click()
+    await expect(
+      mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+    ).toBeVisible({ timeout: 5_000 })
 
-      // Toggle git panel on (general tab — shows git init controls). Use the
-      // retry helper since full-suite pollution can leave focus on the prior
-      // tab's panel.
-      await ensureGitPanelVisible(mainWindow)
-      await expect(mainWindow.getByText('Not a git repository')).toBeVisible({ timeout: 5_000 })
-    })
-
-    test.afterAll(() => {
-      try {
-        execSync(`rm -rf "${NO_GIT_DIR}"`)
-      } catch {
-        /* ignore */
-      }
-    })
-
-    test('shows "Not a git repository" and init button', async ({ mainWindow }) => {
-      await expect(mainWindow.getByText('Not a git repository')).toBeVisible()
-      await expect(mainWindow.getByRole('button', { name: 'Initialize Git' })).toBeVisible()
-    })
-
-    test('initialize git creates repo', async ({ mainWindow }) => {
-      await mainWindow.getByRole('button', { name: 'Initialize Git' }).click()
-
-      // Init button should be gone, "Not a git repository" should be gone
-      await expect(mainWindow.getByRole('button', { name: 'Initialize Git' })).not.toBeVisible()
-      await expect(mainWindow.getByText('Not a git repository')).not.toBeVisible()
-
-      // Verify via API
-      const isRepo = await mainWindow.evaluate(
-        (p) => window.getTrpcVanillaClient().worktrees.isGitRepo.query({ path: p }),
-        NO_GIT_DIR
-      )
-      expect(isRepo).toBe(true)
-    })
+    // Toggle git panel on (general tab — shows git init controls). Use the
+    // retry helper since full-suite pollution can leave focus on the prior
+    // tab's panel.
+    await ensureGitPanelVisible(mainWindow)
+    await expect(mainWindow.getByText('Not a git repository')).toBeVisible({ timeout: 5_000 })
   })
+
+  test.afterAll(() => {
+    try {
+      execSync(`rm -rf "${NO_GIT_DIR}"`)
+    } catch {
+      /* ignore */
+    }
+  })
+
+  test('shows "Not a git repository" and init button', async ({ mainWindow }) => {
+    await expect(mainWindow.getByText('Not a git repository')).toBeVisible()
+    await expect(mainWindow.getByRole('button', { name: 'Initialize Git' })).toBeVisible()
+  })
+
+  test('initialize git creates repo', async ({ mainWindow }) => {
+    await mainWindow.getByRole('button', { name: 'Initialize Git' }).click()
+
+    // Init button should be gone, "Not a git repository" should be gone
+    await expect(mainWindow.getByRole('button', { name: 'Initialize Git' })).not.toBeVisible()
+    await expect(mainWindow.getByText('Not a git repository')).not.toBeVisible()
+
+    // Verify via API
+    const isRepo = await mainWindow.evaluate(
+      (p) => window.getTrpcVanillaClient().worktrees.isGitRepo.query({ path: p }),
+      NO_GIT_DIR
+    )
+    expect(isRepo).toBe(true)
+  })
+})

@@ -168,9 +168,7 @@ async function acquireLock(lockPath: string): Promise<() => Promise<void>> {
         continue
       }
       if (Date.now() > deadline) {
-        throw new Error(
-          `[fs-utils] timed out after ${LOCK_TIMEOUT_MS}ms waiting for ${lockPath}`
-        )
+        throw new Error(`[fs-utils] timed out after ${LOCK_TIMEOUT_MS}ms waiting for ${lockPath}`)
       }
       await sleep(5 + Math.floor(Math.random() * 10))
     }

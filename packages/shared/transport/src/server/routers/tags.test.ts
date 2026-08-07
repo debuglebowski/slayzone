@@ -15,10 +15,14 @@ const caller = tagsRouter.createCaller(ctx)
 const projectId = crypto.randomUUID()
 const projectId2 = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P1', '#000')
-h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId2, 'P2', '#111')
+h.db
+  .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
+  .run(projectId2, 'P2', '#111')
 const taskId = crypto.randomUUID()
 h.db
-  .prepare('INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)')
+  .prepare(
+    'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+  )
   .run(taskId, projectId, 'T1', 'inbox', 3, 0)
 
 test('tags router: create defaults + custom color + per-project sort_order', async () => {
@@ -29,11 +33,21 @@ test('tags router: create defaults + custom color + per-project sort_order', asy
   expect(bug.sort_order).toBe(0)
   expect(bug.id).toBeTruthy()
 
-  const feat = await caller.create({ name: 'feat', color: '#ff0000', textColor: '#ffffff', projectId })
+  const feat = await caller.create({
+    name: 'feat',
+    color: '#ff0000',
+    textColor: '#ffffff',
+    projectId
+  })
   expect(feat.color).toBe('#ff0000')
   expect(feat.sort_order).toBe(1)
 
-  const chore = await caller.create({ name: 'chore', color: '#22c55e', textColor: '#ffffff', projectId })
+  const chore = await caller.create({
+    name: 'chore',
+    color: '#22c55e',
+    textColor: '#ffffff',
+    projectId
+  })
   expect(chore.sort_order).toBe(2)
 })
 
@@ -41,7 +55,12 @@ test('tags router: same name + same color allowed across projects', async () => 
   const bug2 = await caller.create({ name: 'bug', projectId: projectId2 })
   expect(bug2.name).toBe('bug')
   expect(bug2.project_id).toBe(projectId2)
-  const green = await caller.create({ name: 'green', color: '#22c55e', textColor: '#ffffff', projectId: projectId2 })
+  const green = await caller.create({
+    name: 'green',
+    color: '#22c55e',
+    textColor: '#ffffff',
+    projectId: projectId2
+  })
   expect(green.color).toBe('#22c55e')
   expect(green.project_id).toBe(projectId2)
 })

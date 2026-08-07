@@ -19,7 +19,10 @@ const h = await createTestHarness()
 
 const priorFlag = process.env.PLAYWRIGHT
 
-function fakeReqRes(url: string, method = 'POST'): {
+function fakeReqRes(
+  url: string,
+  method = 'POST'
+): {
   req: never
   res: never
   status: () => number | null

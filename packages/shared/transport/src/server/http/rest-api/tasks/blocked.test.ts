@@ -21,13 +21,17 @@ h.db
 
 const taskId = `55555555-${crypto.randomUUID().slice(9)}`
 h.db
-  .prepare('INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)')
+  .prepare(
+    'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+  )
   .run(taskId, projectId, 'Blockable', 'todo', 3, 0)
 
 // A dependency blocker for context.
 const blockerId = crypto.randomUUID()
 h.db
-  .prepare('INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)')
+  .prepare(
+    'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+  )
   .run(blockerId, projectId, 'Blocker', 'todo', 3, 1)
 h.db
   .prepare('INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)')

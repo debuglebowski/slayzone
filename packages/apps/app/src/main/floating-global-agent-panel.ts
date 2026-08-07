@@ -222,7 +222,9 @@ function executeAction(action: Action): void {
         saveExpandedSizeTimer = null
       }
       // Client-local: this is the size of a native window on THIS display.
-      void updateClientSettings({ floatingAgentPanel: { config: readClientSettings().floatingAgentPanel?.config } })
+      void updateClientSettings({
+        floatingAgentPanel: { config: readClientSettings().floatingAgentPanel?.config }
+      })
       broadcastState()
       return
   }

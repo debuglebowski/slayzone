@@ -51,7 +51,8 @@ test.describe('Terminal shell fallback on CLI crash', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      ({ id, mode }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: mode }),
+      ({ id, mode }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: mode }),
       { id: taskId, mode: customModeId }
     )
     await s.refreshData()
@@ -60,12 +61,17 @@ test.describe('Terminal shell fallback on CLI crash', () => {
   test.afterAll(async ({ mainWindow }) => {
     if (customModeId) {
       await mainWindow
-        .evaluate((id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }), customModeId)
+        .evaluate(
+          (id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }),
+          customModeId
+        )
         .catch(() => {})
     }
     await mainWindow
       .evaluate(() =>
-        window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+        window
+          .getTrpcVanillaClient()
+          .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
       )
       .catch(() => {})
   })

@@ -56,11 +56,7 @@ export async function listPromptsForTask(
 }
 
 /** Delete the oldest rows beyond MAX_PROMPTS_PER_AGENT for one (task, agent). */
-export async function prunePrompts(
-  db: SlayzoneDb,
-  taskId: string,
-  agentId: string
-): Promise<void> {
+export async function prunePrompts(db: SlayzoneDb, taskId: string, agentId: string): Promise<void> {
   await db
     .prepare(
       `DELETE FROM agent_prompts

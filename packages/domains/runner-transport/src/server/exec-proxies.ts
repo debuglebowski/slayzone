@@ -472,8 +472,7 @@ function createDetachController<E extends DetachableEntry>(
     }
     if (ended.length > 0) {
       record('runner.sessions_disposed', 'error', ended, runnerId, {
-        message:
-          `${String(ended.length)} ${kind} session(s) exited while the runner was unreachable.`
+        message: `${String(ended.length)} ${kind} session(s) exited while the runner was unreachable.`
       })
     }
   }
@@ -700,9 +699,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           })
         ),
       write: (data: string): void => {
-        void gateway
-          .request(runnerId, HubToRunnerMethods.ptyWrite, { sessionId, data })
-          .catch(noop)
+        void gateway.request(runnerId, HubToRunnerMethods.ptyWrite, { sessionId, data }).catch(noop)
       },
       resize: (cols: number, rows: number): void => {
         void gateway
@@ -1010,12 +1007,10 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
         get pid(): number | undefined {
           return pid
         },
-        onData: (
-          cb: (chunk: string, stream: 'stdout' | 'stderr') => void
-        ): ExecDisposable => dataEmitter.on((v) => cb(v.chunk, v.stream)),
-        onExit: (
-          cb: (e: { code: number | null; signal: string | null }) => void
-        ): ExecDisposable => exitEmitter.on(cb),
+        onData: (cb: (chunk: string, stream: 'stdout' | 'stderr') => void): ExecDisposable =>
+          dataEmitter.on((v) => cb(v.chunk, v.stream)),
+        onExit: (cb: (e: { code: number | null; signal: string | null }) => void): ExecDisposable =>
+          exitEmitter.on(cb),
         /**
          * Write to the routed child's stdin. Beyond the `ProcessBackend` seam
          * (background processes never needed stdin), but the routed CHAT backend
@@ -1207,8 +1202,7 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
             }
           }
         },
-        write: (data) =>
-          (procHandle as unknown as { write?: (d: string) => void }).write?.(data),
+        write: (data) => (procHandle as unknown as { write?: (d: string) => void }).write?.(data),
         kill: (signal) => procHandle.kill(signal)
       }
     }
@@ -1247,7 +1241,9 @@ export interface RemoteWorktreeAdaptersOptions {
  * be a network call (documented cosmetic degradation for remote worktrees).
  * When `resolveRunnerId()` is null every method degrades to `local`.
  */
-export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOptions): WorktreeExecAdapters {
+export function createRemoteWorktreeAdapters(
+  options: RemoteWorktreeAdaptersOptions
+): WorktreeExecAdapters {
   const { gateway, local, resolveRunnerId } = options
 
   return {
@@ -1285,8 +1281,7 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
 
     async copyIgnoredFiles(taskId, repoPath, worktreePath, behavior, customPaths) {
       const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null)
-        throw new NoRunnerAvailableError(`ignored-file copy for task ${taskId}`)
+      if (runnerId == null) throw new NoRunnerAvailableError(`ignored-file copy for task ${taskId}`)
       await gateway.request(runnerId, HubToRunnerMethods.gitCopyIgnoredFiles, {
         repoPath,
         worktreePath,
@@ -1298,7 +1293,9 @@ export function createRemoteWorktreeAdapters(options: RemoteWorktreeAdaptersOpti
     async getCurrentBranch(taskId, repoPath) {
       const runnerId = await resolveRunnerId(taskId)
       if (runnerId == null) throw new NoRunnerAvailableError(`git branch read for task ${taskId}`)
-      const res = await gateway.request(runnerId, HubToRunnerMethods.gitGetCurrentBranch, { repoPath })
+      const res = await gateway.request(runnerId, HubToRunnerMethods.gitGetCurrentBranch, {
+        repoPath
+      })
       return gitGetCurrentBranchResultSchema.parse(res).branch
     },
 

@@ -41,23 +41,28 @@ export function subscribeFileWatcher(rootPath: string, listener: Listener): () =
 
       const prev = debounceMap.get(relPath)
       if (prev) clearTimeout(prev)
-      debounceMap.set(relPath, setTimeout(() => {
-        debounceMap.delete(relPath)
-        const abs = path.join(root, relPath)
-        const exists = fs.existsSync(abs)
-        const event: FileWatchEvent = {
-          type: exists ? 'changed' : 'deleted',
-          root,
-          relPath,
-        }
-        for (const l of listeners) l(event)
-      }, 100))
+      debounceMap.set(
+        relPath,
+        setTimeout(() => {
+          debounceMap.delete(relPath)
+          const abs = path.join(root, relPath)
+          const exists = fs.existsSync(abs)
+          const event: FileWatchEvent = {
+            type: exists ? 'changed' : 'deleted',
+            root,
+            relPath
+          }
+          for (const l of listeners) l(event)
+        }, 100)
+      )
     })
 
     watchers.set(root, { watcher, listeners, debounceMap })
     return () => unsubscribe(root, listener)
   } catch {
-    return () => { /* watch failed; nothing to unsubscribe */ }
+    return () => {
+      /* watch failed; nothing to unsubscribe */
+    }
   }
 }
 

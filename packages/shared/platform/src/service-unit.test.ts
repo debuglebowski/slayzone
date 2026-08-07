@@ -57,7 +57,8 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 function assertThrows(fn: () => unknown, needle: string, msg: string): void {
   let message = ''
@@ -105,8 +106,13 @@ console.log('─'.repeat(40))
 test('detects a backend appropriate to the platform', () => {
   const detected = detectBackend()
   if (process.platform === 'darwin') assertEq(detected, 'launchd', 'macOS → launchd')
-  else if (process.platform === 'win32') assertEq(detected, 'none', 'Windows → no user supervisor yet')
-  else assert(detected === 'systemd' || detected === 'none', `linux → systemd or none, got ${detected}`)
+  else if (process.platform === 'win32')
+    assertEq(detected, 'none', 'Windows → no user supervisor yet')
+  else
+    assert(
+      detected === 'systemd' || detected === 'none',
+      `linux → systemd or none, got ${detected}`
+    )
 })
 
 test('systemd requires a reachable USER BUS, not just the binary', () => {
@@ -372,7 +378,11 @@ test('rejects a name that would escape the unit dir', () => {
   assertThrows(() => unitPath('hub', 'a/b', 'systemd', '/units'), 'name', 'slash')
   assertThrows(() => unitPath('hub', '', 'systemd', '/units'), 'name', 'empty')
   // The runner path validates identically — the guard is not hub-specific.
-  assertThrows(() => unitPath('runner', '../../evil', 'systemd', '/units'), 'name', 'runner traversal')
+  assertThrows(
+    () => unitPath('runner', '../../evil', 'systemd', '/units'),
+    'name',
+    'runner traversal'
+  )
 })
 
 test('rejects a name carrying unit/plist syntax or whitespace', () => {
@@ -386,7 +396,11 @@ test('the invalid-name error names the kind it is talking about', () => {
   // The hub error points at the config.json `hubName` key; a runner operator has no
   // such key, so a hub-worded message would misdirect them.
   assertThrows(() => unitPath('hub', 'a b', 'systemd', '/units'), 'hub name', 'hub wording')
-  assertThrows(() => unitPath('runner', 'a b', 'systemd', '/units'), 'runner name', 'runner wording')
+  assertThrows(
+    () => unitPath('runner', 'a b', 'systemd', '/units'),
+    'runner name',
+    'runner wording'
+  )
 })
 
 test('accepts the names a hub actually gets (dirname-derived)', () => {

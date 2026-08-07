@@ -45,8 +45,14 @@ test.describe('Automations: catchup_on_start (tRPC end-to-end)', () => {
     ...(catchup_on_start !== undefined ? { catchup_on_start } : {})
   })
 
-  const createAutomation = (page: import('@playwright/test').Page, input: ReturnType<typeof buildCronInput>) =>
-    page.evaluate((payload) => window.getTrpcVanillaClient().automations.create.mutate(payload), input) as Promise<AutomationRow>
+  const createAutomation = (
+    page: import('@playwright/test').Page,
+    input: ReturnType<typeof buildCronInput>
+  ) =>
+    page.evaluate(
+      (payload) => window.getTrpcVanillaClient().automations.create.mutate(payload),
+      input
+    ) as Promise<AutomationRow>
 
   const updateAutomation = (
     page: import('@playwright/test').Page,

@@ -34,7 +34,10 @@ export function BrowserTabBar({
   return (
     <div className="shrink-0 flex items-center h-10 px-2 gap-1 border-b border-border bg-surface-1 overflow-x-auto scrollbar-hide">
       <DndContext sensors={tabSensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <SortableContext items={tabs.tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
+        <SortableContext
+          items={tabs.tabs.map((t) => t.id)}
+          strategy={horizontalListSortingStrategy}
+        >
           {tabs.tabs.map((tab) => (
             <SortableBrowserTab
               key={tab.id}

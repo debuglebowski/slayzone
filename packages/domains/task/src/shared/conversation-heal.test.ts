@@ -1,4 +1,8 @@
-import { decideConversationHeal, type HealInput, type HealTranscriptMeta } from './conversation-heal'
+import {
+  decideConversationHeal,
+  type HealInput,
+  type HealTranscriptMeta
+} from './conversation-heal'
 import { parseSqliteUtc } from './types'
 
 function assert(cond: boolean, msg: string): void {
@@ -73,7 +77,10 @@ assert(
 const phantomWithFallback = base({
   storedInHistory: true,
   storedExists: false,
-  history: [{ id: 'phantom', exists: false }, { id: 'survivor', exists: true }]
+  history: [
+    { id: 'phantom', exists: false },
+    { id: 'survivor', exists: true }
+  ]
 })
 assert(
   act(phantomWithFallback) === 'history' && id(phantomWithFallback) === 'survivor',
@@ -86,10 +93,20 @@ assert(
 )
 
 // history: exact fallback to a surviving recorded id
-const hInput = base({ history: [{ id: 'old1', exists: false }, { id: 'old2', exists: true }] })
+const hInput = base({
+  history: [
+    { id: 'old1', exists: false },
+    { id: 'old2', exists: true }
+  ]
+})
 assert(act(hInput) === 'history' && id(hInput) === 'old2', 'falls back to surviving history entry')
 // most-recent-first selection
-const hInput2 = base({ history: [{ id: 'a', exists: true }, { id: 'b', exists: true }] })
+const hInput2 = base({
+  history: [
+    { id: 'a', exists: true },
+    { id: 'b', exists: true }
+  ]
+})
 assert(id(hInput2) === 'b', 'history picks most-recent surviving')
 // history is preferred over orphan
 const hInput3 = base({ history: [{ id: 'h', exists: true }], candidates: [cand({})] })
@@ -104,8 +121,12 @@ assert(id(base({ candidates: [cand({ id: 'real' })] })) === 'real', 'orphan retu
 
 // non-legacy tasks never disk-guess
 assert(
-  act(base({ task: { cwd: '/repo', gitBranch: 'main', createdAtMs: T0, isLegacy: false }, candidates: [cand({})] })) ===
-    'overlay',
+  act(
+    base({
+      task: { cwd: '/repo', gitBranch: 'main', createdAtMs: T0, isLegacy: false },
+      candidates: [cand({})]
+    })
+  ) === 'overlay',
   'non-legacy task never uses orphan path'
 )
 
@@ -115,7 +136,10 @@ assert(
   act(base({ candidates: [cand({ id: 'a' }), cand({ id: 'b' })] })) === 'overlay',
   'two candidates in dir+window → overlay'
 )
-assert(act(base({ candidates: [cand({ referenced: true })] })) === 'overlay', 'referenced orphan → overlay')
+assert(
+  act(base({ candidates: [cand({ referenced: true })] })) === 'overlay',
+  'referenced orphan → overlay'
+)
 assert(
   act(base({ candidates: [cand({ firstTsMs: T0 - 1 })] })) === 'overlay',
   'started before task creation → overlay'
@@ -124,19 +148,36 @@ assert(
   act(base({ candidates: [cand({ firstTsMs: T0 + WINDOW + 1 })] })) === 'overlay',
   'started after window → overlay'
 )
-assert(act(base({ candidates: [cand({ gitBranch: 'feature' })] })) === 'overlay', 'branch mismatch → overlay')
 assert(
-  act(base({ task: { cwd: '/repo', gitBranch: null, createdAtMs: T0, isLegacy: true }, candidates: [cand({ gitBranch: null })] })) ===
-    'overlay',
+  act(base({ candidates: [cand({ gitBranch: 'feature' })] })) === 'overlay',
+  'branch mismatch → overlay'
+)
+assert(
+  act(
+    base({
+      task: { cwd: '/repo', gitBranch: null, createdAtMs: T0, isLegacy: true },
+      candidates: [cand({ gitBranch: null })]
+    })
+  ) === 'overlay',
   'unknown task branch → overlay (never guess across branches)'
 )
-assert(act(base({ candidates: [cand({ gitBranch: null })] })) === 'overlay', 'candidate branch unknown → overlay')
-assert(act(base({ candidates: [cand({ hasHumanTurn: false })] })) === 'overlay', 'sidechain-only orphan → overlay')
-assert(act(base({ candidates: [cand({ firstTsMs: null })] })) === 'overlay', 'no timestamp → overlay')
+assert(
+  act(base({ candidates: [cand({ gitBranch: null })] })) === 'overlay',
+  'candidate branch unknown → overlay'
+)
+assert(
+  act(base({ candidates: [cand({ hasHumanTurn: false })] })) === 'overlay',
+  'sidechain-only orphan → overlay'
+)
+assert(
+  act(base({ candidates: [cand({ firstTsMs: null })] })) === 'overlay',
+  'no timestamp → overlay'
+)
 
 // a second referenced conversation in the same dir+window still blocks (ambiguous)
 assert(
-  act(base({ candidates: [cand({ id: 'mine' }), cand({ id: 'neighbor', referenced: true })] })) === 'overlay',
+  act(base({ candidates: [cand({ id: 'mine' }), cand({ id: 'neighbor', referenced: true })] })) ===
+    'overlay',
   'a referenced sibling in dir+window → ambiguous → overlay'
 )
 

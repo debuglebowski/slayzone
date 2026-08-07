@@ -39,10 +39,16 @@ export const feedbackShim = {
     jsonRpcCall<FeedbackMessage[]>('feedback:getMessages', { params: [threadId] }).catch(() => []),
 
   createThread: (input: CreateThreadInput): Promise<FeedbackThread> =>
-    jsonRpcCall<FeedbackThread>('feedback:createThread', input as unknown as Record<string, unknown>),
+    jsonRpcCall<FeedbackThread>(
+      'feedback:createThread',
+      input as unknown as Record<string, unknown>
+    ),
 
   addMessage: (input: AddMessageInput): Promise<FeedbackMessage> =>
-    jsonRpcCall<FeedbackMessage>('feedback:addMessage', input as unknown as Record<string, unknown>),
+    jsonRpcCall<FeedbackMessage>(
+      'feedback:addMessage',
+      input as unknown as Record<string, unknown>
+    ),
 
   deleteThread: async (id: string): Promise<void> => {
     await jsonRpcCall('feedback:deleteThread', { params: [id] })
@@ -50,5 +56,5 @@ export const feedbackShim = {
 
   updateThreadDiscordId: async (id: string, discordThreadId: string): Promise<void> => {
     await jsonRpcCall('feedback:updateThreadDiscordId', { params: [id, discordThreadId] })
-  },
+  }
 }

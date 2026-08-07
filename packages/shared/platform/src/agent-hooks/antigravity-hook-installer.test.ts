@@ -49,7 +49,11 @@ describe('installAntigravityHooks', () => {
   test('handler command carries the event name as an argv arg', async () => {
     const target = tmpHooks()
     try {
-      await installAntigravityHooks({ scriptPath: SCRIPT, hooksPath: target, skipBinaryProbe: true })
+      await installAntigravityHooks({
+        scriptPath: SCRIPT,
+        hooksPath: target,
+        skipBinaryProbe: true
+      })
       const named = readJson(target)['slayzone-notify']
       const entry = (named.PreInvocation as Array<{ hooks: Array<{ command: string }> }>)[0]
       expect(entry.hooks[0].command).toBe(`${SCRIPT} PreInvocation`)
@@ -63,7 +67,11 @@ describe('installAntigravityHooks', () => {
   test('PostToolUse gets matcher "*", PreInvocation/Stop get none', async () => {
     const target = tmpHooks()
     try {
-      await installAntigravityHooks({ scriptPath: SCRIPT, hooksPath: target, skipBinaryProbe: true })
+      await installAntigravityHooks({
+        scriptPath: SCRIPT,
+        hooksPath: target,
+        skipBinaryProbe: true
+      })
       const named = readJson(target)['slayzone-notify']
       expect((named.PostToolUse as Array<{ matcher?: string }>)[0].matcher).toBe('*')
       expect((named.PreInvocation as Array<{ matcher?: string }>)[0].matcher).toBeUndefined()
@@ -76,7 +84,9 @@ describe('installAntigravityHooks', () => {
   test('preserves other named hooks in the file', async () => {
     const target = tmpHooks()
     fs.mkdirSync(path.dirname(target), { recursive: true })
-    const userHook = { PreToolUse: [{ matcher: 'run_command', hooks: [{ command: '/my/lint.sh' }] }] }
+    const userHook = {
+      PreToolUse: [{ matcher: 'run_command', hooks: [{ command: '/my/lint.sh' }] }]
+    }
     fs.writeFileSync(target, JSON.stringify({ 'user-linter': userHook }))
     try {
       const r = await installAntigravityHooks({
@@ -103,7 +113,11 @@ describe('installAntigravityHooks', () => {
       })
     )
     try {
-      await installAntigravityHooks({ scriptPath: SCRIPT, hooksPath: target, skipBinaryProbe: true })
+      await installAntigravityHooks({
+        scriptPath: SCRIPT,
+        hooksPath: target,
+        skipBinaryProbe: true
+      })
       const named = readJson(target)['slayzone-notify']
       expect(named.SessionStart).toBeUndefined()
       expect(Object.keys(named).sort()).toEqual([...ANTIGRAVITY_HOOK_EVENTS].sort())
@@ -133,9 +147,17 @@ describe('installAntigravityHooks', () => {
   test('idempotent — rerun produces same file content', async () => {
     const target = tmpHooks()
     try {
-      await installAntigravityHooks({ scriptPath: SCRIPT, hooksPath: target, skipBinaryProbe: true })
+      await installAntigravityHooks({
+        scriptPath: SCRIPT,
+        hooksPath: target,
+        skipBinaryProbe: true
+      })
       const first = fs.readFileSync(target, 'utf8')
-      await installAntigravityHooks({ scriptPath: SCRIPT, hooksPath: target, skipBinaryProbe: true })
+      await installAntigravityHooks({
+        scriptPath: SCRIPT,
+        hooksPath: target,
+        skipBinaryProbe: true
+      })
       const second = fs.readFileSync(target, 'utf8')
       expect(first).toBe(second)
     } finally {

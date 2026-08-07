@@ -64,10 +64,7 @@ export function SearchDialog({
 
   const { fzfLabel, fzfPath } = useMemo(() => createFzf(items), [items])
 
-  const results = useMemo(
-    () => rankResults(fzfLabel, fzfPath, search),
-    [fzfLabel, fzfPath, search]
-  )
+  const results = useMemo(() => rankResults(fzfLabel, fzfPath, search), [fzfLabel, fzfPath, search])
 
   const groupedResults = useMemo(() => groupResults(results), [results])
 

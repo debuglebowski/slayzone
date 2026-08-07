@@ -52,7 +52,10 @@ const projectId = (project as { id: string }).id
 
 // Exercises namedTxn ('task:insert-row') through SyncSlayzoneDb's registry dispatch.
 const created = await trpc.task.create.mutate({ projectId, title: 'smoke task' } as never)
-check('trpc task.create (namedTxn)', !!created && (created as { title?: string }).title === 'smoke task')
+check(
+  'trpc task.create (namedTxn)',
+  !!created && (created as { title?: string }).title === 'smoke task'
+)
 
 const tasks1 = await trpc.task.getAll.query()
 check('trpc task.getAll → [task]', Array.isArray(tasks1) && tasks1.length === 1)

@@ -24,8 +24,9 @@ interface UseChatCollaborationOpts {
  */
 export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollaborationOpts) {
   const trpcClient = useTRPCClient()
-  const [chatCollaboration, setChatCollaborationState] =
-    useState<ChatCollaborationMode>(DEFAULT_CHAT_COLLABORATION)
+  const [chatCollaboration, setChatCollaborationState] = useState<ChatCollaborationMode>(
+    DEFAULT_CHAT_COLLABORATION
+  )
   const [collaborationChanging, setCollaborationChanging] = useState(false)
 
   useEffect(() => {

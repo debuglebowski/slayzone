@@ -50,9 +50,10 @@ h.db
   .run(taskId, projectId, 'T1', 'inbox', 3, 0)
 
 const wasSpawnedOf = (id: string): number =>
-  (h.db.prepare('SELECT was_spawned FROM terminal_tabs WHERE id = ?').get(id) as
-    | { was_spawned: number }
-    | undefined
+  (
+    h.db.prepare('SELECT was_spawned FROM terminal_tabs WHERE id = ?').get(id) as
+      | { was_spawned: number }
+      | undefined
   )?.was_spawned ?? -1
 
 test('tab-flag recorders: unwired by default (the orphaned state)', () => {

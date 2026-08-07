@@ -6,12 +6,7 @@
  * updateTaskOp (no onMutation), then calls deps.notifyRenderer() manually.
  * This means notifyRenderer fires once (not twice like sibling tools).
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../test-utils/ipc-harness.js'
+import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { spyTaskEvents } from '../../../../../test-utils/event-spy.js'
 import {

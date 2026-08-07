@@ -45,7 +45,9 @@ export function ActionSection({
             variant="ghost"
             size="sm"
             className="h-6 text-xs"
-            onClick={() => setActions((prev: ActionConfig[]) => [...prev, { ...EMPTY_RUN_COMMAND }])}
+            onClick={() =>
+              setActions((prev: ActionConfig[]) => [...prev, { ...EMPTY_RUN_COMMAND }])
+            }
           >
             <Terminal className="w-3 h-3 mr-1" /> Command
           </Button>
@@ -54,7 +56,9 @@ export function ActionSection({
             size="sm"
             className="h-6 text-xs"
             disabled={providers.length === 0}
-            onClick={() => setActions((prev: ActionConfig[]) => [...prev, newAiAction(providers[0])])}
+            onClick={() =>
+              setActions((prev: ActionConfig[]) => [...prev, newAiAction(providers[0])])
+            }
           >
             <Sparkles className="w-3 h-3 mr-1" /> AI
           </Button>

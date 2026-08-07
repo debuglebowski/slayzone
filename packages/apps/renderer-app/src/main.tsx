@@ -1,9 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import {
-  TrpcProvider,
-  electronBootstrap,
-  initTrpcClient
-} from '@slayzone/transport/client'
+import { TrpcProvider, electronBootstrap, initTrpcClient } from '@slayzone/transport/client'
 import { ThemeProvider, AppearanceProvider } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'

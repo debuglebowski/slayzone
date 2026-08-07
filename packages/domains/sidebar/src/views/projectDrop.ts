@@ -130,7 +130,10 @@ export function resolveProjectDrop(input: DropInput): DropAction {
     if (over.kind === 'project' && over.group !== null) return { type: 'none' }
     const overRef: TopLevelEntryRef =
       over.kind === 'group' ? { kind: 'group', id: over.id } : { kind: 'project', id: over.id }
-    return { type: 'reorderTop', refs: insertRef(topLevel, { kind: 'group', id: active.id }, overRef, mode) }
+    return {
+      type: 'reorderTop',
+      refs: insertRef(topLevel, { kind: 'group', id: active.id }, overRef, mode)
+    }
   }
 
   // ── Project dragged onto a GROUP ───────────────────────────────────────────
@@ -139,17 +142,31 @@ export function resolveProjectDrop(input: DropInput): DropAction {
   if (over.kind === 'group') {
     if (mode === 'merge') {
       if (active.group === over.id) return { type: 'none' }
-      return { type: 'join', groupId: over.id, projectId: active.id, index: members(over.id).length }
+      return {
+        type: 'join',
+        groupId: over.id,
+        projectId: active.id,
+        index: members(over.id).length
+      }
     }
     if (active.group !== null) {
       // Member → top level, positioned around the folder (leaves its group).
       const i = topLevel.findIndex((r) => r.kind === 'group' && r.id === over.id)
       if (i < 0) return { type: 'none' }
-      return { type: 'moveOut', projectId: active.id, index: Math.max(0, mode === 'after' ? i + 1 : i) }
+      return {
+        type: 'moveOut',
+        projectId: active.id,
+        index: Math.max(0, mode === 'after' ? i + 1 : i)
+      }
     }
     return {
       type: 'reorderTop',
-      refs: insertRef(topLevel, { kind: 'project', id: active.id }, { kind: 'group', id: over.id }, mode)
+      refs: insertRef(
+        topLevel,
+        { kind: 'project', id: active.id },
+        { kind: 'group', id: over.id },
+        mode
+      )
     }
   }
 
@@ -162,7 +179,12 @@ export function resolveProjectDrop(input: DropInput): DropAction {
     const list = members(tGroup)
     if (mode === 'merge') {
       if (active.group === tGroup) return { type: 'none' }
-      return { type: 'join', groupId: tGroup, projectId: active.id, index: Math.max(0, list.indexOf(over.id)) }
+      return {
+        type: 'join',
+        groupId: tGroup,
+        projectId: active.id,
+        index: Math.max(0, list.indexOf(over.id))
+      }
     }
     let idx = list.indexOf(over.id)
     if (mode === 'after') idx += 1
@@ -183,11 +205,20 @@ export function resolveProjectDrop(input: DropInput): DropAction {
   if (active.group !== null) {
     // Member dropped on a top-level edge → leave its group (drag-out).
     const i = topLevel.findIndex((r) => r.kind === 'project' && r.id === over.id)
-    return { type: 'moveOut', projectId: active.id, index: Math.max(0, mode === 'after' ? i + 1 : i) }
+    return {
+      type: 'moveOut',
+      projectId: active.id,
+      index: Math.max(0, mode === 'after' ? i + 1 : i)
+    }
   }
   return {
     type: 'reorderTop',
-    refs: insertRef(topLevel, { kind: 'project', id: active.id }, { kind: 'project', id: over.id }, mode)
+    refs: insertRef(
+      topLevel,
+      { kind: 'project', id: active.id },
+      { kind: 'project', id: over.id },
+      mode
+    )
   }
 }
 

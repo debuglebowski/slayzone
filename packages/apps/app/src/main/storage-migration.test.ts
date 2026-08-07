@@ -63,19 +63,44 @@ try {
 
     // Copied into new storage:
     check('prod DB copied', readFileSync(join(storage, 'slayzone.sqlite'), 'utf8') === 'PRODDB')
-    check('wal + shm copied', existsSync(join(storage, 'slayzone.sqlite-wal')) && existsSync(join(storage, 'slayzone.sqlite-shm')))
-    check('artifacts copied (recursive)', readFileSync(join(storage, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART')
-    check('blobs copied (recursive)', readFileSync(join(storage, 'blobs', 'd8', '3c76abcd'), 'utf8') === 'BLOBCONTENT')
+    check(
+      'wal + shm copied',
+      existsSync(join(storage, 'slayzone.sqlite-wal')) &&
+        existsSync(join(storage, 'slayzone.sqlite-shm'))
+    )
+    check(
+      'artifacts copied (recursive)',
+      readFileSync(join(storage, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART'
+    )
+    check(
+      'blobs copied (recursive)',
+      readFileSync(join(storage, 'blobs', 'd8', '3c76abcd'), 'utf8') === 'BLOBCONTENT'
+    )
 
     // SOURCE IS READ-ONLY — nothing removed from the legacy dir:
-    check('source prod DB PRESERVED', readFileSync(join(old, 'slayzone.sqlite'), 'utf8') === 'PRODDB')
-    check('source wal/shm PRESERVED', existsSync(join(old, 'slayzone.sqlite-wal')) && existsSync(join(old, 'slayzone.sqlite-shm')))
-    check('source artifacts PRESERVED', readFileSync(join(old, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART')
-    check('source blobs PRESERVED', readFileSync(join(old, 'blobs', 'd8', '3c76abcd'), 'utf8') === 'BLOBCONTENT')
+    check(
+      'source prod DB PRESERVED',
+      readFileSync(join(old, 'slayzone.sqlite'), 'utf8') === 'PRODDB'
+    )
+    check(
+      'source wal/shm PRESERVED',
+      existsSync(join(old, 'slayzone.sqlite-wal')) && existsSync(join(old, 'slayzone.sqlite-shm'))
+    )
+    check(
+      'source artifacts PRESERVED',
+      readFileSync(join(old, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART'
+    )
+    check(
+      'source blobs PRESERVED',
+      readFileSync(join(old, 'blobs', 'd8', '3c76abcd'), 'utf8') === 'BLOBCONTENT'
+    )
 
     // Channel scope — packaged NEVER touches the dev DB:
     check('dev DB NOT migrated by prod channel', !existsSync(join(storage, 'slayzone.dev.sqlite')))
-    check('source dev DB untouched', readFileSync(join(old, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
+    check(
+      'source dev DB untouched',
+      readFileSync(join(old, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB'
+    )
     // Excluded sibling stays behind AND is not copied:
     check('diagnostics NOT copied', !existsSync(join(storage, 'slayzone.diagnostics.sqlite')))
   }
@@ -90,7 +115,10 @@ try {
 
     check('dev DB copied', readFileSync(join(storage, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
     check('dev channel NEVER copies prod DB', !existsSync(join(storage, 'slayzone.sqlite')))
-    check('dev channel NEVER touches prod DB source', readFileSync(join(old, 'slayzone.sqlite'), 'utf8') === 'PRODDB')
+    check(
+      'dev channel NEVER touches prod DB source',
+      readFileSync(join(old, 'slayzone.sqlite'), 'utf8') === 'PRODDB'
+    )
   }
 
   // --- merges MISSING content when dest dir already exists (orphan-class fix) ----
@@ -112,10 +140,22 @@ try {
 
     ensureStorageDir(old, storage, true)
 
-    check('orphan working file merged into existing dest', readFileSync(join(storage, 'artifacts', 'tX', 'a.txt'), 'utf8') === 'ORPHANWF')
-    check('pre-existing dest blob untouched', readFileSync(join(storage, 'blobs', 'ab', 'newhash'), 'utf8') === 'NEW')
-    check('colliding dest file NOT clobbered (dest wins)', readFileSync(join(storage, 'blobs', '77', 'orphanhash'), 'utf8') === 'CURRENT')
-    check('merge leaves source intact', readFileSync(join(old, 'artifacts', 'tX', 'a.txt'), 'utf8') === 'ORPHANWF')
+    check(
+      'orphan working file merged into existing dest',
+      readFileSync(join(storage, 'artifacts', 'tX', 'a.txt'), 'utf8') === 'ORPHANWF'
+    )
+    check(
+      'pre-existing dest blob untouched',
+      readFileSync(join(storage, 'blobs', 'ab', 'newhash'), 'utf8') === 'NEW'
+    )
+    check(
+      'colliding dest file NOT clobbered (dest wins)',
+      readFileSync(join(storage, 'blobs', '77', 'orphanhash'), 'utf8') === 'CURRENT'
+    )
+    check(
+      'merge leaves source intact',
+      readFileSync(join(old, 'artifacts', 'tX', 'a.txt'), 'utf8') === 'ORPHANWF'
+    )
   }
 
   // --- channel-scoped backups, copy-only ----------------------------------------
@@ -131,9 +171,19 @@ try {
 
     ensureStorageDir(old, storage, /* packaged */ true)
     const dstB = join(storage, 'backups')
-    check('prod backup migrated (copy)', existsSync(join(dstB, 'slayzone.2026-03-01T00-00-00-000Z.manual.sqlite')))
-    check('dev backup NOT migrated by prod channel', !existsSync(join(dstB, 'slayzone.dev.2026-02-01T00-00-00-000Z.manual.sqlite')))
-    check('source backups PRESERVED', existsSync(join(bdir, 'slayzone.2026-03-01T00-00-00-000Z.manual.sqlite')) && existsSync(join(bdir, 'slayzone.dev.2026-02-01T00-00-00-000Z.manual.sqlite')))
+    check(
+      'prod backup migrated (copy)',
+      existsSync(join(dstB, 'slayzone.2026-03-01T00-00-00-000Z.manual.sqlite'))
+    )
+    check(
+      'dev backup NOT migrated by prod channel',
+      !existsSync(join(dstB, 'slayzone.dev.2026-02-01T00-00-00-000Z.manual.sqlite'))
+    )
+    check(
+      'source backups PRESERVED',
+      existsSync(join(bdir, 'slayzone.2026-03-01T00-00-00-000Z.manual.sqlite')) &&
+        existsSync(join(bdir, 'slayzone.dev.2026-02-01T00-00-00-000Z.manual.sqlite'))
+    )
   }
 
   // --- per-channel sentinel → genuinely one-time (skips the shared dir after) ----
@@ -146,7 +196,10 @@ try {
     mkdirSync(join(old, 'blobs', 'ff'), { recursive: true })
     writeFileSync(join(old, 'blobs', 'ff', 'laterblob'), 'LATER')
     ensureStorageDir(old, storage, true) // second boot
-    check('sentinel makes 2nd run a no-op (does NOT re-scan shared dir)', !existsSync(join(storage, 'blobs', 'ff', 'laterblob')))
+    check(
+      'sentinel makes 2nd run a no-op (does NOT re-scan shared dir)',
+      !existsSync(join(storage, 'blobs', 'ff', 'laterblob'))
+    )
   }
 
   // --- no-op when there is nothing to migrate -----------------------------------
@@ -163,7 +216,10 @@ try {
     writeFileSync(join(storage, 'slayzone.sqlite'), 'EXISTING')
     writeFileSync(join(old, 'slayzone.sqlite'), 'INCOMING')
     ensureStorageDir(old, storage, true)
-    check('existing storage DB not clobbered', readFileSync(join(storage, 'slayzone.sqlite'), 'utf8') === 'EXISTING')
+    check(
+      'existing storage DB not clobbered',
+      readFileSync(join(storage, 'slayzone.sqlite'), 'utf8') === 'EXISTING'
+    )
     check('source left intact when target exists', existsSync(join(old, 'slayzone.sqlite')))
   }
 } finally {

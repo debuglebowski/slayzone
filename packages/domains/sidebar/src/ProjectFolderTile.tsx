@@ -18,13 +18,7 @@ import { ProjectAvatar } from './ProjectAvatar'
 import { ProjectItem } from './ProjectItem'
 
 /** Up-to-4 mini-avatar grid shown on a collapsed folder (and the drag preview). */
-export function FolderMiniGrid({
-  members,
-  className
-}: {
-  members: Project[]
-  className?: string
-}) {
+export function FolderMiniGrid({ members, className }: { members: Project[]; className?: string }) {
   const shown = members.slice(0, 4)
   return (
     <div

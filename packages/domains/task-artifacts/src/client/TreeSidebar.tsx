@@ -383,7 +383,9 @@ export function TreeSidebar(props: TreeSidebarProps) {
                         <ContextMenuShortcut>⌘C</ContextMenuShortcut>
                       </ContextMenuItem>
                       {(clipboard || osHasFiles) && (
-                        <ContextMenuItem onSelect={() => void handleArtifactPaste(artifact.folder_id)}>
+                        <ContextMenuItem
+                          onSelect={() => void handleArtifactPaste(artifact.folder_id)}
+                        >
                           <ClipboardPaste className="size-3 mr-2" /> Paste
                           <ContextMenuShortcut>⌘V</ContextMenuShortcut>
                         </ContextMenuItem>

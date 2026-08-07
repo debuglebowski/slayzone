@@ -85,9 +85,9 @@ describe('RunnerCard', () => {
     resolvedRunnerId = null
     render(<RunnerCard taskId="task-1" taskRunnerId={null} projectDefaultRunnerId={null} />)
 
-    const options = Array.from(
-      screen.getByTestId('runner-select').querySelectorAll('option')
-    ).map((o) => o.textContent)
+    const options = Array.from(screen.getByTestId('runner-select').querySelectorAll('option')).map(
+      (o) => o.textContent
+    )
     expect(options).toContain('Inherit project default (Local)')
     expect(options).toContain('mac-studio')
     expect(options).toContain('linux-box')
@@ -95,12 +95,10 @@ describe('RunnerCard', () => {
 
   it('labels the inherit option with the project default runner name when set', () => {
     runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
-    render(
-      <RunnerCard taskId="task-1" taskRunnerId={null} projectDefaultRunnerId="runner-a" />
+    render(<RunnerCard taskId="task-1" taskRunnerId={null} projectDefaultRunnerId="runner-a" />)
+    const options = Array.from(screen.getByTestId('runner-select').querySelectorAll('option')).map(
+      (o) => o.textContent
     )
-    const options = Array.from(
-      screen.getByTestId('runner-select').querySelectorAll('option')
-    ).map((o) => o.textContent)
     expect(options).toContain('Inherit project default (mac-studio)')
   })
 

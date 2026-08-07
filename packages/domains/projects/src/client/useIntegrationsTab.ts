@@ -129,13 +129,19 @@ export function useIntegrationsTab({
       loadedGithubProjectConnectionId
     ] = await Promise.all([
       trpcClient.integrations.listConnections.query({ provider: 'linear' }),
-      trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'linear' }),
+      trpcClient.integrations.getProjectMapping.query({
+        projectId: project.id,
+        provider: 'linear'
+      }),
       trpcClient.integrations.getProjectConnection.query({
         projectId: project.id,
         provider: 'linear'
       }),
       trpcClient.integrations.listConnections.query({ provider: 'github' }),
-      trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'github' }),
+      trpcClient.integrations.getProjectMapping.query({
+        projectId: project.id,
+        provider: 'github'
+      }),
       trpcClient.integrations.getProjectConnection.query({
         projectId: project.id,
         provider: 'github'

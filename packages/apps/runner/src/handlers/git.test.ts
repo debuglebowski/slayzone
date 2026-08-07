@@ -62,7 +62,9 @@ describe('createGitHandlers — git.getCurrentBranch', () => {
     git(['checkout', '-b', 'my-feature'], dir)
 
     const handlers = createGitHandlers(ctxWithRoots(roots))
-    expect(await handlers['git.getCurrentBranch']({ repoPath: dir })).toEqual({ branch: 'my-feature' })
+    expect(await handlers['git.getCurrentBranch']({ repoPath: dir })).toEqual({
+      branch: 'my-feature'
+    })
   })
 
   it('returns null branch for a non-repo path (inside an allowed root)', async () => {

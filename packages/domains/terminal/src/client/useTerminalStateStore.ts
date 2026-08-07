@@ -298,13 +298,11 @@ async function pullReconcile(): Promise<void> {
     )
     const sessions = perHub.flat()
     const hibernatedIds: string[] = []
-    useTerminalStateStore
-      .getState()
-      .reconcile(
-        sessions.map((s) => ({ sessionId: s.sessionId, state: s.state as TerminalState })),
-        hibernatedIds,
-        dispatchedAt
-      )
+    useTerminalStateStore.getState().reconcile(
+      sessions.map((s) => ({ sessionId: s.sessionId, state: s.state as TerminalState })),
+      hibernatedIds,
+      dispatchedAt
+    )
   } catch {
     // Best-effort; the next trigger retries (also covers the tRPC-client-not-yet-
     // ready window right after boot — the React hook's initial hydrate fills it).

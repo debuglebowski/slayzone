@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  type Dispatch,
-  type RefObject,
-  type SetStateAction
-} from 'react'
+import { useCallback, useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import {
   useGuardedHotkeys,
   matchesShortcut,

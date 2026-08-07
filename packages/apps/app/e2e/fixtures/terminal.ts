@@ -283,7 +283,10 @@ export async function waitForPtySession(
   await expect
     .poll(
       async () =>
-        page.evaluate((id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }), sessionId),
+        page.evaluate(
+          (id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }),
+          sessionId
+        ),
       {
         timeout: timeoutMs
       }
@@ -299,7 +302,10 @@ export async function waitForNoPtySession(
   await expect
     .poll(
       async () =>
-        page.evaluate((id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }), sessionId),
+        page.evaluate(
+          (id) => window.getTrpcVanillaClient().pty.exists.query({ sessionId: id }),
+          sessionId
+        ),
       {
         timeout: timeoutMs
       }
@@ -316,7 +322,10 @@ export async function waitForPtyState(
   await expect
     .poll(
       async () =>
-        page.evaluate((id) => window.getTrpcVanillaClient().pty.getState.query({ sessionId: id }), sessionId),
+        page.evaluate(
+          (id) => window.getTrpcVanillaClient().pty.getState.query({ sessionId: id }),
+          sessionId
+        ),
       {
         timeout: timeoutMs
       }

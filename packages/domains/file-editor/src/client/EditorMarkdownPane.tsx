@@ -2,17 +2,9 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { getThemeEditorColors } from '@slayzone/ui'
-import {
-  RichTextEditor,
-  getEditorViewDOM,
-  type Editor as MilkdownEditor
-} from '@slayzone/editor'
+import { RichTextEditor, getEditorViewDOM, type Editor as MilkdownEditor } from '@slayzone/editor'
 import { toSlzFileUrl, SLZ_FILE_PREFIX } from '@slayzone/platform/slz-file-url'
-import {
-  MARKDOWN_FILE_TEXT_EXTENSIONS,
-  posixDirname,
-  posixResolve
-} from './FileEditorView.utils'
+import { MARKDOWN_FILE_TEXT_EXTENSIONS, posixDirname, posixResolve } from './FileEditorView.utils'
 
 export interface MarkdownFilePaneHandle {
   scrollToHeadingIndex: (index: number) => void

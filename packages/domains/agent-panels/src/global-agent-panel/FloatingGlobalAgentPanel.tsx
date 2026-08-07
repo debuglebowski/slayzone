@@ -44,14 +44,12 @@ export function FloatingGlobalAgentPanel() {
   const terminalState = useSessionState(session?.sessionId ?? '')
 
   const loadSessionAndConfig = useCallback(async () => {
-    const data = (await trpcClient.app.floatingAgent.getSession.query()) as
-      | FloatingSessionPayload
-      | null
+    const data =
+      (await trpcClient.app.floatingAgent.getSession.query()) as FloatingSessionPayload | null
     if (data)
       setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
-    const config = (await trpcClient.app.floatingAgent.getConfig.query()) as
-      | FloatingConfigPayload
-      | null
+    const config =
+      (await trpcClient.app.floatingAgent.getConfig.query()) as FloatingConfigPayload | null
     if (config) setStyle(config.style as 'widget' | 'icon')
   }, [trpcClient])
 

@@ -208,7 +208,12 @@ describe('resolveHubRegistry (synthesis / migration)', () => {
       remote_server_url: 'wss://hub.example.com/trpc'
     })
     expect(reg).toEqual([
-      { id: LEGACY_REMOTE_HUB_ID, kind: 'remote', label: 'Remote', url: 'wss://hub.example.com/trpc' }
+      {
+        id: LEGACY_REMOTE_HUB_ID,
+        kind: 'remote',
+        label: 'Remote',
+        url: 'wss://hub.example.com/trpc'
+      }
     ])
     expect(reg.some((h) => h.kind === 'local')).toBe(false)
   })
@@ -283,7 +288,10 @@ describe('resolveDefaultHubId', () => {
 
   it('legacy remote mode defaults to the sole remote hub', () => {
     expect(
-      resolveDefaultHubId({ server_mode: 'remote', remote_server_url: 'wss://hub.example.com/trpc' })
+      resolveDefaultHubId({
+        server_mode: 'remote',
+        remote_server_url: 'wss://hub.example.com/trpc'
+      })
     ).toBe(LEGACY_REMOTE_HUB_ID)
   })
 })

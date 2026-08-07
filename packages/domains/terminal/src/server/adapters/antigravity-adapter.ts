@@ -61,7 +61,11 @@ export class AntigravityAdapter implements TerminalAdapter {
   detectError(data: string): ErrorInfo | null {
     const stripped = AntigravityAdapter.stripAnsi(data)
 
-    if (/ANTIGRAVITY_TOKEN environment variable not found|not (?:logged in|authenticated)/i.test(stripped)) {
+    if (
+      /ANTIGRAVITY_TOKEN environment variable not found|not (?:logged in|authenticated)/i.test(
+        stripped
+      )
+    ) {
       return {
         code: 'MISSING_API_KEY',
         message: 'Antigravity not authenticated (ANTIGRAVITY_TOKEN not set / signed out)',

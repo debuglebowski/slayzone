@@ -44,7 +44,5 @@ export function fileUrlToSlzFileUrl(url: string): string {
  * `slz-file://appapp/...`. Non-matching URLs pass through unchanged.
  */
 export function slzFileUrlToFileUrl(url: string): string {
-  return url.startsWith(SLZ_FILE_PREFIX)
-    ? `file://${url.slice(SLZ_FILE_PREFIX.length)}`
-    : url
+  return url.startsWith(SLZ_FILE_PREFIX) ? `file://${url.slice(SLZ_FILE_PREFIX.length)}` : url
 }

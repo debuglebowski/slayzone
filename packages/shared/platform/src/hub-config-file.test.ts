@@ -40,7 +40,8 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 function tmp(): string {
@@ -278,7 +279,11 @@ test('getHubConfigFilePath / getHubStateFilePath resolve under SLAYZONE_ROOT', (
   const prev = process.env.SLAYZONE_ROOT
   process.env.SLAYZONE_ROOT = dir
   try {
-    assertEq(getHubConfigFilePath(), join(dir, 'hub.config.json'), 'config path under root override')
+    assertEq(
+      getHubConfigFilePath(),
+      join(dir, 'hub.config.json'),
+      'config path under root override'
+    )
     assertEq(getHubStateFilePath(), join(dir, 'hub.state.json'), 'state path under root override')
     saveHubConfigFile({ port: 1234 })
     const raw = readFileSync(join(dir, 'hub.config.json'), 'utf8')

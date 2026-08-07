@@ -28,7 +28,12 @@ import { ProjectItem } from '../ProjectItem'
 import { ProjectFolderTile, FolderMiniGrid } from '../ProjectFolderTile'
 import { ProjectAvatar } from '../ProjectAvatar'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
-import { resolveProjectDrop, applyProjectDrop, pointerYFromEvent, resolveDropMode } from './projectDrop'
+import {
+  resolveProjectDrop,
+  applyProjectDrop,
+  pointerYFromEvent,
+  resolveDropMode
+} from './projectDrop'
 import type { SidebarViewContext } from './types'
 
 type DragKind = 'top-project' | 'group' | 'member'
@@ -43,7 +48,6 @@ type DropMode = 'before' | 'after' | 'merge'
  * over-rect geometry that decides merge-vs-reorder never flickers.
  */
 const noShift = () => null
-
 
 export function ProjectsRailView({
   projects,

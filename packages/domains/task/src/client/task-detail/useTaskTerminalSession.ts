@@ -169,14 +169,22 @@ export function useTaskTerminalSession({
         onTaskUpdated(updated)
       } catch {
         // Allow a retry on a transient failure.
-        if (persistedSessionIdRef.current === detectedSessionId) persistedSessionIdRef.current = null
+        if (persistedSessionIdRef.current === detectedSessionId)
+          persistedSessionIdRef.current = null
         return
       }
       // Clear regardless of render churn (no cancel gate — that's what stranded the
       // clear and spun the loop). Functional updater avoids clobbering a newer detect.
       setDetectedSessionId((cur) => (cur === detectedSessionId ? null : cur))
     })()
-  }, [task, detectedSessionId, sessionIdCommand, onTaskUpdated, getConversationIdForMode, updateTask])
+  }, [
+    task,
+    detectedSessionId,
+    sessionIdCommand,
+    onTaskUpdated,
+    getConversationIdForMode,
+    updateTask
+  ])
 
   // Restart terminal (kill PTY, remount, keep session for --resume)
   const handleRestartTerminal = useCallback(async () => {

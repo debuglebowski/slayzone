@@ -50,11 +50,7 @@ type DevSqlBody = {
  * REST stack; when the gate is off this always returns false, so the path simply
  * 404s like any other unknown route.
  */
-export function handleDevSql(
-  db: SlayzoneDb,
-  req: IncomingMessage,
-  res: ServerResponse
-): boolean {
+export function handleDevSql(db: SlayzoneDb, req: IncomingMessage, res: ServerResponse): boolean {
   if (!isDevSqlEnabled()) return false
   const path = (req.url ?? '').split('?')[0]
   if (req.method !== 'POST') return false

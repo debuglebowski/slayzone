@@ -226,35 +226,26 @@ export function useArtifacts(
     [taskId]
   )
 
-  const updateArtifact = useCallback(
-    async (data: UpdateArtifactInput): Promise<void> => {
-      const updated = await updateMutation.mutateAsync(data)
-      if (updated) {
-        setArtifacts((prev) => prev.map((a) => (a.id === data.id ? updated : a)))
-      }
-    },
-    []
-  )
+  const updateArtifact = useCallback(async (data: UpdateArtifactInput): Promise<void> => {
+    const updated = await updateMutation.mutateAsync(data)
+    if (updated) {
+      setArtifacts((prev) => prev.map((a) => (a.id === data.id ? updated : a)))
+    }
+  }, [])
 
-  const deleteArtifact = useCallback(
-    async (id: string): Promise<void> => {
-      await deleteMutation.mutateAsync({ id })
-      setArtifacts((prev) => prev.filter((a) => a.id !== id))
-      setSelectedId((prev) => (prev === id ? null : prev))
-      track('asset_deleted')
-    },
-    []
-  )
+  const deleteArtifact = useCallback(async (id: string): Promise<void> => {
+    await deleteMutation.mutateAsync({ id })
+    setArtifacts((prev) => prev.filter((a) => a.id !== id))
+    setSelectedId((prev) => (prev === id ? null : prev))
+    track('asset_deleted')
+  }, [])
 
-  const renameArtifact = useCallback(
-    async (id: string, newTitle: string): Promise<void> => {
-      const updated = await updateMutation.mutateAsync({ id, title: newTitle })
-      if (updated) {
-        setArtifacts((prev) => prev.map((a) => (a.id === id ? updated : a)))
-      }
-    },
-    []
-  )
+  const renameArtifact = useCallback(async (id: string, newTitle: string): Promise<void> => {
+    const updated = await updateMutation.mutateAsync({ id, title: newTitle })
+    if (updated) {
+      setArtifacts((prev) => prev.map((a) => (a.id === id ? updated : a)))
+    }
+  }, [])
 
   const moveArtifactToFolder = useCallback(
     async (artifactId: string, folderId: string | null): Promise<void> => {
@@ -281,14 +272,11 @@ export function useArtifacts(
     [queryClient, trpc]
   )
 
-  const saveContent = useCallback(
-    async (id: string, content: string): Promise<void> => {
-      // UI saves always mutate the latest version in place. The explicit
-      // "Create version" action is the only UI path that creates new versions.
-      await updateMutation.mutateAsync({ id, content, mutateVersion: true })
-    },
-    []
-  )
+  const saveContent = useCallback(async (id: string, content: string): Promise<void> => {
+    // UI saves always mutate the latest version in place. The explicit
+    // "Create version" action is the only UI path that creates new versions.
+    await updateMutation.mutateAsync({ id, content, mutateVersion: true })
+  }, [])
 
   const uploadArtifact = useCallback(
     async (sourcePath: string, title?: string): Promise<TaskArtifact | null> => {
@@ -408,9 +396,7 @@ export function useArtifacts(
 
   const diffVersions = useCallback(
     async (artifactId: string, a: VersionRef, b?: VersionRef): Promise<DiffResult> => {
-      return queryClient.fetchQuery(
-        trpc.artifacts.versionsDiff.queryOptions({ artifactId, a, b })
-      )
+      return queryClient.fetchQuery(trpc.artifacts.versionsDiff.queryOptions({ artifactId, a, b }))
     },
     [queryClient, trpc]
   )
@@ -454,35 +440,26 @@ export function useArtifacts(
     [taskId]
   )
 
-  const updateFolder = useCallback(
-    async (data: UpdateArtifactFolderInput): Promise<void> => {
-      const updated = await foldersUpdateMutation.mutateAsync(data)
-      if (updated) {
-        setFolders((prev) => prev.map((f) => (f.id === data.id ? updated : f)))
-      }
-    },
-    []
-  )
+  const updateFolder = useCallback(async (data: UpdateArtifactFolderInput): Promise<void> => {
+    const updated = await foldersUpdateMutation.mutateAsync(data)
+    if (updated) {
+      setFolders((prev) => prev.map((f) => (f.id === data.id ? updated : f)))
+    }
+  }, [])
 
-  const deleteFolder = useCallback(
-    async (id: string): Promise<void> => {
-      await foldersDeleteMutation.mutateAsync({ id })
-      setFolders((prev) => prev.filter((f) => f.id !== id))
-      // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
-      setArtifacts((prev) => prev.map((a) => (a.folder_id === id ? { ...a, folder_id: null } : a)))
-    },
-    []
-  )
+  const deleteFolder = useCallback(async (id: string): Promise<void> => {
+    await foldersDeleteMutation.mutateAsync({ id })
+    setFolders((prev) => prev.filter((f) => f.id !== id))
+    // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
+    setArtifacts((prev) => prev.map((a) => (a.folder_id === id ? { ...a, folder_id: null } : a)))
+  }, [])
 
-  const renameFolder = useCallback(
-    async (id: string, newName: string): Promise<void> => {
-      const updated = await foldersUpdateMutation.mutateAsync({ id, name: newName })
-      if (updated) {
-        setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)))
-      }
-    },
-    []
-  )
+  const renameFolder = useCallback(async (id: string, newName: string): Promise<void> => {
+    const updated = await foldersUpdateMutation.mutateAsync({ id, name: newName })
+    if (updated) {
+      setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)))
+    }
+  }, [])
 
   return {
     artifacts,

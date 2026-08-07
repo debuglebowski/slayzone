@@ -68,6 +68,4 @@ export const ALL_ORIGINS: readonly ConversationOrigin[] = [
  * Safe to interpolate: the values are compile-time constants from the union
  * above, never user input.
  */
-export const HONORED_ORIGINS_SQL: string = [...HONORED_ORIGINS]
-  .map((o) => `'${o}'`)
-  .join(',')
+export const HONORED_ORIGINS_SQL: string = [...HONORED_ORIGINS].map((o) => `'${o}'`).join(',')

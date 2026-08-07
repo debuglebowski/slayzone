@@ -39,17 +39,12 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
     url: opts.url,
     // Only attach connectionParams when a token is present — an absent token
     // keeps the connect frame identical to the untokened (local) path.
-    ...(opts.token
-      ? { connectionParams: async () => ({ token: opts.token as string }) }
-      : {})
+    ...(opts.token ? { connectionParams: async () => ({ token: opts.token as string }) } : {})
   })
   return {
     wsClient,
     client: createTRPCClient<AppRouter>({
-      links: [
-        ...(opts.links ?? []),
-        wsLink({ client: wsClient, transformer: superjson })
-      ]
+      links: [...(opts.links ?? []), wsLink({ client: wsClient, transformer: superjson })]
     })
   }
 }

@@ -18,7 +18,7 @@ async function showOpenDialog(options: ShowOpenOptions): Promise<ShowOpenResult>
   const { result } = await remote.showOpenDialog({
     properties: options?.properties ?? [],
     defaultPath: options?.defaultPath ?? '',
-    title: options?.title ?? '',
+    title: options?.title ?? ''
   })
   return { canceled: result.canceled, filePaths: result.filePaths }
 }
@@ -26,14 +26,14 @@ async function showOpenDialog(options: ShowOpenOptions): Promise<ShowOpenResult>
 // STUB surfaces — shape-matched so renderer doesn't throw. cap-shell-6
 // replaces with real Mojo plumbing once save + message dialogs are needed.
 const showSaveDialog = async (): Promise<{ canceled: boolean; filePath?: string }> => ({
-  canceled: true,
+  canceled: true
 })
 const showMessageBox = async (): Promise<{ response: number; checkboxChecked?: boolean }> => ({
-  response: 0,
+  response: 0
 })
 
 export const dialogShim = {
   showOpenDialog,
   showSaveDialog,
-  showMessageBox,
+  showMessageBox
 } as unknown as DialogNS

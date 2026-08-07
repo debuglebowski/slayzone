@@ -41,7 +41,7 @@ const MODE_TO_FLAT_FLAGS: Record<string, string> = {
   codex: 'codex_flags',
   'cursor-agent': 'cursor_flags',
   gemini: 'gemini_flags',
-  opencode: 'opencode_flags',
+  opencode: 'opencode_flags'
 }
 
 // Renderer-side cache for task fields the sidecar's `tasks` table does not
@@ -92,7 +92,7 @@ const MODE_TO_FLAT_CONV: Record<string, string> = {
   codex: 'codex_conversation_id',
   'cursor-agent': 'cursor_conversation_id',
   gemini: 'gemini_conversation_id',
-  opencode: 'opencode_conversation_id',
+  opencode: 'opencode_conversation_id'
 }
 // UpdateTaskInput import cycle: imported types don't include these runtime
 // helpers, so we type the helper's input loosely and rely on callers passing
@@ -124,7 +124,7 @@ function syncProviderAndFlatConversationIds(data: ConvSyncInput): void {
     for (const [mode, cfg] of Object.entries(data.providerConfig)) {
       nextProvider[mode] = {
         ...((priorProvider as Record<string, unknown>)[mode] as object | undefined),
-        ...cfg,
+        ...cfg
       }
     }
     setExtras(data.id, { provider_config: nextProvider })
@@ -134,7 +134,7 @@ function syncProviderAndFlatConversationIds(data: ConvSyncInput): void {
     ['codex', data.codexConversationId],
     ['cursor-agent', data.cursorConversationId],
     ['gemini', data.geminiConversationId],
-    ['opencode', data.opencodeConversationId],
+    ['opencode', data.opencodeConversationId]
   ]
   let provMerged: Record<string, unknown> | null = null
   for (const [mode, val] of flatWrites) {
@@ -142,7 +142,7 @@ function syncProviderAndFlatConversationIds(data: ConvSyncInput): void {
     if (!provMerged) provMerged = { ...(getExtras(data.id).provider_config ?? {}) }
     provMerged[mode] = {
       ...((provMerged as Record<string, unknown>)[mode] as object | undefined),
-      conversationId: val,
+      conversationId: val
     }
   }
   if (provMerged) setExtras(data.id, { provider_config: provMerged })
@@ -214,7 +214,7 @@ function synthProject(entry: {
     icon_image_path: null,
     sort_order: 0,
     created_at: nowIso(),
-    updated_at: nowIso(),
+    updated_at: nowIso()
   }
 }
 
@@ -234,7 +234,7 @@ function synthTask(
     base_dir?: string | null
   },
   projectId: string,
-  order: number,
+  order: number
 ): Task {
   // cap-shell-10 — convert sidecar's numeric archived_at (Date.now()) to an
   // ISO string so kanban's `task.archived_at !== null` check still works and
@@ -282,7 +282,8 @@ function synthTask(
     status: entry.status as Task['status'],
     priority: typeof entry.priority === 'number' ? entry.priority : 3,
     order,
-    due_date: typeof entry.due_date === 'string' && entry.due_date.length > 0 ? entry.due_date : null,
+    due_date:
+      typeof entry.due_date === 'string' && entry.due_date.length > 0 ? entry.due_date : null,
     archived_at: archivedIso,
     deleted_at: deletedIso,
     // Cap-shell-migrate-all-tests: terminal fields flow through the renderer-
@@ -307,7 +308,7 @@ function synthTask(
     worktree_path:
       typeof entry.worktree_path === 'string' && entry.worktree_path.length > 0
         ? entry.worktree_path
-        : extras.worktree_path ?? null,
+        : (extras.worktree_path ?? null),
     worktree_parent_branch:
       typeof entry.worktree_parent_branch === 'string' && entry.worktree_parent_branch.length > 0
         ? entry.worktree_parent_branch
@@ -315,7 +316,7 @@ function synthTask(
     base_dir:
       typeof entry.base_dir === 'string' && entry.base_dir.length > 0
         ? entry.base_dir
-        : extras.base_dir ?? null,
+        : (extras.base_dir ?? null),
     browser_url: null,
     browser_tabs: null,
     web_panel_urls: null,
@@ -329,7 +330,7 @@ function synthTask(
     loop_config: null,
     snoozed_until: null,
     is_temporary: extras.is_temporary ?? false,
-    linear_url: extras.linear_url ?? null,
+    linear_url: extras.linear_url ?? null
   } as unknown as Task
 }
 
@@ -341,7 +342,7 @@ function synthTag(t: { id: string; name: string; color: string }, projectId: str
     color: t.color || '#6366f1',
     text_color: '#ffffff',
     sort_order: 0,
-    created_at: nowIso(),
+    created_at: nowIso()
   }
 }
 
@@ -351,7 +352,14 @@ async function listProjects(): Promise<Project[]> {
   // mojom to surface the full row. cap-migrate-all-tests (core-windowing)
   // extended the snapshot with execution_context for the Environment tab.
   const snap = await jsonRpcCall<{
-    projects: { id: string; name: string; color: string; path: string; columns_config: string | null; execution_context: string | null }[]
+    projects: {
+      id: string
+      name: string
+      color: string
+      path: string
+      columns_config: string | null
+      execution_context: string | null
+    }[]
     activeProjectId: string
   } | null>('projects:get-snapshot', {})
   return (snap?.projects ?? []).map(synthProject)
@@ -411,7 +419,7 @@ export const dbShim = {
       error: string
       project: { id: string; name: string; color: string; path?: string }
     }>('projects:create', {
-      params: [{ name: data.name, color: data.color ?? '', path: data.path ?? '' }],
+      params: [{ name: data.name, color: data.color ?? '', path: data.path ?? '' }]
     })
     if (!res.ok) throw new Error(res.error || 'create failed')
     await syncActiveProject(res.project.id)
@@ -438,22 +446,22 @@ export const dbShim = {
             projectId: data.id,
             name: nameToSend,
             color: data.color ?? '',
-            path: data.path,
-          },
-        ],
+            path: data.path
+          }
+        ]
       })
       if (!res.ok) throw new Error(res.error || 'update failed')
     }
     if (data.columnsConfig !== undefined) {
       await jsonRpcCall('projects:update-columns', {
         projectId: data.id,
-        columnsConfig: data.columnsConfig,
+        columnsConfig: data.columnsConfig
       })
     }
     if (data.executionContext !== undefined) {
       await jsonRpcCall('projects:update-execution-context', {
         projectId: data.id,
-        executionContext: data.executionContext,
+        executionContext: data.executionContext
       })
     }
     // Return the fresh row so callers that read back merged state (e.g.
@@ -472,7 +480,9 @@ export const dbShim = {
   uploadProjectIcon: async (projectId: string, _sourcePath: string): Promise<Project> => {
     // TODO(cap-shell-6): needs files shim. Stub returns current project as-is.
     const all = await listProjects()
-    return all.find((p) => p.id === projectId) ?? synthProject({ id: projectId, name: '', color: '' })
+    return (
+      all.find((p) => p.id === projectId) ?? synthProject({ id: projectId, name: '', color: '' })
+    )
   },
 
   // Tasks
@@ -507,7 +517,14 @@ export const dbShim = {
     // when the sidecar transiently replies with a null result (re-registry,
     // startup handshake window, etc.).
     const pSnapRaw = await jsonRpcCall<{
-      projects: { id: string; name: string; color: string; path: string; columns_config: string | null; execution_context: string | null }[]
+      projects: {
+        id: string
+        name: string
+        color: string
+        path: string
+        columns_config: string | null
+        execution_context: string | null
+      }[]
       activeProjectId: string
     } | null>('projects:get-snapshot', {})
     const pSnap = pSnapRaw ?? { projects: [], activeProjectId: '' }
@@ -533,18 +550,13 @@ export const dbShim = {
         archived_at: number | null
       }[]
     }>('tasklist:list-all', {})
-    const tasks: Task[] = allTasksResult.tasks.map((t, idx) =>
-      synthTask(t, t.project_id, idx),
-    )
+    const tasks: Task[] = allTasksResult.tasks.map((t, idx) => synthTask(t, t.project_id, idx))
     const tags = await listTags(fallbackId)
     // cap-shell-10 — populate blockedTaskIds from the sidecar so kanban's
     // Link2 "blocked" indicator lights up without an extra post-load fetch.
     let blockedTaskIds: string[] = []
     try {
-      const res = await jsonRpcCall<{ ids: string[] }>(
-        'task-dependencies:get-all-blocked-ids',
-        {},
-      )
+      const res = await jsonRpcCall<{ ids: string[] }>('task-dependencies:get-all-blocked-ids', {})
       blockedTaskIds = res?.ids ?? []
     } catch {
       blockedTaskIds = []
@@ -554,7 +566,7 @@ export const dbShim = {
       tasks,
       tags,
       taskTags: {}, // per-task tags resolved lazily via taskTags.getTagsForTask
-      blockedTaskIds,
+      blockedTaskIds
     }
   },
   getTasksByProject: async (projectId: string): Promise<Task[]> => {
@@ -582,7 +594,7 @@ export const dbShim = {
       title: data.title ?? '',
       description: data.description ?? '',
       priority: data.priority,
-      dueDate: data.dueDate ?? null,
+      dueDate: data.dueDate ?? null
     })
     if (!res.ok) throw new Error(res.error || 'tasks:create failed')
     // cap-migrate-all-tests (terminal-core batch) — carry terminal fields from
@@ -598,11 +610,14 @@ export const dbShim = {
     // claude_flags / codex_flags etc. (matches Electron main DB handler
     // which pulls defaults from the terminal_modes table on insert). Explicit
     // caller overrides win.
-    createExtras.claude_flags = createExt.claudeFlags ?? (await liveDefaultFlagsForMode('claude-code'))
+    createExtras.claude_flags =
+      createExt.claudeFlags ?? (await liveDefaultFlagsForMode('claude-code'))
     createExtras.codex_flags = createExt.codexFlags ?? (await liveDefaultFlagsForMode('codex'))
-    createExtras.cursor_flags = createExt.cursorFlags ?? (await liveDefaultFlagsForMode('cursor-agent'))
+    createExtras.cursor_flags =
+      createExt.cursorFlags ?? (await liveDefaultFlagsForMode('cursor-agent'))
     createExtras.gemini_flags = createExt.geminiFlags ?? (await liveDefaultFlagsForMode('gemini'))
-    createExtras.opencode_flags = createExt.opencodeFlags ?? (await liveDefaultFlagsForMode('opencode'))
+    createExtras.opencode_flags =
+      createExt.opencodeFlags ?? (await liveDefaultFlagsForMode('opencode'))
     if (createExt.terminalMode !== undefined) createExtras.terminal_mode = createExt.terminalMode
     if (createExt.isTemporary !== undefined) createExtras.is_temporary = createExt.isTemporary
     setExtras(res.task.id, createExtras)
@@ -612,10 +627,10 @@ export const dbShim = {
         title: res.task.title,
         status: res.task.status,
         priority: data.priority ?? 3,
-        due_date: data.dueDate ?? null,
+        due_date: data.dueDate ?? null
       },
       data.projectId,
-      0,
+      0
     )
   },
   updateTask: async (data: UpdateTaskInput): Promise<Task> => {
@@ -665,7 +680,7 @@ export const dbShim = {
         codex: data.codexConversationId !== undefined,
         'cursor-agent': data.cursorConversationId !== undefined,
         gemini: data.geminiConversationId !== undefined,
-        opencode: data.opencodeConversationId !== undefined,
+        opencode: data.opencodeConversationId !== undefined
       }
       const extendedForMode = data as UpdateTaskInput & {
         providerConfig?: Record<string, { conversationId?: string | null; flags?: string }> | null
@@ -686,9 +701,9 @@ export const dbShim = {
             ...prior,
             [mode]: {
               ...((prior as Record<string, unknown>)[mode] as object | undefined),
-              conversationId: null,
-            },
-          },
+              conversationId: null
+            }
+          }
         })
       }
       // Reset per-mode flag fields to their built-in defaults on any
@@ -702,7 +717,7 @@ export const dbShim = {
         codex: data.codexFlags !== undefined,
         'cursor-agent': data.cursorFlags !== undefined,
         gemini: data.geminiFlags !== undefined,
-        opencode: data.opencodeFlags !== undefined,
+        opencode: data.opencodeFlags !== undefined
       }
       for (const mode of Object.keys(explicitFlags)) {
         if (explicitFlags[mode]) continue
@@ -735,7 +750,8 @@ export const dbShim = {
       providerConfig?: Record<string, unknown> | null
     }
     if (extended.worktreePath !== undefined) metaPatch.worktreePath = extended.worktreePath
-    if (extended.worktreeParentBranch !== undefined) metaPatch.worktreeParentBranch = extended.worktreeParentBranch
+    if (extended.worktreeParentBranch !== undefined)
+      metaPatch.worktreeParentBranch = extended.worktreeParentBranch
     if (extended.mergeState !== undefined) metaPatch.mergeState = extended.mergeState
     if (extended.baseDir !== undefined) metaPatch.baseDir = extended.baseDir
     if (extended.projectId !== undefined) metaPatch.projectId = extended.projectId
@@ -777,14 +793,17 @@ export const dbShim = {
         codex_conversation_id: null,
         cursor_conversation_id: null,
         gemini_conversation_id: null,
-        opencode_conversation_id: null,
+        opencode_conversation_id: null
       })
     }
     if (Object.keys(metaPatch).length > 0) {
       await jsonRpcCall('tasks:update-meta', { taskId: data.id, ...metaPatch })
     }
     const all = await listTasks('')
-    return all.find((t) => t.id === data.id) ?? synthTask({ id: data.id, title: data.title ?? '', status: data.status ?? '' }, '', 0)
+    return (
+      all.find((t) => t.id === data.id) ??
+      synthTask({ id: data.id, title: data.title ?? '', status: data.status ?? '' }, '', 0)
+    )
   },
   deleteTask: async (id: string): Promise<boolean> => {
     const remote = await tasklistRemote()
@@ -823,5 +842,5 @@ export const dbShim = {
       .filter((t) => t.archived_at !== null)
       .map((t, idx) => synthTask(t, t.project_id, idx))
   },
-  reorderTasks: async (_taskIds: string[]): Promise<void> => {},
+  reorderTasks: async (_taskIds: string[]): Promise<void> => {}
 }

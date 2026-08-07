@@ -8,13 +8,7 @@ import {
   File,
   GitCommitHorizontal
 } from 'lucide-react'
-import {
-  Button,
-  cn,
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent
-} from '@slayzone/ui'
+import { Button, cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import type { GhPrComment, GhPrCommit, GhPrTimelineEvent } from '../shared/types'
 import { GhMarkdown } from './GhMarkdown'
 import { AuthorAvatar } from './pr-avatars'

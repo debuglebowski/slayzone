@@ -22,7 +22,11 @@
  */
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS } from '@slayzone/platform'
-import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/transport/db-bootstrap'
+import {
+  LATEST_MIGRATION_VERSION,
+  migrations,
+  runMigrations
+} from '@slayzone/transport/db-bootstrap'
 import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task/shared'
 
 let failures = 0
@@ -128,8 +132,18 @@ function main(): void {
     assertNoThrow(
       () =>
         insSession(raw).run(
-          'as1', 'claude-code', null, 't1', 'conv-new', 'in-band-clear', 'dead', null, 1000,
-          null, null, null
+          'as1',
+          'claude-code',
+          null,
+          't1',
+          'conv-new',
+          'in-band-clear',
+          'dead',
+          null,
+          1000,
+          null,
+          null,
+          null
         ),
       'agent_sessions must accept in-band-clear'
     )
@@ -147,7 +161,18 @@ function main(): void {
     assertThrows(
       () =>
         insSession(raw).run(
-          'as-bad', 'm', null, 't1', 'c', 'totally-made-up', 'dead', null, 1, null, null, null
+          'as-bad',
+          'm',
+          null,
+          't1',
+          'c',
+          'totally-made-up',
+          'dead',
+          null,
+          1,
+          null,
+          null,
+          null
         ),
       'agent_sessions must still reject an unknown origin'
     )
@@ -168,7 +193,18 @@ function main(): void {
       assertNoThrow(
         () =>
           insSession(raw).run(
-            `as-${i}`, 'm', null, 't1', `c-${i}`, origin, 'dead', null, i, null, null, null
+            `as-${i}`,
+            'm',
+            null,
+            't1',
+            `c-${i}`,
+            origin,
+            'dead',
+            null,
+            i,
+            null,
+            null,
+            null
           ),
         `origin '${origin}' must satisfy the agent_sessions CHECK`
       )
@@ -182,10 +218,34 @@ function main(): void {
     const raw = migratedDb()
     seedTask(raw, 't1')
     const ins = insSession(raw)
-    ins.run('s-old', 'claude-code', null, 't1', 'conv-old', 'slay-spawned-fresh', 'dead', null,
-            1000, null, null, null)
-    ins.run('s-clear', 'claude-code', null, 't1', 'conv-cleared', 'in-band-clear', 'dead', null,
-            2000, null, null, null)
+    ins.run(
+      's-old',
+      'claude-code',
+      null,
+      't1',
+      'conv-old',
+      'slay-spawned-fresh',
+      'dead',
+      null,
+      1000,
+      null,
+      null,
+      null
+    )
+    ins.run(
+      's-clear',
+      'claude-code',
+      null,
+      't1',
+      'conv-cleared',
+      'in-band-clear',
+      'dead',
+      null,
+      2000,
+      null,
+      null,
+      null
+    )
     const honored = [...HONORED_ORIGINS].map((o) => `'${o}'`).join(',')
     const row = raw
       .prepare(
@@ -244,9 +304,24 @@ function main(): void {
     assert(raw.pragma('foreign_keys', { simple: true }) === 1, 'foreign_keys must be back ON')
     seedTask(raw, 't1')
     insConv(raw).run('tc1', 't1', 'm', 'c', 'in-band-clear', null, 1)
-    insSession(raw).run('as1', 'm', null, 't1', 'c', 'in-band-clear', 'dead', null, 1, null, null, null)
+    insSession(raw).run(
+      'as1',
+      'm',
+      null,
+      't1',
+      'c',
+      'in-band-clear',
+      'dead',
+      null,
+      1,
+      null,
+      null,
+      null
+    )
     raw.prepare(`DELETE FROM tasks WHERE id = 't1'`).run()
-    const nConv = (raw.prepare(`SELECT count(*) AS n FROM task_conversations`).get() as { n: number }).n
+    const nConv = (
+      raw.prepare(`SELECT count(*) AS n FROM task_conversations`).get() as { n: number }
+    ).n
     const nSess = (raw.prepare(`SELECT count(*) AS n FROM agent_sessions`).get() as { n: number }).n
     assert(nConv === 0, `task_conversations should cascade-delete, ${nConv} left`)
     assert(nSess === 0, `agent_sessions should cascade-delete, ${nSess} left`)
@@ -261,12 +336,32 @@ function main(): void {
     // pending_meta, both v148 columns set and unset, and a pooled row with a
     // NULL task_id (the warm-pool shape the FK must still permit).
     insSession(raw).run(
-      's-full', 'claude-code', '/w', 't1', 'c1', 'slay-spawned-resume', 'dead',
-      '{"usedResume":true,"spawnedAt":5}', 100, 110, 'tab-1', 120
+      's-full',
+      'claude-code',
+      '/w',
+      't1',
+      'c1',
+      'slay-spawned-resume',
+      'dead',
+      '{"usedResume":true,"spawnedAt":5}',
+      100,
+      110,
+      'tab-1',
+      120
     )
     insSession(raw).run(
-      's-pooled', 'claude-code', null, null, null, 'pending-spawn', 'pooled', null, 200,
-      null, null, null
+      's-pooled',
+      'claude-code',
+      null,
+      null,
+      null,
+      'pending-spawn',
+      'pooled',
+      null,
+      200,
+      null,
+      null,
+      null
     )
     insConv(raw).run('tc-full', 't1', 'claude-code', 'c1', 'foreign-observed', '{"a":1}', 300)
     insConv(raw).run('tc-null', 't1', 'claude-code', null, 'manual-reset', null, 400)
@@ -307,7 +402,18 @@ function main(): void {
     const raw = migratedDb()
     seedTask(raw, 't1')
     insSession(raw).run(
-      'keep', 'm', null, 't1', 'c', 'slay-spawned-fresh', 'dead', null, 7, null, null, null
+      'keep',
+      'm',
+      null,
+      't1',
+      'c',
+      'slay-spawned-fresh',
+      'dead',
+      null,
+      7,
+      null,
+      null,
+      null
     )
     assertNoThrow(() => runMigrations(raw), 're-running migrations must not throw')
     assert(

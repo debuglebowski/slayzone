@@ -128,9 +128,7 @@ function migrateRunnerSlice(legacyRoot: string, runnerRoot: string): void {
       if (!entry.endsWith('.json')) continue
       const hubHost = basename(entry, '.json')
       try {
-        const credentials: unknown = JSON.parse(
-          readFileSync(join(legacyRunnersDir, entry), 'utf8')
-        )
+        const credentials: unknown = JSON.parse(readFileSync(join(legacyRunnersDir, entry), 'utf8'))
         updateJsonFile({ [hubHost]: credentials }, stateFilePath)
       } catch (err) {
         console.error(

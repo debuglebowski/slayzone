@@ -22,9 +22,7 @@ export async function unarchiveTaskOp(
       WHERE id = ?
     `,
     params: [id],
-    events: before
-      ? buildTaskUnarchivedEvents({ id, project_id: before.project_id } as Task)
-      : []
+    events: before ? buildTaskUnarchivedEvents({ id, project_id: before.project_id } as Task) : []
   })
   const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
   const task = parseTask(row)

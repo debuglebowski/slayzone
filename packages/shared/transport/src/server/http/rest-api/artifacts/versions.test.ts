@@ -161,12 +161,7 @@ await describe('PUT/POST /api/artifacts/:id/content — write + append', () => {
     const v = h.db
       .prepare('SELECT content_hash FROM artifact_versions WHERE id = ?')
       .get(row.current_version_id) as { content_hash: string }
-    const blob = path.join(
-      storageDir,
-      'blobs',
-      v.content_hash.slice(0, 2),
-      v.content_hash.slice(2)
-    )
+    const blob = path.join(storageDir, 'blobs', v.content_hash.slice(0, 2), v.content_hash.slice(2))
     expect(fs.readFileSync(blob).toString('hex')).toBe(BINARY.toString('hex'))
   })
 
@@ -290,7 +285,9 @@ await describe('GET /api/artifacts/:id/versions/content — streamed read', () =
 
   test('accepts a hash prefix, a relative ref, and HEAD~N', async () => {
     const v2 = h.db
-      .prepare('SELECT content_hash FROM artifact_versions WHERE artifact_id = ? AND version_num = 2')
+      .prepare(
+        'SELECT content_hash FROM artifact_versions WHERE artifact_id = ? AND version_num = 2'
+      )
       .get(binArtifact.id) as { content_hash: string }
     const byHash = await raw(
       'GET',
@@ -453,7 +450,11 @@ await describe('PATCH /api/artifacts/:id/versions — rename', () => {
 await describe('GET /api/artifacts/:id/versions/diff', () => {
   test('text diff returns hunks with add/del/ctx line kinds', async () => {
     // Working copy currently "line one\nline two\n"; write a changed v3.
-    await raw('PUT', `/api/artifacts/${textArtifact.id}/content`, Buffer.from('line one\nCHANGED\n'))
+    await raw(
+      'PUT',
+      `/api/artifacts/${textArtifact.id}/content`,
+      Buffer.from('line one\nCHANGED\n')
+    )
     const res = await rest.request<{
       data: { kind: string; hunks: { lines: { kind: string; text: string }[] }[] }
     }>('GET', `/api/artifacts/${textArtifact.id}/versions/diff?a=1`)

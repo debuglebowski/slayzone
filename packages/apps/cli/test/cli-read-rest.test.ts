@@ -16,7 +16,12 @@ import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import express from 'express'
 import Database from 'better-sqlite3'
-import { test, expect, describe, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
+import {
+  test,
+  expect,
+  describe,
+  createSlayzoneDbAdapter
+} from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
@@ -60,14 +65,9 @@ db.prepare(
   'INSERT INTO tasks (id, project_id, parent_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?, ?)'
 ).run(taskB, projectId, taskA, 'Beta subtask', 'todo', 3, 1)
 const tagId = crypto.randomUUID()
-db.prepare('INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, ?)').run(
-  tagId,
-  projectId,
-  'urgent',
-  '#f00',
-  '#fff',
-  0
-)
+db.prepare(
+  'INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+).run(tagId, projectId, 'urgent', '#f00', '#fff', 0)
 
 const app = express()
 app.use(express.json())
@@ -79,7 +79,10 @@ interface CliResult {
   stdout: string
   stderr: string
 }
-function runCli(args: string[], envOverrides: Record<string, string | undefined> = {}): Promise<CliResult> {
+function runCli(
+  args: string[],
+  envOverrides: Record<string, string | undefined> = {}
+): Promise<CliResult> {
   return new Promise((resolve) => {
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),

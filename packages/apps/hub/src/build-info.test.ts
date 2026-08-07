@@ -86,8 +86,14 @@ console.log('─'.repeat(40))
 test('getServerBuildInfo() returns strings for commit/builtAt/buildId', () => {
   const info = getServerBuildInfo()
   assert(typeof info.commit === 'string' && info.commit.length > 0, 'commit is a non-empty string')
-  assert(typeof info.builtAt === 'string' && info.builtAt.length > 0, 'builtAt is a non-empty string')
-  assert(typeof info.buildId === 'string' && info.buildId.length > 0, 'buildId is a non-empty string')
+  assert(
+    typeof info.builtAt === 'string' && info.builtAt.length > 0,
+    'builtAt is a non-empty string'
+  )
+  assert(
+    typeof info.buildId === 'string' && info.buildId.length > 0,
+    'buildId is a non-empty string'
+  )
 })
 
 test('getServerBuildInfo() falls back to dev sentinels when defines absent', () => {

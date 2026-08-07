@@ -4,7 +4,12 @@ import type { WizardState } from './useProjectIntegrationSetupWizard'
 
 type WizardStep3ModeProps = Pick<
   WizardState,
-  'provider' | 'syncModeOptions' | 'syncMode' | 'setSyncMode' | 'conflictPolicy' | 'setConflictPolicy'
+  | 'provider'
+  | 'syncModeOptions'
+  | 'syncMode'
+  | 'setSyncMode'
+  | 'conflictPolicy'
+  | 'setConflictPolicy'
 >
 
 export function WizardStep3Mode({

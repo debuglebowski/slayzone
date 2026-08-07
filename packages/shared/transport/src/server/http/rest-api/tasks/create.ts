@@ -60,9 +60,7 @@ export function registerCreateTaskRoute(app: Express, deps: RestApiDeps): void {
     const body = { ...((req.body ?? {}) as Record<string, unknown>) }
 
     if (body.project !== undefined && body.projectId !== undefined) {
-      res
-        .status(400)
-        .json({ ok: false, error: 'Provide either project or projectId, not both.' })
+      res.status(400).json({ ok: false, error: 'Provide either project or projectId, not both.' })
       return
     }
     const projectRef = body.project ?? body.projectId
@@ -159,7 +157,11 @@ export function registerCreateTaskRoute(app: Express, deps: RestApiDeps): void {
         // External-id UNIQUE race: another writer created the same task between
         // the lookup above and this insert — return theirs (same answer the
         // lookup would have given, one moment later).
-        if (externalId && err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+        if (
+          externalId &&
+          err instanceof Error &&
+          err.message.includes('UNIQUE constraint failed')
+        ) {
           const existing = await findExisting()
           if (existing) {
             res.json({ ok: true, data: existing, existing: true, project: projectSummary })

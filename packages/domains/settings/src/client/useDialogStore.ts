@@ -134,8 +134,7 @@ export const useDialogStore = create<DialogState>()((set) => ({
 
   settingsOpen: false,
   settingsInitialTab: null,
-  openSettings: (opts) =>
-    set({ settingsOpen: true, settingsInitialTab: opts?.initialTab ?? null }),
+  openSettings: (opts) => set({ settingsOpen: true, settingsInitialTab: opts?.initialTab ?? null }),
   closeSettings: () => set({ settingsOpen: false, settingsInitialTab: null }),
 
   onboardingOpen: false,

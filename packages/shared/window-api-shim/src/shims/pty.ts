@@ -26,10 +26,7 @@
 //   DEV_SERVER_URL_PATTERN + dedup via session.detectedDevUrls so the toast
 //   + auto-open paths fire identically to the Electron main-process version.
 
-import type {
-  TerminalHostRemote,
-  TerminalObserverCallbackRouter,
-} from '@slayzone/mojo-bindings'
+import type { TerminalHostRemote, TerminalObserverCallbackRouter } from '@slayzone/mojo-bindings'
 import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
 import { terminalModesShim } from './terminalModes'
 
@@ -93,7 +90,7 @@ interface SessionDetectedMock {
 const sessionDetectedMock: SessionDetectedMock = {
   uuid: null,
   cmds: [],
-  buffers: new Map(),
+  buffers: new Map()
 }
 
 // cap-AR lever-2 polish (92 + 103) — renderer-local pty mock seam.
@@ -114,7 +111,7 @@ const mock: MockState = {
   createCount: 0,
   lastCreateOpts: null,
   killCalls: [],
-  existsOverride: false,
+  existsOverride: false
 }
 
 function pushChunk(s: Session, data: string, seq: number): void {
@@ -181,7 +178,7 @@ const CLI_MODES = new Set([
   'gemini',
   'cursor-agent',
   'copilot',
-  'qwen',
+  'qwen'
 ])
 
 // cap-AE: module-level state for setShellOverride — the Electron baseline
@@ -191,8 +188,11 @@ let shellOverride: string | null = null
 
 function systemPrefersDark(): boolean {
   if (typeof matchMedia === 'undefined') return true
-  try { return matchMedia('(prefers-color-scheme: dark)').matches }
-  catch { return true }
+  try {
+    return matchMedia('(prefers-color-scheme: dark)').matches
+  } catch {
+    return true
+  }
 }
 
 function b64(input: string): string {
@@ -210,7 +210,7 @@ function encodeStartSentinels(
   cwd: string,
   mode: string,
   initialCommand: string,
-  recoveryLabel: string,
+  recoveryLabel: string
 ): string {
   let out = cwd
   // Order matters — sidecar parser loops and consumes any prefix, so the
@@ -260,7 +260,7 @@ async function createSession(opts: CreateOptions): Promise<{ success: boolean; e
         totalBytes: 0,
         clearedSeq: null as number | null,
         attentionTimer: null,
-        detectedDevUrls: new Set<string>(),
+        detectedDevUrls: new Set<string>()
       }
       sessions.set(sessionId, fake as Session)
     }
@@ -281,7 +281,7 @@ async function createSession(opts: CreateOptions): Promise<{ success: boolean; e
     totalBytes: 0,
     clearedSeq: null,
     attentionTimer: null,
-    detectedDevUrls: new Set<string>(),
+    detectedDevUrls: new Set<string>()
   }
 
   session.observer.onOutput.addListener((data: string) => {
@@ -350,7 +350,11 @@ async function createSession(opts: CreateOptions): Promise<{ success: boolean; e
   if (mode && !CLI_MODES.has(mode)) {
     try {
       const info = await terminalModesShim.get(mode)
-      if (info?.type === 'custom' && typeof info.initialCommand === 'string' && info.initialCommand.length > 0) {
+      if (
+        info?.type === 'custom' &&
+        typeof info.initialCommand === 'string' &&
+        info.initialCommand.length > 0
+      ) {
         initialCommand = info.initialCommand
         recoveryLabel = info.label || mode
       }
@@ -402,7 +406,11 @@ export const ptyShim = {
           const uuid = sessionDetectedMock.uuid
           queueMicrotask(() => {
             sessionDetectedSubs.forEach((cb) => {
-              try { cb(sessionId, uuid) } catch { /* swallow */ }
+              try {
+                cb(sessionId, uuid)
+              } catch {
+                /* swallow */
+              }
             })
           })
         }
@@ -497,17 +505,17 @@ export const ptyShim = {
   },
   getBufferSince: async (
     id: string,
-    afterSeq: number,
+    afterSeq: number
   ): Promise<{ chunks: Array<{ data: string; seq: number }>; currentSeq: number }> => {
     if (mock.installed) return { chunks: [], currentSeq: 0 }
     const s = sessions.get(id)
     if (!s) return { chunks: [], currentSeq: 0 }
-    const chunks = s.chunks.filter((c) => c.seq > afterSeq).map((c) => ({ seq: c.seq, data: c.data }))
+    const chunks = s.chunks
+      .filter((c) => c.seq > afterSeq)
+      .map((c) => ({ seq: c.seq, data: c.data }))
     return { chunks, currentSeq: s.seq }
   },
-  clearBuffer: async (
-    id: string,
-  ): Promise<{ success: boolean; clearedSeq: number | null }> => {
+  clearBuffer: async (id: string): Promise<{ success: boolean; clearedSeq: number | null }> => {
     const s = sessions.get(id)
     if (!s) return { success: false, clearedSeq: null }
     s.chunks = []
@@ -532,7 +540,7 @@ export const ptyShim = {
     return [{ check: 'Shell detected', ok: true, detail: `mode=${target}` }]
   },
   testExecutionContext: async (): Promise<{ success: boolean; error?: string }> => ({
-    success: true,
+    success: true
   }),
   ccsListProfiles: async (): Promise<{ profiles: string[]; error?: string }> => ({ profiles: [] }),
   onAttention: noopSub,
@@ -627,6 +635,6 @@ export const ptyShim = {
       sessionDetectedMock.uuid = null
       sessionDetectedMock.cmds = []
       sessionDetectedMock.buffers.clear()
-    },
-  },
+    }
+  }
 }

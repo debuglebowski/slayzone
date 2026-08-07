@@ -151,8 +151,8 @@ describe('GeneralTab default runner', () => {
   it('preselects the project default runner', () => {
     runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
     renderTab(makeProject({ default_runner_id: 'runner-a' }))
-    expect(
-      (screen.getByTestId('default-runner-select') as HTMLSelectElement).value
-    ).toBe('runner-a')
+    expect((screen.getByTestId('default-runner-select') as HTMLSelectElement).value).toBe(
+      'runner-a'
+    )
   })
 })

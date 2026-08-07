@@ -40,10 +40,7 @@ import type { RestApiDeps } from '../types'
 export function isLoopbackAddress(addr: string | undefined): boolean {
   if (!addr) return false
   return (
-    addr === '127.0.0.1' ||
-    addr === '::1' ||
-    addr === '::ffff:127.0.0.1' ||
-    addr.startsWith('127.')
+    addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1' || addr.startsWith('127.')
   )
 }
 
@@ -75,7 +72,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     }
     const users = deps.hubUsers
     if (!users) {
-      res.status(503).json({ ok: false, error: 'hub user management is not available on this host' })
+      res
+        .status(503)
+        .json({ ok: false, error: 'hub user management is not available on this host' })
       return null
     }
     if (!users.ready()) {

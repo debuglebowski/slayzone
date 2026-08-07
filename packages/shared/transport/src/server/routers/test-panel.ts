@@ -112,7 +112,9 @@ export const testPanelRouter = router({
 
   toggleFileLabel: publicProcedure
     .input(z.object({ projectId: z.string(), filePath: z.string(), labelId: z.string() }))
-    .mutation(({ ctx, input }) => toggleFileLabel(ctx.db, input.projectId, input.filePath, input.labelId)),
+    .mutation(({ ctx, input }) =>
+      toggleFileLabel(ctx.db, input.projectId, input.filePath, input.labelId)
+    ),
 
   getFileNotes: publicProcedure
     .input(z.object({ projectId: z.string() }))

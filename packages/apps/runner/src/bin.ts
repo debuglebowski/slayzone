@@ -59,7 +59,8 @@ async function maybeInteractiveSetup(): Promise<{
   // carries authority only, so compose it into a url (scheme from MODE) before
   // deriving the credential-store host key; runner.config.json still carries a full url.
   const envAddress = process.env[ENV_VARS.hubAddress]
-  const hubUrl = envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/runners') : cfg.hubUrl
+  const hubUrl =
+    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/runners') : cfg.hubUrl
   if (hubUrl !== undefined) {
     try {
       // Creds derive from the ROOT anchor (`<ROOT>/runner.state.json`) — no override knob.

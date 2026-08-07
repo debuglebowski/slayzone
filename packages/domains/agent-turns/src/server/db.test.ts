@@ -84,7 +84,10 @@ await describe('getLatestTurnForWorktree', () => {
     h.db.prepare('DELETE FROM agent_turns').run()
     await insertTurn(h.db, mk({ created_at: 100, snapshot_sha: 'a' }))
     await insertTurn(h.db, mk({ created_at: 200, snapshot_sha: 'b' }))
-    await insertTurn(h.db, mk({ worktree_path: otherWt, created_at: 999, snapshot_sha: 'other-newer' }))
+    await insertTurn(
+      h.db,
+      mk({ worktree_path: otherWt, created_at: 999, snapshot_sha: 'other-newer' })
+    )
     expect((await getLatestTurnForWorktree(h.db, wt))!.snapshot_sha).toBe('b')
     expect((await getLatestTurnForWorktree(h.db, otherWt))!.snapshot_sha).toBe('other-newer')
   })

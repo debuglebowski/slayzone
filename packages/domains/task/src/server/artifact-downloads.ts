@@ -1,5 +1,12 @@
 import path from 'path'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, createWriteStream } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  copyFileSync,
+  createWriteStream
+} from 'fs'
 import archiver from 'archiver'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
@@ -43,12 +50,7 @@ export type ArtifactDownloadHost = {
   getDownloadsDir: () => Promise<string>
   showItemInFolder: (absPath: string) => void
   buildExportHtml: (content: string, mode: string, title: string) => Promise<string>
-  renderPdfToFile: (
-    content: string,
-    mode: string,
-    title: string,
-    destPath: string
-  ) => Promise<void>
+  renderPdfToFile: (content: string, mode: string, title: string, destPath: string) => Promise<void>
   /** False when the mode has no PNG representation. */
   renderPngToFile: (
     content: string,
@@ -58,7 +60,10 @@ export type ArtifactDownloadHost = {
   ) => Promise<boolean>
 }
 
-async function getArtifactRow(db: SlayzoneDb, id: string): Promise<Record<string, unknown> | undefined> {
+async function getArtifactRow(
+  db: SlayzoneDb,
+  id: string
+): Promise<Record<string, unknown> | undefined> {
   return (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
     | Record<string, unknown>
     | undefined
@@ -102,9 +107,9 @@ export async function downloadArtifactFolder(
   folderId: string
 ): Promise<boolean> {
   const store = createArtifactStore(dataDir)
-  const folder = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(
-    folderId
-  )) as Record<string, unknown> | undefined
+  const folder = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(folderId)) as
+    | Record<string, unknown>
+    | undefined
   if (!folder) return false
 
   const result = await host.showOpenDialog({
@@ -139,7 +144,11 @@ export async function downloadArtifactFolder(
     )
     .all(taskId, ...targetIds)) as Record<string, unknown>[]
   for (const artifact of artifacts) {
-    const srcPath = store.getArtifactFilePath(taskId, artifact.id as string, artifact.title as string)
+    const srcPath = store.getArtifactFilePath(
+      taskId,
+      artifact.id as string,
+      artifact.title as string
+    )
     if (!existsSync(srcPath)) continue
     const folderRel =
       rootParentPath === '.'
@@ -266,7 +275,11 @@ export async function downloadAllArtifactsAsZip(
   archive.pipe(output)
 
   for (const artifact of allArtifacts) {
-    const srcPath = store.getArtifactFilePath(taskId, artifact.id as string, artifact.title as string)
+    const srcPath = store.getArtifactFilePath(
+      taskId,
+      artifact.id as string,
+      artifact.title as string
+    )
     if (!existsSync(srcPath)) continue
     const folderId = artifact.folder_id as string | null
     const rel = folderId

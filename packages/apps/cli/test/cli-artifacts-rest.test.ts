@@ -31,7 +31,12 @@ import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import express from 'express'
 import Database from 'better-sqlite3'
-import { test, expect, describe, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
+import {
+  test,
+  expect,
+  describe,
+  createSlayzoneDbAdapter
+} from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
@@ -152,7 +157,15 @@ await describe('CLI artifact metadata commands → REST', () => {
   let childFolderId = ''
 
   test('mkdir creates a root folder via REST', async () => {
-    const r = await runCli(['tasks', 'artifacts', 'mkdir', 'Docs', '--task', short(taskId), '--json'])
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'mkdir',
+      'Docs',
+      '--task',
+      short(taskId),
+      '--json'
+    ])
     expect(r.exitCode).toBe(0)
     const folder = JSON.parse(r.stdout) as { id: string; name: string; parent_id: string | null }
     expect(folder.name).toBe('Docs')
@@ -221,9 +234,12 @@ await describe('CLI artifact metadata commands → REST', () => {
     // 404s with code ARTIFACT_FILE_MISSING; the CLI must pass that through rather
     // than print an error — a version-only artifact is a normal state.
     const ghost = crypto.randomUUID()
-    db.prepare(
-      'INSERT INTO task_artifacts (id, task_id, title, "order") VALUES (?, ?, ?, ?)'
-    ).run(ghost, taskId, 'ghost.md', 70)
+    db.prepare('INSERT INTO task_artifacts (id, task_id, title, "order") VALUES (?, ?, ?, ?)').run(
+      ghost,
+      taskId,
+      'ghost.md',
+      70
+    )
     const r = await runCli(['tasks', 'artifacts', 'read', short(ghost)])
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe('')
@@ -232,9 +248,12 @@ await describe('CLI artifact metadata commands → REST', () => {
 
   test('download --type raw on a row with NO working copy is an ERROR (unlike read)', async () => {
     const ghost = crypto.randomUUID()
-    db.prepare(
-      'INSERT INTO task_artifacts (id, task_id, title, "order") VALUES (?, ?, ?, ?)'
-    ).run(ghost, taskId, 'ghost2.md', 71)
+    db.prepare('INSERT INTO task_artifacts (id, task_id, title, "order") VALUES (?, ?, ?, ?)').run(
+      ghost,
+      taskId,
+      'ghost2.md',
+      71
+    )
     const r = await runCli([
       'tasks',
       'artifacts',
@@ -313,9 +332,9 @@ await describe('CLI artifact metadata commands → REST', () => {
     ])
     expect(back.exitCode).toBe(0)
     expect(back.stdout.trim()).toBe(`Moved folder: ${short(childFolderId)} -> Docs`)
-    const row = db.prepare('SELECT parent_id FROM artifact_folders WHERE id = ?').get(
-      childFolderId
-    ) as { parent_id: string }
+    const row = db
+      .prepare('SELECT parent_id FROM artifact_folders WHERE id = ?')
+      .get(childFolderId) as { parent_id: string }
     expect(row.parent_id).toBe(folderId)
   })
 
@@ -337,7 +356,9 @@ await describe('CLI artifact metadata commands → REST', () => {
     expect(r.exitCode).toBe(0)
     const out = JSON.parse(r.stdout) as { deleted: string; name: string }
     expect(out.deleted).toBe(childFolderId)
-    expect(db.prepare('SELECT 1 AS x FROM artifact_folders WHERE id = ?').get(childFolderId)).toBeUndefined()
+    expect(
+      db.prepare('SELECT 1 AS x FROM artifact_folders WHERE id = ?').get(childFolderId)
+    ).toBeUndefined()
   })
 
   test('list error: unknown task → exit 1 with REST 404 message', async () => {
@@ -395,9 +416,7 @@ await describe('CLI artifact content is binary-safe end to end', () => {
     const artifact = JSON.parse(r.stdout) as { id: string; title: string }
     expect(artifact.title).toBe('source.png')
     pngId = artifact.id
-    const onDisk = fs.readFileSync(
-      path.join(storageDir, 'artifacts', taskId, `${pngId}.png`)
-    )
+    const onDisk = fs.readFileSync(path.join(storageDir, 'artifacts', taskId, `${pngId}.png`))
     expect(onDisk.toString('hex')).toBe(BINARY.toString('hex'))
   })
 
@@ -427,24 +446,20 @@ await describe('CLI artifact content is binary-safe end to end', () => {
   test('create --copy-from streams a binary file byte-exact', async () => {
     const srcPath = path.join(tmpDir, 'copied.png')
     fs.writeFileSync(srcPath, BINARY)
-    const r = await runCli(
-      [
-        'tasks',
-        'artifacts',
-        'create',
-        'copied.png',
-        '--task',
-        short(taskId),
-        '--copy-from',
-        srcPath,
-        '--json'
-      ]
-    )
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'create',
+      'copied.png',
+      '--task',
+      short(taskId),
+      '--copy-from',
+      srcPath,
+      '--json'
+    ])
     expect(r.exitCode).toBe(0)
     const artifact = JSON.parse(r.stdout) as { id: string }
-    const onDisk = fs.readFileSync(
-      path.join(storageDir, 'artifacts', taskId, `${artifact.id}.png`)
-    )
+    const onDisk = fs.readFileSync(path.join(storageDir, 'artifacts', taskId, `${artifact.id}.png`))
     expect(onDisk.toString('hex')).toBe(BINARY.toString('hex'))
   })
 
@@ -557,7 +572,9 @@ await describe('CLI artifact create options route through REST', () => {
     expect(r.exitCode).toBe(0)
     const artifact = JSON.parse(r.stdout) as { id: string; folder_id: string | null }
     expect(artifact.folder_id).toBe(folderId)
-    const row = db.prepare('SELECT folder_id FROM task_artifacts WHERE id = ?').get(artifact.id) as {
+    const row = db
+      .prepare('SELECT folder_id FROM task_artifacts WHERE id = ?')
+      .get(artifact.id) as {
       folder_id: string
     }
     expect(row.folder_id).toBe(folderId)
@@ -590,9 +607,9 @@ await describe('CLI artifact create options route through REST', () => {
     expect(r.exitCode).toBe(0)
     const artifact = JSON.parse(r.stdout) as { id: string; render_mode: string | null }
     expect(artifact.render_mode).toBe('mermaid-preview')
-    const row = db.prepare('SELECT render_mode FROM task_artifacts WHERE id = ?').get(
-      artifact.id
-    ) as { render_mode: string }
+    const row = db
+      .prepare('SELECT render_mode FROM task_artifacts WHERE id = ?')
+      .get(artifact.id) as { render_mode: string }
     expect(row.render_mode).toBe('mermaid-preview')
   })
 
@@ -669,9 +686,7 @@ await describe('CLI artifact commands work without a local database', () => {
     const artifact = JSON.parse(r.stdout) as { id: string; title: string }
     expect(artifact.title).toBe('remote-upload.bin')
     // Bytes crossed the wire and landed under the HUB's storage root.
-    const onDisk = fs.readFileSync(
-      path.join(storageDir, 'artifacts', taskId, `${artifact.id}.bin`)
-    )
+    const onDisk = fs.readFileSync(path.join(storageDir, 'artifacts', taskId, `${artifact.id}.bin`))
     expect(onDisk.toString('hex')).toBe(BINARY.toString('hex'))
   })
 

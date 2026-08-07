@@ -1,4 +1,7 @@
-import type { ProjectIntegrationProvider, WizardSyncMode } from './ProjectIntegrationSetupWizard.types'
+import type {
+  ProjectIntegrationProvider,
+  WizardSyncMode
+} from './ProjectIntegrationSetupWizard.types'
 
 export const STEPS = [
   'Connect account',

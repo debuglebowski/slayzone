@@ -288,9 +288,9 @@ test.describe('Git diff panel', () => {
 
     const p = panel(mainWindow)
     // Invariant 1: file tree visible despite diff_tree_collapsed=1
-    await expect(
-      p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })).toBeVisible({
+      timeout: 5_000
+    })
     // Invariant 2: a file is auto-selected, so the diff body renders
     await expect(p.getByText('auto-select-test')).toBeVisible({ timeout: 5_000 })
 

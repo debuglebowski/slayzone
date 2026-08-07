@@ -168,7 +168,13 @@ test('create: uses project-specific default status from columns config', async (
       '/tmp/custom',
       JSON.stringify([
         { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
-        { id: 'progressing', label: 'Progressing', color: 'blue', position: 1, category: 'started' },
+        {
+          id: 'progressing',
+          label: 'Progressing',
+          color: 'blue',
+          position: 1,
+          category: 'started'
+        },
         { id: 'closed', label: 'Closed', color: 'green', position: 2, category: 'completed' }
       ])
     )
@@ -183,7 +189,13 @@ test('create: falls back to inbox when project columns config is invalid', async
   const invalidProjectId = crypto.randomUUID()
   h.db
     .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
-    .run(invalidProjectId, 'InvalidColumns', '#222', '/tmp/invalid', '{"not":"a-valid-columns-array"}')
+    .run(
+      invalidProjectId,
+      'InvalidColumns',
+      '#222',
+      '/tmp/invalid',
+      '{"not":"a-valid-columns-array"}'
+    )
   const t = (await caller.create({
     projectId: invalidProjectId,
     title: 'Fallback default status'
@@ -344,7 +356,10 @@ test('update: no-op returns current task', async () => {
 test('update: provider_config deep merge - conversationId', async () => {
   const t = await createTask('DeepMerge')
   expect(t.provider_config['claude-code']?.flags).toBe('--allow-dangerously-skip-permissions')
-  const updated = await up({ id: t.id, providerConfig: { 'claude-code': { conversationId: 'abc123' } } })
+  const updated = await up({
+    id: t.id,
+    providerConfig: { 'claude-code': { conversationId: 'abc123' } }
+  })
   expect(updated.provider_config['claude-code']?.conversationId).toBe('abc123')
   expect(updated.provider_config['claude-code']?.flags).toBe('--allow-dangerously-skip-permissions')
 })
@@ -352,14 +367,21 @@ test('update: provider_config deep merge - conversationId', async () => {
 test('update: provider_config deep merge - partial mode update', async () => {
   const t = await createTask('PartialMerge')
   await up({ id: t.id, providerConfig: { codex: { conversationId: 'codex-1' } } })
-  const updated = await up({ id: t.id, providerConfig: { 'claude-code': { conversationId: 'claude-1' } } })
+  const updated = await up({
+    id: t.id,
+    providerConfig: { 'claude-code': { conversationId: 'claude-1' } }
+  })
   expect(updated.provider_config['codex']?.conversationId).toBe('codex-1')
   expect(updated.provider_config['claude-code']?.conversationId).toBe('claude-1')
 })
 
 test('update: legacy fields update provider_config', async () => {
   const t = await createTask('LegacyUpdate')
-  const updated = await up({ id: t.id, claudeConversationId: 'legacy-id', claudeFlags: '--legacy-flag' })
+  const updated = await up({
+    id: t.id,
+    claudeConversationId: 'legacy-id',
+    claudeFlags: '--legacy-flag'
+  })
   expect(updated.provider_config['claude-code']?.conversationId).toBe('legacy-id')
   expect(updated.provider_config['claude-code']?.flags).toBe('--legacy-flag')
   expect(updated.claude_conversation_id).toBe('legacy-id')
@@ -385,7 +407,10 @@ test('update: updates worktree fields', async () => {
 
 test('update: clears conversation IDs when worktreePath changes', async () => {
   const t = await createTask('SessionReset', { terminalMode: 'codex' })
-  const withSession = await up({ id: t.id, providerConfig: { codex: { conversationId: 'stale-session-123' } } })
+  const withSession = await up({
+    id: t.id,
+    providerConfig: { codex: { conversationId: 'stale-session-123' } }
+  })
   expect(withSession.provider_config.codex?.conversationId).toBe('stale-session-123')
   const after = await up({ id: withSession.id, worktreePath: '/tmp/new-worktree' })
   expect(after.worktree_path).toBe('/tmp/new-worktree')
@@ -395,7 +420,10 @@ test('update: clears conversation IDs when worktreePath changes', async () => {
 
 test('update: does not clear conversation IDs when worktreePath and providerConfig both update', async () => {
   const t = await createTask('SessionKeep')
-  const withSession = await up({ id: t.id, providerConfig: { 'claude-code': { conversationId: 'keep-me' } } })
+  const withSession = await up({
+    id: t.id,
+    providerConfig: { 'claude-code': { conversationId: 'keep-me' } }
+  })
   const updated = await up({
     id: withSession.id,
     worktreePath: '/tmp/other-wt',
@@ -407,9 +435,16 @@ test('update: does not clear conversation IDs when worktreePath and providerConf
 test('update: project move clears worktree fields and conversation IDs', async () => {
   const sourceId = crypto.randomUUID()
   const targetId = crypto.randomUUID()
-  h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(sourceId, 'WtSrc', '#a00', '/tmp/wt-src')
-  h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(targetId, 'WtTgt', '#b00', '/tmp/wt-tgt')
-  const t = (await caller.create({ projectId: sourceId, title: 'MoveWorktree' } as unknown as CreateTaskInput)) as Task
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+    .run(sourceId, 'WtSrc', '#a00', '/tmp/wt-src')
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+    .run(targetId, 'WtTgt', '#b00', '/tmp/wt-tgt')
+  const t = (await caller.create({
+    projectId: sourceId,
+    title: 'MoveWorktree'
+  } as unknown as CreateTaskInput)) as Task
   const setup = await up({
     id: t.id,
     worktreePath: '/tmp/wt-src/feat-branch',
@@ -428,9 +463,19 @@ test('update: project move clears worktree fields and conversation IDs', async (
 
 test('update: same-project update preserves worktree fields', async () => {
   const pid = crypto.randomUUID()
-  h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(pid, 'SameProj', '#c00', '/tmp/same')
-  const t = (await caller.create({ projectId: pid, title: 'KeepWorktree' } as unknown as CreateTaskInput)) as Task
-  await up({ id: t.id, worktreePath: '/tmp/same/wt', worktreeParentBranch: 'develop', repoName: 'keep-repo' })
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+    .run(pid, 'SameProj', '#c00', '/tmp/same')
+  const t = (await caller.create({
+    projectId: pid,
+    title: 'KeepWorktree'
+  } as unknown as CreateTaskInput)) as Task
+  await up({
+    id: t.id,
+    worktreePath: '/tmp/same/wt',
+    worktreeParentBranch: 'develop',
+    repoName: 'keep-repo'
+  })
   const updated = await up({ id: t.id, projectId: pid, title: 'Renamed' })
   expect(updated.title).toBe('Renamed')
   expect(updated.worktree_path).toBe('/tmp/same/wt')
@@ -441,11 +486,22 @@ test('update: same-project update preserves worktree fields', async () => {
 test('update: project move with explicit providerConfig preserves conversation IDs', async () => {
   const srcId = crypto.randomUUID()
   const dstId = crypto.randomUUID()
-  h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(srcId, 'CfgSrc', '#d00', '/tmp/cfg-src')
-  h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(dstId, 'CfgDst', '#e00', '/tmp/cfg-dst')
-  const t = (await caller.create({ projectId: srcId, title: 'MoveWithConfig' } as unknown as CreateTaskInput)) as Task
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+    .run(srcId, 'CfgSrc', '#d00', '/tmp/cfg-src')
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+    .run(dstId, 'CfgDst', '#e00', '/tmp/cfg-dst')
+  const t = (await caller.create({
+    projectId: srcId,
+    title: 'MoveWithConfig'
+  } as unknown as CreateTaskInput)) as Task
   await up({ id: t.id, providerConfig: { 'claude-code': { conversationId: 'old-conv' } } })
-  const moved = await up({ id: t.id, projectId: dstId, providerConfig: { 'claude-code': { conversationId: 'new-conv' } } })
+  const moved = await up({
+    id: t.id,
+    projectId: dstId,
+    providerConfig: { 'claude-code': { conversationId: 'new-conv' } }
+  })
   expect(moved.provider_config['claude-code']?.conversationId).toBe('new-conv')
 })
 
@@ -494,9 +550,14 @@ test('update: rejects cycle', async () => {
 
 test('update: rejects cross-project reparent', async () => {
   const otherProjectId = crypto.randomUUID()
-  h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(otherProjectId, 'OtherProj', '#f00', '/tmp/other')
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+    .run(otherProjectId, 'OtherProj', '#f00', '/tmp/other')
   const local = await createTask('Local')
-  const foreign = (await caller.create({ projectId: otherProjectId, title: 'Foreign' } as unknown as CreateTaskInput)) as Task
+  const foreign = (await caller.create({
+    projectId: otherProjectId,
+    title: 'Foreign'
+  } as unknown as CreateTaskInput)) as Task
   const msg = await errMessage(() => up({ id: local.id, parentId: foreign.id }))
   expect(msg.includes('different project')).toBe(true)
 })
@@ -682,7 +743,12 @@ let mutCount = 0
 const reMk = (title: string): Promise<Task> => caller.create(mk(title)) as Promise<Task>
 
 test('onMutation: install counting callback', async () => {
-  setTaskDeps({ ops: taskOps, onMutation: () => { mutCount++ } })
+  setTaskDeps({
+    ops: taskOps,
+    onMutation: () => {
+      mutCount++
+    }
+  })
 })
 
 test('onMutation: fires on create', async () => {
@@ -1019,7 +1085,11 @@ test('temp-promote: renaming a non-temp task leaves is_temporary untouched and d
 
 test('temp-promote: explicit isTemporary in the update wins over auto-promote', async () => {
   const id = seedTempTask('inbox')
-  await updateTask(h.slayDb, { id, title: 'Renamed', isTemporary: true } as unknown as UpdateTaskInput)
+  await updateTask(h.slayDb, {
+    id,
+    title: 'Renamed',
+    isTemporary: true
+  } as unknown as UpdateTaskInput)
   const row = readTempRow(id)
   expect(row.is_temporary).toBe(1)
   expect(row.status).toBe('inbox')
@@ -1063,7 +1133,10 @@ test('inherit: null when parent has no worktree', async () => {
 test('inherit: parent repo_name overrides caller-supplied value', async () => {
   const repoParent = await createTask('RepoParent')
   await up({ id: repoParent.id, repoName: 'parent-repo' })
-  const repoChild = await createTask('RepoChild', { parentId: repoParent.id, repoName: 'caller-repo' })
+  const repoChild = await createTask('RepoChild', {
+    parentId: repoParent.id,
+    repoName: 'caller-repo'
+  })
   expect(repoChild.repo_name).toBe('parent-repo')
 })
 
@@ -1127,7 +1200,9 @@ test('task router: create fires taskEvents (backs the onChanged subscription)', 
 // (the IPC handlers returned null). Surfaces what IPC hid; the renderer must handle
 // the throw at cutover (slice 5).
 test('task router: missing id throws TRPCError NOT_FOUND (not silent null)', async () => {
-  expect(await errCode(() => caller.update({ id: 'nope', title: 'x' } as unknown as UpdateTaskInput))).toBe('NOT_FOUND')
+  expect(
+    await errCode(() => caller.update({ id: 'nope', title: 'x' } as unknown as UpdateTaskInput))
+  ).toBe('NOT_FOUND')
   expect(await errCode(() => caller.archive({ id: 'nope' }))).toBe('NOT_FOUND')
   expect(await errCode(() => caller.restore({ id: 'nope' }))).toBe('NOT_FOUND')
   expect(await errCode(() => caller.unarchive({ id: 'nope' }))).toBe('NOT_FOUND')

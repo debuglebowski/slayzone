@@ -46,8 +46,14 @@ withPublicAddress(undefined, () => {
   const env = provider({ taskId: 'task-1', runnerId: 'runner-a' })
   assert(env !== null, 'runner-routed spawn must resolve a non-null target')
   assert(env!.runnerId === 'runner-a', 'runnerId echoed back')
-  assert(env!.hubBaseUrl === 'http://127.0.0.1:4141', `loopback base on boundPort, got ${env!.hubBaseUrl}`)
-  assert(!('token' in (env as object)), 'no bearer field on the resolved env (token plumbing removed)')
+  assert(
+    env!.hubBaseUrl === 'http://127.0.0.1:4141',
+    `loopback base on boundPort, got ${env!.hubBaseUrl}`
+  )
+  assert(
+    !('token' in (env as object)),
+    'no bearer field on the resolved env (token plumbing removed)'
+  )
 })
 
 // 2. SLAYZONE_HUB_PUBLIC_ADDRESS wins over loopback; scheme comes from MODE
@@ -72,7 +78,10 @@ withPublicAddress(
   () => {
     const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
     const env = provider({ taskId: 'task-3', runnerId: 'r' })
-    assert(env!.hubBaseUrl === 'http://hub.example:8443', `local MODE → http, got ${env!.hubBaseUrl}`)
+    assert(
+      env!.hubBaseUrl === 'http://hub.example:8443',
+      `local MODE → http, got ${env!.hubBaseUrl}`
+    )
   },
   'local'
 )

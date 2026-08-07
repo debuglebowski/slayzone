@@ -63,9 +63,7 @@ describe('mintJoinToken', () => {
       string,
       unknown
     >
-    expect(row.token_hash).toBe(
-      createHash('sha256').update(minted.token, 'utf8').digest('hex')
-    )
+    expect(row.token_hash).toBe(createHash('sha256').update(minted.token, 'utf8').digest('hex'))
     expect(row.used_at).toBeNull()
     expect(row.runner_id).toBeNull()
     for (const [key, value] of Object.entries(row)) {
@@ -87,9 +85,9 @@ describe('verifyJoinToken', () => {
       expect(res.payload.hubUrl).toBe('https://hub.example:8443')
     }
 
-    const row = t.raw
-      .prepare(`SELECT used_at FROM join_tokens WHERE id = ?`)
-      .get(minted.id) as { used_at: number | null }
+    const row = t.raw.prepare(`SELECT used_at FROM join_tokens WHERE id = ?`).get(minted.id) as {
+      used_at: number | null
+    }
     expect(row.used_at).toBe(NOW + 1)
   })
 
@@ -105,9 +103,9 @@ describe('verifyJoinToken', () => {
     const res = await verifyJoinToken(t.db, minted.token, NOW + TTL)
     expect(res).toEqual({ ok: false, reason: 'expired' })
 
-    const row = t.raw
-      .prepare(`SELECT used_at FROM join_tokens WHERE id = ?`)
-      .get(minted.id) as { used_at: number | null }
+    const row = t.raw.prepare(`SELECT used_at FROM join_tokens WHERE id = ?`).get(minted.id) as {
+      used_at: number | null
+    }
     expect(row.used_at).toBeNull()
   })
 

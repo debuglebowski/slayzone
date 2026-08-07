@@ -114,7 +114,8 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 /** Newest mtime under a dir tree (stale-build detection). */
@@ -255,7 +256,9 @@ async function startHub(): Promise<{ port: number }> {
   const port = Number(match![1])
   await poll(
     async () => {
-      const r = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) })
+      const r = await fetch(`http://127.0.0.1:${port}/health`, {
+        signal: AbortSignal.timeout(1000)
+      })
       return r.ok ? true : null
     },
     30_000,
@@ -326,7 +329,15 @@ async function main(): Promise<void> {
 
     await test('create rejects a malformed token BEFORE writing anything', async () => {
       const res = slayNoService(
-        ['runner', 'create', `${NAME_PREFIX}badtok`, '--token', 'not-a-token', '--root', rejectRoot],
+        [
+          'runner',
+          'create',
+          `${NAME_PREFIX}badtok`,
+          '--token',
+          'not-a-token',
+          '--root',
+          rejectRoot
+        ],
         rejectRoot
       )
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
@@ -347,7 +358,10 @@ async function main(): Promise<void> {
         rejectRoot
       )
       assert(res.status !== 0, 'exited non-zero')
-      assert(/reserved for the runner inside the SlayZone/.test(res.stderr), `explains: ${res.stderr}`)
+      assert(
+        /reserved for the runner inside the SlayZone/.test(res.stderr),
+        `explains: ${res.stderr}`
+      )
       assert(!existsSync(join(rejectRoot, 'runner.config.json')), 'no runner.config.json written')
     })
 
@@ -505,10 +519,9 @@ async function main(): Promise<void> {
 
       // The token, hub url, name and path-jail all travel via runner.config.json — none has
       // an env channel, and a unit file must never carry a credential.
-      const cfg = JSON.parse(readFileSync(join(runnerRoot, 'runner.config.json'), 'utf8')) as Record<
-        string,
-        unknown
-      >
+      const cfg = JSON.parse(
+        readFileSync(join(runnerRoot, 'runner.config.json'), 'utf8')
+      ) as Record<string, unknown>
       assertEq(cfg.joinToken, token, 'token persisted')
       assertEq(cfg.runnerName, runnerName, 'name persisted')
       assertEq(cfg.hubUrl, `ws://127.0.0.1:${hub.port}/runners`, 'hub url decoded from the token')
@@ -536,11 +549,13 @@ async function main(): Promise<void> {
       assert(/"mode":"enroll"/.test(logs), `enroll logged:\n${logs.slice(-1500)}`)
       // The durable record: the dialer persists {runnerId, apiKey} per hub host into
       // one shared map file, which is what `runner ls` reads for its ENROLLED column.
-      const creds = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<
-        string,
-        unknown
-      >
-      assert(Object.keys(creds).length > 0, `credential entry written, got ${JSON.stringify(creds)}`)
+      const creds = JSON.parse(
+        readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')
+      ) as Record<string, unknown>
+      assert(
+        Object.keys(creds).length > 0,
+        `credential entry written, got ${JSON.stringify(creds)}`
+      )
     })
 
     await test('the hub reports the runner as connected', async () => {

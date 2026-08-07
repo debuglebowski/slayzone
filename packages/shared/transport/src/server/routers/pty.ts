@@ -31,7 +31,9 @@ export const ptyRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(({ input }) => ops().terminalModesDelete(input.id)),
   modesRestoreDefaults: publicProcedure.mutation(() => ops().terminalModesRestoreDefaults()),
-  modesResetToDefaultState: publicProcedure.mutation(() => ops().terminalModesResetToDefaultState()),
+  modesResetToDefaultState: publicProcedure.mutation(() =>
+    ops().terminalModesResetToDefaultState()
+  ),
 
   // PTY ops
   create: publicProcedure.input(anyInput).mutation(({ input }) => ops().ptyCreate(input as never)),
@@ -77,9 +79,7 @@ export const ptyRouter = router({
   // Renderer→main ensure-alive ACK — resolves the pending requestEnsureAlive
   // waiter by reqId. Mirrors the legacy `pty:ensure-alive:ack` IPC.
   ackEnsureAlive: publicProcedure
-    .input(
-      z.object({ reqId: z.number(), result: z.enum(['ok', 'already-alive', 'error']) })
-    )
+    .input(z.object({ reqId: z.number(), result: z.enum(['ok', 'already-alive', 'error']) }))
     .mutation(({ input }) => ops().ptyAckEnsureAlive(input.reqId, input.result)),
   exists: publicProcedure
     .input(z.object({ sessionId: z.string() }))
@@ -152,8 +152,11 @@ export const ptyRouter = router({
   ),
   onExit: publicProcedure.subscription(() =>
     observable<{ sessionId: string; exitCode: number | null; errorCode: string | null }>((emit) => {
-      const handler = (sessionId: string, exitCode: number | null, errorCode: string | null): void =>
-        emit.next({ sessionId, exitCode, errorCode })
+      const handler = (
+        sessionId: string,
+        exitCode: number | null,
+        errorCode: string | null
+      ): void => emit.next({ sessionId, exitCode, errorCode })
       const ev = getPtyDeps().events
       ev.on('exit', handler)
       return () => ev.off('exit', handler)
@@ -161,8 +164,7 @@ export const ptyRouter = router({
   ),
   onPrompt: publicProcedure.subscription(() =>
     observable<{ sessionId: string; prompt: unknown }>((emit) => {
-      const handler = (sessionId: string, prompt: unknown): void =>
-        emit.next({ sessionId, prompt })
+      const handler = (sessionId: string, prompt: unknown): void => emit.next({ sessionId, prompt })
       const ev = getPtyDeps().events
       ev.on('prompt', handler)
       return () => ev.off('prompt', handler)

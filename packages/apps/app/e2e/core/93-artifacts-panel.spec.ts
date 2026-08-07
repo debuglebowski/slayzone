@@ -583,7 +583,11 @@ test.describe('Artifacts panel', () => {
   test('zoom control is hidden where the viewer owns its own zoom', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     await s.createArtifact({ taskId, title: 'zoom-skip.pdf', content: '' })
-    await s.createArtifact({ taskId, title: 'zoom-skip.svg', content: '<svg viewBox="0 0 10 10"/>' })
+    await s.createArtifact({
+      taskId,
+      title: 'zoom-skip.svg',
+      content: '<svg viewBox="0 0 10 10"/>'
+    })
     await s.refreshData()
 
     await openArtifactsPanel(mainWindow)

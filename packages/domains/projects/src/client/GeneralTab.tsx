@@ -29,7 +29,9 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const uploadProjectIcon = useMutation(trpc.projects.uploadIcon.mutationOptions())
   const updateProject = useMutation(trpc.projects.update.mutationOptions())
   const runnersQuery = useQuery(trpc.runners.list.queryOptions())
-  const setProjectDefaultRunner = useMutation(trpc.runners.setProjectDefaultRunner.mutationOptions())
+  const setProjectDefaultRunner = useMutation(
+    trpc.runners.setProjectDefaultRunner.mutationOptions()
+  )
   const [name, setName] = useState('')
   const [color, setColor] = useState('')
   const [path, setPath] = useState('')

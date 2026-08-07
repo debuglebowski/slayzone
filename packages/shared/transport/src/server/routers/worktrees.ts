@@ -167,7 +167,9 @@ export const worktreesRouter = router({
     .mutation(({ input }) =>
       mergeIntoParent(input.projectPath, input.parentBranch, input.sourceBranch)
     ),
-  abortMerge: publicProcedure.input(obj({ path: s })).mutation(({ input }) => abortMerge(input.path)),
+  abortMerge: publicProcedure
+    .input(obj({ path: s }))
+    .mutation(({ input }) => abortMerge(input.path)),
   mergeWithAI: publicProcedure
     .input(obj({ projectPath: s, worktreePath: s, parentBranch: s, sourceBranch: s }))
     .mutation(({ input }) => mergeWithAI(input)),
@@ -195,7 +197,9 @@ export const worktreesRouter = router({
     .mutation(({ input }) => unstageAll(input.path)),
   getFileDiff: publicProcedure
     .input(obj({ repoPath: s, filePath: s, staged: z.boolean(), opts: u.optional() }))
-    .query(({ input }) => getFileDiff(input.repoPath, input.filePath, input.staged, input.opts as never)),
+    .query(({ input }) =>
+      getFileDiff(input.repoPath, input.filePath, input.staged, input.opts as never)
+    ),
   getUntrackedFileDiff: publicProcedure
     .input(obj({ repoPath: s, filePath: s }))
     .query(({ input }) => getUntrackedFileDiff(input.repoPath, input.filePath)),
@@ -316,7 +320,14 @@ export const worktreesRouter = router({
     .input(obj({ repoPath: s }))
     .query(({ input }) => getIgnoredFileTree(input.repoPath)),
   copyIgnoredFiles: publicProcedure
-    .input(obj({ repoPath: s, worktreePath: s, paths: z.array(s), mode: z.enum(['all', 'custom']).optional() }))
+    .input(
+      obj({
+        repoPath: s,
+        worktreePath: s,
+        paths: z.array(s),
+        mode: z.enum(['all', 'custom']).optional()
+      })
+    )
     .mutation(({ input }) =>
       copyIgnoredFiles(
         input.repoPath,

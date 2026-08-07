@@ -1,11 +1,5 @@
 import { ArrowDownCircle, ArrowUpCircle, RefreshCw } from 'lucide-react'
-import {
-  Button,
-  cn,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from '@slayzone/ui'
+import { Button, cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import type { CliProvider } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import type { ProviderGroup } from './sync-view-model'
@@ -73,12 +67,9 @@ export function ContextItemEditorSync({
         {providerGroups.map((group) => {
           const stale = group.syncHealth === 'stale'
           const representative = group.providers[0]
-          const active =
-            activeDiffProvider !== null && group.providers.includes(activeDiffProvider)
-          const thisSyncing =
-            syncingProvider !== null && group.providers.includes(syncingProvider)
-          const thisPulling =
-            pullingProvider !== null && group.providers.includes(pullingProvider)
+          const active = activeDiffProvider !== null && group.providers.includes(activeDiffProvider)
+          const thisSyncing = syncingProvider !== null && group.providers.includes(syncingProvider)
+          const thisPulling = pullingProvider !== null && group.providers.includes(pullingProvider)
           const label = group.providers.map((p) => PROVIDER_LABELS[p]).join(' / ')
           const testSuffix = group.providers.join('-')
           return (
@@ -128,8 +119,7 @@ export function ContextItemEditorSync({
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        Overwrite skill content in the Database with the contents of {label}'s
-                        File.
+                        Overwrite skill content in the Database with the contents of {label}'s File.
                       </TooltipContent>
                     </Tooltip>
                   )}
@@ -149,8 +139,7 @@ export function ContextItemEditorSync({
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        Overwrite {label}'s File with the current skill content from the
-                        Database.
+                        Overwrite {label}'s File with the current skill content from the Database.
                       </TooltipContent>
                     </Tooltip>
                   )}

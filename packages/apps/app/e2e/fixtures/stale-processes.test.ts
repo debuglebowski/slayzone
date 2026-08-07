@@ -50,10 +50,14 @@ function reader(map: Record<number, string>): (pid: number) => string {
 
 test('parses `pgrep -af` output into pid + command', () => {
   const out = `1234 Electron ${RUNNER}\n5678 Electron ${RUNNER}\n`
-  assertEq(parsePgrepOutput(out), [
-    { pid: 1234, command: `Electron ${RUNNER}` },
-    { pid: 5678, command: `Electron ${RUNNER}` }
-  ] satisfies StaleCandidate[], 'both lines parsed')
+  assertEq(
+    parsePgrepOutput(out),
+    [
+      { pid: 1234, command: `Electron ${RUNNER}` },
+      { pid: 5678, command: `Electron ${RUNNER}` }
+    ] satisfies StaleCandidate[],
+    'both lines parsed'
+  )
 })
 
 test('ignores blank and malformed pgrep lines', () => {

@@ -11,7 +11,12 @@ import {
 import { useTabStore } from '@slayzone/settings'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'
-import type { Project, ProjectGroup, ColumnConfig, TopLevelEntryRef } from '@slayzone/projects/shared'
+import type {
+  Project,
+  ProjectGroup,
+  ColumnConfig,
+  TopLevelEntryRef
+} from '@slayzone/projects/shared'
 import type { OnboardingChecklistState, KeyRecorderComponent } from './types'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'

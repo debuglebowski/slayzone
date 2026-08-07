@@ -192,7 +192,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
     await focusTerminal(mainWindow)
     await expect
       .poll(
-          async () => {
+        async () => {
           await emitMenu(mainWindow, 'close-current-focus')
           await mainWindow.waitForTimeout(80)
           return await terminalGroupTabs(mainWindow).count()

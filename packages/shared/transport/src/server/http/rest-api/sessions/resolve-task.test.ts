@@ -14,10 +14,14 @@ import { registerResolveSessionTaskRoute } from './resolve-task.js'
 
 const h = await createTestHarness()
 const projectId = crypto.randomUUID()
-h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(projectId, 'P', '#000', '/tmp/p')
+h.db
+  .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+  .run(projectId, 'P', '#000', '/tmp/p')
 const taskId = crypto.randomUUID()
 h.db
-  .prepare('INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)')
+  .prepare(
+    'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+  )
   .run(taskId, projectId, 'T', 'todo', 3, 0)
 
 function seedSession(id: string, boundTaskId: string | null, status: string): void {
@@ -50,7 +54,10 @@ await describe('GET /api/session/:sessionId/task', () => {
   })
 
   test('unknown session → null (not an error)', async () => {
-    const res = await rest.request<{ taskId: string | null }>('GET', '/api/session/does-not-exist/task')
+    const res = await rest.request<{ taskId: string | null }>(
+      'GET',
+      '/api/session/does-not-exist/task'
+    )
     expect(res.status).toBe(200)
     expect(res.body.taskId).toBe(null)
   })

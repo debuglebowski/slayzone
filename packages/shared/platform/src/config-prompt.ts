@@ -169,7 +169,9 @@ export async function runInteractiveConfig(
     io.write('')
     io.write(opts.title ?? 'Configuration to save:')
     for (const { field, config } of collected) {
-      io.write(`  ${field.configKey}: ${Array.isArray(config) ? config.join(', ') : String(config)}`)
+      io.write(
+        `  ${field.configKey}: ${Array.isArray(config) ? config.join(', ') : String(config)}`
+      )
     }
     io.write('')
 

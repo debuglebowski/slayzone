@@ -215,7 +215,12 @@ test.describe('Browser panel', () => {
     await expect
       .poll(
         async () =>
-          (await testInvoke(mainWindow, 'browser:execute-js', viewId, 'window.innerWidth')) as number,
+          (await testInvoke(
+            mainWindow,
+            'browser:execute-js',
+            viewId,
+            'window.innerWidth'
+          )) as number,
         { timeout: 8_000 }
       )
       .toBeGreaterThan(50)

@@ -15,5 +15,5 @@ import { jsonRpcCall } from '../transport/mojo'
 export const filesShim = {
   getDropPaths: (): string[] => [],
   pathExists: (filePath: string): Promise<boolean> =>
-    jsonRpcCall<boolean>('fs:exists', { params: [filePath] }),
+    jsonRpcCall<boolean>('fs:exists', { params: [filePath] })
 }

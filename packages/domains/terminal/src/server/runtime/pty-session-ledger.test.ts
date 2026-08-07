@@ -154,7 +154,7 @@ await test('pending-spawn is recorded durably BEFORE the agent starts (no bind o
   setPtySessionLedger(ledger)
   try {
     const fake = makeFakePty(events)
-  installAdoptBackend(fake)
+    installAdoptBackend(fake)
     installAdoptBackend(fake)
     const sessionId = 'ledgerA:ledgerA'
     const res = await createPty({
@@ -199,7 +199,7 @@ await test('pending-spawn is pruned on exit (fire-and-forget, scoped to task+mod
   setPtySessionLedger(ledger)
   try {
     const fake = makeFakePty(events)
-  installAdoptBackend(fake)
+    installAdoptBackend(fake)
     installAdoptBackend(fake)
     const sessionId = 'ledgerB:ledgerB'
     await createPty({
@@ -237,7 +237,7 @@ await test('bindSessionToTask fires ONLY on pre-warmed pooled adoption (and skip
   setPtySessionLedger(ledger)
   try {
     const fake = makeFakePty(events)
-  installAdoptBackend(fake)
+    installAdoptBackend(fake)
     installAdoptBackend(fake)
     const sessionId = 'ledgerC:ledgerC'
     await createPty({
@@ -298,7 +298,10 @@ await test('null ledger (pre-init): spawn still succeeds, nothing recorded', asy
   expect(cmd.includes('SLAYZONE_TASK_ID='), `task id must still be exported: ${cmd}`)
   killPty(sessionId)
   await new Promise((r) => setTimeout(r, 10))
-  expect(events.every((e) => e === 'pty:write'), `no ledger calls expected: ${JSON.stringify(events)}`)
+  expect(
+    events.every((e) => e === 'pty:write'),
+    `no ledger calls expected: ${JSON.stringify(events)}`
+  )
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

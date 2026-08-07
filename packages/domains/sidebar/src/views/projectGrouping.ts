@@ -17,10 +17,7 @@ export type TopLevelEntry =
  * `group_id` points at a missing group falls back to top-level (defensive
  * against data drift — never drop a project from the sidebar).
  */
-export function buildTopLevelEntries(
-  projects: Project[],
-  groups: ProjectGroup[]
-): TopLevelEntry[] {
+export function buildTopLevelEntries(projects: Project[], groups: ProjectGroup[]): TopLevelEntry[] {
   const groupById = new Map(groups.map((g) => [g.id, g]))
   const membersByGroup = new Map<string, Project[]>()
   const ungrouped: Project[] = []

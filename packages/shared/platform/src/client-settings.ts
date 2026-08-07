@@ -120,7 +120,9 @@ function coerce(raw: Record<string, unknown>): ClientSettings {
     }
   }
   if (raw.cli && typeof raw.cli === 'object') {
-    out.cli = { migrationDialogShown: asBool((raw.cli as Record<string, unknown>).migrationDialogShown) }
+    out.cli = {
+      migrationDialogShown: asBool((raw.cli as Record<string, unknown>).migrationDialogShown)
+    }
   }
   return out
 }

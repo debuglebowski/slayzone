@@ -15,21 +15,21 @@ const anyInput = z.unknown()
 
 export const integrationsRouter = router({
   // Connections
-  connectGithub: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().connectGithub(input as never)
-  ),
-  connectLinear: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().connectLinear(input as never)
-  ),
-  connectJira: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().connectJira(input as never)
-  ),
-  getJiraTransitions: publicProcedure.input(z.object({ taskId: z.string() })).query(({ input }) =>
-    getIntegrationOps().getJiraTransitions(input.taskId)
-  ),
-  updateConnection: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().updateConnection(input as never)
-  ),
+  connectGithub: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().connectGithub(input as never)),
+  connectLinear: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().connectLinear(input as never)),
+  connectJira: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().connectJira(input as never)),
+  getJiraTransitions: publicProcedure
+    .input(z.object({ taskId: z.string() }))
+    .query(({ input }) => getIntegrationOps().getJiraTransitions(input.taskId)),
+  updateConnection: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().updateConnection(input as never)),
   listConnections: publicProcedure
     .input(z.object({ provider: z.string().optional() }).optional())
     .query(({ input }) => getIntegrationOps().listConnections(input?.provider as never)),
@@ -39,20 +39,20 @@ export const integrationsRouter = router({
   disconnect: publicProcedure
     .input(z.object({ connectionId: z.string() }))
     .mutation(({ input }) => getIntegrationOps().disconnect(input.connectionId)),
-  clearProjectProvider: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().clearProjectProvider(input as never)
-  ),
+  clearProjectProvider: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().clearProjectProvider(input as never)),
   getProjectConnection: publicProcedure
     .input(z.object({ projectId: z.string(), provider: z.string() }))
     .query(({ input }) =>
       getIntegrationOps().getProjectConnection(input.projectId, input.provider as never)
     ),
-  setProjectConnection: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().setProjectConnection(input as never)
-  ),
-  clearProjectConnection: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().clearProjectConnection(input as never)
-  ),
+  setProjectConnection: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().setProjectConnection(input as never)),
+  clearProjectConnection: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().clearProjectConnection(input as never)),
 
   // Github
   listGithubRepositories: publicProcedure
@@ -61,18 +61,18 @@ export const integrationsRouter = router({
   listGithubProjects: publicProcedure
     .input(z.object({ connectionId: z.string() }))
     .query(({ input }) => getIntegrationOps().listGithubProjects(input.connectionId)),
-  listGithubIssues: publicProcedure.input(anyInput).query(({ input }) =>
-    getIntegrationOps().listGithubIssues(input as never)
-  ),
-  importGithubIssues: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().importGithubIssues(input as never)
-  ),
-  listGithubRepositoryIssues: publicProcedure.input(anyInput).query(({ input }) =>
-    getIntegrationOps().listGithubRepositoryIssues(input as never)
-  ),
-  importGithubRepositoryIssues: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().importGithubRepositoryIssues(input as never)
-  ),
+  listGithubIssues: publicProcedure
+    .input(anyInput)
+    .query(({ input }) => getIntegrationOps().listGithubIssues(input as never)),
+  importGithubIssues: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().importGithubIssues(input as never)),
+  listGithubRepositoryIssues: publicProcedure
+    .input(anyInput)
+    .query(({ input }) => getIntegrationOps().listGithubRepositoryIssues(input as never)),
+  importGithubRepositoryIssues: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().importGithubRepositoryIssues(input as never)),
 
   // Linear
   listLinearTeams: publicProcedure
@@ -81,17 +81,17 @@ export const integrationsRouter = router({
   listLinearProjects: publicProcedure
     .input(z.object({ connectionId: z.string(), teamId: z.string() }))
     .query(({ input }) => getIntegrationOps().listLinearProjects(input.connectionId, input.teamId)),
-  listLinearIssues: publicProcedure.input(anyInput).query(({ input }) =>
-    getIntegrationOps().listLinearIssues(input as never)
-  ),
-  importLinearIssues: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().importLinearIssues(input as never)
-  ),
+  listLinearIssues: publicProcedure
+    .input(anyInput)
+    .query(({ input }) => getIntegrationOps().listLinearIssues(input as never)),
+  importLinearIssues: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().importLinearIssues(input as never)),
 
   // Project mapping
-  setProjectMapping: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().setProjectMapping(input as never)
-  ),
+  setProjectMapping: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().setProjectMapping(input as never)),
   getProjectMapping: publicProcedure
     .input(z.object({ projectId: z.string(), provider: z.string() }))
     .query(({ input }) =>
@@ -99,9 +99,9 @@ export const integrationsRouter = router({
     ),
 
   // Sync
-  syncNow: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().syncNow(input as never)
-  ),
+  syncNow: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().syncNow(input as never)),
   getTaskSyncStatus: publicProcedure
     .input(z.object({ taskId: z.string(), provider: z.string() }))
     .query(({ input }) =>
@@ -112,32 +112,32 @@ export const integrationsRouter = router({
     .query(({ input }) =>
       getIntegrationOps().getBatchTaskSyncStatus(input.taskIds, input.provider as never)
     ),
-  pushTask: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().pushTask(input as never)
-  ),
-  pullTask: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().pullTask(input as never)
-  ),
+  pushTask: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().pushTask(input as never)),
+  pullTask: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().pullTask(input as never)),
   getLink: publicProcedure
     .input(z.object({ taskId: z.string(), provider: z.string() }))
     .query(({ input }) => getIntegrationOps().getLink(input.taskId, input.provider as never)),
   unlinkTask: publicProcedure
     .input(z.object({ taskId: z.string(), provider: z.string() }))
     .mutation(({ input }) => getIntegrationOps().unlinkTask(input.taskId, input.provider as never)),
-  pushUnlinkedTasks: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().pushUnlinkedTasks(input as never)
-  ),
-  fetchProviderStatuses: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().fetchProviderStatuses(input as never)
-  ),
+  pushUnlinkedTasks: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().pushUnlinkedTasks(input as never)),
+  fetchProviderStatuses: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().fetchProviderStatuses(input as never)),
   applyStatusSync: publicProcedure.input(anyInput).mutation(
     // Returns the updated project; the ops impl reads it via the worker DB
     // (.get() → unknown), so assert the row shape at this API boundary.
     ({ input }) => getIntegrationOps().applyStatusSync(input as never) as Promise<Project>
   ),
-  resyncProviderStatuses: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().resyncProviderStatuses(input as never)
-  ),
+  resyncProviderStatuses: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().resyncProviderStatuses(input as never)),
 
   // Generic provider-dispatched
   listProviderGroups: publicProcedure
@@ -148,22 +148,22 @@ export const integrationsRouter = router({
     .query(({ input }) =>
       getIntegrationOps().listProviderScopes(input.connectionId, input.groupId)
     ),
-  listProviderIssues: publicProcedure.input(anyInput).query(({ input }) =>
-    getIntegrationOps().listProviderIssues(input as never)
-  ),
-  importProviderIssues: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().importProviderIssues(input as never)
-  ),
+  listProviderIssues: publicProcedure
+    .input(anyInput)
+    .query(({ input }) => getIntegrationOps().listProviderIssues(input as never)),
+  importProviderIssues: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().importProviderIssues(input as never)),
 
   // Test channels (E2E only — no-op in production renderer)
-  testSeedGithubConnection: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().testSeedGithubConnection(input as never)
-  ),
-  testSetGithubRepositories: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().testSetGithubRepositories(input as never)
-  ),
-  testSetGithubRepositoryIssues: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().testSetGithubRepositoryIssues(input as never)
-  ),
+  testSeedGithubConnection: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().testSeedGithubConnection(input as never)),
+  testSetGithubRepositories: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().testSetGithubRepositories(input as never)),
+  testSetGithubRepositoryIssues: publicProcedure
+    .input(anyInput)
+    .mutation(({ input }) => getIntegrationOps().testSetGithubRepositoryIssues(input as never)),
   testClearGithubMocks: publicProcedure.mutation(() => getIntegrationOps().testClearGithubMocks())
 })

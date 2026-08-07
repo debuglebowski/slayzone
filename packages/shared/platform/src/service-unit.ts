@@ -181,7 +181,9 @@ export function detectBackend(): ServiceBackend {
   } catch (e) {
     const err = e as { stdout?: string | Buffer; status?: number | null }
     // A non-zero exit that still reported a state means the bus is there.
-    const state = (typeof err.stdout === 'string' ? err.stdout : err.stdout?.toString() ?? '').trim()
+    const state = (
+      typeof err.stdout === 'string' ? err.stdout : (err.stdout?.toString() ?? '')
+    ).trim()
     if (state && !/^(offline|unknown)$/i.test(state)) return 'systemd'
     return 'none'
   }

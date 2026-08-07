@@ -15,7 +15,7 @@ import {
   searchFiles,
   assertWithinRoot,
   subscribeFileWatcher,
-  type FileWatchEvent,
+  type FileWatchEvent
 } from '@slayzone/file-editor/server'
 import type { SearchFilesOptions } from '@slayzone/file-editor/shared'
 import { router, publicProcedure } from '../trpc'
@@ -67,7 +67,9 @@ export const fileEditorRouter = router({
     }),
 
   copyIn: publicProcedure
-    .input(z.object({ rootPath: z.string(), absoluteSrc: z.string(), targetDir: z.string().optional() }))
+    .input(
+      z.object({ rootPath: z.string(), absoluteSrc: z.string(), targetDir: z.string().optional() })
+    )
     .mutation(({ input }) => copyIn(input.rootPath, input.absoluteSrc, input.targetDir)),
 
   copy: publicProcedure
@@ -107,14 +109,12 @@ export const fileEditorRouter = router({
    * events with relative paths. Replaces the fs:watch + fs:changed +
    * fs:deleted IPC trio.
    */
-  watch: publicProcedure
-    .input(z.object({ rootPath: z.string() }))
-    .subscription(({ input }) =>
-      observable<FileWatchEvent>((emit) => {
-        const unsubscribe = subscribeFileWatcher(input.rootPath, (e) => {
-          emit.next(e)
-        })
-        return unsubscribe
-      }),
-    ),
+  watch: publicProcedure.input(z.object({ rootPath: z.string() })).subscription(({ input }) =>
+    observable<FileWatchEvent>((emit) => {
+      const unsubscribe = subscribeFileWatcher(input.rootPath, (e) => {
+        emit.next(e)
+      })
+      return unsubscribe
+    })
+  )
 })

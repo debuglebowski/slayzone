@@ -8,11 +8,7 @@
  *
  * Run with: npx tsx packages/apps/app/src/main/present-window.test.ts
  */
-import {
-  presentWindowWith,
-  type PresentableWindow,
-  type PresentOutcome
-} from './present-window'
+import { presentWindowWith, type PresentableWindow, type PresentOutcome } from './present-window'
 
 let passed = 0
 let failed = 0

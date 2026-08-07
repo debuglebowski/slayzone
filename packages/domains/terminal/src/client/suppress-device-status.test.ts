@@ -11,7 +11,10 @@
 import * as headless from '@xterm/headless'
 import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
 
-type HeadlessNs = { Terminal?: typeof headless.Terminal; default?: { Terminal: typeof headless.Terminal } }
+type HeadlessNs = {
+  Terminal?: typeof headless.Terminal
+  default?: { Terminal: typeof headless.Terminal }
+}
 const ns = headless as unknown as HeadlessNs
 const Terminal = ns.Terminal ?? ns.default?.Terminal
 if (!Terminal) throw new Error('could not resolve Terminal from @xterm/headless')
@@ -142,7 +145,11 @@ await test('baseline: xterm DOES answer XTVERSION with a DCS when not suppressed
   // Establishes the poison is real and this test measures it.
   const term = new Terminal({ allowProposedApi: true })
   const out = await emitted(term, '\x1b[>0q')
-  eq(out.startsWith('\x1bP>|xterm.js('), true, `expected DCS version reply, got ${JSON.stringify(out)}`)
+  eq(
+    out.startsWith('\x1bP>|xterm.js('),
+    true,
+    `expected DCS version reply, got ${JSON.stringify(out)}`
+  )
   eq(out.endsWith('\x1b\\'), true, 'ST terminated')
   term.dispose()
 })
@@ -184,7 +191,11 @@ await test('dispose() restores xterm XTVERSION answering', async () => {
   const subs = suppressXtVersionReply(term)
   eq(await emitted(term, '\x1b[>0q'), '', 'suppressed while registered')
   for (const s of subs) s.dispose()
-  eq((await emitted(term, '\x1b[>0q')).startsWith('\x1bP>|xterm.js('), true, 'restored after dispose')
+  eq(
+    (await emitted(term, '\x1b[>0q')).startsWith('\x1bP>|xterm.js('),
+    true,
+    'restored after dispose'
+  )
   term.dispose()
 })
 

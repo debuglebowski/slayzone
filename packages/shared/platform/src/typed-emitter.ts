@@ -12,9 +12,7 @@ import { EventEmitter } from 'node:events'
  * Lives in a platform **subpath** export (`@slayzone/platform/events`), never
  * the main barrel, so the `node:events` import stays out of the renderer bundle.
  */
-export class TypedEmitter<
-  TEventMap extends Record<string, unknown[]>
-> extends EventEmitter {
+export class TypedEmitter<TEventMap extends Record<string, unknown[]>> extends EventEmitter {
   on<K extends keyof TEventMap & string>(
     event: K,
     listener: (...args: TEventMap[K]) => void

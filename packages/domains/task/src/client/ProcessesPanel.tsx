@@ -86,7 +86,11 @@ export function ProcessesPanel({
         setProcesses((prev) =>
           prev.map((p) =>
             p.id === processId
-              ? { ...p, status: procStatus, serverUrl: procStatus === 'running' ? p.serverUrl : null }
+              ? {
+                  ...p,
+                  status: procStatus,
+                  serverUrl: procStatus === 'running' ? p.serverUrl : null
+                }
               : p
           )
         )
@@ -130,32 +134,23 @@ export function ProcessesPanel({
     })
   }, [])
 
-  const handleKill = useCallback(
-    async (id: string) => {
-      await killMutation.mutateAsync({ processId: id })
-      setProcesses((prev) => prev.filter((p) => p.id !== id))
-      setExpandedLogs((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    },
-    []
-  )
+  const handleKill = useCallback(async (id: string) => {
+    await killMutation.mutateAsync({ processId: id })
+    setProcesses((prev) => prev.filter((p) => p.id !== id))
+    setExpandedLogs((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }, [])
 
-  const handleStop = useCallback(
-    async (id: string) => {
-      await stopMutation.mutateAsync({ processId: id })
-    },
-    []
-  )
+  const handleStop = useCallback(async (id: string) => {
+    await stopMutation.mutateAsync({ processId: id })
+  }, [])
 
-  const handleRestart = useCallback(
-    async (id: string) => {
-      await restartMutation.mutateAsync({ processId: id })
-    },
-    []
-  )
+  const handleRestart = useCallback(async (id: string) => {
+    await restartMutation.mutateAsync({ processId: id })
+  }, [])
 
   const handleInject = useCallback(
     (proc: ProcessEntry) => {

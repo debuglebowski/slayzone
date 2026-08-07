@@ -87,7 +87,11 @@ export interface ChatDataOps {
    *  REMOTE spawn (no loopback agent-hook URL — the runner overlays its own and
    *  relays over its authed ws), exactly as the pty ledger does. `runnerId` null
    *  keeps today's loopback env. */
-  buildMcpEnv(taskId: string, mode: string, runnerId?: string | null): Promise<Record<string, string>>
+  buildMcpEnv(
+    taskId: string,
+    mode: string,
+    runnerId?: string | null
+  ): Promise<Record<string, string>>
   /** Effective runner for this task, or null for the hub. Mirrors the pty spawn
    *  lookups' `resolveRunnerId`; the default impl reads the tasks/projects rows. */
   resolveRunnerId(taskId: string): Promise<string | null>

@@ -40,7 +40,8 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 /** Occupies `port` so the walk has to step over it. */
@@ -65,7 +66,10 @@ async function main(): Promise<void> {
     // port the desktop app expects to bind.
     for (const [env, port] of Object.entries(SIDECAR_FIXED_PORT)) {
       assert(port >= HUB_PORT_BLOCK.start, `${env} inside block`)
-      assert(port < HUB_DYNAMIC_PORT_RANGE.start, `${env} in the reserved head, not the dynamic range`)
+      assert(
+        port < HUB_DYNAMIC_PORT_RANGE.start,
+        `${env} in the reserved head, not the dynamic range`
+      )
     }
   })
 
@@ -146,7 +150,10 @@ async function main(): Promise<void> {
       await new Promise((r) => srv.close(() => r(undefined)))
     }
     assert(message.length > 0, 'threw')
-    assert(!message.includes('no free port'), `propagated the real error, not exhaustion: ${message}`)
+    assert(
+      !message.includes('no free port'),
+      `propagated the real error, not exhaustion: ${message}`
+    )
   })
 
   console.log(`\n${passed} passed, ${failed} failed\n`)

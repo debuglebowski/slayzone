@@ -6,12 +6,7 @@
  * to read; the calling agent passes whichever id its own shell has.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/create-subtask.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../test-utils/ipc-harness.js'
+import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { registerCreateSubtaskTool } from './create-subtask.js'
 

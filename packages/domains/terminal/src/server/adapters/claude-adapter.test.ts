@@ -76,10 +76,12 @@ test('detectActivity is a no-op — user-interrupt handled at the input layer', 
   // with cursor positioning, so it arrived split across PTY chunks and usually
   // never matched. It is now redundant — detectActivity returns null for it too,
   // leaving this adapter fully hook-driven (+ input-layer interrupt).
-  expect(adapter.detectActivity('⎿  Interrupted · What should Claude do instead?', 'unknown'))
-    .toBe(null)
-  expect(adapter.detectActivity('\x1b[38;2;153;153;153m  ⎿  Interrupted · What\x1b[39m', 'unknown'))
-    .toBe(null)
+  expect(adapter.detectActivity('⎿  Interrupted · What should Claude do instead?', 'unknown')).toBe(
+    null
+  )
+  expect(
+    adapter.detectActivity('\x1b[38;2;153;153;153m  ⎿  Interrupted · What\x1b[39m', 'unknown')
+  ).toBe(null)
 })
 
 console.log('\nClaudeAdapter.detectError\n')

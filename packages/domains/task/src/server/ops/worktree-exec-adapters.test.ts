@@ -198,9 +198,7 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
   seedTask(h, taskA, projectId, 'Shared A')
   seedTask(h, taskB, projectId, 'Shared B')
   const sharedWt = '/tmp/wt/shared-' + taskA.slice(0, 8)
-  h.db
-    .prepare('UPDATE tasks SET worktree_path = ? WHERE id IN (?, ?)')
-    .run(sharedWt, taskA, taskB)
+  h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id IN (?, ?)').run(sharedWt, taskA, taskB)
   const projectPath = (
     h.db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId) as { path: string }
   ).path

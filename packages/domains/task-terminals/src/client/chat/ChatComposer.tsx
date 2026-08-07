@@ -399,7 +399,10 @@ export function ChatComposer({
                 description="Per-turn footer with duration, cost, and turn count."
                 checked={appearance.chatShowMessageMeta}
                 onCheckedChange={(c) => {
-                  settingsSetMutation.mutate({ key: 'chat_show_message_meta', value: c ? '1' : '0' })
+                  settingsSetMutation.mutate({
+                    key: 'chat_show_message_meta',
+                    value: c ? '1' : '0'
+                  })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />

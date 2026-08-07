@@ -196,7 +196,7 @@ await test('adopt: warm scrollback reaches the RingBuffer via the data path', as
   killPty(sessionId)
 })
 
-await test('adopt: resizes the warm pty to the tab\'s real dimensions', async () => {
+await test("adopt: resizes the warm pty to the tab's real dimensions", async () => {
   // The warm pool spawns the shell with no cols/rows (placeholder 80x24) — adoption
   // must apply the tab's actual requested size, or the already-running agent's
   // first paint is laid out for the wrong terminal size.
@@ -277,7 +277,7 @@ await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled
   try {
     const fake = makeFakePty()
     installFakeBackend(fake)
-  installFakeBackend(fake)
+    installFakeBackend(fake)
     const sessionId = 'taskD:taskD'
     await createPty({
       win: fakeWin,
@@ -324,39 +324,39 @@ await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled
   } finally {
     setDatabase(stubDb)
 
-/**
- * Stands in for the routing backend. `adopt` hands back the fake pty (the runner's
- * process, rekeyed) and replays `warmScrollback` through its onData, which is how a
- * real runner delivers everything the agent emitted while warm.
- */
-let warmScrollback = ''
-let adoptCalls: Array<{ runnerId: string; warmId: string; sessionId: string }> = []
-function installFakeBackend(fake: FakePty): void {
-  setPtyBackend({
-    spawn() {
-      fake.spawnedFresh = true
-      throw new Error('adoption must not cold-spawn')
-    },
-    async adopt(runnerId: string, warmId: string, sessionId: string) {
-      adoptCalls.push({ runnerId, warmId, sessionId })
-      const dataCbs: Array<(d: string) => void> = []
-      const handle = {
-        ...fake,
-        onData(cb: (d: string) => void) {
-          dataCbs.push(cb)
-          // The seed arrives as the FIRST chunk on the normal data path (one
-          // contiguous chunk), not as a side-channel buffer append.
-          if (warmScrollback) queueMicrotask(() => cb(warmScrollback))
-          return { dispose() {} }
+    /**
+     * Stands in for the routing backend. `adopt` hands back the fake pty (the runner's
+     * process, rekeyed) and replays `warmScrollback` through its onData, which is how a
+     * real runner delivers everything the agent emitted while warm.
+     */
+    let warmScrollback = ''
+    let adoptCalls: Array<{ runnerId: string; warmId: string; sessionId: string }> = []
+    function installFakeBackend(fake: FakePty): void {
+      setPtyBackend({
+        spawn() {
+          fake.spawnedFresh = true
+          throw new Error('adoption must not cold-spawn')
         },
-        write: (str: string) => fake.write(str),
-        resize: (c: number, r: number) => fake.resize(c, r),
-        kill: () => fake.kill()
-      }
-      return handle as unknown as Awaited<ReturnType<NonNullable<PtyBackend['adopt']>>>
+        async adopt(runnerId: string, warmId: string, sessionId: string) {
+          adoptCalls.push({ runnerId, warmId, sessionId })
+          const dataCbs: Array<(d: string) => void> = []
+          const handle = {
+            ...fake,
+            onData(cb: (d: string) => void) {
+              dataCbs.push(cb)
+              // The seed arrives as the FIRST chunk on the normal data path (one
+              // contiguous chunk), not as a side-channel buffer append.
+              if (warmScrollback) queueMicrotask(() => cb(warmScrollback))
+              return { dispose() {} }
+            },
+            write: (str: string) => fake.write(str),
+            resize: (c: number, r: number) => fake.resize(c, r),
+            kill: () => fake.kill()
+          }
+          return handle as unknown as Awaited<ReturnType<NonNullable<PtyBackend['adopt']>>>
+        }
+      } as unknown as PtyBackend)
     }
-  } as unknown as PtyBackend)
-}
     raw.close()
   }
 })

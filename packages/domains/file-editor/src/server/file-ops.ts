@@ -9,7 +9,7 @@ import type {
   FileSearchMatch,
   SearchFilesOptions,
   GitStatusMap,
-  GitFileStatus,
+  GitFileStatus
 } from '../shared'
 
 export const ALWAYS_IGNORED = new Set(['.git', '.DS_Store'])
@@ -30,7 +30,11 @@ export function getIgnoreFilter(rootPath: string): ReturnType<typeof ignore> {
   const root = path.resolve(rootPath)
   const gitignorePath = path.join(root, '.gitignore')
   let mtime = 0
-  try { mtime = fs.statSync(gitignorePath).mtimeMs } catch { /* no .gitignore */ }
+  try {
+    mtime = fs.statSync(gitignorePath).mtimeMs
+  } catch {
+    /* no .gitignore */
+  }
 
   const cached = ignoreCache.get(root)
   if (cached && cached.mtime === mtime) return cached.ig
@@ -38,7 +42,9 @@ export function getIgnoreFilter(rootPath: string): ReturnType<typeof ignore> {
   const ig = ignore()
   try {
     ig.add(fs.readFileSync(gitignorePath, 'utf-8'))
-  } catch { /* no .gitignore */ }
+  } catch {
+    /* no .gitignore */
+  }
   ignoreCache.set(root, { ig, mtime })
   return ig
 }
@@ -77,13 +83,17 @@ export function readDir(rootPath: string, dirPath: string): DirEntry[] {
       const symlink = e.isSymbolicLink()
       let isDir = e.isDirectory()
       if (symlink) {
-        try { isDir = fs.statSync(path.join(abs, e.name)).isDirectory() } catch { return null }
+        try {
+          isDir = fs.statSync(path.join(abs, e.name)).isDirectory()
+        } catch {
+          return null
+        }
       }
       const ignored = isIgnored(rootPath, relPath, isDir)
       return {
         name: e.name,
         path: relPath,
-        type: isDir ? 'directory' as const : 'file' as const,
+        type: isDir ? ('directory' as const) : ('file' as const),
         ...(ignored && { ignored: true }),
         ...(symlink && { isSymlink: true })
       }
@@ -114,7 +124,11 @@ export function listAllFiles(rootPath: string): string[] {
 
   function walk(dir: string, prefix: string): void {
     let entries: fs.Dirent[]
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
     for (const e of entries) {
       const relPath = prefix ? `${prefix}/${e.name}` : e.name
       if (ALWAYS_IGNORED.has(e.name)) continue
@@ -203,7 +217,10 @@ export function gitStatus(rootPath: string): Promise<GitStatusMap> {
     proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
     proc.on('error', () => resolve({ files: {}, isGitRepo: false }))
     proc.on('close', (code) => {
-      if (code !== 0) { resolve({ files: {}, isGitRepo: true }); return }
+      if (code !== 0) {
+        resolve({ files: {}, isGitRepo: true })
+        return
+      }
       const output = Buffer.concat(chunks).toString('utf-8')
       const files: Record<string, GitFileStatus> = {}
       for (const line of output.split('\n')) {
@@ -215,7 +232,7 @@ export function gitStatus(rootPath: string): Promise<GitStatusMap> {
         if (arrow !== -1) filePath = filePath.slice(arrow + 4)
 
         let status: GitFileStatus
-        if ((x === 'U' || y === 'U') || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) {
+        if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) {
           status = 'conflicted'
         } else if (x === '?' && y === '?') {
           status = 'untracked'
@@ -234,7 +251,11 @@ export function gitStatus(rootPath: string): Promise<GitStatusMap> {
   })
 }
 
-export function searchFiles(rootPath: string, query: string, options?: SearchFilesOptions): FileSearchResult[] {
+export function searchFiles(
+  rootPath: string,
+  query: string,
+  options?: SearchFilesOptions
+): FileSearchResult[] {
   if (!query) return []
   const root = path.resolve(rootPath)
   const ig = getIgnoreFilter(rootPath)
@@ -256,7 +277,11 @@ export function searchFiles(rootPath: string, query: string, options?: SearchFil
   function walk(dir: string, prefix: string): void {
     if (totalMatches >= maxResults) return
     let entries: fs.Dirent[]
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
     for (const e of entries) {
       if (totalMatches >= maxResults) return
       const relPath = prefix ? `${prefix}/${e.name}` : e.name
@@ -274,11 +299,19 @@ export function searchFiles(rootPath: string, query: string, options?: SearchFil
     if (totalMatches >= maxResults) return
     const abs = path.join(rootDir, relPath)
     let stat: fs.Stats
-    try { stat = fs.statSync(abs) } catch { return }
+    try {
+      stat = fs.statSync(abs)
+    } catch {
+      return
+    }
     if (stat.size > MAX_FILE_SIZE) return
 
     let content: string
-    try { content = fs.readFileSync(abs, 'utf-8') } catch { return }
+    try {
+      content = fs.readFileSync(abs, 'utf-8')
+    } catch {
+      return
+    }
 
     if (content.slice(0, 8192).includes('\0')) return
 

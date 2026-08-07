@@ -242,7 +242,11 @@ async function main(): Promise<void> {
     {
       const { stdout } = await runUpdate()
       const log = readLog(npmInstallLog)
-      check('mixed outdated: issues exactly one batched npm install -g call', log.length === 1, log.join('|'))
+      check(
+        'mixed outdated: issues exactly one batched npm install -g call',
+        log.length === 1,
+        log.join('|')
+      )
       check(
         'mixed outdated: targets latest (no prerelease in use)',
         log[0]?.includes('@slayzone/hub@1.0.0') ?? false,
@@ -343,7 +347,11 @@ async function main(): Promise<void> {
     {
       const { stdout } = await runUpdate()
       const log = readLog(pnpmInstallLog)
-      check('pnpm-only: reports via the pnpm manager column', stdout.some((l) => l.includes('pnpm')), stdout.join('\n'))
+      check(
+        'pnpm-only: reports via the pnpm manager column',
+        stdout.some((l) => l.includes('pnpm')),
+        stdout.join('\n')
+      )
       check(
         'pnpm-only: --allow-build is set for hub (native deps)',
         log.some((l) => l.includes('--allow-build=@slayzone/hub')),
@@ -356,7 +364,8 @@ async function main(): Promise<void> {
       )
       check(
         'pnpm-only: installs both outdated packages at the target version',
-        log.some((l) => l.includes('@slayzone/cli@1.1.0')) && log.some((l) => l.includes('@slayzone/hub@1.1.0')),
+        log.some((l) => l.includes('@slayzone/cli@1.1.0')) &&
+          log.some((l) => l.includes('@slayzone/hub@1.1.0')),
         log.join('|')
       )
       check('pnpm-only: never touches npm install', readLog(npmInstallLog).length === 0)
@@ -372,8 +381,16 @@ async function main(): Promise<void> {
     {
       const { stdout } = await runUpdate()
       const log = readLog(bunInstallLog)
-      check('bun-only: reports via the bun manager column', stdout.some((l) => l.includes('bun')), stdout.join('\n'))
-      check('bun-only: --trust is set for runner (native deps)', log.some((l) => l.includes('--trust')), log.join('|'))
+      check(
+        'bun-only: reports via the bun manager column',
+        stdout.some((l) => l.includes('bun')),
+        stdout.join('\n')
+      )
+      check(
+        'bun-only: --trust is set for runner (native deps)',
+        log.some((l) => l.includes('--trust')),
+        log.join('|')
+      )
       check(
         'bun-only: installs the outdated package at the target version',
         log.some((l) => l.includes('@slayzone/runner@1.0.0')),
@@ -390,7 +407,11 @@ async function main(): Promise<void> {
     {
       await runUpdate()
       const log = readLog(bunInstallLog)
-      check('bun-only, cli: no --trust flag (no native deps)', !log.some((l) => l.includes('--trust')), log.join('|'))
+      check(
+        'bun-only, cli: no --trust flag (no native deps)',
+        !log.some((l) => l.includes('--trust')),
+        log.join('|')
+      )
     }
     disableBun()
 

@@ -80,9 +80,7 @@ export function WorktreesSettingsTab() {
     }
     if (presetsQuery.data !== undefined) {
       try {
-        const parsed = presetsQuery.data
-          ? (JSON.parse(presetsQuery.data) as CopyPreset[])
-          : null
+        const parsed = presetsQuery.data ? (JSON.parse(presetsQuery.data) as CopyPreset[]) : null
         setPresets(parsed && parsed.length > 0 ? parsed : FALLBACK_PRESETS)
       } catch {
         setPresets(FALLBACK_PRESETS)
@@ -90,16 +88,13 @@ export function WorktreesSettingsTab() {
     }
   }, [presetsQuery.data, presetsQuery.isError])
 
-  const savePresets = useCallback(
-    (updated: CopyPreset[]) => {
-      setPresets(updated)
-      setSettingMutation.mutate({
-        key: 'worktree_copy_presets',
-        value: JSON.stringify(updated)
-      })
-    },
-    []
-  )
+  const savePresets = useCallback((updated: CopyPreset[]) => {
+    setPresets(updated)
+    setSettingMutation.mutate({
+      key: 'worktree_copy_presets',
+      value: JSON.stringify(updated)
+    })
+  }, [])
 
   const addPreset = () => {
     const id = `preset-${Date.now()}`

@@ -11,7 +11,12 @@ import { agentPromptsEvents } from './events'
  * single per-turn event keeps it OFF the per-tool hook hot path.
  */
 export function isUserPromptSubmitEvent(hookEvent: string): boolean {
-  return hookEvent.trim().toLowerCase().replace(/[_\-\s]/g, '') === 'userpromptsubmit'
+  return (
+    hookEvent
+      .trim()
+      .toLowerCase()
+      .replace(/[_\-\s]/g, '') === 'userpromptsubmit'
+  )
 }
 
 /**

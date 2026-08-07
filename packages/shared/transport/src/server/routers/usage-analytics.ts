@@ -10,16 +10,14 @@ export const usageAnalyticsRouter = router({
     .input(dateRangeInput)
     .query(({ ctx, input }) => queryAnalytics(ctx.db, input)),
 
-  refresh: publicProcedure
-    .input(dateRangeInput)
-    .mutation(async ({ ctx, input }) => {
-      try {
-        await refreshUsageData(ctx.db)
-      } catch (err) {
-        console.error('[usage-analytics] refresh failed:', err)
-      }
-      return queryAnalytics(ctx.db, input)
-    }),
+  refresh: publicProcedure.input(dateRangeInput).mutation(async ({ ctx, input }) => {
+    try {
+      await refreshUsageData(ctx.db)
+    } catch (err) {
+      console.error('[usage-analytics] refresh failed:', err)
+    }
+    return queryAnalytics(ctx.db, input)
+  }),
 
   taskCost: publicProcedure
     .input(z.object({ taskId: z.string() }))

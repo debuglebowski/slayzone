@@ -72,7 +72,12 @@ export {
   ptyEvents,
   type PtyEventMap
 } from '../server/runtime/pty-manager'
-export { resolveUserShell, getShellStartupArgs, whichBinary, getEnrichedPath } from '../server/shell-env'
+export {
+  resolveUserShell,
+  getShellStartupArgs,
+  whichBinary,
+  getEnrichedPath
+} from '../server/shell-env'
 export { syncTerminalModes } from '../server/startup-sync'
 export { isHookDrivenMode, HOOK_DRIVEN_MODES } from '../server/adapters'
 export {

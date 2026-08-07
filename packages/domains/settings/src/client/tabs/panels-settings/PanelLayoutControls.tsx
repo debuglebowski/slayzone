@@ -98,7 +98,10 @@ export function PanelLayoutControls({
       {renderBound('max', 'Max width')}
       <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
         <span className="text-sm text-muted-foreground">Align</span>
-        <Select value={layout.align ?? 'left'} onValueChange={(v) => update({ align: v as PanelAlign })}>
+        <Select
+          value={layout.align ?? 'left'}
+          onValueChange={(v) => update({ align: v as PanelAlign })}
+        >
           <SelectTrigger className="w-32">
             <SelectValue />
           </SelectTrigger>

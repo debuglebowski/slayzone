@@ -25,8 +25,7 @@ export const aiConfigShim = {
   deleteItem: (id: string) => invoke('ai-config:delete-item', id),
   listProjectSelections: (projectId: string) =>
     invoke('ai-config:list-project-selections', projectId),
-  setProjectSelection: (input: Any) =>
-    invoke('ai-config:set-project-selection', input),
+  setProjectSelection: (input: Any) => invoke('ai-config:set-project-selection', input),
   removeProjectSelection: (projectId: string, itemId: string, provider?: string) =>
     invoke('ai-config:remove-project-selection', projectId, itemId, provider),
   discoverContextFiles: (projectPath: string) =>
@@ -48,8 +47,7 @@ export const aiConfigShim = {
     invoke('ai-config:rename-context-file', oldPath, newPath, projectPath),
   deleteContextFile: (filePath: string, projectPath: string, projectId: string) =>
     invoke('ai-config:delete-context-file', filePath, projectPath, projectId),
-  deleteComputerFile: (filePath: string) =>
-    invoke('ai-config:delete-computer-file', filePath),
+  deleteComputerFile: (filePath: string) => invoke('ai-config:delete-computer-file', filePath),
   createComputerFile: (provider: string, category: string, slug: string) =>
     invoke('ai-config:create-computer-file', provider, category, slug),
   writeComputerSkill: (provider: string, slug: string, content: string) =>
@@ -59,15 +57,12 @@ export const aiConfigShim = {
   writeMcpServer: (input: Any) => invoke('ai-config:write-mcp-server', input),
   removeMcpServer: (input: Any) => invoke('ai-config:remove-mcp-server', input),
   discoverComputerMcpConfigs: () => invoke('ai-config:discover-computer-mcp-configs'),
-  writeComputerMcpServer: (input: Any) =>
-    invoke('ai-config:write-computer-mcp-server', input),
-  removeComputerMcpServer: (input: Any) =>
-    invoke('ai-config:remove-computer-mcp-server', input),
+  writeComputerMcpServer: (input: Any) => invoke('ai-config:write-computer-mcp-server', input),
+  removeComputerMcpServer: (input: Any) => invoke('ai-config:remove-computer-mcp-server', input),
   listProviders: () => invoke('ai-config:list-providers'),
   toggleProvider: (id: string, enabled: boolean) =>
     invoke('ai-config:toggle-provider', id, enabled),
-  getProjectProviders: (projectId: string) =>
-    invoke('ai-config:get-project-providers', projectId),
+  getProjectProviders: (projectId: string) => invoke('ai-config:get-project-providers', projectId),
   setProjectProviders: (projectId: string, providers: unknown[]) =>
     invoke('ai-config:set-project-providers', projectId, providers),
   needsSync: (projectId: string, projectPath: string) =>
@@ -94,8 +89,12 @@ export const aiConfigShim = {
     invoke('ai-config:save-root-instructions', projectId, projectPath, content),
   readProviderInstructions: (projectPath: string, provider: string) =>
     invoke('ai-config:read-provider-instructions', projectPath, provider),
-  pushProviderInstructions: (projectId: string, projectPath: string, provider: string, content: string) =>
-    invoke('ai-config:push-provider-instructions', projectId, projectPath, provider, content),
+  pushProviderInstructions: (
+    projectId: string,
+    projectPath: string,
+    provider: string,
+    content: string
+  ) => invoke('ai-config:push-provider-instructions', projectId, projectPath, provider, content),
   pullProviderInstructions: (projectId: string, projectPath: string, provider: string) =>
     invoke('ai-config:pull-provider-instructions', projectId, projectPath, provider),
   getProjectSkillsStatus: (projectId: string, projectPath: string) =>
@@ -128,6 +127,6 @@ export const aiConfigShim = {
     updateSkill: (itemId: string, entryId: string) =>
       invoke('ai-config:marketplace:update-skill', itemId, entryId),
     unlinkSkill: (itemId: string) => invoke('ai-config:marketplace:unlink-skill', itemId),
-    ensureFresh: () => invoke('ai-config:marketplace:ensure-fresh'),
-  },
+    ensureFresh: () => invoke('ai-config:marketplace:ensure-fresh')
+  }
 }

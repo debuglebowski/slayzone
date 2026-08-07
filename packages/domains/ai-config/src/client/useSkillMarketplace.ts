@@ -52,8 +52,8 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
   }, [loadRegistries, loadEntries])
 
   useEffect(() => {
-    trpcClient.aiConfig.marketplace
-      .ensureFresh.mutate()
+    trpcClient.aiConfig.marketplace.ensureFresh
+      .mutate()
       .then(() => {
         setRefreshKey((k) => k + 1)
       })

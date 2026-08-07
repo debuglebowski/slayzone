@@ -452,8 +452,9 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
     ).atlasVersion
     const repacked = (await mainWindow.evaluate(
       (sid) =>
-        (window as unknown as { __atlasOracle: { repack: (s: string) => string | null } })
-          .__atlasOracle.repack(sid),
+        (
+          window as unknown as { __atlasOracle: { repack: (s: string) => string | null } }
+        ).__atlasOracle.repack(sid),
       activeSid
     )) as string | null
     expect(repacked, 'repacked from the active pane').toBe(activeSid)
@@ -466,8 +467,9 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
 
     const touched = (await mainWindow.evaluate(
       (sid) =>
-        (window as unknown as { __atlasOracle: { paint: (s: string) => string[] } }).__atlasOracle
-          .paint(sid),
+        (
+          window as unknown as { __atlasOracle: { paint: (s: string) => string[] } }
+        ).__atlasOracle.paint(sid),
       activeSid
     )) as string[]
     expect(touched.length, 'at least one sibling forced to repaint').toBeGreaterThan(0)
@@ -506,8 +508,9 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
     expect(backgroundSid, 'found a background pane to repack from').toBeTruthy()
     await mainWindow.evaluate(
       (sid) =>
-        (window as unknown as { __atlasOracle: { repack: (s: string) => string | null } })
-          .__atlasOracle.repack(sid),
+        (
+          window as unknown as { __atlasOracle: { repack: (s: string) => string | null } }
+        ).__atlasOracle.repack(sid),
       backgroundSid as string
     )
 

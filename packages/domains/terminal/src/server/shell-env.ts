@@ -162,4 +162,3 @@ export async function whichBinary(name: string): Promise<string | null> {
     return null
   }
 }
-

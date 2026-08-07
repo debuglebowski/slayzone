@@ -85,9 +85,7 @@ test.describe('Gemini agent hooks', () => {
       })
       await mainWindow.waitForFunction(
         () => {
-          const events = (window as Record<string, unknown>).__geminiEvents as
-            | unknown[]
-            | undefined
+          const events = (window as Record<string, unknown>).__geminiEvents as unknown[] | undefined
           return !!events && events.length > 0
         },
         { timeout: 2000 }

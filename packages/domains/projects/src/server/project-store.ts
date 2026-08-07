@@ -18,15 +18,12 @@ function unlinkProjectIconFiles(iconsDir: string, projectId: string): void {
     if (entry.startsWith(`${projectId}.`)) {
       try {
         unlinkSync(path.join(iconsDir, entry))
-      } catch {
-      }
+      } catch {}
     }
   }
 }
 
-export function parseProject(
-  row: Record<string, unknown> | undefined
-): Project | null {
+export function parseProject(row: Record<string, unknown> | undefined): Project | null {
   if (!row) return null
   return {
     ...row,
@@ -229,9 +226,9 @@ export async function uploadProjectIcon(
 
 export async function reorderProjects(db: SlayzoneDb, projectIds: string[]): Promise<void> {
   if (!Array.isArray(projectIds) || projectIds.length === 0) return
-  const { count } = (await db.get<{ count: number }>(
-    'SELECT COUNT(*) AS count FROM projects'
-  )) as { count: number }
+  const { count } = (await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM projects')) as {
+    count: number
+  }
   if (projectIds.length !== count)
     throw new Error(`Expected ${count} project IDs, got ${projectIds.length}`)
   await db.batchTxn(

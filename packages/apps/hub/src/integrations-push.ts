@@ -52,19 +52,16 @@ export function wireIntegrationPush(opts: {
     void pushTaskAfterEdit(opts.db, taskId, { pushGithubTask: opts.pushGithubTask })
   })
 
-  opts.taskBus.on(
-    'db:tasks:create:done',
-    (_event: unknown, taskId: string, projectId: string) => {
-      void pushNewTaskToProviders(opts.db, taskId, projectId).then(async () => {
-        // Only ping the UI when a link was actually created — otherwise every
-        // task creation would trigger a board refetch for nothing.
-        const hasLink = await opts.db
-          .prepare('SELECT 1 FROM external_links WHERE task_id = ? LIMIT 1')
-          .get(taskId)
-        if (hasLink) opts.notifyTasksChanged()
-      })
-    }
-  )
+  opts.taskBus.on('db:tasks:create:done', (_event: unknown, taskId: string, projectId: string) => {
+    void pushNewTaskToProviders(opts.db, taskId, projectId).then(async () => {
+      // Only ping the UI when a link was actually created — otherwise every
+      // task creation would trigger a board refetch for nothing.
+      const hasLink = await opts.db
+        .prepare('SELECT 1 FROM external_links WHERE task_id = ? LIMIT 1')
+        .get(taskId)
+      if (hasLink) opts.notifyTasksChanged()
+    })
+  })
 
   opts.taskBus.on('db:tasks:archive:done', (_event: unknown, taskId: string) => {
     void pushArchiveToProviders(opts.db, taskId)

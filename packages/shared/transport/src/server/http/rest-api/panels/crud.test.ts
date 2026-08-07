@@ -57,9 +57,9 @@ await describe('/api/panels', () => {
     expect(notifyCount).toBe(1)
     createdId = res.body.data.id
 
-    const stored = h.db
-      .prepare(`SELECT value FROM settings WHERE key = 'panel_config'`)
-      .get() as { value: string }
+    const stored = h.db.prepare(`SELECT value FROM settings WHERE key = 'panel_config'`).get() as {
+      value: string
+    }
     const config = JSON.parse(stored.value) as { webPanels: Panel[] }
     expect(config.webPanels.some((p) => p.id === createdId)).toBe(true)
   })
@@ -77,9 +77,9 @@ await describe('/api/panels', () => {
     )
     expect(res.status).toBe(200)
     expect(res.body.data.enabled).toBe(true)
-    const stored = h.db
-      .prepare(`SELECT value FROM settings WHERE key = 'panel_config'`)
-      .get() as { value: string }
+    const stored = h.db.prepare(`SELECT value FROM settings WHERE key = 'panel_config'`).get() as {
+      value: string
+    }
     const config = JSON.parse(stored.value) as { viewEnabled?: { task?: Record<string, boolean> } }
     expect(config.viewEnabled?.task?.[createdId]).toBe(true)
   })
@@ -134,9 +134,9 @@ await describe('/api/panels', () => {
     expect(Boolean(predefined)).toBe(true)
     const res = await rest.request<OneResponse>('DELETE', `/api/panels/${predefined!.id}`)
     expect(res.status).toBe(200)
-    const stored = h.db
-      .prepare(`SELECT value FROM settings WHERE key = 'panel_config'`)
-      .get() as { value: string }
+    const stored = h.db.prepare(`SELECT value FROM settings WHERE key = 'panel_config'`).get() as {
+      value: string
+    }
     const config = JSON.parse(stored.value) as { deletedPredefined?: string[] }
     expect(config.deletedPredefined?.includes(predefined!.id)).toBe(true)
     const after = await rest.request<ListResponse>('GET', '/api/panels')

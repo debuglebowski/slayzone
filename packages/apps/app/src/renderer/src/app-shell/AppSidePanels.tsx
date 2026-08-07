@@ -99,9 +99,7 @@ export function AppSidePanels({
         )}
       {agentSessionId && globalAgentPanelMounted && !hideSidebarPanel && (
         <div
-          className={
-            globalAgentPanelState.isOpen ? 'min-h-0' : 'w-0 overflow-hidden invisible'
-          }
+          className={globalAgentPanelState.isOpen ? 'min-h-0' : 'w-0 overflow-hidden invisible'}
           style={globalAgentPanelState.isOpen ? undefined : { position: 'absolute' as const }}
         >
           <Suspense fallback={null}>

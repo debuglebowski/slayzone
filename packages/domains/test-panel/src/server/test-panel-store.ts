@@ -98,7 +98,9 @@ export async function reorderCategories(db: SlayzoneDb, ids: string[]): Promise<
 // --- Profiles (stored in settings key-value table) ---
 
 export async function listProfiles(db: SlayzoneDb): Promise<TestProfile[]> {
-  const row = await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'test_profiles'")
+  const row = await db.get<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'test_profiles'"
+  )
   let userProfiles: TestProfile[] = []
   if (row) {
     try {
@@ -111,7 +113,9 @@ export async function listProfiles(db: SlayzoneDb): Promise<TestProfile[]> {
 }
 
 export async function saveProfile(db: SlayzoneDb, profile: TestProfile): Promise<void> {
-  const row = await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'test_profiles'")
+  const row = await db.get<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'test_profiles'"
+  )
   let profiles: TestProfile[] = []
   if (row) {
     try {
@@ -129,7 +133,9 @@ export async function saveProfile(db: SlayzoneDb, profile: TestProfile): Promise
 }
 
 export async function deleteProfile(db: SlayzoneDb, id: string): Promise<void> {
-  const row = await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'test_profiles'")
+  const row = await db.get<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'test_profiles'"
+  )
   if (!row) return
   let profiles: TestProfile[] = []
   try {
@@ -280,10 +286,9 @@ export async function toggleFileLabel(
       [projectId, filePath, labelId]
     )
   } else {
-    await db.run('INSERT INTO test_file_labels (project_id, file_path, label_id) VALUES (?, ?, ?)', [
-      projectId,
-      filePath,
-      labelId
-    ])
+    await db.run(
+      'INSERT INTO test_file_labels (project_id, file_path, label_id) VALUES (?, ?, ?)',
+      [projectId, filePath, labelId]
+    )
   }
 }

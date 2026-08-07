@@ -36,7 +36,8 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
+  if (actual !== expected)
+    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 function tmp(): string {
@@ -44,7 +45,9 @@ function tmp(): string {
 }
 
 /** A fake IO that feeds a fixed queue of answers and records everything written. */
-function fakeIo(answers: string[]): PromptIO & { asked: string[]; written: string[]; closed: boolean } {
+function fakeIo(
+  answers: string[]
+): PromptIO & { asked: string[]; written: string[]; closed: boolean } {
   const queue = [...answers]
   const asked: string[] = []
   const written: string[] = []
@@ -66,7 +69,10 @@ function fakeIo(answers: string[]): PromptIO & { asked: string[]; written: strin
 }
 
 /** Run body with a scrubbed set of the env vars this module reads. */
-function withEnv(vars: Record<string, string | undefined>, fn: () => void | Promise<void>): void | Promise<void> {
+function withEnv(
+  vars: Record<string, string | undefined>,
+  fn: () => void | Promise<void>
+): void | Promise<void> {
   const keys = ['SLAYZONE_SUPERVISED', 'SLAYZONE_NONINTERACTIVE']
   const prev: Record<string, string | undefined> = {}
   for (const k of keys) prev[k] = process.env[k]
@@ -98,7 +104,9 @@ async function main(): Promise<void> {
 
   await test('canPrompt false under SLAYZONE_SUPERVISED / SLAYZONE_NONINTERACTIVE', () => {
     withEnv({ SLAYZONE_SUPERVISED: '1' }, () => assertEq(canPrompt(), false, 'supervised ⇒ false'))
-    withEnv({ SLAYZONE_NONINTERACTIVE: '1' }, () => assertEq(canPrompt(), false, 'noninteractive ⇒ false'))
+    withEnv({ SLAYZONE_NONINTERACTIVE: '1' }, () =>
+      assertEq(canPrompt(), false, 'noninteractive ⇒ false')
+    )
   })
 
   console.log('\nconfig-prompt: confirm')
@@ -118,7 +126,11 @@ async function main(): Promise<void> {
     const dir = tmp()
     try {
       const io = fakeIo([])
-      const res = await runInteractiveConfig({ fields: [], io, configPath: join(dir, 'config.json') })
+      const res = await runInteractiveConfig({
+        fields: [],
+        io,
+        configPath: join(dir, 'config.json')
+      })
       assertEq(res.collected.length, 0, 'nothing collected')
       assertEq(res.saved, false, 'not saved')
       assertEq(io.asked.length, 0, 'no questions asked')
@@ -140,7 +152,11 @@ async function main(): Promise<void> {
         io,
         configPath: cfgPath,
         fields: [
-          { configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }
+          {
+            configKey: 'publicAddress',
+            envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS',
+            label: 'Public address'
+          }
         ]
       })
       assertEq(res.saved, true, 'saved')
@@ -165,7 +181,13 @@ async function main(): Promise<void> {
       const res = await runInteractiveConfig({
         io,
         configPath: cfgPath,
-        fields: [{ configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }]
+        fields: [
+          {
+            configKey: 'publicAddress',
+            envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS',
+            label: 'Public address'
+          }
+        ]
       })
       assertEq(res.saved, false, 'not saved')
       assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example.com:8443', 'env still seeded')
@@ -186,7 +208,13 @@ async function main(): Promise<void> {
       const res = await runInteractiveConfig({
         io,
         configPath: join(dir, 'config.json'),
-        fields: [{ configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }]
+        fields: [
+          {
+            configKey: 'publicAddress',
+            envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS',
+            label: 'Public address'
+          }
+        ]
       })
       assertEq(res.collected.length, 0, 'nothing collected')
       assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, undefined, 'env NOT seeded')
@@ -241,7 +269,13 @@ async function main(): Promise<void> {
       await runInteractiveConfig({
         io,
         configPath: cfgPath,
-        fields: [{ configKey: 'publicAddress', envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS', label: 'Public address' }]
+        fields: [
+          {
+            configKey: 'publicAddress',
+            envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS',
+            label: 'Public address'
+          }
+        ]
       })
       const cfg = readJson(cfgPath)
       assertEq(cfg.address, '0.0.0.0:9999', 'pre-existing key preserved')

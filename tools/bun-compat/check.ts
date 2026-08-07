@@ -30,7 +30,11 @@ interface ProbeResult {
   notes?: string
 }
 
-async function probe(module: string, fn: () => Promise<void> | void, notes?: string): Promise<ProbeResult> {
+async function probe(
+  module: string,
+  fn: () => Promise<void> | void,
+  notes?: string
+): Promise<ProbeResult> {
   const started = Date.now()
   const stepTracker: { step: string } = { step: 'import' }
   try {
@@ -50,7 +54,7 @@ async function probe(module: string, fn: () => Promise<void> | void, notes?: str
         status: 'skipped',
         step: stepTracker.step,
         durationMs: Date.now() - started,
-        notes: 'package not installed in workspace',
+        notes: 'package not installed in workspace'
       }
     }
     return {
@@ -59,7 +63,7 @@ async function probe(module: string, fn: () => Promise<void> | void, notes?: str
       step: stepTracker.step,
       error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
       durationMs: Date.now() - started,
-      notes,
+      notes
     }
   }
 }
@@ -72,141 +76,188 @@ async function main(): Promise<void> {
 
   // better-sqlite3 — native n-api bindings; historically the most brittle on Bun.
   results.push(
-    await probe('better-sqlite3', async () => {
-      const mod = await import('better-sqlite3')
-      const Database = mod.default
-      const dbPath = join(tmpdir(), `slayzone-bun-compat-${process.pid}.sqlite`)
-      const db = new Database(dbPath)
-      db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)')
-      db.prepare('INSERT INTO t (name) VALUES (?)').run('smoke')
-      const row = db.prepare('SELECT * FROM t WHERE id = 1').get() as { id: number; name: string }
-      if (row?.name !== 'smoke') throw new Error(`unexpected row: ${JSON.stringify(row)}`)
-      db.close()
-    }, 'prepared statements + runtime-loaded native binding'),
+    await probe(
+      'better-sqlite3',
+      async () => {
+        const mod = await import('better-sqlite3')
+        const Database = mod.default
+        const dbPath = join(tmpdir(), `slayzone-bun-compat-${process.pid}.sqlite`)
+        const db = new Database(dbPath)
+        db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)')
+        db.prepare('INSERT INTO t (name) VALUES (?)').run('smoke')
+        const row = db.prepare('SELECT * FROM t WHERE id = 1').get() as { id: number; name: string }
+        if (row?.name !== 'smoke') throw new Error(`unexpected row: ${JSON.stringify(row)}`)
+        db.close()
+      },
+      'prepared statements + runtime-loaded native binding'
+    )
   )
 
   // node-pty — spawns PTYs; depends on conpty (win) or util-linux.
   results.push(
-    await probe('node-pty', async () => {
-      const pty = await import('node-pty')
-      const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'
-      const child = pty.spawn(shell, [], { cols: 80, rows: 24, cwd: process.cwd(), env: { ...process.env, LANG: 'en_US.UTF-8' } })
-      const sawOutput = await new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => resolve(false), 1500)
-        child.onData((_) => {
-          clearTimeout(timer)
-          resolve(true)
+    await probe(
+      'node-pty',
+      async () => {
+        const pty = await import('node-pty')
+        const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'
+        const child = pty.spawn(shell, [], {
+          cols: 80,
+          rows: 24,
+          cwd: process.cwd(),
+          env: { ...process.env, LANG: 'en_US.UTF-8' }
         })
-        child.write('echo bunpty\r')
-      })
-      child.kill()
-      if (!sawOutput) throw new Error('no PTY data within 1.5s')
-    }, 'spawn + write + read'),
+        const sawOutput = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), 1500)
+          child.onData((_) => {
+            clearTimeout(timer)
+            resolve(true)
+          })
+          child.write('echo bunpty\r')
+        })
+        child.kill()
+        if (!sawOutput) throw new Error('no PTY data within 1.5s')
+      },
+      'spawn + write + read'
+    )
   )
 
   // convex — cloud client, uses WebSocket + fetch, not native; still worth probing.
   results.push(
-    await probe('convex', async () => {
-      const mod = await import('convex/browser')
-      if (typeof mod.ConvexClient !== 'function') {
-        throw new Error('ConvexClient missing from convex/browser')
-      }
-      // Don't actually connect — just verify constructor + shape
-      const client = new mod.ConvexClient('https://example.convex.cloud', { skipConvexDeploymentUrlCheck: true })
-      if (typeof client.close !== 'function') throw new Error('close() missing on ConvexClient')
-      client.close()
-    }, 'module + basic client shape'),
+    await probe(
+      'convex',
+      async () => {
+        const mod = await import('convex/browser')
+        if (typeof mod.ConvexClient !== 'function') {
+          throw new Error('ConvexClient missing from convex/browser')
+        }
+        // Don't actually connect — just verify constructor + shape
+        const client = new mod.ConvexClient('https://example.convex.cloud', {
+          skipConvexDeploymentUrlCheck: true
+        })
+        if (typeof client.close !== 'function') throw new Error('close() missing on ConvexClient')
+        client.close()
+      },
+      'module + basic client shape'
+    )
   )
 
   // express — pure JS, but has a large dep tree that tickles Bun's CJS interop.
   results.push(
-    await probe('express', async () => {
-      const express = (await import('express')).default
-      const app = express()
-      app.get('/ping', (_req, res) => res.send('pong'))
-      await new Promise<void>((resolve, reject) => {
-        const server = app.listen(0, '127.0.0.1', async () => {
-          try {
-            const addr = server.address()
-            if (!addr || typeof addr === 'string') throw new Error('no address')
-            const res = await fetch(`http://127.0.0.1:${addr.port}/ping`)
-            const body = await res.text()
-            if (body !== 'pong') throw new Error(`unexpected body: ${body}`)
-            server.close(() => resolve())
-          } catch (e) {
-            server.close()
-            reject(e)
-          }
+    await probe(
+      'express',
+      async () => {
+        const express = (await import('express')).default
+        const app = express()
+        app.get('/ping', (_req, res) => res.send('pong'))
+        await new Promise<void>((resolve, reject) => {
+          const server = app.listen(0, '127.0.0.1', async () => {
+            try {
+              const addr = server.address()
+              if (!addr || typeof addr === 'string') throw new Error('no address')
+              const res = await fetch(`http://127.0.0.1:${addr.port}/ping`)
+              const body = await res.text()
+              if (body !== 'pong') throw new Error(`unexpected body: ${body}`)
+              server.close(() => resolve())
+            } catch (e) {
+              server.close()
+              reject(e)
+            }
+          })
+          server.on('error', reject)
         })
-        server.on('error', reject)
-      })
-    }, 'listen + fetch round-trip'),
+      },
+      'listen + fetch round-trip'
+    )
   )
 
   // ws — WebSocket implementation, sometimes used alongside Bun's native WebSocket.
   results.push(
-    await probe('ws', async () => {
-      const { WebSocketServer, WebSocket } = await import('ws')
-      await new Promise<void>((resolve, reject) => {
-        const wss = new WebSocketServer({ port: 0 })
-        wss.on('listening', () => {
-          const addr = wss.address()
-          if (!addr || typeof addr === 'string') { wss.close(); return reject(new Error('no address')) }
-          const client = new WebSocket(`ws://127.0.0.1:${addr.port}`)
-          client.on('open', () => client.send('hi'))
-          wss.on('connection', (sock) => {
-            sock.on('message', (data) => {
-              if (String(data) !== 'hi') { wss.close(); client.close(); return reject(new Error(`bad msg: ${data}`)) }
-              sock.send('ack')
+    await probe(
+      'ws',
+      async () => {
+        const { WebSocketServer, WebSocket } = await import('ws')
+        await new Promise<void>((resolve, reject) => {
+          const wss = new WebSocketServer({ port: 0 })
+          wss.on('listening', () => {
+            const addr = wss.address()
+            if (!addr || typeof addr === 'string') {
+              wss.close()
+              return reject(new Error('no address'))
+            }
+            const client = new WebSocket(`ws://127.0.0.1:${addr.port}`)
+            client.on('open', () => client.send('hi'))
+            wss.on('connection', (sock) => {
+              sock.on('message', (data) => {
+                if (String(data) !== 'hi') {
+                  wss.close()
+                  client.close()
+                  return reject(new Error(`bad msg: ${data}`))
+                }
+                sock.send('ack')
+              })
             })
+            client.on('message', (data) => {
+              if (String(data) !== 'ack') {
+                wss.close()
+                client.close()
+                return reject(new Error(`bad ack: ${data}`))
+              }
+              client.close()
+              wss.close(() => resolve())
+            })
+            client.on('error', reject)
+            wss.on('error', reject)
           })
-          client.on('message', (data) => {
-            if (String(data) !== 'ack') { wss.close(); client.close(); return reject(new Error(`bad ack: ${data}`)) }
-            client.close()
-            wss.close(() => resolve())
-          })
-          client.on('error', reject)
-          wss.on('error', reject)
         })
-      })
-    }, 'server + client round-trip'),
+      },
+      'server + client round-trip'
+    )
   )
 
   // msgpackr — fast MessagePack encoder/decoder with optional native accelerator.
   results.push(
-    await probe('msgpackr', async () => {
-      const { pack, unpack } = await import('msgpackr')
-      const input = { a: 1, b: 'two', c: [true, null, 3.14] }
-      const bytes = pack(input)
-      const out = unpack(bytes)
-      if (JSON.stringify(out) !== JSON.stringify(input)) {
-        throw new Error(`roundtrip mismatch: ${JSON.stringify(out)}`)
-      }
-    }, 'pack/unpack round-trip'),
+    await probe(
+      'msgpackr',
+      async () => {
+        const { pack, unpack } = await import('msgpackr')
+        const input = { a: 1, b: 'two', c: [true, null, 3.14] }
+        const bytes = pack(input)
+        const out = unpack(bytes)
+        if (JSON.stringify(out) !== JSON.stringify(input)) {
+          throw new Error(`roundtrip mismatch: ${JSON.stringify(out)}`)
+        }
+      },
+      'pack/unpack round-trip'
+    )
   )
 
   // Report
   const summary = {
     runtime,
-    version: runtime === 'bun'
-      // @ts-expect-error — Bun global
-      ? Bun.version as string
-      : process.version,
+    version:
+      runtime === 'bun'
+        ? // @ts-expect-error — Bun global
+          (Bun.version as string)
+        : process.version,
     platform: `${process.platform}-${process.arch}`,
     generatedAt: new Date().toISOString(),
-    results,
+    results
   }
 
   mkdirSync(join(REPO_ROOT, 'tools', 'bun-compat'), { recursive: true })
   writeFileSync(REPORT_PATH, JSON.stringify(summary, null, 2), 'utf8')
 
   const pad = (s: string, n: number): string => s + ' '.repeat(Math.max(0, n - s.length))
-  process.stdout.write(`\nbun-compat: runtime=${runtime} ${summary.version} on ${summary.platform}\n`)
-  process.stdout.write(`${pad('module', 20)}${pad('status', 10)}${pad('step', 12)}duration  error\n`)
+  process.stdout.write(
+    `\nbun-compat: runtime=${runtime} ${summary.version} on ${summary.platform}\n`
+  )
+  process.stdout.write(
+    `${pad('module', 20)}${pad('status', 10)}${pad('step', 12)}duration  error\n`
+  )
   process.stdout.write(`${'-'.repeat(70)}\n`)
   for (const r of results) {
     process.stdout.write(
-      `${pad(r.module, 20)}${pad(r.status, 10)}${pad(r.step, 12)}${pad(`${r.durationMs}ms`, 10)}${r.error ?? ''}\n`,
+      `${pad(r.module, 20)}${pad(r.status, 10)}${pad(r.step, 12)}${pad(`${r.durationMs}ms`, 10)}${r.error ?? ''}\n`
     )
   }
   process.stdout.write(`\nwrote ${REPORT_PATH}\n`)
@@ -214,7 +265,9 @@ async function main(): Promise<void> {
   const blocked = results.filter((r) => r.status === 'blocked')
   const skipped = results.filter((r) => r.status === 'skipped')
   if (skipped.length > 0) {
-    process.stdout.write(`\n${skipped.length} module(s) skipped (not installed): ${skipped.map((r) => r.module).join(', ')}\n`)
+    process.stdout.write(
+      `\n${skipped.length} module(s) skipped (not installed): ${skipped.map((r) => r.module).join(', ')}\n`
+    )
   }
   if (blocked.length > 0) {
     process.stderr.write(`\n${blocked.length} module(s) blocked on ${runtime}\n`)
@@ -224,6 +277,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  process.stderr.write(`bun-compat failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`)
+  process.stderr.write(
+    `bun-compat failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`
+  )
   process.exit(2)
 })

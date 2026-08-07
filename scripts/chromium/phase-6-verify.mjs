@@ -63,7 +63,7 @@ function makeCdp(wsUrl) {
   return {
     send,
     close: () => ws.close(),
-    events,
+    events
   }
 }
 
@@ -81,11 +81,11 @@ async function evalInPage(target, expression, awaitPromise = false) {
     const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
       expression,
       returnByValue: true,
-      awaitPromise,
+      awaitPromise
     })
     if (exceptionDetails) {
       throw new Error(
-        `eval: ${exceptionDetails.text} :: ${exceptionDetails.exception?.description ?? ''}`,
+        `eval: ${exceptionDetails.text} :: ${exceptionDetails.exception?.description ?? ''}`
       )
     }
     return result.value
@@ -111,7 +111,7 @@ const report = {
   sso_scripted: null,
   tab_switch: null,
   needs_user: [],
-  errors: [],
+  errors: []
 }
 
 async function run() {
@@ -142,7 +142,7 @@ async function run() {
   //    has had a chance to register. See step 6.
   report.extensions = {
     loaded_count: 0,
-    loaded_ids: [],
+    loaded_ids: []
   }
 
   // 4) SSO scripted pass — for each of 4 SSO URLs, open a new page, wait
@@ -152,14 +152,14 @@ async function run() {
     { name: 'Google', url: 'https://accounts.google.com/' },
     { name: 'GitHub', url: 'https://github.com/login' },
     { name: 'Microsoft', url: 'https://login.microsoftonline.com/' },
-    { name: 'Apple', url: 'https://appleid.apple.com/' },
+    { name: 'Apple', url: 'https://appleid.apple.com/' }
   ]
   const browser = await browserCdp()
   const ssoResults = []
   for (const sso of ssoUrls) {
     try {
       const { targetId } = await browser.send('Target.createTarget', {
-        url: sso.url,
+        url: sso.url
       })
       // Wait long enough for redirect(s) to settle. 6s is a generous budget
       // for cold-start TLS + sign-in page render; we don't click anything.
@@ -178,7 +178,7 @@ async function run() {
       // Collect any HTTPS-failure console errors via a quick eval.
       const title = await evalInPage(
         (await listTargets()).find((t) => t.id === targetId),
-        'document.title',
+        'document.title'
       )
       ssoResults.push({
         name: sso.name,
@@ -186,7 +186,7 @@ async function run() {
         final_url: finalUrl,
         page_title: title,
         loaded,
-        status: loaded ? 'pass-scripted' : 'needs-user-hands-on',
+        status: loaded ? 'pass-scripted' : 'needs-user-hands-on'
       })
       await browser.send('Target.closeTarget', { targetId })
     } catch (err) {
@@ -194,7 +194,7 @@ async function run() {
         name: sso.name,
         requested_url: sso.url,
         status: 'error',
-        error: String(err?.message ?? err),
+        error: String(err?.message ?? err)
       })
     }
   }
@@ -205,9 +205,7 @@ async function run() {
   //    scripts, which wake the SW).
   {
     const retry = await listTargets()
-    const extTargets = retry.filter((t) =>
-      t.url.startsWith('chrome-extension://'),
-    )
+    const extTargets = retry.filter((t) => t.url.startsWith('chrome-extension://'))
     const ids = new Set()
     for (const t of extTargets) {
       const id = t.url.replace('chrome-extension://', '').split('/')[0]
@@ -228,7 +226,7 @@ async function run() {
   const benchTargets = []
   for (let i = 0; i < 10; i++) {
     const { targetId } = await browser.send('Target.createTarget', {
-      url: `data:text/html,<title>bench-${i}</title><body>bench ${i}</body>`,
+      url: `data:text/html,<title>bench-${i}</title><body>bench ${i}</body>`
     })
     benchTargets.push(targetId)
   }
@@ -250,8 +248,7 @@ async function run() {
     p50_ms: +pct(50).toFixed(2),
     p95_ms: +pct(95).toFixed(2),
     p99_ms: +pct(99).toFixed(2),
-    under_50ms_ratio:
-      latencies.filter((l) => l < 50).length / latencies.length,
+    under_50ms_ratio: latencies.filter((l) => l < 50).length / latencies.length
   }
   for (const id of benchTargets) {
     try {
@@ -265,19 +262,19 @@ async function run() {
     item: '1Password MV3 extension',
     why: 'Chrome Web Store install requires Google sign-in; unpacked build is not publicly distributed.',
     instructions:
-      'Open chrome://extensions/ in the running SlayZone, enable Developer mode, and install 1Password from the Web Store. Verify the fill UI appears on a login form.',
+      'Open chrome://extensions/ in the running SlayZone, enable Developer mode, and install 1Password from the Web Store. Verify the fill UI appears on a login form.'
   })
   report.needs_user.push({
     item: 'React DevTools extension',
     why: 'Unpacked build requires cloning facebook/react + yarn build; not bundled by default.',
     instructions:
-      'Option A: build facebook/react/packages/react-devtools-extensions locally and --load-extension=path. Option B: install from Chrome Web Store (requires Google sign-in).',
+      'Option A: build facebook/react/packages/react-devtools-extensions locally and --load-extension=path. Option B: install from Chrome Web Store (requires Google sign-in).'
   })
   for (const sso of ssoUrls) {
     report.needs_user.push({
       item: `${sso.name} SSO sign-in`,
       why: 'Credentials + 2FA/passkey require live user.',
-      instructions: `Navigate to ${sso.url} in the running SlayZone and complete the sign-in flow end-to-end.`,
+      instructions: `Navigate to ${sso.url} in the running SlayZone and complete the sign-in flow end-to-end.`
     })
   }
 }
@@ -298,17 +295,15 @@ console.log(`port=${s.cdp_port} browser=${s.browser}`)
 console.log(`shell_reachable=${s.slayzone_shell_reachable}`)
 console.log(`region_webuis=${JSON.stringify(s.region_webuis)}`)
 console.log(
-  `extensions=loaded_count=${s.extensions?.loaded_count} ids=${JSON.stringify(s.extensions?.loaded_ids)}`,
+  `extensions=loaded_count=${s.extensions?.loaded_count} ids=${JSON.stringify(s.extensions?.loaded_ids)}`
 )
 console.log('sso_scripted:')
 for (const r of s.sso_scripted ?? []) {
-  console.log(
-    `  - ${r.name.padEnd(10)} status=${r.status} url=${r.final_url ?? r.requested_url}`,
-  )
+  console.log(`  - ${r.name.padEnd(10)} status=${r.status} url=${r.final_url ?? r.requested_url}`)
 }
 if (s.tab_switch) {
   console.log(
-    `tab_switch: samples=${s.tab_switch.samples} p50=${s.tab_switch.p50_ms}ms p95=${s.tab_switch.p95_ms}ms p99=${s.tab_switch.p99_ms}ms under_50ms=${(s.tab_switch.under_50ms_ratio * 100).toFixed(1)}%`,
+    `tab_switch: samples=${s.tab_switch.samples} p50=${s.tab_switch.p50_ms}ms p95=${s.tab_switch.p95_ms}ms p99=${s.tab_switch.p99_ms}ms under_50ms=${(s.tab_switch.under_50ms_ratio * 100).toFixed(1)}%`
   )
 }
 if (s.errors.length) {

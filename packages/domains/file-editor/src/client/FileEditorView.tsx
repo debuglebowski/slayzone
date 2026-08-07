@@ -443,7 +443,10 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
           {activeFile && isImage ? (
             <div className="flex-1 min-h-0 flex items-center justify-center overflow-auto p-4 bg-[repeating-conic-gradient(hsl(var(--muted))_0%_25%,transparent_0%_50%)_50%/16px_16px]">
               <img
-                src={toSlzFileUrl(`${projectPath}/${activeFile.path}`, fileVersions.get(activeFile.path))}
+                src={toSlzFileUrl(
+                  `${projectPath}/${activeFile.path}`,
+                  fileVersions.get(activeFile.path)
+                )}
                 className="max-w-full max-h-full object-contain"
                 draggable={false}
               />

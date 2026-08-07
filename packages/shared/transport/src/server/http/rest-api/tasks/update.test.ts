@@ -118,9 +118,9 @@ await describe('PATCH /api/tasks/:id', () => {
     expect(res.body.error.includes('Ambiguous id prefix "22222222"')).toBe(true)
     expect(res.body.error.includes(a.slice(0, 8))).toBe(true)
     expect(res.body.error.includes(b.slice(0, 8))).toBe(true)
-    const rows = h.db
-      .prepare('SELECT title FROM tasks WHERE id IN (?, ?)')
-      .all(a, b) as Array<{ title: string }>
+    const rows = h.db.prepare('SELECT title FROM tasks WHERE id IN (?, ?)').all(a, b) as Array<{
+      title: string
+    }>
     expect(rows.every((r) => r.title === 'T')).toBe(true)
   })
 

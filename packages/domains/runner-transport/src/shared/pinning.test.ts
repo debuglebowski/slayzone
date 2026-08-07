@@ -12,12 +12,30 @@ import {
 } from './pinning'
 
 /** Generate a throwaway self-signed cert with the system openssl. */
-function generateSelfSignedCert(dir: string): { certPem: string; keyPath: string; certPath: string } {
+function generateSelfSignedCert(dir: string): {
+  certPem: string
+  keyPath: string
+  certPath: string
+} {
   const keyPath = join(dir, 'key.pem')
   const certPath = join(dir, 'cert.pem')
   execFileSync(
     'openssl',
-    ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certPath, '-days', '1', '-subj', '/CN=localhost'],
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
+      '-days',
+      '1',
+      '-subj',
+      '/CN=localhost'
+    ],
     { stdio: 'pipe' }
   )
   return { certPem: readFileSync(certPath, 'utf8'), keyPath, certPath }
@@ -42,9 +60,13 @@ describe('certSha256Fingerprint', () => {
   it('matches the fingerprint openssl computes for the same cert', () => {
     // Independent oracle: `openssl x509 -fingerprint -sha256` prints
     // `sha256 Fingerprint=AB:CD:...`.
-    const opensslOut = execFileSync('openssl', ['x509', '-in', certPath, '-noout', '-fingerprint', '-sha256'], {
-      encoding: 'utf8'
-    })
+    const opensslOut = execFileSync(
+      'openssl',
+      ['x509', '-in', certPath, '-noout', '-fingerprint', '-sha256'],
+      {
+        encoding: 'utf8'
+      }
+    )
     const expected = opensslOut.split('=')[1]!.trim().replaceAll(':', '').toLowerCase()
     expect(expected).toMatch(/^[0-9a-f]{64}$/)
     expect(certSha256Fingerprint(certPem)).toBe(expected)
@@ -64,10 +86,7 @@ describe('certSha256Fingerprint', () => {
 describe('normalizeCertSha256Fingerprint', () => {
   it('strips colons and lowercases', () => {
     const fp = certSha256Fingerprint(certPem)
-    const colonized = fp
-      .toUpperCase()
-      .match(/.{2}/g)!
-      .join(':')
+    const colonized = fp.toUpperCase().match(/.{2}/g)!.join(':')
     expect(normalizeCertSha256Fingerprint(colonized)).toBe(fp)
   })
 

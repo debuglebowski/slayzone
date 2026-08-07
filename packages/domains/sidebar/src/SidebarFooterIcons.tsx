@@ -1,13 +1,7 @@
 import { useState } from 'react'
 import { Settings, Keyboard, Megaphone, Trophy, BarChart3 } from 'lucide-react'
 import { TerminalStatusPopover } from '@slayzone/terminal'
-import {
-  IconButton,
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  cn
-} from '@slayzone/ui'
+import { IconButton, Tooltip, TooltipTrigger, TooltipContent, cn } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/settings'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'

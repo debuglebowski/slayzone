@@ -237,7 +237,10 @@ test.describe('Clean merge skips merge mode', () => {
     // Merge mode is not entered and the feature commit lands on the parent branch
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          taskId
+        )
         let merged = false
         try {
           merged = git(`git show HEAD:${mergedFile}`).includes('feature content')
@@ -295,7 +298,10 @@ test.describe('Phase 1 — uncommitted changes', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          taskId
+        )
         return task?.merge_state ?? null
       })
       .toBe('uncommitted')
@@ -320,7 +326,10 @@ test.describe('Phase 1 — uncommitted changes', () => {
     await expect
       .poll(
         async () => {
-          const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
+          const task = await mainWindow.evaluate(
+            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+            taskId
+          )
           return task?.merge_state ?? null
         },
         { timeout: 10_000 }
@@ -368,7 +377,10 @@ test.describe('Phase 2 — conflict resolution', () => {
   test('enters conflict merge mode', async ({ mainWindow }) => {
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          taskId
+        )
         return task?.merge_state ?? null
       })
       .toBe('conflicts')
@@ -411,7 +423,10 @@ test.describe('Phase 2 — conflict resolution', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          taskId
+        )
         return { status: task?.status ?? null, mergeState: task?.merge_state ?? null }
       })
       .toMatchObject({ status: 'done', mergeState: null })
@@ -527,7 +542,10 @@ test.describe('Abort merge', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId)
+        const task = await mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+          taskId
+        )
         return task?.merge_state ?? null
       })
       .toBeNull()
@@ -586,7 +604,10 @@ test.describe('Merge badge on kanban', () => {
   })
 
   test('merge badge disappears when merge_state cleared', async ({ mainWindow }) => {
-    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), { id: taskId, mergeState: null })
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
+      id: taskId,
+      mergeState: null
+    })
     const s = seed(mainWindow)
     await s.refreshData()
 
@@ -619,7 +640,9 @@ test.describe('getConflictContent API', () => {
   test('returns ours, theirs, base, merged fields', async ({ mainWindow }) => {
     const content = await mainWindow.evaluate(
       ({ pp, fp }) =>
-        window.getTrpcVanillaClient().worktrees.getConflictContent.query({ repoPath: pp, filePath: fp }),
+        window
+          .getTrpcVanillaClient()
+          .worktrees.getConflictContent.query({ repoPath: pp, filePath: fp }),
       { pp: gitDir, fp: conflictFile }
     )
 

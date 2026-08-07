@@ -1,6 +1,9 @@
 import Database from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { casRepointConversationId, collectReferencedConversationIds } from './conversation-id-heal.js'
+import {
+  casRepointConversationId,
+  collectReferencedConversationIds
+} from './conversation-id-heal.js'
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -40,7 +43,9 @@ const ins = raw.prepare(
 )
 ins.run(
   't1',
-  cfg({ 'claude-code': { conversationId: 'phantom', flags: '--x', conversationHistory: ['old1'] } }),
+  cfg({
+    'claude-code': { conversationId: 'phantom', flags: '--x', conversationHistory: ['old1'] }
+  }),
   'phantom',
   null
 )
@@ -55,14 +60,19 @@ async function main(): Promise<void> {
     next: 'real'
   })
   assert(ok === true, 'cas repoints when expected matches')
-  const row1 = raw.prepare('SELECT provider_config, claude_conversation_id FROM tasks WHERE id=?').get('t1') as {
+  const row1 = raw
+    .prepare('SELECT provider_config, claude_conversation_id FROM tasks WHERE id=?')
+    .get('t1') as {
     provider_config: string
     claude_conversation_id: string
   }
   const pc = JSON.parse(row1.provider_config)
   assert(pc['claude-code'].conversationId === 'real', 'conversationId updated')
   assert(pc['claude-code'].flags === '--x', 'flags preserved')
-  assert(JSON.stringify(pc['claude-code'].conversationHistory) === JSON.stringify(['old1']), 'history preserved')
+  assert(
+    JSON.stringify(pc['claude-code'].conversationHistory) === JSON.stringify(['old1']),
+    'history preserved'
+  )
   assert(row1.claude_conversation_id === 'real', 'legacy column dual-written')
 
   // CAS stale: expected no longer matches → no-op (cannot clobber a concurrent write).

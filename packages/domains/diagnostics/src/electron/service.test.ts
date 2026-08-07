@@ -131,7 +131,9 @@ async function run() {
   // drains to the DB on a timer — a fixed sleep raced both under full-suite
   // load. Poll the DB (load-independent) until the events land, then assert.
   for (let i = 0; i < 200; i++) {
-    const { c } = h.db.prepare('SELECT COUNT(*) AS c FROM diagnostics_events').get() as { c: number }
+    const { c } = h.db.prepare('SELECT COUNT(*) AS c FROM diagnostics_events').get() as {
+      c: number
+    }
     if (c > 0) break
     await new Promise((r) => setTimeout(r, 20))
   }

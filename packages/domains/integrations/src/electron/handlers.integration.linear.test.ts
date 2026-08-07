@@ -15,7 +15,11 @@ import {
   runScopedDiscovery
 } from '../server/integration-test-helpers'
 import * as linearClient from './linear-client'
-import { pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders } from '../server/sync'
+import {
+  pushNewTaskToProviders,
+  pushArchiveToProviders,
+  pushUnarchiveToProviders
+} from '../server/sync'
 import type { ProviderStatus } from '../shared'
 
 // No OS keychain cipher is wired in this test, so credential storage falls back

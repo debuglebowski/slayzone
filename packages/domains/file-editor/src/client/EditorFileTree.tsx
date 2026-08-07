@@ -192,7 +192,13 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       handleFolderDragEnter,
       handleFolderDragLeave,
       handleFolderDrop
-    } = useFileTreeDragDrop({ projectPath, loadDir, setExpandedFolders, onFileRenamed, selectedPaths })
+    } = useFileTreeDragDrop({
+      projectPath,
+      loadDir,
+      setExpandedFolders,
+      onFileRenamed,
+      selectedPaths
+    })
 
     const { handleKeyDown } = useFileTreeKeyboard({
       focusedPath,
@@ -290,7 +296,8 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
             onDragOver={(e) => {
               if (!dragPathRef.current) return
               e.preventDefault()
-              if (e.dataTransfer) e.dataTransfer.dropEffect = isValidDropTarget('') ? 'move' : 'none'
+              if (e.dataTransfer)
+                e.dataTransfer.dropEffect = isValidDropTarget('') ? 'move' : 'none'
             }}
             onDragEnter={(e) => {
               if (!dragPathRef.current) return

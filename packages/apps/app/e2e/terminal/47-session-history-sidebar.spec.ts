@@ -33,13 +33,21 @@ test.describe('Session history sidebar', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'One session', status: 'todo' })
     await seedSession(electronApp, { id: 'one-1', taskId: t.id, conv: 'ONE-A', createdAt: 1000 })
-    await seedPrompt(electronApp, { id: 'one-p1', taskId: t.id, conv: 'ONE-A', text: 'only session', createdAt: 1001 })
+    await seedPrompt(electronApp, {
+      id: 'one-p1',
+      taskId: t.id,
+      conv: 'ONE-A',
+      text: 'only session',
+      createdAt: 1001
+    })
     await s.refreshData()
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'One session' })
 
     // One distinct conversation → no history worth a separate view → no button.
     await mainWindow.waitForTimeout(400)
-    await expect(mainWindow.locator('[data-testid="session-history-toggle"]:visible')).toHaveCount(0)
+    await expect(mainWindow.locator('[data-testid="session-history-toggle"]:visible')).toHaveCount(
+      0
+    )
   })
 
   test('multi-session task lists sessions newest-first, docks beside messages', async ({
@@ -50,9 +58,21 @@ test.describe('Session history sidebar', () => {
     const t = await s.createTask({ projectId, title: 'Many sessions', status: 'todo' })
     // Two distinct conversations. CONV-B is newer → must list first.
     await seedSession(electronApp, { id: 'many-1', taskId: t.id, conv: 'CONV-A', createdAt: 1000 })
-    await seedPrompt(electronApp, { id: 'many-p1', taskId: t.id, conv: 'CONV-A', text: 'older session', createdAt: 1001 })
+    await seedPrompt(electronApp, {
+      id: 'many-p1',
+      taskId: t.id,
+      conv: 'CONV-A',
+      text: 'older session',
+      createdAt: 1001
+    })
     await seedSession(electronApp, { id: 'many-2', taskId: t.id, conv: 'CONV-B', createdAt: 2000 })
-    await seedPrompt(electronApp, { id: 'many-p2', taskId: t.id, conv: 'CONV-B', text: 'newer session', createdAt: 2001 })
+    await seedPrompt(electronApp, {
+      id: 'many-p2',
+      taskId: t.id,
+      conv: 'CONV-B',
+      text: 'newer session',
+      createdAt: 2001
+    })
     await s.refreshData()
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Many sessions' })
 
@@ -73,11 +93,15 @@ test.describe('Session history sidebar', () => {
     // Sessions + Messages can BOTH be open side-by-side (not mutually exclusive).
     await mainWindow.locator('[data-testid="agent-prompts-toggle"]:visible').first().click()
     await expect(mainWindow.locator('[data-testid="agent-prompts-sidebar"]:visible')).toHaveCount(1)
-    await expect(mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible')).toHaveCount(1)
+    await expect(mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible')).toHaveCount(
+      1
+    )
 
     // The header X closes the sessions sidebar; the toggle returns to the tab bar.
     await sidebar.locator('[aria-label="Close sessions sidebar"]').click()
-    await expect(mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible')).toHaveCount(0)
+    await expect(mainWindow.locator('[data-testid="agent-sessions-sidebar"]:visible')).toHaveCount(
+      0
+    )
     await expect(mainWindow.locator(toggleSel)).toHaveCount(1)
   })
 
@@ -167,9 +191,7 @@ test.describe('Session history sidebar', () => {
     await expect(sidebar2.getByText('newest session')).toHaveCount(0)
 
     // The current session is NOT deletable — no affordance on that card at all.
-    await expect(
-      sidebar2.locator('[aria-label="Delete session: oldest session"]')
-    ).toHaveCount(0)
+    await expect(sidebar2.locator('[aria-label="Delete session: oldest session"]')).toHaveCount(0)
 
     await mainWindow.evaluate(() =>
       window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: false })

@@ -22,152 +22,152 @@ const crashModeId = 'crash-overlay-e2e'
 // ─── Crash overlay ────────────────────────────────────────────────────────────
 
 test.describe('Terminal crash overlay', () => {
-    let projectAbbrev: string
-    let taskId: string
-    let sessionId: string
+  let projectAbbrev: string
+  let taskId: string
+  let sessionId: string
 
-    test.beforeAll(async ({ mainWindow }) => {
-      await resetApp(mainWindow)
-      // AI-mode terminals are idle-gated (TerminalStarter). The custom mode's
-      // starter button ("Open Crash Overlay E2E") doesn't match
-      // startAgentTerminal's built-in-agent regex, and every Retry remount
-      // would re-hit the gate anyway (exit clears `was_spawned`) — seed
-      // auto-start so mounts spawn directly. The gate is 93/97's subject.
-      await mainWindow.evaluate(() =>
-        window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
-      )
-      await mainWindow.evaluate(
-        (id) =>
-          window.getTrpcVanillaClient().pty.modesCreate.mutate({
-            id,
-            label: 'Crash Overlay E2E',
-            type: 'claude-code',
-            initialCommand: null,
-            resumeCommand: null,
-            defaultFlags: '',
-            enabled: true,
-            order: 999
-          }),
-        crashModeId
-      )
-      const s = seed(mainWindow)
-      const p = await s.createProject({
-        name: 'CrashRec',
-        color: '#dc2626',
-        path: TEST_PROJECT_PATH
-      })
-      projectAbbrev = p.name.slice(0, 2).toUpperCase()
-
-      const t = await s.createTask({
-        projectId: p.id,
-        title: 'Crash overlay task',
-        status: 'in_progress'
-      })
-      taskId = t.id
-      sessionId = getMainSessionId(taskId)
-
-      // Set the task to the custom mode and open its terminal.
-      await mainWindow.evaluate(
-        ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: m }),
-        {
-          id: taskId,
-          m: crashModeId
-        }
-      )
-      await s.refreshData()
-
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Crash overlay task' })
-      await waitForPtySession(mainWindow, sessionId)
+  test.beforeAll(async ({ mainWindow }) => {
+    await resetApp(mainWindow)
+    // AI-mode terminals are idle-gated (TerminalStarter). The custom mode's
+    // starter button ("Open Crash Overlay E2E") doesn't match
+    // startAgentTerminal's built-in-agent regex, and every Retry remount
+    // would re-hit the gate anyway (exit clears `was_spawned`) — seed
+    // auto-start so mounts spawn directly. The gate is 93/97's subject.
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+    )
+    await mainWindow.evaluate(
+      (id) =>
+        window.getTrpcVanillaClient().pty.modesCreate.mutate({
+          id,
+          label: 'Crash Overlay E2E',
+          type: 'claude-code',
+          initialCommand: null,
+          resumeCommand: null,
+          defaultFlags: '',
+          enabled: true,
+          order: 999
+        }),
+      crashModeId
+    )
+    const s = seed(mainWindow)
+    const p = await s.createProject({
+      name: 'CrashRec',
+      color: '#dc2626',
+      path: TEST_PROJECT_PATH
     })
+    projectAbbrev = p.name.slice(0, 2).toUpperCase()
 
-    test.afterAll(async ({ mainWindow }) => {
-      await mainWindow.evaluate(
-        (id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }),
-        crashModeId
-      )
-      await mainWindow
-        .evaluate(() =>
-          window
-            .getTrpcVanillaClient()
-            .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
-        )
-        .catch(() => {})
+    const t = await s.createTask({
+      projectId: p.id,
+      title: 'Crash overlay task',
+      status: 'in_progress'
     })
+    taskId = t.id
+    sessionId = getMainSessionId(taskId)
 
-    const ensureLiveTerminal = async (mainWindow: import('@playwright/test').Page) => {
-      const retryButton = mainWindow.getByRole('button', { name: 'Retry' }).last()
-      if (await retryButton.isVisible({ timeout: 500 }).catch(() => false)) {
-        await retryButton.click()
-        await expect(retryButton).not.toBeVisible({ timeout: 3_000 })
+    // Set the task to the custom mode and open its terminal.
+    await mainWindow.evaluate(
+      ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: m }),
+      {
+        id: taskId,
+        m: crashModeId
       }
-      await waitForPtySession(mainWindow, sessionId)
+    )
+    await s.refreshData()
+
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Crash overlay task' })
+    await waitForPtySession(mainWindow, sessionId)
+  })
+
+  test.afterAll(async ({ mainWindow }) => {
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().pty.modesDelete.mutate({ id }),
+      crashModeId
+    )
+    await mainWindow
+      .evaluate(() =>
+        window
+          .getTrpcVanillaClient()
+          .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+      )
+      .catch(() => {})
+  })
+
+  const ensureLiveTerminal = async (mainWindow: import('@playwright/test').Page) => {
+    const retryButton = mainWindow.getByRole('button', { name: 'Retry' }).last()
+    if (await retryButton.isVisible({ timeout: 500 }).catch(() => false)) {
+      await retryButton.click()
+      await expect(retryButton).not.toBeVisible({ timeout: 3_000 })
     }
+    await waitForPtySession(mainWindow, sessionId)
+  }
 
-    const crashTerminal = async (mainWindow: import('@playwright/test').Page) => {
-      await ensureLiveTerminal(mainWindow)
-      // Readiness gate: the session registers before the shell finishes its
-      // startup, so an immediate `exit 7` can land while the shell isn't
-      // processing input yet (flaky overlay). Prove the shell is live with an
-      // echo round-trip first.
-      const ready = `CRASH_READY_${Date.now()}`
-      await runCommand(mainWindow, sessionId, `echo ${ready}`)
-      await waitForBufferContains(mainWindow, sessionId, ready)
-      await runCommand(mainWindow, sessionId, 'exit 7')
-    }
+  const crashTerminal = async (mainWindow: import('@playwright/test').Page) => {
+    await ensureLiveTerminal(mainWindow)
+    // Readiness gate: the session registers before the shell finishes its
+    // startup, so an immediate `exit 7` can land while the shell isn't
+    // processing input yet (flaky overlay). Prove the shell is live with an
+    // echo round-trip first.
+    const ready = `CRASH_READY_${Date.now()}`
+    await runCommand(mainWindow, sessionId, `echo ${ready}`)
+    await waitForBufferContains(mainWindow, sessionId, ready)
+    await runCommand(mainWindow, sessionId, 'exit 7')
+  }
 
-    test('overlay appears after terminal crash', async ({ mainWindow }) => {
-      await crashTerminal(mainWindow)
-      await expect(mainWindow.getByText(/Process exited with code/i).last()).toBeVisible({
-        timeout: 10_000
-      })
-    })
-
-    test('overlay shows Retry and Doctor buttons', async ({ mainWindow }) => {
-      await crashTerminal(mainWindow)
-
-      await expect(mainWindow.getByRole('button', { name: 'Retry' }).last()).toBeVisible({
-        timeout: 10_000
-      })
-
-      await expect(mainWindow.getByRole('button', { name: 'Doctor' }).last()).toBeVisible({
-        timeout: 10_000
-      })
-    })
-
-    test('Doctor from overlay shows validation results', async ({ mainWindow }) => {
-      await crashTerminal(mainWindow)
-      await mainWindow.getByRole('button', { name: 'Doctor' }).last().click()
-
-      // Results should appear inline in the overlay.
-      await expect(mainWindow.locator('text=/Binary found|Shell detected/i').first()).toBeVisible({
-        timeout: 8_000
-      })
-
-      // Doctor cards render structured check output.
-      await expect(mainWindow.locator('.rounded-lg.border:visible').first()).toBeVisible({
-        timeout: 3_000
-      })
-    })
-
-    test('Retry clears overlay then it reappears after re-crash', async ({ mainWindow }) => {
-      await crashTerminal(mainWindow)
-      const exitText = mainWindow.getByText(/Process exited with code/i).last()
-      await expect(exitText).toBeVisible()
-
-      await mainWindow.getByRole('button', { name: 'Retry' }).last().click()
-
-      // Overlay clears immediately after Retry
-      await expect(exitText).not.toBeVisible({ timeout: 3_000 })
-
-      await waitForPtySession(mainWindow, sessionId)
-      await crashTerminal(mainWindow)
-
-      // Terminal respawns, then we force a second crash and the overlay reappears.
-      await expect(mainWindow.getByText(/Process exited with code/i).last()).toBeVisible({
-        timeout: 10_000
-      })
+  test('overlay appears after terminal crash', async ({ mainWindow }) => {
+    await crashTerminal(mainWindow)
+    await expect(mainWindow.getByText(/Process exited with code/i).last()).toBeVisible({
+      timeout: 10_000
     })
   })
+
+  test('overlay shows Retry and Doctor buttons', async ({ mainWindow }) => {
+    await crashTerminal(mainWindow)
+
+    await expect(mainWindow.getByRole('button', { name: 'Retry' }).last()).toBeVisible({
+      timeout: 10_000
+    })
+
+    await expect(mainWindow.getByRole('button', { name: 'Doctor' }).last()).toBeVisible({
+      timeout: 10_000
+    })
+  })
+
+  test('Doctor from overlay shows validation results', async ({ mainWindow }) => {
+    await crashTerminal(mainWindow)
+    await mainWindow.getByRole('button', { name: 'Doctor' }).last().click()
+
+    // Results should appear inline in the overlay.
+    await expect(mainWindow.locator('text=/Binary found|Shell detected/i').first()).toBeVisible({
+      timeout: 8_000
+    })
+
+    // Doctor cards render structured check output.
+    await expect(mainWindow.locator('.rounded-lg.border:visible').first()).toBeVisible({
+      timeout: 3_000
+    })
+  })
+
+  test('Retry clears overlay then it reappears after re-crash', async ({ mainWindow }) => {
+    await crashTerminal(mainWindow)
+    const exitText = mainWindow.getByText(/Process exited with code/i).last()
+    await expect(exitText).toBeVisible()
+
+    await mainWindow.getByRole('button', { name: 'Retry' }).last().click()
+
+    // Overlay clears immediately after Retry
+    await expect(exitText).not.toBeVisible({ timeout: 3_000 })
+
+    await waitForPtySession(mainWindow, sessionId)
+    await crashTerminal(mainWindow)
+
+    // Terminal respawns, then we force a second crash and the overlay reappears.
+    await expect(mainWindow.getByText(/Process exited with code/i).last()).toBeVisible({
+      timeout: 10_000
+    })
+  })
+})
 
 // ─── Doctor from three-dots menu ─────────────────────────────────────────────
 
@@ -191,7 +191,8 @@ test.describe('Doctor from terminal menu', () => {
     // the mode trigger on tasks:changed, which is what these tests probe.
     if (mode === 'claude-code') {
       await mainWindow.evaluate(
-        (id) => window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' }),
+        (id) =>
+          window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' }),
         taskId
       )
       await mainWindow.evaluate(() => {

@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  type Dispatch,
-  type RefObject,
-  type SetStateAction
-} from 'react'
+import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import { scopeTracker } from '@slayzone/ui'
@@ -260,7 +254,12 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
           )
         if (payload.shift)
           document.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', ...mods, bubbles: true })
+            new KeyboardEvent('keydown', {
+              key: 'Shift',
+              code: 'ShiftLeft',
+              ...mods,
+              bubbles: true
+            })
           )
         if (payload.alt)
           document.dispatchEvent(

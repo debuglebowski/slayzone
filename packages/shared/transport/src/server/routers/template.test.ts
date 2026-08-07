@@ -41,8 +41,13 @@ const mkProject = (cols = COLUMNS): string => {
     .run(id, 'P-' + id.slice(0, 6), '#111', '/tmp/' + id.slice(0, 6), cols)
   return id
 }
-const createTemplate = (name: string, extra?: Record<string, unknown>): Promise<Record<string, unknown>> =>
-  caller.create({ projectId, name, ...extra } as unknown as CreateTaskTemplateInput) as Promise<Record<string, unknown>>
+const createTemplate = (
+  name: string,
+  extra?: Record<string, unknown>
+): Promise<Record<string, unknown>> =>
+  caller.create({ projectId, name, ...extra } as unknown as CreateTaskTemplateInput) as Promise<
+    Record<string, unknown>
+  >
 const PANEL = {
   terminal: true,
   browser: true,
@@ -74,7 +79,10 @@ test('template router: create with all fields', async () => {
     terminalMode: 'codex',
     providerConfig: { codex: { flags: '--sandbox workspace-write' } },
     panelVisibility: { ...PANEL, editor: false },
-    browserTabs: { tabs: [{ id: 't1', url: 'http://localhost:3000', title: 'Dev' }], activeTabId: 't1' },
+    browserTabs: {
+      tabs: [{ id: 't1', url: 'http://localhost:3000', title: 'Dev' }],
+      activeTabId: 't1'
+    },
     webPanelUrls: { grafana: 'http://grafana.local' },
     dangerouslySkipPermissions: true,
     defaultStatus: 'todo',
@@ -93,7 +101,11 @@ test('template router: create with all fields', async () => {
 
 test('template router: create as default + new default replaces previous', async () => {
   const pid = mkProject()
-  const first = (await caller.create({ projectId: pid, name: 'First', isDefault: true } as never)) as Record<string, unknown>
+  const first = (await caller.create({
+    projectId: pid,
+    name: 'First',
+    isDefault: true
+  } as never)) as Record<string, unknown>
   expect(first.is_default).toBe(true)
   await caller.create({ projectId: pid, name: 'Second', isDefault: true } as never)
   expect((await caller.get({ id: first.id as string }))?.is_default).toBe(false)
@@ -111,15 +123,25 @@ test('template router: get + update name + partial preserves + create→get→ge
   const t = (await createTemplate('GetMe')) as Record<string, unknown>
   expect((await caller.get({ id: t.id as string }))?.name).toBe('GetMe')
 
-  const partial = (await createTemplate('Partial', { terminalMode: 'codex', defaultPriority: 2 })) as Record<string, unknown>
-  const updated = (await caller.update({ id: partial.id, defaultPriority: 5 } as never)) as Record<string, unknown>
+  const partial = (await createTemplate('Partial', {
+    terminalMode: 'codex',
+    defaultPriority: 2
+  })) as Record<string, unknown>
+  const updated = (await caller.update({ id: partial.id, defaultPriority: 5 } as never)) as Record<
+    string,
+    unknown
+  >
   expect(updated.terminal_mode).toBe('codex')
   expect(updated.default_priority).toBe(5)
 })
 
 test('template router: update terminalMode + panelVisibility', async () => {
   const t = (await createTemplate('UpdateFields')) as Record<string, unknown>
-  const updated = (await caller.update({ id: t.id, terminalMode: 'codex', panelVisibility: PANEL } as never)) as Record<string, any>
+  const updated = (await caller.update({
+    id: t.id,
+    terminalMode: 'codex',
+    panelVisibility: PANEL
+  } as never)) as Record<string, any>
   expect(updated.terminal_mode).toBe('codex')
   expect(updated.panel_visibility?.browser).toBe(true)
 })
@@ -130,7 +152,10 @@ test('template router: delete + setDefault set/clear', async () => {
   expect(await caller.get({ id: t.id as string })).toBeNull()
 
   const pid = mkProject()
-  const setMe = (await caller.create({ projectId: pid, name: 'SetMe' } as never)) as Record<string, unknown>
+  const setMe = (await caller.create({ projectId: pid, name: 'SetMe' } as never)) as Record<
+    string,
+    unknown
+  >
   expect(setMe.is_default).toBe(false)
   await caller.setDefault({ projectId: pid, templateId: setMe.id as string })
   expect((await caller.get({ id: setMe.id as string }))?.is_default).toBe(true)
@@ -142,7 +167,9 @@ test('template router: delete + setDefault set/clear', async () => {
 // get/update return null, delete returns false. Locks the cross-router asymmetry.
 test('template router: missing id → null / false (no throw)', async () => {
   expect(await caller.get({ id: 'nope' })).toBeNull()
-  expect(await caller.update({ id: 'nope', name: 'x' } as unknown as UpdateTaskTemplateInput)).toBeNull()
+  expect(
+    await caller.update({ id: 'nope', name: 'x' } as unknown as UpdateTaskTemplateInput)
+  ).toBeNull()
   expect(await caller.delete({ id: 'nope' })).toBe(false)
 })
 
@@ -153,13 +180,20 @@ test('template application: explicit templateId applies all fields', async () =>
     terminalMode: 'codex',
     providerConfig: { codex: { flags: '--test-flag' } },
     panelVisibility: { ...PANEL, editor: true },
-    browserTabs: { tabs: [{ id: 'b1', url: 'http://localhost', title: 'Local' }], activeTabId: 'b1' },
+    browserTabs: {
+      tabs: [{ id: 'b1', url: 'http://localhost', title: 'Local' }],
+      activeTabId: 'b1'
+    },
     webPanelUrls: { docs: 'http://docs.local' },
     dangerouslySkipPermissions: true,
     defaultStatus: 'todo',
     defaultPriority: 1
   })) as Record<string, unknown>
-  const task = (await tasks.create({ projectId, title: 'FromTemplate', templateId: tmpl.id } as never)) as Record<string, any>
+  const task = (await tasks.create({
+    projectId,
+    title: 'FromTemplate',
+    templateId: tmpl.id
+  } as never)) as Record<string, any>
   expect(task.terminal_mode).toBe('codex')
   expect(task.provider_config.codex?.flags).toBe('--test-flag')
   expect(task.panel_visibility?.editor).toBe(true)
@@ -177,29 +211,62 @@ test('template application: project default auto-applies when no templateId', as
       { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' }
     ])
   )
-  await caller.create({ projectId: pid, name: 'ProjectDefault', isDefault: true, terminalMode: 'codex', defaultStatus: 'backlog', defaultPriority: 5 } as never)
-  const task = (await tasks.create({ projectId: pid, title: 'Auto' } as never)) as Record<string, unknown>
+  await caller.create({
+    projectId: pid,
+    name: 'ProjectDefault',
+    isDefault: true,
+    terminalMode: 'codex',
+    defaultStatus: 'backlog',
+    defaultPriority: 5
+  } as never)
+  const task = (await tasks.create({ projectId: pid, title: 'Auto' } as never)) as Record<
+    string,
+    unknown
+  >
   expect(task.terminal_mode).toBe('codex')
   expect(task.status).toBe('backlog')
   expect(task.priority).toBe(5)
 })
 
 test('template application: explicit input overrides template + no-template defaults + temp task', async () => {
-  const tmpl = (await createTemplate('Overridable', { terminalMode: 'codex', defaultStatus: 'todo', defaultPriority: 1 })) as Record<string, unknown>
-  const overridden = (await tasks.create({ projectId, title: 'Override', templateId: tmpl.id, terminalMode: 'claude-code', status: 'in_progress', priority: 4 } as never)) as Record<string, unknown>
+  const tmpl = (await createTemplate('Overridable', {
+    terminalMode: 'codex',
+    defaultStatus: 'todo',
+    defaultPriority: 1
+  })) as Record<string, unknown>
+  const overridden = (await tasks.create({
+    projectId,
+    title: 'Override',
+    templateId: tmpl.id,
+    terminalMode: 'claude-code',
+    status: 'in_progress',
+    priority: 4
+  } as never)) as Record<string, unknown>
   expect(overridden.terminal_mode).toBe('claude-code')
   expect(overridden.status).toBe('in_progress')
   expect(overridden.priority).toBe(4)
 
   const plainPid = mkProject()
-  const plain = (await tasks.create({ projectId: plainPid, title: 'Plain' } as never)) as Record<string, unknown>
+  const plain = (await tasks.create({ projectId: plainPid, title: 'Plain' } as never)) as Record<
+    string,
+    unknown
+  >
   expect(plain.terminal_mode).toBe('claude-code')
   expect(plain.priority).toBe(3)
   expect(plain.panel_visibility).toBeNull()
   expect(plain.browser_tabs).toBeNull()
 
-  const tempTmpl = (await createTemplate('TempTemplate', { terminalMode: 'codex', defaultPriority: 2, panelVisibility: PANEL })) as Record<string, unknown>
-  const temp = (await tasks.create({ projectId, title: 'Temp', isTemporary: true, templateId: tempTmpl.id } as never)) as Record<string, any>
+  const tempTmpl = (await createTemplate('TempTemplate', {
+    terminalMode: 'codex',
+    defaultPriority: 2,
+    panelVisibility: PANEL
+  })) as Record<string, unknown>
+  const temp = (await tasks.create({
+    projectId,
+    title: 'Temp',
+    isTemporary: true,
+    templateId: tempTmpl.id
+  } as never)) as Record<string, any>
   expect(temp.is_temporary).toBe(true)
   expect(temp.terminal_mode).toBe('codex')
   expect(temp.priority).toBe(2)
@@ -209,24 +276,48 @@ test('template application: explicit input overrides template + no-template defa
 // ─── updateTask persists template-like fields ───
 
 test('updateTask: panelVisibility / browserTabs / webPanelUrls / terminalMode round-trip + combined', async () => {
-  const t1 = (await tasks.create({ projectId, title: 'PanelRT' } as never)) as Record<string, unknown>
-  const visUpdated = (await tasks.update({ id: t1.id, panelVisibility: { ...PANEL, editor: true } } as never)) as Record<string, any>
+  const t1 = (await tasks.create({ projectId, title: 'PanelRT' } as never)) as Record<
+    string,
+    unknown
+  >
+  const visUpdated = (await tasks.update({
+    id: t1.id,
+    panelVisibility: { ...PANEL, editor: true }
+  } as never)) as Record<string, any>
   expect(visUpdated.panel_visibility?.editor).toBe(true)
   expect(visUpdated.panel_visibility?.diff).toBe(false)
 
-  const t2 = (await tasks.create({ projectId, title: 'BrowserRT' } as never)) as Record<string, unknown>
-  const tabsUpdated = (await tasks.update({ id: t2.id, browserTabs: { tabs: [{ id: 'x', url: 'http://example.com', title: 'Ex' }], activeTabId: 'x' } } as never)) as Record<string, any>
+  const t2 = (await tasks.create({ projectId, title: 'BrowserRT' } as never)) as Record<
+    string,
+    unknown
+  >
+  const tabsUpdated = (await tasks.update({
+    id: t2.id,
+    browserTabs: { tabs: [{ id: 'x', url: 'http://example.com', title: 'Ex' }], activeTabId: 'x' }
+  } as never)) as Record<string, any>
   expect(tabsUpdated.browser_tabs?.tabs[0].url).toBe('http://example.com')
   expect(tabsUpdated.browser_tabs?.activeTabId).toBe('x')
 
   const t3 = (await tasks.create({ projectId, title: 'WebRT' } as never)) as Record<string, unknown>
-  const webUpdated = (await tasks.update({ id: t3.id, webPanelUrls: { grafana: 'http://grafana.local', docs: 'http://docs.local' } } as never)) as Record<string, any>
+  const webUpdated = (await tasks.update({
+    id: t3.id,
+    webPanelUrls: { grafana: 'http://grafana.local', docs: 'http://docs.local' }
+  } as never)) as Record<string, any>
   expect(webUpdated.web_panel_urls?.grafana).toBe('http://grafana.local')
 
-  const t4 = (await tasks.create({ projectId, title: 'ModeChange' } as never)) as Record<string, unknown>
-  expect(((await tasks.update({ id: t4.id, terminalMode: 'codex' } as never)) as Record<string, unknown>).terminal_mode).toBe('codex')
+  const t4 = (await tasks.create({ projectId, title: 'ModeChange' } as never)) as Record<
+    string,
+    unknown
+  >
+  expect(
+    ((await tasks.update({ id: t4.id, terminalMode: 'codex' } as never)) as Record<string, unknown>)
+      .terminal_mode
+  ).toBe('codex')
 
-  const t5 = (await tasks.create({ projectId, title: 'ApplySimulation' } as never)) as Record<string, unknown>
+  const t5 = (await tasks.create({ projectId, title: 'ApplySimulation' } as never)) as Record<
+    string,
+    unknown
+  >
   const combined = (await tasks.update({
     id: t5.id,
     terminalMode: 'codex',

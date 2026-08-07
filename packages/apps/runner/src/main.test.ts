@@ -29,19 +29,21 @@ function makeDispatch(shutdown: (reason: string) => void = () => {}) {
 }
 
 describe('createHubRequestHandler dispatch table', () => {
-  it.each(['fs.readFile', 'git.clone', 'proc.status', 'bogus.method'])(
-    'answers unknown method %s with -32001 unimplemented',
-    async (method) => {
-      const { handle } = makeDispatch()
-      const err = await handle(method, {}).then(
-        () => null,
-        (e: unknown) => e
-      )
-      expect(err).toBeInstanceOf(RpcError)
-      expect((err as RpcError).code).toBe(RunnerTransportErrorCodes.unimplemented)
-      expect((err as RpcError).message).toBe(`unimplemented: ${method}`)
-    }
-  )
+  it.each([
+    'fs.readFile',
+    'git.clone',
+    'proc.status',
+    'bogus.method'
+  ])('answers unknown method %s with -32001 unimplemented', async (method) => {
+    const { handle } = makeDispatch()
+    const err = await handle(method, {}).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(RunnerTransportErrorCodes.unimplemented)
+    expect((err as RpcError).message).toBe(`unimplemented: ${method}`)
+  })
 
   it('routes implemented methods (git.isGitRepo does not throw unimplemented)', async () => {
     const { handle } = makeDispatch()

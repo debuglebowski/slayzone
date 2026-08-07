@@ -67,7 +67,11 @@ import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
-import { stripUnderlineCodes, KITTY_SHIFT_ENTER, DETECTION_ENGINES } from '@slayzone/terminal/shared'
+import {
+  stripUnderlineCodes,
+  KITTY_SHIFT_ENTER,
+  DETECTION_ENGINES
+} from '@slayzone/terminal/shared'
 import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
 import { track } from '@slayzone/telemetry/client'
 
@@ -201,13 +205,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const trpcClient = useTRPCClient()
   const trpc = useTRPC()
-  const {
-    subscribe,
-    subscribeExit,
-    getCrashOutput,
-    resetTaskState,
-    cleanupTask
-  } = usePty()
+  const { subscribe, subscribeExit, getCrashOutput, resetTaskState, cleanupTask } = usePty()
   const { terminalThemeId, contentVariant } = useTheme()
   const {
     terminalFontSize,
@@ -229,26 +227,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // stale metrics and the screen scrambles. rAF-debounced so a resize drag (many
   // fits per second) coalesces to one correction on the settled frame. No-op when
   // the DOM renderer is active (no addon).
-  const scheduleAtlasCorrection = useCallback((site = 'fit'): void => {
-    if (atlasCorrectionRafRef.current !== null) {
-      cancelAnimationFrame(atlasCorrectionRafRef.current)
-    }
-    atlasCorrectionRafRef.current = requestAnimationFrame(() => {
-      atlasCorrectionRafRef.current = null
-      const addon = webglAddonRef.current
-      const terminal = terminalRef.current
-      if (addon && terminal) {
-        // getLiveTerminals: the atlas is SHARED across panes, so the repack
-        // invalidates every one of them — each needs a frame or it keeps
-        // painting stale texcoords. See correctAtlas.
-        correctAtlas(addon, terminal, sessionId, site, getLiveTerminals)
-        // The atlas was just intentionally re-rasterized — the scramble probe's
-        // current baseline points at the *old* atlas pixels and would now flag
-        // every cell as drift. Re-baseline so the probe tracks the new atlas.
-        scrambleProbeRef.current?.rebaseline()
+  const scheduleAtlasCorrection = useCallback(
+    (site = 'fit'): void => {
+      if (atlasCorrectionRafRef.current !== null) {
+        cancelAnimationFrame(atlasCorrectionRafRef.current)
       }
-    })
-  }, [sessionId])
+      atlasCorrectionRafRef.current = requestAnimationFrame(() => {
+        atlasCorrectionRafRef.current = null
+        const addon = webglAddonRef.current
+        const terminal = terminalRef.current
+        if (addon && terminal) {
+          // getLiveTerminals: the atlas is SHARED across panes, so the repack
+          // invalidates every one of them — each needs a frame or it keeps
+          // painting stale texcoords. See correctAtlas.
+          correctAtlas(addon, terminal, sessionId, site, getLiveTerminals)
+          // The atlas was just intentionally re-rasterized — the scramble probe's
+          // current baseline points at the *old* atlas pixels and would now flag
+          // every cell as drift. Re-baseline so the probe tracks the new atlas.
+          scrambleProbeRef.current?.rebaseline()
+        }
+      })
+    },
+    [sessionId]
+  )
 
   // Idempotent fit: only calls fit() when the proposed geometry (measured from
   // the current container width + cell size) differs from what the terminal
@@ -257,18 +258,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // churn. Covers BOTH drift axes: a container-width change (the mount race)
   // and a cell-size change (webfont FOUT swapping the measured cell after the
   // init fit). Returns true when it actually re-fit.
-  const ensureFit = useCallback((site: string): boolean => {
-    const terminal = terminalRef.current
-    const fitAddon = fitAddonRef.current
-    if (!terminal || !fitAddon) return false
-    const proposed = fitAddon.proposeDimensions()
-    if (!proposed || Number.isNaN(proposed.cols) || Number.isNaN(proposed.rows)) return false
-    if (proposed.cols === terminal.cols && proposed.rows === terminal.rows) return false
-    fitAddon.fit()
-    diag(sessionId, 'fit', { site, terminal })
-    scheduleAtlasCorrection(`fit:${site}`)
-    return true
-  }, [sessionId, scheduleAtlasCorrection])
+  const ensureFit = useCallback(
+    (site: string): boolean => {
+      const terminal = terminalRef.current
+      const fitAddon = fitAddonRef.current
+      if (!terminal || !fitAddon) return false
+      const proposed = fitAddon.proposeDimensions()
+      if (!proposed || Number.isNaN(proposed.cols) || Number.isNaN(proposed.rows)) return false
+      if (proposed.cols === terminal.cols && proposed.rows === terminal.rows) return false
+      fitAddon.fit()
+      diag(sessionId, 'fit', { site, terminal })
+      scheduleAtlasCorrection(`fit:${site}`)
+      return true
+    },
+    [sessionId, scheduleAtlasCorrection]
+  )
 
   const wasActiveRef = useRef(isActive)
 
@@ -1376,9 +1380,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let cancelled = false
     void (async () => {
       await Promise.race([
-        document.fonts
-          .load(`${terminalFontSize}px ${terminalFontFamily}`)
-          .catch(() => undefined),
+        document.fonts.load(`${terminalFontSize}px ${terminalFontFamily}`).catch(() => undefined),
         new Promise((resolve) => setTimeout(resolve, 1500))
       ])
       if (cancelled) return
@@ -1400,9 +1402,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let cancelled = false
     void (async () => {
       await Promise.race([
-        document.fonts
-          .load(`${terminalFontSize}px ${terminalFontFamily}`)
-          .catch(() => undefined),
+        document.fonts.load(`${terminalFontSize}px ${terminalFontFamily}`).catch(() => undefined),
         new Promise((resolve) => setTimeout(resolve, 1500))
       ])
       if (cancelled) return
@@ -1661,9 +1661,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // (editor, sidebar, dialog input) land on a real focusable and are NOT
           // this bug — skip them to keep the signal clean.
           const wentNowhere =
-            active == null ||
-            active === document.body ||
-            active === document.documentElement
+            active == null || active === document.body || active === document.documentElement
           if (!wentNowhere) return
           const now = performance.now()
           if (now - lastReportAt < REPORT_THROTTLE_MS) return
@@ -1712,9 +1710,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
                 // hibernate-warn countdown overlay (Moon icon) lives in the
                 // TerminalStarter wrapper (sibling of <Terminal>), so look up to
                 // the nearest positioned ancestor, not inside our own container.
-                countdownVisible: !!(container.closest('div.relative') ?? container.parentElement)?.querySelector(
-                  '.animate-pulse'
-                )
+                countdownVisible: !!(
+                  container.closest('div.relative') ?? container.parentElement
+                )?.querySelector('.animate-pulse')
               }
             })
             .catch(() => {})

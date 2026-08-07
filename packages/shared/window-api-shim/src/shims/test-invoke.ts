@@ -36,9 +36,7 @@
 
 import { jsonRpcCall } from '../transport/mojo'
 
-type CdpEmbeddedTargets =
-  | Array<{ targetId: string; url: string }>
-  | { error: string }
+type CdpEmbeddedTargets = Array<{ targetId: string; url: string }> | { error: string }
 
 type CdpEvalResult = unknown | { error: string } | null
 
@@ -66,7 +64,7 @@ async function evaluateOnEmbedded(expression: string): Promise<CdpEvalResult> {
   const fn = target.__slayzoneCdpEvaluateOnEmbedded
   if (typeof fn !== 'function') return null
   return fn(expression).catch((err) => ({
-    error: err instanceof Error ? err.message : String(err),
+    error: err instanceof Error ? err.message : String(err)
   }))
 }
 

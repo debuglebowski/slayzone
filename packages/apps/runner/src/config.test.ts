@@ -159,10 +159,7 @@ describe('loadRunnerConfig', () => {
 
   it('fails fast when an EXPLICIT config.json pin is set on a ws:// hub url (no silent downgrade)', () => {
     expect(() =>
-      loadRunnerConfig(
-        {},
-        { hubUrl: 'ws://hub.example/runners', pinnedCertSha256: 'a'.repeat(64) }
-      )
+      loadRunnerConfig({}, { hubUrl: 'ws://hub.example/runners', pinnedCertSha256: 'a'.repeat(64) })
     ).toThrow(/requires a wss:\/\/ hub url/)
   })
 
@@ -216,7 +213,11 @@ describe('loadRunnerConfig', () => {
   it('reads hubUrl/joinToken/runnerName from the shared config as a base', () => {
     const config = loadRunnerConfig(
       {},
-      { hubUrl: 'wss://shared.example/runners', joinToken: 'jt-shared', runnerName: 'shared-runner' }
+      {
+        hubUrl: 'wss://shared.example/runners',
+        joinToken: 'jt-shared',
+        runnerName: 'shared-runner'
+      }
     )
     expect(config.hubUrl).toBe('wss://shared.example/runners')
     expect(config.joinToken).toBe('jt-shared')
@@ -254,7 +255,10 @@ describe('loadRunnerConfig', () => {
       delete process.env.SLAYZONE_HUB_JOIN_TOKEN
       process.env.SLAYZONE_ROOT = dir
       process.env.SLAYZONE_SUPERVISED = '1'
-      writeFileSync(join(dir, 'config.json'), JSON.stringify({ hubUrl: 'wss://shared.example/runners' }))
+      writeFileSync(
+        join(dir, 'config.json'),
+        JSON.stringify({ hubUrl: 'wss://shared.example/runners' })
+      )
       // Supervised ⇒ shared skipped ⇒ no hub source anywhere ⇒ throws.
       expect(() => loadRunnerConfig()).toThrow(/SLAYZONE_HUB_ADDRESS/)
       // Sanity: with SUPERVISED unset, the SAME shared config IS read (no throw).

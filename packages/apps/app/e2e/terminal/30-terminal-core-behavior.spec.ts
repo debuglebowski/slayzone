@@ -109,7 +109,10 @@ test.describe('Terminal state transitions', () => {
     const sessionId = getMainSessionId(taskId)
     await waitForPtySession(mainWindow, sessionId)
 
-    const initialState = await mainWindow.evaluate((id) => window.getTrpcVanillaClient().pty.getState.query({ sessionId: id }), sessionId)
+    const initialState = await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().pty.getState.query({ sessionId: id }),
+      sessionId
+    )
     expect(['starting', 'idle']).toContain(initialState)
 
     await waitForPtyState(mainWindow, sessionId, 'idle')
@@ -118,7 +121,12 @@ test.describe('Terminal state transitions', () => {
     await waitForBufferContains(mainWindow, sessionId, marker)
 
     await expect
-      .poll(async () => mainWindow.evaluate((id) => window.getTrpcVanillaClient().pty.getState.query({ sessionId: id }), sessionId))
+      .poll(async () =>
+        mainWindow.evaluate(
+          (id) => window.getTrpcVanillaClient().pty.getState.query({ sessionId: id }),
+          sessionId
+        )
+      )
       .toBe('idle')
   })
 })
@@ -162,7 +170,9 @@ test.describe('Terminal mode switch teardown', () => {
   test.afterAll(async ({ mainWindow }) => {
     await mainWindow
       .evaluate(() =>
-        window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+        window
+          .getTrpcVanillaClient()
+          .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
       )
       .catch(() => {})
   })
@@ -239,9 +249,9 @@ test.describe('Terminal tab rename persistence', () => {
       .not.toBeNull()
 
     const tabs = await mainWindow.evaluate(
-          (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
-          taskId
-        )
+      (id) => window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }),
+      taskId
+    )
     const nonMainTab = tabs.find((tab: { id: string; isMain: boolean }) => !tab.isMain)
     expect(nonMainTab).toBeTruthy()
     const nonMainTabId = nonMainTab!.id

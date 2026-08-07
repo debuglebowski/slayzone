@@ -37,7 +37,12 @@ import { wsDataToText } from '../shared/ws-data'
 import { computeBackoffDelayMs, type BackoffOptions } from './backoff'
 import type { RunnerCredentialStore } from './credential-store'
 
-export type HubDialerState = 'stopped' | 'connecting' | 'authenticating' | 'connected' | 'waiting-retry'
+export type HubDialerState =
+  | 'stopped'
+  | 'connecting'
+  | 'authenticating'
+  | 'connected'
+  | 'waiting-retry'
 
 export interface RunnerIdentity {
   name: string
@@ -261,7 +266,9 @@ export class HubDialer {
         if (!cert?.raw) return new Error('hub presented no certificate')
         if (!certMatchesFingerprint(expected, cert.raw)) {
           const actual = certSha256FingerprintFromDer(cert.raw)
-          return new Error(`hub certificate fingerprint mismatch: expected ${expected}, got ${actual}`)
+          return new Error(
+            `hub certificate fingerprint mismatch: expected ${expected}, got ${actual}`
+          )
         }
         return undefined
       }
@@ -286,7 +293,9 @@ export class HubDialer {
     const raw = cert && cert.raw ? cert.raw : null
     if (raw && certMatchesFingerprint(expected, raw)) return true
     const actual = raw ? certSha256FingerprintFromDer(raw) : 'no certificate'
-    const error = new Error(`hub certificate fingerprint mismatch: expected ${expected}, got ${actual}`)
+    const error = new Error(
+      `hub certificate fingerprint mismatch: expected ${expected}, got ${actual}`
+    )
     this.log('runner dialer rejected hub certificate', { error: error.message })
     this.events.emit('error', { error, fatal: false })
     ws.terminate()
@@ -337,7 +346,10 @@ export class HubDialer {
     ws.on('error', (err) => {
       if (this.current !== conn) return
       this.log('runner dialer socket error', { error: String(err) })
-      this.events.emit('error', { error: err instanceof Error ? err : new Error(String(err)), fatal: false })
+      this.events.emit('error', {
+        error: err instanceof Error ? err : new Error(String(err)),
+        fatal: false
+      })
     })
     ws.on('close', (code, reasonBuf) => {
       this.handleClose(conn, code, reasonBuf.toString())
@@ -378,7 +390,8 @@ export class HubDialer {
           // Only an explicit credential rejection means the stored key is
           // dead. Transient hub-side RpcErrors and socket failures both go to
           // the reconnect path (rethrow → outer catch → backoff).
-          if (!(err instanceof RpcError) || err.code !== RunnerTransportErrorCodes.unauthorized) throw err
+          if (!(err instanceof RpcError) || err.code !== RunnerTransportErrorCodes.unauthorized)
+            throw err
           if (!this.opts.joinToken) {
             this.fatal(
               new Error(
@@ -428,8 +441,8 @@ export class HubDialer {
             new Error(
               isAuth
                 ? `This runner needs to be enrolled again: the hub refused its join token ` +
-                  `(a join token is single-use). Enroll it from Settings → Runners ` +
-                  `(or \`slay runner enroll\`). (${err instanceof Error ? err.message : String(err)})`
+                    `(a join token is single-use). Enroll it from Settings → Runners ` +
+                    `(or \`slay runner enroll\`). (${err instanceof Error ? err.message : String(err)})`
                 : `hub rejected enrollment (${(err as RpcError).code}): ${err instanceof Error ? err.message : String(err)}`
             ),
             conn,
@@ -449,7 +462,12 @@ export class HubDialer {
           this.log('runner dialer join-token mint failed', { error: String(mintErr) })
         }
         if (!fresh) {
-          this.fatal(new Error(`hub rejected enrollment and no fresh join token could be minted: ${err instanceof Error ? err.message : String(err)}`), conn)
+          this.fatal(
+            new Error(
+              `hub rejected enrollment and no fresh join token could be minted: ${err instanceof Error ? err.message : String(err)}`
+            ),
+            conn
+          )
           return
         }
         this.currentJoinToken = fresh
@@ -462,7 +480,9 @@ export class HubDialer {
               retryErr.code === RunnerTransportErrorCodes.protocolMismatch)
           ) {
             this.fatal(
-              new Error(`hub rejected enrollment with a fresh token (${retryErr.code}): ${retryErr.message}`),
+              new Error(
+                `hub rejected enrollment with a fresh token (${retryErr.code}): ${retryErr.message}`
+              ),
               conn
             )
             return
@@ -528,7 +548,12 @@ export class HubDialer {
     conn.heartbeatTimer.unref?.()
   }
 
-  private handleHubRequest(conn: Connection, method: string, params: unknown, id: string | number): void {
+  private handleHubRequest(
+    conn: Connection,
+    method: string,
+    params: unknown,
+    id: string | number
+  ): void {
     if (method === HubToRunnerMethods.ping) {
       conn.rpc.respond(id, { ts: Date.now() })
       return

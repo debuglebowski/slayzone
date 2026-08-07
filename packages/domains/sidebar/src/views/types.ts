@@ -1,7 +1,12 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
-import type { Project, ProjectGroup, ColumnConfig, TopLevelEntryRef } from '@slayzone/projects/shared'
+import type {
+  Project,
+  ProjectGroup,
+  ColumnConfig,
+  TopLevelEntryRef
+} from '@slayzone/projects/shared'
 
 export interface SidebarViewContext {
   projects: Project[]

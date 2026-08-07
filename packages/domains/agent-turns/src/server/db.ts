@@ -16,25 +16,29 @@ export interface InsertTurn {
 }
 
 export async function insertTurn(db: SlayzoneDb, t: InsertTurn): Promise<void> {
-  await db.prepare(
-    `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at)
+  await db
+    .prepare(
+      `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    t.id,
-    t.worktree_path,
-    t.task_id,
-    t.terminal_tab_id,
-    t.snapshot_sha,
-    t.head_sha_at_snap,
-    t.prompt_preview,
-    t.created_at
-  )
+    )
+    .run(
+      t.id,
+      t.worktree_path,
+      t.task_id,
+      t.terminal_tab_id,
+      t.snapshot_sha,
+      t.head_sha_at_snap,
+      t.prompt_preview,
+      t.created_at
+    )
   // Bump task-level interaction marker so tree-view "Last interaction" sort
   // reflects this turn. Skips when the turn isn't task-scoped.
   if (t.task_id) {
-    await db.prepare(
-      `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
-    ).run(t.created_at, t.task_id, t.created_at)
+    await db
+      .prepare(
+        `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
+      )
+      .run(t.created_at, t.task_id, t.created_at)
   }
 }
 
@@ -44,8 +48,9 @@ export async function deleteTurn(db: SlayzoneDb, id: string): Promise<void> {
 
 export async function getTurn(db: SlayzoneDb, id: string): Promise<AgentTurn | null> {
   return (
-    (await db.prepare(`SELECT * FROM agent_turns WHERE id = ?`).get(id) as AgentTurn | undefined) ??
-    null
+    ((await db.prepare(`SELECT * FROM agent_turns WHERE id = ?`).get(id)) as
+      | AgentTurn
+      | undefined) ?? null
   )
 }
 
@@ -55,9 +60,9 @@ export async function getLatestTurnForWorktree(
   worktreePath: string
 ): Promise<AgentTurn | null> {
   return (
-    (await db
+    ((await db
       .prepare(`SELECT * FROM agent_turns WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1`)
-      .get(worktreePath) as AgentTurn | undefined) ?? null
+      .get(worktreePath)) as AgentTurn | undefined) ?? null
   )
 }
 

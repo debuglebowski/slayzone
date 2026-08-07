@@ -118,7 +118,12 @@ export function FederatedRoot({ decorateUrl, children }: FederatedRootProps): Re
   const defaultHubId = useHubRegistryStore((s) => s.defaultHubId)
   const tokens = useHubRegistryStore((s) => s.tokens)
   return (
-    <FederationProvider hubs={hubs} defaultHubId={defaultHubId} decorateUrl={decorateUrl} tokens={tokens}>
+    <FederationProvider
+      hubs={hubs}
+      defaultHubId={defaultHubId}
+      decorateUrl={decorateUrl}
+      tokens={tokens}
+    >
       {children}
     </FederationProvider>
   )

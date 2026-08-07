@@ -183,24 +183,21 @@ export function createArtifactStore(dataDir: string) {
       ] as const) {
         if (data[key] !== undefined) setKeys.push(key)
       }
-      const row = await db.namedTxn(
-        'task-artifacts:update',
-        {
-          dataDir,
-          id: data.id,
-          mutateVersion: data.mutateVersion,
-          title: data.title,
-          folderId: data.folderId,
-          renderMode: data.renderMode,
-          viewMode: data.viewMode,
-          readabilityOverride: data.readabilityOverride,
-          widthOverride: data.widthOverride,
-          zoomPct: data.zoomPct,
-          language: data.language,
-          content: data.content,
-          setKeys
-        }
-      )
+      const row = await db.namedTxn('task-artifacts:update', {
+        dataDir,
+        id: data.id,
+        mutateVersion: data.mutateVersion,
+        title: data.title,
+        folderId: data.folderId,
+        renderMode: data.renderMode,
+        viewMode: data.viewMode,
+        readabilityOverride: data.readabilityOverride,
+        widthOverride: data.widthOverride,
+        zoomPct: data.zoomPct,
+        language: data.language,
+        content: data.content,
+        setKeys
+      })
       if (row === null) return null
       return parseArtifact(row ?? undefined)
     },
@@ -435,10 +432,7 @@ export function createArtifactStore(dataDir: string) {
     },
 
     /** Title + current-version-content search. Backs `slay tasks artifacts search`. */
-    searchArtifacts(
-      db: SlayzoneDb,
-      data: ArtifactSearchOptions
-    ): Promise<ArtifactSearchReport> {
+    searchArtifacts(db: SlayzoneDb, data: ArtifactSearchOptions): Promise<ArtifactSearchReport> {
       return db.namedTxn('task-artifacts:search', {
         dataDir,
         ...data
@@ -517,10 +511,10 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: { taskId: string; name: string }
     ): Promise<ArtifactFolder | null> {
-      const row = await db.namedTxn(
-        'task-artifacts:folders:getOrCreateByName',
-        { taskId: data.taskId, name: data.name }
-      )
+      const row = await db.namedTxn('task-artifacts:folders:getOrCreateByName', {
+        taskId: data.taskId,
+        name: data.name
+      })
       return parseFolder(row)
     },
 
@@ -528,10 +522,11 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: CreateArtifactFolderInput
     ): Promise<ArtifactFolder | null> {
-      const row = await db.namedTxn(
-        'task-artifacts:folders:create',
-        { taskId: data.taskId, parentId: data.parentId ?? null, name: data.name }
-      )
+      const row = await db.namedTxn('task-artifacts:folders:create', {
+        taskId: data.taskId,
+        parentId: data.parentId ?? null,
+        name: data.name
+      })
       return parseFolder(row)
     },
 
@@ -539,9 +534,9 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: UpdateArtifactFolderInput
     ): Promise<ArtifactFolder | null> {
-      const existing = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(
-        data.id
-      )) as Record<string, unknown> | undefined
+      const existing = (await db
+        .prepare('SELECT * FROM artifact_folders WHERE id = ?')
+        .get(data.id)) as Record<string, unknown> | undefined
       if (!existing) return null
 
       const sets: string[] = []

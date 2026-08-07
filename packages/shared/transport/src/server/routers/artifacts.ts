@@ -145,7 +145,13 @@ export const artifactsRouter = router({
 
   // --- Versions ---
   versionsList: publicProcedure
-    .input(z.object({ artifactId: z.string(), limit: z.number().optional(), offset: z.number().optional() }))
+    .input(
+      z.object({
+        artifactId: z.string(),
+        limit: z.number().optional(),
+        offset: z.number().optional()
+      })
+    )
     .query(({ ctx, input }) => store(ctx.dataRoot).listArtifactVersions(ctx.db, input)),
 
   versionsRead: publicProcedure
@@ -208,7 +214,9 @@ export const artifactsRouter = router({
   // --- Download (needs the Electron host via AppDeps) ---
   downloadFile: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) => downloadArtifactFile(downloadHost(), ctx.db, ctx.dataRoot, input.id)),
+    .mutation(({ ctx, input }) =>
+      downloadArtifactFile(downloadHost(), ctx.db, ctx.dataRoot, input.id)
+    ),
 
   downloadFolder: publicProcedure
     .input(z.object({ folderId: z.string() }))

@@ -21,7 +21,9 @@ h.db
 
 const parentId = crypto.randomUUID()
 h.db
-  .prepare(`INSERT INTO tasks (id, project_id, title, terminal_mode, "order") VALUES (?, ?, ?, ?, 1)`)
+  .prepare(
+    `INSERT INTO tasks (id, project_id, title, terminal_mode, "order") VALUES (?, ?, ?, ?, 1)`
+  )
   .run(parentId, projectId, 'Parent', 'codex')
 const kidVisible = crypto.randomUUID()
 h.db

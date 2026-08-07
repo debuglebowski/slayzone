@@ -70,7 +70,7 @@ function isHumanUserRecord(rec: TranscriptRecord): boolean {
         typeof p === 'object' &&
         (p as { type?: unknown }).type === 'text' &&
         typeof (p as { text?: unknown }).text === 'string' &&
-        ((p as { text: string }).text).trim().length > 0
+        (p as { text: string }).text.trim().length > 0
     )
   }
   return false
@@ -109,7 +109,8 @@ export async function readClaudeTranscriptMeta(
         continue
       }
       if (meta.cwd == null && typeof rec.cwd === 'string') meta.cwd = rec.cwd
-      if (meta.gitBranch == null && typeof rec.gitBranch === 'string') meta.gitBranch = rec.gitBranch
+      if (meta.gitBranch == null && typeof rec.gitBranch === 'string')
+        meta.gitBranch = rec.gitBranch
       if (meta.firstTsMs == null && typeof rec.timestamp === 'string') {
         const t = Date.parse(rec.timestamp)
         if (!Number.isNaN(t)) meta.firstTsMs = t

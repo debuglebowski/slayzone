@@ -1,5 +1,8 @@
 import type { IntegrationSyncMode } from '@slayzone/integrations/shared'
-import type { ProjectIntegrationProvider, WizardSyncMode } from './ProjectIntegrationSetupWizard.types'
+import type {
+  ProjectIntegrationProvider,
+  WizardSyncMode
+} from './ProjectIntegrationSetupWizard.types'
 
 export function toWizardSyncMode(syncMode: IntegrationSyncMode | undefined): WizardSyncMode {
   return syncMode === 'two_way' ? 'two_way' : 'one_way_import'

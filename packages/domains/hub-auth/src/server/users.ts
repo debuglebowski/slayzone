@@ -184,10 +184,7 @@ export async function listHubUsers(auth: HubAuth): Promise<HubUserRow[]> {
  * session/account/user. `apikey` and `member` rows reference a user and would be
  * left dangling.
  */
-export async function removeHubUser(
-  auth: HubAuth,
-  email: string
-): Promise<RemoveHubUserResult> {
+export async function removeHubUser(auth: HubAuth, email: string): Promise<RemoveHubUserResult> {
   const ctx = await auth.$context
   const normalized = normalizeEmail(email)
 

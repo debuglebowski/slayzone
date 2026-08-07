@@ -89,7 +89,6 @@ export type RunnerGatewayEvents = {
   'protocol-error': { runnerId: string | null; detail: string; line?: string }
 }
 
-
 export interface HubRunnerGatewayOptions {
   /**
    * Validate a join token and mint credentials for a new runner. Throw (or
@@ -100,9 +99,13 @@ export interface HubRunnerGatewayOptions {
    */
   verifyEnrollment: (params: EnrollParams) => Promise<{ runnerId: string; apiKey: string }>
   /** Resolve an api key to a runner identity, or null to refuse. */
-  verifyApiKey: (
-    apiKey: string
-  ) => Promise<{ runnerId: string; name?: string; platform?: string; version?: string; capabilities?: string[] } | null>
+  verifyApiKey: (apiKey: string) => Promise<{
+    runnerId: string
+    name?: string
+    platform?: string
+    version?: string
+    capabilities?: string[]
+  } | null>
   /** Drop authenticated runners silent for this long. `0` disables. Default 45s. */
   heartbeatTimeoutMs?: number
   /** Drop sockets that never authenticate. Default 10s. */
@@ -116,7 +119,12 @@ export interface HubRunnerGateway {
   /** Adopt an accepted WebSocket (e.g. from a `ws` server `connection` event). */
   handleConnection(ws: WebSocket): void
   /** Send a request to a connected runner. Rejects `unknownRunner` if absent. */
-  request<T = unknown>(runnerId: string, method: string, params?: unknown, timeoutMs?: number): Promise<T>
+  request<T = unknown>(
+    runnerId: string,
+    method: string,
+    params?: unknown,
+    timeoutMs?: number
+  ): Promise<T>
   /** Fire-and-forget notification to a connected runner (no-op if absent). */
   notify(runnerId: string, method: string, params?: unknown): void
   /**
@@ -213,7 +221,10 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
    * It also refuses to judge a window this process did not witness — see the
    * freeze guard below.
    */
-  function armHeartbeatWatchdog(conn: RunnerConnection, delayMs: number = heartbeatTimeoutMs): void {
+  function armHeartbeatWatchdog(
+    conn: RunnerConnection,
+    delayMs: number = heartbeatTimeoutMs
+  ): void {
     if (heartbeatTimeoutMs <= 0 || conn.closed) return
     const armedAt = Date.now()
     conn.heartbeatTimer = setTimeout(() => {
@@ -310,7 +321,11 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
     armHeartbeatWatchdog(conn)
   }
 
-  async function handleEnroll(conn: RunnerConnection, params: unknown, id: JsonRpcId): Promise<void> {
+  async function handleEnroll(
+    conn: RunnerConnection,
+    params: unknown,
+    id: JsonRpcId
+  ): Promise<void> {
     const parsed = enrollParamsSchema.safeParse(params)
     if (!parsed.success) {
       conn.rpc.respondError(id, RunnerTransportErrorCodes.unauthorized, 'malformed enroll request')
@@ -358,7 +373,11 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
     log('runner runner enrolled', { runnerId: minted.runnerId, name: descriptor.name })
   }
 
-  async function handleHello(conn: RunnerConnection, params: unknown, id: JsonRpcId): Promise<void> {
+  async function handleHello(
+    conn: RunnerConnection,
+    params: unknown,
+    id: JsonRpcId
+  ): Promise<void> {
     const parsed = helloParamsSchema.safeParse(params)
     if (!parsed.success) {
       conn.rpc.respondError(id, RunnerTransportErrorCodes.unauthorized, 'malformed hello request')
@@ -403,14 +422,23 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
     log('runner runner reconnected', { runnerId: identity.runnerId })
   }
 
-  function handleRunnerRequest(conn: RunnerConnection, method: string, params: unknown, id: JsonRpcId): void {
+  function handleRunnerRequest(
+    conn: RunnerConnection,
+    method: string,
+    params: unknown,
+    id: JsonRpcId
+  ): void {
     if (!conn.descriptor) {
       if (method === RunnerToHubMethods.enroll) {
         void handleEnroll(conn, params, id)
       } else if (method === RunnerToHubMethods.hello) {
         void handleHello(conn, params, id)
       } else {
-        conn.rpc.respondError(id, RunnerTransportErrorCodes.unauthorized, 'authenticate with enroll or hello first')
+        conn.rpc.respondError(
+          id,
+          RunnerTransportErrorCodes.unauthorized,
+          'authenticate with enroll or hello first'
+        )
         protocolError(conn, `request '${method}' before authentication`)
       }
       return
@@ -429,7 +457,11 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
       }
       case RunnerToHubMethods.enroll:
       case RunnerToHubMethods.hello:
-        conn.rpc.respondError(id, RunnerTransportErrorCodes.unauthorized, 'session already authenticated')
+        conn.rpc.respondError(
+          id,
+          RunnerTransportErrorCodes.unauthorized,
+          'session already authenticated'
+        )
         return
       default:
         conn.rpc.respondError(id, JSON_RPC_METHOD_NOT_FOUND, `method not found: ${method}`)
@@ -529,11 +561,19 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
   return {
     events,
     handleConnection,
-    request<T = unknown>(runnerId: string, method: string, params?: unknown, timeoutMs?: number): Promise<T> {
+    request<T = unknown>(
+      runnerId: string,
+      method: string,
+      params?: unknown,
+      timeoutMs?: number
+    ): Promise<T> {
       const conn = getConnection(runnerId)
       if (!conn) {
         return Promise.reject(
-          new RpcError(RunnerTransportErrorCodes.unknownRunner, `runner '${runnerId}' is not connected`)
+          new RpcError(
+            RunnerTransportErrorCodes.unknownRunner,
+            `runner '${runnerId}' is not connected`
+          )
         )
       }
       return conn.rpc.request<T>(method, params, timeoutMs)
@@ -543,7 +583,10 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
     },
     listRunners(): RunnerDescriptor[] {
       return [...byRunnerId.values()]
-        .filter((conn): conn is RunnerConnection & { descriptor: RunnerDescriptor } => conn.descriptor !== null)
+        .filter(
+          (conn): conn is RunnerConnection & { descriptor: RunnerDescriptor } =>
+            conn.descriptor !== null
+        )
         .map((conn) => ({ ...conn.descriptor }))
     },
     listUsableRunners(): RunnerDescriptor[] {

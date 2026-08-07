@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, Button, Input, Label } from '@slayzone/ui'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  Button,
+  Input,
+  Label
+} from '@slayzone/ui'
 import type { ProjectGroup } from '@slayzone/projects/shared'
 
 interface GroupSettingsDialogProps {

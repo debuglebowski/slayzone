@@ -71,22 +71,42 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   check('DB copied', readFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
   check(
     'wal + shm copied',
-    existsSync(join(hubRoot, 'slayzone.dev.sqlite-wal')) && existsSync(join(hubRoot, 'slayzone.dev.sqlite-shm'))
+    existsSync(join(hubRoot, 'slayzone.dev.sqlite-wal')) &&
+      existsSync(join(hubRoot, 'slayzone.dev.sqlite-shm'))
   )
-  check('artifacts copied (recursive)', readFileSync(join(hubRoot, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART')
-  check('blobs copied (recursive)', readFileSync(join(hubRoot, 'blobs', 'd8', '3c76abcd'), 'utf8') === 'BLOBCONTENT')
+  check(
+    'artifacts copied (recursive)',
+    readFileSync(join(hubRoot, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART'
+  )
+  check(
+    'blobs copied (recursive)',
+    readFileSync(join(hubRoot, 'blobs', 'd8', '3c76abcd'), 'utf8') === 'BLOBCONTENT'
+  )
   check(
     'most-recent backup copied, older one left behind',
     existsSync(join(hubRoot, 'backups', 'slayzone.dev.2026-03-01T00-00-00-000Z.manual.sqlite'))
   )
-  check('boot-config.json copied (missed by storage-migration.ts scope)', existsSync(join(hubRoot, 'boot-config.json')))
-  check('hub-tokens.json copied (missed by storage-migration.ts scope)', existsSync(join(hubRoot, 'hub-tokens.json')))
+  check(
+    'boot-config.json copied (missed by storage-migration.ts scope)',
+    existsSync(join(hubRoot, 'boot-config.json'))
+  )
+  check(
+    'hub-tokens.json copied (missed by storage-migration.ts scope)',
+    existsSync(join(hubRoot, 'hub-tokens.json'))
+  )
 
-  check('source DB PRESERVED', readFileSync(join(legacyStorage, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
-  check('source artifacts PRESERVED', readFileSync(join(legacyStorage, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART')
+  check(
+    'source DB PRESERVED',
+    readFileSync(join(legacyStorage, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB'
+  )
+  check(
+    'source artifacts PRESERVED',
+    readFileSync(join(legacyStorage, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART'
+  )
   check(
     'source boot-config.json / hub-tokens.json PRESERVED',
-    existsSync(join(legacyStorage, 'boot-config.json')) && existsSync(join(legacyStorage, 'hub-tokens.json'))
+    existsSync(join(legacyStorage, 'boot-config.json')) &&
+      existsSync(join(legacyStorage, 'hub-tokens.json'))
   )
 }
 
@@ -109,15 +129,21 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   const statePath = join(runnerRoot, 'runner.state.json')
   check('runner.state.json created (single file, not a directory of files)', existsSync(statePath))
   const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>
-  check('first hub entry merged in, keyed by hub-host derived from filename', JSON.stringify(state['hub-a.example_8443']) === JSON.stringify({ runnerId: 'r-a', apiKey: 'key-a' }))
+  check(
+    'first hub entry merged in, keyed by hub-host derived from filename',
+    JSON.stringify(state['hub-a.example_8443']) ===
+      JSON.stringify({ runnerId: 'r-a', apiKey: 'key-a' })
+  )
   check(
     'second hub entry merged in alongside the first — not overwritten',
-    JSON.stringify(state['hub-b.example_9000']) === JSON.stringify({ runnerId: 'r-b', apiKey: 'key-b', pinnedFingerprint: 'f'.repeat(64) })
+    JSON.stringify(state['hub-b.example_9000']) ===
+      JSON.stringify({ runnerId: 'r-b', apiKey: 'key-b', pinnedFingerprint: 'f'.repeat(64) })
   )
   check('exactly two entries — no stray keys', Object.keys(state).length === 2)
   check(
     'legacy per-host files PRESERVED (copy semantics, not move)',
-    existsSync(join(legacyRunners, 'hub-a.example_8443.json')) && existsSync(join(legacyRunners, 'hub-b.example_9000.json'))
+    existsSync(join(legacyRunners, 'hub-a.example_8443.json')) &&
+      existsSync(join(legacyRunners, 'hub-b.example_9000.json'))
   )
 }
 
@@ -126,7 +152,10 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   const { legacyRoot, hubRoot, runnerRoot } = setup()
   const legacyRunners = join(legacyRoot, 'runners')
   mkdirSync(legacyRunners, { recursive: true })
-  writeFileSync(join(legacyRunners, 'good-hub.json'), JSON.stringify({ runnerId: 'r1', apiKey: 'k1' }))
+  writeFileSync(
+    join(legacyRunners, 'good-hub.json'),
+    JSON.stringify({ runnerId: 'r1', apiKey: 'k1' })
+  )
   writeFileSync(join(legacyRunners, 'corrupt-hub.json'), 'not json at all')
 
   let threw = false
@@ -136,7 +165,10 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
     threw = true
   }
   check('does not throw on one corrupt legacy file', !threw)
-  const state = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<string, unknown>
+  const state = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<
+    string,
+    unknown
+  >
   check('the good entry still migrated despite the corrupt sibling', 'good-hub' in state)
   check('the corrupt entry is simply absent, not a garbage value', !('corrupt-hub' in state))
 }
@@ -151,7 +183,10 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
 
   check('hub slice completed independently', existsSync(join(hubRoot, 'slayzone.dev.sqlite')))
-  check('runner slice completed independently (empty state, no legacy creds)', Object.keys(readState(runnerRoot)).length === 0)
+  check(
+    'runner slice completed independently (empty state, no legacy creds)',
+    Object.keys(readState(runnerRoot)).length === 0
+  )
   check('hub sentinel written', existsSync(join(hubRoot, '.channel-migrated')))
   check('runner sentinel written', existsSync(join(runnerRoot, '.channel-migrated')))
 }
@@ -162,21 +197,36 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   mkdirSync(join(legacyRoot, 'storage'), { recursive: true })
   writeFileSync(join(legacyRoot, 'storage', 'slayzone.dev.sqlite'), 'DB')
   mkdirSync(join(legacyRoot, 'runners'), { recursive: true })
-  writeFileSync(join(legacyRoot, 'runners', 'hub-a.json'), JSON.stringify({ runnerId: 'r1', apiKey: 'k1' }))
+  writeFileSync(
+    join(legacyRoot, 'runners', 'hub-a.json'),
+    JSON.stringify({ runnerId: 'r1', apiKey: 'k1' })
+  )
 
   ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
 
   // Simulate the legacy shared dir gaining new content after the first boot
   // (an old, not-yet-updated peer build still writing to it).
-  writeFileSync(join(legacyRoot, 'runners', 'hub-b.json'), JSON.stringify({ runnerId: 'r2', apiKey: 'k2' }))
+  writeFileSync(
+    join(legacyRoot, 'runners', 'hub-b.json'),
+    JSON.stringify({ runnerId: 'r2', apiKey: 'k2' })
+  )
   mkdirSync(join(legacyRoot, 'storage', 'blobs', 'ff'), { recursive: true })
   writeFileSync(join(legacyRoot, 'storage', 'blobs', 'ff', 'laterblob'), 'LATER')
 
   ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false }) // second boot
 
-  check('sentinel makes 2nd run a no-op — later hub blob NOT picked up', !existsSync(join(hubRoot, 'blobs', 'ff', 'laterblob')))
-  const state = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<string, unknown>
-  check('sentinel makes 2nd run a no-op — later runner credential NOT picked up', !('hub-b' in state))
+  check(
+    'sentinel makes 2nd run a no-op — later hub blob NOT picked up',
+    !existsSync(join(hubRoot, 'blobs', 'ff', 'laterblob'))
+  )
+  const state = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<
+    string,
+    unknown
+  >
+  check(
+    'sentinel makes 2nd run a no-op — later runner credential NOT picked up',
+    !('hub-b' in state)
+  )
 }
 
 // --- never clobbers already-populated destination content --------------------
@@ -191,7 +241,10 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
 
   ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
 
-  check('existing DB not clobbered', readFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'utf8') === 'EXISTING')
+  check(
+    'existing DB not clobbered',
+    readFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'utf8') === 'EXISTING'
+  )
   check(
     'existing boot-config.json not clobbered',
     readFileSync(join(hubRoot, 'boot-config.json'), 'utf8') === '{"already":"here"}'
@@ -204,7 +257,10 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
   check('fresh install: hub root created, no throw', existsSync(hubRoot))
   check('fresh install: runner root created, no throw', existsSync(runnerRoot))
-  check('fresh install: no runner.state.json forced into existence with nothing to migrate', Object.keys(readState(runnerRoot)).length === 0)
+  check(
+    'fresh install: no runner.state.json forced into existence with nothing to migrate',
+    Object.keys(readState(runnerRoot)).length === 0
+  )
 }
 
 // --- REGRESSION GUARD: a copy failure must never touch the legacy source -----
@@ -213,7 +269,9 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
 // leave the legacy source completely intact, since it may be a still-live
 // peer's only copy of that data.
 if (process.platform === 'win32') {
-  console.log('  (skipped copy-failure regression guard — POSIX mode bits are not enforced on Windows)')
+  console.log(
+    '  (skipped copy-failure regression guard — POSIX mode bits are not enforced on Windows)'
+  )
 } else if (process.getuid?.() === 0) {
   console.log('  (skipped copy-failure regression guard — running as root ignores permission bits)')
 } else {
@@ -237,7 +295,10 @@ if (process.platform === 'win32') {
     'legacy source DB is COMPLETELY UNTOUCHED after a failed copy',
     readFileSync(join(legacyRoot, 'storage', 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB'
   )
-  check('no sentinel was written for the failed slice (a retry can still happen)', !existsSync(join(hubRoot, '.channel-migrated')))
+  check(
+    'no sentinel was written for the failed slice (a retry can still happen)',
+    !existsSync(join(hubRoot, '.channel-migrated'))
+  )
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

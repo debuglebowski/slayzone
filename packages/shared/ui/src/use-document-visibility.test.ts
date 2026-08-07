@@ -38,9 +38,7 @@ describe('useDocumentVisibility', () => {
     renderHook(() => useDocumentVisibility())
     // Listener is module-scoped + lazily installed once. Subsequent mounts
     // reuse it via useSyncExternalStore's shared subscribe Set.
-    const visibilityRegistrations = spy.mock.calls.filter(
-      ([type]) => type === 'visibilitychange'
-    )
+    const visibilityRegistrations = spy.mock.calls.filter(([type]) => type === 'visibilitychange')
     expect(visibilityRegistrations.length).toBeLessThanOrEqual(1)
     spy.mockRestore()
   })

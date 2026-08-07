@@ -163,8 +163,7 @@ export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   // so a routing impl can resolve which runner the work belongs to.
   createWorktree: (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
     createWorktree(repoPath, worktreePath, branch, sourceBranch),
-  removeWorktree: (_taskId, projectPath, worktreePath) =>
-    removeWorktree(projectPath, worktreePath),
+  removeWorktree: (_taskId, projectPath, worktreePath) => removeWorktree(projectPath, worktreePath),
   runWorktreeSetupScript: (_taskId, worktreePath, repoPath, sourceBranch) =>
     runWorktreeSetupScript(worktreePath, repoPath, sourceBranch),
   copyIgnoredFiles: (_taskId, repoPath, worktreePath, behavior, customPaths) =>
@@ -307,10 +306,7 @@ export async function attachWorktreeColors(db: SlayzoneDb, tasks: Task[]): Promi
  * row, which becomes the newest honored row here, which becomes
  * `existingConversationId` on the next spawn → `--resume <picked>`.
  */
-async function attachCurrentConversationByMode(
-  db: SlayzoneDb,
-  tasks: Task[]
-): Promise<Task[]> {
+async function attachCurrentConversationByMode(db: SlayzoneDb, tasks: Task[]): Promise<Task[]> {
   if (tasks.length === 0) return tasks
   const placeholders = tasks.map(() => '?').join(',')
   const ids = tasks.map((t) => t.id)
@@ -622,7 +618,13 @@ async function createWorktreeForTask(
 
   // Block A: Create worktree and link to task immediately
   try {
-    await runtimeAdapters.worktrees.createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch)
+    await runtimeAdapters.worktrees.createWorktree(
+      taskId,
+      repoPath,
+      worktreePath,
+      branch,
+      sourceBranch
+    )
   } catch (err) {
     // Git may exit non-zero after creating the worktree (e.g. post-checkout hook failure).
     // If the dir exists, still link it — better than orphaning a worktree the user can see.
@@ -703,7 +705,12 @@ async function createWorktreeForTask(
   }
 
   // Fire-and-forget: don't block task creation on setup script
-  void runtimeAdapters.worktrees.runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch)
+  void runtimeAdapters.worktrees.runWorktreeSetupScript(
+    taskId,
+    worktreePath,
+    repoPath,
+    sourceBranch
+  )
 }
 
 export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {
@@ -754,8 +761,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       normalizedStatusForWrite !== existing.status &&
       categoryRank(existing.status) > categoryRank(normalizedStatusForWrite)
     if (isDemotionToDefault) {
-      const coerced =
-        data.status !== undefined && !isKnownStatus(data.status, targetColumns)
+      const coerced = data.status !== undefined && !isKnownStatus(data.status, targetColumns)
       recordDiagnosticEvent({
         level: 'error',
         source: 'task',
@@ -996,10 +1002,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       // funnel the renderer's `currentConversationByMode` (computed from the
       // ledger) goes stale after Detect/Reset writes, surfacing as the
       // session-id banner re-appearing post-Update.
-      const modesToCompare = new Set<string>([
-        ...Object.keys(current),
-        ...Object.keys(merged)
-      ])
+      const modesToCompare = new Set<string>([...Object.keys(current), ...Object.keys(merged)])
       for (const m of modesToCompare) {
         const oldId = current[m]?.conversationId ?? null
         const newId = merged[m]?.conversationId ?? null
@@ -1209,8 +1212,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   if (data.priority !== undefined) eventOverrides.priority = data.priority
   if (data.dueDate !== undefined) eventOverrides.due_date = data.dueDate
   const afterTask = beforeRow ? parseTask({ ...beforeRow, ...eventOverrides }) : null
-  const updateEvents =
-    beforeTask && afterTask ? buildTaskUpdatedEvents(beforeTask, afterTask) : []
+  const updateEvents = beforeTask && afterTask ? buildTaskUpdatedEvents(beforeTask, afterTask) : []
 
   await db.namedTxn('task:update', {
     sql: `UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`,
@@ -1271,9 +1273,10 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   }
   // Clear snooze when task reaches terminal status
   if (reachedTerminal && !fields.some((f) => f.startsWith('snoozed_until'))) {
-    await db.run('UPDATE tasks SET snoozed_until = NULL WHERE id = ? AND snoozed_until IS NOT NULL', [
-      data.id
-    ])
+    await db.run(
+      'UPDATE tasks SET snoozed_until = NULL WHERE id = ? AND snoozed_until IS NOT NULL',
+      [data.id]
+    )
   }
   // Revive path: task moved from a terminal status (e.g. `done`) back to an active
   // one (e.g. `in_progress`). Signal the renderer to respawn the main AI tab so

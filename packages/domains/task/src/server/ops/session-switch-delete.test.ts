@@ -15,7 +15,11 @@
  */
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS, type BatchOp, type SlayzoneDb } from '@slayzone/platform'
-import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/transport/db-bootstrap'
+import {
+  LATEST_MIGRATION_VERSION,
+  migrations,
+  runMigrations
+} from '@slayzone/transport/db-bootstrap'
 import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task/shared'
 import { recordConversation } from './task-conversations.js'
 import {
@@ -161,7 +165,18 @@ async function main(): Promise<void> {
     assertNoThrow(
       () =>
         insSession(raw).run(
-          'as1', M, null, 't1', 'conv-a', 'user-selected', 'dead', null, 1000, null, null, null
+          'as1',
+          M,
+          null,
+          't1',
+          'conv-a',
+          'user-selected',
+          'dead',
+          null,
+          1000,
+          null,
+          null,
+          null
         ),
       'agent_sessions must accept user-selected'
     )
@@ -172,7 +187,18 @@ async function main(): Promise<void> {
     assertThrows(
       () =>
         insSession(raw).run(
-          'as-bad', M, null, 't1', 'c', 'totally-made-up', 'dead', null, 1, null, null, null
+          'as-bad',
+          M,
+          null,
+          't1',
+          'c',
+          'totally-made-up',
+          'dead',
+          null,
+          1,
+          null,
+          null,
+          null
         ),
       'agent_sessions must still reject an unknown origin'
     )
@@ -193,7 +219,18 @@ async function main(): Promise<void> {
       assertNoThrow(
         () =>
           insSession(raw).run(
-            `as-${i}`, 'm', null, 't1', `c-${i}`, origin, 'dead', null, i, null, null, null
+            `as-${i}`,
+            'm',
+            null,
+            't1',
+            `c-${i}`,
+            origin,
+            'dead',
+            null,
+            i,
+            null,
+            null,
+            null
           ),
         `origin '${origin}' must satisfy the agent_sessions CHECK`
       )
@@ -233,10 +270,33 @@ async function main(): Promise<void> {
 
     seedTask(raw, 't1')
     insSession(raw).run(
-      's-full', M, '/w', 't1', 'c1', 'slay-spawned-resume', 'dead',
-      '{"usedResume":true,"spawnedAt":5}', 100, 110, 'tab-1', 120
+      's-full',
+      M,
+      '/w',
+      't1',
+      'c1',
+      'slay-spawned-resume',
+      'dead',
+      '{"usedResume":true,"spawnedAt":5}',
+      100,
+      110,
+      'tab-1',
+      120
     )
-    insSession(raw).run('s-pooled', M, null, null, null, 'pending-spawn', 'pooled', null, 200, null, null, null)
+    insSession(raw).run(
+      's-pooled',
+      M,
+      null,
+      null,
+      null,
+      'pending-spawn',
+      'pooled',
+      null,
+      200,
+      null,
+      null,
+      null
+    )
     insConv(raw).run('tc-full', 't1', M, 'c1', 'foreign-observed', '{"a":1}', 300)
     insConv(raw).run('tc-null', 't1', M, null, 'manual-reset', null, 400)
     const before = {
@@ -296,17 +356,38 @@ async function main(): Promise<void> {
     const raw = migratedDb()
     seedTask(raw, 't1')
     const db = bridge(raw)
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: 'A', origin: 'slay-spawned-fresh' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'A',
+      origin: 'slay-spawned-fresh'
+    })
     await new Promise((r) => setTimeout(r, 2))
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: 'B', origin: 'slay-spawned-fresh' })
-    assert((await getCurrentConversationId(db, 't1', M)) === 'B', 'newest session should start current')
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'B',
+      origin: 'slay-spawned-fresh'
+    })
+    assert(
+      (await getCurrentConversationId(db, 't1', M)) === 'B',
+      'newest session should start current'
+    )
 
     assert(await isHonoredConversation(db, 't1', M, 'A'), 'A must be switchable')
     assert(!(await isHonoredConversation(db, 't1', M, 'nope')), 'unknown id must not be switchable')
-    assert(!(await isHonoredConversation(db, 't2', M, 'A')), "another task's id must not be switchable")
+    assert(
+      !(await isHonoredConversation(db, 't2', M, 'A')),
+      "another task's id must not be switchable"
+    )
 
     await new Promise((r) => setTimeout(r, 2))
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: 'A', origin: 'user-selected' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'A',
+      origin: 'user-selected'
+    })
     assert((await getCurrentConversationId(db, 't1', M)) === 'A', 'switch must make A current')
 
     const sessions = await listTaskSessions(db, 't1', M)
@@ -320,16 +401,28 @@ async function main(): Promise<void> {
       "a switch must not rewrite the session's recorded provenance"
     )
     // The legacy mirror consumers still read must follow the switch.
-    const t = raw.prepare(`SELECT claude_conversation_id AS c FROM tasks WHERE id = 't1'`).get() as {
+    const t = raw
+      .prepare(`SELECT claude_conversation_id AS c FROM tasks WHERE id = 't1'`)
+      .get() as {
       c: string
     }
     assert(t.c === 'A', `legacy column must mirror the switch, got ${t.c}`)
 
     // A switch after a reset cutoff still works (the new row is past the cutoff).
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: null, origin: 'manual-reset' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: null,
+      origin: 'manual-reset'
+    })
     assert((await getCurrentConversationId(db, 't1', M)) === null, 'reset must clear current')
     await new Promise((r) => setTimeout(r, 2))
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: 'B', origin: 'user-selected' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'B',
+      origin: 'user-selected'
+    })
     assert(
       (await getCurrentConversationId(db, 't1', M)) === 'B',
       'switch must work after a reset cutoff'
@@ -342,9 +435,19 @@ async function main(): Promise<void> {
     const raw = migratedDb()
     seedTask(raw, 't1')
     const db = bridge(raw)
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: 'A', origin: 'slay-spawned-fresh' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'A',
+      origin: 'slay-spawned-fresh'
+    })
     await new Promise((r) => setTimeout(r, 2))
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: 'B', origin: 'slay-spawned-fresh' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'B',
+      origin: 'slay-spawned-fresh'
+    })
     insPrompt(raw).run('p-a', 't1', M, 'A', 'hello from A', 1)
     insPrompt(raw).run('p-b', 't1', M, 'B', 'hello from B', 2)
 
@@ -355,12 +458,20 @@ async function main(): Promise<void> {
     assert(await deleteSession(db, 't1', M, 'A'), 'deleting a non-current session must succeed')
     const after = await listTaskSessions(db, 't1', M)
     assert(after.length === 1 && after[0]?.conversationId === 'B', 'A must be gone from the list')
-    assert(!(await isHonoredConversation(db, 't1', M, 'A')), 'a deleted session must not be switchable')
+    assert(
+      !(await isHonoredConversation(db, 't1', M, 'A')),
+      'a deleted session must not be switchable'
+    )
     // (the Messages-sidebar side of the tombstone — listPromptsForTask — is
     // asserted in agent-turns/src/server/prompt-capture.test.ts, which owns that op)
 
     // Deleting is scoped: the same conversation id under another mode survives.
-    await recordConversation(db, { taskId: 't1', mode: 'codex', conversationId: 'A', origin: 'slay-spawned-fresh' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'codex',
+      conversationId: 'A',
+      origin: 'slay-spawned-fresh'
+    })
     assert(
       (await getCurrentConversationId(db, 't1', 'codex')) === 'A',
       'a tombstone must not leak across modes'
@@ -369,7 +480,12 @@ async function main(): Promise<void> {
     // Defence in depth: even if a later honored row named a deleted conversation,
     // it must never become the resume target.
     await new Promise((r) => setTimeout(r, 2))
-    await recordConversation(db, { taskId: 't1', mode: M, conversationId: 'A', origin: 'in-band-clear' })
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: M,
+      conversationId: 'A',
+      origin: 'in-band-clear'
+    })
     assert(
       (await getCurrentConversationId(db, 't1', M)) === 'B',
       'a deleted conversation must never resolve as current'

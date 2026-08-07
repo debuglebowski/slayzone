@@ -169,10 +169,7 @@ async function writeContent(
     // commander's "boolean or string" optional-argument shape unambiguously.
     const mutateRef = parseRef(queryString(req.query.mutateVersionRef))
     const mutateCurrent = queryString(req.query.mutateVersion) != null
-    const author = parseAuthor(
-      queryString(req.query.authorType),
-      queryString(req.query.authorId)
-    )
+    const author = parseAuthor(queryString(req.query.authorType), queryString(req.query.authorId))
 
     tmpPath = await stageRequestBody(req)
 

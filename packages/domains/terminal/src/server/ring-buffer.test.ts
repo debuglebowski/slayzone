@@ -114,7 +114,10 @@ test('drops a partial escape sequence left at the head by eviction', () => {
   buf.append('aaaaaaaaaa\x1b[32m') // will be evicted, but shows intent
   buf.append('bbbbbbbbbbbb')
   const out = buf.toString()
-  ok(!/(^|[^\x1b])\[32m/.test(out.replace(/^\x1b\[0m\x1b\(B\x1b\[r/, '')), `no orphaned CSI: ${JSON.stringify(out)}`)
+  ok(
+    !/(^|[^\x1b])\[32m/.test(out.replace(/^\x1b\[0m\x1b\(B\x1b\[r/, '')),
+    `no orphaned CSI: ${JSON.stringify(out)}`
+  )
 })
 
 test('an orphaned CSI tail at the head is removed, not printed as text', () => {

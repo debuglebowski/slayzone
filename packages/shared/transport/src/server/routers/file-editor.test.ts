@@ -62,7 +62,9 @@ test('file-editor router: readDir sorts dirs first, hard-filters .git, FLAGS git
 test('file-editor router: readFile content + rejects traversal', async () => {
   const result = (await caller.readFile({ rootPath, filePath: 'readme.md' })) as { content: string }
   expect(result.content).toBe('# Hello')
-  expect(await didThrow(() => caller.readFile({ rootPath, filePath: '../../../etc/passwd' }))).toBe(true)
+  expect(await didThrow(() => caller.readFile({ rootPath, filePath: '../../../etc/passwd' }))).toBe(
+    true
+  )
 })
 
 test('file-editor router: listAllFiles recursive, excludes ignored', async () => {
@@ -98,7 +100,11 @@ test('file-editor router: rename file + rejects traversal', async () => {
   await caller.rename({ rootPath, oldPath: 'new-file.txt', newPath: 'renamed.txt' })
   expect(fs.existsSync(path.join(rootPath, 'renamed.txt'))).toBe(true)
   expect(fs.existsSync(path.join(rootPath, 'new-file.txt'))).toBe(false)
-  expect(await didThrow(() => caller.rename({ rootPath, oldPath: 'renamed.txt', newPath: '../../escape.txt' }))).toBe(true)
+  expect(
+    await didThrow(() =>
+      caller.rename({ rootPath, oldPath: 'renamed.txt', newPath: '../../escape.txt' })
+    )
+  ).toBe(true)
 })
 
 test('file-editor router: delete file + dir recursive + rejects traversal', async () => {
