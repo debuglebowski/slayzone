@@ -154,7 +154,22 @@ export async function buildMcpEnv(
   if (resolvedProjectId) env.SLAYZONE_PROJECT_ID = resolvedProjectId
   if (sessionId) env.SLAYZONE_SESSION_ID = sessionId
 
-  const hookCapable = Boolean(mode && HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId))
+  // The AGENT this mode actually runs, which is not the same thing as the mode id.
+  // A built-in mode IS its agent id (`claude-code`), but a user-defined provider has
+  // its own slug (`ccremote-t3b61`) and declares the agent it wraps in
+  // `terminal_modes.type`. Gating on the mode id made every custom provider
+  // permanently hook-INcapable: it got no hook env, so notify.sh exited at its
+  // `[ -z "$SLAYZONE_AGENT_HOOK_URL" ]` guard, `confirmSessionConversation` never ran,
+  // its `task_conversations` row stayed `pending-spawn` (not an honored origin), and
+  // every restart re-minted a fresh session instead of resuming.
+  const agentId: string | undefined = !mode
+    ? undefined
+    : HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId)
+      ? mode
+      : (await db?.get<{ type?: string }>('SELECT type FROM terminal_modes WHERE id = ?', [mode]))
+          ?.type
+
+  const hookCapable = Boolean(agentId && HOOK_SUPPORTED_AGENT_IDS.has(agentId as AgentId))
 
   // On-disk anchor for EVERY spawn, hook-capable or not — this hub's own root,
   // which the `slay` CLI inside the child uses to find the DB (post-flattening
@@ -180,12 +195,20 @@ export async function buildMcpEnv(
   // channel fired the hook), so a future cross-release-channel clobber is
   // visible in Diagnostics.
   function setHookIdentity(): void {
-    env.SLAYZONE_AGENT_ID = mode as string
+    // AGENT id, never the mode id: the server rejects a hook whose agentId is not a
+    // known agent (`isAgentId` guard), and notify.sh documents this var as the agent.
+    env.SLAYZONE_AGENT_ID = agentId as string
     const ctx: Record<string, unknown> = {
       v: 1,
-      agentId: mode,
+      agentId,
       releaseChannel: getSlayzoneReleaseChannel()
     }
+    // The ledger and the PTY registry are keyed by MODE, which only equals the agent
+    // id for built-ins. Carry it separately so a custom provider's conversation is
+    // filed under its own mode instead of landing on the wrapped agent's built-in
+    // row (which would let the two providers resume into each other's sessions).
+    // Omitted when identical, so built-in hook payloads stay byte-identical.
+    if (mode && mode !== agentId) ctx.mode = mode
     if (taskId) ctx.taskId = taskId
     if (sessionId) ctx.slaySessionId = sessionId
     if (resolvedProjectId) ctx.projectId = resolvedProjectId

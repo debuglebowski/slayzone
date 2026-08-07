@@ -324,6 +324,14 @@ const PayloadSchema = z.object({
  *  (state machine, prompt capture, conversation-id persist) read ONLY this. */
 interface ResolvedHook {
   agentId: HookAgentId
+  /**
+   * The terminal MODE this hook belongs to — what the conversation ledger and the
+   * PTY registry are keyed by. Equal to `agentId` for built-in modes, but a custom
+   * provider has its own id (`ccremote-t3b61`) while running a built-in agent, and
+   * only `agentId` may travel in the agent field (`isAgentId` rejects anything
+   * else). Falls back to `agentId` so legacy payloads and built-ins are unchanged.
+   */
+  mode: string
   hookEvent: string
   taskId?: string
   slaySessionId?: string
@@ -401,11 +409,15 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
 
   return {
     agentId: agentIdRaw,
+    // ctx-only (no legacy top-level equivalent) and absent when it equals the agent
+    // id, so every built-in and every pre-fix payload resolves exactly as before.
+    mode: typeof ctx?.mode === 'string' && ctx.mode ? ctx.mode : agentIdRaw,
     hookEvent,
     source: typeof effRaw?.source === 'string' ? effRaw.source : undefined,
     taskId: body.taskId ?? (typeof ctx?.taskId === 'string' ? ctx.taskId : undefined),
     slaySessionId:
-      body.slaySessionId ?? (typeof ctx?.slaySessionId === 'string' ? ctx.slaySessionId : undefined),
+      body.slaySessionId ??
+      (typeof ctx?.slaySessionId === 'string' ? ctx.slaySessionId : undefined),
     sessionId: cliSessionId,
     cwd: body.cwd ?? (typeof effRaw?.cwd === 'string' ? effRaw.cwd : undefined),
     raw: effRaw ?? body.raw,
@@ -449,7 +461,9 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
  */
 async function persistConversationId(
   deps: RestApiDeps,
-  agentId: string,
+  /** Terminal MODE, not the agent id — every lookup below keys the ledger by it
+   *  (`ResolvedHook.mode`). They differ for custom providers. */
+  mode: string,
   taskId: string,
   sessionId: string,
   /** `SessionStart.source` — see `ResolvedHook.source`. Only `'clear'` alters
@@ -480,7 +494,7 @@ async function persistConversationId(
     // but `compact` keeps the same id (already honored, nothing to fix) and
     // `fork`'s id semantics are unverified — left on the existing gate.
     if (source === 'clear') {
-      const outgoing = await getCurrentConversationId(deps.db, taskId, agentId)
+      const outgoing = await getCurrentConversationId(deps.db, taskId, mode)
       // Idempotence: a repeated SessionStart for a clear we already recorded
       // makes the new id the current one, so `outgoing === sessionId`. Nothing to
       // do — falling through would record a duplicate row every replay.
@@ -489,12 +503,12 @@ async function persistConversationId(
       // nothing to claim ownership OF, so skip the lookup and let the standard
       // gate handle it as an ordinary first spawn.
       const ownedSpawn = outgoing
-        ? await findOwnedSpawnForConversation(deps.db, taskId, agentId, outgoing)
+        ? await findOwnedSpawnForConversation(deps.db, taskId, mode, outgoing)
         : null
       if (ownedSpawn) {
         await recordConversation(deps.db, {
           taskId,
-          mode: agentId,
+          mode,
           conversationId: sessionId,
           origin: 'in-band-clear'
         })
@@ -512,7 +526,7 @@ async function persistConversationId(
     // honored on read). This closes the RC1 eager-persist clobber: a manual
     // `claude --resume <foreign>` inside a slay PTY can no longer bind the
     // foreign session to the task.
-    const pending = await findPendingSpawn(deps.db, taskId, agentId)
+    const pending = await findPendingSpawn(deps.db, taskId, mode)
     // No pending → no spawn-intent record: definitely foreign.
     // Pending w/ expectedSessionId === null → fresh PTY spawn where slay did
     // NOT pre-mint a UUID; accept the first observed id as fresh (temporal-
@@ -530,7 +544,7 @@ async function persistConversationId(
           : 'foreign-observed'
     await recordConversation(deps.db, {
       taskId,
-      mode: agentId,
+      mode,
       conversationId: sessionId,
       origin
     })
@@ -631,7 +645,11 @@ export async function processAgentHook(
   // carry only the former, and this must cover pooled and task-spawned agents
   // through one path. Fire-and-forget: a DB hiccup must never block the ack, and
   // the next turn re-attempts.
-  if (hook.sessionId && TURN_PROOF_EVENTS.has(hook.hookEvent) && !firstTurnMarked.has(hook.sessionId)) {
+  if (
+    hook.sessionId &&
+    TURN_PROOF_EVENTS.has(hook.hookEvent) &&
+    !firstTurnMarked.has(hook.sessionId)
+  ) {
     const provenId = hook.sessionId
     firstTurnMarked.add(provenId)
     void markSessionFirstTurn(deps.db, provenId).catch(() => {
@@ -651,9 +669,9 @@ export async function processAgentHook(
       // Awaited: a single indexed SELECT + UPDATE on local SQLite is sub-ms,
       // and the capture event is low-frequency (repeats short-circuit in the
       // helper) — keeping it deterministic beats a fire-and-forget race.
-      await persistConversationId(deps, hook.agentId, hook.taskId, cliSessionId, hook.source)
+      await persistConversationId(deps, hook.mode, hook.taskId, cliSessionId, hook.source)
       // Mirror onto the live PTY session for the idle-close gate.
-      const ptySessionId = bridge?.findSession(hook.taskId, hook.agentId as TerminalMode)
+      const ptySessionId = bridge?.findSession(hook.taskId, hook.mode as TerminalMode)
       if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)
     } else if (!hook.taskId && hook.slaySessionId && cliSessionId) {
       // Pre-warmed POOLED agent: no task yet, so capture the conversation
@@ -676,7 +694,7 @@ export async function processAgentHook(
   // for hook-driven agents (replaces adapter output detection / bullet-glyph
   // regex). gemini/opencode still rely on adapter detection.
   if (bridge && isHookDrivenMode(hook.agentId) && resolvedTaskId) {
-    const mode = hook.agentId as TerminalMode
+    const mode = hook.mode as TerminalMode
     const sessionId = bridge.findSession(resolvedTaskId, mode)
     if (sessionId) {
       const newState = hookToTerminalState(hook.agentId, hook.hookEvent, hook.raw)
