@@ -114,7 +114,7 @@ export function RunnersHeading({
 function SkeletonRow() {
   return (
     <tr data-testid="runner-row-skeleton">
-      <Rail glyph={RAIL_BRANCH} />
+      <Rail />
       <td className="w-1/4 py-2 pr-3">
         <Skeleton className="h-3.5 w-28" />
       </td>
@@ -161,14 +161,29 @@ function statusText(row: { connected: boolean; lastSeenAt: number | null }): str
   return `Last seen ${new Date(row.lastSeenAt).toLocaleString()}`
 }
 
-/** Rail glyphs. Every runner is an intermediate leaf — ＋ Add runner is the last. */
-const RAIL_BRANCH = '├─'
-const RAIL_END = '└─'
-
-function Rail({ glyph }: { glyph: string }) {
+/**
+ * The connector rail, DRAWN rather than typed.
+ *
+ * `├─` and `└─` were box-drawing characters in a proportional UI font: their
+ * stroke weight is the font's, not the border token's, so they read lighter than
+ * every other line on the card, and their arms only met the next row's by
+ * coincidence of line-height. Two borders instead — same token as the card's own
+ * edges, continuous down the column, and correct at any row height or zoom.
+ *
+ * `last` terminates the vertical at the elbow, which is the whole job of `└`.
+ */
+function Rail({ last = false }: { last?: boolean }) {
   return (
-    <td className="text-muted-foreground/60 w-10 py-2 pl-2 font-mono text-xs" aria-hidden="true">
-      {glyph}
+    <td className="relative w-8" aria-hidden="true">
+      <span
+        className={cn(
+          'border-border absolute left-3 border-l',
+          // bottom-1/2 rather than h-1/2: percentage heights inside a table cell
+          // depend on the cell resolving its own height, insets do not.
+          last ? 'top-0 bottom-1/2' : 'inset-y-0'
+        )}
+      />
+      <span className="border-border absolute top-1/2 left-3 w-2.5 border-t" />
     </td>
   )
 }
@@ -291,7 +306,7 @@ export function HubCard({
               )}
               {runners.map((runner) => (
                 <tr key={runner.id} data-testid="runner-row">
-                  <Rail glyph={RAIL_BRANCH} />
+                  <Rail />
                   <td className="w-1/4 py-2 pr-3">
                     <span className="text-muted-foreground/60 mr-1.5" aria-hidden="true">
                       ▣
@@ -362,7 +377,7 @@ export function HubCard({
                   relaunching the app. */}
               {localRunnerMissing && (
                 <tr data-testid="runner-local-missing">
-                  <Rail glyph={RAIL_BRANCH} />
+                  <Rail />
                   <td className="w-1/4 py-2 pr-3">
                     <span className="text-destructive/70 mr-1.5" aria-hidden="true">
                       ⨯
@@ -395,7 +410,7 @@ export function HubCard({
               {/* Last leaf: enrolling is an operation INSIDE this hub, and sits
                   where the runner it creates will appear. */}
               <tr data-testid="runner-add-row">
-                <Rail glyph={RAIL_END} />
+                <Rail last />
                 <td colSpan={5} className="py-1">
                   {adding ? (
                     <>
