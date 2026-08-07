@@ -15,12 +15,7 @@
  *
  * Run with: npx tsx packages/domains/terminal/src/server/mcp-env.test.ts
  */
-import {
-  buildMcpEnv,
-  resolveRemoteMcpEnv,
-  AGENT_HOOK_PATH,
-  type RemoteMcpEnv
-} from './mcp-env'
+import { buildMcpEnv, resolveRemoteMcpEnv, AGENT_HOOK_PATH, type RemoteMcpEnv } from './mcp-env'
 
 let pass = 0
 function assert(cond: boolean, msg: string): void {
@@ -81,10 +76,7 @@ const REMOTE: RemoteMcpEnv = {
   )
   // The pre-rename name is NEVER written: notify.sh reads it only as a fallback so
   // an OLDER release channel's app can still feed a NEWER shared script.
-  assert(
-    !('SLAYZONE_HOOK_CONTEXT' in env),
-    'the retired SLAYZONE_HOOK_CONTEXT must NOT be written'
-  )
+  assert(!('SLAYZONE_HOOK_CONTEXT' in env), 'the retired SLAYZONE_HOOK_CONTEXT must NOT be written')
   const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
   assert(ctx.v === 1, `ctx envelope version must be 1, got ${ctx.v}`)
   assert(ctx.taskId === 'task-1', 'ctx carries taskId')
@@ -116,6 +108,56 @@ const REMOTE: RemoteMcpEnv = {
   assert(
     !('SLAYZONE_AGENT_HOOK_CONTEXT' in env),
     'non-hook mode must NOT set SLAYZONE_AGENT_HOOK_CONTEXT'
+  )
+}
+
+// A db that answers only the `terminal_modes.type` lookup — enough to resolve a
+// custom provider's agent. `mode` is the row's declared type, or undefined for
+// an unknown id (mirrors a deleted provider).
+function dbWithModeType(type: string | undefined): never {
+  return {
+    get: async (sql: string) =>
+      sql.includes('FROM terminal_modes') ? (type ? { type } : undefined) : undefined
+  } as never
+}
+
+// 1d. CUSTOM provider wrapping a hook-capable agent → hook-capable.
+//     Regression guard: gating on the MODE ID made every user-defined provider
+//     permanently hook-incapable, so notify.sh exited at its URL guard, the
+//     conversation was never confirmed, its ledger row stayed `pending-spawn`
+//     (not an honored origin) and each restart re-minted instead of resuming.
+{
+  const env = await buildMcpEnv(dbWithModeType('claude-code'), 'task-c', 'ccremote-t3b61' as never)
+  assert(
+    'SLAYZONE_AGENT_HOOK_URL' in env,
+    'custom provider wrapping claude-code must get the hook URL'
+  )
+  assert(
+    env.SLAYZONE_AGENT_ID === 'claude-code',
+    `SLAYZONE_AGENT_ID must be the AGENT, not the mode id — the server rejects unknown agents; got: ${env.SLAYZONE_AGENT_ID}`
+  )
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
+  assert(ctx.agentId === 'claude-code', 'ctx.agentId is the wrapped agent')
+  assert(
+    ctx.mode === 'ccremote-t3b61',
+    `ctx.mode must carry the real mode so the ledger is keyed by it (not the built-in's row), got: ${ctx.mode}`
+  )
+}
+
+// 1e. Built-in mode → ctx carries NO `mode` key, so hook payloads for every
+//     existing provider stay byte-identical to before the custom-provider fix.
+{
+  const env = await buildMcpEnv(null, 'task-b', 'claude-code')
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
+  assert(!('mode' in ctx), 'built-in ctx must omit `mode` (identical to pre-fix payload)')
+}
+
+// 1f. Custom provider whose declared type is NOT hook-capable → still no hook env.
+{
+  const env = await buildMcpEnv(dbWithModeType('some-shell'), 'task-d', 'my-shell-mode' as never)
+  assert(
+    !('SLAYZONE_AGENT_HOOK_CONTEXT' in env),
+    'custom provider wrapping a non-hook agent must NOT become hook-capable'
   )
 }
 
@@ -197,7 +239,14 @@ const REMOTE: RemoteMcpEnv = {
 
 // 6. Remote non-hook-capable → nothing hook-related, no hub env.
 {
-  const env = await buildMcpEnv(null, 'task-r3', 'some-unknown-mode' as never, undefined, undefined, REMOTE)
+  const env = await buildMcpEnv(
+    null,
+    'task-r3',
+    'some-unknown-mode' as never,
+    undefined,
+    undefined,
+    REMOTE
+  )
   assertNoHubEnv(env, 'non-hook remote')
   assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'no hook URL for non-hook remote mode')
   assert(!('SLAYZONE_AGENT_HOOK_CONTEXT' in env), 'no ctx blob for non-hook remote mode')
@@ -212,7 +261,11 @@ const REMOTE: RemoteMcpEnv = {
     called = true
     return REMOTE
   }
-  const r = await resolveRemoteMcpEnv(provider, { taskId: 't', runnerId: null, mode: 'claude-code' })
+  const r = await resolveRemoteMcpEnv(provider, {
+    taskId: 't',
+    runnerId: null,
+    mode: 'claude-code'
+  })
   assert(r === null, 'runnerId null must resolve to null')
   assert(called === false, 'provider must NOT be called for a local (null-runner) spawn')
 }
@@ -246,7 +299,11 @@ const REMOTE: RemoteMcpEnv = {
   const provider = () => {
     throw new Error('mint failed')
   }
-  const r = await resolveRemoteMcpEnv(provider, { taskId: 't', runnerId: 'r1', mode: 'claude-code' })
+  const r = await resolveRemoteMcpEnv(provider, {
+    taskId: 't',
+    runnerId: 'r1',
+    mode: 'claude-code'
+  })
   assert(r === null, 'a throwing provider must degrade to null')
 }
 
