@@ -16,6 +16,43 @@ const artifactRow = (page: Page, title: string) =>
 const previewFrame = (page: Page) =>
   artifactsPanel(page).locator('iframe[title="HTML preview"]').contentFrame()
 
+/**
+ * Wait for the preview through its REAL stages instead of one composite budget.
+ *
+ * `expect(frame.locator('#x')).toHaveText(...)` spans four hops — React commit →
+ * `getFilePath` IPC → `slz-file://` fetch → parse+script — and reports all of them
+ * as `element(s) not found`, which cannot distinguish "iframe never mounted" from
+ * "document never loaded". These tests otherwise run in 0.1–0.3s against a 5s
+ * ceiling, so when one fails it is stuck, not slow; naming the stuck hop is the
+ * whole diagnostic value. The pane now surfaces its own failure, so assert that
+ * first — a resolved error beats waiting out a timeout on a pane that already knows.
+ */
+async function waitForPreviewLoaded(page: Page) {
+  const panel = artifactsPanel(page)
+  const error = panel.locator('[data-testid="html-preview-error"]')
+  const iframe = panel.locator('iframe[title="HTML preview"]')
+
+  await expect(async () => {
+    if (await error.isVisible().catch(() => false)) {
+      throw new Error(`HTML preview reported an error: ${await error.innerText()}`)
+    }
+    await expect(iframe).toBeAttached({ timeout: 1_000 })
+  }).toPass({ timeout: 8_000 })
+
+  // The frame exists; now prove its document actually finished loading, so a
+  // content assertion that fails is about the CONTENT and nothing earlier.
+  await expect
+    .poll(
+      async () =>
+        previewFrame(page)
+          .locator('body')
+          .evaluate((b) => b.ownerDocument.readyState)
+          .catch(() => 'unavailable'),
+      { timeout: 8_000 }
+    )
+    .toBe('complete')
+}
+
 async function openArtifactsPanel(page: Page) {
   if (
     await artifactsPanel(page)
@@ -71,6 +108,7 @@ test.describe('HTML artifact preview executes scripts', () => {
     await openArtifactsPanel(mainWindow)
     await artifactRow(mainWindow, 'click-test.html').click()
 
+    await waitForPreviewLoaded(mainWindow)
     const frame = previewFrame(mainWindow)
     await expect(frame.locator('#r')).toHaveText('initial', { timeout: 5_000 })
     // Sandboxed iframe (allow-scripts only) — programmatic click via evaluate
@@ -92,6 +130,7 @@ test.describe('HTML artifact preview executes scripts', () => {
     await openArtifactsPanel(mainWindow)
     await artifactRow(mainWindow, 'onload-test.html').click()
 
+    await waitForPreviewLoaded(mainWindow)
     const frame = previewFrame(mainWindow)
     await expect(frame.locator('#x')).toHaveText('after', { timeout: 5_000 })
   })
@@ -115,6 +154,7 @@ test.describe('HTML artifact preview executes scripts', () => {
     await openArtifactsPanel(mainWindow)
     await artifactRow(mainWindow, 'canvas-test.html').click()
 
+    await waitForPreviewLoaded(mainWindow)
     const frame = previewFrame(mainWindow)
     await expect(frame.locator('#ok')).toHaveText('yes', { timeout: 5_000 })
   })
@@ -140,6 +180,7 @@ test.describe('HTML artifact preview executes scripts', () => {
     await openArtifactsPanel(mainWindow)
     await artifactRow(mainWindow, 'sandbox-test.html').click()
 
+    await waitForPreviewLoaded(mainWindow)
     const frame = previewFrame(mainWindow)
     // slz-file is a standard, secure scheme (needed for Storage APIs in artifact
     // previews) — sandbox without allow-same-origin still surfaces the scheme as

@@ -17,6 +17,18 @@
 # starved timeout (a 4s toBeVisible, a 5s predicate, a 30s test budget); each
 # passes in isolation, and which ones fail rotates per run, so they read as a
 # dozen unrelated product bugs. They are one scheduling choice.
+#
+# Group-per-subdirectory was re-measured later against 3, 2 and 1 process:
+#
+#   6 groups   309-450s   (median 327)
+#   3 procs    484s       (+49%)
+#   2 procs    523s       (+60%)
+#   1 serial  1213s      (+271%)   and STILL failed
+#
+# Failure count is not monotonic in parallelism — the variance WITHIN the 6-group
+# config exceeded the differences between configs — so cutting processes buys wall
+# clock loss without buying green. `core` (53 specs) is the critical path and
+# equals total wall clock; rebalance IT before touching the process count.
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -29,13 +41,19 @@ fi
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
-# Discover groups from subdirectories
+# Discover groups from subdirectories.
+#
+# `perf` is deliberately NOT one of them: it asserts wall-clock budgets, and a
+# latency measured while five other Electron apps share the cores measures the
+# machine, not the product. It runs alone, after the parallel phase, below.
+PERF_GROUP=perf
 groups=()
 total=0
 for dir in e2e/*/; do
   [[ -d "$dir" ]] || continue
   name=$(basename "$dir")
   [[ "$name" == "fixtures" ]] && continue
+  [[ "$name" == "$PERF_GROUP" ]] && continue
   specs=("$dir"*.spec.ts)
   [[ -e "${specs[0]}" ]] || continue
   groups+=("$name")
@@ -43,6 +61,37 @@ for dir in e2e/*/; do
 done
 
 echo "Running $total specs across ${#groups[@]} groups: ${groups[*]}"
+
+# ── Host covariates ──────────────────────────────────────────────────────────
+# A suite result is not interpretable without them. Measured on this box, the
+# SAME commit went from 21 failures / 5 runs (0 green) to 1 failure / 5 runs
+# (4 green) with no code change at all — the only difference was that the
+# co-resident dev app had been restarted. Wall clock moved with it (327s -> 289s
+# median), which is the tell: a degrading host shows up in the clock before it
+# shows up in the failures. Print these on every run so the next anomaly is
+# diagnosable instead of arguable.
+print_covariates() {
+  local when=$1
+  echo "[covariates:$when] $(uptime | sed 's/.*load averages*: //')  load"
+  # SlayZone processes NOT belonging to this test run (no PLAYWRIGHT marker) —
+  # the co-resident dev app, its sidecar and its runner. `etime` is process AGE,
+  # the variable that correlated here; `rss` is in KB.
+  local procs
+  procs=$(pgrep -f 'out/main/index\.js|hub/dist/bin\.c?js|runner/dist/bin\.cjs' 2>/dev/null || true)
+  local count=0 total_rss=0 oldest="-"
+  for pid in $procs; do
+    ps eww -o command= -p "$pid" 2>/dev/null | grep -q 'PLAYWRIGHT=' && continue
+    count=$((count + 1))
+    local rss etime
+    rss=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
+    etime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+    [[ -n "$rss" ]] && total_rss=$((total_rss + rss))
+    [[ "$oldest" == "-" ]] && oldest=$etime
+  done
+  echo "[covariates:$when] $count foreign SlayZone proc(s), $((total_rss / 1024))MB RSS, oldest age $oldest"
+}
+print_covariates before
+
 start_time=$SECONDS
 
 # Launch each group in parallel
@@ -66,6 +115,23 @@ for i in "${!pids[@]}"; do
     fail=1
   fi
 done
+
+# ── Serial perf phase ────────────────────────────────────────────────────────
+# Runs ALONE, after every parallel group has exited, so its latency assertions
+# measure the product rather than the contention. Skipped when the group is
+# absent or empty.
+perf_specs=(e2e/$PERF_GROUP/*.spec.ts)
+if [[ -d "e2e/$PERF_GROUP" && -e "${perf_specs[0]}" ]]; then
+  echo ""
+  echo "Parallel phase done — running '$PERF_GROUP' alone (latency budgets need a quiet box)"
+  perf_log="$tmpdir/log-$PERF_GROUP.txt"
+  if npx playwright test --config playwright.config.ts "e2e/$PERF_GROUP/" > "$perf_log" 2>&1; then
+    :
+  else
+    fail=1
+  fi
+  groups+=("$PERF_GROUP")
+fi
 
 elapsed=$(( SECONDS - start_time ))
 
@@ -97,6 +163,7 @@ if [[ ${#failed_tests[@]} -gt 0 ]]; then
 fi
 
 echo ""
+print_covariates after
 echo "Wall clock: ${elapsed}s ($((elapsed / 60))m $((elapsed % 60))s)"
 echo "========================================="
 exit $fail

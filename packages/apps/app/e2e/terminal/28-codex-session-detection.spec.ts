@@ -50,7 +50,10 @@ test.describe('Session ID banners', () => {
       }
       await card.click().catch(() => {})
       await expect(banner).toBeVisible({ timeout: 4_000 })
-    }).toPass({ timeout: 30_000 })
+      // Strictly below the 30s test timeout: at exactly 30s this wrapper could never
+      // report its own failure, so a real miss surfaced as "banner not visible,
+      // 4000ms" (the inner assertion) instead of the 30s budget it actually spent.
+    }).toPass({ timeout: 20_000 })
   }
 
   test.beforeAll(async ({ electronApp, mainWindow }) => {

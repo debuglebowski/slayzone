@@ -68,9 +68,15 @@ export interface DiscoverOptions {
   /**
    * Extra ports to probe alongside the range — for hubs the block sweep cannot
    * find because they bind outside it. The caller supplies these from whatever
-   * out-of-band knowledge it has; the desktop app's sidecar, for instance, takes
-   * an OS-assigned port and publishes it to `settings.server_port`, which the CLI
-   * reads. Duplicates of range ports are ignored.
+   * out-of-band knowledge it has. Duplicates of range ports are ignored.
+   *
+   * NOTE: the desktop sidecar still publishes its OS-assigned port to
+   * `settings.server_port`, but the CLI no longer reads it — that row is now a
+   * display value (the MCP settings tab). The CLI is TOLD its address via
+   * `SLAYZONE_HUB_ADDRESS` (re-added per spawn by `buildMcpEnv`) and otherwise
+   * probes the fixed per-channel port, verifying the responder's root before
+   * using it. Do not reintroduce a `settings.server_port` read here: deriving an
+   * address from on-disk state is what made `slay` depend on the app's layout.
    */
   extraPorts?: number[]
   /** Per-port probe timeout in ms. Default 300. */

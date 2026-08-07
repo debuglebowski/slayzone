@@ -574,14 +574,23 @@ export function hubCommand(): Command {
         `${'-'.repeat(nameW)}  ${'-'.repeat(5)}  ${'-'.repeat(7)}  ${'-'.repeat(rootW)}  ` +
           `${'-'.repeat(7)}  ${'-'.repeat(8)}`
       )
+      // Which of these is THIS shell's? The sweep is machine-wide by design (that
+      // is the point of multi-hub), so it legitimately lists hubs this invocation
+      // does not belong to — including a developer's desktop app alongside a test
+      // run's sidecar. Marking the caller's own hub is what makes the list safe to
+      // act on; restricting the sweep would cap the feature instead.
+      const ownRoot = process.env.SLAYZONE_ROOT?.trim()
+        ? resolvePath(process.env.SLAYZONE_ROOT.trim())
+        : null
       for (const h of hubs) {
         // The app's hub has a platform state dir for a root; showing that path
         // would imply it is a hub you could cd into and manage.
         const root = h.supervised ? '(desktop app)' : shortenPath(h.root)
+        const mine = ownRoot && resolvePath(h.root) === ownRoot ? '  ← this shell' : ''
         console.log(
           `${h.name.padEnd(nameW)}  ${String(h.port).padEnd(5)}  ${String(h.pid).padEnd(7)}  ` +
             `${root.padEnd(rootW)}  ${String(h.runnersConnected).padEnd(7)}  ` +
-            `${formatUptime(h.uptimeMs)}`
+            `${formatUptime(h.uptimeMs)}${mine}`
         )
       }
     })

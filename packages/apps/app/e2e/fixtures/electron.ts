@@ -1097,7 +1097,11 @@ const sidebar = (page: Page) => page.locator('[data-slot="sidebar"]').first()
 /** Click a project blob in the sidebar by its 2-letter abbreviation */
 export async function clickProject(page: Page, abbrev: string) {
   const target = sidebar(page).getByRole('button', { name: abbrev, exact: true }).last()
-  for (let attempt = 0; attempt < 25; attempt += 1) {
+  // 8, not 25. Each attempt costs up to ~2.1s (two 1s click budgets + a refresh +
+  // 100ms), so 25 was a ~52s worst case — longer than the 30s test timeout, and
+  // nested inside other retries it could exceed it several times over. A helper
+  // must not be able to consume the budget of the test that calls it.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     if ((await target.count()) > 0) {
       await target.scrollIntoViewIfNeeded().catch(() => {})
       const clicked = await target
@@ -1201,7 +1205,10 @@ export async function openTaskById(page: Page, taskId: string): Promise<void> {
     await expect(
       page.locator('[data-testid="terminal-mode-trigger"]:visible').first()
     ).toBeVisible({ timeout: 7_000 })
-  }).toPass({ timeout: 40_000 })
+    // 20s, NOT 40s. A retry budget above the 30s test timeout can never report its
+    // own failure — Playwright kills the test first and blames whatever line is
+    // executing, which is how a helper's failure gets filed as an unrelated bug.
+  }).toPass({ timeout: 20_000 })
 }
 
 /**
@@ -1217,7 +1224,12 @@ export async function showProjectBoard(
   page: Page,
   projectAbbrev: string,
   cardText: string,
-  timeout = 30_000
+  // MUST stay strictly below the 30s test timeout. At exactly 30_000 this wrapper
+  // could never report its own failure — Playwright killed the test first and blamed
+  // whatever line was executing, so the error read "element(s) not found, 4000ms"
+  // (the inner assertion) for what was really a 30s failure. A retry budget that
+  // equals the enclosing budget is unsatisfiable by construction.
+  timeout = 20_000
 ): Promise<void> {
   await expect(async () => {
     await goHome(page)
@@ -1273,8 +1285,30 @@ export function projectBlob(page: Page, abbrev: string) {
   return sidebar(page).getByRole('button', { name: abbrev, exact: true }).last()
 }
 
-/** Open Project Settings for a given sidebar project abbreviation. */
-export async function openProjectSettings(page: Page, abbrev: string): Promise<Locator> {
+/**
+ * Open Project Settings for a project, deterministically.
+ *
+ * Dispatches the app's own `open-project-settings` event (handled in App.tsx) with
+ * an id resolved from the API. No `goHome`, no `clickProject`, no right-click, no
+ * context menu — none of which the dialog actually needs.
+ *
+ * The previous implementation used that UI dance as its PRIMARY path and reached
+ * this event only in an `else` branch taken when the sidebar blob was *invisible*.
+ * A blob that was visible but COVERED (a stray modal, a mid-animation overlay) took
+ * the UI path forever. Worse, its nested retries — `clickProject` alone is 25
+ * attempts ≈ 52s, inside a 4-attempt loop — could outlast the 30s test budget, so a
+ * single transient miss became a test timeout blamed on `waitForTimeout(150)`
+ * rather than a fast, honest failure. Five `64-execution-context` failures in one
+ * run were this: four direct victims plus one cascade.
+ *
+ * `tab` selects the settings tab up front, which also removes the caller's need to
+ * click a tab and retry that too.
+ */
+export async function openProjectSettings(
+  page: Page,
+  abbrev: string,
+  tab?: string
+): Promise<Locator> {
   const dialog = page
     .getByRole('dialog')
     .filter({ has: page.getByRole('heading', { name: 'Project Settings' }) })
@@ -1302,60 +1336,34 @@ export async function openProjectSettings(page: Page, abbrev: string): Promise<L
     await page.waitForTimeout(100)
   }
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (await dialog.isVisible({ timeout: 300 }).catch(() => false)) break
+  // Resolve the id, then ask the app to open the dialog. Retried as a whole
+  // because the renderer's project list may not yet include a just-seeded project
+  // (App's handler looks the id up in its own `projects` array and no-ops on a
+  // miss). Budget is well inside the 30s test timeout, so a genuine failure
+  // reports THIS assertion instead of blowing the test budget elsewhere.
+  await expect(async () => {
+    const projectId = await page.evaluate(async (projectAbbrev) => {
+      const projects = await window.getTrpcVanillaClient().projects.list.query()
+      return (
+        projects.find((project) => project.name.slice(0, 2).toUpperCase() === projectAbbrev)?.id ??
+        null
+      )
+    }, abbrev)
+    if (!projectId) throw new Error(`openProjectSettings: no project with abbrev "${abbrev}" yet`)
 
-    await goHome(page)
-    await clickProject(page, abbrev)
-    const blob = projectBlob(page, abbrev)
-    if (await blob.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await blob.scrollIntoViewIfNeeded().catch(() => {})
+    await page.evaluate(
+      ({ id, initialTab }) => {
+        window.dispatchEvent(
+          new CustomEvent('open-project-settings', {
+            detail: initialTab ? { projectId: id, tab: initialTab } : { projectId: id }
+          })
+        )
+      },
+      { id: projectId, initialTab: tab }
+    )
+    await expect(dialog).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 15_000 })
 
-      // Right-click → Settings via evaluate (fast, avoids Playwright actionability overhead)
-      await blob
-        .evaluate((node) => {
-          node.dispatchEvent(
-            new MouseEvent('contextmenu', {
-              bubbles: true,
-              cancelable: true,
-              button: 2,
-              buttons: 2
-            })
-          )
-        })
-        .catch(() => {})
-
-      const settingsItem = page.getByRole('menuitem', { name: 'Settings' }).first()
-      if (await settingsItem.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await settingsItem.click({ force: true }).catch(() => {})
-      }
-    } else {
-      const projectId = await page.evaluate((projectAbbrev) => {
-        return window
-          .getTrpcVanillaClient()
-          .projects.list.query()
-          .then(
-            (projects) =>
-              projects.find((project) => project.name.slice(0, 2).toUpperCase() === projectAbbrev)
-                ?.id ?? null
-          )
-      }, abbrev)
-      if (projectId) {
-        await page
-          .evaluate((id) => {
-            window.dispatchEvent(
-              new CustomEvent('open-project-settings', { detail: { projectId: id } })
-            )
-          }, projectId)
-          .catch(() => {})
-      }
-    }
-
-    if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-    await page.waitForTimeout(150)
-  }
-
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
   return dialog
 }
 

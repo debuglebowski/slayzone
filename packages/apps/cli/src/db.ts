@@ -88,9 +88,17 @@ export async function notifyApp(): Promise<void> {
   }
 
   // Same channel as api.ts's resolveTarget: this channel's fixed port.
-  const port = await probeFixedPort()
-  if (port) {
-    const ok = await postJson(port, '/api/notify')
+  const probe = await probeFixedPort()
+  if (probe.kind === 'foreign') {
+    // A different install answered. Notifying it would pop someone else's UI about
+    // a change they do not have; staying silent is the correct failure here.
+    console.error(
+      `Warning: skipped app notify — 127.0.0.1:${probe.port} serves ${probe.root}, not ${probe.expected}.`
+    )
+    return
+  }
+  if (probe.kind === 'found') {
+    const ok = await postJson(probe.port, '/api/notify')
     if (!ok) {
       console.error(
         'Warning: app notify failed (POST /api/notify) — app may be stale or unreachable'

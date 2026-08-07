@@ -25,6 +25,7 @@
  *
  * @module cli/local-hub
  */
+import path from 'node:path'
 import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
 import { LOOPBACK_HOSTS } from '@slayzone/platform/hub-addr'
 import { findHub } from '@slayzone/platform/hub-discovery'
@@ -44,17 +45,58 @@ export function fixedPortForChannel(): number {
 }
 
 /**
- * Probe this channel's fixed port, returning it when a hub actually answers there.
+ * The root THIS invocation belongs to, when it can be known.
+ *
+ * `SLAYZONE_ROOT` is `global`-scoped in the env manifest, so — unlike
+ * `SLAYZONE_HUB_ADDRESS`, which is `infra` and therefore stripped by
+ * `sanitizeSpawnEnv` at every pty boundary — it survives into a task terminal.
+ * That makes it the one identity signal a `slay` running inside an app-spawned
+ * terminal still holds, and the only thing that can tell the app it belongs to
+ * apart from a DIFFERENT app answering the same fixed port.
+ *
+ * Null for a plain user shell that was never spawned by an app. There is no
+ * expectation to violate there, so the probe is accepted: the failure this
+ * guards is a shell that belongs to app A silently acting on app B.
+ */
+function expectedRoot(): string | null {
+  const root = process.env.SLAYZONE_ROOT?.trim()
+  return root ? path.resolve(root) : null
+}
+
+/** Outcome of probing this channel's fixed port. */
+export type FixedPortProbe =
+  /** A hub answered and it is ours (or we had no expectation to check). */
+  | { kind: 'found'; port: number }
+  /** Nothing hub-shaped answered. */
+  | { kind: 'absent' }
+  /** A hub answered, but it serves a different root — refuse, never downgrade. */
+  | { kind: 'foreign'; port: number; root: string; expected: string }
+
+/**
+ * Probe this channel's fixed port, returning it when OUR hub answers there.
  *
  * `findHub` with an all-digits argument probes that port DIRECTLY (no sweep) and
- * validates the `/health` body is hub-shaped, so an unrelated service that happens
- * to hold the port is rejected rather than dialled. Null for every other outcome —
- * the caller falls back.
+ * validates the `/health` body is hub-shaped — but hub-shaped only proves it is
+ * *a* hub, not *the* hub. A fixed port is a well-known address, so anything on
+ * this machine that binds it answers: most sharply, an e2e worker's `slay` (whose
+ * own address was stripped at the spawn boundary) probes this port and reaches the
+ * developer's live app, then mutates its real data.
+ *
+ * So the identity is verified too. `/health` already reports `root` over loopback;
+ * a mismatch is reported rather than silently dialled, for the same reason
+ * `resolveTarget` refuses to downgrade a configured-but-unreachable hub to the
+ * local app: quietly acting on a different target applies the command to the
+ * wrong data.
  */
-export async function probeFixedPort(): Promise<number | null> {
+export async function probeFixedPort(): Promise<FixedPortProbe> {
   const port = fixedPortForChannel()
   const hub = await findHub(String(port))
-  return hub ? hub.port : null
+  if (!hub) return { kind: 'absent' }
+  const expected = expectedRoot()
+  if (expected && path.resolve(hub.root) !== expected) {
+    return { kind: 'foreign', port: hub.port, root: hub.root, expected }
+  }
+  return { kind: 'found', port: hub.port }
 }
 
 /**

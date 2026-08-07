@@ -346,11 +346,20 @@ export async function readBufferSince(
   )
 }
 
+/**
+ * Write a command + CR into a pty and WAIT for the write to be acknowledged.
+ *
+ * The `return` is load-bearing. Without it the arrow's block body discards the
+ * mutate promise, so `page.evaluate` resolves as soon as the synchronous block
+ * returns `undefined` — i.e. before the write has been dispatched, let alone
+ * received by the pty. Every caller that writes and then immediately asserts was
+ * racing an unsynchronised write, and the gap widens under machine load. A scan
+ * of the whole e2e tree found this was the only dropped tRPC promise in it.
+ */
 export async function runCommand(page: Page, sessionId: string, command: string): Promise<void> {
   await page.evaluate(
-    ({ id, cmd }) => {
-      window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: `${cmd}\r` })
-    },
+    ({ id, cmd }) =>
+      window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: `${cmd}\r` }),
     { id: sessionId, cmd: command }
   )
 }

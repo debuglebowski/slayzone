@@ -32,20 +32,12 @@ test.describe('Project execution context settings', () => {
   // ---------------------------------------------------------------------------
   // Helper: ensure project settings dialog is open on Environment tab
   // ---------------------------------------------------------------------------
+  // The dialog opens directly on the Environment tab, so there is no tab to click
+  // and no click to retry. The old 5-attempt loop existed because the opener could
+  // return a dialog that was still settling; opening by event removes that.
   async function openSettings(mainWindow: import('@playwright/test').Page) {
-    const dialog = await openProjectSettings(mainWindow, projectAbbrev)
-
-    const execContext = dialog.locator('#exec-context')
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await dialog
-        .getByTestId('settings-tab-environment')
-        .first()
-        .click()
-        .catch(() => {})
-      if (await execContext.isVisible({ timeout: 1_500 }).catch(() => false)) return
-      await mainWindow.waitForTimeout(120)
-    }
-    await expect(execContext).toBeVisible({ timeout: 5_000 })
+    const dialog = await openProjectSettings(mainWindow, projectAbbrev, 'environment')
+    await expect(dialog.locator('#exec-context')).toBeVisible({ timeout: 5_000 })
   }
 
   async function selectExecutionContext(
@@ -130,6 +122,28 @@ test.describe('Project execution context settings', () => {
   // 5) Reopen dialog — Docker fields are pre-filled
   // ---------------------------------------------------------------------------
   test('docker fields are restored on reopen', async ({ mainWindow }) => {
+    // Seed the saved state this test READS instead of inheriting it from the
+    // previous test. The file used to be a chain — test 4 saved, test 5 asserted
+    // the save, 6 and 7 mutated it further — so ONE failure upstream reported as
+    // several. In the run that started this investigation, four tests timed out
+    // and this one then failed on an assertion about a save that never happened:
+    // five failures, one cause. A test that can only pass when its predecessor
+    // did is not independently meaningful.
+    await mainWindow.evaluate(
+      ({ id }) =>
+        window.getTrpcVanillaClient().projects.update.mutate({
+          id,
+          executionContext: {
+            type: 'docker',
+            container: 'my-dev-container',
+            workdir: '/workspace',
+            shell: '/bin/zsh'
+          }
+        }),
+      { id: projectId }
+    )
+    await seed(mainWindow).refreshData()
+
     await openSettings(mainWindow)
     await expect(mainWindow.locator('#exec-context')).toHaveText(/Docker container/)
     await expect(mainWindow.locator('#exec-container')).toHaveValue('my-dev-container')

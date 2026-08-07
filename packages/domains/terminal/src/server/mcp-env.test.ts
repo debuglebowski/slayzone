@@ -31,21 +31,50 @@ function assert(cond: boolean, msg: string): void {
   pass++
 }
 
-/** Every env key that could point an agent at a hub — the CLI must resolve the
- *  server from the DB, never from an injected address. Includes the RETIRED
- *  `SLAYZONE_HUB_URL`/`_HOST`/`_PORT` so a rename can't quietly disarm this
- *  guard (a reintroduced old name would slip through a current-names-only list). */
-const HUB_ENV_KEYS = [
-  'SLAYZONE_HUB_ADDRESS',
-  'SLAYZONE_HUB_URL',
-  'SLAYZONE_HUB_HOST',
-  'SLAYZONE_HUB_PORT'
-] as const
+/** Retired hub-address names. NEVER written, local or remote — listed so a
+ *  reintroduced old name can't slip through a current-names-only guard. */
+const RETIRED_HUB_ENV_KEYS = ['SLAYZONE_HUB_URL', 'SLAYZONE_HUB_HOST', 'SLAYZONE_HUB_PORT'] as const
 
+/** Every key that could point a child at a hub, live name included. */
+const HUB_ENV_KEYS = ['SLAYZONE_HUB_ADDRESS', ...RETIRED_HUB_ENV_KEYS] as const
+
+/**
+ * No hub dial env AT ALL — the REMOTE invariant.
+ *
+ * A remote spawn runs on someone else's runner box, so handing it the hub's
+ * address is a leak; the runner already owns its own relay. Unchanged.
+ */
 function assertNoHubEnv(env: Record<string, string>, where: string): void {
   for (const key of HUB_ENV_KEYS) {
     assert(!(key in env), `${where} must NOT set ${key}`)
   }
+}
+
+/**
+ * The LOCAL invariant, narrowed on purpose.
+ *
+ * This used to be "no hub address anywhere", justified by "the CLI reads
+ * settings.server_port from the DB". That justification is dead — the CLI stopped
+ * reading that row, which left `slay` inside a pty with no pinned address at all.
+ * It then fell back to probing the fixed per-channel port, which answers for
+ * whichever install holds it: under e2e, the developer's live app. A blanket ban
+ * on the address was therefore protecting nothing and causing a data-safety hole.
+ *
+ * What the invariant actually protects is preserved and still asserted:
+ *   - no credential is ever injected (SLAYZONE_HUB_TOKEN), local or remote;
+ *   - no retired name is ever written;
+ *   - a REMOTE spawn still gets no hub address (see assertNoHubEnv).
+ * A loopback authority for the app that spawned you is not a credential.
+ */
+function assertLocalHubEnv(env: Record<string, string>, where: string, port: number): void {
+  assert(
+    env.SLAYZONE_HUB_ADDRESS === `127.0.0.1:${port}`,
+    `${where} must pin the loopback hub authority, got: ${env.SLAYZONE_HUB_ADDRESS}`
+  )
+  for (const key of RETIRED_HUB_ENV_KEYS) {
+    assert(!(key in env), `${where} must NOT set the retired ${key}`)
+  }
+  assert(!('SLAYZONE_HUB_TOKEN' in env), `${where} must NOT inject a bearer`)
 }
 
 // A fixed port so the loopback assertions are exact. buildMcpEnv reads
@@ -69,9 +98,8 @@ const REMOTE: RemoteMcpEnv = {
   )
   assert(env.SLAYZONE_AGENT_ID === 'claude-code', 'local must set SLAYZONE_AGENT_ID')
   assert('SLAYZONE_ROOT' in env, 'local hook-capable must set SLAYZONE_ROOT')
-  // Covers the address var too: the CLI reads settings.server_port from the DB.
-  assertNoHubEnv(env, 'local')
-  assert(!('SLAYZONE_HUB_TOKEN' in env), 'local must NOT set SLAYZONE_HUB_TOKEN')
+  // Tell the child which app it belongs to, so `slay` never has to go probing.
+  assertLocalHubEnv(env, 'local', MCP_PORT)
   assert(env.SLAYZONE_TASK_ID === 'task-1', 'task id present')
   // The opaque context blob the benign notify.sh forwards verbatim. All identity
   // fields the server needs to attribute a hook live HERE — never named in the script.
@@ -126,11 +154,19 @@ const REMOTE: RemoteMcpEnv = {
   assert(JSON.stringify(a) === JSON.stringify(b), 'remote=null must equal remote omitted')
 }
 
-// 3. Local non-hook-capable mode → no hook URL, no port env (unchanged behavior).
+// 3. Local non-hook-capable mode → no hook URL, but STILL a pinned address.
+// A plain shell is where `slay` is typed by hand, so it is the case that most
+// needs pinning — and the one that previously fell through to a port probe.
 {
   const env = await buildMcpEnv(null, 'task-3', 'some-unknown-mode' as never)
   assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'no hook URL for non-hook-capable mode')
-  assertNoHubEnv(env, 'local non-hook mode')
+  assertLocalHubEnv(env, 'local non-hook mode', MCP_PORT)
+}
+
+// 3a. A bare shell (no task, no mode) is pinned too.
+{
+  const env = await buildMcpEnv(null, undefined, undefined)
+  assertLocalHubEnv(env, 'plain shell', MCP_PORT)
 }
 
 // 3b. SLAYZONE_ROOT is set for EVERY spawn, not only hook-capable ones —
@@ -184,9 +220,12 @@ const REMOTE: RemoteMcpEnv = {
 {
   const local = await buildMcpEnv(null, 'task-same', 'claude-code')
   const remote = await buildMcpEnv(null, 'task-same', 'claude-code', undefined, undefined, REMOTE)
-  // Same identity blob + agent id; the only difference is the hook URL (local has
-  // the loopback one, remote defers to the runner overlay).
+  // Same identity blob + agent id. Two deliberate differences, both loopback-shaped
+  // and neither an identity field: local carries the hook URL (remote defers to the
+  // runner overlay) and local carries the hub authority (remote must not — it would
+  // ship this hub's address to another box).
   assert(remote.SLAYZONE_AGENT_ID === local.SLAYZONE_AGENT_ID, 'agent id identical local vs remote')
+  assert(!('SLAYZONE_HUB_ADDRESS' in remote), 'remote must NOT carry this hub address')
   assert(
     remote.SLAYZONE_AGENT_HOOK_CONTEXT === local.SLAYZONE_AGENT_HOOK_CONTEXT,
     'ctx blob identical local vs remote'

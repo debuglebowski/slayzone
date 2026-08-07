@@ -23,12 +23,24 @@ interface ApiTarget {
 async function resolveTarget(): Promise<ApiTarget> {
   const hub = resolveHubTarget()
   if (hub) return { baseUrl: hub.baseUrl, token: hub.token, hub: true }
-  const port = await probeFixedPort()
-  if (!port) {
+  const probe = await probeFixedPort()
+  if (probe.kind === 'foreign') {
+    // Same rule as the configured-hub case above, applied to the probe: a hub
+    // answered, but not ours. Acting on it would write to another install's data.
+    console.error(
+      `Refusing to act on the SlayZone app at 127.0.0.1:${probe.port}: it serves\n` +
+        `  ${probe.root}\n` +
+        `but this shell belongs to\n` +
+        `  ${probe.expected}\n` +
+        'Set SLAYZONE_HUB_ADDRESS to the intended app, or run from a shell that belongs to it.'
+    )
+    process.exit(1)
+  }
+  if (probe.kind === 'absent') {
     console.error('SlayZone server port not found. Is the app running?')
     process.exit(1)
   }
-  return { baseUrl: `http://127.0.0.1:${port}`, token: null, hub: false }
+  return { baseUrl: `http://127.0.0.1:${probe.port}`, token: null, hub: false }
 }
 
 function withAuth(init: RequestInit | undefined, token: string | null): RequestInit | undefined {

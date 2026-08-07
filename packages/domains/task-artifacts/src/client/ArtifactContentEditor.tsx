@@ -587,7 +587,12 @@ function ArtifactPreview({
 }) {
   if (renderMode === 'html-preview')
     return (
+      // Keyed on the identity of what is being previewed, so switching artifacts
+      // (or saving a new version) REMOUNTS the frame with fresh state instead of
+      // the effect having to reset it — which is both the idiomatic reset and what
+      // keeps a previous artifact's resolved path or error off the new one.
       <HtmlPreviewFrame
+        key={`${artifactId}:${contentVersion}`}
         artifactId={artifactId}
         contentVersion={contentVersion}
         getFilePath={getFilePath}
@@ -629,14 +634,58 @@ function HtmlPreviewFrame({
   zoom: number
 }) {
   const [src, setSrc] = useState<string | null>(null)
+  // `null` while in flight or resolved; a string once the path could not be
+  // resolved. Previously there was no error branch at all: `getFilePath` had no
+  // `.catch` and no null handling, so a rejection OR a null path left `src` null
+  // forever and the pane sat on "Loading..." with no retry and no way to tell a
+  // slow load from a dead one. That indefinite state is what the e2e preview
+  // "flake" was — it never resolved, so no timeout could have saved it.
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
-    getFilePath(artifactId).then((p) => {
-      if (p) setSrc(toSlzFileUrl(p, contentVersion))
-    })
-  }, [artifactId, contentVersion, getFilePath])
+    // Guard the late resolution. The `key` at the call site already remounts this
+    // component per artifact/version, so there is no state to reset here; this
+    // covers the remaining in-mount case (a `Retry` issued while the previous
+    // lookup is still in flight).
+    let cancelled = false
+    getFilePath(artifactId)
+      .then((p) => {
+        if (cancelled) return
+        if (p) setSrc(toSlzFileUrl(p, contentVersion))
+        else setError('This artifact has no file on disk yet.')
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : 'Could not load the preview.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [artifactId, contentVersion, getFilePath, attempt])
+
+  if (error)
+    return (
+      <div
+        data-testid="html-preview-error"
+        className="flex-1 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground"
+      >
+        <span className="text-destructive">{error}</span>
+        <button
+          type="button"
+          className="underline hover:text-foreground"
+          onClick={() => setAttempt((n) => n + 1)}
+        >
+          Retry
+        </button>
+      </div>
+    )
   if (!src)
     return (
-      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+      <div
+        data-testid="html-preview-loading"
+        className="flex-1 flex items-center justify-center text-xs text-muted-foreground"
+      >
         Loading...
       </div>
     )

@@ -164,7 +164,15 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // Same bit `hub.describe` reports over /trpc — mirrored on /health so a
     // client can learn "this hub needs a sign-in" without opening a socket.
     authRequired: hubAuthRequired,
-    runnersConnected: () => runnerGateway?.listRunners().length ?? 0
+    // `listUsableRunners`, NOT `listRunners` — its own docstring names itself the
+    // single authority for "can this runner do work right now?" and warns that the
+    // raw map means only "socket is open", including a runner that has stopped
+    // responding but not yet been reaped. `/health.runnersConnected` is read as a
+    // READINESS gate (an e2e worker waits on it before dispatching), so the raw
+    // count reports `connected: true` for a runner that cannot take work — the
+    // symptom recorded in e2e/global-setup.ts: a fresh worker's gate satisfied in
+    // ~14ms by a runner that process never spawned, which then dies mid-test.
+    runnersConnected: () => runnerGateway?.listUsableRunners().length ?? 0
   }
 
   // SLAYZONE_MODE is the SINGLE lever for the whole hub's transport: `local`

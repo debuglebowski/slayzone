@@ -115,11 +115,18 @@ export async function resolveRemoteMcpEnv(
  * `cli-hub-target.json` (see apps/cli/hub-config.ts). With no `remote` (the default)
  * nothing about the local env changes.
  *
- * No port/address env var is injected here: the `slay` CLI resolves the local
- * server port from `settings.server_port` in the DB (written by the server at
- * boot). It is NOT inherited — `SLAYZONE_HUB_ADDRESS` is infra-scoped, so
- * sanitizeSpawnEnv strips it at the spawn boundary; the DB is the durable
- * source of truth for every pty.
+ * `SLAYZONE_HUB_ADDRESS` IS injected for a local spawn — this hub's own loopback
+ * address. It is infra-scoped, so sanitizeSpawnEnv strips whatever the parent held
+ * and this re-adds the correct per-spawn value, which is exactly the contract
+ * `buildBaseEnv` describes ("per-spawn identity is re-added afterward via mcpEnv").
+ *
+ * This used to say the CLI resolved the port from `settings.server_port` in the DB.
+ * That contract is dead: the CLI stopped reading that row, so a `slay` inside a pty
+ * had NO pinned address and fell through to probing the fixed per-channel port —
+ * which answers for whichever install happens to hold it. Under e2e that is the
+ * developer's live app, so a test could mutate real data. Telling the child its
+ * address is the fix; `probeFixedPort` additionally verifies the responder's root
+ * (apps/cli/local-hub.ts) so the derive path fails closed rather than guessing.
  */
 export async function buildMcpEnv(
   db: SlayzoneDb | null | undefined,
@@ -202,10 +209,17 @@ export async function buildMcpEnv(
     return env
   }
 
-  // Local (hub-local — today's only path): loopback. The port is used ONLY to
-  // build the agent-hook URL below. No port/address var is injected — the CLI
-  // resolves the server port itself from settings.server_port.
+  // Local (hub-local — today's only path): loopback.
   const serverPort = (globalThis as Record<string, unknown>).__serverPort as number | undefined
+
+  if (serverPort) {
+    // Tell every child WHICH app it belongs to — plain shells included, not just
+    // hook-capable agents: `slay` is run by hand in a terminal far more often than
+    // by an agent, and an unpinned `slay` is precisely the one that goes probing.
+    // Authority only (host:port), per the env naming rules — the scheme derives
+    // from SLAYZONE_MODE, and this hub is loopback.
+    env.SLAYZONE_HUB_ADDRESS = `127.0.0.1:${serverPort}`
+  }
 
   if (serverPort && hookCapable) {
     env.SLAYZONE_AGENT_HOOK_URL = `http://127.0.0.1:${serverPort}${AGENT_HOOK_PATH}`
