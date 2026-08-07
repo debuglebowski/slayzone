@@ -5,7 +5,12 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { test as base, expect } from '@playwright/test'
-import { launchIsolatedElectron, projectBlob, clickSettings, bootConfigPath } from '../fixtures/electron'
+import {
+  launchIsolatedElectron,
+  projectBlob,
+  clickSettings,
+  bootConfigPath
+} from '../fixtures/electron'
 
 /**
  * Phase 3a — multi-hub federation, 2-hub loopback end-to-end.
@@ -475,9 +480,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           window
             .getTrpcVanillaClient()
             .task.loadBoardData.query()
-            .then((b: { tasks: Array<{ title: string }> }) => b.tasks.map((t) => t.title)) as Promise<
-            string[]
-          >
+            .then((b: { tasks: Array<{ title: string }> }) =>
+              b.tasks.map((t) => t.title)
+            ) as Promise<string[]>
       )
       expect(localTitles).not.toContain(TITLE)
 
@@ -574,9 +579,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           window
             .getTrpcVanillaClient()
             .projects.list.query()
-            .then((ps: Array<{ name: string }>) => ps.some((p) => p.name === 'Routed-P')) as Promise<
-            boolean
-          >
+            .then((ps: Array<{ name: string }>) =>
+              ps.some((p) => p.name === 'Routed-P')
+            ) as Promise<boolean>
       )
       expect(onLocal).toBe(false)
     } finally {
@@ -586,13 +591,14 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
-  base('Runners tab merges both hubs and mints the join token on the CHOSEN hub', async () => {
+  base('Connections tab nests runners per hub and mints on the hub they sit under', async () => {
     base.setTimeout(180_000)
 
     // A runner belongs to exactly ONE hub, and which hub is decided when the token is
-    // MINTED (it embeds that hub's dial url + cert fingerprint). So on a federated
-    // client the mint has to be routable — otherwise a remote hub's runners are
-    // invisible and un-enrollable, which is what this asserts end-to-end.
+    // MINTED (it embeds that hub's dial url + cert fingerprint). Listing runners
+    // inside their hub makes the enrollment control's POSITION the hub choice, so a
+    // federated client can enroll against a remote hub with no picker to get wrong —
+    // which is what this asserts end-to-end.
     const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
     let hub: SecondHub | null = null
     let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
@@ -631,21 +637,19 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(dialog).toBeVisible({ timeout: 10_000 })
       await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
 
-      // ONE merged table, not a section per hub (mirrors the flat merged rail).
-      await expect(page.locator('[data-testid="runners-table"]')).toHaveCount(1, {
+      // Runners are listed INSIDE their hub — one block per connected hub, since a
+      // runner belongs to exactly one. Both hubs are connected here.
+      await expect(page.locator('[data-testid="runners-table"]')).toHaveCount(2, {
         timeout: 10_000
       })
 
-      // The hub picker only exists when >1 hub is connected — its presence IS the
-      // federated affordance under test.
-      await page.locator('[data-testid="runner-add-open"]').click()
-      const hubPicker = page.locator('[data-testid="runner-add-hub"]')
-      await expect(hubPicker).toBeVisible({ timeout: 10_000 })
-
-      // Choose the REMOTE hub, then mint.
-      await hubPicker.click()
-      await page.getByRole('option', { name: /Hub B/ }).click()
-      await page.locator('[data-testid="runner-add"]').click()
+      // Enrolling from within Hub B's group IS the hub choice — there is no picker
+      // to get wrong. That absence is the federated affordance under test.
+      const remoteGroup = page.locator('[data-testid="hub-group-remote-b"]')
+      await expect(remoteGroup).toBeVisible({ timeout: 10_000 })
+      await remoteGroup.locator('[data-testid="runner-add-open"]').click()
+      await expect(page.locator('[data-testid="runner-add-hub"]')).toHaveCount(0)
+      await remoteGroup.locator('[data-testid="runner-add"]').click()
 
       // The dialog must name the hub the token belongs to: with several connected, a
       // token pasted onto the wrong machine is indistinguishable from a broken one.
@@ -672,138 +676,141 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
-  base('a remote-hub task PTY spawns on the remote hub and streams output back (Phase 4)', async () => {
-    base.setTimeout(180_000)
+  base(
+    'a remote-hub task PTY spawns on the remote hub and streams output back (Phase 4)',
+    async () => {
+      base.setTimeout(180_000)
 
-    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
-    let hub: SecondHub | null = null
-    let hubRunner: HubRunner | null = null
-    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
-    try {
-      hub = await spawnSecondHub(secondStore)
-      await waitForHubHealth(hub.port)
-      const remoteHubUrl = hub.url
+      const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+      let hub: SecondHub | null = null
+      let hubRunner: HubRunner | null = null
+      let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+      try {
+        hub = await spawnSecondHub(secondStore)
+        await waitForHubHealth(hub.port)
+        const remoteHubUrl = hub.url
 
-      // The remote hub needs its OWN runner: terminals run only on runners, so a
-      // bare hub refuses pty.create with an actionable error. This is also what
-      // makes the assertion below meaningful — the PTY genuinely runs on the
-      // remote hub's machine rather than inside the hub process itself.
-      hubRunner = await attachRunnerToHub({
-        hubUrl: remoteHubUrl,
-        rootDir: path.join(secondStore, 'runner-root'),
-        credentialsDir: path.join(secondStore, 'runner-creds'),
-        // Path-jail must admit the pty cwd used below.
-        allowedRoots: secondStore,
-        name: 'e2e-remote-hub-runner'
-      })
+        // The remote hub needs its OWN runner: terminals run only on runners, so a
+        // bare hub refuses pty.create with an actionable error. This is also what
+        // makes the assertion below meaningful — the PTY genuinely runs on the
+        // remote hub's machine rather than inside the hub process itself.
+        hubRunner = await attachRunnerToHub({
+          hubUrl: remoteHubUrl,
+          rootDir: path.join(secondStore, 'runner-root'),
+          credentialsDir: path.join(secondStore, 'runner-creds'),
+          // Path-jail must admit the pty cwd used below.
+          allowedRoots: secondStore,
+          name: 'e2e-remote-hub-runner'
+        })
 
-      // Remote hub: create a project (path = the remote store dir, a real dir) +
-      // a task to run a terminal in.
-      const { remoteTaskId } = await withHubClient(remoteHubUrl, async (c) => {
-        const project = (await c.projects.create.mutate({
-          name: 'Remote-Term',
-          color: '#22c55e',
-          path: secondStore
-        })) as { id: string }
-        const task = (await c.task.create.mutate({
-          projectId: project.id,
-          title: 'remote term task',
-          status: 'in_progress'
-        })) as { id: string }
-        return { remoteTaskId: task.id }
-      })
+        // Remote hub: create a project (path = the remote store dir, a real dir) +
+        // a task to run a terminal in.
+        const { remoteTaskId } = await withHubClient(remoteHubUrl, async (c) => {
+          const project = (await c.projects.create.mutate({
+            name: 'Remote-Term',
+            color: '#22c55e',
+            path: secondStore
+          })) as { id: string }
+          const task = (await c.task.create.mutate({
+            projectId: project.id,
+            title: 'remote term task',
+            status: 'in_progress'
+          })) as { id: string }
+          return { remoteTaskId: task.id }
+        })
 
-      launched = await launchIsolatedElectron({
-        name: 'multi-hub-pty',
-        seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
-          fs.writeFileSync(
-            bootConfigPath(userDataDir),
-            JSON.stringify(
-              {
-                server_mode: 'local',
-                multi_hub: true,
-                hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url: remoteHubUrl }],
-                default_hub_id: 'local'
-              },
-              null,
-              2
+        launched = await launchIsolatedElectron({
+          name: 'multi-hub-pty',
+          seedUserData: (userDataDir) => {
+            fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+            fs.writeFileSync(
+              bootConfigPath(userDataDir),
+              JSON.stringify(
+                {
+                  server_mode: 'local',
+                  multi_hub: true,
+                  hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url: remoteHubUrl }],
+                  default_hub_id: 'local'
+                },
+                null,
+                2
+              )
             )
-          )
-        },
-        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
-      })
-
-      const page = launched.page
-      await page.waitForSelector('#root', { timeout: 20_000 })
-
-      // Spawn a raw-shell PTY for the remote task via the app's federated client
-      // registry (the remote hub's client), then drive a command and assert the
-      // output streams back — proving the per-hub PtyEventStreams fans onData from
-      // the REMOTE hub. sessionId matches the app's convention `${taskId}:${taskId}`.
-      const sessionId = `${remoteTaskId}:${remoteTaskId}`
-      const marker = `MULTIHUB_PTY_OK_${remoteTaskId.slice(0, 8)}`
-
-      // Create on the remote hub directly (deterministic — no UI timing), then
-      // assert the app observes its live output through the federated stream.
-      await withHubClient(remoteHubUrl, (c) =>
-        c.pty.create.mutate({ sessionId, cwd: secondStore, mode: 'terminal' })
-      )
-      await expect
-        .poll(
-          () => withHubClient(remoteHubUrl, (c) => c.pty.exists.query({ sessionId })),
-          { timeout: 30_000, intervals: [500, 1_000] }
-        )
-        .toBe(true)
-
-      // Drive a command on the remote hub's pty and confirm its stdout came back
-      // (proof the pty runs on the remote hub + streams round-trip).
-      await expect
-        .poll(
-          async () => {
-            await withHubClient(remoteHubUrl, (c) =>
-              c.pty.write.mutate({ sessionId, data: `echo ${marker}\r` })
-            )
-            const buffer = await withHubClient(remoteHubUrl, (c) =>
-              c.pty.getBuffer.query({ sessionId })
-            )
-            return bufferHasCommandOutput((buffer as string) ?? '', marker)
           },
-          { timeout: 45_000, intervals: [1_000, 1_500, 2_000] }
-        )
-        .toBe(true)
+          extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+        })
 
-      // And the APP's federated terminal-state store sees this remote session as
-      // ALIVE (running/idle), not the 'starting' default — proving the per-hub
-      // PtyEventStreams + cross-hub reconcile surface remote liveness. Nudge a
-      // reconcile via window focus, then poll the store.
-      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-      await expect
-        .poll(
-          () =>
-            page.evaluate((sid) => {
-              const store = (
-                window as unknown as {
-                  __slayzone_terminalStateStore?: {
-                    getState: () => { getSessionState?: (id: string) => string }
-                  }
-                }
-              ).__slayzone_terminalStateStore
-              if (!store?.getState().getSessionState) return null
-              return store.getState().getSessionState!(sid)
-            }, sessionId),
-          { timeout: 30_000, intervals: [1_000, 2_000] }
+        const page = launched.page
+        await page.waitForSelector('#root', { timeout: 20_000 })
+
+        // Spawn a raw-shell PTY for the remote task via the app's federated client
+        // registry (the remote hub's client), then drive a command and assert the
+        // output streams back — proving the per-hub PtyEventStreams fans onData from
+        // the REMOTE hub. sessionId matches the app's convention `${taskId}:${taskId}`.
+        const sessionId = `${remoteTaskId}:${remoteTaskId}`
+        const marker = `MULTIHUB_PTY_OK_${remoteTaskId.slice(0, 8)}`
+
+        // Create on the remote hub directly (deterministic — no UI timing), then
+        // assert the app observes its live output through the federated stream.
+        await withHubClient(remoteHubUrl, (c) =>
+          c.pty.create.mutate({ sessionId, cwd: secondStore, mode: 'terminal' })
         )
-        .toMatch(/running|idle/)
-    } finally {
-      if (launched) await launched.close()
-      // Runner before hub: it re-dials on disconnect, so killing the hub first
-      // leaves it reconnecting against a dead port for the whole teardown.
-      if (hubRunner) await hubRunner.stop()
-      if (hub) await hub.stop()
-      fs.rmSync(secondStore, { recursive: true, force: true })
+        await expect
+          .poll(() => withHubClient(remoteHubUrl, (c) => c.pty.exists.query({ sessionId })), {
+            timeout: 30_000,
+            intervals: [500, 1_000]
+          })
+          .toBe(true)
+
+        // Drive a command on the remote hub's pty and confirm its stdout came back
+        // (proof the pty runs on the remote hub + streams round-trip).
+        await expect
+          .poll(
+            async () => {
+              await withHubClient(remoteHubUrl, (c) =>
+                c.pty.write.mutate({ sessionId, data: `echo ${marker}\r` })
+              )
+              const buffer = await withHubClient(remoteHubUrl, (c) =>
+                c.pty.getBuffer.query({ sessionId })
+              )
+              return bufferHasCommandOutput((buffer as string) ?? '', marker)
+            },
+            { timeout: 45_000, intervals: [1_000, 1_500, 2_000] }
+          )
+          .toBe(true)
+
+        // And the APP's federated terminal-state store sees this remote session as
+        // ALIVE (running/idle), not the 'starting' default — proving the per-hub
+        // PtyEventStreams + cross-hub reconcile surface remote liveness. Nudge a
+        // reconcile via window focus, then poll the store.
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+        await expect
+          .poll(
+            () =>
+              page.evaluate((sid) => {
+                const store = (
+                  window as unknown as {
+                    __slayzone_terminalStateStore?: {
+                      getState: () => { getSessionState?: (id: string) => string }
+                    }
+                  }
+                ).__slayzone_terminalStateStore
+                if (!store?.getState().getSessionState) return null
+                return store.getState().getSessionState!(sid)
+              }, sessionId),
+            { timeout: 30_000, intervals: [1_000, 2_000] }
+          )
+          .toMatch(/running|idle/)
+      } finally {
+        if (launched) await launched.close()
+        // Runner before hub: it re-dials on disconnect, so killing the hub first
+        // leaves it reconnecting against a dead port for the whole teardown.
+        if (hubRunner) await hubRunner.stop()
+        if (hub) await hub.stop()
+        fs.rmSync(secondStore, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   base('adding a hub via Settings goes live without a reload', async () => {
     base.setTimeout(180_000)
@@ -888,10 +895,7 @@ function bufferHasCommandOutput(buffer: string, marker: string): boolean {
 }
 
 /** Run `fn` with a raw tRPC WS client to a hub, closing the socket after. */
-async function withHubClient<T>(
-  url: string,
-  fn: (client: any) => Promise<T>
-): Promise<T> {
+async function withHubClient<T>(url: string, fn: (client: any) => Promise<T>): Promise<T> {
   const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
   const superjson = (await import('superjson')).default
   const ws = createWSClient({ url })

@@ -25,6 +25,19 @@ let hubTokens: Record<string, string> = {}
 /** Keyed by the probed url — what that hub's /health answers. */
 let probeReplies: Record<string, ProbeReply> = {}
 
+/**
+ * The LIVE federation, which is a different registry from the draft one this tab
+ * edits — null simulates the Chromium fork, which renders with no
+ * FederationProvider at all.
+ */
+let federation: {
+  hubs: Array<{ id: string; kind: string; label: string; url?: string }>
+  defaultHubId: string
+} | null = null
+
+/** Whose `<HubScope>` is currently rendering, recorded by the mock below. */
+let renderingHubId = ''
+
 vi.mock('@slayzone/transport/client', () => ({
   electronBootstrap: {
     getHubRegistry: () => Promise.resolve({ hubs: registryHubs, defaultHubId: 'local' }),
@@ -36,7 +49,57 @@ vi.mock('@slayzone/transport/client', () => ({
     setBootSettings: () => Promise.resolve({ ok: true as const }),
     relaunch: () => Promise.resolve()
   },
-  useHubRegistryStore: { getState: () => ({ addHubs: vi.fn(), setTokens: vi.fn() }) }
+  useHubRegistryStore: { getState: () => ({ addHubs: vi.fn(), setTokens: vi.fn() }) },
+  useFederationOrNull: () => federation,
+  HubScope: ({ hubId, children }: any) => {
+    renderingHubId = hubId
+    return <>{children}</>
+  }
+}))
+
+/**
+ * The card's own behaviour is covered in HubCard.test.tsx. Here it only needs to
+ * report WHETHER a hub got the runner-owning card and under WHICH scope — this
+ * file is about which hubs can have a runner list at all.
+ *
+ * Both exports are stubbed, and both render the hub's identity + controls slots:
+ * the Sign in / Verify / signed-in assertions below live in those slots, and a
+ * not-connected remote goes through the SHELL rather than the card.
+ */
+vi.mock('./HubCard', () => ({
+  HubCard: ({ hubId, isLocalHub, identity, controls, headerTestId }: any) => (
+    <div data-testid={`hub-group-${hubId}`}>
+      <div data-testid={headerTestId}>
+        {identity}
+        {controls}
+      </div>
+      <div
+        data-testid="hub-card-live"
+        data-hub={hubId}
+        data-scope={renderingHubId}
+        data-local={String(isLocalHub)}
+      />
+    </div>
+  ),
+  HubCardShell: ({ hubId, headerTestId, identity, controls, body }: any) => (
+    <div data-testid={`hub-group-${hubId}`}>
+      <div data-testid={headerTestId}>
+        {identity}
+        {controls}
+      </div>
+      {body}
+    </div>
+  ),
+  RunnersHeading: ({ note, noteTestId }: any) => (
+    <div>
+      <span>Runners</span>
+      {note ? <span data-testid={noteTestId}>{note}</span> : null}
+    </div>
+  )
+}))
+
+vi.mock('./RunnerActions', () => ({
+  RunnerActionsProvider: ({ children }: any) => <>{children}</>
 }))
 
 vi.mock('@slayzone/ui', () => {
@@ -47,7 +110,13 @@ vi.mock('@slayzone/ui', () => {
         {children}
       </button>
     ),
+    IconButton: ({ children, onClick, disabled, ...props }: any) => (
+      <button onClick={onClick} disabled={disabled} {...props}>
+        {children}
+      </button>
+    ),
     Input: (props: any) => <input {...props} />,
+    Separator: (props: any) => <hr {...props} />,
     Switch: ({ checked, onCheckedChange, ...props }: any) => (
       <input
         type="checkbox"
@@ -69,7 +138,16 @@ vi.mock('@slayzone/ui', () => {
 
 vi.mock('lucide-react', () => {
   const Icon = () => <span />
-  return { Trash2: Icon, RotateCw: Icon, Plus: Icon, X: Icon, Pencil: Icon, PlugZap: Icon }
+  return {
+    Trash2: Icon,
+    RotateCw: Icon,
+    Plus: Icon,
+    X: Icon,
+    Pencil: Icon,
+    PlugZap: Icon,
+    Circle: Icon,
+    CircleDot: Icon
+  }
 })
 
 vi.mock('./SettingsTabIntro', () => ({ SettingsTabIntro: () => <div /> }))
@@ -99,6 +177,8 @@ describe('HubsSettingsTab — Sign in visibility', () => {
     registryHubs = []
     hubTokens = {}
     probeReplies = {}
+    federation = null
+    renderingHubId = ''
   })
   afterEach(cleanup)
 
@@ -134,5 +214,90 @@ describe('HubsSettingsTab — Sign in visibility', () => {
     await rowSettled()
     await waitFor(() => expect(screen.getByTestId('hub-signed-in')).toBeTruthy())
     expect(screen.queryByTestId('hub-signin-open')).toBeNull()
+  })
+})
+
+/**
+ * Runners are listed INSIDE their hub. Which means the tab has to reconcile two
+ * different registries: the draft boot-config it edits, and the live federation a
+ * runner list can actually be queried through. A hub present in the first but not
+ * the second must say so — an empty list there would be a false claim about that
+ * hub's configuration rather than a description of a hub we haven't connected to.
+ */
+describe('HubsSettingsTab — nested runners', () => {
+  beforeEach(() => {
+    registryHubs = []
+    hubTokens = {}
+    probeReplies = {}
+    federation = null
+    renderingHubId = ''
+  })
+  afterEach(cleanup)
+
+  const LIVE_LOCAL = {
+    id: 'local',
+    kind: 'local',
+    label: 'Local',
+    url: 'ws://127.0.0.1:51100/trpc'
+  }
+  const LIVE_REMOTE = { id: 'hub:remote', kind: 'remote', label: 'Remote', url: REMOTE_URL }
+
+  /** Every live runner-owning card on screen, as `{hub, scope}` pairs. */
+  const blocks = (): Array<{ hub: string | null; scope: string | null; local: string | null }> =>
+    screen.queryAllByTestId('hub-card-live').map((el) => ({
+      hub: el.getAttribute('data-hub'),
+      scope: el.getAttribute('data-scope'),
+      local: el.getAttribute('data-local')
+    }))
+
+  it('gives every connected hub its own block, inside that hub’s scope', async () => {
+    seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: false })
+    federation = { hubs: [LIVE_LOCAL, LIVE_REMOTE], defaultHubId: 'local' }
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    await waitFor(() => expect(blocks().length).toBe(2))
+    // Each block's ambient scope must be its OWN hub — that is what makes its
+    // mint and revoke hub-correct by construction rather than by lookup.
+    expect(blocks()).toEqual([
+      { hub: 'local', scope: 'local', local: 'true' },
+      { hub: 'hub:remote', scope: 'hub:remote', local: 'false' }
+    ])
+  })
+
+  it('marks a hub that is not connected yet instead of showing an empty list', async () => {
+    // In the draft registry, absent from the live federation: added but not yet
+    // saved + relaunched.
+    seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: false })
+    federation = { hubs: [LIVE_LOCAL], defaultHubId: 'local' }
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    await waitFor(() => expect(blocks().length).toBe(1))
+    expect(blocks()[0]?.hub).toBe('local')
+    expect(screen.getByTestId('hub-runners-unavailable').textContent).toContain('not connected yet')
+  })
+
+  it('says the local hub is off rather than listing runners for it', async () => {
+    // No local entry in the registry = "run a local hub" is off. Nothing on this
+    // machine can execute, so a runner list would be meaningless.
+    registryHubs = [{ id: 'hub:remote', kind: 'remote', label: 'Remote', url: REMOTE_URL }]
+    probeReplies = { [REMOTE_URL]: { ok: true, normalizedUrl: REMOTE_URL, authRequired: false } }
+    federation = { hubs: [LIVE_REMOTE], defaultHubId: 'hub:remote' }
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    await waitFor(() => expect(blocks().length).toBe(1))
+    expect(blocks()[0]?.hub).toBe('hub:remote')
+    expect(screen.getByTestId('hub-runners-unavailable').textContent).toContain('local hub is off')
+  })
+
+  it('fork (no federation at all): the local hub still lists its runners', async () => {
+    // The Chromium fork renders this surface outside a FederationProvider. It must
+    // degrade to the single-hub view rather than throwing — which is why the
+    // component uses the OrNull variant.
+    registryHubs = [{ id: 'local', kind: 'local', label: 'Local' }]
+    federation = null
+    render(<HubsSettingsTab />)
+    await waitFor(() => expect(blocks().length).toBe(1))
+    // No scope was entered — the ambient client is the only hub there is.
+    expect(blocks()[0]).toEqual({ hub: 'local', scope: '', local: 'true' })
   })
 })

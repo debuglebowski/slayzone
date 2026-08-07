@@ -3181,7 +3181,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
     })
     // Reads the pre-boot config the renderer needs for settings toggles that
-    // aren't backed by the settings DB (multi-hub — see RunnersSettingsTab). The
+    // aren't backed by the settings DB (multi-hub — see HubsSettingsTab). The
     // in-memory `bootConfig` was read once at boot; re-read from disk so a save
     // made since boot is reflected. `server_mode`/url are already exposed via
     // `app:get-server-url`; this surfaces `multi_hub` as a plain boolean.
