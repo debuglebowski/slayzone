@@ -1,6 +1,7 @@
 import { createTRPCContext } from '@trpc/tanstack-react-query'
 import { createTRPCClient, createWSClient, wsLink, type TRPCLink } from '@trpc/client'
 import superjson from 'superjson'
+import { connectDeadlineLink } from './connectDeadlineLink'
 import type { AppRouter } from '../server/router'
 
 // New TanStack React Query integration (replaces classic createTRPCReact).
@@ -30,6 +31,12 @@ export type CreateTrpcClientOpts = {
    * → no connectionParams frame → byte-identical to the pre-auth client.
    */
   token?: string
+  /**
+   * Override how long an operation may wait for this hub's socket to open
+   * before it fails as unreachable (see `connectDeadlineLink`). Tests pass a
+   * short one; callers otherwise take the default.
+   */
+  connectDeadlineMs?: number
 }
 
 // Vanilla (non-React) client — used by the provider boot and by e2e via
@@ -44,7 +51,19 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
   return {
     wsClient,
     client: createTRPCClient<AppRouter>({
-      links: [...(opts.links ?? []), wsLink({ client: wsClient, transformer: superjson })]
+      links: [
+        ...(opts.links ?? []),
+        // AFTER the caller's links (the fork's mojo link resolves browser ops
+        // locally and must not be gated on a WS that isn't part of its path),
+        // and immediately BEFORE the terminating wsLink — everything it guards
+        // is an operation actually bound for this socket.
+        connectDeadlineLink({
+          connectionState: wsClient.connectionState,
+          deadlineMs: opts.connectDeadlineMs,
+          hubUrl: opts.url
+        }),
+        wsLink({ client: wsClient, transformer: superjson })
+      ]
     })
   }
 }
