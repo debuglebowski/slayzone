@@ -118,6 +118,25 @@ export function ownedSessionSql(resetAtExpr: string): string {
  */
 export const TURN_TRACKED_MODES: ReadonlySet<string> = new Set(['claude-code'])
 
+/**
+ * The AGENT a mode runs — the mode id itself for a built-in, or
+ * `terminal_modes.type` for a user-defined provider wrapping one.
+ *
+ * Turn-tracking is a property of the AGENT (whose hooks post the turn), never of
+ * the mode wrapping it. Testing the raw mode id classified every custom provider
+ * as "turns unobservable" and so marked its sessions resumability-proven at
+ * spawn — before any transcript exists. The next restart then resumed an id
+ * `--resume` cannot find, which fails, trips the healer, and RESETS the task:
+ * the user sees an empty chat and loses the conversation pointer.
+ */
+async function resolveTurnTrackedAgent(db: SlayzoneDb, mode: string): Promise<string> {
+  if (TURN_TRACKED_MODES.has(mode)) return mode
+  const row = await db.get<{ type?: string }>('SELECT type FROM terminal_modes WHERE id = ?', [
+    mode
+  ])
+  return row?.type ?? mode
+}
+
 const TTL_PENDING_MS = 10 * 60 * 1000 // explicit pre-minted expected id → wide window.
 const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // null-expected → tight window (temporal-proximity gate only).
 const FIND_PENDING_RETRY_MS = 100
@@ -617,7 +636,7 @@ export async function confirmSessionConversation(
   // until `markSessionFirstTurn`. Confirm is the right seam because it is the
   // first moment the REAL conversation id is known (a pre-mint can be wrong, and
   // providers that mint their own id have none until here).
-  if (usedResume || !TURN_TRACKED_MODES.has(row.mode)) {
+  if (usedResume || !TURN_TRACKED_MODES.has(await resolveTurnTrackedAgent(db, row.mode))) {
     await markSessionFirstTurn(db, args.observedConversationId)
   }
   return origin
@@ -645,10 +664,10 @@ export async function confirmSessionConversationByTaskMode(
 /** Mark a session's process exited. Lifecycle-only mutation (never touches a
  *  resume-critical value). */
 export async function markSessionDead(db: SlayzoneDb, sessionId: string): Promise<void> {
-  await db.run(
-    `UPDATE agent_sessions SET status = 'dead', ended_at = ? WHERE id = ?`,
-    [Date.now(), sessionId]
-  )
+  await db.run(`UPDATE agent_sessions SET status = 'dead', ended_at = ? WHERE id = ?`, [
+    Date.now(),
+    sessionId
+  ])
 }
 
 /**
