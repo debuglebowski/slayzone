@@ -184,4 +184,31 @@ const ids = (n: number): string[] => Array.from({ length: n }, (_, i) => `t${i +
   )
 }
 
+// ── duplicates in a stored order must collapse ──────────────────────────────
+// A duplicate id gets laid out twice while the renderer draws each task once, so
+// the grid sizes itself for the larger count and one rect is orphaned as dead
+// space — the exact defect this layout exists to remove.
+{
+  assert(
+    JSON.stringify(reconcileExplodeOrder(['a', 'a', 'b'], ['a', 'b'])) === '["a","b"]',
+    'duplicate id collapses to one, first position wins'
+  )
+  assert(
+    JSON.stringify(reconcileExplodeOrder(['b', 'a', 'b'], ['a', 'b'])) === '["b","a"]',
+    'first occurrence sets the position, later ones are dropped'
+  )
+  assert(
+    JSON.stringify(reconcileExplodeOrder(['a', 'a'], ['a', 'b'])) === '["a","b"]',
+    'dedupe still appends the tasks that were never in the stored order'
+  )
+
+  // End to end: every allocated rect must belong to a distinct task, or the
+  // renderer's id→rect map silently drops one and leaves a hole.
+  const reconciled = reconcileExplodeOrder(['a', 'a', 'b'], ['a', 'b'])
+  const { cells } = computeExplodeLayout({ ...BASE, taskIds: reconciled, width: 1000, height: 600 })
+  const unique = new Set(cells.map((c) => c.taskId))
+  assert(cells.length === unique.size, 'no two rects share a task id')
+  eq(cells.length, 2, 'grid is sized for the real task count, not the padded one')
+}
+
 console.log(`OK — explodeLayout ${pass} checks passed`)

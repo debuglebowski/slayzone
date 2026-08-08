@@ -152,13 +152,26 @@ export function swapExplodeOrder(order: readonly string[], a: string, b: string)
  * Reconcile a persisted order against the tabs that are actually open: keep the
  * user's arrangement, drop closed tasks, append newly-opened ones. Without this a
  * stored order silently hides a task that was opened after it was saved.
+ *
+ * Guarantees each open id appears EXACTLY ONCE. A duplicate would otherwise be
+ * laid out twice while the renderer draws each task once — the grid sizes itself
+ * for the larger count and one rect is left orphaned as dead space, which is the
+ * exact defect this layout exists to remove. Deduping here rather than at the
+ * persistence boundary because this is the single choke point every read passes
+ * through, so the invariant holds for any source of a bad order, not just a
+ * hand-edited settings blob.
  */
 export function reconcileExplodeOrder(
   order: readonly string[],
   openTaskIds: readonly string[]
 ): string[] {
   const open = new Set(openTaskIds)
-  const kept = order.filter((id) => open.has(id))
-  const known = new Set(kept)
-  return [...kept, ...openTaskIds.filter((id) => !known.has(id))]
+  const seen = new Set<string>()
+  const kept: string[] = []
+  for (const id of order) {
+    if (!open.has(id) || seen.has(id)) continue
+    seen.add(id)
+    kept.push(id)
+  }
+  return [...kept, ...openTaskIds.filter((id) => !seen.has(id))]
 }
