@@ -9,7 +9,7 @@ import React, {
   useTransition
 } from 'react'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, BookOpen } from 'lucide-react'
+import { AlertTriangle, BookOpen, GripVertical, Minimize2 } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   useTRPC,
@@ -109,6 +109,15 @@ import type {
   ProjectIntegrationOnboardingProvider,
   ContextManagerSection
 } from './app-shell'
+import {
+  computeExplodeLayout,
+  ExplodeMinimizedTray,
+  type ExplodeCellRect
+} from '@slayzone/app-shell'
+
+/** Custom DnD mime so an explode-cell drag is distinguishable from dragged text
+ *  or files, which terminals and editors must keep handling themselves. */
+const EXPLODE_DRAG_TYPE = 'application/x-slayzone-explode-cell'
 
 function App(): React.JSX.Element {
   performance.mark('sz:app:render')
@@ -328,9 +337,37 @@ function App(): React.JSX.Element {
   )
   const activeAgentTaskIds = useActiveSessionTaskIds()
 
-  // Explode mode (multi-task grid) — owns toggle, focused cell, grid ref + width
-  const { explodeMode, setExplodeMode, focusedExplodeTaskId, explodeGridRef, explodeGridWidth } =
-    useExplodeMode(openTaskIds, tabs, activeTabIndex)
+  // Explode mode (multi-task grid) — owns toggle, focused cell, grid ref + size,
+  // and the user's arrangement (order + which terminals are parked in the tray).
+  const {
+    explodeMode,
+    setExplodeMode,
+    focusedExplodeTaskId,
+    explodeGridRef,
+    explodeGridWidth,
+    explodeGridHeight,
+    explodeVisibleTaskIds,
+    explodeMinimizedTaskIds,
+    minimizeExplodeTask,
+    restoreExplodeTask,
+    restoreAllExplodeTasks,
+    swapExplodeTasks
+  } = useExplodeMode(openTaskIds, tabs, activeTabIndex)
+
+  // Explicit pixel rects per cell (see explodeLayout for why not CSS grid tracks).
+  // `p-1` on the container is the outer frame, so subtract it from the usable box.
+  const explodeRects = useMemo(() => {
+    if (!explodeMode) return new Map<string, ExplodeCellRect>()
+    const PAD = 4
+    const { cells } = computeExplodeLayout({
+      taskIds: explodeVisibleTaskIds,
+      width: Math.max(0, explodeGridWidth - PAD * 2),
+      height: Math.max(0, explodeGridHeight - PAD * 2),
+      gap: 4,
+      minCellWidth: 480
+    })
+    return new Map(cells.map((c) => [c.taskId, c]))
+  }, [explodeMode, explodeVisibleTaskIds, explodeGridWidth, explodeGridHeight])
 
   // Tab lifecycle (extracted — manages sync, cleanup, cache eviction, page tracking)
   useTabLifecycle({
@@ -1482,6 +1519,14 @@ function App(): React.JSX.Element {
                               {visibleTaskCount} {visibleTaskCount === 1 ? 'task' : 'tasks'}
                             </div>
                           )}
+                          {explodeMode && explodeMinimizedTaskIds.length > 0 && (
+                            <ExplodeMinimizedTray
+                              taskIds={explodeMinimizedTaskIds}
+                              titleFor={(id) => tasksMap.get(id)?.title ?? 'Untitled'}
+                              onRestore={restoreExplodeTask}
+                              onRestoreAll={restoreAllExplodeTasks}
+                            />
+                          )}
                         </>
                       ) : undefined
                     }
@@ -1536,216 +1581,297 @@ function App(): React.JSX.Element {
                     </div>
                   ) : null}
                   <div className="flex-1 min-h-0 flex overflow-hidden">
-                  <div
-                    ref={explodeGridRef}
-                    className={cn(
-                      'flex-1 min-w-0 min-h-0 rounded-lg overflow-hidden relative',
-                      explodeMode ? 'grid gap-1 p-1' : ''
-                    )}
-                    style={{
-                      ...(explodeMode
-                        ? (() => {
-                            const MIN_CELL_W = 480
-                            const widthCols =
-                              explodeGridWidth > 0
-                                ? Math.max(1, Math.floor(explodeGridWidth / MIN_CELL_W))
-                                : Math.ceil(Math.sqrt(visibleTaskCount))
-                            const cols = Math.max(1, Math.min(widthCols, visibleTaskCount))
-                            const rows = Math.ceil(visibleTaskCount / cols)
-                            return {
-                              gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                              gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`
+                    <div
+                      ref={explodeGridRef}
+                      className={cn(
+                        'flex-1 min-w-0 min-h-0 rounded-lg overflow-hidden relative',
+                        explodeMode ? 'p-1' : ''
+                      )}
+                      // CAPTURE phase, on the grid rather than per cell. `Terminal.tsx`
+                      // attaches a `dragover` listener that calls stopPropagation()
+                      // unconditionally (it owns file-drop-to-paste-path), so a bubbling
+                      // handler on the cell never fires once the pointer is over terminal
+                      // content — which is most of a cell, and ALL of a full-height one.
+                      // Capture runs before that listener, so a swap lands wherever the
+                      // user drops. Gated on our own mime so file/text drags still fall
+                      // through to the terminal untouched.
+                      onDragOverCapture={
+                        explodeMode
+                          ? (e) => {
+                              if (!e.dataTransfer.types.includes(EXPLODE_DRAG_TYPE)) return
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
                             }
-                          })()
-                        : undefined)
-                    }}
-                  >
-                    {tabs.map((tab, i) => {
-                      const isVisible = toVisibleIndex(i) >= 0
-                      if (explodeMode && (tab.type !== 'task' || !isVisible)) return null
-                      // Inactive tabs hide via `invisible` (visibility:hidden). CSS does not
-                      // interpolate `visibility`, so a descendant carrying a `transition` (e.g.
-                      // Button's `transition-all`) stays fully painted for the whole transition
-                      // duration before snapping off — that was the "Turn into task" button
-                      // lingering on tab switch. Hidden tabs are inert, so we also kill their
-                      // descendant transitions (`[&_*]:transition-none!` below) → the hide is
-                      // instant for every element, not just ones without a transition.
-                      const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
-                      const isExplodeFocused =
-                        explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
-                      return (
-                        <div
-                          key={tab.type === 'home' ? 'home' : tab.taskId}
-                          data-explode-task-id={
-                            explodeMode && tab.type === 'task' ? tab.taskId : undefined
-                          }
-                          className={
-                            explodeMode
-                              ? cn(
-                                  'rounded overflow-hidden border min-h-0 relative',
-                                  isExplodeFocused
-                                    ? 'border-primary/60 ring-2 ring-primary/40'
-                                    : 'border-border'
-                                )
-                              : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
-                          }
-                          inert={!explodeMode && !isViewActive ? true : undefined}
-                        >
-                          {/* Multi-hub: scope each tab's content to the hub that
+                          : undefined
+                      }
+                      onDropCapture={
+                        explodeMode
+                          ? (e) => {
+                              if (!e.dataTransfer.types.includes(EXPLODE_DRAG_TYPE)) return
+                              const from = e.dataTransfer.getData(EXPLODE_DRAG_TYPE)
+                              // In capture phase `e.target` is still the deepest node (the
+                              // terminal), so walk up to whichever cell owns it.
+                              const cell = (e.target as HTMLElement | null)?.closest?.(
+                                '[data-explode-task-id]'
+                              )
+                              const to = cell?.getAttribute('data-explode-task-id')
+                              e.preventDefault()
+                              e.stopPropagation()
+                              if (from && to && from !== to) swapExplodeTasks(from, to)
+                            }
+                          : undefined
+                      }
+                    >
+                      {tabs.map((tab, i) => {
+                        const isVisible = toVisibleIndex(i) >= 0
+                        if (explodeMode && (tab.type !== 'task' || !isVisible)) return null
+                        // Inactive tabs hide via `invisible` (visibility:hidden). CSS does not
+                        // interpolate `visibility`, so a descendant carrying a `transition` (e.g.
+                        // Button's `transition-all`) stays fully painted for the whole transition
+                        // duration before snapping off — that was the "Turn into task" button
+                        // lingering on tab switch. Hidden tabs are inert, so we also kill their
+                        // descendant transitions (`[&_*]:transition-none!` below) → the hide is
+                        // instant for every element, not just ones without a transition.
+                        const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
+                        const isExplodeFocused =
+                          explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
+                        // A minimized cell has no rect: it is parked in the header tray.
+                        // It stays MOUNTED and merely hidden — unmounting would tear down
+                        // its xterm and lose the scrollback the user minimized to keep.
+                        const explodeRect =
+                          explodeMode && tab.type === 'task'
+                            ? explodeRects.get(tab.taskId)
+                            : undefined
+                        const isExplodeMinimized =
+                          explodeMode && tab.type === 'task' && !explodeRect
+                        return (
+                          <div
+                            key={tab.type === 'home' ? 'home' : tab.taskId}
+                            data-explode-task-id={
+                              explodeMode && tab.type === 'task' ? tab.taskId : undefined
+                            }
+                            className={
+                              explodeMode
+                                ? isExplodeMinimized
+                                  ? 'absolute inset-0 invisible [&_*]:transition-none!'
+                                  : cn(
+                                      'group absolute rounded overflow-hidden border min-h-0',
+                                      isExplodeFocused
+                                        ? 'border-primary/60 ring-2 ring-primary/40 z-10'
+                                        : 'border-border'
+                                    )
+                                : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
+                            }
+                            style={
+                              explodeRect
+                                ? {
+                                    left: explodeRect.left + 4,
+                                    top: explodeRect.top + 4,
+                                    width: explodeRect.width,
+                                    height: explodeRect.height
+                                  }
+                                : undefined
+                            }
+                            inert={
+                              (!explodeMode && !isViewActive) || isExplodeMinimized
+                                ? true
+                                : undefined
+                            }
+                          >
+                            {explodeRect && tab.type === 'task' ? (
+                              // Hover-revealed cell chrome. Absolutely positioned over the
+                              // content rather than inset above it, so showing it never
+                              // resizes the terminal underneath (an xterm reflow on hover
+                              // would reflow the user's output).
+                              <div className="absolute top-0 right-0 z-20 flex items-center gap-0.5 rounded-bl bg-surface-2/90 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                <button
+                                  type="button"
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.setData(EXPLODE_DRAG_TYPE, tab.taskId)
+                                    e.dataTransfer.effectAllowed = 'move'
+                                  }}
+                                  title="Drag onto another terminal to swap places"
+                                  aria-label="Drag to swap position"
+                                  data-testid="explode-drag-handle"
+                                  className="cursor-grab p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                                >
+                                  <GripVertical className="size-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => minimizeExplodeTask(tab.taskId)}
+                                  title="Minimize to the header tray (keeps running)"
+                                  aria-label="Minimize terminal"
+                                  data-testid="explode-minimize"
+                                  className="p-1 text-muted-foreground hover:text-foreground"
+                                >
+                                  <Minimize2 className="size-3.5" />
+                                </button>
+                              </div>
+                            ) : null}
+                            {/* Multi-hub: scope each tab's content to the hub that
                               owns it, so ambient useTRPC() (TaskDetailPage/
                               HomeDetail + the hub-keyed taskDetailCache) resolves
                               to the right hub. Single-hub → HubScope(default) is
                               the same client the app is already wrapped in. */}
-                          <HubScope
-                            hubId={
-                              tab.type === 'task'
-                                ? (hubIdByTask.get(tab.taskId) ?? defaultHubId)
-                                : selectedProjectHubId
-                            }
-                          >
-                          {tab.type === 'home' ? (
-                            <HomeDetail
-                              durationLocked={durationLocked}
-                              selectedProject={selectedProject}
-                              selectedProjectId={selectedProjectId}
-                              projects={projects}
-                              updateProject={updateProject}
-                              updateTask={updateTask}
-                              projectNameInputRef={projectNameInputRef}
-                              projectNameValue={projectNameValue}
-                              setProjectNameValue={setProjectNameValue}
-                              handleProjectNameSave={handleProjectNameSave}
-                              handleProjectNameKeyDown={handleProjectNameKeyDown}
-                              projectPathMissing={projectPathMissing}
-                              handleFixProjectPath={handleFixProjectPath}
-                              filter={filter}
-                              setFilter={setFilter}
-                              projectTags={projectTags}
-                              homePanel={homePanel}
-                              homePanelConfig={homePanelConfig}
-                              isHomePanelEnabled={isHomePanelEnabled}
-                              panelSizes={panelSizes}
-                              updatePanelSizes={updatePanelSizes}
-                              resetPanelSize={resetPanelSize}
-                              testsPanelEnabled={testsPanelEnabled}
-                              testGroupBy={testGroupBy}
-                              homeResolvedRepo={homeResolvedRepo}
-                              homeDetectedRepos={homeDetectedRepos}
-                              homeSelectedProject={homeSelectedProject}
-                              handleHomeRepoChange={handleHomeRepoChange}
-                              isViewActive={isViewActive}
-                              isHomeTabActive={tabs[activeTabIndex]?.type === 'home'}
-                              tasks={tasks}
-                              displayTasks={displayTasks}
-                              taskTags={taskTags}
-                              blockedTaskIds={blockedTaskIds}
-                              handleTaskMove={handleTaskMove}
-                              handleTaskBulkMove={handleTaskBulkMove}
-                              reorderTasks={reorderTasks}
-                              handleTaskClick={handleTaskClick}
-                              handleTaskTagsChange={handleTaskTagsChange}
-                              contextMenuUpdate={contextMenuUpdate}
-                              bulkContextMenuUpdate={bulkContextMenuUpdate}
-                              clearBlockers={clearBlockers}
-                              archiveTask={archiveTask}
-                              deleteTask={deleteTask}
-                              bulkDelete={bulkDelete}
-                              archiveTasks={archiveTasks}
-                              activeAgentTaskIds={activeAgentTaskIds}
-                              shutdownAgentForTask={shutdownAgentForTask}
-                              globalAgentPanelState={globalAgentPanelState}
-                              agentStatusState={agentStatusState}
-                              openProjectSettings={openProjectSettings}
-                              panelGitShortcut={panelGitShortcut}
-                              panelEditorShortcut={panelEditorShortcut}
-                              panelProcessesShortcut={panelProcessesShortcut}
-                              panelTestsShortcut={panelTestsShortcut}
-                              panelAutomationsShortcut={panelAutomationsShortcut}
-                            />
-                          ) : (
-                            <Suspense fallback={<TaskShell />}>
-                              <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
-                                <TaskDetailDataLoader
-                                  taskId={tab.taskId}
-                                  task={tasksMap.get(tab.taskId) ?? null}
-                                  project={
-                                    projectsMap.get(tasksMap.get(tab.taskId)?.project_id ?? '') ??
-                                    null
-                                  }
-                                  isActive={explodeMode || isViewActive}
-                                  hasShortcutFocus={
-                                    explodeMode ? focusedExplodeTaskId === tab.taskId : isViewActive
-                                  }
-                                  compact={explodeMode}
-                                  zenMode={zenMode}
-                                  onBack={goBack}
-                                  onTaskUpdated={updateTask}
-                                  onArchiveTask={archiveTask}
-                                  onDeleteTask={deleteTask}
-                                  onNavigateToTask={openTask}
-                                  onConvertTask={handleConvertTask}
-                                  onCloseTab={closeTabByTaskId}
-                                  settingsRevision={settingsRevision}
-                                  terminalFocusRequestId={terminalFocusRequests[tab.taskId] ?? 0}
-                                  onTerminalFocusRequestHandled={handleTerminalFocusRequestHandled}
-                                  isSidePanelResizing={isSidePanelResizing}
+                            <HubScope
+                              hubId={
+                                tab.type === 'task'
+                                  ? (hubIdByTask.get(tab.taskId) ?? defaultHubId)
+                                  : selectedProjectHubId
+                              }
+                            >
+                              {tab.type === 'home' ? (
+                                <HomeDetail
+                                  durationLocked={durationLocked}
+                                  selectedProject={selectedProject}
+                                  selectedProjectId={selectedProjectId}
+                                  projects={projects}
+                                  updateProject={updateProject}
+                                  updateTask={updateTask}
+                                  projectNameInputRef={projectNameInputRef}
+                                  projectNameValue={projectNameValue}
+                                  setProjectNameValue={setProjectNameValue}
+                                  handleProjectNameSave={handleProjectNameSave}
+                                  handleProjectNameKeyDown={handleProjectNameKeyDown}
+                                  projectPathMissing={projectPathMissing}
+                                  handleFixProjectPath={handleFixProjectPath}
+                                  filter={filter}
+                                  setFilter={setFilter}
+                                  projectTags={projectTags}
+                                  homePanel={homePanel}
+                                  homePanelConfig={homePanelConfig}
+                                  isHomePanelEnabled={isHomePanelEnabled}
+                                  panelSizes={panelSizes}
+                                  updatePanelSizes={updatePanelSizes}
+                                  resetPanelSize={resetPanelSize}
+                                  testsPanelEnabled={testsPanelEnabled}
+                                  testGroupBy={testGroupBy}
+                                  homeResolvedRepo={homeResolvedRepo}
+                                  homeDetectedRepos={homeDetectedRepos}
+                                  homeSelectedProject={homeSelectedProject}
+                                  handleHomeRepoChange={handleHomeRepoChange}
+                                  isViewActive={isViewActive}
+                                  isHomeTabActive={tabs[activeTabIndex]?.type === 'home'}
+                                  tasks={tasks}
+                                  displayTasks={displayTasks}
+                                  taskTags={taskTags}
+                                  blockedTaskIds={blockedTaskIds}
+                                  handleTaskMove={handleTaskMove}
+                                  handleTaskBulkMove={handleTaskBulkMove}
+                                  reorderTasks={reorderTasks}
+                                  handleTaskClick={handleTaskClick}
+                                  handleTaskTagsChange={handleTaskTagsChange}
+                                  contextMenuUpdate={contextMenuUpdate}
+                                  bulkContextMenuUpdate={bulkContextMenuUpdate}
+                                  clearBlockers={clearBlockers}
+                                  archiveTask={archiveTask}
+                                  deleteTask={deleteTask}
+                                  bulkDelete={bulkDelete}
+                                  archiveTasks={archiveTasks}
+                                  activeAgentTaskIds={activeAgentTaskIds}
+                                  shutdownAgentForTask={shutdownAgentForTask}
+                                  globalAgentPanelState={globalAgentPanelState}
+                                  agentStatusState={agentStatusState}
+                                  openProjectSettings={openProjectSettings}
+                                  panelGitShortcut={panelGitShortcut}
+                                  panelEditorShortcut={panelEditorShortcut}
+                                  panelProcessesShortcut={panelProcessesShortcut}
+                                  panelTestsShortcut={panelTestsShortcut}
+                                  panelAutomationsShortcut={panelAutomationsShortcut}
                                 />
-                              </div>
-                            </Suspense>
-                          )}
-                          </HubScope>
+                              ) : (
+                                <Suspense fallback={<TaskShell />}>
+                                  <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
+                                    <TaskDetailDataLoader
+                                      taskId={tab.taskId}
+                                      task={tasksMap.get(tab.taskId) ?? null}
+                                      project={
+                                        projectsMap.get(
+                                          tasksMap.get(tab.taskId)?.project_id ?? ''
+                                        ) ?? null
+                                      }
+                                      isActive={explodeMode || isViewActive}
+                                      hasShortcutFocus={
+                                        explodeMode
+                                          ? focusedExplodeTaskId === tab.taskId
+                                          : isViewActive
+                                      }
+                                      compact={explodeMode}
+                                      zenMode={zenMode}
+                                      onBack={goBack}
+                                      onTaskUpdated={updateTask}
+                                      onArchiveTask={archiveTask}
+                                      onDeleteTask={deleteTask}
+                                      onNavigateToTask={openTask}
+                                      onConvertTask={handleConvertTask}
+                                      onCloseTab={closeTabByTaskId}
+                                      settingsRevision={settingsRevision}
+                                      terminalFocusRequestId={
+                                        terminalFocusRequests[tab.taskId] ?? 0
+                                      }
+                                      onTerminalFocusRequestHandled={
+                                        handleTerminalFocusRequestHandled
+                                      }
+                                      isSidePanelResizing={isSidePanelResizing}
+                                    />
+                                  </div>
+                                </Suspense>
+                              )}
+                            </HubScope>
+                          </div>
+                        )
+                      })}
+                      {activeView === 'leaderboard' && (
+                        <div className="absolute inset-0 z-20">
+                          <Suspense fallback={null}>
+                            <LeaderboardPage auth={leaderboardAuth} />
+                          </Suspense>
                         </div>
-                      )
-                    })}
-                    {activeView === 'leaderboard' && (
-                      <div className="absolute inset-0 z-20">
-                        <Suspense fallback={null}>
-                          <LeaderboardPage auth={leaderboardAuth} />
-                        </Suspense>
-                      </div>
-                    )}
-                    {activeView === 'usage-analytics' && (
-                      <div className="absolute inset-0 z-20">
-                        <Suspense fallback={null}>
-                          <UsageAnalyticsPage onTaskClick={openTask} />
-                        </Suspense>
-                      </div>
-                    )}
-                    {activeView === 'context' && (
-                      <div className="absolute inset-0 z-20">
-                        <Suspense fallback={null}>
-                          <ContextManagerPage
-                            selectedProjectId={selectedProjectId}
-                            projectPath={projects.find((p) => p.id === selectedProjectId)?.path}
-                            projectName={projects.find((p) => p.id === selectedProjectId)?.name}
-                            onBack={() => useTabStore.getState().setActiveView('tabs')}
-                          />
-                        </Suspense>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                      {activeView === 'usage-analytics' && (
+                        <div className="absolute inset-0 z-20">
+                          <Suspense fallback={null}>
+                            <UsageAnalyticsPage onTaskClick={openTask} />
+                          </Suspense>
+                        </div>
+                      )}
+                      {activeView === 'context' && (
+                        <div className="absolute inset-0 z-20">
+                          <Suspense fallback={null}>
+                            <ContextManagerPage
+                              selectedProjectId={selectedProjectId}
+                              projectPath={projects.find((p) => p.id === selectedProjectId)?.path}
+                              projectName={projects.find((p) => p.id === selectedProjectId)?.name}
+                              onBack={() => useTabStore.getState().setActiveView('tabs')}
+                            />
+                          </Suspense>
+                        </div>
+                      )}
+                    </div>
 
-                  <AppSidePanels
-                    agentSessionId={agentSessionId}
-                    globalAgentPanelMounted={globalAgentPanelMountedRef.current}
-                    hideSidebarPanel={hideSidebarPanel}
-                    globalAgentPanelState={globalAgentPanelState}
-                    setGlobalAgentPanelState={setGlobalAgentPanelState}
-                    isSidePanelResizing={isSidePanelResizing}
-                    setIsSidePanelResizing={setIsSidePanelResizing}
-                    projects={projects}
-                    selectedProjectId={selectedProjectId}
-                    agentMode={agentMode}
-                    handleAgentNewSession={handleAgentNewSession}
-                    handleAgentModeChange={handleAgentModeChange}
-                    floatingState={floatingGlobalAgentPanelState.kind}
-                    agentStatusState={agentStatusState}
-                    setAgentStatusState={setAgentStatusState}
-                    idleTasks={idleTasks}
-                    openTask={openTask}
-                    handleDismissIdle={handleDismissIdle}
-                    columnsByProjectId={columnsByProjectId}
-                  />
+                    <AppSidePanels
+                      agentSessionId={agentSessionId}
+                      globalAgentPanelMounted={globalAgentPanelMountedRef.current}
+                      hideSidebarPanel={hideSidebarPanel}
+                      globalAgentPanelState={globalAgentPanelState}
+                      setGlobalAgentPanelState={setGlobalAgentPanelState}
+                      isSidePanelResizing={isSidePanelResizing}
+                      setIsSidePanelResizing={setIsSidePanelResizing}
+                      projects={projects}
+                      selectedProjectId={selectedProjectId}
+                      agentMode={agentMode}
+                      handleAgentNewSession={handleAgentNewSession}
+                      handleAgentModeChange={handleAgentModeChange}
+                      floatingState={floatingGlobalAgentPanelState.kind}
+                      agentStatusState={agentStatusState}
+                      setAgentStatusState={setAgentStatusState}
+                      idleTasks={idleTasks}
+                      openTask={openTask}
+                      handleDismissIdle={handleDismissIdle}
+                      columnsByProjectId={columnsByProjectId}
+                    />
                   </div>
                 </div>
               </div>
