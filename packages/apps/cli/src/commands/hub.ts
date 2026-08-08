@@ -790,6 +790,19 @@ export function hubCommand(): Command {
             `Remove it with \`slay hub rm ${name}\` and create it again.`
         )
       }
+      // ONE ROOT, ONE HUB — the same guard `create` applies, because `start` is the
+      // other way a hub is booted. The name check above cannot catch this: a hub
+      // occupying this root under a DIFFERENT name (renamed, or started by hand)
+      // slips past it, and starting anyway would put two writers on one
+      // `<ROOT>/storage` SQLite file.
+      const occupant = (await discoverAllHubs()).find((h) => h.root === root)
+      if (occupant) {
+        fail(
+          `A hub is already running in ${shortenPath(root)} — "${occupant.name}" on port ` +
+            `${occupant.port} (pid ${occupant.pid}). Starting "${name}" would put two hubs ` +
+            `on the same store.`
+        )
+      }
       await launchHub({ name, root, backend, creating: false })
     })
 
@@ -885,7 +898,24 @@ export function hubCommand(): Command {
         console.log(`Unit updated to ${HUB_PACKAGE}@${bin.version}.`)
       }
       supervisorStop('hub', backend, name)
-      await waitForHubGone(hub.port, 15_000)
+      // NEVER start a second hub because the first would not die.
+      //
+      // This return value used to be discarded, and the consequence was two live
+      // hubs on ONE root: a hub created before its unit existed (or started by hand)
+      // is not owned by the supervisor, so `supervisorStop` is a no-op on it; the
+      // wait then timed out, the old process kept :51110, and the "restart" bound
+      // :51111 from the port block. Two hubs sharing `<ROOT>/storage` means two
+      // writers on one SQLite file, so this has to be fatal rather than a warning.
+      if (!(await waitForHubGone(hub.port, 15_000))) {
+        fail(
+          `Hub "${name}" is still answering on port ${hub.port} after 15s, so restarting ` +
+            `would leave TWO hubs sharing ${shortenPath(root)} — refusing.\n` +
+            `It is not owned by ${backend} (started by hand, docker, or before it was ` +
+            `registered). Stop that process first:\n` +
+            `  kill ${hub.pid}\n` +
+            `then \`slay hub start ${name}\`.`
+        )
+      }
       supervisorStart('hub', backend, name, unitPath('hub', name, backend))
       const back = await waitForHub(() => findHub(name), 20_000)
       if (!back) fail(`Hub "${name}" did not come back within 20s. Check ${shortenPath(logDir)}.`)
