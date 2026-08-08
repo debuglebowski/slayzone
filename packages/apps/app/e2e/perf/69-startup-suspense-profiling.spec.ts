@@ -58,7 +58,15 @@ interface StartupTimeline {
 }
 
 test.describe('Startup & Suspense Profiling', () => {
-  const PROJ_ABBREV = 'SP'
+  /**
+   * DERIVED, not hardcoded — same defect as `perf/68` had. The sidebar badge is
+   * `name.slice(0, 2).toUpperCase()` (`ProjectAvatar.tsx`), so `StartupProf`
+   * renders as **ST**; this was pinned to `'SP'`, which matches no button.
+   * `clickProject` then falls through to its command-palette fallback, which
+   * presses Enter on whatever ranks first and silently navigates elsewhere when
+   * that is not the project.
+   */
+  let projAbbrev: string
   let projectId: string
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -70,6 +78,7 @@ test.describe('Startup & Suspense Profiling', () => {
       path: TEST_PROJECT_PATH
     })
     projectId = p.id
+    projAbbrev = p.name.slice(0, 2).toUpperCase()
 
     // Seed tasks across statuses
     for (let i = 0; i < 8; i++) {
@@ -78,7 +87,7 @@ test.describe('Startup & Suspense Profiling', () => {
     }
     await s.refreshData()
     await goHome(mainWindow)
-    await clickProject(mainWindow, PROJ_ABBREV)
+    await clickProject(mainWindow, projAbbrev)
 
     // Open 2 task tabs so Suspense boundaries fire on reload
     const tasks = await s.getTasks()

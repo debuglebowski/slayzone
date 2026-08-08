@@ -65,20 +65,38 @@ function writePerfResults(name: string, data: unknown) {
 test.describe('Performance Profiling', () => {
   const metrics: Partial<PerfMetrics> = { timestamp: new Date().toISOString() }
   let projectId: string
-  const PROJ_ABBREV = 'PF'
+  /**
+   * DERIVED, not hardcoded. The sidebar renders a project's badge as
+   * `name.slice(0, 2).toUpperCase()` (`ProjectAvatar.tsx`), so `PerfTest` is
+   * **PE** — this was pinned to `'PF'`, which matches no button at all.
+   *
+   * `clickProject` therefore exhausted all 8 attempts looking for a badge that
+   * could never exist and fell through to its last-resort fallback: type the
+   * string into the command palette and press Enter, accepting whatever ranks
+   * first among files, folders, commands, projects and tasks. That path lands on
+   * the right project most of the time and silently navigates somewhere else the
+   * rest of the time, at which point `Perf task 0` never appears and the whole
+   * `beforeAll` fails — taking all ten tests with it and reporting under
+   * `01 — memory baseline`, which is innocent.
+   *
+   * Measured before this change: 1 failure in 5 separate runs, matching 2/10 in
+   * the full-suite campaign.
+   */
+  let projAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'PerfTest', color: '#8b5cf6', path: TEST_PROJECT_PATH })
     projectId = p.id
+    projAbbrev = p.name.slice(0, 2).toUpperCase()
     // Seed 10 tasks across statuses
     for (let i = 0; i < 10; i++) {
       const statuses = ['inbox', 'in_progress', 'done', 'in_progress', 'inbox']
       await s.createTask({ projectId, title: `Perf task ${i}`, status: statuses[i % 5] })
     }
     await s.refreshData()
-    await showProjectBoard(mainWindow, PROJ_ABBREV, 'Perf task 0')
+    await showProjectBoard(mainWindow, projAbbrev, 'Perf task 0')
   })
 
   test('01 — memory baseline', async ({ mainWindow }) => {
@@ -141,10 +159,15 @@ test.describe('Performance Profiling', () => {
     if (paint.firstContentfulPaint > 0) {
       expect(paint.firstContentfulPaint).toBeLessThan(5_000)
     }
-  })
 
-  test('04 — slowest resources', async ({ mainWindow }) => {
-    const resources = await mainWindow.evaluate(() => {
+    // Resource timings, collected HERE rather than in a test of their own.
+    // This was `04 — slowest resources`, a `test()` containing no assertion at
+    // all: it could only ever report, so it added a pass/fail unit that could
+    // not fail on purpose. It is kept at this point in the sequence rather than
+    // moved to `afterAll` because the resource buffer keeps accumulating — read
+    // at the end of the file it would rank a test-induced fetch as the app's
+    // "slowest resource".
+    metrics.resources = await mainWindow.evaluate(() => {
       const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[]
       const sorted = entries.slice().sort((a, b) => b.duration - a.duration)
       return {
@@ -155,7 +178,6 @@ test.describe('Performance Profiling', () => {
         }))
       }
     })
-    metrics.resources = resources
   })
 
   test('05 — IPC round-trip: loadBoardData', async ({ mainWindow }) => {
@@ -202,7 +224,7 @@ test.describe('Performance Profiling', () => {
     // goHome+clickProject can fail to surface the board (card stays hidden). Retry the
     // nav until the card is visible. This precedes the measured goHome below, so it
     // doesn't affect the latency number.
-    await showProjectBoard(mainWindow, PROJ_ABBREV, 'Perf task 0')
+    await showProjectBoard(mainWindow, projAbbrev, 'Perf task 0')
     // Open a task tab by double-clicking the kanban card
     const taskCard = mainWindow.getByText('Perf task 0').first()
     await taskCard.dblclick()
@@ -319,10 +341,17 @@ test.describe('Performance Profiling', () => {
     // Listener growth during the profiled interaction should stay bounded even if
     // the app shell has a large steady-state listener baseline.
     expect(cdpData.jsEventListenersDelta).toBeLessThan(1_000)
-    expect(cdpData.jsEventListeners).toBeLessThan(100_000)
+    // Dropped: `expect(cdpData.jsEventListeners).toBeLessThan(100_000)`. A
+    // hundred thousand live listeners is not a bound this app can reach, so the
+    // assertion could never fire — it read as coverage while providing none.
+    // The delta bound above is the one that can actually catch a leak.
   })
 
-  test('11 — write results', async () => {
+  // Writing the report is teardown, not a test. As `11 — write results` it was
+  // a `test()` with no assertion, and it could only run if every preceding test
+  // had already run; as `afterAll` the profiling JSON is still produced when an
+  // earlier case throws, which is exactly when the numbers are most wanted.
+  test.afterAll(async () => {
     writePerfResults('profiling-results', metrics)
   })
 })

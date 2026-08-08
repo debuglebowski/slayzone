@@ -38,8 +38,21 @@ if [[ $# -gt 0 ]]; then
   exec npx playwright test --config playwright.config.ts "$@"
 fi
 
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT
+# Where per-group logs and JSON reports land.
+#
+# Default stays a self-deleting tmpdir so an interactive run leaves no litter.
+# Set E2E_RUN_DIR to keep them: a multi-run campaign needs per-test failure
+# IDENTITY across runs, not just counts. That is what made the original flake
+# diagnosis possible — two samples could not reveal that one file's five
+# failures were one cause with four victims. Without durable per-run reports the
+# error text is deleted by the exit trap and only the count survives.
+if [[ -n "${E2E_RUN_DIR:-}" ]]; then
+  tmpdir="$E2E_RUN_DIR"
+  mkdir -p "$tmpdir"
+else
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+fi
 
 # Discover groups from subdirectories.
 #
@@ -72,23 +85,10 @@ echo "Running $total specs across ${#groups[@]} groups: ${groups[*]}"
 # diagnosable instead of arguable.
 print_covariates() {
   local when=$1
-  echo "[covariates:$when] $(uptime | sed 's/.*load averages*: //')  load"
-  # SlayZone processes NOT belonging to this test run (no PLAYWRIGHT marker) —
-  # the co-resident dev app, its sidecar and its runner. `etime` is process AGE,
-  # the variable that correlated here; `rss` is in KB.
-  local procs
-  procs=$(pgrep -f 'out/main/index\.js|hub/dist/bin\.c?js|runner/dist/bin\.cjs' 2>/dev/null || true)
-  local count=0 total_rss=0 oldest="-"
-  for pid in $procs; do
-    ps eww -o command= -p "$pid" 2>/dev/null | grep -q 'PLAYWRIGHT=' && continue
-    count=$((count + 1))
-    local rss etime
-    rss=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
-    etime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
-    [[ -n "$rss" ]] && total_rss=$((total_rss + rss))
-    [[ "$oldest" == "-" ]] && oldest=$etime
-  done
-  echo "[covariates:$when] $count foreign SlayZone proc(s), $((total_rss / 1024))MB RSS, oldest age $oldest"
+  local json
+  json=$(bash "$(dirname "$0")/e2e-covariates.sh")
+  [[ -n "${E2E_RUN_DIR:-}" ]] && echo "$json" > "$tmpdir/covariates-$when.json"
+  echo "[covariates:$when] $json"
 }
 print_covariates before
 
@@ -99,10 +99,22 @@ pids=()
 for name in "${groups[@]}"; do
   logfile="$tmpdir/log-$name.txt"
 
-  npx playwright test \
-    --config playwright.config.ts \
-    "e2e/$name/" \
-    > "$logfile" 2>&1 &
+  # `list` keeps the human log readable; `json` is what the cross-run
+  # failure-identity table is built from. Only added when the reports are being
+  # kept — an interactive run has nothing to aggregate.
+  if [[ -n "${E2E_RUN_DIR:-}" ]]; then
+    PLAYWRIGHT_JSON_OUTPUT_NAME="$tmpdir/report-$name.json" \
+      npx playwright test \
+        --config playwright.config.ts \
+        --reporter=list,json \
+        "e2e/$name/" \
+        > "$logfile" 2>&1 &
+  else
+    npx playwright test \
+      --config playwright.config.ts \
+      "e2e/$name/" \
+      > "$logfile" 2>&1 &
+  fi
   pids+=($!)
 done
 
@@ -125,11 +137,17 @@ if [[ -d "e2e/$PERF_GROUP" && -e "${perf_specs[0]}" ]]; then
   echo ""
   echo "Parallel phase done — running '$PERF_GROUP' alone (latency budgets need a quiet box)"
   perf_log="$tmpdir/log-$PERF_GROUP.txt"
-  if npx playwright test --config playwright.config.ts "e2e/$PERF_GROUP/" > "$perf_log" 2>&1; then
+  perf_reporter=()
+  if [[ -n "${E2E_RUN_DIR:-}" ]]; then
+    perf_reporter=(--reporter=list,json)
+    export PLAYWRIGHT_JSON_OUTPUT_NAME="$tmpdir/report-$PERF_GROUP.json"
+  fi
+  if npx playwright test --config playwright.config.ts "${perf_reporter[@]+"${perf_reporter[@]}"}" "e2e/$PERF_GROUP/" > "$perf_log" 2>&1; then
     :
   else
     fail=1
   fi
+  unset PLAYWRIGHT_JSON_OUTPUT_NAME
   groups+=("$PERF_GROUP")
 fi
 
@@ -166,4 +184,21 @@ echo ""
 print_covariates after
 echo "Wall clock: ${elapsed}s ($((elapsed / 60))m $((elapsed % 60))s)"
 echo "========================================="
+
+# Durable run summary. `spec_sha` fingerprints the spec tree because Playwright
+# reads spec files live from disk: if anything edits them mid-campaign, runs
+# either side of that edit measured different suites and "N consecutive green"
+# would be a claim about two different things. Recording it makes that
+# detectable instead of assumed.
+if [[ -n "${E2E_RUN_DIR:-}" ]]; then
+  spec_sha=$(find e2e -name '*.spec.ts' -o -name '*.ts' -path 'e2e/fixtures/*' \
+    | sort | xargs shasum 2>/dev/null | shasum | cut -c1-12)
+  printf '{"elapsed_s":%d,"fail":%d,"git_sha":"%s","git_dirty":%s,"spec_sha":"%s"}\n' \
+    "$elapsed" "$fail" \
+    "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+    "$([[ -n "$(git status --porcelain 2>/dev/null)" ]] && echo true || echo false)" \
+    "$spec_sha" \
+    > "$tmpdir/summary.json"
+fi
+
 exit $fail

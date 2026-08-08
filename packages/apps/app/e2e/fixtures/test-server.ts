@@ -26,6 +26,27 @@ function startServer(): Promise<{ host: string; port: number }> {
         res.end()
         return
       }
+      // A page that actually declares a favicon, plus the icon itself.
+      //
+      // Deliberately its OWN route rather than a link in the shared `HTML`
+      // template: adding `<link rel=icon>` to every fixture page would make
+      // every browser spec issue an extra request, which the specs that count
+      // requests or assert load-completion would notice.
+      if (url.startsWith('/favicon.ico')) {
+        // Smallest valid GIF — enough for a real fetch to succeed.
+        res.writeHead(200, { 'content-type': 'image/gif' })
+        res.end(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'))
+        return
+      }
+      if (url.startsWith('/favicon-page')) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end(
+          `<!doctype html><html><head><title>Favicon Page</title>` +
+            `<link rel="icon" href="/favicon.ico"></head>` +
+            `<body><h1>Favicon Page</h1></body></html>`
+        )
+        return
+      }
       if (url.startsWith('/title-')) {
         const name = decodeURIComponent(url.slice('/title-'.length).split('?')[0])
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
