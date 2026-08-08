@@ -8,6 +8,10 @@ export {
   getHubClient,
   listHubClients,
   _resetHubClients,
+  // Test seam, exported for the same reason as `_resetHubClients`: unit tests of
+  // stores that persist through tRPC need a stub, or their debounced write fires
+  // after the assertions and crashes the run on "tRPC client not ready".
+  _setTrpcClientSingleton,
   type CreateTrpcClientOpts,
   type TrpcVanillaClient,
   type HubWsClient,

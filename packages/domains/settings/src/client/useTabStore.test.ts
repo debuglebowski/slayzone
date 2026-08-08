@@ -4,6 +4,22 @@
  */
 
 import { useTabStore } from './useTabStore.js'
+import { _setTrpcClientSingleton } from '@slayzone/transport/client'
+
+// The store persists its view-state slice through tRPC on a 500ms debounce. Once
+// `isLoaded` flips true (which `_loadState` does), any slice change schedules that
+// write — so without a stub the timer fires after the assertions and crashes the
+// run on "tRPC client not ready". Stub it and assert the write instead.
+const settingsWrites: Array<{ key: string; value: string }> = []
+_setTrpcClientSingleton({
+  settings: {
+    set: {
+      mutate: async (input: { key: string; value: string }) => {
+        settingsWrites.push(input)
+      }
+    }
+  }
+} as never)
 
 const store = useTabStore
 
@@ -30,10 +46,7 @@ function test(name: string, fn: () => void) {
 // (tB) that is still open. This is the precondition for the home-icon bug.
 function seedFocusedOnAWithBTaskOpen() {
   store.setState({
-    tabs: [
-      { type: 'home' },
-      { type: 'task', taskId: 'tB', title: 'B-task' }
-    ],
+    tabs: [{ type: 'home' }, { type: 'task', taskId: 'tB', title: 'B-task' }],
     activeTabIndex: 1,
     selectedProjectId: 'pA',
     activeView: 'tabs',
@@ -82,6 +95,55 @@ test('plain switch where last tab was home lands on home', () => {
   store.setState({ projectLastActiveTab: { pB: 'home' } })
   store.getState().selectProject('pB')
   assert(store.getState().activeTabIndex === 0, 'activeTabIndex 0')
+})
+
+// ── explode arrangement persistence ─────────────────────────────────────────
+// The arrangement rides the same `viewState` slice as the rest of the view
+// state, so a renderer reload keeps a layout the user deliberately built.
+
+test('setExplodeArrangement updates order and minimized independently', () => {
+  store.setState({ explodeOrder: ['a', 'b'], explodeMinimized: ['b'] })
+  // Partial write: a drag changes only the order and must not clear the tray.
+  store.getState().setExplodeArrangement({ order: ['b', 'a'] })
+  let s = store.getState()
+  assert(JSON.stringify(s.explodeOrder) === '["b","a"]', `order=${JSON.stringify(s.explodeOrder)}`)
+  assert(JSON.stringify(s.explodeMinimized) === '["b"]', 'minimized untouched by an order write')
+
+  store.getState().setExplodeArrangement({ minimized: [] })
+  s = store.getState()
+  assert(JSON.stringify(s.explodeOrder) === '["b","a"]', 'order untouched by a minimized write')
+  assert(s.explodeMinimized.length === 0, 'minimized cleared')
+})
+
+test('_loadState restores a persisted arrangement', () => {
+  store.getState()._loadState({
+    tabs: [],
+    activeTabIndex: 0,
+    selectedProjectId: '',
+    explodeOrder: ['x', 'y'],
+    explodeMinimized: ['y']
+  })
+  const s = store.getState()
+  assert(JSON.stringify(s.explodeOrder) === '["x","y"]', `order=${JSON.stringify(s.explodeOrder)}`)
+  assert(JSON.stringify(s.explodeMinimized) === '["y"]', 'minimized restored')
+})
+
+test('_loadState rejects malformed arrangement entries', () => {
+  // This JSON lives on disk, so a non-string entry would otherwise flow straight
+  // into layout as an undefined task id.
+  store.getState()._loadState({
+    tabs: [],
+    activeTabIndex: 0,
+    selectedProjectId: '',
+    explodeOrder: ['ok', 42, null, 'fine'] as unknown as string[],
+    explodeMinimized: 'not-an-array' as unknown as string[]
+  })
+  const s = store.getState()
+  assert(
+    JSON.stringify(s.explodeOrder) === '["ok","fine"]',
+    `non-string entries dropped, got ${JSON.stringify(s.explodeOrder)}`
+  )
+  assert(s.explodeMinimized.length === 0, 'non-array falls back to empty')
 })
 
 console.log('Done')
