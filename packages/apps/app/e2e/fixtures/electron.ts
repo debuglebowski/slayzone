@@ -6,16 +6,7 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { pressShortcut } from './shortcuts'
-import type { TrpcVanillaClient } from '@slayzone/transport/client'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
-
-declare global {
-  interface Window {
-    /** Exposed by main.tsx under Playwright — the vanilla tRPC client.
-     *  Typing it here makes the page.evaluate() closures below type-checked. */
-    getTrpcVanillaClient: () => TrpcVanillaClient
-  }
-}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)

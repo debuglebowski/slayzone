@@ -1,11 +1,5 @@
 import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
 
-declare global {
-  interface Window {
-    __testInvoke: (channel: string, ...args: unknown[]) => Promise<unknown>
-  }
-}
-
 type SidecarStatus = {
   health: 'starting' | 'ready' | 'restarting' | 'failed'
   pid: number | null

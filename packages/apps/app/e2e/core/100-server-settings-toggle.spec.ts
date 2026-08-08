@@ -1,12 +1,6 @@
 import fs from 'fs'
 import { test, expect, clickSettings, resetApp, bootConfigPath } from '../fixtures/electron'
 
-declare global {
-  interface Window {
-    __testInvoke: (channel: string, ...args: unknown[]) => Promise<unknown>
-  }
-}
-
 /**
  * Connections → Hubs: the "Run a local hub" toggle (replaces the old Server-tab
  * Local/Remote radio). It writes `server_mode` in the pre-boot config FILE (not

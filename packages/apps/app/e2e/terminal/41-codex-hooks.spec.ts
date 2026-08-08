@@ -10,15 +10,19 @@ import {
 import fs from 'fs'
 import { spawnSync } from 'child_process'
 
-declare global {
-  interface Window {
-    /** Lifecycle events captured by the in-page subscriptions below. Set inside
-     *  `page.evaluate` closures, read back by `waitForFunction`. */
-    __codexHookEvents?: unknown[]
-    __codexHookUnsub?: () => void
-    __codexStartEvents?: unknown[]
-    __codexStartUnsub?: () => void
-  }
+/**
+ * Scratch globals this spec parks on `window` inside its own `page.evaluate`
+ * closures, read back by `waitForFunction`. Module-scope rather than
+ * `declare global` (which the sibling hook specs also use): `e2e/` is one
+ * TypeScript program, so a global declaration here would be visible to every
+ * other spec and let an unrelated file's typo typecheck against it. Only
+ * app-contract globals belong in `e2e/globals.d.ts`.
+ */
+type CodexHookWindow = Window & {
+  __codexHookEvents?: unknown[]
+  __codexHookUnsub?: () => void
+  __codexStartEvents?: unknown[]
+  __codexStartUnsub?: () => void
 }
 
 /**
@@ -85,14 +89,15 @@ test.describe('Codex agent hooks', () => {
     await waitForFile(scriptPath, 5000)
 
     await mainWindow.evaluate(() => {
+      const w = window as CodexHookWindow
       const events: unknown[] = []
-      window.__codexHookEvents = events
+      w.__codexHookEvents = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
           events.push(ev)
         }
       })
-      window.__codexHookUnsub = () => sub.unsubscribe()
+      w.__codexHookUnsub = () => sub.unsubscribe()
     })
 
     // Codex native hooks deliver the event as JSON on stdin (hook_event_name).
@@ -104,7 +109,7 @@ test.describe('Codex agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = window.__codexHookEvents
+        const events = (window as CodexHookWindow).__codexHookEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 5000 }
@@ -117,7 +122,7 @@ test.describe('Codex agent hooks', () => {
     })
 
     await mainWindow.evaluate(() => {
-      window.__codexHookUnsub?.()
+      ;(window as CodexHookWindow).__codexHookUnsub?.()
     })
   })
 
@@ -134,14 +139,15 @@ test.describe('Codex agent hooks', () => {
     const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
 
     await mainWindow.evaluate(() => {
+      const w = window as CodexHookWindow
       const events: unknown[] = []
-      window.__codexStartEvents = events
+      w.__codexStartEvents = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
           events.push(ev)
         }
       })
-      window.__codexStartUnsub = () => sub.unsubscribe()
+      w.__codexStartUnsub = () => sub.unsubscribe()
     })
 
     const res = spawnSync('bash', [scriptPath], {
@@ -154,7 +160,7 @@ test.describe('Codex agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = window.__codexStartEvents
+        const events = (window as CodexHookWindow).__codexStartEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 5000 }
@@ -163,7 +169,7 @@ test.describe('Codex agent hooks', () => {
     expect(event).toMatchObject({ agentId: 'codex', type: 'agent-start' })
 
     await mainWindow.evaluate(() => {
-      window.__codexStartUnsub?.()
+      ;(window as CodexHookWindow).__codexStartUnsub?.()
     })
   })
 
