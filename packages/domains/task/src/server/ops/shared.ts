@@ -37,6 +37,29 @@ import {
   resolveWorktreeBasePathTemplate
 } from '@slayzone/worktrees/shared'
 
+/**
+ * The board's task ordering, defined once and interpolated by every list query
+ * (get-all, get-by-project, get-subtasks, load-board-data) so they cannot answer
+ * the same question differently.
+ *
+ * `rowid DESC` is the part that matters. Without it the ordering is NOT TOTAL:
+ * `"order"` is `NOT NULL DEFAULT 0`, and nothing on the create path sets it, so
+ * every task made through the app ties on the primary key. `created_at` defaults
+ * to `datetime('now')`, which is second-granular — so two tasks created in the
+ * same second tie there too, and SQLite is then free to return them in any
+ * order. Two consequences, both observed:
+ *
+ *   - In the app, same-second tasks could swap position between refetches.
+ *   - In the suite, `core/52` asserted a specific card was first and failed
+ *     ~2% of runs. It looked host-correlated for a subtle reason: a slower host
+ *     widens the gap between two seeded INSERTs, which makes them more likely to
+ *     land in DIFFERENT seconds — and then `created_at DESC` deterministically
+ *     puts the SECOND one first. A load-sensitive symptom with no load bug.
+ *
+ * `DESC` keeps the tie-break consistent with `created_at DESC`: newest first.
+ */
+export const TASK_ORDER_BY = `ORDER BY t."order" ASC, t.created_at DESC, t.rowid DESC`
+
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export interface DiagnosticEventPayload {

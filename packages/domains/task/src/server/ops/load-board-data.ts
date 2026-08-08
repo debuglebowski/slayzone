@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task/shared'
 import { parseProject } from '@slayzone/projects/server'
-import { parseAndColorTasks } from './shared.js'
+import { parseAndColorTasks, TASK_ORDER_BY } from './shared.js'
 
 export interface BoardData {
   tasks: Task[]
@@ -17,7 +17,7 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
       FROM tasks t
       LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
       WHERE t.deleted_at IS NULL
-      ORDER BY t."order" ASC, t.created_at DESC`
+      ${TASK_ORDER_BY}`
   )
 
   const projectRows = await db.all<Record<string, unknown>>(

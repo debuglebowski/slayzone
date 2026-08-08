@@ -79,68 +79,110 @@ test.describe('Kanban keyboard shortcuts', () => {
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
   }
 
+  /**
+   * Task ids per visible non-empty column, in the order the board renders them.
+   *
+   * READ, never assumed. `tasks."order"` is `NOT NULL DEFAULT 0` and no create
+   * path sets it, and `created_at` defaults to second-granular `datetime('now')`
+   * — so two tasks seeded in the same second tie on BOTH board sort keys and
+   * their relative order is decided by the query, not by creation sequence.
+   *
+   * Six tests in this file used to hard-code `taskIds.t1` as "first in todo".
+   * Whichever one happened to run when the tie resolved the other way is the one
+   * that reported, so this single bug surfaced as `J/K` one run and `H/L` the
+   * next and looked like two unrelated flakes. It also looked host-correlated
+   * for a reason that has nothing to do with the host: a slower box widens the
+   * gap between the two seeded INSERTs, making them likelier to land in
+   * different seconds — at which point `created_at DESC` puts the SECOND task
+   * first, deterministically.
+   *
+   * Deriving the order keeps these tests honest about what they actually assert
+   * (J/K moves within a column, H/L moves across) under either ordering.
+   */
+  async function columnIds(page: import('@playwright/test').Page): Promise<string[][]> {
+    return page.evaluate(() => {
+      const out: string[][] = []
+      for (const col of document.querySelectorAll('[data-testid="kanban-column"]')) {
+        const el = col as HTMLElement
+        if (el.offsetParent === null || col.closest('.invisible')) continue
+        const ids = Array.from(col.querySelectorAll('[data-task-id]'))
+          .map((c) => c.getAttribute('data-task-id'))
+          .filter((id): id is string => !!id)
+        if (ids.length > 0) out.push(ids)
+      }
+      return out
+    })
+  }
+
   test('J/K navigates within column', async ({ mainWindow }) => {
+    const [todo] = await columnIds(mainWindow)
+
     // First press focuses first task in first non-empty column (todo)
     await press(mainWindow, 'j')
-    const first = await focusedTaskId(mainWindow)
-    expect(first).toBe(taskIds.t1)
+    expect(await focusedTaskId(mainWindow)).toBe(todo[0])
 
     // J moves down to second task
     await press(mainWindow, 'j')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t2)
+    expect(await focusedTaskId(mainWindow)).toBe(todo[1])
 
     // K moves back up
     await press(mainWindow, 'k')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t1)
+    expect(await focusedTaskId(mainWindow)).toBe(todo[0])
 
     // K at top stays on first task
     await press(mainWindow, 'k')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t1)
+    expect(await focusedTaskId(mainWindow)).toBe(todo[0])
   })
 
   test('H/L navigates across columns', async ({ mainWindow }) => {
-    // Start on todo-1
+    const [todo, prog, review] = await columnIds(mainWindow)
+
+    // Start on the first todo card
     await press(mainWindow, 'Escape')
     await press(mainWindow, 'j')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t1)
+    expect(await focusedTaskId(mainWindow)).toBe(todo[0])
 
     // L moves to in_progress column
     await press(mainWindow, 'l')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t3)
+    expect(await focusedTaskId(mainWindow)).toBe(prog[0])
 
     // L moves to review column
     await press(mainWindow, 'l')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t4)
+    expect(await focusedTaskId(mainWindow)).toBe(review[0])
 
     // H moves back to in_progress
     await press(mainWindow, 'h')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t3)
+    expect(await focusedTaskId(mainWindow)).toBe(prog[0])
   })
 
   test('H/L clamps row index on shorter columns', async ({ mainWindow }) => {
+    const [, prog, review] = await columnIds(mainWindow)
+
     // Navigate to review, second row
     await press(mainWindow, 'Escape')
     await press(mainWindow, 'j')
-    // Focus todo-1, then L to in_progress (1 task), then L to review
+    // Focus first todo card, then L to in_progress (1 task), then L to review
     await press(mainWindow, 'l')
     await press(mainWindow, 'l')
-    // Now on review-1 (row 0), go to row 1
+    // Now on review row 0, go to row 1
     await press(mainWindow, 'j')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t5) // review row 1
+    expect(await focusedTaskId(mainWindow)).toBe(review[1])
 
     // H to in_progress which only has 1 task — should clamp to row 0
     await press(mainWindow, 'h')
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t3)
+    expect(await focusedTaskId(mainWindow)).toBe(prog[0])
   })
 
   test('Enter opens task in tab', async ({ mainWindow }) => {
+    const [todo] = await columnIds(mainWindow)
+
     await press(mainWindow, 'Escape')
-    await press(mainWindow, 'j') // focus todo-1
+    await press(mainWindow, 'j') // focus first todo card
     await press(mainWindow, 'Enter')
 
     // Task tab opened — kanban card is now hidden (home tab inactive)
     // Use data-task-id which only exists on kanban cards, not tab labels
-    await expect(mainWindow.locator(`[data-task-id="${taskIds.t1}"]`)).toBeHidden({
+    await expect(mainWindow.locator(`[data-task-id="${todo[0]}"]`)).toBeHidden({
       timeout: 3_000
     })
 
@@ -150,9 +192,11 @@ test.describe('Kanban keyboard shortcuts', () => {
   })
 
   test('S opens status picker, number key selects', async ({ mainWindow }) => {
+    const [todo] = await columnIds(mainWindow)
+
     await press(mainWindow, 'Escape')
-    await press(mainWindow, 'j') // focus todo-1
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t1)
+    await press(mainWindow, 'j') // focus first todo card
+    expect(await focusedTaskId(mainWindow)).toBe(todo[0])
 
     // Press S to open status picker
     await press(mainWindow, 's')
@@ -167,18 +211,20 @@ test.describe('Kanban keyboard shortcuts', () => {
     const s = seed(mainWindow)
     await s.refreshData()
     const tasks = await s.getTasks()
-    const updated = tasks.find((t: any) => t.id === taskIds.t1)
+    const updated = tasks.find((t: any) => t.id === todo[0])
     expect(updated?.status).toBe('in_progress')
 
     // Restore for subsequent tests
-    await s.updateTask({ id: taskIds.t1, status: 'todo' })
+    await s.updateTask({ id: todo[0], status: 'todo' })
     await s.refreshData()
   })
 
   test('P opens priority picker, number key selects', async ({ mainWindow }) => {
+    const [todo] = await columnIds(mainWindow)
+
     await press(mainWindow, 'Escape')
-    await press(mainWindow, 'j') // focus todo-1
-    expect(await focusedTaskId(mainWindow)).toBe(taskIds.t1)
+    await press(mainWindow, 'j') // focus first todo card
+    expect(await focusedTaskId(mainWindow)).toBe(todo[0])
 
     // Press P to open priority picker
     await press(mainWindow, 'p')
@@ -193,11 +239,11 @@ test.describe('Kanban keyboard shortcuts', () => {
     const s = seed(mainWindow)
     await s.refreshData()
     const tasks = await s.getTasks()
-    const updated = tasks.find((t: any) => t.id === taskIds.t1)
+    const updated = tasks.find((t: any) => t.id === todo[0])
     expect(updated?.priority).toBe(1)
 
     // Restore
-    await s.updateTask({ id: taskIds.t1, priority: 3 } as any)
+    await s.updateTask({ id: todo[0], priority: 3 } as any)
     await s.refreshData()
   })
 
