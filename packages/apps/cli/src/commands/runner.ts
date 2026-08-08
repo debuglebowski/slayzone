@@ -24,8 +24,8 @@
  * pins `SLAYZONE_ROOT` and nothing else.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, openSync, readFileSync } from 'node:fs'
-import { join, resolve as resolvePath } from 'node:path'
+import { existsSync, openSync, rmSync } from 'node:fs'
+import { resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
 import { isLoopbackRunnerUrl } from '@slayzone/platform/hub-addr'
@@ -37,7 +37,8 @@ import {
   updateRunnerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import {
-  detectBackend,
+  detectBackendWithReason,
+  explainNoBackend,
   listRegisteredUnits,
   readUnitRoot,
   removeUnit,
@@ -45,6 +46,13 @@ import {
   writeUnit,
   type ServiceBackend
 } from '@slayzone/platform/service-unit'
+import {
+  configPathFor,
+  isUnknown,
+  listRunners,
+  resolveRunner,
+  type RunnerFacts
+} from './runner-identity'
 import {
   ensureLogDir,
   fail,
@@ -79,11 +87,6 @@ const ENROLL_TIMEOUT_MS = 30_000
  */
 const CONNECTED_RE = /"mode":"(enroll|hello)"/
 
-/** `<ROOT>/runner.config.json` for a runner rooted at `root`. */
-function configPathFor(root: string): string {
-  return join(root, 'runner.config.json')
-}
-
 /**
  * Say so when a token's dial target names the hub's OWN machine.
  *
@@ -108,29 +111,72 @@ function warnIfLoopbackHub(hubUrl: string): void {
 }
 
 /**
- * Whether this runner holds credentials for a hub — i.e. it has enrolled at least
- * once. The dialer writes `<ROOT>/runner.state.json` (0600, `{hubHost: creds}`)
- * after a successful enroll, so a non-empty map there is the durable record.
+ * Undo a partially-completed `create`.
  *
- * This is what separates "installed but never reached its hub" (a bad token, an
- * unreachable hub, a crash-looping unit) from "running normally, currently offline".
+ * `create` writes config, then a unit, then starts — and any step can fail. Before
+ * this, a failure after the config write left root state with no unit, which is the
+ * split that made `create` ("already installed") and `start` ("not registered")
+ * disagree permanently with no way out. Registered actions run on any failure path,
+ * newest first, so the machine ends up as it started.
  */
-function isEnrolled(root: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(join(root, 'runner.state.json'), 'utf8'))
-    return typeof parsed === 'object' && parsed !== null && Object.keys(parsed).length > 0
-  } catch {
-    return false
+const createRollback: Array<() => void> = []
+function registerCreateRollback(undo: () => void): void {
+  createRollback.push(undo)
+}
+export function runCreateRollback(): void {
+  while (createRollback.length > 0) {
+    try {
+      createRollback.pop()?.()
+    } catch {
+      // Best-effort: a rollback step that throws must not mask the ORIGINAL failure,
+      // which is the thing the operator needs to read.
+    }
   }
+}
+
+/**
+ * Resolve a runner the machine knows about in ANY way, or exit.
+ *
+ * Replaces the old unit-file-only lookup. Refusing on a missing unit while the root
+ * still held a runner is what produced the unrecoverable state; the only honest
+ * "does not exist" is no source knowing the name at all (see
+ * {@link runnerIdentity.isUnknown}).
+ */
+async function requireKnown(name: string, backend: ServiceBackend): Promise<RunnerFacts> {
+  const facts = await resolveRunner(name, backend)
+  if (!isUnknown(facts)) return facts
+  const { runners } = await listRunners(backend)
+  const known = runners.map((r) => r.name)
+  fail(
+    `No runner named "${name}" on this machine.\n` +
+      (known.length > 0
+        ? `Known runners: ${known.join(', ')}`
+        : 'No runners here. Create one with `slay runner create <name> --token <token>`.')
+  )
+}
+
+/**
+ * The root of a runner we are about to act on, or exit.
+ *
+ * A runner known ONLY to the hub (enrolled elsewhere, or its root deleted) has no
+ * local root, so there is nothing here to start or read logs from. That is a real
+ * state worth naming rather than crashing on a null path.
+ */
+function requireRoot(facts: RunnerFacts, verb: string): string {
+  if (facts.root) return facts.root
+  fail(
+    `"${facts.name}" is enrolled on the hub but has no installation on this machine, ` +
+      `so there is nothing to ${verb}.\n` +
+      `Install it here with \`slay runner create ${facts.name} --token <token>\`, or ` +
+      `run the command on the machine that hosts it.`
+  )
 }
 
 /**
  * Resolve a registered runner's root, or exit with the standard not-found message.
  *
- * Every command but `create` needs this and needs it worded identically. A runner
- * with no unit simply does not exist as far as this machine is concerned — there is
- * no "running but unregistered" runner to fall back on, since nothing on the box
- * would know about it.
+ * Still used where a UNIT is genuinely required (`restart` rewrites one). Everything
+ * that can act on a partially-present runner uses {@link requireKnown} instead.
  */
 function requireRegistered(name: string, backend: ServiceBackend): { root: string } {
   if (backend === 'none') {
@@ -209,6 +255,9 @@ async function launchRunner(args: {
     })
     child.unref()
     if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS))) {
+      // Same all-or-nothing rule as the supervised path: a first boot that never
+      // reached a hub must not leave root state behind claiming this runner exists.
+      if (creating) runCreateRollback()
       failWithLog(
         'runner',
         name,
@@ -247,8 +296,13 @@ async function launchRunner(args: {
     supervisorStart('runner', backend, name, writtenUnitPath)
   } catch (e) {
     // The supervisor refused. Never leave a unit file behind for a runner that was
-    // never started — `ls` would list a runner that does not exist.
-    if (creating) removeUnit('runner', name, backend)
+    // never started — `ls` would list a runner that does not exist. The config
+    // written earlier in this same `create` goes with it (runCreateRollback), or the
+    // next `create` would meet an occupied root for a runner that never existed.
+    if (creating) {
+      removeUnit('runner', name, backend)
+      runCreateRollback()
+    }
     if (!(e instanceof SupervisorError)) throw e
     // A systemd USER manager needs a login session bus. On a VPS/container there
     // often is none, and every `--user` call fails this way. Name the actual fix
@@ -281,6 +335,7 @@ async function launchRunner(args: {
       // want to fix its config and `start` again.
       supervisorStop('runner', backend, name)
       removeUnit('runner', name, backend)
+      runCreateRollback()
     } else {
       supervisorStop('runner', backend, name)
     }
@@ -386,88 +441,67 @@ export function runnerCommand(): Command {
       warnIfLoopbackHub(minted.hubUrl)
     })
 
-  // slay runner ls — unit files + supervisor state. This is also the `hub
-  // registered` equivalent: with no port to sweep, enumeration IS the listing.
+  // slay runner ls — every source that knows about a runner, unioned. See
+  // runner-identity.ts for why the unit file could never be the registry on its own.
   cmd
     .command('ls')
-    .description('List the runners installed on this machine')
+    .description('List the runners this machine knows about')
     .option('--json', 'Output as JSON')
-    .action((opts: { json?: boolean }) => {
-      const backend = detectBackend()
-      // No supervisor ⇒ nothing can be registered, so there is nothing to
-      // enumerate. The answer to `ls` is still "none installed" — the same
-      // question the empty case below answers — with the reason appended rather
-      // than substituted for it. `--json` MUST stay machine-readable on this
-      // path: a caller asking for the list gets an empty array, never prose.
-      if (backend === 'none') {
-        if (opts.json) {
-          console.log('[]')
-          return
-        }
-        console.log(
-          'No runners installed — this platform has no user service manager, so runners ' +
-            'cannot be registered here.'
-        )
-        console.log(`Run one in the foreground instead:\n  npx ${RUNNER_PACKAGE}`)
-        return
-      }
-      const units = listRegisteredUnits('runner', backend)
-      const rows = units.map((u) => {
-        const root = readUnitRoot('runner', u.name, backend)
-        const status = supervisorStatus('runner', backend, u.name)
-        // hubUrl comes from the runner's own runner.config.json — the unit deliberately
-        // carries no hub address (a runner's dial target arrives with its token).
-        const hubUrl = root ? (loadRunnerConfigFile(configPathFor(root)).hubUrl ?? null) : null
-        return {
-          name: u.name,
-          unitPath: u.unitPath,
-          root,
-          running: status.running,
-          pid: status.pid,
-          lastExit: status.lastExit,
-          hubUrl,
-          enrolled: root ? isEnrolled(root) : false
-        }
-      })
+    .action(async (opts: { json?: boolean }) => {
+      const backend = resolveBackend()
+      const { runners, hubReachable } = await listRunners(backend)
       if (opts.json) {
-        console.log(JSON.stringify(rows, null, 2))
+        console.log(JSON.stringify(runners, null, 2))
         return
       }
-      if (rows.length === 0) {
-        console.log(
-          'No runners installed. Create one with `slay runner create <name> --token <token>`.'
-        )
+      if (runners.length === 0) {
+        console.log('No runners here. Create one with `slay runner create <name> --token <token>`.')
+        // Only mention supervision when it is actually missing — on a healthy box
+        // this is noise, and the reason names the fix that applies to THIS machine.
+        if (backend === 'none') console.log(`\n${explainNoBackend(detectBackendWithReason().reason)}`)
         return
       }
-      const nameW = Math.max(4, ...rows.map((r) => r.name.length))
-      const rootW = Math.max(4, ...rows.map((r) => (r.root ? shortenPath(r.root).length : 1)))
-      const hubW = Math.max(3, ...rows.map((r) => (r.hubUrl ?? '-').length))
+      const state = (r: RunnerFacts): string => {
+        if (r.running) return 'running'
+        if (r.supervised) return 'stopped'
+        // Installed with no unit: a real runner the supervisor does not know about.
+        // Naming it "stopped" would imply `start` merely resumes it, when `start`
+        // actually has to register it first.
+        return 'unmanaged'
+      }
+      const enrolled = (r: RunnerFacts): string =>
+        !hubReachable && !r.enrolled ? '?' : r.enrolled ? 'yes' : 'no'
+      const nameW = Math.max(4, ...runners.map((r) => r.name.length))
+      const rootW = Math.max(4, ...runners.map((r) => (r.root ? shortenPath(r.root).length : 1)))
+      const hubW = Math.max(3, ...runners.map((r) => (r.hubUrl ?? '-').length))
       console.log(
-        `${'NAME'.padEnd(nameW)}  ${'STATE'.padEnd(7)}  ${'PID'.padEnd(7)}  ` +
-          `${'ROOT'.padEnd(rootW)}  ${'HUB'.padEnd(hubW)}  ENROLLED`
+        `${'NAME'.padEnd(nameW)}  ${'STATE'.padEnd(9)}  ${'ROOT'.padEnd(rootW)}  ` +
+          `${'HUB'.padEnd(hubW)}  ENROLLED`
       )
       console.log(
-        `${'-'.repeat(nameW)}  ${'-'.repeat(7)}  ${'-'.repeat(7)}  ${'-'.repeat(rootW)}  ` +
-          `${'-'.repeat(hubW)}  ${'-'.repeat(8)}`
+        `${'-'.repeat(nameW)}  ${'-'.repeat(9)}  ${'-'.repeat(rootW)}  ${'-'.repeat(hubW)}  ` +
+          `${'-'.repeat(8)}`
       )
-      for (const r of rows) {
+      for (const r of runners) {
         console.log(
-          `${r.name.padEnd(nameW)}  ${(r.running ? 'running' : 'stopped').padEnd(7)}  ` +
-            `${String(r.pid ?? '-').padEnd(7)}  ${(r.root ? shortenPath(r.root) : '?').padEnd(rootW)}  ` +
-            `${(r.hubUrl ?? '-').padEnd(hubW)}  ${r.enrolled ? 'yes' : 'no'}`
+          `${r.name.padEnd(nameW)}  ${state(r).padEnd(9)}  ` +
+            `${(r.root ? shortenPath(r.root) : '?').padEnd(rootW)}  ` +
+            `${(r.hubUrl ?? '-').padEnd(hubW)}  ${enrolled(r)}`
         )
       }
-      // A runner that is registered but never enrolled is the runner equivalent of a
-      // hub that installed and crash-looped: it looks installed and does nothing.
-      for (const r of rows.filter((x) => !x.enrolled)) {
+      if (!hubReachable) {
         console.log(
-          `\nRunner "${r.name}" has never reached a hub` +
-            (r.lastExit !== null && r.lastExit !== 0 ? ` (last exit ${r.lastExit})` : '') +
-            `. Check \`slay runner logs ${r.name}\`.`
+          `\nNo hub could be reached, so ENROLLED is unknown ("?") for runners this ` +
+            `machine has no local record of.`
         )
       }
-      for (const r of rows.filter((x) => !x.running)) {
-        console.log(`\nRunner "${r.name}" is stopped. Start it: slay runner start ${r.name}`)
+      const unmanaged = runners.filter((r) => state(r) === 'unmanaged')
+      if (unmanaged.length > 0 && backend !== 'none') {
+        console.log(
+          `\n${unmanaged.map((r) => `"${r.name}"`).join(', ')} ${unmanaged.length === 1 ? 'is' : 'are'} ` +
+            `installed but not registered with ${backend}. ` +
+            `\`slay runner start <name>\` will register and start ${unmanaged.length === 1 ? 'it' : 'them'}.`
+        )
       }
     })
 
@@ -527,22 +561,53 @@ export function runnerCommand(): Command {
 
       // ONE ROOT, ONE RUNNER — checked independently of the unit file.
       //
-      // Two runners sharing a root would share `runner.config.json` (so the second's token +
-      // name would overwrite the first's) and the `runners/` credential store, then
-      // fight over both. The unit check above cannot catch this: it is keyed on the
-      // NAME, so a different name in an occupied root slips past it — and on a
-      // platform with no service manager there is no unit to consult at all, which is
-      // how a second `create` came to silently spawn a rival runner. `runner.config.json`
-      // already naming a runner is the durable record that this root is taken.
+      // Two runners sharing a root would share `runner.config.json` (so the second's
+      // token + name would overwrite the first's) and the credential store, then fight
+      // over both. The unit check above cannot catch this: it is keyed on the NAME, so
+      // a different name in an occupied root slips past it — and with no service
+      // manager there is no unit to consult at all.
+      //
+      // ADOPT rather than refuse when the occupant IS this name. Reaching here means
+      // no unit exists (the check above returned), so the root holds a runner the
+      // supervisor does not know about — precisely what a `create` under a missing
+      // supervisor leaves behind. There is one runner there, it has the name asked
+      // for, and the operator asked to create it: refusing produced a state no
+      // command could resolve. A DIFFERENT name in an occupied root is a genuine
+      // conflict and still refuses.
       const occupant = loadRunnerConfigFile(configPathFor(root)).runnerName
-      if (occupant !== undefined) {
+      if (occupant !== undefined && occupant !== name) {
         fail(
           `A runner is already installed in ${shortenPath(root)} — "${occupant}".\n` +
-            (occupant === name
-              ? `Start it with \`slay runner start ${name}\`, or remove it with ` +
-                `\`slay runner rm ${name}\`.`
-              : `Give this runner its own directory with \`--root <dir>\`, or remove ` +
-                `"${occupant}" first with \`slay runner rm ${occupant}\`.`)
+            `Give this runner its own directory with \`--root <dir>\`, or remove ` +
+            `"${occupant}" first with \`slay runner rm ${occupant}\`.`
+        )
+      }
+      // ADOPT only when there is a supervisor to adopt INTO. Reaching here with the
+      // same name means the root holds a runner with no unit — repairable by
+      // registering it, which is exactly the wedge to undo.
+      //
+      // With NO supervisor there is nothing to register and, worse, no way to ask
+      // whether that runner is currently RUNNING: an unsupervised runner is a bare
+      // detached process this command cannot see. Adopting would spawn a second one
+      // sharing the same runner.config.json and credential store, and the two would
+      // fight over both. Refusing is correct there — the state is not repairable, so
+      // say what is, rather than making it worse.
+      const adopting = occupant === name && backend !== 'none'
+      if (occupant === name && !adopting) {
+        fail(
+          `A runner is already installed in ${shortenPath(root)} — "${occupant}".\n` +
+            `Start it with \`slay runner start ${name}\`, or remove it with ` +
+            `\`slay runner rm ${name}\`.`
+        )
+      }
+      if (adopting) {
+        console.log(
+          `Adopting the runner already in ${shortenPath(root)} — it is installed but not ` +
+            `registered with ${backend}. Its config will be refreshed with this token.`
+        )
+        console.log(
+          `  If you started it in the foreground, stop that process first — otherwise two ` +
+            `runners would share this root.`
         )
       }
 
@@ -561,6 +626,15 @@ export function runnerCommand(): Command {
         },
         configPathFor(root)
       )
+      // ALL OR NOTHING. Before this, a create that got past the config write but died
+      // later (supervisor refused, enroll timed out) left root state with no unit —
+      // the exact split that made `create` and `start` disagree forever. Unwind the
+      // config we just wrote unless we are adopting one that predates this command.
+      if (!adopting) {
+        registerCreateRollback(() => {
+          rmSync(configPathFor(root), { force: true })
+        })
+      }
       console.log(`Hub:   ${decoded.hubUrl}`)
       console.log(`Allow: ${allowedRoots.map((d) => shortenPath(d)).join(', ')}`)
       // Second warn site (the first is `mint`): a token can be carried here from
@@ -574,19 +648,29 @@ export function runnerCommand(): Command {
   // slay runner start <name>
   cmd
     .command('start <name>')
-    .description('Start an existing runner that is stopped')
+    .description('Start a runner, registering it first if it is not yet supervised')
     .action(async (name: string) => {
       const backend = resolveBackend()
-      const { root } = requireRegistered(name, backend)
+      const facts = await requireKnown(name, backend)
       // ALREADY RUNNING is reported, not restarted: bouncing a live runner drops its
       // pty sessions and any agent turn in flight, which is not what someone typing
       // `start` wants. Use `restart`.
-      if (backend !== 'none' && supervisorStatus('runner', backend, name).running) {
+      if (facts.running) {
         const status = supervisorStatus('runner', backend, name)
         console.log(
           `Runner "${name}" is already running${status.pid ? ` (pid ${status.pid})` : ''}.`
         )
         return
+      }
+      const root = requireRoot(facts, 'start')
+      // SELF-HEAL, don't refuse. Installed-but-unsupervised is the state a `create`
+      // under a missing supervisor leaves behind — and until now `start` rejected it
+      // as "no runner named X" while `create` rejected the same runner as "already
+      // installed", which no command could resolve. `launchRunner` writes the unit
+      // when it is absent, so simply proceeding IS the repair; say so, because
+      // registering is a real side effect the operator did not explicitly ask for.
+      if (!facts.supervised && backend !== 'none') {
+        console.log(`"${name}" is installed but not registered with ${backend} — registering it.`)
       }
       await launchRunner({ name, root, backend, creating: false })
     })
@@ -597,8 +681,14 @@ export function runnerCommand(): Command {
     .description('Stop a runner, keeping it registered so `start` can bring it back')
     .action(async (name: string) => {
       const backend = resolveBackend()
-      requireRegistered(name, backend)
+      const facts = await requireKnown(name, backend)
       if (backend === 'none') return
+      if (!facts.supervised) {
+        console.log(
+          `"${name}" is not registered with ${backend}, so there is nothing for it to stop.`
+        )
+        return
+      }
       supervisorStop('runner', backend, name)
       if (!(await waitForStopped(name, backend, 15_000))) {
         fail(
@@ -613,24 +703,45 @@ export function runnerCommand(): Command {
   cmd
     .command('rm <name>')
     .description('Stop a runner and remove its registration')
-    .action((name: string) => {
+    .option(
+      '--purge',
+      'Also delete the runner root (config, credentials, logs) — this is the operator’s data'
+    )
+    .action(async (name: string, opts: { purge?: boolean }) => {
       const backend = resolveBackend()
-      const { root } = requireRegistered(name, backend)
-      if (backend === 'none') return
-      // Quiet stop: the unit may be unloaded already, or the bus unreachable — which
-      // is the very case that leaves a stale unit behind. Neither must block removal.
-      supervisorStopQuiet('runner', backend, name)
-      removeUnit('runner', name, backend)
-      // The runner's ROOT (runner.config.json with its token, credentials, logs) is
-      // deliberately left on disk: it is the operator's data, and `rm` was asked to
-      // remove a registration, not to delete their state. NOTE this does not revoke
-      // the runner on the HUB — it will show there as disconnected until revoked.
-      console.log(
-        `Removed "${name}". Its config and credentials are still in ${shortenPath(root)}.`
-      )
-      console.log(
-        `It is still enrolled on its hub — revoke it there if this machine is going away.`
-      )
+      const facts = await requireKnown(name, backend)
+      // REMOVE WHATEVER EXISTS, in any combination. `rm` refusing on a missing unit
+      // is what turned a half-created runner into a dead end — the operator could
+      // neither create (root occupied) nor remove (not registered).
+      if (facts.supervised && backend !== 'none') {
+        // Quiet stop: the unit may be unloaded already, or the bus unreachable —
+        // which is the very case that leaves a stale unit behind. Neither must block
+        // removal.
+        supervisorStopQuiet('runner', backend, name)
+        removeUnit('runner', name, backend)
+        console.log(`Unregistered "${name}" from ${backend}.`)
+      } else if (backend !== 'none') {
+        console.log(`"${name}" had no ${backend} registration.`)
+      }
+
+      if (facts.root && facts.installed) {
+        if (opts.purge) {
+          // Explicit only. The root holds the operator's credentials and logs, and
+          // deleting it on a plain `rm` would destroy data they never offered up.
+          rmSync(facts.root, { recursive: true, force: true })
+          console.log(`Deleted ${shortenPath(facts.root)}.`)
+        } else {
+          // Leaving the config behind is safe now that `create` adopts an exact
+          // name+root match — it no longer blocks a re-create the way it used to.
+          console.log(`Config and credentials remain in ${shortenPath(facts.root)}.`)
+          console.log(`  Delete them too with \`slay runner rm ${name} --purge\`.`)
+        }
+      }
+      if (facts.enrolled) {
+        console.log(
+          `It is still enrolled on its hub — revoke it there if this machine is going away.`
+        )
+      }
     })
 
   // slay runner restart <name>
@@ -684,9 +795,12 @@ export function runnerCommand(): Command {
     .description("Show a runner's log output")
     .option('-n, --lines <n>', 'Last N lines', '50')
     .option('-f, --follow', 'Follow the log')
-    .action((name: string, opts: { lines: string; follow?: boolean }) => {
-      const backend = detectBackend()
-      const { root } = requireRegistered(name, backend)
+    .action(async (name: string, opts: { lines: string; follow?: boolean }) => {
+      const backend = resolveBackend()
+      // Logs are the FIRST thing wanted when a runner misbehaves, so this must work
+      // for an unsupervised one too — its output is in the root's log dir either way.
+      const facts = await requireKnown(name, backend)
+      const root = requireRoot(facts, 'read logs for')
       const lines = Number(opts.lines)
       if (!Number.isInteger(lines) || lines < 1) fail(`Invalid --lines ${opts.lines}.`)
       // systemd captures stdout into journald rather than a file, so the unit's own

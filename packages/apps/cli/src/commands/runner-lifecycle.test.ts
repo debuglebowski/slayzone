@@ -52,7 +52,8 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync
+  statSync,
+  writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -606,6 +607,72 @@ async function main(): Promise<void> {
       if (pid) spawnedRunnerPids.push(Number(pid))
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
       assert(/--root <dir>/.test(res.stderr), `suggests a separate root: ${res.stderr}`)
+    })
+
+    // --------------------------------------------- the config-only wedge (regression)
+    //
+    // THE BUG: a `create` with no supervisor available writes runner.config.json and
+    // no unit. From then on `create` refused ("already installed in <root>") while
+    // `start`/`stop`/`rm` refused ("No runner named X") — two different existence
+    // oracles, and NO command could resolve the state. Recovery was `rm -rf` by hand.
+    // Hit for real on a VPS whose XDG_RUNTIME_DIR was unset (see service-unit.ts).
+    //
+    // Built by writing the config directly: that is exactly the on-disk residue the
+    // broken path left, and it needs no spawned process to reproduce.
+    const orphanRoot = join(TMP, 'orphan-root')
+    const orphanName = `${NAME_PREFIX}orphan`
+    await test('a config-only runner is VISIBLE to ls (it used to be invisible)', async () => {
+      mkdirSync(orphanRoot, { recursive: true })
+      writeFileSync(
+        join(orphanRoot, 'runner.config.json'),
+        JSON.stringify({
+          runnerName: orphanName,
+          hubUrl: `ws://127.0.0.1:${hub.port}/runners`
+        }),
+        { mode: 0o600 }
+      )
+      const res = slayNoService(['runner', 'ls'], orphanRoot)
+      assertEq(res.status, 0, `ls exits 0 (stderr: ${res.stderr})`)
+      assert(
+        new RegExp(orphanName).test(res.stdout),
+        `lists the config-only runner: ${res.stdout}`
+      )
+      // "unmanaged", not "stopped": `start` has to REGISTER it, not merely resume it,
+      // and calling that "stopped" would misdescribe what happens next.
+      assert(/unmanaged/.test(res.stdout), `marks it unmanaged: ${res.stdout}`)
+    })
+
+    await test('ls --json stays machine-readable with no service manager', async () => {
+      // Regression: the no-backend branch printed prose on stdout even under --json,
+      // so anything parsing the list broke on exactly the boxes that needed it.
+      const res = slayNoService(['runner', 'ls', '--json'], orphanRoot)
+      assertEq(res.status, 0, `exits 0 (stderr: ${res.stderr})`)
+      const parsed: unknown = JSON.parse(res.stdout)
+      assert(Array.isArray(parsed), `stdout parses as JSON array: ${res.stdout}`)
+    })
+
+    await test('rm recovers a config-only runner — the dead end is gone', async () => {
+      const res = slayNoService(['runner', 'rm', orphanName, '--purge'], orphanRoot)
+      assertEq(res.status, 0, `rm succeeds (stderr: ${res.stderr})`)
+      assert(
+        !existsSync(join(orphanRoot, 'runner.config.json')),
+        '--purge deleted the root that was blocking re-create'
+      )
+      // The precise old failure. Its absence IS the fix.
+      assert(
+        !/No runner named/.test(res.stderr),
+        `no longer claims the runner does not exist: ${res.stderr}`
+      )
+    })
+
+    await test('rm without --purge keeps the operator’s credentials', async () => {
+      mkdirSync(orphanRoot, { recursive: true })
+      const cfg = join(orphanRoot, 'runner.config.json')
+      writeFileSync(cfg, JSON.stringify({ runnerName: orphanName }), { mode: 0o600 })
+      const res = slayNoService(['runner', 'rm', orphanName], orphanRoot)
+      assertEq(res.status, 0, `rm succeeds (stderr: ${res.stderr})`)
+      assert(existsSync(cfg), 'a plain rm never deletes the root — that is operator data')
+      rmSync(orphanRoot, { recursive: true, force: true })
     })
 
     // ------------------------------------------------------------------- cleanliness
