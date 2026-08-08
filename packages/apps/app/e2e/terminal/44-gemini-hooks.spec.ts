@@ -14,6 +14,20 @@ import http from 'http'
  * (no Gemini binary required). The `agent-start` mapping for `BeforeAgent`
  * comes from the per-agent override table in agent-event-handler.ts.
  */
+
+/**
+ * The renderer-side scratch globals this spec parks its captured lifecycle
+ * events on. Declared as a Window extension rather than casting to
+ * `Record<string, unknown>`, which TS rejects as a non-overlapping conversion.
+ * Type-only, so it is erased before the closures are serialised.
+ */
+type HookWindow = Window & {
+  __geminiEvents?: unknown[]
+  __geminiUnsub?: () => void
+  __geminiEvents2?: unknown[]
+  __geminiUnsub2?: () => void
+}
+
 test.describe('Gemini agent hooks', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -23,7 +37,6 @@ test.describe('Gemini agent hooks', () => {
     mainWindow
   }) => {
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', [
         'SLAYZONE_USER_DATA_DIR',
         'SLAYZONE_GEMINI_SETTINGS_PATH'
@@ -55,7 +68,6 @@ test.describe('Gemini agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
 
@@ -63,13 +75,14 @@ test.describe('Gemini agent hooks', () => {
     if (!port) return
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__geminiEvents = []
+      const w = window as HookWindow
+      w.__geminiEvents = []
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__geminiEvents as unknown[]).push(ev)
+          w.__geminiEvents?.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__geminiUnsub = () => sub.unsubscribe()
+      w.__geminiUnsub = () => sub.unsubscribe()
     })
 
     // The tRPC WS subscription above registers server-side asynchronously after
@@ -85,7 +98,7 @@ test.describe('Gemini agent hooks', () => {
       })
       await mainWindow.waitForFunction(
         () => {
-          const events = (window as Record<string, unknown>).__geminiEvents as unknown[] | undefined
+          const events = (window as HookWindow).__geminiEvents
           return !!events && events.length > 0
         },
         { timeout: 2000 }
@@ -94,7 +107,7 @@ test.describe('Gemini agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__geminiEvents as unknown[] | undefined
+        const events = (window as HookWindow).__geminiEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 3000 }
@@ -109,8 +122,7 @@ test.describe('Gemini agent hooks', () => {
     })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__geminiUnsub as (() => void) | undefined
-      unsub?.()
+      ;(window as HookWindow).__geminiUnsub?.()
     })
   })
 
@@ -118,20 +130,20 @@ test.describe('Gemini agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
     if (!port) return
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__geminiEvents2 = []
+      const w = window as HookWindow
+      w.__geminiEvents2 = []
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__geminiEvents2 as unknown[]).push(ev)
+          w.__geminiEvents2?.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__geminiUnsub2 = () => sub.unsubscribe()
+      w.__geminiUnsub2 = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -141,7 +153,7 @@ test.describe('Gemini agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__geminiEvents2 as unknown[] | undefined
+        const events = (window as HookWindow).__geminiEvents2
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 3000 }
@@ -151,8 +163,7 @@ test.describe('Gemini agent hooks', () => {
     expect(event.agentId).toBe('gemini')
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__geminiUnsub2 as (() => void) | undefined
-      unsub?.()
+      ;(window as HookWindow).__geminiUnsub2?.()
     })
   })
 })

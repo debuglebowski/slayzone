@@ -23,6 +23,15 @@ import http from 'http'
  *   - the event name is passed as an argv arg (not in the payload)
  *   - the resumable id is `conversationId`, present in every hook payload
  */
+
+/** Scratch slots the specs below park on `window` inside evaluate closures. */
+type HookWindow = Window & {
+  __agEvents?: unknown[]
+  __agUnsub?: () => void
+  __agEvents2?: unknown[]
+  __agUnsub2?: () => void
+}
+
 test.describe('Antigravity agent hooks', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -32,7 +41,6 @@ test.describe('Antigravity agent hooks', () => {
     mainWindow
   }) => {
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', [
         'SLAYZONE_USER_DATA_DIR',
         'SLAYZONE_ANTIGRAVITY_HOOKS_PATH'
@@ -66,7 +74,6 @@ test.describe('Antigravity agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
 
@@ -74,13 +81,14 @@ test.describe('Antigravity agent hooks', () => {
     if (!port) return
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__agEvents = []
+      const events: unknown[] = []
+      ;(window as HookWindow).__agEvents = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__agEvents as unknown[]).push(ev)
+          events.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__agUnsub = () => sub.unsubscribe()
+      ;(window as HookWindow).__agUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -92,7 +100,7 @@ test.describe('Antigravity agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__agEvents as unknown[] | undefined
+        const events = (window as HookWindow).__agEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 3000 }
@@ -107,7 +115,7 @@ test.describe('Antigravity agent hooks', () => {
     })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__agUnsub as (() => void) | undefined
+      const unsub = (window as HookWindow).__agUnsub
       unsub?.()
     })
   })
@@ -116,20 +124,20 @@ test.describe('Antigravity agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
     if (!port) return
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__agEvents2 = []
+      const events: unknown[] = []
+      ;(window as HookWindow).__agEvents2 = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__agEvents2 as unknown[]).push(ev)
+          events.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__agUnsub2 = () => sub.unsubscribe()
+      ;(window as HookWindow).__agUnsub2 = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -139,7 +147,7 @@ test.describe('Antigravity agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__agEvents2 as unknown[] | undefined
+        const events = (window as HookWindow).__agEvents2
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 3000 }
@@ -149,7 +157,7 @@ test.describe('Antigravity agent hooks', () => {
     expect(event.agentId).toBe('antigravity')
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__agUnsub2 as (() => void) | undefined
+      const unsub = (window as HookWindow).__agUnsub2
       unsub?.()
     })
   })
@@ -158,7 +166,6 @@ test.describe('Antigravity agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
@@ -170,12 +177,17 @@ test.describe('Antigravity agent hooks', () => {
       color: '#0891b2',
       path: TEST_PROJECT_PATH
     })
-    const task = await s.createTask({
-      projectId: project.id,
-      title: 'AG sid capture',
-      status: 'in_progress',
-      terminalMode: 'antigravity'
-    })
+    // `seed().createTask` narrows its input to the common fields and drops
+    // `terminalMode`, which this spec needs — go straight at task.create.
+    const task = await mainWindow.evaluate(
+      (d) => window.getTrpcVanillaClient().task.create.mutate(d),
+      {
+        projectId: project.id,
+        title: 'AG sid capture',
+        status: 'in_progress',
+        terminalMode: 'antigravity'
+      }
+    )
 
     const cid = 'aa111111-1111-4111-8111-111111111111'
 

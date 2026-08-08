@@ -10,6 +10,17 @@ import {
 import fs from 'fs'
 import { spawnSync } from 'child_process'
 
+declare global {
+  interface Window {
+    /** Lifecycle events captured by the in-page subscriptions below. Set inside
+     *  `page.evaluate` closures, read back by `waitForFunction`. */
+    __codexHookEvents?: unknown[]
+    __codexHookUnsub?: () => void
+    __codexStartEvents?: unknown[]
+    __codexStartUnsub?: () => void
+  }
+}
+
 /**
  * Codex hook-driven agent lifecycle E2E.
  *
@@ -36,7 +47,6 @@ test.describe('Codex agent hooks', () => {
 
   test('boot installer wrote a managed ~/.codex/hooks.json', async ({ mainWindow }) => {
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_CODEX_HOOKS_PATH'])
     })) as Record<string, string>
 
@@ -63,27 +73,26 @@ test.describe('Codex agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
     if (!port) return
 
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
     const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     await waitForFile(scriptPath, 5000)
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__codexHookEvents = []
+      const events: unknown[] = []
+      window.__codexHookEvents = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__codexHookEvents as unknown[]).push(ev)
+          events.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__codexHookUnsub = () => sub.unsubscribe()
+      window.__codexHookUnsub = () => sub.unsubscribe()
     })
 
     // Codex native hooks deliver the event as JSON on stdin (hook_event_name).
@@ -95,9 +104,7 @@ test.describe('Codex agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__codexHookEvents as
-          | unknown[]
-          | undefined
+        const events = window.__codexHookEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 5000 }
@@ -110,33 +117,31 @@ test.describe('Codex agent hooks', () => {
     })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__codexHookUnsub as (() => void) | undefined
-      unsub?.()
+      window.__codexHookUnsub?.()
     })
   })
 
   test('UserPromptSubmit stdin payload maps to agent-start', async ({ mainWindow }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
     if (!port) return
 
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
     const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__codexStartEvents = []
+      const events: unknown[] = []
+      window.__codexStartEvents = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__codexStartEvents as unknown[]).push(ev)
+          events.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__codexStartUnsub = () => sub.unsubscribe()
+      window.__codexStartUnsub = () => sub.unsubscribe()
     })
 
     const res = spawnSync('bash', [scriptPath], {
@@ -149,9 +154,7 @@ test.describe('Codex agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__codexStartEvents as
-          | unknown[]
-          | undefined
+        const events = window.__codexStartEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 5000 }
@@ -160,10 +163,7 @@ test.describe('Codex agent hooks', () => {
     expect(event).toMatchObject({ agentId: 'codex', type: 'agent-start' })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__codexStartUnsub as
-        | (() => void)
-        | undefined
-      unsub?.()
+      window.__codexStartUnsub?.()
     })
   })
 
@@ -171,14 +171,12 @@ test.describe('Codex agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
     if (!port) return
 
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_USER_DATA_DIR'])
     })) as Record<string, string>
     const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)

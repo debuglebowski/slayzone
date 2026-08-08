@@ -1,7 +1,7 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, switchTerminalMode } from '../fixtures/terminal'
-import type { ElectronApplication } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
 
 // Simulate a native menu accelerator by invoking the real menu item from the
 // main process. The renderer consumes these signals via the tRPC `menu.*`
@@ -21,6 +21,19 @@ async function clickMenuItem(electronApp: ElectronApplication, labels: string[])
     },
     labels
   )
+}
+
+// `seed().createTask` narrows its input to the common fields and drops both
+// `isTemporary` and `terminalMode`, which these specs need — go straight at
+// task.create.
+function createTempTask(page: Page, projectId: string, title: string) {
+  return page.evaluate((d) => window.getTrpcVanillaClient().task.create.mutate(d), {
+    projectId,
+    title,
+    status: 'in_progress',
+    isTemporary: true,
+    terminalMode: 'claude-code'
+  })
 }
 
 test.describe('Terminal mode switching', () => {
@@ -165,13 +178,7 @@ test.describe('Terminal mode switching', () => {
 
   test('temporary tasks can switch terminal mode', async ({ mainWindow }) => {
     const s = seed(mainWindow)
-    const temp = await s.createTask({
-      projectId,
-      title: 'Mode switch temporary task',
-      status: 'in_progress',
-      isTemporary: true,
-      terminalMode: 'claude-code'
-    })
+    const temp = await createTempTask(mainWindow, projectId, 'Mode switch temporary task')
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Mode switch temporary task' })
@@ -183,7 +190,7 @@ test.describe('Terminal mode switching', () => {
     await mainWindow.evaluate(async (id) => {
       await window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: `${id}:${id}` })
       await new Promise((r) => setTimeout(r, 100))
-      await window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' } as never)
+      await window.getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' })
     }, temp.id)
 
     await expect
@@ -211,13 +218,7 @@ test.describe('Terminal mode switching', () => {
     electronApp
   }) => {
     const s = seed(mainWindow)
-    const temp = await s.createTask({
-      projectId,
-      title: 'Mode switch temporary auto-delete',
-      status: 'in_progress',
-      isTemporary: true,
-      terminalMode: 'claude-code'
-    })
+    const temp = await createTempTask(mainWindow, projectId, 'Mode switch temporary auto-delete')
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, {

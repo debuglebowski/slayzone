@@ -240,6 +240,7 @@ async function endIteration(
             startTime: number
             commitTime: number
           }>
+          enabled: boolean
           reset?: () => void
         }
       }

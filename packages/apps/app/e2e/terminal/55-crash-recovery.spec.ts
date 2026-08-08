@@ -8,7 +8,7 @@
  * Doctor-menu tests use `claude-code` (binary must be installed).
  */
 import { test, expect, seed, resetApp } from '../fixtures/electron'
-import { TEST_PROJECT_PATH, goHome, clickProject } from '../fixtures/electron'
+import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   getMainSessionId,
   openTaskTerminal,

@@ -7,11 +7,9 @@ import {
   TEST_PROJECT_PATH,
   resetApp,
   cliRoot,
-  cliEnv,
-  cliDbPath
+  cliEnv
 } from '../fixtures/electron'
 import { spawnSync } from 'child_process'
-import { DatabaseSync } from 'node:sqlite'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'

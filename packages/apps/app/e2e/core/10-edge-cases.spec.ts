@@ -1,12 +1,4 @@
-import {
-  test,
-  expect,
-  seed,
-  goHome,
-  clickProject,
-  projectBlob,
-  resetApp
-} from '../fixtures/electron'
+import { test, expect, seed, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
 test.describe('Edge cases', () => {

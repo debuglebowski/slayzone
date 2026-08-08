@@ -382,7 +382,9 @@ test.describe('Startup & Suspense Profiling', () => {
       const totalStart = performance.now()
 
       // Replicate fetchTaskDetail's parallel calls
-      const [task, tags, taskTags, projects, subTasks] = await Promise.all([
+      // Only `task` is read below (for the sequential parent lookup); the other
+      // four still run — measuring them is the point of this block.
+      const [task] = await Promise.all([
         time('db.getTask', () => window.getTrpcVanillaClient().task.get.query({ id: taskId })),
         time('tags.getTags', () => window.getTrpcVanillaClient().tags.list.query()),
         time('taskTags.getTagsForTask', () =>

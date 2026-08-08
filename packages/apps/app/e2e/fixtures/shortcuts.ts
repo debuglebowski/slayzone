@@ -17,6 +17,9 @@ function toPlaywrightKey(keys: string, isMac = process.platform === 'darwin'): s
 export function shortcutKey(id: string): string {
   const def = shortcutDefinitions.find((d) => d.id === id)
   if (!def) throw new Error(`Unknown shortcut id: ${id}`)
+  if (def.defaultKeys === null) {
+    throw new Error(`Shortcut has no default keys, so it cannot be pressed: ${id}`)
+  }
   return toPlaywrightKey(def.defaultKeys)
 }
 

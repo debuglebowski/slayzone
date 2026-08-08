@@ -19,6 +19,14 @@ type ExportImportResult = {
   importedProjects?: Array<{ id: string; name: string }>
 }
 
+/** `importedProjects` is only populated on a successful, non-canceled import. */
+function requireImportedProjects(result: ExportImportResult): Array<{ id: string; name: string }> {
+  if (!result.importedProjects) {
+    throw new Error(`import result carried no importedProjects: ${JSON.stringify(result)}`)
+  }
+  return result.importedProjects
+}
+
 const exportImportTest = {
   exportAllToPath: (page: Page, filePath: string) =>
     page.evaluate((p) => {
@@ -156,8 +164,9 @@ test.describe('Export & Import', () => {
 
     // Verify importedProjects in result
     expect(result.importedProjects).toHaveLength(1)
-    expect(result.importedProjects[0].name).toBe('EX Project (imported)')
-    expect(result.importedProjects[0].id).toBeTruthy()
+    const importedProjects = requireImportedProjects(result)
+    expect(importedProjects[0].name).toBe('EX Project (imported)')
+    expect(importedProjects[0].id).toBeTruthy()
 
     await s.refreshData()
 
@@ -174,7 +183,7 @@ test.describe('Export & Import', () => {
     expect(imported).toBeTruthy()
 
     // Imported project ID matches what was returned in result
-    expect(imported!.id).toBe(result.importedProjects[0].id)
+    expect(imported!.id).toBe(importedProjects[0].id)
 
     // Imported project has a different ID from original
     expect(imported!.id).not.toBe(projectId)
@@ -286,7 +295,7 @@ test.describe('Export & Import', () => {
 
     await s.refreshData()
     const allTasks = await s.getTasks()
-    const importedProjectId = importResult.importedProjects[0].id
+    const importedProjectId = requireImportedProjects(importResult)[0].id
     const importedTasks = allTasks.filter(
       (t: { project_id: string }) => t.project_id === importedProjectId
     )

@@ -1,6 +1,5 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { switchTerminalMode, openTaskTerminal } from '../fixtures/terminal'
 
 /**
  * Tests the session ID banner system across all provider types:

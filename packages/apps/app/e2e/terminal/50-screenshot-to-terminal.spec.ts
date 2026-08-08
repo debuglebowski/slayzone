@@ -27,7 +27,7 @@ test.describe('Screenshot browser to terminal', () => {
   const cameraButton = (mainWindow: import('@playwright/test').Page) =>
     mainWindow.locator('[data-testid="browser-screenshot"]:visible').first()
 
-  test.beforeAll(async ({ electronApp, mainWindow }) => {
+  test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
     const p = await s.createProject({
@@ -54,7 +54,6 @@ test.describe('Screenshot browser to terminal', () => {
   })
 
   test('screenshot captures browser view and injects path into terminal', async ({
-    electronApp,
     mainWindow
   }) => {
     // Open browser panel

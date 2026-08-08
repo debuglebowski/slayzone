@@ -2,7 +2,6 @@ import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH, goHome, clickProject } from '../fixtures/electron'
 import {
   openTaskTerminal,
-  switchTerminalMode,
   getMainSessionId,
   waitForPtySession,
   readFullBuffer,

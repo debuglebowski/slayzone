@@ -1,9 +1,7 @@
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   testInvoke,
-  urlInput,
   ensureBrowserPanelVisible,
-  ensureBrowserPanelHidden,
   openTaskViaSearch,
   getActiveViewId
 } from '../fixtures/browser-view'

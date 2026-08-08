@@ -1,12 +1,4 @@
-import {
-  test,
-  expect,
-  seed,
-  goHome,
-  clickProject,
-  projectBlob,
-  resetApp
-} from '../fixtures/electron'
+import { test, expect, seed, goHome, projectBlob, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import type { Page, Locator } from '@playwright/test'
 

@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import {
   test,
   expect,
@@ -25,8 +26,19 @@ let mcpUrl = ''
  */
 type McpResult = {
   tools?: { name: string; description?: string }[]
-  content?: { text: string }[]
+  content?: { type: string; text: string }[]
   isError?: boolean
+}
+
+/**
+ * First content block of a tool result. `content` is optional on the wire (an
+ * error frame carries none), so this fails loudly instead of letting the caller
+ * index into `undefined`.
+ */
+function firstContent(result: McpResult): { type: string; text: string } {
+  const block = result.content?.[0]
+  if (!block) throw new Error(`MCP result carried no content: ${JSON.stringify(result)}`)
+  return block
 }
 
 /** A JSON-RPC response frame from the MCP server. */
@@ -102,6 +114,19 @@ async function mcpInit(): Promise<string> {
   return sessionId!
 }
 
+/**
+ * Read a task straight from the DB via tRPC. `task.get` resolves to `null` for a
+ * missing id, so this narrows once here rather than at every assertion below.
+ */
+async function getDbTask(page: Page, id: string) {
+  const task = await page.evaluate(
+    (i) => window.getTrpcVanillaClient().task.get.query({ id: i }),
+    id
+  )
+  if (!task) throw new Error(`Task ${id} is missing from the DB`)
+  return task
+}
+
 test.describe('MCP Server', () => {
   let projectId: string
   let taskId: string
@@ -158,7 +183,7 @@ test.describe('MCP Server', () => {
     )
 
     expect(body.result).toBeTruthy()
-    const payload = JSON.parse(body.result.content[0].text)
+    const payload = JSON.parse(firstContent(body.result).text)
     expect(payload.task_id).toBe(taskId)
   })
 
@@ -175,16 +200,13 @@ test.describe('MCP Server', () => {
 
     // Tool returns updated task JSON
     expect(body.result).toBeTruthy()
-    const content = body.result.content[0]
+    const content = firstContent(body.result)
     expect(content.type).toBe('text')
     const updated = JSON.parse(content.text)
     expect(updated.title).toBe('Updated by MCP')
 
     // Verify DB was updated
-    const dbTask = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
+    const dbTask = await getDbTask(mainWindow, taskId)
     expect(dbTask.title).toBe('Updated by MCP')
 
     // Verify UI refreshed (MCP sends tasks:changed IPC)
@@ -208,17 +230,14 @@ test.describe('MCP Server', () => {
     )
 
     expect(body.result).toBeTruthy()
-    const created = JSON.parse(body.result.content[0].text)
+    const created = JSON.parse(firstContent(body.result).text)
     expect(created.parent_id).toBe(taskId)
     expect(created.project_id).toBe(projectId)
     expect(created.title).toBe('Subtask from MCP')
     expect(created.status).toBe('todo')
     expect(created.priority).toBe(2)
 
-    const dbTask = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      created.id
-    )
+    const dbTask = await getDbTask(mainWindow, created.id)
     expect(dbTask.parent_id).toBe(taskId)
     expect(dbTask.project_id).toBe(projectId)
   })
@@ -234,7 +253,7 @@ test.describe('MCP Server', () => {
       sid
     )
 
-    const updated = JSON.parse(body.result.content[0].text)
+    const updated = JSON.parse(firstContent(body.result).text)
     expect(updated.status).toBe('in_progress')
 
     // Verify on kanban — task should appear in In Progress column
@@ -255,7 +274,7 @@ test.describe('MCP Server', () => {
     )
 
     expect(body.result.isError).toBe(true)
-    expect(body.result.content[0].text).toContain('not found')
+    expect(firstContent(body.result).text).toContain('not found')
   })
 
   test('update multiple fields at once', async ({ mainWindow }) => {
@@ -274,15 +293,12 @@ test.describe('MCP Server', () => {
       sid
     )
 
-    const updated = JSON.parse(body.result.content[0].text)
+    const updated = JSON.parse(firstContent(body.result).text)
     expect(updated.title).toBe('Multi-update')
     expect(updated.status).toBe('review')
     expect(updated.priority).toBe(1)
 
-    const dbTask = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
+    const dbTask = await getDbTask(mainWindow, taskId)
     expect(dbTask.title).toBe('Multi-update')
     expect(dbTask.status).toBe('review')
     expect(dbTask.priority).toBe(1)
@@ -304,7 +320,7 @@ test.describe('MCP Server', () => {
       },
       sid
     )
-    const after = JSON.parse(setBody.result.content[0].text)
+    const after = JSON.parse(firstContent(setBody.result).text)
     expect(after.description).toBe('A description from MCP')
     expect(after.due_date).toBe('2026-06-01')
 
@@ -321,15 +337,12 @@ test.describe('MCP Server', () => {
       },
       sid
     )
-    const cleared = JSON.parse(clearBody.result.content[0].text)
+    const cleared = JSON.parse(firstContent(clearBody.result).text)
     expect(cleared.description).toBeNull()
     expect(cleared.due_date).toBeNull()
 
     // Verify DB
-    const dbTask = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
+    const dbTask = await getDbTask(mainWindow, taskId)
     expect(dbTask.description).toBeNull()
     expect(dbTask.due_date).toBeNull()
   })
@@ -392,15 +405,15 @@ test.describe('MCP Server', () => {
       )
     ])
 
-    const u1 = JSON.parse(res1.body.result.content[0].text)
-    const u2 = JSON.parse(res2.body.result.content[0].text)
+    const u1 = JSON.parse(firstContent(res1.body.result).text)
+    const u2 = JSON.parse(firstContent(res2.body.result).text)
     expect(u1.title).toBe('From session 1')
     expect(u2.title).toBe('From session 2')
 
     // Verify both in DB
     const [db1, db2] = await Promise.all([
-      mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), taskId),
-      mainWindow.evaluate((id) => window.getTrpcVanillaClient().task.get.query({ id }), t2.id)
+      getDbTask(mainWindow, taskId),
+      getDbTask(mainWindow, t2.id)
     ])
     expect(db1.title).toBe('From session 1')
     expect(db2.title).toBe('From session 2')
@@ -411,7 +424,9 @@ test.describe('MCP Server', () => {
     const { body } = await mcpRequest('tools/list', {}, sid)
     const tools = body.result?.tools ?? []
     const updateTool = tools.find((t) => t.name === 'update_task')
-    expect(updateTool).toBeTruthy()
+    if (!updateTool) {
+      throw new Error(`tools/list has no update_task tool (got: ${tools.map((t) => t.name)})`)
+    }
     expect(updateTool.description).toContain('SLAYZONE_TASK_ID')
   })
 
@@ -420,7 +435,13 @@ test.describe('MCP Server', () => {
   }) => {
     // Reset task title so we can find it on kanban
     const s = seed(mainWindow)
-    await s.updateTask({ id: taskId, title: 'MCP env test', status: 'in_progress' })
+    // Direct tRPC call, not seed().updateTask — the seed helper's input type does
+    // not surface `title`, which is what this reset is for.
+    await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
+      id: taskId,
+      title: 'MCP env test',
+      status: 'in_progress'
+    })
     await s.refreshData()
 
     // Open the task terminal

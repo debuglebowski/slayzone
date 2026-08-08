@@ -2,7 +2,6 @@ import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/ele
 import {
   getMainSessionId,
   openTaskTerminal,
-  waitForPtySession,
   waitForBufferContains,
   readFullBuffer
 } from '../fixtures/terminal'

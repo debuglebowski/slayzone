@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { pressShortcut } from './shortcuts'
 import type { TrpcVanillaClient } from '@slayzone/transport/client'
+import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 
 declare global {
   interface Window {
@@ -82,9 +83,17 @@ export function getWorkerArtifactsDir(): string | undefined {
 let sessionStdoutStream: fs.WriteStream | null = null
 let sessionStderrStream: fs.WriteStream | null = null
 
-type ElectronFixtures = {
+/**
+ * Worker-scoped fixtures. They MUST live in `base.extend`'s second type
+ * parameter: Playwright types the first one as test-scoped, so declaring these
+ * there makes `{ scope: 'worker' }` unassignable to `{ scope?: 'test' }`.
+ */
+type ElectronWorkerFixtures = {
   electronApp: ElectronApplication
   mainWindow: Page
+}
+
+type ElectronFixtures = {
   /** Auto fixture — see the `_mainWindowGuard` definition for what it reports. */
   _mainWindowGuard: void
 }
@@ -738,7 +747,7 @@ export function cliEnv(root: string): Record<string, string> {
   }
 }
 
-export const test = base.extend<ElectronFixtures>({
+export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
   electronApp: [
     async ({}, use, workerInfo) => {
       if (!sharedApp) {
@@ -964,21 +973,15 @@ export function seed(page: Page) {
     createProject: (data: { name: string; color: string; path?: string }) =>
       page.evaluate((d) => window.getTrpcVanillaClient().projects.create.mutate(d), data),
 
-    createTask: (data: {
-      projectId: string
-      title: string
-      status?: string
-      priority?: number
-      dueDate?: string
-    }) => page.evaluate((d) => window.getTrpcVanillaClient().task.create.mutate(d), data),
+    // Typed off the mutations' own input types rather than a hand-picked subset:
+    // the subset silently dropped fields specs DO pass (terminalMode, repoName,
+    // isTemporary, title-on-update), and nothing flagged it while e2e was
+    // outside every tsconfig.
+    createTask: (data: CreateTaskInput) =>
+      page.evaluate((d) => window.getTrpcVanillaClient().task.create.mutate(d), data),
 
-    updateTask: (data: {
-      id: string
-      status?: string
-      priority?: number
-      progress?: number
-      dueDate?: string | null
-    }) => page.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), data),
+    updateTask: (data: UpdateTaskInput) =>
+      page.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), data),
 
     deleteTask: (id: string) =>
       page.evaluate((i) => window.getTrpcVanillaClient().task.delete.mutate({ id: i }), id),

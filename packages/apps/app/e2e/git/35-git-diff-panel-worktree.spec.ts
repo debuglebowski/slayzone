@@ -621,12 +621,17 @@ test.describe('Git diff panel — multi-repo wrapper with worktree on child', ()
       color: '#f43f5e',
       path: wrapperDir
     })
-    const t = await s.createTask({
-      projectId: project.id,
-      title: 'Multi WT task',
-      status: 'todo',
-      repoName: 'child1'
-    })
+    // Direct tRPC call, not seed().createTask — the seed helper's input type does
+    // not surface `repoName`, which is the whole point of this fixture.
+    const t = await mainWindow.evaluate(
+      (d) => window.getTrpcVanillaClient().task.create.mutate(d),
+      {
+        projectId: project.id,
+        title: 'Multi WT task',
+        status: 'todo',
+        repoName: 'child1'
+      }
+    )
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: child1WorktreePath,

@@ -2,7 +2,6 @@ import http from 'http'
 import { AddressInfo } from 'net'
 
 let serverPromise: Promise<{ host: string; port: number }> | undefined
-let serverInstance: http.Server | undefined
 
 const HTML = (title: string, body: string) =>
   `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`
@@ -58,7 +57,6 @@ function startServer(): Promise<{ host: string; port: number }> {
     })
     server.on('error', reject)
     server.listen(0, '127.0.0.1', () => {
-      serverInstance = server
       const addr = server.address() as AddressInfo
       resolve({ host: '127.0.0.1', port: addr.port })
     })

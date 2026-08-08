@@ -12,6 +12,10 @@ import { execSync } from 'child_process'
 import { existsSync } from 'fs'
 import path from 'path'
 
+/** `deleted_at` is a real tasks column (soft delete) that the `Task` type omits;
+ *  task.get returns the raw row, so the timestamp is there at runtime. */
+type SoftDeletedRow = { deleted_at?: string | null }
+
 test.describe('Git worktree operations', () => {
   let projectAbbrev: string
   let taskId: string
@@ -371,7 +375,7 @@ test.describe('Git worktree operations', () => {
 
     await expect
       .poll(async () => {
-        const deleted = await getTask(mainWindow, created.id)
+        const deleted = (await getTask(mainWindow, created.id)) as SoftDeletedRow | null | undefined
         return deleted?.deleted_at ?? null
       })
       .toEqual(expect.any(String))

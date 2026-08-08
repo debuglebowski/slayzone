@@ -40,6 +40,20 @@ const HUB_BIN = path.resolve(APP_DIR, '..', 'hub', 'dist', 'bin.cjs')
 /** Built by `ensureRunnerBuilt()` in global-setup, so it exists before any spec. */
 const RUNNER_BIN = path.resolve(APP_DIR, '..', 'runner', 'dist', 'bin.cjs')
 
+/**
+ * The renderer test seams these specs drive from inside `page.evaluate`. Types are
+ * erased before the closure is serialised, so naming them here is free at runtime.
+ */
+type FederationWindow = {
+  __slayzone_refreshData?: () => Promise<unknown>
+  __slayzone_dialogStore?: {
+    getState: () => {
+      openCreateTask: (draft?: { projectId: string }) => void
+      openCreateProject: () => void
+    }
+  }
+}
+
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer()
@@ -301,7 +315,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         await c.task.create.mutate({ projectId: project.id, title: 'local task', status: 'todo' })
         return project.id as string
       })
-      await page.evaluate(() => window.__slayzone_refreshData?.())
+      await page.evaluate(() => (window as unknown as FederationWindow).__slayzone_refreshData?.())
 
       // (1) UNION — the flat rail renders a tile for BOTH hubs' projects. The
       // rail is fed by useTasksData's merged (federated) arrays, so both the
@@ -454,7 +468,10 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       // as the sidebar "+" and a board column's add button do (they pass a draft
       // carrying the project id, which may belong to any hub in the union).
       await page.evaluate(
-        (pid) => window.__slayzone_dialogStore?.getState().openCreateTask({ projectId: pid }),
+        (pid) =>
+          (window as unknown as FederationWindow).__slayzone_dialogStore
+            ?.getState()
+            .openCreateTask({ projectId: pid }),
         remoteProjectId
       )
       await page.locator('input[name="title"]').fill(TITLE)
@@ -556,7 +573,11 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       // Close settings, then create a project targeting the REMOTE hub via the
       // dialog's hub picker, and assert it lands on the remote hub's DB.
       await page.keyboard.press('Escape')
-      await page.evaluate(() => window.__slayzone_dialogStore?.getState().openCreateProject())
+      await page.evaluate(() =>
+        (window as unknown as FederationWindow).__slayzone_dialogStore
+          ?.getState()
+          .openCreateProject()
+      )
       await page.getByPlaceholder('Project name').fill('Routed-P')
       // Pick the remote hub in the picker (radix Select).
       await page.locator('[data-testid="create-project-hub"]').click()
@@ -897,12 +918,18 @@ function bufferHasCommandOutput(buffer: string, marker: string): boolean {
 
 /** Structural stand-in for the tRPC proxy client. These specs drive a SECOND hub
  *  over a raw socket and cast every result at its own call site, so binding the
- *  real `AppRouter` here would only couple the e2e build to the router's shape. */
-type HubClient = {
-  [key: string]: HubClient & {
-    query: (input?: unknown) => Promise<unknown>
-    mutate: (input?: unknown) => Promise<unknown>
-  }
+ *  real `AppRouter` here would only couple the e2e build to the router's shape.
+ *
+ *  Both halves are `interface`, not `type`: an interface is resolved lazily, so the
+ *  self-reference in the index signature still resolves for the call sites ABOVE
+ *  this declaration. As a circular type alias it collapsed to `HubProcedure` there,
+ *  and every `c.<router>.<proc>` in the file reported TS2339. */
+interface HubProcedure {
+  query: (input?: unknown) => Promise<unknown>
+  mutate: (input?: unknown) => Promise<unknown>
+}
+interface HubClient {
+  [key: string]: HubClient & HubProcedure
 }
 
 /** Run `fn` with a raw tRPC WS client to a hub, closing the socket after. */

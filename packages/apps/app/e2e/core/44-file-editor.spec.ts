@@ -541,9 +541,9 @@ test.describe('File editor', () => {
     // Dispatch DnD events manually — synthetic DragEvent has null dataTransfer,
     // but the tree DnD logic uses refs (set by dragstart) not dataTransfer.
     await mainWindow.evaluate(async () => {
-      const allButtons = Array.from(document.querySelectorAll('button.w-full')).filter(
-        (b) => b.offsetParent !== null
-      )
+      const allButtons = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('button.w-full')
+      ).filter((b) => b.offsetParent !== null)
       const srcBtn = allButtons.find((b) => b.textContent?.includes('dragme.txt'))
       const tgtBtn = allButtons.find((b) => b.textContent?.includes('target-folder'))
       if (!srcBtn || !tgtBtn) throw new Error('buttons not found')

@@ -7,9 +7,17 @@ import {
   resetApp,
   TEST_PROJECT_PATH
 } from '../fixtures/electron'
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import fs from 'fs'
-import path from 'path'
+
+/**
+ * The artifacts store re-reads the row it just wrote, so its create mutations are
+ * typed nullable. A seed that came back empty is a broken fixture, not a soft path.
+ */
+function requireSeeded<T>(row: T | null | undefined, what: string): T {
+  if (!row) throw new Error(`seed returned no ${what}`)
+  return row
+}
 
 // --- Locators ---
 
@@ -45,7 +53,7 @@ async function openArtifactsPanel(page: Page) {
   await expect(artifactsPanel(page)).toBeVisible({ timeout: 5_000 })
 }
 
-async function rightClick(page: Page, locator: import('@playwright/test').Locator) {
+async function rightClick(locator: Locator) {
   await locator.click({ button: 'right' })
 }
 
@@ -134,7 +142,7 @@ test.describe('Artifacts panel', () => {
 
   test('create artifact via root context menu', async ({ mainWindow }) => {
     await openArtifactsPanel(mainWindow)
-    await rightClick(mainWindow, sidebar(mainWindow))
+    await rightClick(sidebar(mainWindow))
     await expect(mainWindow.getByRole('menuitem', { name: 'New Artifact' })).toBeVisible({
       timeout: 3_000
     })
@@ -147,7 +155,7 @@ test.describe('Artifacts panel', () => {
 
   test('rename artifact via context menu', async ({ mainWindow }) => {
     await openArtifactsPanel(mainWindow)
-    await rightClick(mainWindow, artifactRow(mainWindow, 'schema.sql'))
+    await rightClick(artifactRow(mainWindow, 'schema.sql'))
     await expect(mainWindow.getByRole('menuitem', { name: 'Rename' })).toBeVisible({
       timeout: 3_000
     })
@@ -161,7 +169,7 @@ test.describe('Artifacts panel', () => {
 
   test('delete artifact via context menu', async ({ mainWindow }) => {
     await openArtifactsPanel(mainWindow)
-    await rightClick(mainWindow, artifactRow(mainWindow, 'schema.json'))
+    await rightClick(artifactRow(mainWindow, 'schema.json'))
     await expect(mainWindow.getByRole('menuitem', { name: 'Delete' })).toBeVisible({
       timeout: 3_000
     })
@@ -182,7 +190,7 @@ test.describe('Artifacts panel', () => {
 
   test('create folder via root context menu', async ({ mainWindow }) => {
     await openArtifactsPanel(mainWindow)
-    await rightClick(mainWindow, sidebar(mainWindow))
+    await rightClick(sidebar(mainWindow))
     await expect(mainWindow.getByRole('menuitem', { name: 'New Folder' })).toBeVisible({
       timeout: 3_000
     })
@@ -195,7 +203,7 @@ test.describe('Artifacts panel', () => {
 
   test('create artifact inside folder via context menu', async ({ mainWindow }) => {
     await openArtifactsPanel(mainWindow)
-    await rightClick(mainWindow, folderRow(mainWindow, 'designs'))
+    await rightClick(folderRow(mainWindow, 'designs'))
     await expect(mainWindow.getByRole('menuitem', { name: 'New Artifact' })).toBeVisible({
       timeout: 3_000
     })
@@ -208,7 +216,7 @@ test.describe('Artifacts panel', () => {
 
   test('create subfolder via folder context menu', async ({ mainWindow }) => {
     await openArtifactsPanel(mainWindow)
-    await rightClick(mainWindow, folderRow(mainWindow, 'designs'))
+    await rightClick(folderRow(mainWindow, 'designs'))
     await expect(mainWindow.getByRole('menuitem', { name: 'New Folder' })).toBeVisible({
       timeout: 3_000
     })
@@ -221,7 +229,7 @@ test.describe('Artifacts panel', () => {
 
   test('rename folder via context menu', async ({ mainWindow }) => {
     await openArtifactsPanel(mainWindow)
-    await rightClick(mainWindow, folderRow(mainWindow, 'docs'))
+    await rightClick(folderRow(mainWindow, 'docs'))
     await expect(mainWindow.getByRole('menuitem', { name: 'Rename' })).toBeVisible({
       timeout: 3_000
     })
@@ -238,13 +246,16 @@ test.describe('Artifacts panel', () => {
 
     // Self-contained setup: create a fresh folder + artifact inside it.
     const s = seed(mainWindow)
-    const folder = await s.createArtifactFolder({ taskId, name: 'to-delete' })
+    const folder = requireSeeded(
+      await s.createArtifactFolder({ taskId, name: 'to-delete' }),
+      'folder to-delete'
+    )
     await s.createArtifact({ taskId, title: 'guide.md', folderId: folder.id, content: '' })
     await s.refreshData()
     await expect(folderRow(mainWindow, 'to-delete')).toBeVisible({ timeout: 5_000 })
 
     // Delete the folder via context menu
-    await rightClick(mainWindow, folderRow(mainWindow, 'to-delete'))
+    await rightClick(folderRow(mainWindow, 'to-delete'))
     await mainWindow.getByRole('menuitem', { name: 'Delete' }).first().click()
 
     // Folder gone, artifact moves to root.
@@ -264,7 +275,7 @@ test.describe('Artifacts panel', () => {
       await seed(mainWindow).createArtifact({ taskId, title: 'notes.md', content: '' })
       await seed(mainWindow).refreshData()
     }
-    await rightClick(mainWindow, artifactRow(mainWindow, 'notes.md'))
+    await rightClick(artifactRow(mainWindow, 'notes.md'))
 
     await expect(mainWindow.getByRole('menuitem', { name: 'Rename' })).toBeVisible({
       timeout: 3_000
@@ -286,7 +297,7 @@ test.describe('Artifacts panel', () => {
       await seed(mainWindow).createArtifactFolder({ taskId, name: 'designs' })
       await seed(mainWindow).refreshData()
     }
-    await rightClick(mainWindow, folderRow(mainWindow, 'designs'))
+    await rightClick(folderRow(mainWindow, 'designs'))
 
     await expect(mainWindow.getByRole('menuitem', { name: 'New Artifact' })).toBeVisible({
       timeout: 3_000
@@ -384,7 +395,10 @@ test.describe('Artifacts panel', () => {
 
   test('seeded folder with artifact renders correctly', async ({ mainWindow }) => {
     const s = seed(mainWindow)
-    const folder = await s.createArtifactFolder({ taskId, name: 'seeded-folder' })
+    const folder = requireSeeded(
+      await s.createArtifactFolder({ taskId, name: 'seeded-folder' }),
+      'folder seeded-folder'
+    )
     await s.createArtifact({ taskId, title: 'nested.md', folderId: folder.id })
     await s.refreshData()
 
@@ -413,11 +427,14 @@ test.describe('Artifacts panel', () => {
   }) => {
     const s = seed(mainWindow)
     // Use a code-mode extension so CodeMirror is the only editor — preview/split toggle isn't on the path.
-    const artifact = await s.createArtifact({
-      taskId,
-      title: 'sync-banner.ts',
-      content: 'initial\n'
-    })
+    const artifact = requireSeeded(
+      await s.createArtifact({
+        taskId,
+        title: 'sync-banner.ts',
+        content: 'initial\n'
+      }),
+      'artifact sync-banner.ts'
+    )
     await s.refreshData()
 
     await openArtifactsPanel(mainWindow)

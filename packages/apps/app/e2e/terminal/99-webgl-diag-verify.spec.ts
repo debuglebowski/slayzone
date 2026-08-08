@@ -4,7 +4,7 @@
  * ring buffer (window.__slayzone_terminalDiag) to confirm events are recorded
  * with geometry. Not part of the regression suite — a /verify driver.
  */
-import { test, expect, seed, resetApp, clickProject, TEST_PROJECT_PATH } from '../fixtures/electron'
+import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { getMainSessionId, waitForPtySession, openTaskTerminal } from '../fixtures/terminal'
 
 interface DiagEvent {

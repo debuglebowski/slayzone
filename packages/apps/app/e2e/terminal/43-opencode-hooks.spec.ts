@@ -1,6 +1,5 @@
 import { test, expect, resetApp, notifyScriptPath } from '../fixtures/electron'
 import fs from 'fs'
-import path from 'path'
 import http from 'http'
 
 /**
@@ -17,6 +16,20 @@ import http from 'http'
  * Sandbox paths come from the fixture (electron.ts). No real
  * ~/.config/opencode/plugin/ writes from this spec.
  */
+
+/**
+ * The renderer-side scratch globals this spec parks its captured lifecycle
+ * events on. Declared as a Window extension rather than casting to
+ * `Record<string, unknown>`, which TS rejects as a non-overlapping conversion.
+ * Type-only, so it is erased before the closures are serialised.
+ */
+type HookWindow = Window & {
+  __opencodeHookEvents?: unknown[]
+  __opencodeHookUnsub?: () => void
+  __opencodePermEvents?: unknown[]
+  __opencodePermUnsub?: () => void
+}
+
 test.describe('OpenCode agent hooks', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -26,7 +39,6 @@ test.describe('OpenCode agent hooks', () => {
     mainWindow
   }) => {
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', [
         'SLAYZONE_USER_DATA_DIR',
         'SLAYZONE_OPENCODE_PLUGIN_PATH'
@@ -58,7 +70,6 @@ test.describe('OpenCode agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
 
@@ -66,13 +77,14 @@ test.describe('OpenCode agent hooks', () => {
     if (!port) return
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__opencodeHookEvents = []
+      const w = window as HookWindow
+      w.__opencodeHookEvents = []
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__opencodeHookEvents as unknown[]).push(ev)
+          w.__opencodeHookEvents?.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__opencodeHookUnsub = () => sub.unsubscribe()
+      w.__opencodeHookUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -90,9 +102,7 @@ test.describe('OpenCode agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__opencodeHookEvents as
-          | unknown[]
-          | undefined
+        const events = (window as HookWindow).__opencodeHookEvents
         return events && events.length >= 2 ? events : null
       },
       { timeout: 3000 }
@@ -110,10 +120,7 @@ test.describe('OpenCode agent hooks', () => {
     expect(events[1]).toMatchObject({ agentId: 'opencode', hookEvent: 'Stop', type: 'agent-stop' })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__opencodeHookUnsub as
-        | (() => void)
-        | undefined
-      unsub?.()
+      ;(window as HookWindow).__opencodeHookUnsub?.()
     })
   })
 
@@ -121,20 +128,20 @@ test.describe('OpenCode agent hooks', () => {
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
     if (!port) return
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__opencodePermEvents = []
+      const w = window as HookWindow
+      w.__opencodePermEvents = []
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__opencodePermEvents as unknown[]).push(ev)
+          w.__opencodePermEvents?.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__opencodePermUnsub = () => sub.unsubscribe()
+      w.__opencodePermUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -146,9 +153,7 @@ test.describe('OpenCode agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__opencodePermEvents as
-          | unknown[]
-          | undefined
+        const events = (window as HookWindow).__opencodePermEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 3000 }
@@ -157,10 +162,7 @@ test.describe('OpenCode agent hooks', () => {
     expect(event.type).toBe('permission-request')
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__opencodePermUnsub as
-        | (() => void)
-        | undefined
-      unsub?.()
+      ;(window as HookWindow).__opencodePermUnsub?.()
     })
   })
 })

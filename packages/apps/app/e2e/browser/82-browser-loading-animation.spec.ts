@@ -7,6 +7,7 @@ import {
   tabEntries
 } from '../fixtures/browser-view'
 import { getTestUrl } from '../fixtures/test-server'
+import type { Page } from '@playwright/test'
 
 test.describe('Browser loading animation', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -22,7 +23,7 @@ test.describe('Browser loading animation', () => {
     await openTaskViaSearch(mainWindow, 'Loading anim task')
   })
 
-  const loadingOverlay = (page: typeof import('@playwright/test').Page.prototype) =>
+  const loadingOverlay = (page: Page) =>
     page.locator('[data-testid="browser-loading-animation"]:visible')
 
   test('loading animation shows immediately when browser panel opens (before any URL)', async ({

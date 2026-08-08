@@ -1,0 +1,20 @@
+{
+  // The e2e tree was in NO tsconfig, so nothing typechecked 153 spec files.
+  // Playwright compiles specs at runtime and simply ignores type errors, which
+  // means a wrong annotation there is invisible until a test happens to break —
+  // and any `unknown`/interface work done in these files was decorative.
+  //
+  // Node-ish base (specs use fs/path/os and drive Electron), plus DOM: every
+  // `page.evaluate` closure is authored against browser globals even though it
+  // is serialised and run in the renderer.
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  // txn-registry.d.ts augments a global interface that the named-transaction
+  // helpers key off; both other app configs include it, and without it every
+  // `namedTxn('x:y')` in reachable code reports an unknown key.
+  "include": ["e2e/**/*", "../../shared/types/src/txn-registry.d.ts"],
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  }
+}

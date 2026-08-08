@@ -116,7 +116,7 @@ test.describe('Terminal clickable URLs', () => {
               }
               return false
             },
-            { sessionId, needle }
+            { sessionId: sid, needle }
           )
         },
         { timeout: 10_000, message: 'URL never appeared in xterm frontend buffer' }
@@ -178,7 +178,7 @@ test.describe('Terminal clickable URLs', () => {
         }
         return { found: false, error: `URL not found in ${bufferLength} buffer lines` }
       },
-      { sessionId, url, ...opts }
+      { sessionId: sid, url, ...opts }
     )
   }
 
@@ -252,7 +252,7 @@ test.describe('Terminal clickable URLs', () => {
           y: rect.top + (viewportLine + 0.5) * charHeight
         }
       },
-      { sessionId, url }
+      { sessionId: sid, url }
     )
   }
 

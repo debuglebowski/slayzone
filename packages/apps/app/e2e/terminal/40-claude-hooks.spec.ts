@@ -14,6 +14,15 @@ import http from 'http'
  * Sandbox paths are set by the fixture (electron.ts) so we never touch the
  * dev user's real ~/.slayzone or ~/.claude/settings.json.
  */
+
+/** Scratch slots the specs below park on `window` inside evaluate closures. */
+type HookWindow = Window & {
+  __hookEvents?: unknown[]
+  __hookUnsub?: () => void
+  __hookEvents2?: unknown[]
+  __hookUnsub2?: () => void
+}
+
 test.describe('Claude agent hooks', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -23,7 +32,6 @@ test.describe('Claude agent hooks', () => {
     mainWindow
   }) => {
     const env = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', [
         'SLAYZONE_USER_DATA_DIR',
         'SLAYZONE_CLAUDE_SETTINGS_PATH'
@@ -57,7 +65,6 @@ test.describe('Claude agent hooks', () => {
 
   test('POST /api/agent-hook dispatches agent:lifecycle to renderer', async ({ mainWindow }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
 
@@ -66,13 +73,14 @@ test.describe('Claude agent hooks', () => {
 
     // Subscribe in renderer before firing.
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__hookEvents = []
+      const events: unknown[] = []
+      ;(window as HookWindow).__hookEvents = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__hookEvents as unknown[]).push(ev)
+          events.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__hookUnsub = () => sub.unsubscribe()
+      ;(window as HookWindow).__hookUnsub = () => sub.unsubscribe()
     })
 
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -84,7 +92,7 @@ test.describe('Claude agent hooks', () => {
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__hookEvents as unknown[] | undefined
+        const events = (window as HookWindow).__hookEvents
         return events && events.length > 0 ? events[0] : null
       },
       { timeout: 3000 }
@@ -99,27 +107,27 @@ test.describe('Claude agent hooks', () => {
     })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__hookUnsub as (() => void) | undefined
+      const unsub = (window as HookWindow).__hookUnsub
       unsub?.()
     })
   })
 
   test('unknown hookEvent yields 204 + no broadcast', async ({ mainWindow }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()
     if (!port) return
 
     await mainWindow.evaluate(() => {
-      ;(window as Record<string, unknown>).__hookEvents2 = []
+      const events: unknown[] = []
+      ;(window as HookWindow).__hookEvents2 = events
       const sub = window.getTrpcVanillaClient().agentLifecycle.onEvent.subscribe(undefined, {
         onData: (ev) => {
-          ;((window as Record<string, unknown>).__hookEvents2 as unknown[]).push(ev)
+          events.push(ev)
         }
       })
-      ;(window as Record<string, unknown>).__hookUnsub2 = () => sub.unsubscribe()
+      ;(window as HookWindow).__hookUnsub2 = () => sub.unsubscribe()
     })
 
     const { status } = await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
@@ -130,13 +138,12 @@ test.describe('Claude agent hooks', () => {
 
     // Give IPC a tick — should remain empty.
     await new Promise((r) => setTimeout(r, 250))
-    const events = await mainWindow.evaluate(
-      () => (window as Record<string, unknown>).__hookEvents2
-    )
-    expect((events as unknown[]).length).toBe(0)
+    const events = await mainWindow.evaluate(() => (window as HookWindow).__hookEvents2)
+    if (!events) throw new Error('__hookEvents2 was never initialised in the renderer')
+    expect(events.length).toBe(0)
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__hookUnsub2 as (() => void) | undefined
+      const unsub = (window as HookWindow).__hookUnsub2
       unsub?.()
     })
   })

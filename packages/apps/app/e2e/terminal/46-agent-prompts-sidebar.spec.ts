@@ -30,7 +30,6 @@ test.describe('Agent prompts sidebar', () => {
 
   test('captures hook prompts and renders them in the sidebar', async ({ mainWindow }) => {
     const port = (await mainWindow.evaluate(() => {
-      // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
     })) as number | null
     expect(port).toBeTruthy()

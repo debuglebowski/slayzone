@@ -1,10 +1,8 @@
-import { test, expect, seed, goHome, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   testInvoke,
-  urlInput,
   tabEntries,
   newTabBtn,
-  focusForAppShortcut,
   ensureBrowserPanelVisible,
   ensureBrowserPanelHidden,
   openTaskViaSearch,

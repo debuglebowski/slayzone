@@ -9,7 +9,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import type { ScenarioResult, IterationResult, ProfilerCommit, IpcCallSummary } from './types'
+import type { ScenarioResult, IterationResult, IpcCallSummary } from './types'
 
 function loadResults(runDir: string): ScenarioResult[] {
   const files = fs.readdirSync(runDir).filter((f) => f.endsWith('.json'))
