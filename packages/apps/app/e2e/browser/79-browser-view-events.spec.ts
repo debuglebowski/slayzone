@@ -4,7 +4,9 @@ import {
   urlInput,
   ensureBrowserPanelVisible,
   openTaskViaSearch,
-  getActiveViewId
+  getActiveViewId,
+  getViewState,
+  waitForLoadComplete
 } from '../fixtures/browser-view'
 import { getTestUrl } from '../fixtures/test-server'
 
@@ -28,14 +30,7 @@ test.describe('Browser view events (WebContentsView)', () => {
     // Navigate via IPC — manager's getUrl will reflect the event
     await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-Example'))
 
-    await expect
-      .poll(
-        async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-        },
-        { timeout: 15000 }
-      )
-      .toContain('/title-Example')
+    await waitForLoadComplete(mainWindow, viewId, '/title-Example')
   })
 
   test('did-navigate event propagates canGoBack/canGoForward', async ({ mainWindow }) => {
@@ -44,36 +39,15 @@ test.describe('Browser view events (WebContentsView)', () => {
 
     // First navigation
     await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-Example'))
-    await expect
-      .poll(
-        async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-        },
-        { timeout: 15000 }
-      )
-      .toContain('/title-Example')
+    await waitForLoadComplete(mainWindow, viewId, '/title-Example')
 
     // Second navigation — should enable goBack
     await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-Other'))
-    await expect
-      .poll(
-        async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-        },
-        { timeout: 15000 }
-      )
-      .toContain('/title-Other')
+    await waitForLoadComplete(mainWindow, viewId, '/title-Other')
 
     // goBack should work (proves canGoBack was true)
     await testInvoke(mainWindow, 'browser:go-back', viewId)
-    await expect
-      .poll(
-        async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-        },
-        { timeout: 15000 }
-      )
-      .toContain('/title-Example')
+    await waitForLoadComplete(mainWindow, viewId, '/title-Example')
   })
 
   test('page title can be set and read via executeJs', async ({ mainWindow }) => {
@@ -91,14 +65,7 @@ test.describe('Browser view events (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-Example'))
-    await expect
-      .poll(
-        async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-        },
-        { timeout: 15000 }
-      )
-      .toContain('/title-Example')
+    await waitForLoadComplete(mainWindow, viewId, '/title-Example')
 
     // dom-ready fires asynchronously after navigation; poll readyState until the
     // document is parsed rather than reading once (a single read can catch 'loading').
@@ -143,17 +110,19 @@ test.describe('Browser view events (WebContentsView)', () => {
 
     await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-Example'))
 
-    // Wait for loading to stop (did-stop-loading event)
-    await expect
-      .poll(
-        async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-        },
-        { timeout: 15000 }
-      )
-      .toContain('/title-Example')
+    // This test's subject is SlayZone's loading state, not Chromium's parser.
+    // `isLoading` is driven by did-start/did-stop-loading in browser-view-manager
+    // and is what the renderer renders a spinner from — the mechanism behind the
+    // shipped "browser stuck loading" bug. `document.readyState` would assert
+    // Chromium instead, and asserting it once (the previous version) raced the
+    // parse: the URL commits before the document parses, so the wait it relied
+    // on had already returned.
+    await waitForLoadComplete(mainWindow, viewId, '/title-Example')
 
-    // After navigation completes, the page should be fully loaded
+    const state = await getViewState(mainWindow, viewId)
+    expect(state?.isLoading).toBe(false)
+
+    // And the document really is parsed by the time loading reports stopped.
     const readyState = await testInvoke(
       mainWindow,
       'browser:execute-js',
@@ -167,24 +136,33 @@ test.describe('Browser view events (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-Example'))
+    // `/favicon-page` declares `<link rel="icon" href="/favicon.ico">`. The
+    // previous version navigated to a fixture page that declares NO icon, so
+    // the query always returned "" and the only assertion was
+    // `expect(typeof faviconHref).toBe('string')` — which passes for the empty
+    // string, i.e. it could not distinguish a working favicon path from a
+    // missing one. Serving a real icon is what makes this test's name true.
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/favicon-page'))
+    await waitForLoadComplete(mainWindow, viewId, '/favicon-page')
+
+    // The page's declared icon resolves to an absolute URL on the fixture host.
+    let faviconHref = ''
     await expect
       .poll(
         async () => {
-          return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
+          faviconHref = (await testInvoke(
+            mainWindow,
+            'browser:execute-js',
+            viewId,
+            'document.querySelector("link[rel*=icon]")?.href || ""'
+          )) as string
+          return faviconHref
         },
-        { timeout: 15000 }
+        { timeout: 5_000 }
       )
-      .toContain('/title-Example')
+      .not.toBe('')
 
-    // Check if favicon link exists in the page (proves page-favicon-updated event path works)
-    const faviconHref = await testInvoke(
-      mainWindow,
-      'browser:execute-js',
-      viewId,
-      'document.querySelector("link[rel*=icon]")?.href || ""'
-    )
-    // example.com may or may not have a favicon, but the query shouldn't throw
-    expect(typeof faviconHref).toBe('string')
+    expect(faviconHref).toContain('/favicon.ico')
+    expect(faviconHref).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//)
   })
 })
