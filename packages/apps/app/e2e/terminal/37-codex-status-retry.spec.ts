@@ -13,7 +13,6 @@ import { switchTerminalMode } from '../fixtures/terminal'
 test.describe('Session banner behavior', () => {
   let projectAbbrev: string
   let noAutoTaskId: string
-  let switchTaskId: string
   let navTaskId: string
   let dismissTask1Id: string
   let dismissTask2Id: string
@@ -77,7 +76,8 @@ test.describe('Session banner behavior', () => {
       title: 'SB no auto fire',
       status: 'in_progress'
     })
-    const switchTask = await s.createTask({
+    // Reached by title (getByText), never by id — no binding needed.
+    await s.createTask({
       projectId: p.id,
       title: 'SB mode switch',
       status: 'in_progress'
@@ -103,7 +103,6 @@ test.describe('Session banner behavior', () => {
       status: 'in_progress'
     })
     noAutoTaskId = noAutoTask.id
-    switchTaskId = switchTask.id
     navTaskId = navTask.id
     dismissTask1Id = dismissTask1.id
     dismissTask2Id = dismissTask2.id

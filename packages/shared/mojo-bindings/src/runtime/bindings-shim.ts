@@ -15,90 +15,133 @@
  * The shape of Chromium's Mojo TS runtime is wide and evolves with each
  * Chromium roll — mirroring it precisely would be a maintenance burden for
  * something whose types we never check against real logic. The shim therefore
- * uses `any` as the leaf type in the `mojo.internal.*` namespace and only
+ * treats every mojom type spec as an opaque `MojomType` token and only
  * enforces the generic signatures the generated code actually relies on.
  */
 
-/* eslint-disable @typescript-eslint/no-namespace, @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-namespace */
 
 export namespace mojo {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   export namespace internal {
-    export type MojomType = any
-    export const String: any = undefined
-    export const Bool: any = undefined
-    export const Int32: any = undefined
-    export const Uint32: any = undefined
-    export const Int64: any = undefined
-    export const Uint64: any = undefined
-    export const Float: any = undefined
-    export const Double: any = undefined
+    /**
+     * Opaque token for a mojom type spec. The generated code only ever passes
+     * these around (`Spec.$` into Struct/StructField/sendMessage) and never
+     * reads through them, so an unknown-shaped token type-checks exactly the
+     * usages that exist while keeping the real runtime free to change shape.
+     */
+    export type MojomType = unknown
+    export const String: MojomType = undefined
+    export const Bool: MojomType = undefined
+    export const Int32: MojomType = undefined
+    export const Uint32: MojomType = undefined
+    export const Int64: MojomType = undefined
+    export const Uint64: MojomType = undefined
+    export const Float: MojomType = undefined
+    export const Double: MojomType = undefined
 
-    export function Array(..._args: any[]): any {
+    export function Array(..._args: unknown[]): MojomType {
       return undefined
     }
 
-    export function Struct<_T>(...args: any[]): any {
+    export function Struct<_T>(...args: unknown[]): MojomType {
       return args
     }
-    export function StructField<_T, _V>(...args: any[]): any {
+    export function StructField<_T, _V>(...args: unknown[]): MojomType {
       return args
     }
-    export function Union<_T>(...args: any[]): any {
+    export function Union<_T>(...args: unknown[]): MojomType {
       return args
     }
-    export function Enum(...args: any[]): any {
+    export function Enum(...args: unknown[]): MojomType {
       return args
     }
 
     export interface InterfaceProxy<_T> {
-      $: any
+      $: unknown
     }
-    export const InterfaceProxy: any = class {}
+    // The generated code calls this as a plain spec factory — `InterfaceProxy(
+    // FooRemote)` inside a StructField list — never with `new`.
+    export const InterfaceProxy: (..._args: unknown[]) => MojomType = () => undefined
 
     export namespace interfaceSupport {
       export interface Endpoint<_T> {}
       export interface PendingReceiver<_T> {}
-      export function getEndpointForReceiver<T>(_handle: any): Endpoint<T> {
-        return {} as any
+
+      /**
+       * What `bindNewPipeAndPassReceiver()` hands back. The generated
+       * `getRemote()` helpers immediately call `.bindInBrowser()` on it.
+       */
+      export interface BoundPendingReceiver {
+        bindInBrowser(scope?: string): void
       }
-      export function bind(..._args: any[]): void {}
+
+      const inertPendingReceiver: BoundPendingReceiver = {
+        bindInBrowser() {
+          // No pipe exists in the shim — the browser process does the real bind.
+        }
+      }
+
+      export function getEndpointForReceiver<T>(_handle: unknown): Endpoint<T> {
+        return {}
+      }
+      export function bind(..._args: unknown[]): void {
+        // The browser process performs the actual interface binding.
+      }
 
       export class InterfaceRemoteBase<_T> {
-        constructor(..._args: any[]) {}
-        bindNewPipeAndPassReceiver(): any {
-          return { bindInBrowser: () => {} }
+        constructor(..._args: unknown[]) {
+          // Inert stand-in: the real remote comes from the browser-served runtime.
+        }
+        bindNewPipeAndPassReceiver(): BoundPendingReceiver {
+          return inertPendingReceiver
         }
         getConnectionErrorEventRouter(): ConnectionErrorEventRouter {
           return new ConnectionErrorEventRouter()
         }
-        sendMessage(..._args: any[]): any {
-          return Promise.resolve()
+        // `R` is inferred from the calling method's declared return type, which
+        // is how the generated remotes type their `Promise<{...}>` replies.
+        sendMessage<R = void>(..._args: unknown[]): Promise<R> {
+          return Promise.resolve(undefined as unknown as R)
         }
       }
 
       export class InterfaceRemoteBaseWrapper<_T> {
-        constructor(..._args: any[]) {}
-        bindNewPipeAndPassReceiver(): any {
-          return { bindInBrowser: () => {} }
+        constructor(..._args: unknown[]) {
+          // Inert stand-in: the real remote comes from the browser-served runtime.
         }
-        close(): void {}
+        bindNewPipeAndPassReceiver(): BoundPendingReceiver {
+          return inertPendingReceiver
+        }
+        close(): void {
+          // Nothing to release — no pipe was ever opened.
+        }
       }
 
       export class InterfaceReceiverHelperInternal<_R, _P> {
-        constructor(..._args: any[]) {}
-        registerHandler(..._args: any[]): void {}
+        constructor(..._args: unknown[]) {
+          // Inert stand-in: the real receiver comes from the browser-served runtime.
+        }
+        registerHandler(..._args: unknown[]): void {
+          // Message dispatch only happens against the real runtime.
+        }
         getConnectionErrorEventRouter(): ConnectionErrorEventRouter {
           return new ConnectionErrorEventRouter()
         }
       }
 
-      export class InterfaceReceiverHelper<_R, _P> {
-        constructor(..._args: any[]) {}
-        bindNewPipeAndPassRemote(): any {
-          return {}
+      export class InterfaceReceiverHelper<R, _P> {
+        constructor(..._args: unknown[]) {
+          // Inert stand-in: the real receiver comes from the browser-served runtime.
         }
-        close(): void {}
+        // Callers hand the result straight to a remote's `subscribe(observer)`,
+        // so it must type as the helper's own remote half (`R`).
+        bindNewPipeAndPassRemote(): R {
+          return {} as unknown as R
+        }
+        close(): void {
+          // Nothing to release — no pipe was ever opened.
+        }
       }
 
       export class CallbackRouter {
@@ -107,12 +150,16 @@ export namespace mojo {
         }
       }
 
-      export class InterfaceCallbackReceiver<_F = any> {
-        constructor(..._args: any[]) {}
-        addListener(_handler: any): number {
+      export class InterfaceCallbackReceiver<_F = unknown> {
+        constructor(..._args: unknown[]) {
+          // Inert stand-in: listeners only ever fire against the real runtime.
+        }
+        addListener(_handler: unknown): number {
           return 0
         }
-        createReceiverHandler(..._args: any[]): any {}
+        createReceiverHandler(..._args: unknown[]): unknown {
+          return undefined
+        }
       }
 
       export class ConnectionErrorEventRouter {

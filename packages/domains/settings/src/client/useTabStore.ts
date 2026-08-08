@@ -3,6 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
 import { getTrpcClient, getHubClient } from '@slayzone/transport/client'
 import type { TaskStatus } from '@slayzone/task/shared'
+import type { ColumnConfig } from '@slayzone/projects/shared'
 
 export type ActiveView = 'tabs' | 'leaderboard' | 'usage-analytics' | 'context'
 
@@ -50,16 +51,22 @@ export interface TaskLookupTask {
 export interface TaskLookupProject {
   id: string
   path?: string | null
+  /** Kanban column set — App.tsx reads it off the lookup to pick a status when
+   *  converting a temporary task. */
+  columns_config?: ColumnConfig[] | null
   /** Multi-hub: owning hub id (App fills it from useTasksData.hubIdByProject).
    *  Absent → default hub, so single-hub warm-pool routing is unchanged. */
   hubId?: string
 }
 
+/**
+ * Callers hand in whole `Task` / `Project` records; the field sets above are
+ * the only ones this store (or its readers) touch, and structural typing lets
+ * the rest ride along untouched.
+ */
 export interface TaskLookup {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tasks: Array<TaskLookupTask & Record<string, any>>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  projects: Array<TaskLookupProject & Record<string, any>>
+  tasks: TaskLookupTask[]
+  projects: TaskLookupProject[]
 }
 
 interface TabState {
@@ -739,12 +746,18 @@ useTabStore.subscribe(
         const defaultClient = getTrpcClient()
         for (const [hubId, counts] of countsByHub) {
           const client = hubId && getHubClient(hubId) ? getHubClient(hubId)!.client : defaultClient
-          client.pty.warmSetProjectTabCounts.mutate({ counts }).catch(() => {})
+          client.pty.warmSetProjectTabCounts.mutate({ counts }).catch(() => {
+            // Warm-pool hint only: a hub that is down just misses this
+            // snapshot, and the next tab change re-pushes the full one.
+          })
         }
         // No open task tabs at all → clear the default hub's counts (preserves the
         // prior single-hub behavior of pushing an empty snapshot).
         if (countsByHub.size === 0) {
-          defaultClient.pty.warmSetProjectTabCounts.mutate({ counts: {} }).catch(() => {})
+          defaultClient.pty.warmSetProjectTabCounts.mutate({ counts: {} }).catch(() => {
+            // Same as above: losing a clear-snapshot only leaves a stale warm
+            // hint until the next tab change.
+          })
         }
       } catch {
         /* tRPC client not ready (boot) */

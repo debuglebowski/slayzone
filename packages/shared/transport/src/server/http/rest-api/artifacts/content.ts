@@ -130,7 +130,11 @@ export async function createArtifactFromStream(
   } catch (err) {
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
   } finally {
-    if (tmpPath) await unlink(tmpPath).catch(() => {})
+    if (tmpPath)
+      await unlink(tmpPath).catch(() => {
+        // Best-effort: createArtifact may already have consumed (moved) the
+        // staging file, and a leftover temp file must never fail the response.
+      })
   }
 }
 
@@ -229,7 +233,11 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     } finally {
-      if (tmpPath) await unlink(tmpPath).catch(() => {})
+      if (tmpPath)
+        await unlink(tmpPath).catch(() => {
+          // Best-effort: uploadArtifact may already have consumed (moved) the
+          // staging file, and a leftover temp file must never fail the response.
+        })
     }
   })
 }

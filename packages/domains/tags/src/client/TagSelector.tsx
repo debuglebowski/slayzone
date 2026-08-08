@@ -81,7 +81,6 @@ export function TagSelector({
           onTagCreated?.(tag)
           onToggle(tag.id, true)
         }}
-        onUpdated={() => {}}
       />
     </>
   )

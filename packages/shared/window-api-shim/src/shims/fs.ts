@@ -96,15 +96,24 @@ export const fsShim = {
 
   watch: (rootPath: string): void => {
     // Fire-and-forget — sidecar no-ops in cap-shell-6.
-    void jsonRpcCall('fs:watch', { params: [rootPath] }).catch(() => {})
+    void jsonRpcCall('fs:watch', { params: [rootPath] }).catch(() => {
+      // Watching is an optimization, not a requirement: the renderer already
+      // falls back to manual refresh, so a rejected registration is silent.
+    })
   },
 
   unwatch: (rootPath: string): void => {
-    void jsonRpcCall('fs:unwatch', { params: [rootPath] }).catch(() => {})
+    void jsonRpcCall('fs:unwatch', { params: [rootPath] }).catch(() => {
+      // Teardown path — the watch may never have registered, and a failure
+      // here has nothing left to recover.
+    })
   },
 
   showInFinder: (rootPath: string, targetPath: string): void => {
-    void jsonRpcCall('fs:showInFinder', { params: [rootPath, targetPath] }).catch(() => {})
+    void jsonRpcCall('fs:showInFinder', { params: [rootPath, targetPath] }).catch(() => {
+      // Reveal-in-Finder is a convenience shell-out; the caller has no UI to
+      // report a failure into and the file itself is unaffected.
+    })
   },
 
   // Renderer expects `onFileChanged(cb) => unsub`. cap-shell-6 never fires

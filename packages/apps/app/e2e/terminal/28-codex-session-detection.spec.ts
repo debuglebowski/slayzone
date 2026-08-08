@@ -14,7 +14,6 @@ test.describe('Session ID banners', () => {
   let geminiTaskId: string
   let cursorTaskId: string
   let opencodeTaskId: string
-  let claudeTaskId: string
 
   const detectedId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   const sessionBanner = (page: import('@playwright/test').Page) =>
@@ -122,7 +121,9 @@ test.describe('Session ID banners', () => {
       title: 'BT opencode task',
       status: 'todo'
     })
-    const claudeTask = await s.createTask({
+    // Opened by title, never by id — it stays on the default claude-code mode,
+    // so nothing below has to address it through a task update.
+    await s.createTask({
       projectId: p.id,
       title: 'BT claude task',
       status: 'todo'
@@ -131,7 +132,6 @@ test.describe('Session ID banners', () => {
     geminiTaskId = geminiTask.id
     cursorTaskId = cursorTask.id
     opencodeTaskId = opencodeTask.id
-    claudeTaskId = claudeTask.id
 
     await mainWindow.evaluate(
       ({ codex, gemini, cursor, opencode }) => {

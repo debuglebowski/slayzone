@@ -25,9 +25,10 @@ export async function closeTopDialog(mainWindow: Page): Promise<void> {
 
 export async function openUserContextManager(
   mainWindow: Page,
-  // electronApp kept for call-site compatibility; no longer needed.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  _electronApp?: any
+  // electronApp kept for call-site compatibility; no longer needed, so it is
+  // typed `unknown` — every existing call site still type-checks and nothing
+  // here can accidentally start using it again.
+  _electronApp?: unknown
 ): Promise<Locator> {
   // The Context Manager moved out of User Settings into a top-level tab-bar view
   // (tabStore activeView === 'context'). Drive the exposed store directly

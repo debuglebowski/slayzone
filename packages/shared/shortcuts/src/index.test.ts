@@ -294,7 +294,7 @@ describe('getBlockedWebPanelKeys', () => {
   })
 
   it('does NOT include terminal/editor/browser scope shortcuts', () => {
-    const blocked = getBlockedWebPanelKeys()
+    getBlockedWebPanelKeys()
     // mod+f is terminal-search (terminal scope) and browser-find (browser scope)
     // but NOT any global/task scope shortcut at mod+f, so it should be available
     // Actually mod+f is not used at global or task scope, so it's not blocked

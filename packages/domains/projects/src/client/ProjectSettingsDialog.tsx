@@ -215,7 +215,14 @@ export function ProjectSettingsDialog({
             <TestsTab
               projectId={project.id}
               groupBy={groupBy}
-              onGroupByChange={onGroupByChange ?? (() => {})}
+              onGroupByChange={
+                onGroupByChange ??
+                (() => {
+                  // `groupBy` is lifted state owned by the host. TestsTab
+                  // requires the setter, so a host that renders the dialog
+                  // without one gets an inert group-by control, not a crash.
+                })
+              }
             />
           )}
         </SettingsLayout>

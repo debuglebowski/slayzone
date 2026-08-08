@@ -14,7 +14,7 @@ import { isGitTabEnabled, isPanelEnabled } from '@slayzone/task/shared'
 import { CARD_CLASS } from './panels-settings.constants'
 import { PanelLayoutControls } from './PanelLayoutControls'
 import { SortableGitTabRow } from './SortableGitTabRow'
-import type { PanelSettingsState } from './usePanelSettings'
+import type { DiffContextLines, PanelSettingsState } from './usePanelSettings'
 
 export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
   const {
@@ -131,7 +131,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
               <Select
                 value={diffContextLines}
                 onValueChange={(v) => {
-                  setDiffContextLines(v as any)
+                  setDiffContextLines(v as DiffContextLines)
                   setSetting('diff_context_lines', v)
                 }}
               >

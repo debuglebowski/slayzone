@@ -114,7 +114,12 @@ export function childProcessToHandle(child: ChildProcess): ChatProcHandle {
     stream: { on(ev: 'data', cb: (c: Buffer | string) => void): unknown; off?: unknown } | null,
     cb: (chunk: string) => void
   ): ChatDisposable => {
-    if (!stream) return { dispose: () => {} }
+    if (!stream)
+      return {
+        dispose: () => {
+          // Nothing was ever attached — this stdio stream is absent on the child.
+        }
+      }
     const listener = (c: Buffer | string): void => cb(typeof c === 'string' ? c : c.toString())
     stream.on('data', listener)
     return {

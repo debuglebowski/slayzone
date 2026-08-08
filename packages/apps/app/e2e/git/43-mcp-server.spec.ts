@@ -18,8 +18,26 @@ import {
 
 let mcpUrl = ''
 
+/**
+ * The slice of an MCP `tools/list` / `tools/call` result these tests read.
+ * `content[].text` is itself a JSON string that each test parses into its own
+ * payload shape, so it deliberately stops here.
+ */
+type McpResult = {
+  tools?: { name: string; description?: string }[]
+  content?: { text: string }[]
+  isError?: boolean
+}
+
+/** A JSON-RPC response frame from the MCP server. */
+type JsonRpcMessage = {
+  id?: number
+  result: McpResult
+  error?: { code: number; message: string }
+}
+
 /** Parse SSE or JSON response text into JSON-RPC messages. */
-function parseResponse(text: string): any[] {
+function parseResponse(text: string): JsonRpcMessage[] {
   // SSE format: "event: message\ndata: {...}\n\n"
   if (text.includes('event:')) {
     return [...text.matchAll(/^data: (.+)$/gm)].map(([, json]) => JSON.parse(json))
@@ -37,7 +55,7 @@ async function mcpRequest(
   method: string,
   params: Record<string, unknown> = {},
   sessionId?: string
-): Promise<{ body: any; sessionId: string | null }> {
+): Promise<{ body: JsonRpcMessage; sessionId: string | null }> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream'
@@ -57,7 +75,7 @@ async function mcpRequest(
 
   const text = await res.text()
   const messages = parseResponse(text)
-  const body = messages.find((m: any) => m.id === 1) ?? messages[0]
+  const body = messages.find((m) => m.id === 1) ?? messages[0]
   return { body, sessionId: res.headers.get('mcp-session-id') }
 }
 
@@ -94,8 +112,8 @@ test.describe('MCP Server', () => {
     const port = await electronApp.evaluate(async () => {
       // Wait for MCP server to start (port 0 = random)
       for (let i = 0; i < 20; i++) {
-        const p = (globalThis as any).__serverPort
-        if (p) return p as number
+        const p = (globalThis as typeof globalThis & { __serverPort?: number }).__serverPort
+        if (p) return p
         await new Promise((r) => setTimeout(r, 250))
       }
       return null
@@ -122,7 +140,7 @@ test.describe('MCP Server', () => {
     const sid = await mcpInit()
     const { body } = await mcpRequest('tools/list', {}, sid)
     const tools = body.result?.tools ?? []
-    const names = tools.map((t: any) => t.name)
+    const names = tools.map((t) => t.name)
     expect(names).toContain('get_current_task_id')
     expect(names).toContain('create_subtask')
     expect(names).toContain('update_task')
@@ -392,7 +410,7 @@ test.describe('MCP Server', () => {
     const sid = await mcpInit()
     const { body } = await mcpRequest('tools/list', {}, sid)
     const tools = body.result?.tools ?? []
-    const updateTool = tools.find((t: any) => t.name === 'update_task')
+    const updateTool = tools.find((t) => t.name === 'update_task')
     expect(updateTool).toBeTruthy()
     expect(updateTool.description).toContain('SLAYZONE_TASK_ID')
   })

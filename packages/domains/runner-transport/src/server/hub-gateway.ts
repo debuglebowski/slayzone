@@ -195,7 +195,11 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
   const authTimeoutMs = options.authTimeoutMs ?? DEFAULT_AUTH_TIMEOUT_MS
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
-  const log = options.log ?? (() => {})
+  const log =
+    options.log ??
+    (() => {
+      // Logging is opt-in — a host that passes no sink discards gateway diagnostics.
+    })
 
   const events = new TypedEventEmitter<RunnerGatewayEvents>((event, err) => {
     log('runner gateway listener threw', { event: String(event), error: String(err) })

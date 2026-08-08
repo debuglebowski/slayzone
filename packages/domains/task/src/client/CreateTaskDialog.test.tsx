@@ -78,12 +78,21 @@ vi.mock('@slayzone/ui', () => {
     FormLabel: pass,
     FormControl: pass,
     FormMessage: () => null,
-    FormField: ({ control, name, render }: any) => (
+    FormField: ({ control, name, render }: React.ComponentProps<typeof Controller>) => (
       <Controller control={control} name={name} render={render} />
     ),
-    Input: (props: any) => <input {...props} />,
-    Textarea: (props: any) => <textarea {...props} />,
-    Button: ({ children, variant, size, ...rest }: any) => <button {...rest}>{children}</button>,
+    Input: (props: React.ComponentProps<'input'>) => <input {...props} />,
+    Textarea: (props: React.ComponentProps<'textarea'>) => <textarea {...props} />,
+    // `variant`/`size` are styling-only in the real Button — dropped here so
+    // they don't leak onto the DOM node as unknown attributes.
+    Button: ({
+      children,
+      variant,
+      size,
+      ...rest
+    }: React.ComponentProps<'button'> & { variant?: string; size?: string }) => (
+      <button {...rest}>{children}</button>
+    ),
     Select: pass,
     SelectContent: pass,
     SelectItem: pass,

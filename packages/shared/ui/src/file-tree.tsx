@@ -4,11 +4,11 @@ import { cn } from './utils'
 
 // --- Tree types ---
 
-export interface TreeFolder {
+export interface TreeFolder<T> {
   type: 'folder'
   name: string
   path: string
-  children: TreeNode<any>[]
+  children: TreeNode<T>[]
 }
 
 export interface TreeFile<T> {
@@ -17,33 +17,44 @@ export interface TreeFile<T> {
   item: T
 }
 
-export type TreeNode<T> = TreeFolder | TreeFile<T>
+export type TreeNode<T> = TreeFolder<T> | TreeFile<T>
 
 // --- Tree building ---
+
+/**
+ * Intermediate structure while inserting paths: a directory is a nested Map,
+ * a file is the item itself. Only ever lives inside `buildFileTree`.
+ */
+type PathMap<T> = Map<string, PathMap<T> | T>
 
 export function buildFileTree<T>(
   items: T[],
   getPath: (item: T) => string,
   options?: { compress?: boolean }
 ): TreeNode<T>[] {
-  const root = new Map<string, any>()
+  // `T` is unconstrained, so the Map check is what separates a directory from a
+  // leaf. A type predicate (rather than a bare `instanceof`) is what lets TS
+  // narrow the `PathMap<T> | T` union down to `T` on the else branch.
+  const isDir = (value: unknown): value is PathMap<T> => value instanceof Map
+
+  const root: PathMap<T> = new Map()
   for (const item of items) {
     const parts = getPath(item).split('/')
     let current = root
     for (let i = 0; i < parts.length - 1; i++) {
       if (!current.has(parts[i])) current.set(parts[i], new Map())
       const next = current.get(parts[i])
-      if (next instanceof Map) current = next
+      if (isDir(next)) current = next
       else break
     }
     current.set(parts[parts.length - 1], item)
   }
 
-  function toNodes(map: Map<string, any>, prefix: string): TreeNode<T>[] {
-    const dirs: TreeFolder[] = []
+  function toNodes(map: PathMap<T>, prefix: string): TreeNode<T>[] {
+    const dirs: TreeFolder<T>[] = []
     const files: TreeFile<T>[] = []
     for (const [name, value] of map) {
-      if (value instanceof Map) {
+      if (isDir(value)) {
         const dirPath = prefix ? `${prefix}/${name}` : name
         dirs.push({ type: 'folder', name, path: dirPath, children: toNodes(value, dirPath) })
       } else {
@@ -65,7 +76,7 @@ function compressTree<T>(nodes: TreeNode<T>[]): TreeNode<T>[] {
     if (node.type === 'file') return node
     let n = node
     while (n.children.length === 1 && n.children[0].type === 'folder') {
-      const child = n.children[0] as TreeFolder
+      const child = n.children[0] as TreeFolder<T>
       n = {
         type: 'folder',
         name: `${n.name}/${child.name}`,

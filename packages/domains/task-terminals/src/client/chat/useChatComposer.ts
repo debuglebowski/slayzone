@@ -72,7 +72,10 @@ export function useChatComposer({
   // Forward-declared ref — wired to autocomplete.bumpUsageFromMessage further
   // down once the autocomplete hook has run. The drain callback closes over
   // this ref, so the assignment lands before the first onDrained fires.
-  const bumpUsageRef = useRef<(text: string) => Promise<void> | void>(() => {})
+  const bumpUsageRef = useRef<(text: string) => Promise<void> | void>(() => {
+    // Placeholder until the assignment below swaps in the real bump. A drain that
+    // somehow fires first has no usage counts to bump yet anyway.
+  })
   /**
    * "Up next" queue lives in SQLite (table `chat_queue`) — survives reload,
    * sync's across windows, drained main-side on session→idle. Hook is a

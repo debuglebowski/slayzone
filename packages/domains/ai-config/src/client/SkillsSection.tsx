@@ -142,7 +142,11 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
         for (const u of updates) map.set(u.itemId, u)
         setUpdateMap(map)
       })
-      .catch(() => {})
+      .catch(() => {
+        // Update badges are decoration on top of the installed skills: an
+        // unreachable or rate-limited marketplace leaves the list rendering
+        // exactly as before, so it must not raise anything at the user.
+      })
   }, [trpcClient, items])
 
   // Consume one-shot library skill selection from the store (set by Go-to-library button).

@@ -3,21 +3,31 @@ import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
+// Stand-in prop shapes: only what RunnerCard actually passes to each primitive,
+// so a changed call site fails here instead of silently drifting.
+type MockChildren = { children?: React.ReactNode }
+type MockSelectProps = MockChildren & {
+  value?: string
+  onValueChange: (value: string) => void
+}
+
 // Native-<select> stand-in for the Radix Select so onValueChange is drivable via
 // fireEvent.change (SelectTrigger renders nothing — its content lives in the
 // options emitted by SelectContent).
 vi.mock('@slayzone/ui', () => ({
-  Select: ({ children, value, onValueChange }: any) => (
+  Select: ({ children, value, onValueChange }: MockSelectProps) => (
     <select
       data-testid="runner-select"
       value={value}
-      onChange={(e: any) => onValueChange(e.target.value)}
+      onChange={(e) => onValueChange(e.target.value)}
     >
       {children}
     </select>
   ),
-  SelectContent: ({ children }: any) => <>{children}</>,
-  SelectItem: ({ children, value }: any) => <option value={value}>{children}</option>,
+  SelectContent: ({ children }: MockChildren) => <>{children}</>,
+  SelectItem: ({ children, value }: MockChildren & { value: string }) => (
+    <option value={value}>{children}</option>
+  ),
   SelectTrigger: () => null,
   SelectValue: () => null
 }))

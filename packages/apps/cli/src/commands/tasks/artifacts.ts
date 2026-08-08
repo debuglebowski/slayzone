@@ -146,14 +146,6 @@ function printArtifactTree(artifacts: ArtifactRow[], folders: ArtifactFolderRow[
     console.log('No artifacts.')
     return
   }
-  // Build folder path map
-  const byId = new Map(folders.map((f) => [f.id, f]))
-  function folderPath(id: string): string {
-    const f = byId.get(id)
-    if (!f) return '?'
-    return f.parent_id ? `${folderPath(f.parent_id)}/${f.name}` : f.name
-  }
-
   // Group: parentId -> children
   const childFolders = new Map<string | null, ArtifactFolderRow[]>()
   for (const f of folders) {

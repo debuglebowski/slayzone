@@ -10,7 +10,10 @@
  */
 type TaskReachedTerminalHandler = (taskId: string) => void
 
-let handler: TaskReachedTerminalHandler = () => {}
+let handler: TaskReachedTerminalHandler = () => {
+  // No-op until the Electron host registers the real handler: headless server
+  // callers have no PTYs or chat transports to tear down.
+}
 
 export function setOnTaskReachedTerminalHandler(h: TaskReachedTerminalHandler): void {
   handler = h

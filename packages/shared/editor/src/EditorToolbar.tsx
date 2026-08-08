@@ -9,13 +9,22 @@ import { cn } from '@slayzone/ui'
 import type { FormatState } from './rich-text-editor.types'
 import { toggleTaskListCommand } from './editor-commands'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// The only keys this toolbar can emit. Derived from the command values rather
+// than spelled out as `CmdKey<T>` so adding a button here is a type error until
+// the union is widened, and so each key keeps its own payload type.
+type ToolbarCommandKey =
+  | typeof toggleStrongCommand.key
+  | typeof toggleEmphasisCommand.key
+  | typeof wrapInBulletListCommand.key
+  | typeof wrapInOrderedListCommand.key
+  | typeof toggleTaskListCommand.key
+
 export function EditorToolbar({
   formatState,
   onCommand
 }: {
   formatState: FormatState
-  onCommand: (cmd: any) => void
+  onCommand: (cmd: ToolbarCommandKey) => void
 }) {
   return (
     <div className="flex items-center gap-0.5 border-b border-border/50 px-1 py-1 shrink-0">

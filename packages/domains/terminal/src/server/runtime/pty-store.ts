@@ -155,7 +155,7 @@ export function createPtyOps(db: SlayzoneDb) {
     const isBuiltin = Boolean(builtinRow?.is_builtin)
 
     const sets: string[] = []
-    const params: any[] = []
+    const params: unknown[] = []
 
     if (updates.label !== undefined && !isBuiltin) {
       sets.push('label = ?')

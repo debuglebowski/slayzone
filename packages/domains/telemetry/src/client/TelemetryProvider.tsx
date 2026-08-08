@@ -23,7 +23,11 @@ interface TelemetryContextValue {
 
 export const TelemetryContext = createContext<TelemetryContextValue>({
   tier: 'anonymous',
-  setTier: () => {},
+  setTier: () => {
+    // Default for consumers rendered outside TelemetryProvider (unit tests, the
+    // fork's partial shells). There is no persisted tier to write, so dropping
+    // the change is correct — the provider supplies the real setter.
+  },
   track
 })
 

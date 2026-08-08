@@ -11,13 +11,10 @@ import type { DagLayout } from '../client/CommitGraph'
 
 let passed = 0
 let failed = 0
-let currentDescribe = ''
 
 function describe(name: string, fn: () => void) {
-  currentDescribe = name
   console.log(`\n${name}`)
   fn()
-  currentDescribe = ''
 }
 
 function test(name: string, fn: () => void) {

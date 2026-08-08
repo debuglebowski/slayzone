@@ -21,6 +21,30 @@ export function binaryOnPath(name: string): boolean {
   }
 }
 
+/**
+ * Structural view of the xterm `Terminal` reachable through the link provider
+ * that `xterm-init.ts` publishes on `window.__slayzone_terminalLinks` — only the
+ * buffer/geometry members the readers below touch. Spelled out here rather than
+ * imported from `@xterm/xterm` because the terminal only exists inside
+ * `page.evaluate`, in the app's renderer, never in this Node-side process.
+ */
+type XtermBufferLine = { translateToString(trimRight?: boolean): string }
+type XtermProbe = {
+  rows: number
+  buffer: {
+    active: {
+      length: number
+      viewportY: number
+      cursorX: number
+      cursorY: number
+      getLine(index: number): XtermBufferLine | undefined
+    }
+  }
+}
+type TerminalLinksWindow = Window & {
+  __slayzone_terminalLinks?: Record<string, { _terminal: XtermProbe } | undefined>
+}
+
 /** Common binary paths for CLI providers */
 export const CLI_PATHS = {
   'cursor-agent': `${homedir()}/.local/bin/cursor-agent`,
@@ -394,9 +418,7 @@ export async function waitForBufferContains(
 export async function getViewportLines(page: Page, sessionId: string): Promise<string[] | null> {
   return page.evaluate(
     ({ sid }) => {
-      const links = (window as any).__slayzone_terminalLinks as
-        | Record<string, { _terminal: any }>
-        | undefined
+      const links = (window as TerminalLinksWindow).__slayzone_terminalLinks
       const terminal = links?.[sid]?._terminal
       if (!terminal) return null
       const buf = terminal.buffer.active
@@ -422,9 +444,7 @@ export async function getTerminalState(
 } | null> {
   return page.evaluate(
     ({ sid }) => {
-      const links = (window as any).__slayzone_terminalLinks as
-        | Record<string, { _terminal: any }>
-        | undefined
+      const links = (window as TerminalLinksWindow).__slayzone_terminalLinks
       const terminal = links?.[sid]?._terminal
       if (!terminal) return null
       const buf = terminal.buffer.active

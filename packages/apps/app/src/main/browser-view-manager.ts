@@ -423,13 +423,11 @@ export class BrowserViewManager {
     if (this.allHidden) return
     this.allHidden = true
 
-    let hidden = 0
     for (const entry of this.views.values()) {
       // Remove ALL views from window, not just visible ones — a view might have been
       // re-added by setVisible(true) between the dialog's render and this hideAll call
       if (!entry.lastBounds) entry.lastBounds = entry.bounds
       this.removeFromWindow(entry)
-      hidden++
     }
 
     // Restore focus to renderer so dialogs can receive keyboard input.
@@ -508,7 +506,10 @@ export class BrowserViewManager {
   private applyVisualZoomLimits(wc: Electron.WebContents): void {
     const apply = () => {
       if (wc.isDestroyed()) return
-      void wc.setVisualZoomLevelLimits(1, 3).catch(() => {})
+      void wc.setVisualZoomLevelLimits(1, 3).catch(() => {
+        // Rejects when the frame is swapped out between the isDestroyed() check
+        // and the IPC landing. Pinch-zoom limits are cosmetic — never worth a throw.
+      })
     }
     apply()
     // Re-apply on each navigation — visual zoom limits are per-frame and reset
@@ -954,7 +955,10 @@ export class BrowserViewManager {
     const inject = (url?: string) => {
       if (!wc.mainFrame) return
       // Inject chrome.csi/loadTimes on all pages (lightweight, no Object.defineProperty)
-      wc.mainFrame.executeJavaScript(CSI_LOADTIMES_SCRIPT).catch(() => {})
+      wc.mainFrame.executeJavaScript(CSI_LOADTIMES_SCRIPT).catch(() => {
+        // Rejects if the page navigates again before the script lands. The next
+        // did-navigate re-injects, so a lost attempt costs nothing.
+      })
       // Inject full desktop handoff hardening only when a policy is set (web panels with handoff)
       if (!entry.desktopHandoffPolicy) return
       try {
@@ -962,7 +966,9 @@ export class BrowserViewManager {
       } catch {
         /* invalid URL — inject */
       }
-      wc.mainFrame.executeJavaScript(WEBVIEW_DESKTOP_HANDOFF_SCRIPT).catch(() => {})
+      wc.mainFrame.executeJavaScript(WEBVIEW_DESKTOP_HANDOFF_SCRIPT).catch(() => {
+        // Same as above — re-injected on the next did-navigate if this one is lost.
+      })
     }
     wc.on('did-navigate', (_event, url) => inject(url))
   }
@@ -1356,7 +1362,10 @@ export class BrowserViewManager {
       send({ viewId, type: 'dom-ready' })
       // Reinstall the page-side capture listener on each new document. This stays
       // separate from the before-input-event fallback above on purpose.
-      wc.mainFrame.executeJavaScript(MODIFIED_LINK_CAPTURE_SCRIPT).catch(() => {})
+      wc.mainFrame.executeJavaScript(MODIFIED_LINK_CAPTURE_SCRIPT).catch(() => {
+        // Rejects if the document is torn down mid-injection. The before-input-event
+        // fallback still covers modified clicks until the next dom-ready reinstalls.
+      })
     })
 
     wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {

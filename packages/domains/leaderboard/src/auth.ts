@@ -26,7 +26,15 @@ export const LEADERBOARD_AUTH_DISABLED: LeaderboardAuthState = {
   isLoading: false,
   isAuthenticated: false,
   lastError: null,
-  signInWithGitHub: async () => {},
-  signOut: async () => {},
-  forgetMe: async () => {}
+  // All three are unreachable in this host: `configured: false` sends
+  // LeaderboardPage to its auth-gate, so no control that calls them ever renders.
+  signInWithGitHub: async () => {
+    // No Convex client to open a GitHub OAuth flow against.
+  },
+  signOut: async () => {
+    // No session exists to end.
+  },
+  forgetMe: async () => {
+    // No stored Convex identity to erase.
+  }
 }

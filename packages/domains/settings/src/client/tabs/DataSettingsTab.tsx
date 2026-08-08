@@ -79,7 +79,7 @@ export function DataSettingsTab() {
                 `Imported ${result.projectCount} project(s), ${result.taskCount} task(s)`
               )
               if (result.importedProjects?.length) {
-                setImportedProjects(result.importedProjects.map((p: any) => ({ ...p, path: '' })))
+                setImportedProjects(result.importedProjects.map((p) => ({ ...p, path: '' })))
               }
             } else {
               toast.error(`Import failed: ${result.error}`)
@@ -102,7 +102,7 @@ export function DataSettingsTab() {
                   placeholder="/path/to/repo"
                   value={p.path}
                   onChange={(e) => {
-                    setImportedProjects((prev: any[]) =>
+                    setImportedProjects((prev) =>
                       prev.map((proj, j) => (j === i ? { ...proj, path: e.target.value } : proj))
                     )
                   }}
@@ -118,7 +118,7 @@ export function DataSettingsTab() {
                       properties: ['openDirectory']
                     })
                     if (!result.canceled && result.filePaths[0]) {
-                      setImportedProjects((prev: any[]) =>
+                      setImportedProjects((prev) =>
                         prev.map((proj, j) =>
                           j === i ? { ...proj, path: result.filePaths[0] } : proj
                         )

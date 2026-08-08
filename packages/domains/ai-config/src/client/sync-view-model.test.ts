@@ -40,7 +40,6 @@ function expect(actual: unknown) {
 
 const linkedSynced: ProviderSyncEntry = { syncHealth: 'synced', syncReason: null }
 const linkedStale: ProviderSyncEntry = { syncHealth: 'stale', syncReason: 'external_edit' }
-const linkedNotSynced: ProviderSyncEntry = { syncHealth: 'not_synced', syncReason: null }
 const unlinkedMissing: ProviderSyncEntry = { syncHealth: 'not_synced', syncReason: 'not_linked' }
 const unlinkedUnmanaged: ProviderSyncEntry = { syncHealth: 'unmanaged', syncReason: 'not_linked' }
 

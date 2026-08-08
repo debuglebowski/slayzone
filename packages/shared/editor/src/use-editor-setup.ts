@@ -306,7 +306,11 @@ export function useEditorSetup({
 
     return () => {
       saveKeydownTeardown?.()
-      editor.destroy().catch(() => {})
+      editor.destroy().catch(() => {
+        // Teardown is best-effort: the component is already unmounting, and a
+        // destroy that rejects (editor never finished creating) leaves nothing
+        // to clean up anyway.
+      })
       editorInstanceRef.current = null
       if (externalEditorRef) externalEditorRef.current = null
     }

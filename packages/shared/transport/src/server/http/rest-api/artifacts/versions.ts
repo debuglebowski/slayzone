@@ -189,7 +189,11 @@ async function writeContent(
   } catch (err) {
     sendError(res, err)
   } finally {
-    if (tmpPath) await unlink(tmpPath).catch(() => {})
+    if (tmpPath)
+      await unlink(tmpPath).catch(() => {
+        // Best-effort cleanup — the store may have already consumed (moved) the
+        // staged file, and a temp left behind is harmless either way.
+      })
   }
 }
 

@@ -153,7 +153,10 @@ async function run() {
     // Patch dialog to return a real tmp file path
     const tmpFile = path.join(os.tmpdir(), `slayzone-diag-test-${Date.now()}.json`)
     const original = dialog.showSaveDialog
-    ;(dialog as any).showSaveDialog = async () => ({ canceled: false, filePath: tmpFile })
+    // The stub answers only the one overload the exporter calls, so the slot is
+    // re-typed as `unknown` rather than electron's full overloaded signature.
+    const dialogSlot = dialog as unknown as { showSaveDialog: unknown }
+    dialogSlot.showSaveDialog = async () => ({ canceled: false, filePath: tmpFile })
 
     try {
       const result = (await h.invoke('diagnostics:export', {
@@ -174,7 +177,7 @@ async function run() {
       // Cleanup
       fs.unlinkSync(tmpFile)
     } finally {
-      ;(dialog as any).showSaveDialog = original
+      dialogSlot.showSaveDialog = original
     }
   }
 }

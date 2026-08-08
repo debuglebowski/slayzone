@@ -253,7 +253,9 @@ async function run() {
   for (const id of benchTargets) {
     try {
       await browser.send('Target.closeTarget', { targetId: id })
-    } catch {}
+    } catch {
+      // Best-effort teardown — a bench target may have closed itself already.
+    }
   }
   browser.close()
 

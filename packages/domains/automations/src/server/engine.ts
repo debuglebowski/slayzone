@@ -28,8 +28,10 @@ const MAX_RUNS_PER_AUTOMATION = 100
  * module electron-free (`src/server` boundary guard).
  */
 export type AutomationTriggerBus = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural match for IpcMain.on
-  on(channel: string, listener: (...args: any[]) => void): unknown
+  // Per-channel payloads are unknowable from here (the bus is one untyped
+  // string→args channel map), so listeners take `unknown[]` and destructure
+  // what the emitting side documents. Structurally matches IpcMain.on.
+  on(channel: string, listener: (...args: unknown[]) => void): unknown
 }
 
 class AutomationCommandError extends Error {
@@ -112,7 +114,10 @@ export class AutomationEngine {
     // Emitted by the legacy IPC tags handler (host) AND, since slice 9, by the
     // tRPC `tags.setForTask` path via the task-trigger bus registry (set to this
     // same bus by the side-car composition).
-    bus.on('db:taskTags:setForTask:done', (_event, taskId: string, tagIds: string[]) => {
+    bus.on('db:taskTags:setForTask:done', (...args: unknown[]) => {
+      // ipcMain-shaped payload: a leading event arg (null on the sidecar bus),
+      // then the tags handler's own (taskId, tagIds).
+      const [, taskId, tagIds] = args as [unknown, string, string[]]
       void (async () => {
         const task = await this.db.get<{ project_id: string }>(
           'SELECT project_id FROM tasks WHERE id = ?',

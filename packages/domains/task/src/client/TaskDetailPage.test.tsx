@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import React from 'react'
 import { render, screen, cleanup } from '@testing-library/react'
+import type { ComponentProps, ReactNode } from 'react'
 import type { TaskDetailData } from './taskDetailCache'
 
 // --- Module mocks (must be before component import) ---
@@ -37,7 +38,14 @@ vi.mock('@slayzone/terminal', () => ({
 
 vi.mock('@slayzone/settings/client', () => ({
   useTheme: () => ({ editorThemeId: 'default', contentVariant: 'dark' }),
-  useTabStore: (selector: (s: any) => unknown) =>
+  // Only the header-layout slice the page selects from is provided.
+  useTabStore: (
+    selector: (s: {
+      taskHeaderPanelMode: string
+      taskHeaderPanelAlign: string
+      taskHeaderTitleAlign: string
+    }) => unknown
+  ) =>
     selector({
       taskHeaderPanelMode: 'tabs',
       taskHeaderPanelAlign: 'right',
@@ -49,8 +57,9 @@ vi.mock('@slayzone/settings/client', () => ({
 }))
 
 vi.mock('@slayzone/ui', () => {
-  const Stub = (props: any) => props.children ?? null
-  const StubTrigger = (props: any) => props.children ?? null
+  // Every stub collapses to its children, so children is the only prop that matters.
+  const Stub = (props: { children?: ReactNode }) => props.children ?? null
+  const StubTrigger = (props: { children?: ReactNode }) => props.children ?? null
   return {
     Button: Stub,
     IconButton: Stub,
@@ -70,7 +79,7 @@ vi.mock('@slayzone/ui', () => {
     SelectSeparator: () => null,
     SelectTrigger: StubTrigger,
     SelectValue: Stub,
-    Input: (props: any) => <input {...props} />,
+    Input: (props: ComponentProps<'input'>) => <input {...props} />,
     ContextMenu: Stub,
     ContextMenuContent: Stub,
     ContextMenuItem: Stub,
@@ -100,7 +109,7 @@ vi.mock('@slayzone/ui', () => {
     PopoverContent: Stub,
     PopoverTrigger: StubTrigger,
     buildStatusOptions: () => [],
-    cn: (...args: any[]) => args.filter(Boolean).join(' '),
+    cn: (...args: unknown[]) => args.filter(Boolean).join(' '),
     getColumnStatusStyle: () => null,
     projectColorBg: () => undefined,
     useAppearance: () => ({
@@ -115,7 +124,7 @@ vi.mock('@slayzone/ui', () => {
     matchesShortcut: () => false,
     useShortcutStore: () => ({ overrides: {}, isRecording: false }),
     useShortcutDisplay: () => null,
-    withModalGuard: (fn: any) => fn,
+    withModalGuard: <T,>(fn: T) => fn,
     getThemeEditorColors: () => ({})
   }
 })
@@ -139,7 +148,7 @@ vi.mock('@slayzone/task/shared', () => ({
   setProviderConversationId: vi.fn(),
   setProviderFlags: vi.fn(),
   clearAllConversationIds: vi.fn(),
-  normalizeDescription: (d: any) => d ?? '',
+  normalizeDescription: (d: string | null | undefined) => d ?? '',
   stripMarkdown: (s: string) => s
 }))
 
@@ -234,11 +243,14 @@ vi.mock('@slayzone/transport/client', () => {
   // and every call resolves to []. Stability is load-bearing — returning a fresh
   // proxy per hook call makes `trpcClient` unstable, re-firing every effect that
   // deps on it (`[trpcClient]`) → setState → re-render → infinite loop.
-  const handler: ProxyHandler<any> = {
+  // Self-referential shape: every property access yields the same proxy, and
+  // calling at any depth resolves to [].
+  type DeepProxy = (() => Promise<unknown[]>) & { [key: string]: DeepProxy }
+  const handler: ProxyHandler<DeepProxy> = {
     get: (_t, prop) => (prop === 'then' ? undefined : proxy),
     apply: () => Promise.resolve([])
   }
-  const proxy: any = new Proxy(() => Promise.resolve([]), handler)
+  const proxy = new Proxy((() => Promise.resolve([])) as DeepProxy, handler)
   return {
     useTRPC: () => proxy,
     useTRPCClient: () => proxy,
@@ -312,8 +324,14 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
       updated_at: '2026-01-01',
       archived_at: null,
       deleted_at: null
-    } as any,
-    project: { id: 'proj-1', name: 'Test Project', path: '/tmp/test' } as any,
+      // Both literals carry only the columns the header render path reads, so
+      // they go through `unknown` rather than claiming to be complete rows.
+    } as unknown as TaskDetailData['task'],
+    project: {
+      id: 'proj-1',
+      name: 'Test Project',
+      path: '/tmp/test'
+    } as unknown as TaskDetailData['project'],
     tags: [],
     taskTagIds: [],
     subTasks: [],
@@ -349,7 +367,7 @@ globalThis.ResizeObserver = class {
   observe() {}
   unobserve() {}
   disconnect() {}
-} as any
+} as unknown as typeof ResizeObserver
 
 afterEach(cleanup)
 

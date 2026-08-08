@@ -1,6 +1,22 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
+/**
+ * The renderer exposes the zustand tab store on `window` purely for E2E driving
+ * (Meta+Shift+T and friends are flaky through the OS menu). Only the members
+ * these tests actually call are declared.
+ */
+type TabStoreWindow = {
+  __slayzone_tabStore: {
+    getState: () => {
+      tabs: { type: string; title?: string }[]
+      activeTabIndex: number
+      closeTab: (index: number) => void
+      reopenClosedTab: () => void
+    }
+  }
+}
+
 /** Get the value of the first visible input on the page */
 async function getVisibleInputValue(page: import('@playwright/test').Page): Promise<string | null> {
   return page.evaluate(() => {
@@ -122,7 +138,7 @@ test.describe('Tab management & keyboard shortcuts', () => {
     expect(closedTitle).toBeTruthy()
 
     await mainWindow.evaluate(() => {
-      const store = (window as any).__slayzone_tabStore.getState()
+      const store = (window as unknown as TabStoreWindow).__slayzone_tabStore.getState()
       store.closeTab(store.activeTabIndex)
     })
     await expect
@@ -130,12 +146,9 @@ test.describe('Tab management & keyboard shortcuts', () => {
         async () => {
           return await mainWindow
             .evaluate(() =>
-              (window as any).__slayzone_tabStore
+              (window as unknown as TabStoreWindow).__slayzone_tabStore
                 .getState()
-                .tabs.some(
-                  (tab: { type: string; title?: string }) =>
-                    tab.type === 'task' && tab.title === 'Tab task C'
-                )
+                .tabs.some((tab) => tab.type === 'task' && tab.title === 'Tab task C')
             )
             .catch(() => false)
         },
@@ -144,7 +157,7 @@ test.describe('Tab management & keyboard shortcuts', () => {
       .toBe(false)
 
     await mainWindow.evaluate(() => {
-      ;(window as any).__slayzone_tabStore.getState().reopenClosedTab()
+      ;(window as unknown as TabStoreWindow).__slayzone_tabStore.getState().reopenClosedTab()
     })
     await expect(
       mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()

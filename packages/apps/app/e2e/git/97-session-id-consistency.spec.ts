@@ -11,14 +11,6 @@ import {
 
 const hasCodex = binaryOnPath('codex')
 
-/** Strip ANSI escape sequences from terminal buffer output */
-function stripAnsi(data: string): string {
-  return data
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[?0-9;:]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[()][AB012]/g, '')
-}
-
 /**
  * Integration tests with real CLI binaries.
  * Verifies session ID consistency between the app and the CLI.

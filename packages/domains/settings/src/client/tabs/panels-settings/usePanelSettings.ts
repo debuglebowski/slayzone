@@ -23,6 +23,9 @@ import {
   validatePanelShortcut
 } from '@slayzone/task/shared'
 
+/** Context-line choices offered by the diff settings Select. */
+export type DiffContextLines = '0' | '3' | '5' | 'all'
+
 /** All panel-settings state, effects and handlers. The parent and its panel
  *  sub-views consume the returned view-model; nothing here owns layout/render. */
 export function usePanelSettings(activeTab: string, navigateTo: (tab: string) => void) {
@@ -61,7 +64,7 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
   )
 
   // Diff
-  const [diffContextLines, setDiffContextLines] = useState<'0' | '3' | '5' | 'all'>('3')
+  const [diffContextLines, setDiffContextLines] = useState<DiffContextLines>('3')
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(false)
   const [diffContinuousFlow, setDiffContinuousFlow] = useState(false)
   const [diffTreeCollapsed, setDiffTreeCollapsed] = useState(false)
@@ -152,7 +155,7 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     if (erw === 'all') setEditorRenderWhitespace('all')
     if (ets === '4') setEditorTabSize('4')
     if (eit === '1') setEditorIndentTabs(true)
-    if (dcl) setDiffContextLines(dcl as any)
+    if (dcl === '0' || dcl === '3' || dcl === '5' || dcl === 'all') setDiffContextLines(dcl)
     if (diw === '1') setDiffIgnoreWhitespace(true)
     if (dcf === '1') setDiffContinuousFlow(true)
     if (dtc === '1') setDiffTreeCollapsed(true)

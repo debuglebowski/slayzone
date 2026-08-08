@@ -206,12 +206,13 @@ function App(): React.JSX.Element {
   } = useTabStore.getState()
   const [, startTransition] = useTransition()
 
-  // Expose tab store for e2e tests
-  if (!(window as any).__slayzone_tabStore) (window as any).__slayzone_tabStore = useTabStore
-  if (!(window as any).__slayzone_dialogStore)
-    (window as any).__slayzone_dialogStore = useDialogStore
-  if (!(window as any).__slayzone_filterStore)
-    (window as any).__slayzone_filterStore = useFilterStore
+  // Expose tab store for e2e tests. Same escape hatch the fork's HomeView uses:
+  // these keys are test-only, so they get an index-signature view of `window`
+  // rather than polluting the app's real Window type.
+  const testWindow = window as unknown as Record<string, unknown>
+  if (!testWindow.__slayzone_tabStore) testWindow.__slayzone_tabStore = useTabStore
+  if (!testWindow.__slayzone_dialogStore) testWindow.__slayzone_dialogStore = useDialogStore
+  if (!testWindow.__slayzone_filterStore) testWindow.__slayzone_filterStore = useFilterStore
 
   // Filter state (persisted per project)
   const [filter, setFilter] = useFilterState(selectedProjectId)
@@ -693,9 +694,10 @@ function App(): React.JSX.Element {
     if (!task) return // data not loaded yet — wait for the next tasksMap update
     readConsumedRef.current = activeTaskId
     if (task.needs_attention) {
-      void trpcClient.task.update
-        .mutate({ id: activeTaskId, needsAttention: false })
-        .catch(() => {})
+      void trpcClient.task.update.mutate({ id: activeTaskId, needsAttention: false }).catch(() => {
+        // Clearing the unread dot is cosmetic — a failed write just means the
+        // dot survives until the next activation, which retries.
+      })
     }
   }, [activeTab, tasksMap, trpcClient])
   useEffect(() => {

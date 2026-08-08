@@ -23,6 +23,21 @@ import type {
 } from './IntegrationsTab.types'
 import { formatGithubImportMessage, sortByMode, summarizeSyncRows } from './IntegrationsTab.utils'
 
+/**
+ * Nudge the board to re-read after an integration write.
+ *
+ * Integration import/push/pull go straight to the server over tRPC, so the
+ * board's task list (owned by `useTasksData`, several trees away from this
+ * settings dialog) has no idea rows changed. `useTasksData` publishes its
+ * refetch on `window` for exactly this cross-tree case; it is absent whenever no
+ * board is mounted, hence the optional call.
+ */
+function refreshBoardData(): void {
+  ;(
+    window as Window & { __slayzone_refreshData?: () => Promise<void> | void }
+  ).__slayzone_refreshData?.()
+}
+
 export function useIntegrationsTab({
   project,
   open,
@@ -608,7 +623,7 @@ export function useIntegrationsTab({
         statuses
       })
       onUpdated(updated)
-      ;(window as any).__slayzone_refreshData?.()
+      refreshBoardData()
       await reloadIntegrationState()
       setSyncStep(3)
       setSyncStepEditing(null)
@@ -654,7 +669,7 @@ export function useIntegrationsTab({
         statuses: preview.providerStatuses
       })
       onUpdated(updated)
-      ;(window as any).__slayzone_refreshData?.()
+      refreshBoardData()
       await reloadIntegrationState()
       toast.success('Statuses updated')
     } catch (error) {
@@ -734,7 +749,7 @@ export function useIntegrationsTab({
       })
       setImportMessage(`Imported ${result.imported} issues`)
       if (result.imported > 0) {
-        ;(window as any).__slayzone_refreshData?.()
+        refreshBoardData()
         await handleLoadIssues()
       }
     } catch (err) {
@@ -796,7 +811,7 @@ export function useIntegrationsTab({
       })
       setGithubRepoImportMessage(formatGithubImportMessage(result))
       if (result.imported > 0) {
-        ;(window as any).__slayzone_refreshData?.()
+        refreshBoardData()
         await Promise.all([handleLoadGithubRepositoryIssues(), collectSyncRows()])
       }
     } catch (error) {
@@ -895,7 +910,7 @@ export function useIntegrationsTab({
       }
 
       if (pushed > 0 || unlinkedPushed > 0) {
-        ;(window as any).__slayzone_refreshData?.()
+        refreshBoardData()
       }
       const parts = [`${pushed} pushed`, `${skipped} skipped`]
       if (unlinkedPushed > 0) parts.push(`${unlinkedPushed} newly linked`)
@@ -937,7 +952,7 @@ export function useIntegrationsTab({
         }
       }
       if (pulled > 0) {
-        ;(window as any).__slayzone_refreshData?.()
+        refreshBoardData()
       }
       setSyncMessage(
         `Pull complete: ${pulled} pulled, ${skipped} skipped${errors > 0 ? `, ${errors} errors` : ''}`

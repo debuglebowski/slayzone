@@ -170,7 +170,11 @@ export async function renderToPdf(html: string, isMermaid: boolean): Promise<Buf
     offscreen?.destroy()
     try {
       unlinkSync(tempPath)
-    } catch {}
+    } catch {
+      // Scratch file in the OS temp dir — if the unlink loses (already gone, or
+      // the window still holds it on Windows) the OS reclaims it. Never worth
+      // masking the export's own error with a cleanup failure.
+    }
   }
 }
 
@@ -205,6 +209,9 @@ export async function renderToPng(html: string): Promise<Buffer> {
     offscreen?.destroy()
     try {
       unlinkSync(tempPath)
-    } catch {}
+    } catch {
+      // Same as renderToPdf: the scratch file is disposable and the OS reclaims
+      // it, so a cleanup failure must not replace the export's own error.
+    }
   }
 }

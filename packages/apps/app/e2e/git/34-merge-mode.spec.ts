@@ -203,7 +203,6 @@ async function ensureConflictReady(page: import('@playwright/test').Page, taskId
 
 test.describe('Clean merge skips merge mode', () => {
   let taskId: string
-  let projectAbbrev: string
   let mergedFile: string
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -214,7 +213,6 @@ test.describe('Clean merge skips merge mode', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'CL merge', color: '#10b981', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'MM clean task', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
@@ -257,7 +255,6 @@ test.describe('Clean merge skips merge mode', () => {
 
 test.describe('Phase 1 — uncommitted changes', () => {
   let taskId: string
-  let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     // Reset first — the prior describe leaves its (now done) task tab active, and
@@ -273,7 +270,6 @@ test.describe('Phase 1 — uncommitted changes', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'DI merge', color: '#ef4444', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'MM dirty task', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
@@ -345,7 +341,6 @@ test.describe('Phase 1 — uncommitted changes', () => {
 
 test.describe('Phase 2 — conflict resolution', () => {
   let taskId: string
-  let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     // Isolate from prior describes — an inherited active tab breaks tab/git-panel
@@ -358,7 +353,6 @@ test.describe('Phase 2 — conflict resolution', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'CF merge', color: '#dc2626', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'MM conflict task', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
@@ -437,7 +431,6 @@ test.describe('Phase 2 — conflict resolution', () => {
 
 test.describe('Accept Theirs resolution', () => {
   let taskId: string
-  let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     // Isolate from prior describes (see Phase 2 note).
@@ -449,7 +442,6 @@ test.describe('Accept Theirs resolution', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'TH merge', color: '#f59e0b', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'MM theirs task', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
@@ -495,7 +487,6 @@ test.describe('Accept Theirs resolution', () => {
 
 test.describe('Abort merge', () => {
   let taskId: string
-  let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     // Isolate from prior describes (see Phase 2 note).
@@ -506,7 +497,6 @@ test.describe('Abort merge', () => {
 
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'AB merge', color: '#64748b', path: gitDir })
-    projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'MM abort task', status: 'todo' })
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
@@ -630,7 +620,6 @@ test.describe('getConflictContent API', () => {
     setupConflict()
 
     // Start merge to create conflict state
-    const main = getMainBranch()
     git(`git merge --no-commit --no-ff test-branch || true`)
 
     const s = seed(mainWindow)

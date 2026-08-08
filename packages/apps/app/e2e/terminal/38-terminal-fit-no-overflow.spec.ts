@@ -12,19 +12,12 @@ import { getMainSessionId, openTaskTerminal, waitForPtySession } from '../fixtur
 // had a timing hole, the terminal stayed wide until the user resized/toggled a
 // panel. See plans/graceful-dreaming-sonnet.md.
 //
-// Why assert on the diag ring buffer, not on live DOM overflow: the container
-// ResizeObserver self-heals the overflow within a poll window (it even fires on
-// inactive tabs), so a "screen width <= container width" poll can never fail.
-// The DETERMINISTIC, always-present defect is the init fit measuring the wrong
-// width. `window.__slayzone_terminalDiag` records every fit() with the cols it
-// produced; we force a narrow terminal panel and assert the init fit already
-// measured that narrow width (init cols ~= settled cols, no correction needed).
-
-interface DiagFit {
-  event: string
-  site?: string
-  geom?: { cols: number; rows: number; cellCssW: number }
-}
+// The assertion samples live DOM overflow across the whole mount→settle window
+// rather than checking once at the end: the container ResizeObserver self-heals
+// the overflow within a poll window (it even fires on inactive tabs), so a
+// single late "screen width <= container width" check can never fail. Forcing a
+// narrow terminal panel makes the mount-time wide frame — if it comes back —
+// land inside the sampled window.
 
 // Force the terminal panel to a fixed, narrow px width via the global panel
 // layout config (mirrors core/25-panel-resize.spec.ts `applyLayout`). At the
@@ -48,19 +41,6 @@ async function applyNarrowTerminalLayout(page: import('@playwright/test').Page):
   }
   await s.setSetting('panel_config', JSON.stringify(cfg))
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('panel-config-changed')))
-}
-
-async function readFits(
-  page: import('@playwright/test').Page,
-  sessionPrefix: string
-): Promise<DiagFit[]> {
-  return page.evaluate((prefix) => {
-    const api = (
-      window as unknown as { __slayzone_terminalDiag?: { dump: (s?: string) => DiagFit[] } }
-    ).__slayzone_terminalDiag
-    if (!api) return []
-    return api.dump(prefix).filter((e) => e.event === 'fit')
-  }, sessionPrefix)
 }
 
 test.describe('Terminal fit — init measures the settled panel width', () => {
@@ -117,23 +97,25 @@ test.describe('Terminal fit — init measures the settled panel width', () => {
     await waitForPtySession(mainWindow, sessionId)
     await expect(mainWindow.locator('.xterm-screen:visible').first()).toBeVisible()
 
-    const measureOverflow = (sid: string): number | null =>
-      // Runs in-page: returns screenW - containerW (px the screen exceeds its box).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__slayzone_terminalLinks?.[sid]?._terminal?.element
-        ? (() => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const el = (window as any).__slayzone_terminalLinks[sid]._terminal
-              .element as HTMLElement
-            const s = el.querySelector('.xterm-screen')
-            const c = el.parentElement
-            if (!s || !c) return null
-            return (
-              Math.round(s.getBoundingClientRect().width) -
-              Math.round(c.getBoundingClientRect().width)
-            )
-          })()
-        : null
+    // Runs in-page: returns screenW - containerW (px the screen exceeds its box).
+    // `_terminal` is the xterm instance the link provider holds; only its root
+    // `element` matters here, so the window is widened to just that path.
+    const measureOverflow = (sid: string): number | null => {
+      type TerminalLinksWindow = Window & {
+        __slayzone_terminalLinks?: Record<
+          string,
+          { _terminal?: { element?: HTMLElement } } | undefined
+        >
+      }
+      const el = (window as TerminalLinksWindow).__slayzone_terminalLinks?.[sid]?._terminal?.element
+      if (!el) return null
+      const s = el.querySelector('.xterm-screen')
+      const c = el.parentElement
+      if (!s || !c) return null
+      return (
+        Math.round(s.getBoundingClientRect().width) - Math.round(c.getBoundingClientRect().width)
+      )
+    }
 
     // Sample the overflow repeatedly across the whole mount→settle window. The
     // bug is the screen rendering wider than its container; piece A removes the

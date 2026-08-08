@@ -266,7 +266,6 @@ const SVG_COL_W = 24
 const SVG_DOT_R = 4
 const SVG_MERGE_R = 6
 const SVG_GUTTER = 12
-const SVG_LABEL_OFFSET = 16
 
 function svgColX(col: number): number {
   return col * SVG_COL_W + SVG_COL_W / 2 + SVG_GUTTER / 2
@@ -1185,7 +1184,6 @@ const cases: (TestCase | RawTestCase)[] = []
     l1 = makeHash(),
     r1 = makeHash()
   const f1 = makeHash(),
-    f2 = makeHash(),
     rf1 = makeHash()
   cases.push({
     name: 'Mixed diverged + ahead',

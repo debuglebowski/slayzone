@@ -22,7 +22,29 @@ import {
   pushUnarchiveToProviders
 } from '../server/sync'
 import { parseGitHubExternalKey } from './sync-helpers'
-import type { ProviderStatus } from '../shared'
+import type { IpcMain } from 'electron'
+import type {
+  ExternalLink,
+  GithubIssueSummary,
+  GithubProjectSummary,
+  GithubRepositorySummary,
+  ImportGithubRepositoryIssuesResult,
+  IntegrationConnectionPublic,
+  IntegrationConnectionUsage,
+  ProviderStatus,
+  PullTaskResult,
+  PushTaskResult,
+  PushUnlinkedTasksResult,
+  StatusResyncPreview,
+  SyncNowResult,
+  TaskSyncStatus
+} from '../shared'
+
+/** Shared page shape of both `list-github-*-issues` handlers. */
+interface GithubIssuePage {
+  issues: GithubIssueSummary[]
+  nextCursor: string | null
+}
 
 // No OS keychain cipher is wired in this test, so credential storage falls back
 // to plaintext automatically (the former SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS
@@ -63,7 +85,31 @@ function no(name: string, e: unknown) {
 }
 
 const h = await createTestHarness()
-registerIntegrationHandlers(h.ipcMain as any, h.db)
+// MockIpcMain implements only the `handle`/`on` surface the handlers touch;
+// widen through `unknown` so nothing downstream in this file inherits an `any`.
+registerIntegrationHandlers(h.ipcMain as unknown as IpcMain, h.db)
+
+/**
+ * `h.invoke` is deliberately untyped (the mock ipcMain has no channel→result
+ * map), so name the expected result per call. A handler field that gets renamed
+ * then fails here instead of silently reading `undefined` in an assertion.
+ */
+const invoke = async <T = unknown>(channel: string, ...args: unknown[]): Promise<T> =>
+  (await h.invoke(channel, ...args)) as T
+
+/**
+ * Row shapes for the raw better-sqlite3 fixture reads below — `.get()`/`.all()`
+ * are typed `unknown`, and only the columns these assertions touch are listed.
+ */
+interface TaskRow {
+  id: string
+  title: string
+  status: string
+  archived_at: string | null
+}
+type TaskTitleRow = Pick<TaskRow, 'title'>
+type TaskStatusRow = Pick<TaskRow, 'status'>
+type TaskArchivedRow = Pick<TaskRow, 'archived_at'>
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 console.log('\nGitHub: Auth')
@@ -80,7 +126,9 @@ try {
 console.log('\nGitHub: Connect handler')
 let handlerConnectionId = ''
 try {
-  const result = (await h.invoke('integrations:connect-github', { token: GITHUB_TOKEN })) as any
+  const result = await invoke<IntegrationConnectionPublic>('integrations:connect-github', {
+    token: GITHUB_TOKEN
+  })
   expect(result.provider).toBe('github')
   expect(result.enabled).toBe(true)
   expect('credential_ref' in result).toBe(false)
@@ -107,9 +155,12 @@ try {
 console.log('\nGitHub: Connection management')
 if (handlerConnectionId) {
   try {
-    const connections = (await h.invoke('integrations:list-connections', 'github')) as any[]
+    const connections = await invoke<IntegrationConnectionPublic[]>(
+      'integrations:list-connections',
+      'github'
+    )
     expect(connections.length).toBeGreaterThan(0)
-    const found = connections.find((c: any) => c.id === handlerConnectionId)
+    const found = connections.find((c) => c.id === handlerConnectionId)
     expect(found).toBeTruthy()
     ok('list-connections returns github connections')
   } catch (e) {
@@ -117,7 +168,10 @@ if (handlerConnectionId) {
   }
 
   try {
-    const usage = (await h.invoke('integrations:get-connection-usage', handlerConnectionId)) as any
+    const usage = await invoke<IntegrationConnectionUsage>(
+      'integrations:get-connection-usage',
+      handlerConnectionId
+    )
     expect(typeof usage.mapped_project_count).toBe('number')
     ok('get-connection-usage returns usage')
   } catch (e) {
@@ -147,11 +201,11 @@ if (handlerConnectionId) {
       provider: 'github',
       connectionId: handlerConnectionId
     })
-    const connId = (await h.invoke(
+    const connId = await invoke<string | null>(
       'integrations:get-project-connection',
       connTestProjectId,
       'github'
-    )) as any
+    )
     expect(connId).toBeTruthy()
     expect(connId).toBe(handlerConnectionId)
     ok('set/get-project-connection works')
@@ -160,9 +214,9 @@ if (handlerConnectionId) {
   }
 
   // Use a disposable connection for clear test so handlerConnectionId survives
-  const clearConnResult = (await h.invoke('integrations:connect-github', {
+  const clearConnResult = await invoke<IntegrationConnectionPublic>('integrations:connect-github', {
     token: GITHUB_TOKEN
-  })) as any
+  })
   const clearConnId = clearConnResult.id
   const clearProjectId = `proj-clear-conn-${Date.now()}`
   h.db
@@ -180,11 +234,11 @@ if (handlerConnectionId) {
       projectId: clearProjectId,
       provider: 'github'
     })
-    const connId = (await h.invoke(
+    const connId = await invoke<string | null>(
       'integrations:get-project-connection',
       clearProjectId,
       'github'
-    )) as any
+    )
     expect(connId).toBeNull()
     ok('clear-project-connection removes connection')
   } catch (e) {
@@ -206,10 +260,10 @@ try {
 
 if (handlerConnectionId) {
   try {
-    const repos = (await h.invoke(
+    const repos = await invoke<GithubRepositorySummary[]>(
       'integrations:list-github-repositories',
       handlerConnectionId
-    )) as any[]
+    )
     expect(repos.length).toBeGreaterThan(0)
     ok('list-github-repositories handler returns repos')
   } catch (e) {
@@ -217,10 +271,10 @@ if (handlerConnectionId) {
   }
 
   try {
-    const projects = (await h.invoke(
+    const projects = await invoke<GithubProjectSummary[]>(
       'integrations:list-github-projects',
       handlerConnectionId
-    )) as any[]
+    )
     expect(Array.isArray(projects)).toBe(true)
     ok('list-github-projects handler returns array')
   } catch (e) {
@@ -229,11 +283,11 @@ if (handlerConnectionId) {
 
   if (GITHUB_TEST_PROJECT_ID) {
     try {
-      const result = (await h.invoke('integrations:list-github-issues', {
+      const result = await invoke<GithubIssuePage>('integrations:list-github-issues', {
         connectionId: handlerConnectionId,
         githubProjectId: GITHUB_TEST_PROJECT_ID,
         limit: 5
-      })) as any
+      })
       expect(Array.isArray(result.issues)).toBe(true)
       ok('list-github-issues handler returns project issues')
     } catch (e) {
@@ -242,11 +296,11 @@ if (handlerConnectionId) {
   }
 
   try {
-    const result = (await h.invoke('integrations:list-github-repository-issues', {
+    const result = await invoke<GithubIssuePage>('integrations:list-github-repository-issues', {
       connectionId: handlerConnectionId,
       repositoryFullName: GITHUB_TEST_REPO,
       limit: 5
-    })) as any
+    })
     expect(Array.isArray(result.issues)).toBe(true)
     ok('list-github-repository-issues handler returns repo issues')
   } catch (e) {
@@ -333,20 +387,23 @@ if (createdIssueNumber) {
   })
 
   try {
-    const result = (await h.invoke('integrations:import-github-repository-issues', {
-      projectId,
-      connectionId,
-      repositoryFullName: GITHUB_TEST_REPO,
-      selectedIssueIds: [createdIssueId]
-    })) as any
+    const result = await invoke<ImportGithubRepositoryIssuesResult>(
+      'integrations:import-github-repository-issues',
+      {
+        projectId,
+        connectionId,
+        repositoryFullName: GITHUB_TEST_REPO,
+        selectedIssueIds: [createdIssueId]
+      }
+    )
     expect(result.imported).toBeGreaterThan(0)
 
-    const tasks = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').all(projectId) as any[]
+    const tasks = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').all(projectId)
     expect(tasks.length).toBeGreaterThan(0)
 
     const links = h.db
       .prepare("SELECT * FROM external_links WHERE connection_id = ? AND provider = 'github'")
-      .all(connectionId) as any[]
+      .all(connectionId)
     expect(links.length).toBeGreaterThan(0)
     ok('import creates local task + external link')
   } catch (e) {
@@ -354,13 +411,13 @@ if (createdIssueNumber) {
   }
 
   try {
-    const result = (await h.invoke('integrations:import-github-repository-issues', {
+    await invoke('integrations:import-github-repository-issues', {
       projectId,
       connectionId,
       repositoryFullName: GITHUB_TEST_REPO,
       selectedIssueIds: [createdIssueId]
-    })) as any
-    const tasks = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').all(projectId) as any[]
+    })
+    const tasks = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').all(projectId)
     expect(tasks.length).toBe(1)
     ok('re-import deduplicates')
   } catch (e) {
@@ -372,13 +429,13 @@ if (createdIssueNumber) {
 
   // Push: make local newer
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     const pushedTitle = `[test] pushed from local ${Date.now()}`
     h.db
       .prepare("UPDATE tasks SET title = ?, updated_at = '2099-01-01 00:00:00' WHERE id = ?")
       .run(pushedTitle, task.id)
 
-    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as any
+    const result = await invoke<SyncNowResult>('integrations:sync-now', { taskId: task.id })
     expect(result.scanned).toBe(1)
     expect(result.pushed).toBe(1)
 
@@ -395,7 +452,7 @@ if (createdIssueNumber) {
 
   // Pull: update remote, make local old
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     const newTitle = `[test] pulled from remote ${Date.now()}`
     await githubClient.updateIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
@@ -409,11 +466,13 @@ if (createdIssueNumber) {
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
     h.db.prepare('DELETE FROM external_field_state').run()
 
-    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as any
+    const result = await invoke<SyncNowResult>('integrations:sync-now', { taskId: task.id })
     expect(result.scanned).toBe(1)
     expect(result.pulled).toBe(1)
 
-    const updatedTask = h.db.prepare('SELECT title FROM tasks WHERE id = ?').get(task.id) as any
+    const updatedTask = h.db
+      .prepare('SELECT title FROM tasks WHERE id = ?')
+      .get(task.id) as TaskTitleRow
     expect(updatedTask.title).toBe(newTitle)
     ok('pull: remote newer → updates local')
   } catch (e) {
@@ -422,7 +481,7 @@ if (createdIssueNumber) {
 
   // Archive sync: close remote → local archived_at set
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     await githubClient.updateIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
       repo: REPO_NAME,
@@ -438,7 +497,7 @@ if (createdIssueNumber) {
     await h.invoke('integrations:sync-now', { taskId: task.id })
     const updatedTask = h.db
       .prepare('SELECT archived_at FROM tasks WHERE id = ?')
-      .get(task.id) as any
+      .get(task.id) as TaskArchivedRow
     expect(updatedTask.archived_at).toBeTruthy()
     ok('close remote → local archived')
   } catch (e) {
@@ -447,7 +506,7 @@ if (createdIssueNumber) {
 
   // Reopen remote → local unarchived
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     await githubClient.updateIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
       repo: REPO_NAME,
@@ -463,7 +522,7 @@ if (createdIssueNumber) {
     await h.invoke('integrations:sync-now', { taskId: task.id })
     const updatedTask = h.db
       .prepare('SELECT archived_at FROM tasks WHERE id = ?')
-      .get(task.id) as any
+      .get(task.id) as TaskArchivedRow
     expect(updatedTask.archived_at).toBeNull()
     ok('reopen remote → local unarchived')
   } catch (e) {
@@ -475,14 +534,14 @@ if (createdIssueNumber) {
     h.db
       .prepare("UPDATE integration_project_mappings SET sync_mode = 'one_way' WHERE project_id = ?")
       .run(projectId)
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     h.db
       .prepare(
         "UPDATE tasks SET title = '[test] should not push', updated_at = '2099-01-01 00:00:00' WHERE id = ?"
       )
       .run(task.id)
 
-    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as any
+    const result = await invoke<SyncNowResult>('integrations:sync-now', { taskId: task.id })
     expect(result.pushed).toBe(0)
     ok('one_way mode does not push')
   } catch (e) {
@@ -497,7 +556,7 @@ if (createdIssueNumber) {
   // ── Push archive / unarchive ──────────────────────────────────────────
   console.log('\nGitHub: Push archive/unarchive')
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     await githubClient.updateIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
       repo: REPO_NAME,
@@ -520,7 +579,7 @@ if (createdIssueNumber) {
   }
 
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     await pushUnarchiveToProviders(h.db, task.id)
 
     const remote = await githubClient.getIssue(GITHUB_TOKEN, {
@@ -537,8 +596,12 @@ if (createdIssueNumber) {
   // ── get-task-sync-status ──────────────────────────────────────────────
   console.log('\nGitHub: Sync status')
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
-    const status = (await h.invoke('integrations:get-task-sync-status', task.id, 'github')) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
+    const status = await invoke<TaskSyncStatus>(
+      'integrations:get-task-sync-status',
+      task.id,
+      'github'
+    )
     expect(status.provider).toBe('github')
     expect(status.taskId).toBe(task.id)
     expect(
@@ -553,17 +616,17 @@ if (createdIssueNumber) {
   // ── push-task (manual force push) ─────────────────────────────────────
   console.log('\nGitHub: Manual push/pull')
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     const forcePushTitle = `[test] force pushed ${Date.now()}`
     h.db
       .prepare("UPDATE tasks SET title = ?, updated_at = datetime('now') WHERE id = ?")
       .run(forcePushTitle, task.id)
 
-    const result = (await h.invoke('integrations:push-task', {
+    const result = await invoke<PushTaskResult>('integrations:push-task', {
       taskId: task.id,
       provider: 'github',
       force: true
-    })) as any
+    })
     expect(result.pushed).toBe(true)
 
     const remote = await githubClient.getIssue(GITHUB_TOKEN, {
@@ -579,7 +642,7 @@ if (createdIssueNumber) {
 
   // ── pull-task (manual force pull) ─────────────────────────────────────
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     const forcePullTitle = `[test] force pulled ${Date.now()}`
     await githubClient.updateIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
@@ -590,14 +653,16 @@ if (createdIssueNumber) {
       state: 'open'
     })
 
-    const result = (await h.invoke('integrations:pull-task', {
+    const result = await invoke<PullTaskResult>('integrations:pull-task', {
       taskId: task.id,
       provider: 'github',
       force: true
-    })) as any
+    })
     expect(result.pulled).toBe(true)
 
-    const updatedTask = h.db.prepare('SELECT title FROM tasks WHERE id = ?').get(task.id) as any
+    const updatedTask = h.db
+      .prepare('SELECT title FROM tasks WHERE id = ?')
+      .get(task.id) as TaskTitleRow
     expect(updatedTask.title).toBe(forcePullTitle)
     ok('pull-task force pulls remote → local')
   } catch (e) {
@@ -607,7 +672,7 @@ if (createdIssueNumber) {
   // ── Conflict detection ────────────────────────────────────────────────
   console.log('\nGitHub: Conflict detection')
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
 
     // Establish baseline via force pull
     await h.invoke('integrations:pull-task', {
@@ -631,11 +696,15 @@ if (createdIssueNumber) {
       state: 'open'
     })
 
-    const status = (await h.invoke('integrations:get-task-sync-status', task.id, 'github')) as any
+    const status = await invoke<TaskSyncStatus>(
+      'integrations:get-task-sync-status',
+      task.id,
+      'github'
+    )
     expect(status.fields.length).toBeGreaterThan(0)
-    const titleField = status.fields.find((f: any) => f.field === 'title')
+    const titleField = status.fields.find((f) => f.field === 'title')
     expect(titleField).toBeTruthy()
-    expect(titleField.state !== 'in_sync').toBe(true)
+    expect(titleField!.state !== 'in_sync').toBe(true)
     ok('conflict detected when both sides change')
   } catch (e) {
     no('conflict detected when both sides change', e)
@@ -666,11 +735,11 @@ if (createdIssueNumber) {
 
       const tasksBefore = h.db
         .prepare('SELECT * FROM tasks WHERE project_id = ?')
-        .all(disco.projectId) as any[]
+        .all(disco.projectId)
       await runScopedDiscovery(h.db, disco.mappingId)
       const tasksAfter = h.db
         .prepare('SELECT * FROM tasks WHERE project_id = ?')
-        .all(disco.projectId) as any[]
+        .all(disco.projectId)
 
       expect(tasksAfter.length).toBeGreaterThan(tasksBefore.length)
       ok('runDiscovery auto-imports unlinked issues')
@@ -693,7 +762,7 @@ if (createdIssueNumber) {
 
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'github'")
-      .get(newTaskId) as any
+      .get(newTaskId) as ExternalLink
 
     expect(link).toBeTruthy()
     expect(link.external_key).toBeTruthy()
@@ -719,17 +788,17 @@ if (createdIssueNumber) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     // Force pull to establish baseline + in-sync state
     await h.invoke('integrations:pull-task', { taskId: task.id, provider: 'github', force: true })
 
     // In-sync → should return pushed=false
-    const result = (await h.invoke('integrations:push-task', {
+    const result = await invoke<PushTaskResult>('integrations:push-task', {
       taskId: task.id,
       provider: 'github'
-    })) as any
+    })
     expect(result.pushed).toBe(false)
-    expect(result.message.includes('already in sync')).toBe(true)
+    expect(result.message!.includes('already in sync')).toBe(true)
     ok('push-task returns false when in sync')
   } catch (e) {
     no('push-task returns false when in sync', e)
@@ -738,7 +807,7 @@ if (createdIssueNumber) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     // Force push to establish baseline
     h.db
       .prepare(
@@ -762,12 +831,12 @@ if (createdIssueNumber) {
       )
       .run(task.id)
 
-    const result = (await h.invoke('integrations:push-task', {
+    const result = await invoke<PushTaskResult>('integrations:push-task', {
       taskId: task.id,
       provider: 'github'
-    })) as any
+    })
     expect(result.pushed).toBe(false)
-    expect(result.message.includes('Remote changes detected')).toBe(true)
+    expect(result.message!.includes('Remote changes detected')).toBe(true)
     ok('push-task refuses when remote ahead without force')
   } catch (e) {
     no('push-task refuses when remote ahead without force', e)
@@ -776,7 +845,7 @@ if (createdIssueNumber) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     // Force pull to establish baseline
     await h.invoke('integrations:pull-task', { taskId: task.id, provider: 'github', force: true })
 
@@ -787,12 +856,12 @@ if (createdIssueNumber) {
       )
       .run(task.id)
 
-    const result = (await h.invoke('integrations:pull-task', {
+    const result = await invoke<PullTaskResult>('integrations:pull-task', {
       taskId: task.id,
       provider: 'github'
-    })) as any
+    })
     expect(result.pulled).toBe(false)
-    expect(result.message.includes('Local changes detected')).toBe(true)
+    expect(result.message!.includes('Local changes detected')).toBe(true)
     ok('pull-task refuses when local ahead without force')
   } catch (e) {
     no('pull-task refuses when local ahead without force', e)
@@ -812,16 +881,16 @@ if (createdIssueNumber) {
       unlinkedIds.push(id)
     }
 
-    const result = (await h.invoke('integrations:push-unlinked-tasks', {
+    const result = await invoke<PushUnlinkedTasksResult>('integrations:push-unlinked-tasks', {
       projectId,
       provider: 'github'
-    })) as any
+    })
     expect(result.pushed).toBeGreaterThan(0)
 
     for (const id of unlinkedIds) {
       const link = h.db
         .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'github'")
-        .get(id) as any
+        .get(id) as ExternalLink
       expect(link).toBeTruthy()
       const parsed = parseGitHubExternalKey(link.external_key)
       if (parsed)
@@ -834,10 +903,10 @@ if (createdIssueNumber) {
 
   // Race guard: calling again should push 0
   try {
-    const result = (await h.invoke('integrations:push-unlinked-tasks', {
+    const result = await invoke<PushUnlinkedTasksResult>('integrations:push-unlinked-tasks', {
       projectId,
       provider: 'github'
-    })) as any
+    })
     expect(result.pushed).toBe(0)
     ok('push-unlinked-tasks skips already-linked tasks')
   } catch (e) {
@@ -853,15 +922,15 @@ if (createdIssueNumber) {
       VALUES (?, ?, ?, null, 'todo', 3, 'claude-code', '{}', '', '', 1, datetime('now'), datetime('now'))`)
       .run(tempId, projectId, `[test] temporary ${Date.now()}`)
 
-    const result = (await h.invoke('integrations:push-unlinked-tasks', {
+    const result = await invoke<PushUnlinkedTasksResult>('integrations:push-unlinked-tasks', {
       projectId,
       provider: 'github'
-    })) as any
+    })
     expect(result.pushed).toBe(0)
 
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'github'")
-      .get(tempId) as any
+      .get(tempId)
     expect(link).toBeUndefined()
     ok('push-unlinked-tasks excludes temporary tasks')
   } catch (e) {
@@ -952,7 +1021,7 @@ if (createdIssueNumber) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     // Close remote → sync → verify local status maps to done
     await githubClient.updateIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
@@ -966,7 +1035,9 @@ if (createdIssueNumber) {
     h.db.prepare('DELETE FROM external_field_state').run()
 
     await h.invoke('integrations:sync-now', { taskId: task.id })
-    const updatedTask = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(task.id) as any
+    const updatedTask = h.db
+      .prepare('SELECT status FROM tasks WHERE id = ?')
+      .get(task.id) as TaskStatusRow
     expect(updatedTask.status).toBe('done')
     ok('closed remote → done status')
 
@@ -983,7 +1054,9 @@ if (createdIssueNumber) {
     h.db.prepare('DELETE FROM external_field_state').run()
 
     await h.invoke('integrations:sync-now', { taskId: task.id })
-    const reopenedTask = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(task.id) as any
+    const reopenedTask = h.db
+      .prepare('SELECT status FROM tasks WHERE id = ?')
+      .get(task.id) as TaskStatusRow
     expect(reopenedTask.status !== 'done').toBe(true)
     ok('reopened remote → non-done status')
   } catch (e) {
@@ -1045,12 +1118,12 @@ if (GITHUB_TEST_PROJECT_ID) {
       .prepare('UPDATE integration_project_mappings SET external_project_id = ? WHERE id = ?')
       .run(GITHUB_TEST_PROJECT_ID, statusMappingId)
 
-    statuses = (await h.invoke('integrations:fetch-provider-statuses', {
+    statuses = await invoke<ProviderStatus[]>('integrations:fetch-provider-statuses', {
       connectionId: statusConnId,
       provider: 'github',
       externalTeamId: REPO_OWNER,
       externalProjectId: GITHUB_TEST_PROJECT_ID
-    })) as ProviderStatus[]
+    })
     expect(statuses.length).toBeGreaterThan(0)
     ok('fetch-provider-statuses returns project statuses')
 
@@ -1063,14 +1136,14 @@ if (GITHUB_TEST_PROJECT_ID) {
 
       const project = h.db
         .prepare('SELECT columns_config FROM projects WHERE id = ?')
-        .get(statusProjectId) as any
+        .get(statusProjectId) as { columns_config: string }
       expect(project.columns_config).toBeTruthy()
-      const columns = JSON.parse(project.columns_config)
+      const columns = JSON.parse(project.columns_config) as unknown[]
       expect(columns.length).toBeGreaterThan(0)
 
       const mappings = h.db
         .prepare('SELECT * FROM integration_state_mappings WHERE project_mapping_id = ?')
-        .all(statusMappingId) as any[]
+        .all(statusMappingId)
       expect(mappings.length).toBe(statuses.length)
       ok('apply-status-sync creates columns + state mappings')
     } catch (e) {
@@ -1078,10 +1151,10 @@ if (GITHUB_TEST_PROJECT_ID) {
     }
 
     try {
-      const preview = (await h.invoke('integrations:resync-provider-statuses', {
+      const preview = await invoke<StatusResyncPreview>('integrations:resync-provider-statuses', {
         projectId: statusProjectId,
         provider: 'github'
-      })) as any
+      })
       expect(preview.diff.added.length).toBe(0)
       expect(preview.diff.removed.length).toBe(0)
       ok('resync-provider-statuses shows no diff after fresh apply')
@@ -1137,14 +1210,14 @@ console.log('\nGitHub: Clear/disconnect')
     })
     const links = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'github'")
-      .all(clearTaskId) as any[]
+      .all(clearTaskId)
     expect(links.length).toBe(0)
     const mapping = h.db
       .prepare('SELECT * FROM integration_project_mappings WHERE id = ?')
-      .get(clearTest.mappingId) as any
+      .get(clearTest.mappingId)
     expect(mapping).toBeUndefined()
     // Task should still exist (only link removed)
-    const task = h.db.prepare('SELECT * FROM tasks WHERE id = ?').get(clearTaskId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE id = ?').get(clearTaskId)
     expect(task).toBeTruthy()
     ok('clear-project-provider removes links/mappings, keeps tasks')
   } catch (e) {
@@ -1157,7 +1230,7 @@ console.log('\nGitHub: Clear/disconnect')
       await h.invoke('integrations:disconnect', handlerConnectionId)
       const conn = h.db
         .prepare('SELECT * FROM integration_connections WHERE id = ?')
-        .get(handlerConnectionId) as any
+        .get(handlerConnectionId)
       expect(conn).toBeUndefined()
       ok('disconnect removes connection')
     } catch (e) {

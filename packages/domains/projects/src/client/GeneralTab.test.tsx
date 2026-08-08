@@ -35,26 +35,45 @@ vi.mock('@tanstack/react-query', () => ({
   })
 }))
 
+// Stand-ins for the design-system components GeneralTab renders. Each is typed
+// against the intrinsic element it degrades to, so a prop the real component
+// forwards but the stub drops fails here rather than silently at runtime.
+type Kids = { children?: React.ReactNode }
+
 vi.mock('@slayzone/ui', () => {
-  const Passthrough = ({ children }: any) => <>{children}</>
+  const Passthrough = ({ children }: Kids) => <>{children}</>
   return {
-    Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
-    IconButton: ({ children, ...props }: any) => <button {...props}>{children}</button>,
-    Input: (props: any) => <input {...props} />,
-    Label: ({ children, ...props }: any) => <label {...props}>{children}</label>,
-    ColorPicker: ({ value }: any) => <div data-testid="color-picker" data-value={value} />,
-    Select: ({ children, value, onValueChange }: any) => (
+    Button: ({ children, ...props }: React.ComponentProps<'button'>) => (
+      <button {...props}>{children}</button>
+    ),
+    IconButton: ({ children, ...props }: React.ComponentProps<'button'>) => (
+      <button {...props}>{children}</button>
+    ),
+    Input: (props: React.ComponentProps<'input'>) => <input {...props} />,
+    Label: ({ children, ...props }: React.ComponentProps<'label'>) => (
+      <label {...props}>{children}</label>
+    ),
+    ColorPicker: ({ value }: { value?: string }) => (
+      <div data-testid="color-picker" data-value={value} />
+    ),
+    Select: ({
+      children,
+      value,
+      onValueChange
+    }: Kids & { value?: string; onValueChange: (value: string) => void }) => (
       <select
         data-testid="default-runner-select"
         value={value}
-        onChange={(e: any) => onValueChange(e.target.value)}
+        onChange={(e) => onValueChange(e.target.value)}
       >
         {children}
       </select>
     ),
     SelectContent: Passthrough,
-    SelectItem: ({ children, value }: any) => <option value={value}>{children}</option>,
-    SelectTrigger: ({ children }: any) => <>{children}</>,
+    SelectItem: ({ children, value }: Kids & { value: string }) => (
+      <option value={value}>{children}</option>
+    ),
+    SelectTrigger: ({ children }: Kids) => <>{children}</>,
     SelectValue: () => null
   }
 })
@@ -64,12 +83,16 @@ vi.mock('@slayzone/settings/client', () => ({
   useDialogStore: { getState: () => ({ openDeleteProject: vi.fn() }) }
 }))
 vi.mock('./project-settings-shared', () => ({
-  SettingsTabIntro: ({ title }: any) => <h2>{title}</h2>
+  SettingsTabIntro: ({ title }: { title: string }) => <h2>{title}</h2>
 }))
 
 import { GeneralTab } from './GeneralTab'
+import type { Project } from '@slayzone/projects/shared'
 
-function makeProject(overrides: Record<string, unknown> = {}) {
+// Only the columns GeneralTab reads are filled in; the rest of the `Project` row
+// is irrelevant here, so the literal is widened through `unknown` rather than
+// padded with fields no assertion touches.
+function makeProject(overrides: Record<string, unknown> = {}): Project {
   return {
     id: 'proj-1',
     name: 'Test Project',
@@ -82,7 +105,7 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     created_at: '2026-01-01',
     updated_at: '2026-01-01',
     ...overrides
-  } as any
+  } as unknown as Project
 }
 
 afterEach(cleanup)

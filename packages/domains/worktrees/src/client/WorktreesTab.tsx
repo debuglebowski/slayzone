@@ -158,7 +158,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
       setAssigningWorktree(null)
       setAssignSearch('')
       toast('Worktree assigned to task')
-    } catch (err) {
+    } catch {
       toast('Failed to assign worktree')
     }
   }

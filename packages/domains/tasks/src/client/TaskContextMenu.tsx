@@ -488,7 +488,6 @@ export function TaskContextMenu({
             onTagCreated?.(tag)
             handleTagToggle(tag.id, true)
           }}
-          onUpdated={() => {}}
         />
       )}
 

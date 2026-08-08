@@ -1644,7 +1644,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
                 lastInput: getLastInput()
               }
             })
-            .catch(() => {})
+            .catch(() => {
+              // A dropped diagnostic (sidecar down, or the call still in flight at
+              // teardown) beats an unhandled rejection inside the focus path.
+            })
         } catch {
           /* self-heal must never break the terminal */
         }
@@ -1715,7 +1718,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
                 )?.querySelector('.animate-pulse')
               }
             })
-            .catch(() => {})
+            .catch(() => {
+              // Same as above: reporting the failure must not itself become one.
+            })
         } catch (err) {
           // Never lose the signal to a capture bug — emit a minimal marker so
           // the failure itself is visible in the diagnostics stream.
@@ -1733,7 +1738,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
                   blurStack: sync.blurStack
                 }
               })
-              .catch(() => {})
+              .catch(() => {
+                // Last-resort marker — if even this cannot be delivered, drop it.
+              })
           } catch {
             /* give up silently — diagnostics must never break the terminal */
           }

@@ -25,7 +25,11 @@ export function useIdlePreload(): void {
         : (id) => window.clearTimeout(id)
 
     const handle = ric(() => {
-      for (const load of PRELOADS) load().catch(() => {})
+      for (const load of PRELOADS)
+        load().catch(() => {
+          // Warming is an optimization: a failed prefetch just means the real
+          // lazy import pays the fetch cost (and reports its own error).
+        })
     })
     return () => cic(handle)
   }, [])

@@ -475,12 +475,18 @@ function killWarm(projectId: string): void {
   // with it, and `reapOrphanWarms` covers anything that outlives us.
   void getPtyBackend()
     .warmKill?.(handle.runnerId, handle.warmId)
-    .catch(() => {})
+    .catch(() => {
+      // Only reachable when the runner is unreachable — which already means its
+      // warm agents are gone. Nothing left to kill, nothing to report.
+    })
   // The pooled session's process is gone → mark it dead so a stale `pooled` row
   // never lingers as resumable. Previously driven by the local pty's onExit,
   // which no longer exists here (warm output/exit is the runner's business until
   // adoption).
-  void deps?.ops.markSessionDead(handle.sessionId).catch(() => {})
+  void deps?.ops.markSessionDead(handle.sessionId).catch(() => {
+    // The row is already off the pool map, so a failed write can only leave a
+    // stale `pooled` row that the next `reapOrphanWarms` pass clears anyway.
+  })
 }
 
 /**
@@ -508,7 +514,11 @@ export async function reapOrphanWarms(runnerId: string): Promise<void> {
         event: 'warm.orphan_reaped',
         payload: { runnerId, warmId: entry.warmId, pid: entry.pid }
       })
-      await backend.warmKill(runnerId, entry.warmId).catch(() => {})
+      await backend.warmKill(runnerId, entry.warmId).catch(() => {
+        // One unkillable orphan must not abort the sweep — the remaining
+        // entries are still billable, and this one is retried on the next
+        // reconnect.
+      })
     }
   } catch {
     // Best-effort: a runner that cannot answer warmList has nothing we can reap.

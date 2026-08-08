@@ -45,7 +45,11 @@ export function useStablePoll<T = unknown>(
   useEffect(() => {
     fetchRef.current = fetchFn
   })
-  const refetchRef = useRef<() => void>(() => {})
+  const refetchRef = useRef<() => void>(() => {
+    // Placeholder until the effect below installs the real refetch. A caller
+    // that fires `refetch()` before the first effect run (or while polling is
+    // disabled) has no loop to restart, so dropping the call is correct.
+  })
 
   useEffect(() => {
     if (!enabled) return

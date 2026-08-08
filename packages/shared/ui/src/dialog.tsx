@@ -6,7 +6,14 @@ import { XIcon } from 'lucide-react'
 
 import { cn } from './utils'
 
-const isPlaywright = typeof window !== 'undefined' && !!(window as any).api?.app?.isPlaywright
+// `@slayzone/ui` is consumed by the Electron renderer, the Chromium-fork shell
+// and jsdom tests, so it can't depend on any one of their `window.api` types.
+// Narrow to the single flag this file reads instead.
+type PlaywrightProbeWindow = { api?: { app?: { isPlaywright?: boolean } } }
+
+const isPlaywright =
+  typeof window !== 'undefined' &&
+  !!(window as unknown as PlaywrightProbeWindow).api?.app?.isPlaywright
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />

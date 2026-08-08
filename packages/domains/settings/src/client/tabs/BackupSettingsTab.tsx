@@ -99,8 +99,8 @@ export function BackupSettingsTab() {
       const backup = await createMutation.mutateAsync(undefined)
       toast.success(`Backup created (${formatBytes(backup.sizeBytes)})`)
       reloadBackups()
-    } catch (err: any) {
-      toast.error(`Backup failed: ${err.message}`)
+    } catch (err) {
+      toast.error(`Backup failed: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setCreating(false)
     }
@@ -112,8 +112,8 @@ export function BackupSettingsTab() {
       await deleteMutation.mutateAsync({ filename: deleteTarget.filename })
       toast.success('Backup deleted')
       reloadBackups()
-    } catch (err: any) {
-      toast.error(`Delete failed: ${err.message}`)
+    } catch (err) {
+      toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`)
     }
     setDeleteTarget(null)
   }
@@ -125,8 +125,8 @@ export function BackupSettingsTab() {
         await createMutation.mutateAsync(undefined)
       }
       await restoreMutation.mutateAsync({ filename: restoreTarget.filename })
-    } catch (err: any) {
-      toast.error(`Restore failed: ${err.message}`)
+    } catch (err) {
+      toast.error(`Restore failed: ${err instanceof Error ? err.message : String(err)}`)
     }
     setRestoreTarget(null)
   }
@@ -135,8 +135,8 @@ export function BackupSettingsTab() {
     try {
       const updated = await setSettingsMutation.mutateAsync(partial)
       setSettings(updated)
-    } catch (err: any) {
-      toast.error(`Failed to save settings: ${err.message}`)
+    } catch (err) {
+      toast.error(`Failed to save settings: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

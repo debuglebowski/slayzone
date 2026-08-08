@@ -1,21 +1,28 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import type { ComponentProps, ReactNode } from 'react'
 
+// The mocks render the plain intrinsic element, so the intrinsic's own prop type
+// is the honest signature. (Type-only imports survive vi.mock's hoisting because
+// they are erased before the factory ever runs.)
 vi.mock('@slayzone/ui', () => {
   return {
-    Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
-    Checkbox: (props: any) => <input type="checkbox" {...props} />,
-    Dialog: ({ children, open }: any) => (open ? <div data-testid="dialog">{children}</div> : null),
-    DialogContent: ({ children }: any) => <div>{children}</div>
+    Button: ({ children, ...props }: ComponentProps<'button'>) => (
+      <button {...props}>{children}</button>
+    ),
+    Checkbox: (props: ComponentProps<'input'>) => <input type="checkbox" {...props} />,
+    Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+      open ? <div data-testid="dialog">{children}</div> : null,
+    DialogContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>
   }
 })
 
 vi.mock('framer-motion', () => ({
   motion: {
-    div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-    path: (props: any) => <path {...props} />,
-    p: ({ children, ...props }: any) => <p {...props}>{children}</p>
+    div: ({ children, ...props }: ComponentProps<'div'>) => <div {...props}>{children}</div>,
+    path: (props: ComponentProps<'path'>) => <path {...props} />,
+    p: ({ children, ...props }: ComponentProps<'p'>) => <p {...props}>{children}</p>
   }
 }))
 

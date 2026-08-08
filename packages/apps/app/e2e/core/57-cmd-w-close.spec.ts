@@ -8,8 +8,13 @@ import path from 'path'
 /** Type of the tab the app currently has active, read from the exposed store. */
 async function activeTabType(page: Page): Promise<string> {
   return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const state = (window as any).__slayzone_tabStore?.getState?.()
+    const state = (
+      window as unknown as {
+        __slayzone_tabStore?: {
+          getState?: () => { tabs?: { type?: string }[]; activeTabIndex: number }
+        }
+      }
+    ).__slayzone_tabStore?.getState?.()
     if (!state) return 'unknown'
     return String(state.tabs?.[state.activeTabIndex]?.type ?? 'none')
   })

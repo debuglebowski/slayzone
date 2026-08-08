@@ -355,11 +355,16 @@ export function useWireTerminalStateStore(): void {
       .then((sessions) =>
         st().hydrate(sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })))
       )
-      .catch(() => {})
+      .catch(() => {
+        // Seed only: the store already defaults every session to "unknown", and
+        // the focus/interval self-heal below re-runs the same reconcile.
+      })
     trpcClient.taskTerminals.listHibernatedSessions
       .query()
       .then((ids) => ids.forEach((id) => st().applyHibernated(id)))
-      .catch(() => {})
+      .catch(() => {
+        // Same as above — a missed hibernated set heals on the next reconcile.
+      })
   }, [trpcClient])
 }
 

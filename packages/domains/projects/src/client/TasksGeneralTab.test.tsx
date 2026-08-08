@@ -2,6 +2,7 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
+import type { Project } from '@slayzone/projects/shared'
 
 const mockResolveColumns = vi.fn()
 
@@ -25,30 +26,52 @@ vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: updateProjectSpy })
 }))
 
+// Stand-in prop shapes: only what TasksGeneralTab actually passes to each
+// primitive, so a changed call site fails here instead of silently drifting.
+type MockChildren = { children?: React.ReactNode }
+type MockSelectProps = MockChildren & {
+  value?: string
+  onValueChange: (value: string) => void
+}
+
 vi.mock('@slayzone/ui', () => {
-  const Passthrough = ({ children }: any) => <>{children}</>
+  const Passthrough = ({ children }: MockChildren) => <>{children}</>
   return {
-    Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
-    Label: ({ children, ...props }: any) => <label {...props}>{children}</label>,
-    Select: ({ children, value, onValueChange }: any) => (
+    Button: ({ children, ...props }: React.ComponentProps<'button'>) => (
+      <button {...props}>{children}</button>
+    ),
+    Label: ({ children, ...props }: React.ComponentProps<'label'>) => (
+      <label {...props}>{children}</label>
+    ),
+    Select: ({ children, value, onValueChange }: MockSelectProps) => (
       <div data-testid-select={value} data-value={value}>
         <input
           type="hidden"
           data-select-value={value}
-          onChange={(e: any) => onValueChange(e.target.value)}
+          onChange={(e) => onValueChange(e.target.value)}
         />
         {children}
       </div>
     ),
     SelectContent: Passthrough,
-    SelectItem: ({ children, value }: any) => <option value={value}>{children}</option>,
-    SelectTrigger: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+    SelectItem: ({ children, value }: MockChildren & { value: string }) => (
+      <option value={value}>{children}</option>
+    ),
+    SelectTrigger: ({ children, ...props }: React.ComponentProps<'div'>) => (
+      <div {...props}>{children}</div>
+    ),
     SelectValue: () => null
   }
 })
 
 vi.mock('./project-settings-shared', () => ({
-  SettingsTabIntro: ({ title, description }: any) => (
+  SettingsTabIntro: ({
+    title,
+    description
+  }: {
+    title: React.ReactNode
+    description?: React.ReactNode
+  }) => (
     <div data-testid="settings-tab-intro">
       <h2>{title}</h2>
       <p>{description}</p>
@@ -70,7 +93,7 @@ const TEST_COLUMNS = [
   { id: 'done', label: 'Done', color: 'green', position: 2, category: 'completed' as const }
 ]
 
-function makeProject(overrides: Record<string, unknown> = {}) {
+function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: 'proj-1',
     name: 'Test Project',
@@ -80,15 +103,21 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     worktree_source_branch: null,
     worktree_copy_behavior: null,
     worktree_copy_paths: null,
+    worktree_submodule_init: null,
     columns_config: TEST_COLUMNS,
     execution_context: null,
     selected_repo: null,
     task_automation_config: null,
+    lock_config: null,
+    icon_letters: null,
+    icon_image_path: null,
+    group_id: null,
+    starred: false,
     sort_order: 0,
     created_at: '2026-01-01',
     updated_at: '2026-01-01',
     ...overrides
-  } as any
+  }
 }
 
 beforeEach(() => {

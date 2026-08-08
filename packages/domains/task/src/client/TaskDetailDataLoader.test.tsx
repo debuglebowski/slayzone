@@ -22,9 +22,16 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
       panel_visibility: null,
       browser_tabs: null,
       is_temporary: false
-    } as any,
-    project: { id: 'proj-1', name: 'Test', path: '/tmp', color: '#000' } as any,
-    tags: [{ id: 'tag-1', name: 'bug', color: '#f00' }] as any[],
+      // Only the columns the loader/stub read are filled in, so each literal is
+      // widened through `unknown` instead of padding out the full row.
+    } as unknown as TaskDetailData['task'],
+    project: {
+      id: 'proj-1',
+      name: 'Test',
+      path: '/tmp',
+      color: '#000'
+    } as unknown as TaskDetailData['project'],
+    tags: [{ id: 'tag-1', name: 'bug', color: '#f00' }] as unknown as TaskDetailData['tags'],
     taskTagIds: ['tag-1'],
     subTasks: [],
     parentTask: null,
@@ -51,7 +58,12 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
 // We verify it receives the correct props.
 const receivedProps = vi.fn()
 
-function StubTaskDetailPage(props: any) {
+/** The props the real TaskDetailPage receives from the loader, plus whatever a
+ *  test threads through `TestDataLoader`'s rest params (asserted via
+ *  `receivedProps`, so the extras stay untyped). */
+type StubProps = { taskId: string; initialData: TaskDetailData | null } & Record<string, unknown>
+
+function StubTaskDetailPage(props: StubProps) {
   receivedProps(props)
   if (!props.initialData?.task) return <div data-testid="not-found">Task not found</div>
   return <div data-testid="task-title">{props.initialData.task.title}</div>
@@ -64,12 +76,14 @@ let testCache: ReturnType<typeof createSuspenseCache>
 beforeEach(() => {
   receivedProps.mockClear()
   fetchFn = vi.fn()
-  testCache = createSuspenseCache({ taskDetail: fetchFn as (...args: any[]) => Promise<any> })
+  testCache = createSuspenseCache({
+    taskDetail: fetchFn as (...args: unknown[]) => Promise<TaskDetailData | null>
+  })
 })
 
 // Test DataLoader that uses the test cache + stub component
-function TestDataLoader({ taskId, ...rest }: { taskId: string; [k: string]: any }) {
-  const data = testCache.useData('taskDetail', taskId)
+function TestDataLoader({ taskId, ...rest }: { taskId: string; [k: string]: unknown }) {
+  const data = testCache.useData('taskDetail', taskId) as TaskDetailData | null
   return <StubTaskDetailPage taskId={taskId} initialData={data} {...rest} />
 }
 

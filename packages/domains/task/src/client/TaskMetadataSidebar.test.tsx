@@ -2,38 +2,60 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { Task } from '@slayzone/task/shared'
+
+// Stand-in prop shapes: only what the sidebar tree actually passes to each
+// primitive, so a changed call site fails here instead of silently drifting.
+type MockChildren = { children?: React.ReactNode }
+type MockVariantButtonProps = React.ComponentProps<'button'> & {
+  variant?: string
+  size?: string
+}
+type MockSplitButtonProps = MockChildren & {
+  onClick?: React.MouseEventHandler<HTMLButtonElement>
+  /** Renders the dropdown items; the arg closes the menu, which this stub no-ops. */
+  menu: (close: () => void) => React.ReactNode
+}
 
 vi.mock('@slayzone/ui', () => {
-  const Passthrough = ({ children }: any) => <>{children}</>
-  const Button = ({ children, variant: _variant, size: _size, ...props }: any) => (
-    <button {...props}>{children}</button>
-  )
-  const Input = (props: any) => <input {...props} />
+  const Passthrough = ({ children }: MockChildren) => <>{children}</>
+  const Button = ({
+    children,
+    variant: _variant,
+    size: _size,
+    ...props
+  }: MockVariantButtonProps) => <button {...props}>{children}</button>
+  const Input = (props: React.ComponentProps<'input'>) => <input {...props} />
 
-  const SplitButton = ({ children, onClick, menu }: any) => (
+  const SplitButton = ({ children, onClick, menu }: MockSplitButtonProps) => (
     <div>
       <button onClick={onClick}>{children}</button>
-      {menu(() => {})}
+      {menu(() => {
+        // Menu stays open for the whole test — nothing to close.
+      })}
     </div>
   )
-  const SplitButtonItem = ({ children, onClick }: any) => (
+  const SplitButtonItem = ({
+    children,
+    onClick
+  }: MockChildren & { onClick?: React.MouseEventHandler<HTMLButtonElement> }) => (
     <button onClick={onClick}>{children}</button>
   )
-  const Textarea = (props: any) => <textarea {...props} />
+  const Textarea = (props: React.ComponentProps<'textarea'>) => <textarea {...props} />
 
   return {
     Select: Passthrough,
     SelectContent: Passthrough,
-    SelectItem: ({ children }: any) => <div>{children}</div>,
-    SelectTrigger: ({ children }: any) => <div>{children}</div>,
+    SelectItem: ({ children }: MockChildren) => <div>{children}</div>,
+    SelectTrigger: ({ children }: MockChildren) => <div>{children}</div>,
     SelectValue: () => null,
     Popover: Passthrough,
-    PopoverContent: ({ children }: any) => <div>{children}</div>,
-    PopoverTrigger: ({ children }: any) => <>{children}</>,
+    PopoverContent: ({ children }: MockChildren) => <div>{children}</div>,
+    PopoverTrigger: ({ children }: MockChildren) => <>{children}</>,
     Dialog: Passthrough,
     DialogContent: Passthrough,
     DialogHeader: Passthrough,
-    DialogTitle: ({ children }: any) => <div>{children}</div>,
+    DialogTitle: ({ children }: MockChildren) => <div>{children}</div>,
     Calendar: () => null,
     Button,
     Input,
@@ -41,8 +63,8 @@ vi.mock('@slayzone/ui', () => {
     SplitButton,
     SplitButtonItem,
     Tooltip: Passthrough,
-    TooltipTrigger: ({ children }: any) => <>{children}</>,
-    TooltipContent: ({ children }: any) => <div>{children}</div>,
+    TooltipTrigger: ({ children }: MockChildren) => <>{children}</>,
+    TooltipContent: ({ children }: MockChildren) => <div>{children}</div>,
     ProgressRing: () => null,
     Slider: () => null,
     buildStatusOptions: () => [],
@@ -60,7 +82,7 @@ vi.mock('@slayzone/ui', () => {
         text: '',
         label,
         iconClass: `icon-${label}`,
-        icon: ({ className, ...props }: any) => (
+        icon: ({ className, ...props }: React.ComponentProps<'svg'>) => (
           <svg data-testid={`status-icon-${label}`} className={className} {...props} />
         )
       }
@@ -85,7 +107,10 @@ vi.mock('@slayzone/projects/shared', () => ({
   }
 }))
 
-function makeTask(overrides: Record<string, unknown> = {}) {
+// Deliberately partial: the sidebar only reads the columns spelled out below,
+// so the fixture asserts to `Task` rather than restating every DB column (and
+// drifting the moment one is added).
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     project_id: 'project-1',
@@ -134,7 +159,7 @@ function makeTask(overrides: Record<string, unknown> = {}) {
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
     ...overrides
-  } as any
+  } as Task
 }
 
 const projects = [
@@ -157,7 +182,7 @@ const projects = [
       { id: 'waiting', label: 'Waiting', color: 'orange', position: 1, category: 'started' }
     ]
   }
-] as any[]
+]
 
 const blockerTask = makeTask({
   id: 'blocker-1',
@@ -271,11 +296,19 @@ import { TaskMetadataSidebar } from './TaskMetadataSidebar'
 
 afterEach(() => cleanup())
 
+// jsdom ships no ResizeObserver. The sidebar only constructs/observes/disconnects
+// one — it never reacts to a callback — so an inert stub is enough.
 globalThis.ResizeObserver = class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-} as any
+  observe() {
+    // Never fires: no layout engine in jsdom to report a resize from.
+  }
+  unobserve() {
+    // Nothing was observed.
+  }
+  disconnect() {
+    // Nothing was observed.
+  }
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -285,7 +318,7 @@ beforeEach(() => {
   mutationMocks['tags.setForTask'].mockResolvedValue(undefined)
 })
 
-function renderSidebar(taskOverrides?: Record<string, unknown>) {
+function renderSidebar(taskOverrides?: Partial<Task>) {
   return render(
     <TaskMetadataSidebar
       task={makeTask(taskOverrides)}

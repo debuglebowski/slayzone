@@ -5,6 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { test as base, expect } from '@playwright/test'
+import type { AnyTRPCRouter } from '@trpc/server'
 import {
   launchIsolatedElectron,
   projectBlob,
@@ -894,12 +895,24 @@ function bufferHasCommandOutput(buffer: string, marker: string): boolean {
   return lines.some((line) => line.includes(marker) && !line.includes(`echo ${marker}`))
 }
 
+/** Structural stand-in for the tRPC proxy client. These specs drive a SECOND hub
+ *  over a raw socket and cast every result at its own call site, so binding the
+ *  real `AppRouter` here would only couple the e2e build to the router's shape. */
+type HubClient = {
+  [key: string]: HubClient & {
+    query: (input?: unknown) => Promise<unknown>
+    mutate: (input?: unknown) => Promise<unknown>
+  }
+}
+
 /** Run `fn` with a raw tRPC WS client to a hub, closing the socket after. */
-async function withHubClient<T>(url: string, fn: (client: any) => Promise<T>): Promise<T> {
+async function withHubClient<T>(url: string, fn: (client: HubClient) => Promise<T>): Promise<T> {
   const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
   const superjson = (await import('superjson')).default
   const ws = createWSClient({ url })
-  const client = createTRPCClient<any>({ links: [wsLink({ client: ws, transformer: superjson })] })
+  const client = createTRPCClient<AnyTRPCRouter>({
+    links: [wsLink({ client: ws, transformer: superjson })]
+  }) as unknown as HubClient
   try {
     return await fn(client)
   } finally {

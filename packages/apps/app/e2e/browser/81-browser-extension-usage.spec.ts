@@ -166,7 +166,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
       .toContain('example.org')
 
     // Wait and check marker exists on new page
-    const status = await expect
+    await expect
       .poll(
         async () => {
           return (await testInvoke(
@@ -207,8 +207,10 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
           try {
             await ses.serviceWorkers.startWorkerForScope(scope)
             swResults.push(`${ext.name}: started OK`)
-          } catch (err: any) {
-            swResults.push(`${ext.name}: FAILED - ${err.message}`)
+          } catch (err) {
+            swResults.push(
+              `${ext.name}: FAILED - ${err instanceof Error ? err.message : String(err)}`
+            )
           }
         }
       }

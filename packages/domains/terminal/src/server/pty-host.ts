@@ -24,12 +24,16 @@ export interface PtySessionWindow {
 }
 
 /** Structural slice of Electron's IpcMain the runtime's register* glue takes —
- *  kept structural so the runtime modules stay electron-free. */
+ *  kept structural so the runtime modules stay electron-free.
+ *
+ *  The listener's parameter list is a type parameter rather than a fixed
+ *  tuple: this seam never reads the args, it only hands the listener to the
+ *  host, and each `ipcMain.handle('chat:send', (_, tabId: string, …))` call
+ *  site declares its own channel-specific payload. Inferring `A` keeps those
+ *  annotations checked instead of widening every handler to `any`. */
 export interface IpcMainLike {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural match for IpcMain
-  handle(channel: string, listener: (...args: any[]) => any): unknown
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural match for IpcMain
-  on(channel: string, listener: (...args: any[]) => void): unknown
+  handle<A extends unknown[], R>(channel: string, listener: (...args: A) => R): unknown
+  on<A extends unknown[]>(channel: string, listener: (...args: A) => void): unknown
 }
 
 export interface PtyHostBridge {
@@ -37,9 +41,14 @@ export interface PtyHostBridge {
   getFocusedWindow(): PtySessionWindow | null
   isDarkTheme(): boolean
   /** Renderer→runtime command bus (Electron: ipcMain). */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural match for IpcMain.on
-  bus: { on(channel: string, listener: (...args: any[]) => void): unknown }
+  bus: { on(channel: string, listener: OpaqueBusListener): unknown }
 }
+
+/** A bus listener as the HOST sees it: an unbounded, unknown argument list.
+ *  pty-host stores and forwards these but never calls them, so it has nothing
+ *  to narrow — the narrowing happens in each subscriber's own signature (see
+ *  {@link onPtyHostBus}). */
+type OpaqueBusListener = (...args: unknown[]) => void
 
 const inertBridge: PtyHostBridge = {
   getAllWindows: () => [],
@@ -54,8 +63,7 @@ let configured = false
 
 // Module-scope subscriptions made before the host configures (pty-manager
 // registers its ack listener at import time) — replayed onto the real bus.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors bus.on
-const pendingBusSubs: Array<[string, (...args: any[]) => void]> = []
+const pendingBusSubs: Array<[string, OpaqueBusListener]> = []
 
 export function configurePtyHost(b: PtyHostBridge): void {
   bridge = b
@@ -69,12 +77,21 @@ export function getPtyHostBridge(): PtyHostBridge {
   return bridge
 }
 
-/** Subscribe to the host command bus; queues until the host configures. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors bus.on
-export function onPtyHostBus(channel: string, listener: (...args: any[]) => void): void {
+/** Subscribe to the host command bus; queues until the host configures.
+ *
+ *  `A` is inferred from the subscriber, so a listener may declare the payload
+ *  its channel actually carries (`(_e, reqId: number, result: AckResult)`) and
+ *  stay checked. Widening back to `OpaqueBusListener` at the forwarding edge is
+ *  the one unchecked step: the host, not this seam, decides what a channel
+ *  delivers, and the channel↔payload contract lives with the subscriber. */
+export function onPtyHostBus<A extends unknown[]>(
+  channel: string,
+  listener: (...args: A) => void
+): void {
+  const opaque = listener as OpaqueBusListener
   if (configured) {
-    bridge.bus.on(channel, listener)
+    bridge.bus.on(channel, opaque)
   } else {
-    pendingBusSubs.push([channel, listener])
+    pendingBusSubs.push([channel, opaque])
   }
 }

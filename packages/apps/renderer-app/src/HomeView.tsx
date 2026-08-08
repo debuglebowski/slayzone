@@ -89,7 +89,10 @@ function Centered({ children }: { children: React.ReactNode }): React.JSX.Elemen
 // fork doesn't have yet (no native window chrome / convex / feedback in the
 // shell). Module-level → referentially stable.
 const EMPTY_SESSION_IDS = new Set<string>()
-const NOOP = (): void => {}
+/** Satisfies required app-chrome callbacks the fork has no native window to drive. */
+const NOOP = (): void => {
+  // Deliberately inert — see above.
+}
 
 export function HomeView(): React.JSX.Element {
   const rawData = useTasksData()

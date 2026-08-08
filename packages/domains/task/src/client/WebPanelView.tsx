@@ -62,7 +62,12 @@ export function WebPanelView({
     return hostScope ? { protocol, hostScope } : { protocol }
   }, [blockDesktopHandoff, handoffProtocol, handoffHostScope, baseUrl])
 
-  const actionsRef = useRef<{ navigate: (url: string) => void }>({ navigate: () => {} })
+  const actionsRef = useRef<{ navigate: (url: string) => void }>({
+    navigate: () => {
+      // Seeded no-op: `onPopupRoute` closes over this ref on the first render, before
+      // `useBrowserView` below has returned the real actions to assign into it.
+    }
+  })
 
   const onPopupRoute = useCallback(
     (popupUrl: string) => {
@@ -82,7 +87,10 @@ export function WebPanelView({
           url: popupUrl,
           options: desktopHandoffPolicy ? { desktopHandoff: desktopHandoffPolicy } : undefined
         })
-        .catch(() => {})
+        .catch(() => {
+          // Best-effort hand-off to the OS browser: if no handler is registered for
+          // the URL the shell rejects, and there is nothing useful to tell the user.
+        })
     },
     [desktopHandoffPolicy, trpcClient]
   )

@@ -8,10 +8,8 @@ import {
   expect,
   describe
 } from '../../../shared/test-utils/ipc-harness.js'
-import { createSlayDbAdapter } from './test-harness.js'
 
 const h = await createTestHarness()
-const db = createSlayDbAdapter(h.db)
 
 const projectId = crypto.randomUUID()
 h.db

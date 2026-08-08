@@ -148,7 +148,13 @@ class BufferingEmitter<T> {
 
 const sessionKey = (runnerId: string, sessionId: string): string => `${runnerId}:${sessionId}`
 
-const noop = (): void => {}
+const noop = (): void => {
+  // Shared rejection sink for the fire-and-forget gateway calls below (write,
+  // resize, kill, …). Each is a best-effort nudge at a session that may already
+  // be gone; nothing waits on the reply and the authoritative teardown arrives
+  // as an exit/close frame regardless. Swallowing here is what keeps a
+  // disconnected runner from raising an unhandled rejection in the hub.
+}
 
 /**
  * Raised when exec work has no runner to go to.
@@ -1071,7 +1077,11 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     getCommandLine(): Promise<string | null> {
       return Promise.resolve(null)
     },
-    killByPid(): void {}
+    killByPid(): void {
+      // Nothing to kill: same reasoning as `getCommandLine` above — the pid a
+      // routed session reports belongs to the runner's machine, so the hub has
+      // no process of its own to signal.
+    }
   }
 }
 
@@ -1174,7 +1184,12 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
                 console.error('[routing-chat] onSpawn listener threw:', err)
               }
             })
-            return { dispose: () => {} }
+            return {
+              dispose: () => {
+                // The replay is already queued and `cb` was never added to
+                // `spawnCbs`, so there is no subscription left to tear down.
+              }
+            }
           }
           spawnCbs.push(cb)
           return {

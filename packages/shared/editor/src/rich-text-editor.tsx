@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, type ComponentProps } from 'react'
 import { editorViewCtx } from '@milkdown/core'
 import { callCommand } from '@milkdown/utils'
 import { cn } from '@slayzone/ui'
@@ -84,9 +84,11 @@ export function RichTextEditor({
     searchRegex
   )
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleCommand = useCallback(
-    (cmdKey: any) => {
+  // Typed off the toolbar's own prop so the accepted keys stay in lockstep with
+  // the buttons it renders — widening ToolbarCommandKey there is what widens
+  // this handler, rather than the two drifting apart behind an `any`.
+  const handleCommand = useCallback<ComponentProps<typeof EditorToolbar>['onCommand']>(
+    (cmdKey) => {
       editorInstanceRef.current?.action(callCommand(cmdKey))
     },
     [editorInstanceRef]

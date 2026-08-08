@@ -48,7 +48,15 @@ export interface TestHarness {
   cleanup(): void
 }
 
-const fakeEvent = { sender: { send: () => {} } }
+const fakeEvent = {
+  sender: {
+    send: () => {
+      // Handlers that push to the renderer get a sink: there is no renderer here,
+      // and contract tests assert on the handler's return value and the resulting
+      // DB state, never on the push.
+    }
+  }
+}
 
 // The production named-transaction registry lives in the app package; load it
 // the same way the harness loads migrations (runtime dynamic import — keeps

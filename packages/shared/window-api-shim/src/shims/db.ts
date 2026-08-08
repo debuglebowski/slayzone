@@ -842,5 +842,9 @@ export const dbShim = {
       .filter((t) => t.archived_at !== null)
       .map((t, idx) => synthTask(t, t.project_id, idx))
   },
-  reorderTasks: async (_taskIds: string[]): Promise<void> => {}
+  reorderTasks: async (_taskIds: string[]): Promise<void> => {
+    // TODO(cap-shell-7): TasklistHost has no reorder yet — stub, same gap as
+    // `reorderProjects` above. Board DnD reorders optimistically in the
+    // renderer; the order just doesn't survive a reload under the fork.
+  }
 }

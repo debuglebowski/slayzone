@@ -57,7 +57,10 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
       .then(() => {
         setRefreshKey((k) => k + 1)
       })
-      .catch(() => {})
+      .catch(() => {
+        // Best-effort freshness pass: on failure the already-loaded registry
+        // rows stay on screen and the user can still refresh by hand.
+      })
   }, [trpcClient])
 
   // Handle external navigation (e.g. clicking marketplace badge in skill list)

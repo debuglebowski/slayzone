@@ -73,7 +73,11 @@ export interface HubRequestDispatch {
  * everything else throws `-32001 unimplemented`.
  */
 export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequestDispatch {
-  const log = deps.log ?? (() => {})
+  const log =
+    deps.log ??
+    (() => {
+      // Logging is opt-in — with no sink, handler diagnostics are discarded.
+    })
   const ctx: HandlerContext = {
     dialer: deps.dialer,
     config: deps.config,
@@ -121,7 +125,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
 }
 
 export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}): RunnerHandle {
-  const log = deps.log ?? (() => {})
+  const log =
+    deps.log ??
+    (() => {
+      // Logging is opt-in — with no sink, runner lifecycle diagnostics are discarded.
+    })
   // Creds always derive from the ROOT anchor (`<ROOT>/runners`, see
   // credential-store slayzoneRootDir) — no override knob. Tests inject a store
   // via deps.credentialStore.

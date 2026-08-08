@@ -1,5 +1,5 @@
 import { createElement, type ReactElement } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { mermaidCodeOverride } from './mermaidCodeOverride'
@@ -24,10 +24,13 @@ const blockTags = [
   'img'
 ] as const
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function withSourceLine(tag: string): (props: any) => ReactElement {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const Component = ({ node, ...rest }: any): ReactElement =>
+// `tag` is only known at runtime, so its intrinsic attributes can't be named here.
+// We read the hast `node` react-markdown passes (for the source line) and forward
+// every other attribute verbatim, hence the open record.
+type SourceLineProps = ExtraProps & Record<string, unknown>
+
+function withSourceLine(tag: string): (props: SourceLineProps) => ReactElement {
+  const Component = ({ node, ...rest }: SourceLineProps): ReactElement =>
     createElement(tag, { 'data-source-line': node?.position?.start?.line, ...rest })
   Component.displayName = `MarkdownSourceLine(${tag})`
   return Component

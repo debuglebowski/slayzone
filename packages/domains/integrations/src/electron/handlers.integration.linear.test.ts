@@ -22,6 +22,22 @@ import {
 } from '../server/sync'
 import type { ProviderStatus } from '../shared'
 
+// `h.invoke` and better-sqlite3's `get`/`all` both hand back `unknown`. These
+// shapes name ONLY the fields the assertions below read, so a drifting handler
+// contract or a renamed column surfaces right here instead of being swallowed.
+type ConnectionResult = { id: string; provider: string; enabled: boolean }
+type SyncResult = { scanned: number; pushed: number; pulled: number }
+type PushTaskResult = { pushed: boolean; message: string }
+type PullTaskResult = { pulled: boolean; message: string }
+type SyncStatus = {
+  provider: string
+  taskId: string
+  state: string
+  fields: Array<{ field: string; state: string }>
+}
+type TaskRow = { id: string }
+type ExternalLinkRow = { external_id: string }
+
 // No OS keychain cipher is wired in this test, so credential storage falls back
 // to plaintext automatically (the former SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS
 // flag is gone — plaintext is now gated on cipher availability).
@@ -55,7 +71,12 @@ function no(name: string, e: unknown) {
 }
 
 const h = await createTestHarness()
-registerIntegrationHandlers(h.ipcMain as any, h.db)
+// The harness mock implements only the `ipcMain` surface the handlers touch, so
+// widen it to whatever the registrar declares rather than restating electron's.
+registerIntegrationHandlers(
+  h.ipcMain as unknown as Parameters<typeof registerIntegrationHandlers>[0],
+  h.db
+)
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 console.log('\nLinear: Auth')
@@ -73,7 +94,9 @@ try {
 console.log('\nLinear: Connect handler')
 let handlerConnectionId = ''
 try {
-  const result = (await h.invoke('integrations:connect-linear', { apiKey: LINEAR_API_KEY })) as any
+  const result = (await h.invoke('integrations:connect-linear', {
+    apiKey: LINEAR_API_KEY
+  })) as ConnectionResult
   expect(result.provider).toBe('linear')
   expect(result.enabled).toBe(true)
   expect('credential_ref' in result).toBe(false)
@@ -100,7 +123,7 @@ try {
 console.log('\nLinear: Connection management')
 if (handlerConnectionId) {
   try {
-    const connections = (await h.invoke('integrations:list-connections', 'linear')) as any[]
+    const connections = (await h.invoke('integrations:list-connections', 'linear')) as unknown[]
     expect(connections.length).toBeGreaterThan(0)
     ok('list-connections returns linear connections')
   } catch (e) {
@@ -108,7 +131,9 @@ if (handlerConnectionId) {
   }
 
   try {
-    const usage = (await h.invoke('integrations:get-connection-usage', handlerConnectionId)) as any
+    const usage = (await h.invoke('integrations:get-connection-usage', handlerConnectionId)) as {
+      mapped_project_count: number
+    }
     expect(typeof usage.mapped_project_count).toBe('number')
     ok('get-connection-usage returns usage')
   } catch (e) {
@@ -143,7 +168,7 @@ if (handlerConnectionId) {
       'integrations:get-project-connection',
       connTestProjectId,
       'linear'
-    )) as any
+    )) as string | null
     expect(connId).toBeTruthy()
     expect(connId).toBe(handlerConnectionId)
     ok('set/get-project-connection works')
@@ -154,7 +179,7 @@ if (handlerConnectionId) {
   // Use a disposable connection for clear test so handlerConnectionId survives
   const clearConnResult = (await h.invoke('integrations:connect-linear', {
     apiKey: LINEAR_API_KEY
-  })) as any
+  })) as ConnectionResult
   const clearConnId = clearConnResult.id
   const clearProjectId = `proj-clear-conn-${Date.now()}`
   h.db
@@ -176,7 +201,7 @@ if (handlerConnectionId) {
       'integrations:get-project-connection',
       clearProjectId,
       'linear'
-    )) as any
+    )) as string | null
     expect(connId).toBeNull()
     ok('clear-project-connection removes connection')
   } catch (e) {
@@ -218,7 +243,9 @@ try {
 // Handler-level discovery
 if (handlerConnectionId) {
   try {
-    const result = (await h.invoke('integrations:list-linear-teams', handlerConnectionId)) as any
+    const result = (await h.invoke('integrations:list-linear-teams', handlerConnectionId)) as {
+      teams: unknown[]
+    }
     expect(result.teams.length).toBeGreaterThan(0)
     ok('list-linear-teams handler returns teams')
   } catch (e) {
@@ -230,7 +257,7 @@ if (handlerConnectionId) {
       'integrations:list-linear-projects',
       handlerConnectionId,
       LINEAR_TEST_TEAM_ID
-    )) as any[]
+    )) as unknown[]
     expect(Array.isArray(projects)).toBe(true)
     ok('list-linear-projects handler returns array')
   } catch (e) {
@@ -242,7 +269,7 @@ if (handlerConnectionId) {
       connectionId: handlerConnectionId,
       teamId: LINEAR_TEST_TEAM_ID,
       limit: 5
-    })) as any
+    })) as { issues: unknown }
     expect(Array.isArray(result.issues)).toBe(true)
     ok('list-linear-issues handler returns issues')
   } catch (e) {
@@ -326,16 +353,18 @@ if (createdIssueId) {
       connectionId,
       teamId: LINEAR_TEST_TEAM_ID,
       selectedIssueIds: [createdIssueId]
-    })) as any
+    })) as { imported: number; linked: number }
     expect(result.imported).toBeGreaterThan(0)
     expect(result.linked).toBeGreaterThan(0)
 
-    const tasks = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').all(projectId) as any[]
+    const tasks = h.db
+      .prepare('SELECT * FROM tasks WHERE project_id = ?')
+      .all(projectId) as unknown[]
     expect(tasks.length).toBeGreaterThan(0)
 
     const links = h.db
       .prepare("SELECT * FROM external_links WHERE connection_id = ? AND provider = 'linear'")
-      .all(connectionId) as any[]
+      .all(connectionId) as ExternalLinkRow[]
     expect(links.length).toBeGreaterThan(0)
     expect(links[0].external_id).toBe(createdIssueId)
     ok('import creates local task + external link')
@@ -344,13 +373,15 @@ if (createdIssueId) {
   }
 
   try {
-    const result = (await h.invoke('integrations:import-linear-issues', {
+    await h.invoke('integrations:import-linear-issues', {
       projectId,
       connectionId,
       teamId: LINEAR_TEST_TEAM_ID,
       selectedIssueIds: [createdIssueId]
-    })) as any
-    const tasks = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').all(projectId) as any[]
+    })
+    const tasks = h.db
+      .prepare('SELECT * FROM tasks WHERE project_id = ?')
+      .all(projectId) as unknown[]
     expect(tasks.length).toBe(1)
     ok('re-import deduplicates')
   } catch (e) {
@@ -362,12 +393,12 @@ if (createdIssueId) {
 
   // Push: make local newer
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     h.db
       .prepare("UPDATE tasks SET title = ?, updated_at = '2099-01-01 00:00:00' WHERE id = ?")
       .run(`[test] pushed from local ${Date.now()}`, task.id)
 
-    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as any
+    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as SyncResult
     expect(result.scanned).toBe(1)
     expect(result.pushed).toBe(1)
 
@@ -380,18 +411,20 @@ if (createdIssueId) {
 
   // Pull: update remote, make local old
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     const newTitle = `[test] pulled from remote ${Date.now()}`
     await linearClient.updateIssue(LINEAR_API_KEY, createdIssueId, { title: newTitle })
 
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
     h.db.prepare('DELETE FROM external_field_state').run()
 
-    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as any
+    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as SyncResult
     expect(result.scanned).toBe(1)
     expect(result.pulled).toBe(1)
 
-    const updatedTask = h.db.prepare('SELECT title FROM tasks WHERE id = ?').get(task.id) as any
+    const updatedTask = h.db.prepare('SELECT title FROM tasks WHERE id = ?').get(task.id) as {
+      title: string
+    }
     expect(updatedTask.title).toBe(newTitle)
     ok('pull: remote newer → updates local')
   } catch (e) {
@@ -403,14 +436,14 @@ if (createdIssueId) {
     h.db
       .prepare("UPDATE integration_project_mappings SET sync_mode = 'one_way' WHERE project_id = ?")
       .run(projectId)
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     h.db
       .prepare(
         "UPDATE tasks SET title = '[test] should not push', updated_at = '2099-01-01 00:00:00' WHERE id = ?"
       )
       .run(task.id)
 
-    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as any
+    const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as SyncResult
     expect(result.pushed).toBe(0)
     ok('one_way mode does not push')
   } catch (e) {
@@ -428,14 +461,18 @@ if (createdIssueId) {
     const completedState = workflowStates.find((s) => s.type === 'completed')
     if (completedState) {
       await linearClient.updateIssue(LINEAR_API_KEY, createdIssueId, { stateId: completedState.id })
-      const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+      const task = h.db
+        .prepare('SELECT * FROM tasks WHERE project_id = ?')
+        .get(projectId) as TaskRow
       h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
       h.db.prepare('DELETE FROM external_field_state').run()
 
-      const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as any
+      const result = (await h.invoke('integrations:sync-now', { taskId: task.id })) as SyncResult
       expect(result.pulled).toBe(1)
 
-      const updatedTask = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(task.id) as any
+      const updatedTask = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(task.id) as {
+        status: string
+      }
       expect(updatedTask.status).toBe('done')
       ok('completed state → done status')
     } else {
@@ -452,7 +489,9 @@ if (createdIssueId) {
   try {
     const completedState = workflowStates.find((s) => s.type === 'completed')
     if (completedState) {
-      const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+      const task = h.db
+        .prepare('SELECT * FROM tasks WHERE project_id = ?')
+        .get(projectId) as TaskRow
       h.db.prepare('UPDATE tasks SET archived_at = NULL WHERE id = ?').run(task.id)
       await linearClient.updateIssue(LINEAR_API_KEY, createdIssueId, { stateId: completedState.id })
       h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
@@ -461,7 +500,7 @@ if (createdIssueId) {
       await h.invoke('integrations:sync-now', { taskId: task.id })
       const updatedTask = h.db
         .prepare('SELECT archived_at FROM tasks WHERE id = ?')
-        .get(task.id) as any
+        .get(task.id) as { archived_at: string | null }
       expect(updatedTask.archived_at).toBeTruthy()
       ok('remote completed → local archived')
     } else {
@@ -477,7 +516,9 @@ if (createdIssueId) {
       (s) => s.type === 'unstarted' || s.type === 'started'
     )
     if (unstartedState) {
-      const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+      const task = h.db
+        .prepare('SELECT * FROM tasks WHERE project_id = ?')
+        .get(projectId) as TaskRow
       await linearClient.updateIssue(LINEAR_API_KEY, createdIssueId, { stateId: unstartedState.id })
       h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
       h.db.prepare('DELETE FROM external_field_state').run()
@@ -485,7 +526,7 @@ if (createdIssueId) {
       await h.invoke('integrations:sync-now', { taskId: task.id })
       const updatedTask = h.db
         .prepare('SELECT archived_at FROM tasks WHERE id = ?')
-        .get(task.id) as any
+        .get(task.id) as { archived_at: string | null }
       expect(updatedTask.archived_at).toBeNull()
       ok('remote reopened → local unarchived')
     } else {
@@ -498,7 +539,7 @@ if (createdIssueId) {
   // ── Push archive / unarchive ──────────────────────────────────────────
   console.log('\nLinear: Push archive/unarchive')
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     await pushArchiveToProviders(h.db, task.id)
 
     const remote = await linearClient.getIssue(LINEAR_API_KEY, createdIssueId)
@@ -509,7 +550,7 @@ if (createdIssueId) {
   }
 
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
     await pushUnarchiveToProviders(h.db, task.id)
 
     const remote = await linearClient.getIssue(LINEAR_API_KEY, createdIssueId)
@@ -522,8 +563,12 @@ if (createdIssueId) {
   // ── get-task-sync-status ──────────────────────────────────────────────
   console.log('\nLinear: Sync status')
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
-    const status = (await h.invoke('integrations:get-task-sync-status', task.id, 'linear')) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
+    const status = (await h.invoke(
+      'integrations:get-task-sync-status',
+      task.id,
+      'linear'
+    )) as SyncStatus
     expect(status.provider).toBe('linear')
     expect(status.taskId).toBe(task.id)
     expect(
@@ -538,7 +583,7 @@ if (createdIssueId) {
   // ── Conflict detection ────────────────────────────────────────────────
   console.log('\nLinear: Conflict detection')
   try {
-    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
 
     // First sync to establish baseline
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
@@ -555,11 +600,15 @@ if (createdIssueId) {
       title: `[test] remote conflict title ${Date.now()}`
     })
 
-    const status = (await h.invoke('integrations:get-task-sync-status', task.id, 'linear')) as any
+    const status = (await h.invoke(
+      'integrations:get-task-sync-status',
+      task.id,
+      'linear'
+    )) as SyncStatus
     expect(status.fields.length).toBeGreaterThan(0)
-    const titleField = status.fields.find((f: any) => f.field === 'title')
+    const titleField = status.fields.find((f) => f.field === 'title')
     expect(titleField).toBeTruthy()
-    expect(titleField.state !== 'in_sync').toBe(true)
+    expect(titleField!.state !== 'in_sync').toBe(true)
     ok('conflict detected when both sides change')
   } catch (e) {
     no('conflict detected when both sides change', e)
@@ -596,7 +645,7 @@ if (createdIssueId) {
 
     const project = h.db
       .prepare('SELECT columns_config FROM projects WHERE id = ?')
-      .get(freshProjectId) as any
+      .get(freshProjectId) as { columns_config: string }
     expect(project.columns_config).toBeTruthy()
     const columns = JSON.parse(project.columns_config)
     expect(columns.length).toBeGreaterThan(0)
@@ -607,7 +656,7 @@ if (createdIssueId) {
       const preview = (await h.invoke('integrations:resync-provider-statuses', {
         projectId: freshProjectId,
         provider: 'linear'
-      })) as any
+      })) as { diff: { added: unknown[]; removed: unknown[] } }
       expect(preview.diff.added.length).toBe(0)
       expect(preview.diff.removed.length).toBe(0)
       ok('resync-provider-statuses shows no diff after fresh apply')
@@ -643,11 +692,11 @@ if (createdIssueId) {
 
       const tasksBefore = h.db
         .prepare('SELECT * FROM tasks WHERE project_id = ?')
-        .all(disco.projectId) as any[]
+        .all(disco.projectId) as unknown[]
       await runScopedDiscovery(h.db, disco.mappingId)
       const tasksAfter = h.db
         .prepare('SELECT * FROM tasks WHERE project_id = ?')
-        .all(disco.projectId) as any[]
+        .all(disco.projectId) as unknown[]
 
       expect(tasksAfter.length).toBeGreaterThan(tasksBefore.length)
       ok('runDiscovery auto-imports unlinked issues')
@@ -670,7 +719,7 @@ if (createdIssueId) {
 
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-      .get(newTaskId) as any
+      .get(newTaskId) as ExternalLinkRow
 
     expect(link).toBeTruthy()
     expect(link.external_id).toBeTruthy()
@@ -689,10 +738,10 @@ if (createdIssueId) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-      .get(task.id) as any
+      .get(task.id) as ExternalLinkRow
     if (task && link) {
       const forcePushTitle = `[test] force pushed ${Date.now()}`
       h.db
@@ -703,7 +752,7 @@ if (createdIssueId) {
         taskId: task.id,
         provider: 'linear',
         force: true
-      })) as any
+      })) as PushTaskResult
       expect(result.pushed).toBe(true)
 
       const remote = await linearClient.getIssue(LINEAR_API_KEY, link.external_id)
@@ -720,10 +769,10 @@ if (createdIssueId) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-      .get(task.id) as any
+      .get(task.id) as ExternalLinkRow
     if (task && link) {
       const forcePullTitle = `[test] force pulled ${Date.now()}`
       await linearClient.updateIssue(LINEAR_API_KEY, link.external_id, { title: forcePullTitle })
@@ -732,10 +781,12 @@ if (createdIssueId) {
         taskId: task.id,
         provider: 'linear',
         force: true
-      })) as any
+      })) as PullTaskResult
       expect(result.pulled).toBe(true)
 
-      const updatedTask = h.db.prepare('SELECT title FROM tasks WHERE id = ?').get(task.id) as any
+      const updatedTask = h.db.prepare('SELECT title FROM tasks WHERE id = ?').get(task.id) as {
+        title: string
+      }
       expect(updatedTask.title).toBe(forcePullTitle)
       ok('pull-task force pulls remote → local')
     } else {
@@ -749,10 +800,10 @@ if (createdIssueId) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-      .get(task.id) as any
+      .get(task.id) as ExternalLinkRow
     if (task && link) {
       // Sync first to establish baseline
       await h.invoke('integrations:pull-task', { taskId: task.id, provider: 'linear', force: true })
@@ -761,7 +812,7 @@ if (createdIssueId) {
       const result = (await h.invoke('integrations:push-task', {
         taskId: task.id,
         provider: 'linear'
-      })) as any
+      })) as PushTaskResult
       expect(result.pushed).toBe(false)
       expect(result.message.includes('already in sync')).toBe(true)
       ok('push-task returns false when in sync')
@@ -776,10 +827,10 @@ if (createdIssueId) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-      .get(task.id) as any
+      .get(task.id) as ExternalLinkRow
     if (task && link) {
       // Establish baseline
       await h.invoke('integrations:push-task', { taskId: task.id, provider: 'linear', force: true })
@@ -798,7 +849,7 @@ if (createdIssueId) {
       const result = (await h.invoke('integrations:push-task', {
         taskId: task.id,
         provider: 'linear'
-      })) as any
+      })) as PushTaskResult
       expect(result.pushed).toBe(false)
       expect(result.message.includes('Remote changes detected')).toBe(true)
       ok('push-task refuses when remote ahead without force')
@@ -813,7 +864,7 @@ if (createdIssueId) {
   try {
     const task = h.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
-      .get(projectId) as any
+      .get(projectId) as TaskRow
     if (task) {
       // Establish baseline
       await h.invoke('integrations:pull-task', { taskId: task.id, provider: 'linear', force: true })
@@ -828,7 +879,7 @@ if (createdIssueId) {
       const result = (await h.invoke('integrations:pull-task', {
         taskId: task.id,
         provider: 'linear'
-      })) as any
+      })) as PullTaskResult
       expect(result.pulled).toBe(false)
       expect(result.message.includes('Local changes detected')).toBe(true)
       ok('pull-task refuses when local ahead without force')
@@ -857,14 +908,14 @@ if (createdIssueId) {
     const result = (await h.invoke('integrations:push-unlinked-tasks', {
       projectId,
       provider: 'linear'
-    })) as any
+    })) as { pushed: number }
     expect(result.pushed).toBeGreaterThan(0)
 
     // Verify each task now has a link
     for (const id of unlinkedIds) {
       const link = h.db
         .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-        .get(id) as any
+        .get(id) as ExternalLinkRow
       expect(link).toBeTruthy()
       createdIssueIds.push(link.external_id)
     }
@@ -878,7 +929,7 @@ if (createdIssueId) {
     const result = (await h.invoke('integrations:push-unlinked-tasks', {
       projectId,
       provider: 'linear'
-    })) as any
+    })) as { pushed: number }
     expect(result.pushed).toBe(0)
     ok('push-unlinked-tasks skips already-linked tasks')
   } catch (e) {
@@ -897,12 +948,12 @@ if (createdIssueId) {
     const result = (await h.invoke('integrations:push-unlinked-tasks', {
       projectId,
       provider: 'linear'
-    })) as any
+    })) as { pushed: number }
     expect(result.pushed).toBe(0)
 
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-      .get(tempId) as any
+      .get(tempId) as ExternalLinkRow | undefined
     expect(link).toBeUndefined()
     ok('push-unlinked-tasks excludes temporary tasks')
   } catch (e) {
@@ -1016,13 +1067,15 @@ console.log('\nLinear: Clear/disconnect')
     })
     const links = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'")
-      .all(clearTaskId) as any[]
+      .all(clearTaskId) as unknown[]
     expect(links.length).toBe(0)
     const mapping = h.db
       .prepare('SELECT * FROM integration_project_mappings WHERE id = ?')
-      .get(clearTest.mappingId) as any
+      .get(clearTest.mappingId) as { id: string } | undefined
     expect(mapping).toBeUndefined()
-    const task = h.db.prepare('SELECT * FROM tasks WHERE id = ?').get(clearTaskId) as any
+    const task = h.db.prepare('SELECT * FROM tasks WHERE id = ?').get(clearTaskId) as
+      | TaskRow
+      | undefined
     expect(task).toBeTruthy()
     ok('clear-project-provider removes links/mappings, keeps tasks')
   } catch (e) {
@@ -1034,7 +1087,7 @@ console.log('\nLinear: Clear/disconnect')
       await h.invoke('integrations:disconnect', handlerConnectionId)
       const conn = h.db
         .prepare('SELECT * FROM integration_connections WHERE id = ?')
-        .get(handlerConnectionId) as any
+        .get(handlerConnectionId) as { id: string } | undefined
       expect(conn).toBeUndefined()
       ok('disconnect removes connection')
     } catch (e) {

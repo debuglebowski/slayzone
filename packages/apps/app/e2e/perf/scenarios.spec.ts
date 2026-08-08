@@ -33,6 +33,29 @@ const ITERATIONS = 5
 const RUN_DIR = path.join(defaultResultsDir(), `run-${Date.now()}`)
 const PROJ_ABBREV = 'PE'
 
+/**
+ * App.tsx parks the renderer's zustand stores on `window` for e2e/CDP driving.
+ * Only the slices these scenarios actually call are typed — a wider mirror of
+ * the store types would rot against the real stores without ever being checked
+ * against them. `closeCreateTask` stays optional because the tear-down calls
+ * guard it with `?.()`; the measured `openCreateTask` deliberately does not, so
+ * a missing store fails the scenario instead of silently recording a no-op.
+ */
+interface PerfStoreWindow extends Window {
+  __slayzone_tabStore: {
+    getState(): {
+      tabs: Array<{ type: string }>
+      openTask(taskId: string): void
+      setActiveTabIndex(index: number): void
+    }
+  }
+  __slayzone_dialogStore: {
+    getState(): { openCreateTask(): void; closeCreateTask?(): void }
+  }
+}
+// NB: the cast is spelled out inline at every use below. A module-scope helper
+// would be out of scope inside a serialised `page.evaluate` closure.
+
 let projectId: string
 let firstTaskId: string
 let secondTaskId: string
@@ -81,13 +104,17 @@ test.describe
         beforeEach: async (page) => {
           // Ensure dialog is closed before each iteration
           await page.evaluate(() =>
-            (window as any).__slayzone_dialogStore?.getState().closeCreateTask?.()
+            (window as unknown as PerfStoreWindow).__slayzone_dialogStore
+              ?.getState()
+              .closeCreateTask?.()
           )
           await page.waitForTimeout(150)
         },
         run: async (page) => {
           await page.evaluate(() =>
-            (window as any).__slayzone_dialogStore.getState().openCreateTask()
+            (window as unknown as PerfStoreWindow).__slayzone_dialogStore
+              .getState()
+              .openCreateTask()
           )
           // Wait for the dialog to be present and contain a title input
           await page.waitForFunction(
@@ -103,7 +130,9 @@ test.describe
         },
         afterEach: async (page) => {
           await page.evaluate(() =>
-            (window as any).__slayzone_dialogStore?.getState().closeCreateTask?.()
+            (window as unknown as PerfStoreWindow).__slayzone_dialogStore
+              ?.getState()
+              .closeCreateTask?.()
           )
           await page.waitForTimeout(100)
         }
@@ -119,7 +148,7 @@ test.describe
       // Pre-open both task tabs so the scenario measures pure tab-switch cost
       await mainWindow.evaluate(
         ({ a, b }) => {
-          const store = (window as any).__slayzone_tabStore.getState()
+          const store = (window as unknown as PerfStoreWindow).__slayzone_tabStore.getState()
           store.openTask(a)
           store.openTask(b)
         },
@@ -135,16 +164,18 @@ test.describe
           // Park on tab 0 (project) before each measured switch so we always
           // measure the same direction: project → task A
           await page.evaluate(() =>
-            (window as any).__slayzone_tabStore.getState().setActiveTabIndex(0)
+            (window as unknown as PerfStoreWindow).__slayzone_tabStore
+              .getState()
+              .setActiveTabIndex(0)
           )
           await page.waitForTimeout(150)
           void iteration
         },
         run: async (page) => {
           await page.evaluate(() => {
-            const store = (window as any).__slayzone_tabStore.getState()
+            const store = (window as unknown as PerfStoreWindow).__slayzone_tabStore.getState()
             // Find the first task tab
-            const idx = store.tabs.findIndex((t: any) => t.type === 'task')
+            const idx = store.tabs.findIndex((t) => t.type === 'task')
             if (idx >= 0) store.setActiveTabIndex(idx)
           })
           // Wait for the task shell to be visible
@@ -171,7 +202,9 @@ test.describe
     test('create-task', async ({ mainWindow }) => {
       // Make sure dialog is closed before starting
       await mainWindow.evaluate(() =>
-        (window as any).__slayzone_dialogStore?.getState().closeCreateTask?.()
+        (window as unknown as PerfStoreWindow).__slayzone_dialogStore
+          ?.getState()
+          .closeCreateTask?.()
       )
 
       const definition: ScenarioDefinition = {
@@ -180,14 +213,18 @@ test.describe
         iterations: ITERATIONS,
         beforeEach: async (page) => {
           await page.evaluate(() =>
-            (window as any).__slayzone_dialogStore?.getState().closeCreateTask?.()
+            (window as unknown as PerfStoreWindow).__slayzone_dialogStore
+              ?.getState()
+              .closeCreateTask?.()
           )
           await page.waitForTimeout(100)
         },
         run: async (page, iteration) => {
           // Open dialog
           await page.evaluate(() =>
-            (window as any).__slayzone_dialogStore.getState().openCreateTask()
+            (window as unknown as PerfStoreWindow).__slayzone_dialogStore
+              .getState()
+              .openCreateTask()
           )
           await page.waitForFunction(
             () => {
@@ -227,7 +264,7 @@ test.describe
                 return window
                   .getTrpcVanillaClient()
                   .task.getAll.query()
-                  .then((tasks: any[]) => tasks.some((task) => task.title === t))
+                  .then((tasks) => tasks.some((task) => task.title === t))
               },
               title,
               { timeout: 5000 }
@@ -236,7 +273,9 @@ test.describe
         },
         afterEach: async (page) => {
           await page.evaluate(() =>
-            (window as any).__slayzone_dialogStore?.getState().closeCreateTask?.()
+            (window as unknown as PerfStoreWindow).__slayzone_dialogStore
+              ?.getState()
+              .closeCreateTask?.()
           )
           await page.waitForTimeout(100)
         }

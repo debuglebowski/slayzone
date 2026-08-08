@@ -2,14 +2,12 @@ import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
 test.describe('Tag create and edit dialog', () => {
-  let projectId: string
   let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Tag Test', color: '#3b82f6', path: TEST_PROJECT_PATH })
-    projectId = p.id
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const task = await s.createTask({ projectId: p.id, title: 'Tag task' })
     const tag = await s.createTag({ name: 'existing-tag', color: '#ef4444', projectId: p.id })
@@ -79,12 +77,12 @@ test.describe('Tag create and edit dialog', () => {
     expect(tagsAfter.length).toBe(countBefore)
 
     // Old name must be gone
-    const old = tagsAfter.find((t: any) => t.name === 'existing-tag')
+    const old = tagsAfter.find((t) => t.name === 'existing-tag')
     expect(old).toBeUndefined()
 
     // New name must exist
-    const renamed = tagsAfter.find((t: any) => t.name === 'renamed-tag')
+    const renamed = tagsAfter.find((t) => t.name === 'renamed-tag')
     expect(renamed).toBeTruthy()
-    expect(renamed.id).toBe(tagsBefore.find((t: any) => t.name === 'existing-tag')!.id)
+    expect(renamed!.id).toBe(tagsBefore.find((t) => t.name === 'existing-tag')!.id)
   })
 })

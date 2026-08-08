@@ -13,6 +13,10 @@ export const diagnosticsShim = {
     return Promise.resolve()
   },
   getConfig: async (): Promise<unknown> => ({}),
-  setConfig: async (_cfg: unknown): Promise<void> => {},
+  setConfig: async (_cfg: unknown): Promise<void> => {
+    // No diagnostics config exists in the shell yet — `getConfig` returns `{}`,
+    // so accepting and dropping a write keeps the surface shape until the
+    // cap-shell-7 diagnostics channel gives it somewhere to land.
+  },
   export: async (): Promise<string> => ''
 }

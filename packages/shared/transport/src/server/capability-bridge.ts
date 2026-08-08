@@ -37,17 +37,20 @@ import {
 
 /** Resolve a dotted `AppDeps` method path (one level of nesting supported). */
 function resolveAppDepsMethod(path: string): (...args: unknown[]) => unknown {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic dispatch over the AppDeps surface
-  const deps = getAppDeps() as any
+  // Dispatch is by string, so the typed AppDeps surface is unusable here; the
+  // `typeof fn !== 'function'` guards below are what make the calls safe.
+  type Bag = Record<string, unknown>
+  type Method = (...args: unknown[]) => unknown
+  const deps = getAppDeps() as unknown as Bag
   const parts = path.split('.')
   if (parts.length === 1) {
-    const fn = deps[parts[0]]
+    const fn = deps[parts[0]] as Method | undefined
     if (typeof fn !== 'function') throw new Error(`capability-bridge: ${path} is not a function`)
     return fn.bind(deps)
   }
   if (parts.length === 2) {
-    const obj = deps[parts[0]]
-    const fn = obj?.[parts[1]]
+    const obj = deps[parts[0]] as Bag | undefined
+    const fn = obj?.[parts[1]] as Method | undefined
     if (typeof fn !== 'function') throw new Error(`capability-bridge: ${path} is not a function`)
     return fn.bind(obj)
   }

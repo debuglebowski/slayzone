@@ -495,7 +495,9 @@ export async function getIssuesBatch(
     const repo = data[`i${i}`]
     if (!repo?.issue) continue
     const node = repo.issue
-    if ((node as any).__typename === 'PullRequest') continue
+    // The aliased `issue(number:)` field can resolve to a PR — GitHub shares the
+    // number space — so widen `__typename` past the node type's `'Issue'` literal.
+    if ((node as { __typename?: string }).__typename === 'PullRequest') continue
     // Ensure __typename for mapGraphQLIssue
     const issueNode: GitHubGraphQLIssueNode = { ...node, __typename: 'Issue' }
     result.set(issues[i].id, mapGraphQLIssue(issueNode))

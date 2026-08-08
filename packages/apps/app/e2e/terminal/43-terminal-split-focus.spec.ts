@@ -47,7 +47,7 @@ test.describe('Terminal split focus', () => {
     // Get the new tab's ID (the non-main tab)
     const newTabId = await mainWindow.evaluate(async (id) => {
       const tabs = await window.getTrpcVanillaClient().taskTerminals.list.query({ taskId: id })
-      return tabs.find((t: any) => !t.isMain)?.id
+      return tabs.find((t) => !t.isMain)?.id
     }, taskId)
     expect(newTabId).toBeTruthy()
 

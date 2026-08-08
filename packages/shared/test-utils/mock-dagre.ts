@@ -3,5 +3,8 @@
  */
 export default {
   graphlib: { Graph: class {} },
-  layout: () => {}
+  layout: () => {
+    // The real layout mutates the graph in place. No handler test reads the
+    // resulting node positions — only that importing dagre does not blow up.
+  }
 }

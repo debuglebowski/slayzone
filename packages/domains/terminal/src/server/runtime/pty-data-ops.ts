@@ -4,7 +4,7 @@ import {
   prunePendingSpawns as prunePendingSpawnsDb,
   bindSessionToTask as bindSessionToTaskDb
 } from '@slayzone/task/server'
-import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal/shared'
+import type { TerminalMode, TerminalModeInfo, UsageProviderConfig } from '@slayzone/terminal/shared'
 import { buildMcpEnv as buildMcpEnvDb, type RemoteMcpEnv } from '../mcp-env'
 
 /**
@@ -85,29 +85,57 @@ export interface PtySpawnLookups {
   resolveRunnerId(taskId: string): Promise<string | null>
 }
 
-/** Map a raw `terminal_modes` row to the shared TerminalModeInfo shape. */
-export function mapModeRow(row: any): TerminalModeInfo {
-  let usageConfig = null
-  if (row.usage_config) {
+/**
+ * A `terminal_modes` row exactly as SQLite hands it back: snake_case columns,
+ * booleans still 0/1, and `usage_config` still a JSON string. `mapModeRow` is
+ * the one place that shape is known, so it stays local to this module.
+ */
+interface TerminalModeRow {
+  id: string
+  label: string
+  type: string
+  initial_command: string | null
+  resume_command: string | null
+  headless_command: string | null
+  default_flags: string | null
+  enabled: number
+  is_builtin: number
+  order: number
+  pattern_working: string | null
+  pattern_error: string | null
+  usage_config: string | null
+}
+
+/**
+ * Map a raw `terminal_modes` row to the shared TerminalModeInfo shape.
+ *
+ * Takes `unknown` because every caller feeds it straight from `db.prepare(...)`,
+ * whose result the DB bridge types as `unknown`; the row shape is asserted once
+ * here rather than at each of the five call sites.
+ */
+export function mapModeRow(row: unknown): TerminalModeInfo {
+  const r = row as TerminalModeRow
+  let usageConfig: UsageProviderConfig | null = null
+  if (r.usage_config) {
     try {
-      usageConfig = JSON.parse(row.usage_config)
+      usageConfig = JSON.parse(r.usage_config) as UsageProviderConfig
     } catch {
       /* ignore corrupt */
     }
   }
   return {
-    id: row.id,
-    label: row.label,
-    type: row.type,
-    initialCommand: row.initial_command,
-    resumeCommand: row.resume_command,
-    headlessCommand: row.headless_command ?? null,
-    defaultFlags: row.default_flags,
-    enabled: Boolean(row.enabled),
-    isBuiltin: Boolean(row.is_builtin),
-    order: row.order,
-    patternWorking: row.pattern_working,
-    patternError: row.pattern_error,
+    id: r.id,
+    label: r.label,
+    type: r.type,
+    initialCommand: r.initial_command,
+    resumeCommand: r.resume_command,
+    headlessCommand: r.headless_command ?? null,
+    defaultFlags: r.default_flags,
+    enabled: Boolean(r.enabled),
+    isBuiltin: Boolean(r.is_builtin),
+    order: r.order,
+    patternWorking: r.pattern_working,
+    patternError: r.pattern_error,
     usageConfig
   }
 }

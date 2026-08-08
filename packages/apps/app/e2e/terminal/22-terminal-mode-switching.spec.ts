@@ -1,13 +1,13 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, switchTerminalMode } from '../fixtures/terminal'
+import type { ElectronApplication } from '@playwright/test'
 
 // Simulate a native menu accelerator by invoking the real menu item from the
 // main process. The renderer consumes these signals via the tRPC `menu.*`
 // subscriptions (fed by `menuEvents`); the legacy `webContents.send('app:*')`
 // broadcasts are orphaned post-cutover, so driving them is a no-op.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function clickMenuItem(electronApp: any, labels: string[]): Promise<void> {
+async function clickMenuItem(electronApp: ElectronApplication, labels: string[]): Promise<void> {
   await electronApp.evaluate(
     ({ Menu }: { Menu: typeof Electron.CrossProcessExports.Menu }, path: string[]) => {
       let items = Menu.getApplicationMenu()?.items ?? []

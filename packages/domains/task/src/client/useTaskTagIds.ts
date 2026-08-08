@@ -25,7 +25,10 @@ export function useTaskTagIds(
         void queryClient
           .fetchQuery(trpc.tags.getForTask.queryOptions({ taskId }))
           .then((tags) => setTagIds(tags.map((t) => t.id)))
-          .catch(() => {})
+          .catch(() => {
+            // Opportunistic refresh — keep the last-known tag ids on failure;
+            // the next `tasks-changed` event retries.
+          })
       }
     })
   )

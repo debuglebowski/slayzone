@@ -100,7 +100,18 @@ export function OnboardingDialog({
   if (!open && !closing) return null
 
   return (
-    <Dialog open={open || closing} onOpenChange={autoOpen ? () => {} : handleSkip}>
+    <Dialog
+      open={open || closing}
+      onOpenChange={
+        autoOpen
+          ? () => {
+              // Auto-opened onboarding is non-dismissable: swallow Radix's close
+              // request so Esc/outside-click can't skip first-run setup. The
+              // matching preventDefault handlers are on DialogContent below.
+            }
+          : handleSkip
+      }
+    >
       <DialogContent
         className={cn(
           'p-0 overflow-hidden border-none shadow-none bg-transparent transition-[max-width] duration-300',

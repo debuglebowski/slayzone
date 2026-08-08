@@ -2,7 +2,6 @@ import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
 test.describe('Tag input field responsive overflow', () => {
-  let projectId: string
   let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow, electronApp }) => {
@@ -13,7 +12,6 @@ test.describe('Tag input field responsive overflow', () => {
       color: '#3b82f6',
       path: TEST_PROJECT_PATH
     })
-    projectId = p.id
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const task = await s.createTask({ projectId: p.id, title: 'Many tags task' })
 

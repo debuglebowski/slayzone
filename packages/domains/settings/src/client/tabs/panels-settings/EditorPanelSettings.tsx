@@ -58,7 +58,10 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
           <Select
             value={editorTabSize}
             onValueChange={(v) => {
-              setEditorTabSize(v as any)
+              // Radix hands back a bare string; narrow it to the two SelectItem
+              // values rather than trusting the widget (same guard style as the
+              // load path in usePanelSettings).
+              setEditorTabSize(v === '4' ? '4' : '2')
               setSetting('editor_tab_size', v)
             }}
           >
@@ -86,7 +89,7 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
           <Select
             value={editorMarkdownViewMode}
             onValueChange={(v) => {
-              setEditorMarkdownViewMode(v as any)
+              setEditorMarkdownViewMode(v === 'split' || v === 'code' ? v : 'rich')
               setSetting('editor_markdown_view_mode', v)
               window.dispatchEvent(new Event('sz:settings-changed'))
             }}

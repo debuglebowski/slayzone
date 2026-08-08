@@ -101,7 +101,6 @@ import {
   ensureIntegrationSchema,
   setCredentialCipher
 } from '@slayzone/integrations/server'
-import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { AutomationEngine } from '@slayzone/automations/server'
 import { recordDiagnosticEvent, bindDiagnosticsDbs } from '@slayzone/diagnostics/server'
@@ -173,10 +172,23 @@ function unavailable(name: string): never {
   throw new Error(`${name} ${NOT_AVAILABLE}`)
 }
 
-/** A throwing stand-in for an electron-only function dep. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- single chokepoint for typed stubs
-function stub<T extends (...args: any[]) => any>(name: string): T {
+/**
+ * A throwing stand-in for an electron-only function dep. `never[]` params are
+ * what makes the constraint accept ANY function shape: parameters are
+ * contravariant, and every parameter type is a supertype of `never`.
+ */
+function stub<T extends (...args: never[]) => unknown>(name: string): T {
   return ((..._args: unknown[]) => unavailable(name)) as unknown as T
+}
+
+/**
+ * A silently-doing-nothing stand-in, the counterpart to `stub`. Reaching a
+ * `stub` is a bug (fail loud); reaching a `noop` is normal — shared code calls
+ * these on every host, and off-Electron there is simply nothing to act on (no
+ * window chrome, no native menu, no WebContentsView z-order to maintain).
+ */
+const noop = (): void => {
+  // Deliberately empty — see above.
 }
 
 export type ServerComposition = {
@@ -494,7 +506,7 @@ export function composeServer(opts: {
   // `pty.ackEnsureAlive` mutation, so the command bus stays inert.
   const stubPtyWindow: PtySessionWindow = {
     isDestroyed: () => false,
-    webContents: { send: () => {}, getURL: () => '' }
+    webContents: { send: noop, getURL: () => '' }
   }
   configurePtyHost({
     getAllWindows: () => [stubPtyWindow],
@@ -709,7 +721,6 @@ export function composeServer(opts: {
       decryptString: (encrypted) => hostCipher.decryptStringFromB64(encrypted.toString('base64'))
     })
   }
-  const feedbackOps = buildFeedbackOps(db)
 
   // --- Processes ---------------------------------------------------------------
   // This process owns the process-manager runtime: the renderer drives process
@@ -846,11 +857,11 @@ export function composeServer(opts: {
       appWindowGetContentBounds: () => null,
       appWindowGetDisplayScaleFactor: () => null,
       // Window-cosmetic setters no-op off-window in the Electron host too.
-      appWindowSetTrafficLightPosition: () => {},
-      appWindowSetWindowButtonVisibility: () => {},
-      appFocusRenderer: () => {},
+      appWindowSetTrafficLightPosition: noop,
+      appWindowSetWindowButtonVisibility: noop,
+      appFocusRenderer: noop,
       // No window to raise on a headless host.
-      appRaiseMainWindow: () => {},
+      appRaiseMainWindow: noop,
       // No OS nativeTheme off-Electron. Default the preference to "system" so the
       // renderer resolves dark/light from `prefers-color-scheme` (ThemeContext);
       // an explicit light/dark still applies for the session. (Cross-restart
@@ -867,7 +878,7 @@ export function composeServer(opts: {
         decryptStringFromB64: stub('credentialCipher.decryptStringFromB64')
       },
       // No native menu on a headless host.
-      appRebuildMenuForShortcuts: () => {},
+      appRebuildMenuForShortcuts: noop,
 
       // Chromium-fork GitHub OAuth start. Unlike the Electron host (which blocks
       // waiting for the deep-link and returns the code inline), the fork CANNOT
@@ -912,7 +923,8 @@ export function composeServer(opts: {
       artifactBuildExportHtml: stub('artifactBuildExportHtml'),
       artifactRenderPdfToFile: stub('artifactRenderPdfToFile'),
       artifactRenderPngToFile: stub('artifactRenderPngToFile'),
-      windowClose: () => {},
+      // No OS window owns this process — nothing to close.
+      windowClose: noop,
 
       browser: {
         createView: stub('browser.createView'),
@@ -988,9 +1000,11 @@ export function composeServer(opts: {
       },
 
       webview: {
-        registerBrowserTab: () => {},
-        unregisterBrowserTab: () => {},
-        setActiveBrowserTab: () => {},
+        // Browser-tab bookkeeping exists to drive native z-order; there are no
+        // native child views here, so registration has nothing to track.
+        registerBrowserTab: noop,
+        unregisterBrowserTab: noop,
+        setActiveBrowserTab: noop,
         closeDevTools: stub('webview.closeDevTools'),
         isDevToolsOpened: () => false,
         disableDeviceEmulation: stub('webview.disableDeviceEmulation'),
@@ -1007,7 +1021,7 @@ export function composeServer(opts: {
         open: stub('taskWindows.open'),
         close: stub('taskWindows.close'),
         list: () => [],
-        setPrimaryActive: () => {},
+        setPrimaryActive: noop,
         getPrimaryActive: () => null,
         claimPanel: stub('taskWindows.claimPanel'),
         releasePanel: stub('taskWindows.releasePanel'),

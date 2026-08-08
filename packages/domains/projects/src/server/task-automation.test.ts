@@ -193,7 +193,7 @@ await describe('task automation: no-op cases', async () => {
 
   test('task not found does not throw', async () => {
     resetNotify()
-    const projId = seedProject({ on_terminal_active: 'in_progress', on_terminal_idle: null })
+    seedProject({ on_terminal_active: 'in_progress', on_terminal_idle: null })
     await handleTerminalStateChange(
       h.slayDb,
       'nonexistent-task:0',

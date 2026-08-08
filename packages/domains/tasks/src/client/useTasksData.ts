@@ -398,7 +398,10 @@ export function useTasksData(): UseTasksDataReturn {
   // everything" contract holds — external writes (CLI, IPC, e2e seeds, other
   // windows) that don't go through a tRPC mutation become visible app-wide.
   useEffect(() => {
-    ;(window as any).__slayzone_refreshData = () => {
+    // `window` carries no typed slot for our bridges — same Record cast the
+    // app's other global hooks use.
+    const w = window as unknown as Record<string, unknown>
+    w.__slayzone_refreshData = () => {
       void queryClient.invalidateQueries()
       return Promise.all([
         queryClient.refetchQueries(trpc.task.loadBoardData.queryFilter()),
@@ -406,7 +409,7 @@ export function useTasksData(): UseTasksDataReturn {
       ])
     }
     return () => {
-      delete (window as any).__slayzone_refreshData
+      delete w.__slayzone_refreshData
     }
   }, [queryClient, trpc, loadGroups])
 

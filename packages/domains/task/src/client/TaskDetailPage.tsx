@@ -1209,7 +1209,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
   handlePanelToggleRef.current = handlePanelToggle
 
-  const openArtifactRef = useRef<(taskId: string, artifactId: string) => void>(() => {})
+  const openArtifactRef = useRef<(taskId: string, artifactId: string) => void>(() => {
+    // Placeholder only — the assignment right below installs the real handler on
+    // every render, before anything can dispatch through the ref.
+  })
   openArtifactRef.current = (targetTaskId, artifactId) => {
     if (!task || targetTaskId !== task.id) return
     if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)

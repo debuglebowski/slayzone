@@ -34,8 +34,11 @@ function browserHost(): BrowserHost | null {
 // Mirrors the `app.browser` router's `input → positional args` for queries +
 // mutations. `?.` because the shim defines only a subset at runtime; fallbacks
 // match the shim's own stub returns so read-only probes degrade, never throw.
-/* eslint-disable @typescript-eslint/no-explicit-any -- bridge: tRPC inputs are anyInput-typed */
-type Handler = (h: BrowserHost, i: any) => unknown
+// The input arrives untyped off the wire and every field is forwarded straight
+// into an `AnyFn` (which takes `unknown` args), so an open record of `unknown`
+// is as precise as the bridge can be without re-deriving each proc's zod input.
+type ProcInput = Record<string, unknown>
+type Handler = (h: BrowserHost, i: ProcInput) => unknown
 const PROCS: Record<string, Handler> = {
   createView: (h, i) => h.createView?.(i),
   destroyView: (h, i) => h.destroyView?.(i.viewId),
@@ -85,7 +88,6 @@ const PROCS: Record<string, Handler> = {
   importExtension: (h, i) => h.importExtension?.(i.extPath) ?? { error: 'not supported' },
   reparentToCurrentWindow: (h, i) => h.reparentToCurrentWindow?.(i.viewId)
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // `app.browser.<routerName>` → shim subscription method. The router's stream
 // names differ from the preload's (onShortcut/onFocused vs onBrowserView*).
@@ -157,7 +159,7 @@ export function browserMojoLink(): TRPCLink<AppRouter> {
           return
         }
         Promise.resolve()
-          .then(() => handler(host, op.input))
+          .then(() => handler(host, op.input as ProcInput))
           .then((data) => {
             observer.next({ result: { data } })
             observer.complete()

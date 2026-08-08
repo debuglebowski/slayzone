@@ -51,7 +51,10 @@ export function useLeaderboardController(auth: LeaderboardAuthState) {
 
   useEffect(() => {
     if (!auth.isAuthenticated) return
-    void syncViewerProfile({}).catch(() => {})
+    void syncViewerProfile({}).catch(() => {
+      // Best-effort profile push — the board still renders from the Convex
+      // doc we already have; the next mount retries.
+    })
   }, [auth.isAuthenticated, syncViewerProfile])
 
   useEffect(() => {
@@ -111,7 +114,10 @@ export function useLeaderboardController(auth: LeaderboardAuthState) {
         }
         setDevProtocolBanner(null)
       })
-      .catch(() => {})
+      .catch(() => {
+        // Dev-only diagnostic probe. If the query fails we simply show no
+        // banner rather than surfacing an error about a debugging aid.
+      })
     return () => {
       cancelled = true
     }

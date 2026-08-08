@@ -5,9 +5,9 @@
  * `ProcessBackend`, task `WorktreeExecAdapters`); the fake gateway is the
  * `RoutingGateway` slice of `HubRunnerGateway`.
  */
-import type { ProcHandle, ProcSpawnSpec, ProcessBackend } from '@slayzone/processes/server'
+import type { ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
-import type { PtyBackend, PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
+import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
 import {
@@ -84,23 +84,6 @@ const requireCall = (gateway: FakeGateway, method: string): RecordedCall => {
   const call = gateway.requestsOf(method)[0]
   if (!call) throw new Error(`expected a call to ${method}`)
   return call
-}
-
-const throwingPty: PtyBackend = {
-  spawn: () => {
-    throw new Error('local pty.spawn must not run for a routed spec')
-  }
-}
-const throwingProc: ProcessBackend = {
-  spawn: () => {
-    throw new Error('local proc.spawn must not run for a routed spec')
-  },
-  getCommandLine: () => {
-    throw new Error('local proc.getCommandLine must not run for a routed spec')
-  },
-  killByPid: () => {
-    throw new Error('local proc.killByPid must not run for a routed spec')
-  }
 }
 
 const ptySpec = (over: Partial<PtySpawnSpec> = {}): PtySpawnSpec => ({
@@ -202,7 +185,6 @@ describe('createRoutingPtyBackend', () => {
 
   it('adopt: seeds warm output first, then drains frames that raced the reply', async () => {
     const gateway = new FakeGateway()
-    let releaseAdopt: (() => void) | null = null
     gateway.onMethod('pty.warmAdopt', () => ({ pid: 4242, data: 'BOOT-BANNER', seq: 5 }))
     const backend = createRoutingPtyBackend({ gateway, resolveRunnerId: () => 'runner-1' })
 

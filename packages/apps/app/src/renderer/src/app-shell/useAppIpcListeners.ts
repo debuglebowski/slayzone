@@ -73,13 +73,18 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
 
   // Stable refs for the close subscriptions — onData reads these so it always
   // sees the latest tabs/activeTabIndex without re-binding the WS subscription.
-  const closeActiveTaskRef = useRef<() => void>(() => {})
+  const closeActiveTaskRef = useRef<() => void>(() => {
+    // Seeded no-op: the real closure is assigned on the next line of every render,
+    // so this initial value can never be the one a subscription invokes.
+  })
   closeActiveTaskRef.current = () => {
     const activeTab = tabs[activeTabIndex]
     if (activeTab?.type === 'task') closeTab(activeTabIndex)
     else void closeWindow.mutate()
   }
-  const closeCurrentHomeRef = useRef<() => void>(() => {})
+  const closeCurrentHomeRef = useRef<() => void>(() => {
+    // Seeded no-op, same as above — overwritten on the next line every render.
+  })
   closeCurrentHomeRef.current = () => {
     const activeTab = tabs[activeTabIndex]
     if (activeTab?.type === 'home') void closeWindow.mutate()
@@ -168,8 +173,11 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
           void trpcClient.app.browser.reload.mutate({ viewId })
           return
         }
-        // Fallback: webview (multi-device grid)
-        const webview = document.querySelector('[data-browser-panel] webview') as any
+        // Fallback: webview (multi-device grid). <webview> is an Electron custom
+        // element, so the DOM lib types it as a bare HTMLElement — narrow to just
+        // the one method we call rather than pulling in the Electron typings.
+        type ReloadableWebview = HTMLElement & { reload?: () => void }
+        const webview = document.querySelector<ReloadableWebview>('[data-browser-panel] webview')
         if (webview?.reload) webview.reload()
       }
     })

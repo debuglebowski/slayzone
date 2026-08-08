@@ -42,7 +42,7 @@ test.describe('File editor', () => {
       path: TEST_PROJECT_PATH
     })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
-    const t = await s.createTask({ projectId: p.id, title: 'Editor test task', status: 'todo' })
+    await s.createTask({ projectId: p.id, title: 'Editor test task', status: 'todo' })
     await s.refreshData()
 
     // Navigate to task

@@ -1,12 +1,15 @@
 import { use, useSyncExternalStore } from 'react'
 
-type Fetcher = (...args: any[]) => Promise<any>
+// `never[]` params keep the constraint contravariance-safe: a concrete
+// `(id: string) => Promise<T>` is assignable to it, which `unknown[]` would
+// reject under strictFunctionTypes.
+type Fetcher = (...args: never[]) => Promise<unknown>
 type Fetchers = Record<string, Fetcher>
-type FetcherReturn<F> = F extends (...args: any[]) => Promise<infer R> ? R : never
-type FetcherArgs<F> = F extends (...args: infer A) => any ? A : never
+type FetcherReturn<F> = F extends (...args: never[]) => Promise<infer R> ? R : never
+type FetcherArgs<F> = F extends (...args: infer A) => unknown ? A : never
 
 interface CacheEntry {
-  promise: Promise<any>
+  promise: Promise<unknown>
   value?: unknown
   error?: unknown
   settled: boolean
@@ -70,7 +73,10 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
     const k = cacheKey(key, args)
     let entry = cache.get(k)
     if (!entry) {
-      const fetcher = fetchers[key]
+      // Keyed by plain string here, so the concrete fetcher's parameter types
+      // are unrecoverable — arg correctness is enforced by the public
+      // useData/prefetch signatures, which carry FetcherArgs<F[K]>.
+      const fetcher = fetchers[key] as (...args: unknown[]) => Promise<unknown>
       const promise = fetcher(...args)
       entry = { promise, settled: false }
       const e = entry
@@ -89,7 +95,11 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
       // Prevent unhandled rejection warnings. The original promise still rejects —
       // use() will re-throw into the error boundary. Failed entries stay in cache
       // until explicitly invalidated (allows error boundary to catch and display).
-      promise.catch(() => {})
+      promise.catch(() => {
+        // Body is empty on purpose: this handler exists only to mark the
+        // rejection handled, never to consume it — use() re-throws the same
+        // rejection into the error boundary.
+      })
       cache.set(k, entry)
     }
     return entry
@@ -100,13 +110,16 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
       // Subscribe to cache changes so invalidation triggers re-render
       useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
       const entry = getOrFetch(key, args)
+      // Entries are stored untyped (one string-keyed map for every fetcher);
+      // the public signature is what ties a key back to its fetcher's return.
+      type Data = FetcherReturn<F[typeof key]>
       if (entry.settled) {
         // Data already resolved — return synchronously, bypassing use() scheduling delay
         if (entry.error !== undefined) throw entry.error
-        return entry.value
+        return entry.value as Data
       }
       // Not yet resolved — fall through to use() which will suspend
-      return use(entry.promise)
+      return use(entry.promise) as Data
     },
 
     prefetch(key, ...args) {

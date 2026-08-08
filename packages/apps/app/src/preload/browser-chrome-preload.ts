@@ -32,8 +32,13 @@ contextBridge.exposeInMainWorld(BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY, sendMo
 if ('executeInMainWorld' in contextBridge) {
   contextBridge.executeInMainWorld({
     func: () => {
-      if (!window.chrome) (window as any).chrome = {}
-      const c = window.chrome as any
+      // This runs in the page's main world, where `chrome` is Chrome's own
+      // namespace object — absent in a WebContentsView. Typed as a loose bag
+      // because the members stubbed below are the only ones anything reads, and
+      // @types/chrome isn't part of the preload build.
+      const w = window as unknown as { chrome?: Record<string, unknown> }
+      if (!w.chrome) w.chrome = {}
+      const c = w.chrome
 
       // chrome.app — BotGuard checks for this
       if (!c.app) {

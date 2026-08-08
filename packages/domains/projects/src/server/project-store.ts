@@ -18,7 +18,10 @@ function unlinkProjectIconFiles(iconsDir: string, projectId: string): void {
     if (entry.startsWith(`${projectId}.`)) {
       try {
         unlinkSync(path.join(iconsDir, entry))
-      } catch {}
+      } catch {
+        // Best-effort: the icon may already be gone, or live on a read-only
+        // volume. Never let a stale file block the project update/delete.
+      }
     }
   }
 }

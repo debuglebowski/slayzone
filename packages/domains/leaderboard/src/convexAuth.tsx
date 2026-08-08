@@ -228,7 +228,10 @@ function ConvexAuthBridge({
       .then((stats) => {
         if (stats.days.length > 0) syncDailyStats({ days: stats.days })
       })
-      .catch(() => {})
+      .catch(() => {
+        // Background once-a-day stat push — offline or a Convex hiccup must not
+        // surface anywhere; the next interval tick re-sends the same days.
+      })
   }, [syncDailyStats, trpcClient])
 
   useEffect(() => {

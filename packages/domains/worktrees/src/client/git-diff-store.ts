@@ -552,7 +552,11 @@ export function useGitDiffSnapshot(
   // useSyncExternalStore does not tear down / recreate every render. We
   // memoize on `key` + every param that feeds into subscribeEntry.
   const subscribe = useMemo(() => {
-    if (!active || !targetPath) return (_listener: () => void) => () => {}
+    if (!active || !targetPath)
+      return (_listener: () => void) => () => {
+        // Nothing was subscribed (panel hidden or no target), so there is
+        // nothing for useSyncExternalStore to tear down.
+      }
     const args: SubscribeArgs = {
       targetPath,
       ignoreWhitespace: params.ignoreWhitespace,

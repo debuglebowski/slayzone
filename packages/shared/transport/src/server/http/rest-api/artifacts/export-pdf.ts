@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import { dirname } from 'node:path'
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { getEffectiveRenderMode, canExportAsPdf } from '@slayzone/task/shared'
+import type { RenderMode } from '@slayzone/task/shared'
 import { getArtifactFilePath } from './shared'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
@@ -28,7 +29,7 @@ export function registerArtifactsExportPdfRoute(app: Express, deps: RestApiDeps)
     }
 
     const title = existing.title as string
-    const mode = getEffectiveRenderMode(title, existing.render_mode as string | null as any)
+    const mode = getEffectiveRenderMode(title, existing.render_mode as RenderMode | null)
     if (!canExportAsPdf(mode)) {
       res.status(400).json({ error: `Cannot export ${mode} as pdf` })
       return

@@ -121,7 +121,10 @@ export function FeedbackDialog(): React.JSX.Element {
     async (thread: FeedbackThread) => {
       try {
         if (thread.discord_thread_id) {
-          await markDeleted({ threadId: thread.discord_thread_id }).catch(() => {})
+          await markDeleted({ threadId: thread.discord_thread_id }).catch(() => {
+            // Best-effort: tombstoning the Discord side is a courtesy and the thread
+            // may already be gone there. A failure must not block the local delete.
+          })
         }
         await trpcClient.feedback.deleteThread.mutate({ threadId: thread.id })
         if (selectedId === thread.id) {

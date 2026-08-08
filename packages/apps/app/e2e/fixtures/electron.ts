@@ -229,7 +229,11 @@ export async function resetApp(page: Page): Promise<void> {
   // locked". The reset is idempotent (it clears state), so retry until it lands — this
   // beforeAll-shared helper otherwise sheds an entire describe to one transient lock.
   await expect(async () => {
-    await page.evaluate(() => (window as any).__testInvoke('app:reset-for-test'))
+    await page.evaluate(() =>
+      (
+        window as unknown as { __testInvoke: (ch: string, ...rest: unknown[]) => Promise<unknown> }
+      ).__testInvoke('app:reset-for-test')
+    )
   }).toPass({ timeout: 15_000 })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root', { timeout: 10_000 })
@@ -1089,7 +1093,9 @@ export function seed(page: Page) {
     /** Re-fetch all data from DB into React state */
     refreshData: () =>
       page.evaluate(async () => {
-        await (window as any).__slayzone_refreshData?.()
+        await (
+          window as unknown as { __slayzone_refreshData?: () => Promise<unknown> }
+        ).__slayzone_refreshData?.()
         await new Promise((resolve) => setTimeout(resolve, 50))
       })
   }

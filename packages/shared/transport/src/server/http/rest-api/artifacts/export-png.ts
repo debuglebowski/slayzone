@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { dirname } from 'node:path'
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
-import { getEffectiveRenderMode, canExportAsPng } from '@slayzone/task/shared'
+import { getEffectiveRenderMode, canExportAsPng, type RenderMode } from '@slayzone/task/shared'
 import { getArtifactFilePath } from './shared'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
@@ -28,7 +28,10 @@ export function registerArtifactsExportPngRoute(app: Express, deps: RestApiDeps)
     }
 
     const title = existing.title as string
-    const mode = getEffectiveRenderMode(title, existing.render_mode as string | null as any)
+    // `render_mode` is a free-form TEXT column; getEffectiveRenderMode already
+    // falls back to the title's extension for anything it doesn't recognise, so
+    // the raw column value can be handed over as-is.
+    const mode = getEffectiveRenderMode(title, existing.render_mode as RenderMode | null)
     if (!canExportAsPng(mode)) {
       res.status(400).json({ error: `Cannot export ${mode} as png` })
       return

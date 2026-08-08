@@ -195,7 +195,7 @@ async function main(): Promise<void> {
       // production hub port is fixed per-environment (SIDECAR_FIXED_PORT), so this
       // can't happen; the assertion pins the property so a future change that
       // reintroduces a churning port is caught.
-      const { db, close } = createMigratedDb()
+      const { close } = createMigratedDb()
       const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-portchange-'))
       try {
         const url1 = deriveRunnerHubUrl({ remote: false, host: HOST, port: 60000 })!

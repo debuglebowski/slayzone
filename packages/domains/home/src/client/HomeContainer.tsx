@@ -277,7 +277,12 @@ function HomeContainerImpl({
     [selectedProject?.name]
   )
 
-  const noopOpenProjectSettings = useCallback(() => {}, [])
+  const noopOpenProjectSettings = useCallback(() => {
+    // Fallback for the two optional settings callbacks below. HomeDetail requires
+    // them, but a host that renders Home without a settings dialog has nothing to
+    // open — so the control stays inert rather than HomeDetail having to branch
+    // on undefined at every call site.
+  }, [])
 
   return (
     <HomeDetail

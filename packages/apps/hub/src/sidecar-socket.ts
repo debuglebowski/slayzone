@@ -72,7 +72,12 @@ export function startSidecarSocketServer(opts: {
   onAuthDeepLink: (url: string) => void
   log?: (msg: string) => void
 }): SidecarSocketServer {
-  const log = opts.log ?? (() => {})
+  const log =
+    opts.log ??
+    ((): void => {
+      // Logging is opt-in: the hub passes its own sink, tests generally don't.
+      // Discarding here keeps every call site free of `log?.(...)`.
+    })
   const socketPath = resolveSidecarSocketPath()
 
   try {

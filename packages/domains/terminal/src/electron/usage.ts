@@ -113,8 +113,12 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 // ── Dot-path extraction ─────────────────────────────────────────────
 
-function getByPath(obj: any, path: string): any {
-  return path.split('.').reduce((o, k) => o?.[k], obj)
+// Walks parsed JSON, so every hop is untyped: the cast is what lets us index
+// the current node, and `?.` keeps a missing hop from throwing.
+function getByPath(obj: unknown, path: string): unknown {
+  return path
+    .split('.')
+    .reduce<unknown>((o, k) => (o as Record<string, unknown> | null | undefined)?.[k], obj)
 }
 
 // ── Claude (Anthropic OAuth API) ─────────────────────────────────────
@@ -284,7 +288,9 @@ async function resolveAuth(config: UsageProviderConfig): Promise<Record<string, 
         : []
     let token: string | null = null
     for (const p of paths) {
-      token = getByPath(parsed, p) ?? null
+      // User-configured dot-path into a user-supplied file — a non-string here
+      // is a mis-configuration, which the String() below renders harmlessly.
+      token = (getByPath(parsed, p) as string | null | undefined) ?? null
       if (token) break
     }
     if (!token) throw new Error(`Token not found at path: ${paths.join(' | ')}`)
@@ -300,8 +306,9 @@ async function resolveAuth(config: UsageProviderConfig): Promise<Record<string, 
     if (config.authKeychainTokenPath) {
       try {
         const parsed = JSON.parse(raw)
-        token = getByPath(parsed, config.authKeychainTokenPath) ?? null
-        if (!token) throw new Error(`Token not found at path: ${config.authKeychainTokenPath}`)
+        const found = getByPath(parsed, config.authKeychainTokenPath) as string | null | undefined
+        if (!found) throw new Error(`Token not found at path: ${config.authKeychainTokenPath}`)
+        token = found
       } catch (e) {
         if (e instanceof SyntaxError) throw new Error('Keychain value is not valid JSON')
         throw e
@@ -321,7 +328,7 @@ async function resolveAuth(config: UsageProviderConfig): Promise<Record<string, 
   return headers
 }
 
-function parseResetsAt(value: any, format?: string): string {
+function parseResetsAt(value: unknown, format?: string): string {
   if (format === 'unix-s') return new Date(Number(value) * 1000).toISOString()
   if (format === 'unix-ms') return new Date(Number(value)).toISOString()
   return String(value) // assume ISO
@@ -332,7 +339,7 @@ function resolveLabel(raw: string, mapping: UsageProviderConfig['windowMapping']
   return raw
 }
 
-function extractWindows(data: any, config: UsageProviderConfig): UsageWindow[] {
+function extractWindows(data: unknown, config: UsageProviderConfig): UsageWindow[] {
   const mapping = config.windowMapping
   const windows: UsageWindow[] = []
 
@@ -341,9 +348,9 @@ function extractWindows(data: any, config: UsageProviderConfig): UsageWindow[] {
     if (util == null) return []
     const rawLabel = mapping.label.startsWith('=')
       ? mapping.label.slice(1)
-      : (getByPath(data, mapping.label) ?? mapping.label)
+      : String(getByPath(data, mapping.label) ?? mapping.label)
     windows.push({
-      key: mapping.key ? (getByPath(data, mapping.key) ?? 'default') : 'default',
+      key: mapping.key ? String(getByPath(data, mapping.key) ?? 'default') : 'default',
       label: resolveLabel(rawLabel, mapping),
       utilization: Number(util),
       resetsAt: parseResetsAt(getByPath(data, mapping.resetsAt), mapping.resetsAtFormat)
@@ -360,9 +367,9 @@ function extractWindows(data: any, config: UsageProviderConfig): UsageWindow[] {
     if (util == null) continue
     const rawLabel = mapping.label.startsWith('=')
       ? mapping.label.slice(1)
-      : (getByPath(item, mapping.label) ?? `Window ${i + 1}`)
+      : String(getByPath(item, mapping.label) ?? `Window ${i + 1}`)
     windows.push({
-      key: mapping.key ? (getByPath(item, mapping.key) ?? `w${i}`) : `w${i}`,
+      key: mapping.key ? String(getByPath(item, mapping.key) ?? `w${i}`) : `w${i}`,
       label: resolveLabel(rawLabel, mapping),
       utilization: Number(util),
       resetsAt: parseResetsAt(getByPath(item, mapping.resetsAt), mapping.resetsAtFormat)

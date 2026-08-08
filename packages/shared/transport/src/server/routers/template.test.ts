@@ -58,6 +58,21 @@ const PANEL = {
   processes: false
 }
 
+/**
+ * A template/task row with its JSON columns spelled out. The routers return the
+ * raw store rows, so every other column stays `unknown` — only the four columns
+ * whose *contents* get asserted need a shape. They are non-nullable here because
+ * a row is cast to `JsonRow` only in the tests that just wrote those columns;
+ * the "column is null" cases assert on plain `Record<string, unknown>` rows,
+ * where `toBeNull()` needs no shape at all.
+ */
+type JsonRow = Record<string, unknown> & {
+  provider_config: { codex?: { flags?: string } }
+  panel_visibility: Record<string, boolean>
+  browser_tabs: { tabs: Array<{ id: string; url: string; title: string }>; activeTabId: string }
+  web_panel_urls: Record<string, string>
+}
+
 test('template router: create defaults', async () => {
   const t = (await createTemplate('Basic')) as Record<string, unknown>
   expect(t.name).toBe('Basic')
@@ -87,7 +102,7 @@ test('template router: create with all fields', async () => {
     dangerouslySkipPermissions: true,
     defaultStatus: 'todo',
     defaultPriority: 1
-  })) as Record<string, any>
+  })) as JsonRow
   expect(t.description).toBe('A full template')
   expect(t.terminal_mode).toBe('codex')
   expect(t.provider_config?.codex?.flags).toBe('--sandbox workspace-write')
@@ -141,7 +156,7 @@ test('template router: update terminalMode + panelVisibility', async () => {
     id: t.id,
     terminalMode: 'codex',
     panelVisibility: PANEL
-  } as never)) as Record<string, any>
+  } as never)) as JsonRow
   expect(updated.terminal_mode).toBe('codex')
   expect(updated.panel_visibility?.browser).toBe(true)
 })
@@ -193,7 +208,7 @@ test('template application: explicit templateId applies all fields', async () =>
     projectId,
     title: 'FromTemplate',
     templateId: tmpl.id
-  } as never)) as Record<string, any>
+  } as never)) as JsonRow
   expect(task.terminal_mode).toBe('codex')
   expect(task.provider_config.codex?.flags).toBe('--test-flag')
   expect(task.panel_visibility?.editor).toBe(true)
@@ -266,7 +281,7 @@ test('template application: explicit input overrides template + no-template defa
     title: 'Temp',
     isTemporary: true,
     templateId: tempTmpl.id
-  } as never)) as Record<string, any>
+  } as never)) as JsonRow
   expect(temp.is_temporary).toBe(true)
   expect(temp.terminal_mode).toBe('codex')
   expect(temp.priority).toBe(2)
@@ -283,7 +298,7 @@ test('updateTask: panelVisibility / browserTabs / webPanelUrls / terminalMode ro
   const visUpdated = (await tasks.update({
     id: t1.id,
     panelVisibility: { ...PANEL, editor: true }
-  } as never)) as Record<string, any>
+  } as never)) as JsonRow
   expect(visUpdated.panel_visibility?.editor).toBe(true)
   expect(visUpdated.panel_visibility?.diff).toBe(false)
 
@@ -294,7 +309,7 @@ test('updateTask: panelVisibility / browserTabs / webPanelUrls / terminalMode ro
   const tabsUpdated = (await tasks.update({
     id: t2.id,
     browserTabs: { tabs: [{ id: 'x', url: 'http://example.com', title: 'Ex' }], activeTabId: 'x' }
-  } as never)) as Record<string, any>
+  } as never)) as JsonRow
   expect(tabsUpdated.browser_tabs?.tabs[0].url).toBe('http://example.com')
   expect(tabsUpdated.browser_tabs?.activeTabId).toBe('x')
 
@@ -302,7 +317,7 @@ test('updateTask: panelVisibility / browserTabs / webPanelUrls / terminalMode ro
   const webUpdated = (await tasks.update({
     id: t3.id,
     webPanelUrls: { grafana: 'http://grafana.local', docs: 'http://docs.local' }
-  } as never)) as Record<string, any>
+  } as never)) as JsonRow
   expect(webUpdated.web_panel_urls?.grafana).toBe('http://grafana.local')
 
   const t4 = (await tasks.create({ projectId, title: 'ModeChange' } as never)) as Record<
@@ -325,7 +340,7 @@ test('updateTask: panelVisibility / browserTabs / webPanelUrls / terminalMode ro
     panelVisibility: PANEL,
     browserTabs: { tabs: [{ id: 'b', url: 'http://app', title: 'App' }], activeTabId: 'b' },
     webPanelUrls: { panel1: 'http://panel.local' }
-  } as never)) as Record<string, any>
+  } as never)) as JsonRow
   expect(combined.terminal_mode).toBe('codex')
   expect(combined.provider_config.codex?.flags).toBeTruthy()
   expect(combined.panel_visibility?.browser).toBe(true)

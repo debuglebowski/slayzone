@@ -52,7 +52,10 @@ export function LoadingScreen({ onDone }: { onDone?: () => void }): React.JSX.El
       onDoneRef.current?.()
     }
 
-    run().catch(() => {}) // swallow cancellation
+    run().catch(() => {
+      // `sleep` rejects on unmount so the typing loop unwinds instead of setting
+      // state on a dead component. That rejection is the expected exit, not a fault.
+    })
     return () => {
       cancelled = true
       timers.forEach(clearTimeout)

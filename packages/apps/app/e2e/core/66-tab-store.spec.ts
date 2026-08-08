@@ -1,10 +1,27 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
-import type { Page } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function sendIPC(electronApp: any, channel: string): Promise<void> {
+/**
+ * The renderer exposes the zustand tab store on `window` purely for E2E driving
+ * (Meta+Shift+T and friends are flaky through the OS menu). Only the members
+ * these tests actually read are declared.
+ */
+type TabStoreWindow = {
+  __slayzone_tabStore?: {
+    getState?: () => {
+      tabs: { type: string; title?: string }[]
+      activeTabIndex: number
+      reopenClosedTab: () => void
+    }
+  }
+}
+
+/** The persisted `viewState` blob, narrowed to the fields these tests assert on. */
+type PersistedViewState = { tabs: { type: string; title?: string }[] }
+
+async function sendIPC(electronApp: ElectronApplication, channel: string): Promise<void> {
   await electronApp.evaluate(
     (
       { BrowserWindow }: { BrowserWindow: typeof Electron.CrossProcessExports.BrowserWindow },
@@ -22,8 +39,7 @@ async function sendIPC(electronApp: any, channel: string): Promise<void> {
 // close-active-task via the tRPC `menu.onCloseActiveTask` subscription (fed by
 // menuEvents); the legacy `app:close-active-task` webContents broadcast has no
 // renderer consumer post slice-5, so `sendIPC` of it is a no-op.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function clickMenuItem(electronApp: any, labels: string[]): Promise<void> {
+async function clickMenuItem(electronApp: ElectronApplication, labels: string[]): Promise<void> {
   await electronApp.evaluate(
     ({ Menu }: { Menu: typeof Electron.CrossProcessExports.Menu }, path: string[]) => {
       let items = Menu.getApplicationMenu()?.items ?? []
@@ -40,11 +56,11 @@ async function clickMenuItem(electronApp: any, labels: string[]): Promise<void> 
 }
 
 /** Read persisted viewState from settings */
-async function getPersistedViewState(page: Page) {
+async function getPersistedViewState(page: Page): Promise<PersistedViewState | null> {
   const raw = await page.evaluate(() =>
     window.getTrpcVanillaClient().settings.get.query({ key: 'viewState' })
   )
-  return raw ? JSON.parse(raw) : null
+  return raw ? (JSON.parse(raw) as PersistedViewState) : null
 }
 
 /** Get the title shown in the visible task title input */
@@ -118,14 +134,15 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
 
     // Invoke reopenClosedTab via the exposed store (Meta+Shift+T is flaky in E2E)
     await mainWindow.evaluate(() => {
-      ;(window as any).__slayzone_tabStore?.getState()?.reopenClosedTab()
+      ;(window as unknown as TabStoreWindow).__slayzone_tabStore?.getState?.()?.reopenClosedTab()
     })
 
     // Verify the store activated C, then wait for its terminal to render
     await expect(async () => {
       const activeTitle = await mainWindow.evaluate(() => {
-        const store = (window as any).__slayzone_tabStore
-        const state = store.getState()
+        const store = (window as unknown as TabStoreWindow).__slayzone_tabStore
+        const state = store?.getState?.()
+        if (!state) return null
         const tab = state.tabs[state.activeTabIndex]
         return tab?.title ?? null
       })
@@ -165,7 +182,8 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
   test('closing temp task tab deletes it from DB', async ({ mainWindow, electronApp }) => {
     const s = seed(mainWindow)
     const temp = await mainWindow.evaluate(
-      (d: any) => window.getTrpcVanillaClient().task.create.mutate(d),
+      (d: { projectId: string; title: string; status: string; isTemporary: boolean }) =>
+        window.getTrpcVanillaClient().task.create.mutate(d),
       {
         projectId,
         title: 'TS temp task',
@@ -188,8 +206,7 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     // fail the rest of the worker with "Target page ... has been closed".
     // Assert the precondition this test already assumes rather than gamble on it.
     const activeType = await mainWindow.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const state = (window as any).__slayzone_tabStore?.getState?.()
+      const state = (window as unknown as TabStoreWindow).__slayzone_tabStore?.getState?.()
       return String(state?.tabs?.[state.activeTabIndex]?.type ?? 'unknown')
     })
     expect(activeType, 'active tab must be a task before invoking Window ▸ Close Task').toBe('task')
@@ -202,7 +219,7 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
           const tasks = await mainWindow.evaluate(() =>
             window.getTrpcVanillaClient().task.getAll.query()
           )
-          return tasks.some((t: any) => t.id === temp.id)
+          return tasks.some((t) => t.id === temp.id)
         },
         { timeout: 10_000 }
       )
@@ -223,7 +240,7 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
 
     const before = await getPersistedViewState(mainWindow)
     expect(before).toBeTruthy()
-    expect(before.tabs.filter((t: any) => t.type === 'task').length).toBeGreaterThanOrEqual(2)
+    expect(before?.tabs.filter((t) => t.type === 'task').length).toBeGreaterThanOrEqual(2)
 
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
     await mainWindow.waitForSelector('#root', { timeout: 10_000 })
@@ -239,16 +256,15 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     await mainWindow.waitForTimeout(800)
 
     const before = await getPersistedViewState(mainWindow)
-    const taskTabsBefore = before.tabs
-      .filter((t: any) => t.type === 'task')
-      .map((t: any) => t.title)
+    if (!before) throw new Error('viewState was not persisted by the previous test')
+    const taskTabsBefore = before.tabs.filter((t) => t.type === 'task').map((t) => t.title)
     expect(taskTabsBefore.length).toBeGreaterThanOrEqual(2)
 
     // Swap the first two task tabs
     const reordered = { ...before, tabs: [...before.tabs] }
     const taskIndices = reordered.tabs
-      .map((t: any, i: number) => (t.type === 'task' ? i : -1))
-      .filter((i: number) => i >= 0)
+      .map((t, i) => (t.type === 'task' ? i : -1))
+      .filter((i) => i >= 0)
     if (taskIndices.length >= 2) {
       const [i, j] = taskIndices
       const tmp = reordered.tabs[i]
@@ -266,7 +282,8 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     await mainWindow.waitForTimeout(500)
 
     const after = await getPersistedViewState(mainWindow)
-    const taskTabsAfter = after.tabs.filter((t: any) => t.type === 'task').map((t: any) => t.title)
+    if (!after) throw new Error('viewState was not persisted after the reload')
+    const taskTabsAfter = after.tabs.filter((t) => t.type === 'task').map((t) => t.title)
     expect(taskTabsAfter.length).toBeGreaterThanOrEqual(2)
     expect(taskTabsAfter[0]).toBe(taskTabsBefore[1])
     expect(taskTabsAfter[1]).toBe(taskTabsBefore[0])

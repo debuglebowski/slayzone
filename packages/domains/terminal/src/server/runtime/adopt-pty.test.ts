@@ -91,7 +91,7 @@ setDatabase(stubDb)
  * real runner delivers everything the agent emitted while warm.
  */
 let warmScrollback = ''
-let adoptCalls: Array<{ runnerId: string; warmId: string; sessionId: string }> = []
+const adoptCalls: Array<{ runnerId: string; warmId: string; sessionId: string }> = []
 function installFakeBackend(fake: FakePty): void {
   setPtyBackend({
     spawn() {
@@ -323,40 +323,6 @@ await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled
     killPty(sessionId)
   } finally {
     setDatabase(stubDb)
-
-    /**
-     * Stands in for the routing backend. `adopt` hands back the fake pty (the runner's
-     * process, rekeyed) and replays `warmScrollback` through its onData, which is how a
-     * real runner delivers everything the agent emitted while warm.
-     */
-    let warmScrollback = ''
-    let adoptCalls: Array<{ runnerId: string; warmId: string; sessionId: string }> = []
-    function installFakeBackend(fake: FakePty): void {
-      setPtyBackend({
-        spawn() {
-          fake.spawnedFresh = true
-          throw new Error('adoption must not cold-spawn')
-        },
-        async adopt(runnerId: string, warmId: string, sessionId: string) {
-          adoptCalls.push({ runnerId, warmId, sessionId })
-          const dataCbs: Array<(d: string) => void> = []
-          const handle = {
-            ...fake,
-            onData(cb: (d: string) => void) {
-              dataCbs.push(cb)
-              // The seed arrives as the FIRST chunk on the normal data path (one
-              // contiguous chunk), not as a side-channel buffer append.
-              if (warmScrollback) queueMicrotask(() => cb(warmScrollback))
-              return { dispose() {} }
-            },
-            write: (str: string) => fake.write(str),
-            resize: (c: number, r: number) => fake.resize(c, r),
-            kill: () => fake.kill()
-          }
-          return handle as unknown as Awaited<ReturnType<NonNullable<PtyBackend['adopt']>>>
-        }
-      } as unknown as PtyBackend)
-    }
     raw.close()
   }
 })

@@ -20,7 +20,12 @@ test.describe('Linear link indicator', () => {
     // Insert mock external_link directly via main process DB (disable FK for fake connection_id)
     await electronApp.evaluate(
       async ({}, { taskId: tid }: { taskId: string }) => {
-        const db = (globalThis as Record<string, any>).__db
+        const db = (globalThis as Record<string, unknown>).__db as
+          | {
+              exec: (sql: string) => Promise<unknown>
+              run: (sql: string, params?: unknown[]) => Promise<unknown>
+            }
+          | undefined
         if (!db) throw new Error('__db not exposed')
         const id = crypto.randomUUID()
         await db.exec('PRAGMA foreign_keys = OFF')

@@ -6,6 +6,17 @@ import { test, expect, seed, resetApp, clickProject } from '../fixtures/electron
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { getMainSessionId, waitForPtySession, getTerminalState } from '../fixtures/terminal'
 
+/** The renderer exposes the tab store on `window` for e2e only — just the slice
+ *  this spec reads (see fixtures/context-manager.ts for the same pattern). */
+type TabStoreWindow = {
+  __slayzone_tabStore?: {
+    getState: () => {
+      tabs: Array<{ type: string; taskId?: string }>
+      activeTabIndex: number
+    }
+  }
+}
+
 test.describe('Temporary task cursor stability', () => {
   let projectAbbrev: string
 
@@ -34,7 +45,7 @@ test.describe('Temporary task cursor stability', () => {
       .poll(
         async () => {
           return mainWindow.evaluate(() => {
-            const store = (window as any).__slayzone_tabStore
+            const store = (window as unknown as TabStoreWindow).__slayzone_tabStore
             if (!store) return null
             const { tabs, activeTabIndex } = store.getState()
             const activeTab = tabs[activeTabIndex]
@@ -46,7 +57,8 @@ test.describe('Temporary task cursor stability', () => {
       .not.toBeNull()
 
     const taskId = await mainWindow.evaluate(() => {
-      const store = (window as any).__slayzone_tabStore
+      const store = (window as unknown as TabStoreWindow).__slayzone_tabStore
+      if (!store) throw new Error('__slayzone_tabStore not exposed')
       const { tabs, activeTabIndex } = store.getState()
       return tabs[activeTabIndex].taskId as string
     })

@@ -20,7 +20,13 @@ test.describe('Onboarding', () => {
       // Clear the flag to trigger the dialog on reload
       await s.setSetting('onboarding_completed', '')
       await mainWindow.evaluate(() => {
-        ;(window as any).__slayzone_dialogStore.getState().openOnboarding()
+        ;(
+          window as unknown as {
+            __slayzone_dialogStore: { getState: () => { openOnboarding: () => void } }
+          }
+        ).__slayzone_dialogStore
+          .getState()
+          .openOnboarding()
       })
 
       // Step 0: Welcome
