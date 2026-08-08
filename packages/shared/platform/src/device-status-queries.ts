@@ -59,6 +59,7 @@
  * private-mode-set sequence ends in `n`. Text containing a literal "n" is
  * unaffected — the pattern requires the `ESC [` introducer.
  */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: \x1b IS the ANSI escape introducer — a CSI pattern cannot be expressed without it
 const CURSOR_STATUS_QUERY = /\x1b\[\??[0-9;]*n/g
 
 /**
@@ -75,6 +76,7 @@ const CURSOR_STATUS_QUERY = /\x1b\[\??[0-9;]*n/g
  * Excludes DECRPM (`$y`) and XTVERSION replies on purpose — those are the
  * renderer's job to answer, per the scope note above.
  */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: \x1b IS the ANSI escape introducer — a CSI pattern cannot be expressed without it
 const CURSOR_STATUS_RESPONSE = /\x1b\[(?:\?[0-9]+;[0-9]+R|[0-9]+;[0-9]+R|[0-9]+n)/g
 
 /** Remove cursor-position/status queries from a chunk of PTY output. */
@@ -96,6 +98,7 @@ export function stripDeviceStatusResponses(data: string): string {
  *
  * `?`, `<`, `>` are CSI private introducers; `0-9;:` are parameter bytes.
  */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: \x1b IS the ANSI escape introducer — a CSI pattern cannot be expressed without it
 const INCOMPLETE_CSI_TAIL = /\x1b(?:\[[?<>0-9;:]*)?$/
 
 /**

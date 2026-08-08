@@ -103,6 +103,7 @@ export function compileMatcher(
 /** Tabs/control chars → spaces, then truncate. Keeps a snippet single-line. */
 export function sanitizeSnippet(s: string): string {
   // eslint-disable-next-line no-control-regex
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is this function's entire purpose — it strips them so a snippet stays single-line
   const cleaned = s.replace(/[\t\x00-\x08\x0b-\x1f\x7f]/g, ' ')
   return cleaned.length > SNIPPET_MAX ? cleaned.slice(0, SNIPPET_MAX) + '…' : cleaned
 }

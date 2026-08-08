@@ -9,8 +9,6 @@ import {
 import { getTestUrl } from '../fixtures/test-server'
 
 test.describe('Browser loading animation', () => {
-  let taskId: string
-
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
@@ -19,8 +17,7 @@ test.describe('Browser loading animation', () => {
       color: '#0ea5e9',
       path: TEST_PROJECT_PATH
     })
-    const t = await s.createTask({ projectId: p.id, title: 'Loading anim task', status: 'todo' })
-    taskId = t.id
+    await s.createTask({ projectId: p.id, title: 'Loading anim task', status: 'todo' })
     await s.refreshData()
     await openTaskViaSearch(mainWindow, 'Loading anim task')
   })

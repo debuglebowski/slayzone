@@ -5,7 +5,6 @@ import { shortcutKey } from '../fixtures/shortcuts'
 
 test.describe('Panel toggles', () => {
   let projectAbbrev: string
-  let taskId: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -16,8 +15,7 @@ test.describe('Panel toggles', () => {
       path: TEST_PROJECT_PATH
     })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
-    const t = await s.createTask({ projectId: p.id, title: 'Panel toggle task', status: 'todo' })
-    taskId = t.id
+    await s.createTask({ projectId: p.id, title: 'Panel toggle task', status: 'todo' })
     await s.refreshData()
 
     await goHome(mainWindow)

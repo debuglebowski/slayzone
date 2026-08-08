@@ -332,10 +332,12 @@ export function createScrambleProbe(opts: ScrambleProbeOptions): ScrambleProbe {
   const stride = opts.stride ?? 4
   // WebGL atlas drift probe; sister system to Terminal.tsx atlas-correction.
   // Hidden-window throttling is handled by the caller via `opts.isCurrent()` /
-  // `opts.isAborted()` checks inside the callback.
-  // eslint-disable-next-line no-restricted-syntax
+  // `opts.isAborted()` checks inside the callback. `useVisibleInterval` is not
+  // an option regardless: this is a plain module function, not a React hook.
   const setInt =
-    opts.setInterval ?? ((cb: () => void, ms: number): number => window.setInterval(cb, ms))
+    opts.setInterval ??
+    // eslint-disable-next-line no-restricted-syntax
+    ((cb: () => void, ms: number): number => window.setInterval(cb, ms))
   const clearInt = opts.clearInterval ?? ((id: number): void => window.clearInterval(id))
   const sampler = (opts.createSampler ?? defaultCreateSampler)(opts.terminal)
 

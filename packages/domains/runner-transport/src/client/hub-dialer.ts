@@ -164,7 +164,12 @@ export class HubDialer {
 
   constructor(opts: HubDialerOptions) {
     this.opts = opts
-    this.log = opts.log ?? (() => {})
+    this.log =
+      opts.log ??
+      (() => {
+        // No logger supplied: the dialer's diagnostics are the embedder's to
+        // route, and it must stay usable (tests, the CLI) without one.
+      })
     this.events = new TypedEventEmitter<HubDialerEvents>((event, err) => {
       this.log('runner dialer listener threw', { event: String(event), error: String(err) })
     })
@@ -530,6 +535,11 @@ export class HubDialer {
     const intervalMs = this.opts.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
     if (intervalMs <= 0) return
     const timeoutMs = this.opts.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
+    // `useVisibleInterval` is a React hook and this is a plain transport class,
+    // so it is not callable here. The intent is also inverted: a heartbeat that
+    // paused while the window is hidden would let the hub time the connection
+    // out precisely when nobody is watching. This must run regardless.
+    // eslint-disable-next-line no-restricted-syntax
     conn.heartbeatTimer = setInterval(() => {
       if (conn.heartbeatInFlight || conn.rpc.isDisposed) return
       conn.heartbeatInFlight = true

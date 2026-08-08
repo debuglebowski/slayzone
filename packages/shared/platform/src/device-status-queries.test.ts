@@ -31,6 +31,7 @@ function test(name: string, fn: () => void): void {
 
 function assert(actual: string, expected: string, label?: string): void {
   if (actual !== expected) {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: renders ESC visibly in failure output — matching it is the point
     const vis = (s: string) => JSON.stringify(s.replace(/\x1b/g, 'ESC'))
     throw new Error(`${label ? label + ': ' : ''}expected ${vis(expected)}, got ${vis(actual)}`)
   }

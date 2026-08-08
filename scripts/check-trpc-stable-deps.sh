@@ -17,13 +17,47 @@ set -euo pipefail
 # A dep-array literal `[ ... <ident>Mutation ]` where the token is the bare
 # object (no `.` before the closing `]`, so `.mutate` usage is NOT flagged).
 # `useMutation(` declarations have no `[` and are excluded.
-MATCHES=$(grep -rnE --include="*.ts" --include="*.tsx" \
+CANDIDATES=$(grep -rnE --include="*.ts" --include="*.tsx" \
   '\[[^]]*[A-Za-z]+Mutation[^].]*\]' \
   packages/domains packages/apps/app/src/renderer 2>/dev/null \
   | grep -v '/node_modules/' \
   | grep -v '/dist/' \
   | grep -vE 'useMutation\(' \
   || true)
+
+# The match above is purely textual: it fires on ANY identifier ending in
+# `Mutation`, including ones that have nothing to do with `useMutation()`. A
+# `const runGroupMutation = useCallback(...)` is stable by construction and was
+# being reported as an infinite-loop risk — a false positive that made this gate
+# permanently red and therefore ignorable, which is worse than not having it.
+#
+# So drop a line only when EVERY `*Mutation` token on it is provably stable:
+# declared in that same file as a useCallback/useMemo/useRef binding. The
+# asymmetry is deliberate — an unrecognised declaration form (multi-line, say)
+# leaves the line flagged. This check may still cry wolf; it must never go quiet
+# on a real one.
+MATCHES=""
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  file=${line%%:*}
+  tokens=$(echo "$line" | grep -oE '[A-Za-z_][A-Za-z0-9_]*Mutation' | sort -u || true)
+
+  keep=1
+  if [ -n "$tokens" ]; then
+    keep=0
+    for tok in $tokens; do
+      if ! grep -qE "const[[:space:]]+${tok}[[:space:]]*=[[:space:]]*(useCallback|useMemo|useRef)\(" \
+        "$file" 2>/dev/null; then
+        keep=1
+        break
+      fi
+    done
+  fi
+
+  [ "$keep" -eq 1 ] && MATCHES="${MATCHES}${line}"$'\n'
+done <<<"$CANDIDATES"
+
+MATCHES=$(printf '%s' "$MATCHES")
 
 if [ -n "$MATCHES" ]; then
   echo "Unstable tRPC mutation object in a hook dependency array (infinite-loop risk)."
