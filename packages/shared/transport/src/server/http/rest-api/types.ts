@@ -171,6 +171,16 @@ export interface RestApiDeps {
     getHubUrl: () => string | null
     /** Hub TLS leaf sha256 (lowercase hex) the token pins. Null until loaded. */
     getCertFingerprint: () => string | null
+    /**
+     * The live runner gateway, for `GET /api/runners` connection status. Null until
+     * the async runner init resolves, and permanently null if it failed — that route
+     * degrades to store rows with `connected: false` rather than erroring, so this
+     * stays optional and nothing depends on it being present.
+     */
+    getGateway?: () => {
+      listRunners: () => Array<{ runnerId: string }>
+      listUsableRunners: () => Array<{ runnerId: string }>
+    } | null
   }
   /**
    * Operator account management, powering the loopback-only `/api/hub/users` routes

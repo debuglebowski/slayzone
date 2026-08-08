@@ -1081,7 +1081,11 @@ export function composeServer(opts: {
     // (setRunnerListenerInfo feeds them once the /runners listener binds).
     runners: {
       getHubUrl: () => runnerHubUrl,
-      getCertFingerprint: () => runnerCertFingerprint
+      getCertFingerprint: () => runnerCertFingerprint,
+      // Same late-bound ref the tRPC `runners.list` reads, so the REST twin
+      // (`GET /api/runners`, what `slay runner ls` calls) can never report a
+      // different connection status than the app's Runners tab.
+      getGateway: () => runnerGatewayRef
     },
     // Operator account management for the loopback-only `/api/hub/users` routes
     // (`slay hub users add|ls|rm`) — the ONLY way to create an account now that

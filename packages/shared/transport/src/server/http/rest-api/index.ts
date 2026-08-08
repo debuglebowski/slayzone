@@ -71,6 +71,7 @@ import { registerTabsSplitRoute } from './tabs/split'
 import { registerTabsRenameRoute } from './tabs/rename'
 import { registerResolveSessionTaskRoute } from './sessions/resolve-task'
 import { registerRunnersJoinTokenRoute } from './runners/join-token'
+import { registerRunnersListRoute } from './runners/list'
 import { registerHubUsersRoutes } from './hub/users'
 
 export type { RestApiDeps } from './types'
@@ -176,6 +177,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // Runners (hub/runner split): loopback join-token mint for the MAIN process's
   // boot-time local-runner auto-enroll. 503 only if the runner init failed.
   registerRunnersJoinTokenRoute(app, deps)
+  registerRunnersListRoute(app, deps)
 
   // Hub accounts: loopback-only operator user management (`slay hub users`). The
   // only way to create an account now that public signup is closed. 503 where
