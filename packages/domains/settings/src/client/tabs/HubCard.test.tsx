@@ -38,11 +38,14 @@ const mintSpy = vi.fn(() =>
   } as any)
 )
 const revokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
-const remoteMintSpy = vi.fn(() =>
+const remoteMintSpy = vi.fn((_input: any, hub?: string) =>
   Promise.resolve({
     token: 'szjt1.REMOTETOKEN',
     label: 'x',
-    hubUrl: 'wss://hub-b.example.com:8443/runners'
+    // 'hub-lo' stands for a hub whose dial address is loopback — legitimate when
+    // the runner is co-located, and the case the token dialog must warn about.
+    hubUrl:
+      hub === 'hub-lo' ? 'ws://127.0.0.1:51100/runners' : 'wss://hub-b.example.com:8443/runners'
   } as any)
 )
 const remoteRevokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
@@ -91,7 +94,7 @@ vi.mock('@tanstack/react-query', () => ({
           ? remoteRevokeSpy
           : revokeSpy
         : remote
-          ? remoteMintSpy
+          ? (input: any) => remoteMintSpy(input, opts?.__hub)
           : mintSpy,
       isPending: false
     }
@@ -161,12 +164,14 @@ function makeRunner(overrides: Partial<MockRunner> = {}): MockRunner {
 }
 
 /**
- * The hub's identity and controls are SLOTS filled by `HubsSettingsTab` — the card
- * only positions them, next to the runner count and enroll control it owns. Stand
- * -ins here, so the header the tests see has the same shape as production's.
+ * Identity / status / primary / more are SLOTS filled by `HubsSettingsTab` — the
+ * card only positions them. Stand-ins here, so the header the tests see has the
+ * same shape as production's.
  */
 const identityFor = (label: string) => <span data-testid="hub-identity">{label}</span>
-const controlsFor = (label: string) => <button data-testid="hub-controls">{label} controls</button>
+const statusFor = (label: string) => <span data-testid="hub-status-slot">{label} status</span>
+const primaryFor = (label: string) => <button data-testid="hub-primary">{label} primary</button>
+const moreFor = (label: string) => <button data-testid="hub-more">{label} more</button>
 
 const card = (hubId: string, hubLabel: string, isLocalHub: boolean) => (
   <Scope hubId={hubId}>
@@ -176,7 +181,9 @@ const card = (hubId: string, hubLabel: string, isLocalHub: boolean) => (
       isLocalHub={isLocalHub}
       headerTestId={isLocalHub ? 'hub-row-local' : 'hub-row-remote'}
       identity={identityFor(hubLabel)}
-      controls={controlsFor(hubLabel)}
+      status={statusFor(hubLabel)}
+      primary={primaryFor(hubLabel)}
+      more={moreFor(hubLabel)}
     />
   </Scope>
 )
@@ -185,6 +192,25 @@ const card = (hubId: string, hubLabel: string, isLocalHub: boolean) => (
 async function renderLocal(): Promise<void> {
   await act(async () => {
     render(<RunnerActionsProvider>{card('local', 'Local', true)}</RunnerActionsProvider>)
+  })
+}
+
+/** One remote hub's card — the only kind that enrolls. */
+async function renderRemote(hubId = 'hub-b', label = 'Hub B'): Promise<void> {
+  await act(async () => {
+    render(<RunnerActionsProvider>{card(hubId, label, false)}</RunnerActionsProvider>)
+  })
+}
+
+/** Two REMOTE cards, for the cases about list chrome the local hub doesn't have. */
+async function renderTwoRemotes(): Promise<void> {
+  await act(async () => {
+    render(
+      <RunnerActionsProvider>
+        {card('hub-b', 'Hub B', false)}
+        {card('hub-lo', 'Loopback hub', false)}
+      </RunnerActionsProvider>
+    )
   })
 }
 
@@ -216,7 +242,7 @@ afterEach(cleanup)
 
 describe('HubCard', () => {
   it('offers enrollment with no mode to enable and no hub picker', async () => {
-    await renderLocal()
+    await renderRemote()
     expect(screen.getByTestId('runner-add-open').hasAttribute('disabled')).toBe(false)
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add-open'))
@@ -228,21 +254,21 @@ describe('HubCard', () => {
   })
 
   it('mints an enrollment token and shows it once', async () => {
-    await renderLocal()
+    await renderRemote()
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add-open'))
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add'))
     })
-    expect(mintSpy).toHaveBeenCalled()
+    expect(remoteMintSpy).toHaveBeenCalled()
     await waitFor(() => {
       expect(screen.getByTestId('runner-minted-token')).toBeDefined()
     })
   })
 
   it('dismisses the minted token via the Done control', async () => {
-    await renderLocal()
+    await renderRemote()
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add-open'))
     })
@@ -314,9 +340,9 @@ describe('HubCard', () => {
   it('adds no note once the rows themselves are on screen', async () => {
     // A count beside the heading would restate what is already visible.
     runnersByHub = {
-      local: [makeRunner(), makeRunner({ id: 'r-2', name: 'linux-box', connected: false })]
+      'hub-b': [makeRunner(), makeRunner({ id: 'r-2', name: 'linux-box', connected: false })]
     }
-    await renderLocal()
+    await renderRemote()
     expect(screen.queryByTestId('hub-runners-summary')).toBeNull()
     expect(screen.getByText('Runners')).toBeDefined()
   })
@@ -330,14 +356,14 @@ describe('HubCard', () => {
     // The hub header carries the hub's identity and controls, and nothing else — a
     // runner count beside the hub's address reads as a property of the hub.
     expect(header.contains(screen.getByTestId('hub-identity'))).toBe(true)
-    expect(header.contains(screen.getByTestId('hub-controls'))).toBe(true)
+    expect(header.contains(screen.getByTestId('hub-status-slot'))).toBe(true)
+    expect(header.contains(screen.getByTestId('hub-more'))).toBe(true)
     expect(header.contains(screen.getByTestId('runners-table'))).toBe(false)
-    expect(header.contains(screen.getByTestId('runner-add-open'))).toBe(false)
   })
 
   it('hangs enroll off the rail as the LAST leaf, below every runner', async () => {
-    runnersByHub = { local: [makeRunner({ id: 'r-local', name: 'local-runner' })] }
-    await renderLocal()
+    runnersByHub = { 'hub-b': [makeRunner()] }
+    await renderRemote()
     const rows = Array.from(screen.getByTestId('runners-table').querySelectorAll('tbody > tr'))
     const addRow = screen.getByTestId('runner-add-row')
     expect(rows.at(-1)).toBe(addRow)
@@ -369,9 +395,10 @@ describe('HubCard', () => {
   it('mints against the hub whose block was used', async () => {
     runnersByHub = { local: [], 'hub-b': [] }
     await renderTwoHubs()
-    // Second block is Hub B's.
+    // Only Hub B offers enrollment — the local card has no add leaf at all, which
+    // is itself the assertion that a mint cannot be aimed at the local hub.
     await act(async () => {
-      fireEvent.click(screen.getAllByTestId('runner-add-open')[1]!)
+      fireEvent.click(screen.getByTestId('runner-add-open'))
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add'))
@@ -403,8 +430,8 @@ describe('HubCard', () => {
   // A loopback token cannot be used by a runner on another machine. Minting can't
   // refuse (the co-located case is the norm), so the dialog must say so.
   it('warns when the minted token targets loopback', async () => {
-    runnersByHub = { local: [] }
-    await renderLocal()
+    runnersByHub = { 'hub-lo': [] }
+    await renderRemote('hub-lo', 'Loopback hub')
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add-open'))
     })
@@ -417,10 +444,10 @@ describe('HubCard', () => {
   })
 
   it('does NOT warn when the minted token targets a public address', async () => {
-    runnersByHub = { local: [], 'hub-b': [] }
-    await renderTwoHubs()
+    runnersByHub = { 'hub-b': [] }
+    await renderRemote()
     await act(async () => {
-      fireEvent.click(screen.getAllByTestId('runner-add-open')[1]!)
+      fireEvent.click(screen.getByTestId('runner-add-open'))
     })
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-add'))
@@ -487,6 +514,133 @@ describe('HubCard', () => {
     expect(screen.getAllByTestId('runner-local-missing').length).toBe(1)
   })
 
+  // --- the local hub is not an enrollment target ------------------------------
+
+  it('offers no enrollment on the local hub at all', async () => {
+    // A token minted here would carry a loopback dial address: redeemable only by
+    // something already on this machine, where a runner already exists.
+    runnersByHub = { local: [makeRunner({ id: 'r-local', name: 'local-runner' })] }
+    await renderLocal()
+    expect(screen.queryByTestId('runner-add-open')).toBeNull()
+    expect(screen.queryByTestId('runner-add-row')).toBeNull()
+  })
+
+  it('terminates the rail on the last runner when there is no add leaf', async () => {
+    // The elbow has to move with the last leaf, or the connector runs past the
+    // final row into empty space.
+    runnersByHub = {
+      local: [
+        makeRunner({ id: 'r-local', name: 'local-runner' }),
+        makeRunner({ id: 'r-2', name: 'other' })
+      ]
+    }
+    await renderLocal()
+    const rows = Array.from(screen.getByTestId('runners-table').querySelectorAll('tbody > tr'))
+    expect(rows.length).toBe(2)
+    expect(rows.at(-1)).toBe(screen.getAllByTestId('runner-row').at(-1))
+  })
+
+  it('drops the list chrome on a one-runner hub', async () => {
+    // Rail, plural heading and refresh-the-LIST all presuppose more than one
+    // runner. The local hub has exactly one, forever.
+    runnersByHub = { local: [makeRunner({ id: 'r-local', name: 'local-runner' })] }
+    await renderLocal()
+    expect(screen.queryByText('Runners')).toBeNull()
+    expect(screen.queryByTestId('runner-refresh')).toBeNull()
+  })
+
+  it('derives the row geometry FROM the header, not in parallel with it', async () => {
+    // The two rows are different mechanisms — a flex header over a fixed-layout
+    // table — so nothing makes them agree except these widths matching. Compare
+    // them directly rather than asserting each against a remembered number, and
+    // assert the header carries NO gap: a gap between flex slots has no
+    // counterpart in table cells, so it silently offsets every column.
+    runnersByHub = { local: [makeRunner({ id: 'r-local', name: 'local-runner' })] }
+    await renderLocal()
+
+    const header = screen.getByTestId('hub-row-local')
+    expect(header.className).not.toMatch(/\bgap-/)
+    const widthOf = (el: Element): string =>
+      (el.className.match(/\bw-(?:\d+|full|auto)\b/) ?? ['(auto)'])[0]
+
+    // Trailing slots of the header: status, primary, more.
+    const headerSlots = Array.from(header.children).slice(1).map(widthOf)
+    // Trailing cells of the row: status, actions, spacer.
+    const rowCells = Array.from(screen.getByTestId('runner-row').querySelectorAll('td'))
+    const rowTrailing = rowCells.slice(-3).map(widthOf)
+
+    expect(rowTrailing).toEqual(headerSlots)
+    // ...and the leading cell matches the star button's footprint (icon-sm = size-8).
+    expect(widthOf(rowCells[0]!)).toBe('w-8')
+  })
+
+  it('gives a runner row the same column geometry as the hub header above it', async () => {
+    // The header reserves w-8 (star) … w-36 (status) w-24 (primary) w-8 (more).
+    // A row that does not mirror those widths puts its status and its action under
+    // nothing in particular, which is what "the rows don't line up" looks like.
+    runnersByHub = { local: [makeRunner({ id: 'r-local', name: 'local-runner' })] }
+    await renderLocal()
+    const cells = Array.from(screen.getByTestId('runner-row').querySelectorAll('td'))
+    const cls = cells.map((c) => c.className)
+    // Five cells against the header's four slots plus its leading star.
+    expect(cells.length).toBe(5)
+    expect(cls[0]).toContain('w-8') // leading marker == the star's footprint
+    expect(cls[1]).toContain('pl-2') // name starts where the hub's name starts
+    expect(cls[2]).toContain('w-32') // status column == the header's status slot
+    expect(cls[3]).toContain('w-24') // actions == the header's primary slot
+    expect(cls[4]).toContain('w-8') // spacer under the header's `⋯`
+  })
+
+  it('keeps the list chrome on a hub that can hold several runners', async () => {
+    runnersByHub = { 'hub-b': [makeRunner()] }
+    await renderRemote()
+    expect(screen.getByText('Runners')).toBeDefined()
+    expect(screen.getByTestId('runner-refresh')).toBeDefined()
+    // Identical geometry to the local card's row — the rail simply fills the
+    // leading cell the marker fills there.
+    const cells = screen.getByTestId('runner-row').querySelectorAll('td')
+    expect(cells.length).toBe(5)
+  })
+
+  it('still names an unreachable one-runner hub, with no heading to hang it on', async () => {
+    queryState = 'error'
+    runnersByHub = { local: [] }
+    await renderLocal()
+    expect(screen.getByTestId('hub-runners-summary').textContent).toBe('could not reach this hub')
+  })
+
+  it('does not let the local runner be revoked', async () => {
+    // Revoking it deletes the credential the app re-dials with; nothing on this
+    // machine could execute until a relaunch re-enrolled one.
+    runnersByHub = { local: [makeRunner({ id: 'r-local', name: 'local-runner' })] }
+    await renderLocal()
+    expect(screen.getAllByTestId('runner-row').length).toBe(1)
+    expect(screen.queryByTestId('runner-revoke')).toBeNull()
+    // The action it DOES keep is the process one.
+    expect(screen.getByTestId('runner-local-restart')).toBeDefined()
+  })
+
+  it('still revokes a non-local runner enrolled on the local hub', async () => {
+    // Installs that enrolled one before the local hub stopped offering enrollment
+    // must keep a way to remove it.
+    runnersByHub = {
+      local: [
+        makeRunner({ id: 'r-local', name: 'local-runner' }),
+        makeRunner({ id: 'r-legacy', name: 'old-box' })
+      ]
+    }
+    await renderLocal()
+    const revokes = screen.getAllByTestId('runner-revoke')
+    expect(revokes.length).toBe(1)
+    await act(async () => {
+      fireEvent.click(revokes[0]!)
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+    })
+    expect(revokeSpy).toHaveBeenCalledWith({ runnerId: 'r-legacy' })
+  })
+
   // --- loading + refresh ------------------------------------------------------
 
   it('does not flash “not running” before the query settles', async () => {
@@ -500,8 +654,8 @@ describe('HubCard', () => {
     // The rail keeps its shape while the answer is in flight, so the section does
     // not jump when the rows arrive.
     queryState = 'loading'
-    runnersByHub = { local: [] }
-    await renderLocal()
+    runnersByHub = { 'hub-b': [] }
+    await renderRemote()
     expect(screen.getAllByTestId('runner-row-skeleton').length).toBeGreaterThan(0)
     expect(screen.queryByTestId('hub-runners-summary')).toBeNull()
     // Enroll stays reachable — waiting on a list is no reason to block adding to it.
@@ -518,17 +672,17 @@ describe('HubCard', () => {
   it('re-checks connection status on demand', async () => {
     // `runners.list` does not poll, so a runner that reconnected looks identical to
     // one still down until something invalidates the query.
-    runnersByHub = { local: [makeRunner({ id: 'r-local', name: 'local-runner' })] }
-    await renderLocal()
+    runnersByHub = { 'hub-b': [makeRunner()] }
+    await renderRemote()
     await act(async () => {
       fireEvent.click(screen.getByTestId('runner-refresh'))
     })
-    expect(refetchSpy).toHaveBeenCalledWith('local')
+    expect(refetchSpy).toHaveBeenCalledWith('hub-b')
   })
 
   it('refreshes only its OWN hub', async () => {
-    runnersByHub = { local: [makeRunner()], 'hub-b': [makeRunner({ id: 'r-2' })] }
-    await renderTwoHubs()
+    runnersByHub = { 'hub-b': [makeRunner()], 'hub-lo': [makeRunner({ id: 'r-2' })] }
+    await renderTwoRemotes()
     const buttons = screen.getAllByTestId('runner-refresh')
     expect(buttons.length).toBe(2)
     await act(async () => {
@@ -537,13 +691,13 @@ describe('HubCard', () => {
     // Each card holds its own query, so a refresh cannot fan out to a hub the user
     // did not ask about.
     expect(refetchSpy).toHaveBeenCalledTimes(1)
-    expect(refetchSpy).toHaveBeenCalledWith('hub-b')
+    expect(refetchSpy).toHaveBeenCalledWith('hub-lo')
   })
 
   it('disables refresh while a fetch is already in flight', async () => {
     queryState = 'loading'
-    runnersByHub = { local: [] }
-    await renderLocal()
+    runnersByHub = { 'hub-b': [] }
+    await renderRemote()
     expect(screen.getByTestId('runner-refresh').hasAttribute('disabled')).toBe(true)
   })
 })

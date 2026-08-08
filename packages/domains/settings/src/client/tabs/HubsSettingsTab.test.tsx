@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 /**
  * Sign in is offered only when a hub ACTUALLY gates its client API.
@@ -66,13 +66,19 @@ vi.mock('@slayzone/transport/client', () => ({
  * the Sign in / Verify / signed-in assertions below live in those slots, and a
  * not-connected remote goes through the SHELL rather than the card.
  */
+const header = (headerTestId: string, identity: any, status: any, primary: any, more: any) => (
+  <div data-testid={headerTestId}>
+    {identity}
+    {status}
+    {primary}
+    {more}
+  </div>
+)
+
 vi.mock('./HubCard', () => ({
-  HubCard: ({ hubId, isLocalHub, identity, controls, headerTestId }: any) => (
+  HubCard: ({ hubId, isLocalHub, identity, status, primary, more, headerTestId }: any) => (
     <div data-testid={`hub-group-${hubId}`}>
-      <div data-testid={headerTestId}>
-        {identity}
-        {controls}
-      </div>
+      {header(headerTestId, identity, status, primary, more)}
       <div
         data-testid="hub-card-live"
         data-hub={hubId}
@@ -81,14 +87,16 @@ vi.mock('./HubCard', () => ({
       />
     </div>
   ),
-  HubCardShell: ({ hubId, headerTestId, identity, controls, body }: any) => (
+  HubCardShell: ({ hubId, headerTestId, identity, status, primary, more, body }: any) => (
     <div data-testid={`hub-group-${hubId}`}>
-      <div data-testid={headerTestId}>
-        {identity}
-        {controls}
-      </div>
+      {header(headerTestId, identity, status, primary, more)}
       {body}
     </div>
+  ),
+  HubStatus: ({ tone, label }: any) => (
+    <span data-testid="hub-status" data-tone={tone}>
+      {label}
+    </span>
   ),
   RunnersHeading: ({ note, noteTestId }: any) => (
     <div>
@@ -116,7 +124,27 @@ vi.mock('@slayzone/ui', () => {
       </button>
     ),
     Input: (props: any) => <input {...props} />,
-    Separator: (props: any) => <hr {...props} />,
+    // Menu content renders inline: these tests are about WHICH actions a hub
+    // offers, not about the menu's open/close mechanics (Radix owns that).
+    DropdownMenu: ({ children }: any) => <>{children}</>,
+    DropdownMenuTrigger: ({ children }: any) => <>{children}</>,
+    DropdownMenuContent: ({ children }: any) => <div>{children}</div>,
+    DropdownMenuItem: ({ children, onSelect, disabled, ...props }: any) => (
+      <button onClick={onSelect} disabled={disabled} {...props}>
+        {children}
+      </button>
+    ),
+    DropdownMenuCheckboxItem: ({ children, checked, onCheckedChange, disabled, ...props }: any) => (
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onCheckedChange?.(e.target.checked)}
+        aria-label={typeof children === 'string' ? children : undefined}
+        {...props}
+      />
+    ),
+    DropdownMenuSeparator: () => <hr />,
     Switch: ({ checked, onCheckedChange, ...props }: any) => (
       <input
         type="checkbox"
@@ -145,8 +173,8 @@ vi.mock('lucide-react', () => {
     X: Icon,
     Pencil: Icon,
     PlugZap: Icon,
-    Circle: Icon,
-    CircleDot: Icon
+    Star: Icon,
+    MoreHorizontal: Icon
   }
 })
 
@@ -287,6 +315,52 @@ describe('HubsSettingsTab — nested runners', () => {
     await waitFor(() => expect(blocks().length).toBe(1))
     expect(blocks()[0]?.hub).toBe('hub:remote')
     expect(screen.getByTestId('hub-runners-unavailable').textContent).toContain('local hub is off')
+  })
+
+  it('gives every hub the same status vocabulary', async () => {
+    // The point of the fixed slots: the column means the same thing all the way
+    // down, so a list of hubs can be scanned rather than read one card at a time.
+    seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true })
+    federation = { hubs: [LIVE_LOCAL, LIVE_REMOTE], defaultHubId: 'local' }
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    await waitFor(() => expect(screen.getAllByTestId('hub-status').length).toBe(2))
+    expect(screen.getAllByTestId('hub-status').map((e) => e.textContent)).toEqual([
+      'Running',
+      'Signed out'
+    ])
+  })
+
+  it('reports a failed verify as Unreachable, outranking a stored token', async () => {
+    // A Verify result is the freshest thing we know about a hub, so it wins over
+    // "we have a token for it" — a signed-in hub that just refused a connection
+    // is not "Signed in" in any sense the operator cares about.
+    seed({ ok: false, error: 'ECONNREFUSED' }, { 'hub:remote': 'tok' })
+    federation = { hubs: [LIVE_LOCAL, LIVE_REMOTE], defaultHubId: 'local' }
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    await waitFor(() => expect(screen.getByTestId('hub-signed-in')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('hub-verify'))
+    await waitFor(() =>
+      expect(screen.getAllByTestId('hub-status').map((e) => e.textContent)).toContain('Unreachable')
+    )
+  })
+
+  it('marks exactly one hub as default, and cannot unset it', async () => {
+    seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: false })
+    federation = { hubs: [LIVE_LOCAL, LIVE_REMOTE], defaultHubId: 'local' }
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    // Local holds it: its star is checked and disabled (there is always a default,
+    // so the only meaningful click is on a hub that does NOT hold it).
+    expect(screen.getByTestId('hub-default-local').getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByTestId('hub-default-local').hasAttribute('disabled')).toBe(true)
+    expect(screen.getByTestId('hub-default-remote').getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(screen.getByTestId('hub-default-remote'))
+    await waitFor(() =>
+      expect(screen.getByTestId('hub-default-remote').getAttribute('aria-checked')).toBe('true')
+    )
+    expect(screen.getByTestId('hub-default-local').getAttribute('aria-checked')).toBe('false')
   })
 
   it('fork (no federation at all): the local hub still lists its runners', async () => {

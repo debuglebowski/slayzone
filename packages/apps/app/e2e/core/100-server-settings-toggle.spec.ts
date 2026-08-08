@@ -16,6 +16,13 @@ declare global {
  *
  * Turning local OFF requires ≥1 remote hub to fall back to (the app must always
  * have a hub), so the spec adds a remote hub first.
+ *
+ * MENUS. Each hub card now ends in fixed slots — status, primary action, `⋯` —
+ * and the occasional actions moved behind that `⋯`: "Run a local hub" on the
+ * local card, Verify/Edit/Remove on a remote one. So every interaction below
+ * opens the relevant menu first. Radix renders menu content in a PORTAL, outside
+ * the settings dialog's subtree, so menu items are located from the WINDOW while
+ * the triggers are located inside the dialog.
  */
 test.describe('Run-local-hub toggle', () => {
   // Named distinctly from the imported `bootConfigPath` helper: a local
@@ -52,7 +59,7 @@ test.describe('Run-local-hub toggle', () => {
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
     await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
-    await expect(dialog.getByTestId('hub-local-toggle')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByTestId('hub-row-local')).toBeVisible({ timeout: 5_000 })
     // The add-hub form lives in a collapsed "＋ Add new hub" row now — expand it so
     // the url/probe/add fields are reachable (idempotent across tests).
     const opener = dialog.getByTestId('hub-add-open')
@@ -60,12 +67,39 @@ test.describe('Run-local-hub toggle', () => {
     return dialog
   }
 
+  /**
+   * Open a card's `⋯` and return the menu item, located from the window because
+   * the content is portalled. Re-opened per interaction: selecting an item closes
+   * the menu, so a handle from a previous open is detached.
+   */
+  const openMenuItem = async (
+    mainWindow: import('@playwright/test').Page,
+    dialog: ReturnType<import('@playwright/test').Page['getByRole']>,
+    trigger: string,
+    item: string
+  ) => {
+    await dialog.getByTestId(trigger).first().click()
+    const menuItem = mainWindow.getByTestId(item).first()
+    await expect(menuItem).toBeVisible({ timeout: 5_000 })
+    return menuItem
+  }
+
   test('local hub runs by default; toggle is disabled with no remotes', async ({ mainWindow }) => {
     const dialog = await openHubsTab(mainWindow)
-    // Local hub row present + running; can't turn it off (nothing to fall back to).
+    // Local hub card present, and its status says so without opening anything.
     await expect(dialog.getByTestId('hub-row-local')).toBeVisible()
-    await expect(dialog.getByTestId('hub-local-toggle')).toBeChecked()
-    await expect(dialog.getByTestId('hub-local-toggle')).toBeDisabled()
+    await expect(dialog.getByTestId('hub-row-local').getByTestId('hub-status')).toHaveText(
+      /Running/
+    )
+
+    // Can't turn it off — nothing to fall back to. `aria-checked`/`aria-disabled`
+    // rather than toBeChecked/toBeDisabled: the control is a menuitemcheckbox now,
+    // which those matchers do not cover.
+    const toggle = await openMenuItem(mainWindow, dialog, 'hub-more-local', 'hub-local-toggle')
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
+    await expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    await mainWindow.keyboard.press('Escape') // close the menu
+
     // Save button only renders when there are unsaved changes — none on open.
     await expect(dialog.getByTestId('hubs-save-relaunch')).toHaveCount(0)
     await mainWindow.keyboard.press('Escape')
@@ -91,9 +125,12 @@ test.describe('Run-local-hub toggle', () => {
     await addBtn.click()
 
     // Now local can be turned off (there's a remote to fall back to).
-    const toggle = dialog.getByTestId('hub-local-toggle')
-    await expect(toggle).toBeEnabled()
-    await toggle.click() // → off
+    const toggleOff = await openMenuItem(mainWindow, dialog, 'hub-more-local', 'hub-local-toggle')
+    // Enabled means the attribute is ABSENT, not "false": Radix renders
+    // `aria-disabled: disabled || undefined`, so there is no such attribute to
+    // read on an enabled item. Asserting the string "false" can never pass.
+    await expect(toggleOff).not.toHaveAttribute('aria-disabled', /.*/)
+    await toggleOff.click() // → off
     await dialog.getByTestId('hubs-save-relaunch').click()
 
     await expect.poll(() => readBootConfig()?.server_mode, { timeout: 5_000 }).toBe('remote')
@@ -104,8 +141,10 @@ test.describe('Run-local-hub toggle', () => {
     // Restore the shared worker app to the default (local hub on, no remotes) so
     // sibling specs in this worker (104 restart) see a running local hub. Turn
     // local back on, remove the remote, save.
-    await toggle.click() // → on
-    await dialog.getByTestId('hub-remove').first().click()
+    const toggleOn = await openMenuItem(mainWindow, dialog, 'hub-more-local', 'hub-local-toggle')
+    await toggleOn.click() // → on
+    const remove = await openMenuItem(mainWindow, dialog, 'hub-more-remote', 'hub-remove')
+    await remove.click()
     await dialog.getByTestId('hubs-save-relaunch').click()
     await expect.poll(() => readBootConfig()?.server_mode, { timeout: 5_000 }).toBe('local')
     await mainWindow.keyboard.press('Escape').catch(() => {})

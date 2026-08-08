@@ -1,16 +1,21 @@
 import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
 
 /**
- * Runner settings (nested inside each hub, in the Connections settings tab).
+ * Runner settings for the LOCAL hub (nested inside its card, in Connections).
  *
- * Smoke-level guard that a hub's runner block renders with enrollment ALWAYS
- * available — a hub always accepts runners, so there is no enable-toggle and no
- * boot-gate. The "Add a runner" control is enabled from the start; the old
- * enable-mode toggle + its disabled-until-booted explainer are gone.
+ * The local hub is a special case and this spec pins the two ways it differs from
+ * a remote one:
  *
- * Everything here is scoped to the LOCAL hub's group. Runners live inside their
- * hub now, so these testids appear once per connected hub — an unscoped lookup
- * would be ambiguous the moment a second hub is configured.
+ *  - it does NOT enroll. A token minted against a loopback address is redeemable
+ *    only by something already on this machine, where the supervised runner
+ *    already is — so there is no add leaf here at all.
+ *  - its runner is NOT revocable, but IS restartable. It is the app's own child
+ *    process; revoking would delete the credential it re-dials with, while
+ *    restarting is the recovery from the supervisor's dead ends.
+ *
+ * Everything is scoped to the local hub's card: these testids appear once per
+ * connected hub, so an unscoped lookup goes ambiguous the moment a second hub is
+ * configured.
  */
 test.describe('Runner settings tab', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -34,29 +39,43 @@ test.describe('Runner settings tab', () => {
       await expect(dialog).toBeVisible({ timeout: 2_000 })
       await connections.click({ timeout: 2_000 })
     }).toPass({ timeout: 20_000 })
-    // The local hub's group — runners are nested inside their hub, so scope to it.
+    // The local hub's card — runners are nested inside their hub, so scope to it.
     const group = dialog.getByTestId('hub-group-local')
     await expect(group).toBeVisible({ timeout: 10_000 })
-    // The enroll form lives in a collapsed "＋ Add new runner" row now — expand it
-    // (idempotent: the dialog persists across tests, so only click when the
-    // collapsed opener is still showing).
-    const opener = group.getByTestId('runner-add-open')
-    if (await opener.isVisible().catch(() => false)) await opener.click()
-    await expect(group.getByTestId('runner-add')).toBeVisible({ timeout: 5_000 })
+    await expect(group.getByTestId('runners-table')).toBeVisible({ timeout: 10_000 })
     return group
   }
 
-  test('renders the Runners section with enrollment always available (no toggle)', async ({
-    mainWindow
-  }) => {
+  test('the local hub lists runners but offers no way to enroll one', async ({ mainWindow }) => {
     const group = await openRunnersTab(mainWindow)
 
-    // Enrollment is always on — the Add button is enabled once the row expands.
-    await expect(group.getByTestId('runner-add')).toBeEnabled()
+    // No add leaf, and therefore no enroll form to reach.
+    await expect(group.getByTestId('runner-add-open')).toHaveCount(0)
+    await expect(group.getByTestId('runner-add-row')).toHaveCount(0)
+    await expect(group.getByTestId('runner-add')).toHaveCount(0)
 
     // The old enable-mode toggle + its disabled-until-booted explainer are gone.
     await expect(group.getByTestId('runners-enabled-toggle')).toHaveCount(0)
     await expect(group.getByTestId('runner-enroll-disabled')).toHaveCount(0)
+
+    await mainWindow.keyboard.press('Escape')
+  })
+
+  test('the local runner cannot be revoked', async ({ mainWindow }) => {
+    const group = await openRunnersTab(mainWindow)
+
+    // Either the runner is enrolled (a row, no revoke on it) or it is missing (the
+    // Start row). Neither state offers a revoke, because the only runner the local
+    // hub can have is the one this app supervises.
+    await expect
+      .poll(
+        async () =>
+          (await group.getByTestId('runner-row').count()) +
+          (await group.getByTestId('runner-local-missing').count()),
+        { timeout: 30_000 }
+      )
+      .toBeGreaterThan(0)
+    await expect(group.getByTestId('runner-revoke')).toHaveCount(0)
 
     await mainWindow.keyboard.press('Escape')
   })
