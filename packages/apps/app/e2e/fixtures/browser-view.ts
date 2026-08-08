@@ -147,6 +147,57 @@ export async function getAllViewIds(page: Page): Promise<string[]> {
   return (await testInvoke(page, 'browser:get-all-view-ids')) as string[]
 }
 
+export interface BrowserViewState {
+  viewId: string
+  url: string
+  title: string
+  isLoading: boolean
+  domReady: boolean
+  hasLoadedRealPage: boolean
+}
+
+/** The manager's live view state — the same snapshot the renderer subscribes to. */
+export async function getViewState(page: Page, viewId: string): Promise<BrowserViewState | null> {
+  return (await testInvoke(page, 'browser:get-state', viewId)) as BrowserViewState | null
+}
+
+/**
+ * Wait until `viewId` has actually finished loading `pathFragment`.
+ *
+ * WHY NOT JUST POLL THE URL. Chromium updates the WebContents URL at navigation
+ * COMMIT — the instant the response starts and the new document is created —
+ * which is strictly before the document parses. `document.readyState` is
+ * `'loading'` at that point by definition. So `poll(get-url).toContain(path)`
+ * followed by a read of page state is a race the test wins only while the IPC
+ * round-trip happens to outlast the parse. It lost once in 14 full-suite runs
+ * (`79-browser-view-events` › "loading stops after navigation completes"), and
+ * five sibling tests in that file carried the same latent race.
+ *
+ * BOTH CONDITIONS ARE REQUIRED. `isLoading === false` alone would match the
+ * PRE-navigation idle state — the classic wait-for-busy-then-idle bug, which
+ * would make this helper return before the navigation even starts. Because the
+ * URL commits before `did-stop-loading` fires, the conjunction is monotone:
+ * once both hold, the target document is committed AND done loading, and
+ * neither can revert without a new navigation.
+ */
+export async function waitForLoadComplete(
+  page: Page,
+  viewId: string,
+  pathFragment: string,
+  timeout = 15_000
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const state = await getViewState(page, viewId)
+        if (!state) return false
+        return state.url.includes(pathFragment) && state.isLoading === false
+      },
+      { timeout }
+    )
+    .toBe(true)
+}
+
 /** Wait for at least one view to exist for a task and return the first viewId. */
 export async function getActiveViewId(page: Page, taskId: string): Promise<string> {
   let viewId = ''

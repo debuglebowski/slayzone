@@ -29,6 +29,34 @@ import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync
 import { electronApp, is } from '@electron-toolkit/utils'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
+
+/**
+ * The private surface of `ElectronChromeExtensions` that `activateExtension`
+ * reaches through. The package exposes no public way to fire an extension's
+ * browser action, so the toolbar button drives one of these two internals —
+ * `api.browserAction.activate` where it exists, else the context router. Both
+ * are optional here because either can disappear on a library upgrade, and the
+ * call site must degrade to "not activated" rather than throw.
+ */
+interface ElectronChromeExtensionsInternals {
+  api?: {
+    browserAction?: {
+      activate?: (
+        event: { type: string },
+        target: { extensionId: string; tabId: number }
+      ) => unknown
+    }
+  }
+  ctx?: {
+    router?: {
+      invoke: (
+        wc: Electron.WebContents,
+        channel: string,
+        payload: Record<string, unknown>
+      ) => unknown
+    }
+  }
+}
 import {
   registerBrowserTab,
   unregisterBrowserTab,
@@ -2976,14 +3004,17 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           if (!ext) return false
           const activeWc = browserViewManager.getActiveWebContents()
           if (!activeWc) return false
-          // Access internal browser action API through the context
-          const api = (chromeExtensions as any).api
+          // Access internal browser action API through the context. Both members
+          // are private to electron-chrome-extensions and can move on upgrade,
+          // hence the two independent probes and the `false` fallthrough.
+          const internals = chromeExtensions as unknown as ElectronChromeExtensionsInternals
+          const api = internals.api
           if (api?.browserAction?.activate) {
             api.browserAction.activate({ type: 'click' }, { extensionId, tabId: activeWc.id })
             return true
           }
           // Fallback: invoke via the internal handle system
-          const ctx = (chromeExtensions as any).ctx
+          const ctx = internals.ctx
           if (ctx?.router) {
             ctx.router.invoke(activeWc, 'browserAction.activate', {
               eventType: 'click',
@@ -3546,6 +3577,14 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor
       })
       ipcMain.handle('browser:get-url', (_, viewId: string) => browserViewManager.getUrl(viewId))
+      // Full view state — `isLoading`, `domReady`, `hasLoadedRealPage`. The URL
+      // alone is not a load-completion signal: it updates at navigation COMMIT,
+      // strictly before the document parses, so a test that polls the URL and
+      // then reads page state is racing the parser. This exposes the same
+      // snapshot the renderer subscribes to, so specs can wait on the real one.
+      ipcMain.handle('browser:get-state', (_, viewId: string) =>
+        browserViewManager.getStateSnapshot(viewId)
+      )
       ipcMain.handle('browser:get-bounds', (_, viewId: string) =>
         browserViewManager.getBounds(viewId)
       )
@@ -4201,7 +4240,11 @@ app.on('web-contents-created', (_, wc) => {
     const desktopHandoffPolicy = webviewDesktopHandoffPolicy.get(wc.id)
     if (!desktopHandoffPolicy) return
     void ensureDesktopHandoffSpoofing()
-    wc.mainFrame?.executeJavaScript(WEBVIEW_INIT_SCRIPT).catch(() => {})
+    wc.mainFrame?.executeJavaScript(WEBVIEW_INIT_SCRIPT).catch(() => {
+      // The frame can navigate away or be torn down between the check above and
+      // the inject; the next did-start-navigation/did-navigate re-applies it, so
+      // a failed inject is not worth surfacing.
+    })
   }
 
   wc.on('did-start-navigation', (_event, _navigationUrl, _isInPlace, isMainFrame) => {

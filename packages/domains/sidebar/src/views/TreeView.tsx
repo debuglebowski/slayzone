@@ -878,9 +878,20 @@ export function TreeView({
             break
           }
         }
-        // Fallback for 'none' (single ungrouped bucket, no header) or when
-        // source lands above the very first header → keep source's group.
-        if (!newGroupKey) newGroupKey = activeData.groupValue
+        // No header above the source's new position. Reached when the source
+        // lands at flat index 0 — i.e. it was dragged UP onto the FIRST header,
+        // so the arrayMove placed it above every header there is.
+        //
+        // The nearest-header-above walk encodes "drop on a header from below =
+        // land at the end of the group ABOVE it", which has no answer here:
+        // there is no group above the first one. The drop target itself is the
+        // only expression of intent left, so use it. Falling back to the
+        // source's own group (as this did) made the gesture a silent no-op —
+        // dropping onto the topmost header never changed status.
+        //
+        // Safe for the 'none' bucket too: none/pinned/temp headers set
+        // `droppable: false`, so they can never be `over` and never reach here.
+        if (!newGroupKey) newGroupKey = overData.groupValue
 
         const newGroup = groupByKey.get(newGroupKey)
         if (!newGroup || newGroup.isTemp) return
