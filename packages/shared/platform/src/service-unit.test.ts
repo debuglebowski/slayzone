@@ -27,6 +27,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   detectBackend,
+  explainNoBackend,
   launchdLabel,
   listRegisteredUnits,
   readUnitRoot,
@@ -35,6 +36,7 @@ import {
   renderSystemdUnit,
   systemdUnitName,
   unitPath,
+  userServiceEnv,
   writeUnit,
   type ServiceUnitSpec
 } from './service-unit'
@@ -139,6 +141,56 @@ test('systemd requires a reachable USER BUS, not just the binary', () => {
   // treating this as `none` would needlessly downgrade a working box.
   assertEq(decide('degraded\n', true), 'systemd', 'degraded ⇒ still usable')
   assertEq(decide('offline\n', true), 'none', 'offline ⇒ not usable')
+})
+
+test('userServiceEnv derives XDG_RUNTIME_DIR only when it is the missing piece', () => {
+  // REGRESSION (cost an hour on a real VPS): a shell attached to an existing zellij
+  // session inherits no XDG_RUNTIME_DIR, so every `systemctl --user` call failed with
+  // "No medium found" and detection reported "this platform has no user service
+  // manager" — on a box where systemd, the user manager and /run/user/999 were all
+  // present and healthy. The address is derivable from the uid, so we supply it
+  // rather than making an operator export a value we can compute.
+  const original = process.env.XDG_RUNTIME_DIR
+  const uid = process.getuid?.()
+  try {
+    // Already set ⇒ untouched. The operator's own value always wins; a session bus
+    // deliberately pointed elsewhere must not be silently overridden.
+    process.env.XDG_RUNTIME_DIR = '/run/user/explicit'
+    assertEq(
+      userServiceEnv().XDG_RUNTIME_DIR,
+      '/run/user/explicit',
+      'an explicit value is never overridden'
+    )
+
+    delete process.env.XDG_RUNTIME_DIR
+    const healed = userServiceEnv().XDG_RUNTIME_DIR
+    if (uid !== undefined && existsSync(`/run/user/${uid}`)) {
+      assertEq(healed, `/run/user/${uid}`, 'unset + dir exists ⇒ derived from uid')
+    } else {
+      // No runtime dir on this host (macOS, or a container without one): there is
+      // nothing to derive, and inventing a path would make detection claim a bus
+      // that cannot answer. Staying unset is what lets `none` stay honest.
+      assertEq(healed, undefined, 'unset + no dir ⇒ left unset, not invented')
+    }
+  } finally {
+    if (original === undefined) delete process.env.XDG_RUNTIME_DIR
+    else process.env.XDG_RUNTIME_DIR = original
+  }
+})
+
+test('a none backend explains the actual fix, not just the absence', () => {
+  // The old message ("this platform has no user service manager") was true but
+  // unactionable, and identical for two very different machines. Each reason must
+  // name the fix that applies to IT.
+  assert(
+    /enable-linger/.test(explainNoBackend('systemd-no-bus')),
+    'no user manager ⇒ points at loginctl enable-linger'
+  )
+  assert(
+    !/enable-linger/.test(explainNoBackend('systemd-missing')),
+    'no systemd at all ⇒ lingering is not the fix and must not be suggested'
+  )
+  assert(/Windows/.test(explainNoBackend('windows')), 'windows names the platform')
 })
 
 console.log('\nservice-unit: launchd plist content (hub)')

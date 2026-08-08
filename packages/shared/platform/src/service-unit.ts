@@ -154,40 +154,142 @@ export function defaultUnitDir(backend: ServiceBackend): string {
 }
 
 /**
- * Which supervisor to use here.
+ * The user-bus address for this uid, when the kernel-side runtime dir exists but
+ * `XDG_RUNTIME_DIR` is not exported into this process.
  *
- * macOS always has launchd. On Linux, systemd --user only counts when
- * `systemctl` exists AND a user bus is reachable — a container without one would
- * accept the file and never run it, which is worse than admitting `none`.
+ * THE GAP THIS CLOSES. `systemctl --user` locates the session bus through
+ * `XDG_RUNTIME_DIR`. A login shell gets it from pam_systemd — but a shell attached
+ * to an existing multiplexer session (zellij/tmux/screen), a `su`, or a container
+ * exec does NOT, even though `/run/user/<uid>` is mounted and the user manager is
+ * running. Every `--user` call then fails with "Failed to connect to bus: No medium
+ * found", and a naive probe concludes the platform has no service manager — which
+ * is wrong, unfixable-looking, and sends an operator hunting for a supervisor that
+ * was there all along.
+ *
+ * The address is fully derivable from the uid, so asking a human to export a value
+ * we can compute is asking them to retype something we already know. We supply it
+ * for the duration of our own child processes and persist nothing: the operator's
+ * environment is theirs, and a runtime dir that stops existing must stop being used.
+ *
+ * Returns null when the var is already set (nothing to fix) or the directory is
+ * absent (genuinely no user manager — `loginctl enable-linger` is the real fix).
  */
-export function detectBackend(): ServiceBackend {
-  if (process.platform === 'darwin') return 'launchd'
-  if (process.platform === 'win32') return 'none'
-  // Must exercise the USER BUS, not merely find the binary. `systemctl --user
-  // --version` prints a version without contacting anything, so it succeeds on a
-  // VPS or container that has no user session — and then every real `--user` call
-  // fails with "Failed to connect to bus: No medium found", after we have already
-  // written a unit file. `is-system-running` performs a real bus round-trip.
-  //
-  // Its exit code is non-zero for states that are perfectly usable (`degraded`
-  // when some unrelated unit failed), so the STDOUT state is what decides:
-  // any state at all ⇒ the bus answered ⇒ systemd is usable.
+function derivedRuntimeDir(): string | null {
+  if (process.env.XDG_RUNTIME_DIR) return null
+  const uid = process.getuid?.()
+  if (uid === undefined) return null
+  const dir = `/run/user/${uid}`
+  return existsSync(dir) ? dir : null
+}
+
+/**
+ * Environment for a `systemctl --user` / `loginctl` child: this process's env plus a
+ * derived `XDG_RUNTIME_DIR` when that is the only thing missing. Callers MUST use
+ * this rather than inheriting env implicitly, or detection and invocation can
+ * disagree — detection succeeding while the actual start fails is the worst of both.
+ */
+export function userServiceEnv(): NodeJS.ProcessEnv {
+  const dir = derivedRuntimeDir()
+  return dir ? { ...process.env, XDG_RUNTIME_DIR: dir } : process.env
+}
+
+/** Why {@link detectBackend} answered as it did — lets callers say something true. */
+export type BackendReason =
+  | 'launchd'
+  | 'windows'
+  | 'systemd-bus-ok'
+  | 'systemd-bus-healed'
+  | 'systemd-no-bus'
+  | 'systemd-missing'
+
+/**
+ * Which supervisor to use here, and why.
+ *
+ * macOS always has launchd. On Linux, systemd --user only counts when `systemctl`
+ * exists AND a user bus is reachable — a container without one would accept the file
+ * and never run it, which is worse than admitting `none`. Before concluding there is
+ * no bus we retry with a derived `XDG_RUNTIME_DIR` (see {@link derivedRuntimeDir}),
+ * because "the env var is missing" and "this machine has no supervisor" are entirely
+ * different problems with entirely different fixes.
+ */
+export function detectBackendWithReason(): { backend: ServiceBackend; reason: BackendReason } {
+  if (process.platform === 'darwin') return { backend: 'launchd', reason: 'launchd' }
+  if (process.platform === 'win32') return { backend: 'none', reason: 'windows' }
+  // First attempt uses the ambient env; the second supplies a derived runtime dir.
+  // Distinguishing them is what lets the caller report a healed bus (and warn that a
+  // bare `systemctl --user` in the operator's own shell will still fail).
+  if (probeUserBus(process.env)) return { backend: 'systemd', reason: 'systemd-bus-ok' }
+  const healed = derivedRuntimeDir()
+  if (healed && probeUserBus({ ...process.env, XDG_RUNTIME_DIR: healed })) {
+    return { backend: 'systemd', reason: 'systemd-bus-healed' }
+  }
+  // No bus either way. `systemctl` missing entirely is a different machine shape
+  // (no systemd at all) than a systemd box whose user manager never started.
+  return {
+    backend: 'none',
+    reason: hasSystemctl() ? 'systemd-no-bus' : 'systemd-missing'
+  }
+}
+
+/** True when `systemctl` is on PATH at all (says nothing about the user bus). */
+function hasSystemctl(): boolean {
+  try {
+    execFileSync('systemctl', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * One real user-bus round-trip under `env`.
+ *
+ * `is-system-running` exits non-zero for states that are perfectly usable
+ * (`degraded` when some unrelated unit failed), so the STDOUT state decides: any
+ * state at all ⇒ the bus answered. `offline`/`unknown` mean it did not.
+ */
+function probeUserBus(env: NodeJS.ProcessEnv): boolean {
   try {
     const out = execFileSync('systemctl', ['--user', 'is-system-running'], {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env
     })
-    return out.trim().length > 0 ? 'systemd' : 'none'
+    return out.trim().length > 0
   } catch (e) {
-    const err = e as { stdout?: string | Buffer; status?: number | null }
-    // A non-zero exit that still reported a state means the bus is there.
-    const state = (
-      typeof err.stdout === 'string' ? err.stdout : (err.stdout?.toString() ?? '')
-    ).trim()
-    if (state && !/^(offline|unknown)$/i.test(state)) return 'systemd'
-    return 'none'
+    const err = e as { stdout?: string | Buffer }
+    const state = (typeof err.stdout === 'string' ? err.stdout : err.stdout?.toString() ?? '').trim()
+    return Boolean(state) && !/^(offline|unknown)$/i.test(state)
   }
 }
+
+/**
+ * Which supervisor to use here. Thin wrapper over {@link detectBackendWithReason}
+ * for the many callers that only need the decision.
+ */
+export function detectBackend(): ServiceBackend {
+  return detectBackendWithReason().backend
+}
+
+/** Operator-facing explanation for a `none` backend — names the actual fix. */
+export function explainNoBackend(reason: BackendReason): string {
+  if (reason === 'windows') {
+    return 'Windows has no user service manager, so services cannot be registered here.'
+  }
+  if (reason === 'systemd-missing') {
+    return 'systemd is not present on this machine, so services cannot be registered here.'
+  }
+  if (reason === 'systemd-no-bus') {
+    return (
+      'systemd is running, but this account has no user manager, so `systemctl --user` ' +
+      'cannot work. Enable a persistent one:\n' +
+      `  sudo loginctl enable-linger ${process.env.USER ?? '<user>'}\n` +
+      'then log out and back in.'
+    )
+  }
+  return 'No user service manager is available here.'
+}
+
 
 /**
  * Absolute path of the unit file for `(kind, name)`. Deterministic — `start` and

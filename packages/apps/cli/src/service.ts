@@ -26,6 +26,7 @@ import {
   launchdLabel,
   serviceLogNames,
   systemdUnitName,
+  userServiceEnv,
   type ServiceBackend,
   type ServiceKind
 } from '@slayzone/platform/service-unit'
@@ -347,7 +348,10 @@ export function followServiceLog(args: {
   if (systemdUnit) {
     const jargs = ['--user', '-u', systemdUnitName(kind, name), '-n', String(lines)]
     if (follow) jargs.push('-f')
-    const child = spawn('journalctl', jargs, { stdio: 'inherit' })
+    // Same healed env as every other `--user` call: journalctl resolves the user
+    // journal through XDG_RUNTIME_DIR too, so without it `logs` fails on exactly the
+    // machines where the unit itself works.
+    const child = spawn('journalctl', jargs, { stdio: 'inherit', env: userServiceEnv() })
     child.on('exit', (code) => process.exit(code ?? 0))
     return
   }
@@ -386,7 +390,7 @@ export class SupervisorError extends Error {
  */
 function run(file: string, args: string[]): void {
   try {
-    execFileSync(file, args, { stdio: ['ignore', 'inherit', 'pipe'] })
+    execFileSync(file, args, { stdio: ['ignore', 'inherit', 'pipe'], env: userServiceEnv() })
   } catch (e) {
     const stderr = (e as { stderr?: Buffer | string }).stderr
     throw new SupervisorError(
@@ -440,7 +444,10 @@ export function supervisorStart(
   // this needs privileges we don't have, in which case the service still survives
   // crashes but not a logout.
   try {
-    execFileSync('loginctl', ['enable-linger', process.env.USER ?? ''], { stdio: 'ignore' })
+    execFileSync('loginctl', ['enable-linger', process.env.USER ?? ''], {
+      stdio: 'ignore',
+      env: userServiceEnv()
+    })
   } catch {
     console.log(
       `Note: could not enable systemd lingering — the ${kind} will stop when you log out.`
@@ -467,7 +474,8 @@ export function supervisorStop(
   }
   try {
     execFileSync('systemctl', ['--user', 'disable', '--now', systemdUnitName(kind, name)], {
-      stdio: 'ignore'
+      stdio: 'ignore',
+      env: userServiceEnv()
     })
   } catch {
     /* already gone */
@@ -555,7 +563,7 @@ export function supervisorStatus(
         '-p',
         'ExecMainStatus'
       ],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: userServiceEnv() }
     )
   } catch {
     return none
