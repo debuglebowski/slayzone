@@ -66,6 +66,7 @@ import {
   type ServiceBackend
 } from '@slayzone/platform/service-unit'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
+import { readServiceLogTail } from '../service'
 
 // Package roots are derived from the REPO root rather than this file's own URL: the
 // CLI package typechecks as CommonJS (see its tsconfig `module`), where `import.meta`
@@ -673,6 +674,37 @@ async function main(): Promise<void> {
       assertEq(res.status, 0, `rm succeeds (stderr: ${res.stderr})`)
       assert(existsSync(cfg), 'a plain rm never deletes the root — that is operator data')
       rmSync(orphanRoot, { recursive: true, force: true })
+    })
+
+    await test('the enroll wait reads journald for a systemd unit, not the log dir', async () => {
+      // REGRESSION (Linux only, shipped): a systemd unit declares
+      // StandardOutput=journal and writes NOTHING to the log dir, but the enroll wait
+      // polled only `<root>/logs/*.log`. So `runner create`/`start` could never
+      // succeed under systemd — it waited out the full 30s and reported "did not
+      // reach its hub" plus "No output was captured" for a runner that had connected.
+      //
+      // It passed everywhere it was exercised: launchd writes real files
+      // (StandardOutPath), and this suite forces the unsupervised path, which
+      // redirects to a file too. Only systemd was broken and only systemd was
+      // uncovered — so assert the SOURCE SELECTION directly rather than the wait.
+      const logRoot = join(TMP, 'logsrc-root')
+      mkdirSync(join(logRoot, 'logs'), { recursive: true })
+      writeFileSync(join(logRoot, 'logs', 'runner.out.log'), 'connected {"mode":"enroll"}\n')
+
+      // No unit named ⇒ file source ⇒ finds the marker.
+      assert(
+        /"mode":"enroll"/.test(readServiceLogTail('runner', logRoot, 200)),
+        'file source reads the log dir'
+      )
+      // A unit named ⇒ journald source. This unit does not exist, so the read yields
+      // '' — and crucially NOT the file content sitting right there. Returning the
+      // file would be the bug: the wait would pass by reading a stale artifact
+      // instead of the unit's real output.
+      assertEq(
+        readServiceLogTail('runner', logRoot, 200, 'slayzone-runner-nonexistent.service'),
+        '',
+        'journald source never falls back to the log dir'
+      )
     })
 
     // ------------------------------------------------------------------- cleanliness

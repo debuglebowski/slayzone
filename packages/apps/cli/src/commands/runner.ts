@@ -42,6 +42,7 @@ import {
   listRegisteredUnits,
   readUnitRoot,
   removeUnit,
+  systemdUnitName,
   unitPath,
   writeUnit,
   type ServiceBackend
@@ -204,11 +205,23 @@ function requireRegistered(name: string, backend: ServiceBackend): { root: strin
   return { root }
 }
 
-/** Poll the runner's captured output until it reports a live hub link. */
-async function waitForConnected(root: string, timeoutMs: number): Promise<boolean> {
+/**
+ * Poll the runner's captured output until it reports a live hub link.
+ *
+ * `backend` decides WHERE that output is: a systemd unit logs to journald and writes
+ * no files at all, so reading the log dir would wait out the full timeout on a
+ * runner that connected immediately.
+ */
+async function waitForConnected(
+  root: string,
+  timeoutMs: number,
+  backend: ServiceBackend,
+  name: string
+): Promise<boolean> {
+  const unit = backend === 'systemd' ? systemdUnitName('runner', name) : undefined
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    if (CONNECTED_RE.test(readServiceLogTail('runner', root, 200))) return true
+    if (CONNECTED_RE.test(readServiceLogTail('runner', root, 200, unit))) return true
     if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, 300))
   }
@@ -254,7 +267,7 @@ async function launchRunner(args: {
       }
     })
     child.unref()
-    if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS))) {
+    if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
       // Same all-or-nothing rule as the supervised path: a first boot that never
       // reached a hub must not leave root state behind claiming this runner exists.
       if (creating) runCreateRollback()
@@ -327,7 +340,7 @@ async function launchRunner(args: {
   // starts fine, fails auth, and exits non-zero — which the supervisor then retries
   // forever. Reporting success on "the process exists" would hand the operator a
   // runner that never does any work.
-  if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS))) {
+  if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
     if (creating) {
       // A failed FIRST boot must not leave a registered, crash-looping unit behind:
       // the supervisor would retry it forever, invisibly, and the operator was given
@@ -489,10 +502,13 @@ export function runnerCommand(): Command {
             `${(r.hubUrl ?? '-').padEnd(hubW)}  ${enrolled(r)}`
         )
       }
-      if (!hubReachable) {
+      // Only explain the "?" when one is actually printed. Saying "ENROLLED is
+      // unknown" under a table whose every row reads `yes` contradicts the table —
+      // a local credential file answers the question without any hub.
+      if (!hubReachable && runners.some((r) => enrolled(r) === '?')) {
         console.log(
-          `\nNo hub could be reached, so ENROLLED is unknown ("?") for runners this ` +
-            `machine has no local record of.`
+          `\nNo hub could be reached, so ENROLLED is "?" for runners with no local ` +
+            `credentials — they may or may not be enrolled.`
         )
       }
       const unmanaged = runners.filter((r) => state(r) === 'unmanaged')
@@ -777,7 +793,7 @@ export function runnerCommand(): Command {
       supervisorStop('runner', backend, name)
       await waitForStopped(name, backend, 15_000)
       supervisorStart('runner', backend, name, unitPath('runner', name, backend))
-      if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS))) {
+      if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
         fail(
           `Runner "${name}" did not reconnect within ${ENROLL_TIMEOUT_MS / 1000}s. ` +
             `Check \`slay runner logs ${name}\`.`

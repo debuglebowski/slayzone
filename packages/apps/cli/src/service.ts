@@ -308,7 +308,39 @@ export function failWithLog(kind: ServiceKind, name: string, logPath: string, wh
  * supervisor's two capture files is newest, since which one carries the interesting
  * output depends on how the process was started.
  */
-export function readServiceLogTail(kind: ServiceKind, root: string, lines: number): string {
+export function readServiceLogTail(
+  kind: ServiceKind,
+  root: string,
+  lines: number,
+  /**
+   * Set for a service registered with systemd. Its unit declares
+   * `StandardOutput=journal`, so NOTHING is ever written to the log dir and a
+   * file-only read returns '' forever.
+   *
+   * This is what made `slay runner create`/`start` unable to succeed on Linux: the
+   * enroll wait polls this tail for the runner's "connected to hub" line, never saw
+   * it, and reported `did not reach its hub within 30s` alongside `No output was
+   * captured` — for a runner that had in fact connected. It passed everywhere it was
+   * exercised: launchd writes real files (StandardOutPath), and the suite forces the
+   * unsupervised path, which redirects to a file too. Only systemd was broken, and
+   * only systemd was never covered.
+   */
+  systemdUnit?: string
+): string {
+  if (systemdUnit) {
+    try {
+      // `--no-pager` or journalctl blocks on a pager when stdout is not a TTY in
+      // some configurations; `-o cat` strips the syslog prefix so the caller's
+      // regexes match the service's own output verbatim.
+      return execFileSync(
+        'journalctl',
+        ['--user', '-u', systemdUnit, '-n', String(lines), '--no-pager', '-o', 'cat'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: userServiceEnv() }
+      ).trim()
+    } catch {
+      return ''
+    }
+  }
   const dir = logDirFor(kind, root)
   let files: string[]
   try {
