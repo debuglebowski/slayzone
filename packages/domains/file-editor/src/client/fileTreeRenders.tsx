@@ -91,6 +91,8 @@ export interface FileTreeRenderCtx {
   handleDuplicate: (entries: DirEntry[]) => void
   handleCopyPath: (entry: DirEntry, absolute: boolean) => void
   handleRevealInFinder: (entry: DirEntry) => void
+  /** False when the workspace lives on another machine — there is no Finder there. */
+  canRevealInFinder: boolean
   handleDeleteSelected: (entry: DirEntry) => void
 }
 
@@ -136,6 +138,7 @@ export function renderContextMenuItems(ctx: FileTreeRenderCtx, entry: DirEntry, 
     handleDuplicate,
     handleCopyPath,
     handleRevealInFinder,
+    canRevealInFinder,
     handleDeleteSelected,
     startCreate,
     startRename
@@ -189,10 +192,14 @@ export function renderContextMenuItems(ctx: FileTreeRenderCtx, entry: DirEntry, 
       <ContextMenuItem onSelect={() => handleCopyPath(entry, true)}>
         <Copy className="size-3 mr-2" /> Copy Path
       </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem onSelect={() => handleRevealInFinder(entry)}>
-        <FolderSearch className="size-3 mr-2" /> Reveal in Finder
-      </ContextMenuItem>
+      {canRevealInFinder && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => handleRevealInFinder(entry)}>
+            <FolderSearch className="size-3 mr-2" /> Reveal in Finder
+          </ContextMenuItem>
+        </>
+      )}
       <ContextMenuSeparator />
       <ContextMenuItem variant="destructive" onSelect={() => handleDeleteSelected(entry)}>
         <Trash2 className="size-3 mr-2" /> Delete

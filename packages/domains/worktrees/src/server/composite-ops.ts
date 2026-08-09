@@ -5,13 +5,10 @@
  * (no drift while both transports coexist). Plus the copy/submodule behavior
  * resolvers, which the worktree-creation flow depends on.
  */
-import { readdir, stat as fsStat } from 'fs/promises'
-import path from 'path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
 import {
-  isGitRepo,
   detectWorktrees,
   createWorktree,
   runWorktreeSetupScript,
@@ -30,75 +27,11 @@ import type {
   ConflictAnalysis
 } from '../shared/types'
 
-// ── Child-repo detection (cached + concurrent-call deduped) ──────────────────
-const CHILD_REPO_CACHE_MAX = 50
-const CHILD_REPO_CACHE_TTL = 30_000 // 30s
-const childRepoCache = new Map<
-  string,
-  { repos: { name: string; path: string }[]; timestamp: number }
->()
-const pendingDetections = new Map<string, Promise<{ name: string; path: string }[]>>()
-
-function evictStaleRepoCache(): void {
-  if (childRepoCache.size <= CHILD_REPO_CACHE_MAX) return
-  const now = Date.now()
-  for (const [key, entry] of childRepoCache) {
-    if (now - entry.timestamp > CHILD_REPO_CACHE_TTL) childRepoCache.delete(key)
-  }
-  if (childRepoCache.size > CHILD_REPO_CACHE_MAX) {
-    const sorted = [...childRepoCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp)
-    for (let i = 0; i < sorted.length - CHILD_REPO_CACHE_MAX; i++) {
-      childRepoCache.delete(sorted[i][0])
-    }
-  }
-}
-
-/** Scan a project dir for immediate child git repos (multi-repo projects). */
-export async function detectChildRepos(
-  projectPath: string
-): Promise<{ name: string; path: string }[]> {
-  const cached = childRepoCache.get(projectPath)
-  if (cached && Date.now() - cached.timestamp < CHILD_REPO_CACHE_TTL) return cached.repos
-
-  // Deduplicate concurrent calls for the same path
-  const pending = pendingDetections.get(projectPath)
-  if (pending) return pending
-
-  const detection = (async () => {
-    // If root is itself a git repo, no multi-repo mode
-    if (await isGitRepo(projectPath)) {
-      childRepoCache.set(projectPath, { repos: [], timestamp: Date.now() })
-      return []
-    }
-    try {
-      const entries = await readdir(projectPath)
-      const repos: { name: string; path: string }[] = []
-      await Promise.all(
-        entries.map(async (entry) => {
-          const fullPath = path.join(projectPath, entry)
-          try {
-            const s = await fsStat(fullPath)
-            if (s.isDirectory() && (await isGitRepo(fullPath))) {
-              repos.push({ name: entry, path: fullPath })
-            }
-          } catch {
-            // Skip inaccessible entries
-          }
-        })
-      )
-      repos.sort((a, b) => a.name.localeCompare(b.name))
-      childRepoCache.set(projectPath, { repos, timestamp: Date.now() })
-      evictStaleRepoCache()
-      return repos
-    } catch {
-      return []
-    }
-  })()
-
-  pendingDetections.set(projectPath, detection)
-  void detection.finally(() => pendingDetections.delete(projectPath))
-  return detection
-}
+// `detectChildRepos` moved to ./list-project-repos, where it is now a projection
+// of the same discovery `listProjectRepos` uses. Two independent walks with
+// subtly different rules for "is this a repo" was one bug waiting to happen; and
+// the walk itself had to move to the runner regardless, since it decides the
+// terminal cwd for a workspace that may live on another machine.
 
 /** Detected worktrees with per-worktree colors assigned (main excluded). */
 export async function detectWorktreesWithColors(repoPath: string) {

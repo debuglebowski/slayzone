@@ -29,8 +29,12 @@ function makeDispatch(shutdown: (reason: string) => void = () => {}) {
 }
 
 describe('createHubRequestHandler dispatch table', () => {
+  // Names inside the reserved namespaces that this runner does NOT implement.
+  // `fs.readFile` used to sit here and stopped qualifying once the file-editor
+  // ops were routed — an unimplemented-method fixture has to be a method that
+  // stays unimplemented, or the test quietly starts asserting a zod parse error.
   it.each([
-    'fs.readFile',
+    'fs.chmod',
     'git.clone',
     'proc.status',
     'bogus.method'

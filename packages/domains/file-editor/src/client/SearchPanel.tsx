@@ -5,6 +5,7 @@ import { track } from '@slayzone/telemetry/client'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { FileSearchResult, OpenFileOptions } from '../shared'
 import { FileIcon } from './FileIcon'
+import { useWorkspaceTarget } from './workspace-target'
 
 interface SearchPanelProps {
   projectPath: string
@@ -13,6 +14,10 @@ interface SearchPanelProps {
 
 export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
   const trpc = useTRPC()
+  // Which machine these filesystem calls are for. Ambient for the whole
+  // panel — see ./workspace-target. Spread into every input so it also
+  // keys the query cache.
+  const target = useWorkspaceTarget()
   const queryClient = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
@@ -41,14 +46,15 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
       try {
         const res = await queryClient.fetchQuery(
           trpc.fileEditor.searchFiles.queryOptions({
+            ...target,
             rootPath: projectPath,
             query,
             options: { matchCase, regex: useRegex }
           })
         )
-        setResults(res)
+        setResults(res.results)
         setCollapsed(new Set())
-        track('file_search_used', { had_results: res.length > 0 })
+        track('file_search_used', { had_results: res.results.length > 0 })
       } catch {
         setResults([])
       } finally {

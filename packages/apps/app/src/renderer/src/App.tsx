@@ -75,6 +75,7 @@ import { useUsage } from '@/components/usage/useUsage'
 import { isConvexConfigured, useLeaderboardAuth } from '@/lib/convexAuth'
 import { recordDiagnosticsTimeline } from '@/lib/diagnosticsClient'
 import { FeedbackDialog } from '@slayzone/feedback/client'
+import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 // Extracted hooks (self-contained, clean interfaces)
 import { useHomePanel } from '@slayzone/home/client'
@@ -272,9 +273,11 @@ function App(): React.JSX.Element {
     () => hubIdByProject.get(selectedProjectId) ?? defaultHubId,
     [hubIdByProject, selectedProjectId, defaultHubId]
   )
-  // Local-only ops (path existence, repo detection) are meaningless for a
-  // project whose files live on a remote hub's host — gate them to the local hub.
-  const selectedProjectIsLocal = selectedProjectHubId === defaultHubId
+  // Path existence and repo detection used to be gated to the local hub, because
+  // they ran against whichever hub the client was talking to and so said nothing
+  // true about a project whose files live elsewhere. They now route to the runner
+  // that owns the workspace, so the gate is gone — the answer is correct for
+  // every hub. `selectedProjectHubId` remains for routing the queries themselves.
 
   // Multi-repo detection for home tab
   const homeSelectedProject = useMemo(
@@ -282,7 +285,11 @@ function App(): React.JSX.Element {
     [projects, selectedProjectId]
   )
   // Same data source as task git panel — flat list of project-root + child repos + recursive submodules.
-  const { repos: homeViewableRepos } = useProjectRepos(homeSelectedProject?.path ?? null, null)
+  const { repos: homeViewableRepos } = useProjectRepos(
+    homeSelectedProject?.path ?? null,
+    null,
+    homeSelectedProject?.id
+  )
   const homeDetectedRepos = useMemo(
     () => homeViewableRepos.map((r) => ({ name: r.name, path: r.path, kind: r.kind })),
     [homeViewableRepos]
@@ -309,12 +316,14 @@ function App(): React.JSX.Element {
   )
 
   // Project path validation (extracted — validates on select + window focus)
-  const { projectPathMissing, validateProjectPath, handleFixProjectPath } = useProjectPathGuard(
-    selectedProjectId,
-    projects,
-    updateProject,
-    selectedProjectIsLocal
-  )
+  const {
+    projectPathMissing,
+    validateProjectPath,
+    handleFixProjectPath,
+    fixPickerOpen,
+    setFixPickerOpen,
+    applyFixedPath
+  } = useProjectPathGuard(selectedProjectId, projects, updateProject)
 
   // Project rename state
   const [projectNameValue, setProjectNameValue] = useState('')
@@ -1836,6 +1845,19 @@ function App(): React.JSX.Element {
             updateToastDismissed={updateToastDismissed}
             updateVersion={updateVersion}
             setUpdateToastDismissed={setUpdateToastDismissed}
+          />
+          {/* Re-point a project whose directory has moved. Rendered here rather
+              than inside the guard hook (a hook cannot render), and browsing the
+              RUNNER that owns the project — the native dialog it replaces browsed
+              this desktop, so on a remote runner it returned a path that did not
+              exist there. */}
+          <WorkspaceDirPicker
+            open={fixPickerOpen}
+            onOpenChange={setFixPickerOpen}
+            onSelect={(path) => void applyFixedPath(path)}
+            target={{ projectId: selectedProjectId }}
+            title="Select project directory"
+            defaultPath={projects.find((p) => p.id === selectedProjectId)?.path ?? null}
           />
         </div>
       </SidebarProvider>

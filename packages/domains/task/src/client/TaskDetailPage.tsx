@@ -148,6 +148,7 @@ import {
   type EditorThemeColors
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
+import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { OpenFileOptions } from '@slayzone/file-editor/shared'
 import { track } from '@slayzone/telemetry/client'
@@ -368,13 +369,26 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const subTaskInputRef = useRef<HTMLInputElement>(null)
   const [parentTask] = useState<Task | null>(initialData?.parentTask ?? null)
 
-  // Project path validation
+  // Project path validation.
+  //
+  // Probed on the machine that owns the workspace (the task's runner), NOT on
+  // whichever hub this client is talking to. The old probe was hub-local and
+  // ungated — App.tsx had learned to suppress it for remote projects, this copy
+  // never did — so a task whose files live on a runner reported
+  // "No repository path configured" for a path that was perfectly fine.
+  //
+  // Three states, deliberately distinct: a path that is set and present, one
+  // that is set but gone, and one we could not ask about because the runner is
+  // offline. Collapsing the last two is what made a transient disconnect look
+  // like a misconfiguration.
   const [projectPathMissing, setProjectPathMissing] = useState(
     initialData?.projectPathMissing ?? false
   )
+  const [workspaceUnreachable, setWorkspaceUnreachable] = useState(false)
+  const [baseDirPickerOpen, setBaseDirPickerOpen] = useState(false)
 
   // Multi-repo detection (drives the *task-bound* axis: terminal cwd, editor root, browser, worktree creation)
-  const detectedRepos = useDetectedRepos(project?.path ?? null)
+  const detectedRepos = useDetectedRepos(project?.path ?? null, project?.id)
   // Task-bound repo name: only what the user has explicitly bound to this task or to the project default.
   // Intentionally NO fallback to first-detected — wrapper folder stays wrapper folder for the bound axis,
   // so the terminal/editor don't silently jump into an arbitrary child repo.
@@ -389,7 +403,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Git-panel viewing axis: ephemeral, repo selection here does NOT change the task-bound path.
   // Default = task-bound; if that resolves to a non-git wrapper folder, default to first discovered repo.
   const taskBoundRepoForView = task?.worktree_path ?? resolvedRepo.path // worktree if present, else resolved child / project root
-  const { repos: viewableRepos } = useProjectRepos(project?.path ?? null, taskBoundRepoForView)
+  const { repos: viewableRepos } = useProjectRepos(
+    project?.path ?? null,
+    taskBoundRepoForView,
+    project?.id
+  )
   const [gitViewRepoPath, setGitViewRepoPath] = useState<string | null>(null)
   // Resolve the active git-panel target. Prefer explicit user pick; fall back to task-bound if it's a real git repo;
   // else first viewable repo (covers wrapper-folder projects). Recomputed on each render so disk changes self-heal.
@@ -845,33 +863,42 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       pendingSearchToggleRef.current = false
     }
   }, [])
-  // Re-check project path on window focus
+  // One probe, shared by the focus listener and the project-change effect, so
+  // the two can never disagree about how the question is asked.
+  const probeTaskId = task?.id
+  const probeWorkspacePath = useCallback(
+    async (path: string): Promise<void> => {
+      if (!probeTaskId) return
+      try {
+        const res = await trpcClient.workspace.pathExists.query({ taskId: probeTaskId, path })
+        setWorkspaceUnreachable(!res.reachable)
+        setProjectPathMissing(res.reachable && !res.exists)
+      } catch {
+        // The request itself failed (hub down mid-flight). Same meaning as an
+        // unreachable runner: we do not know, so do not claim the path is gone.
+        setWorkspaceUnreachable(true)
+        setProjectPathMissing(false)
+      }
+    },
+    [trpcClient, probeTaskId]
+  )
+
+  // Re-check on window focus — the directory may have moved while we were away.
   useEffect(() => {
     if (!project?.path) return
-
-    const handleFocus = (): void => {
-      trpcClient.app.files.pathExists
-        .query({ filePath: project.path! })
-        .then((exists) => setProjectPathMissing(!exists))
-    }
+    const handleFocus = (): void => void probeWorkspacePath(project.path!)
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
-  }, [project?.path, trpcClient])
+  }, [project?.path, probeWorkspacePath])
 
-  // Check project path exists when project changes
   useEffect(() => {
     if (!project?.path) {
       setProjectPathMissing(false)
+      setWorkspaceUnreachable(false)
       return
     }
-    let cancelled = false
-    trpcClient.app.files.pathExists.query({ filePath: project.path }).then((exists) => {
-      if (!cancelled) setProjectPathMissing(!exists)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [project?.path, trpcClient])
+    void probeWorkspacePath(project.path)
+  }, [project?.path, probeWorkspacePath])
 
   // Handle terminal ready - memoized to prevent effect cascade
   const handleTerminalReady = useCallback(
@@ -2545,12 +2572,41 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           }
                         />
                       ) : (
+                        // Three different situations, three different messages.
+                        // They were one line — "No repository path configured" —
+                        // which was a false claim in two of the three cases: it
+                        // told users to set a path they had already set, while the
+                        // real cause was a probe run against the wrong machine or
+                        // a runner that was simply offline.
                         <div className="h-full flex items-center justify-center text-muted-foreground">
                           <div className="text-center p-8">
-                            <p className="mb-2">No repository path configured</p>
-                            <p className="text-sm">
-                              Set a repository path in project settings to use the terminal
-                            </p>
+                            {!project?.path && !effectiveRepoPath ? (
+                              <>
+                                <p className="mb-2">No repository path configured</p>
+                                <p className="text-sm">
+                                  Set a repository path in project settings to use the terminal
+                                </p>
+                              </>
+                            ) : workspaceUnreachable ? (
+                              <>
+                                <p className="mb-2">Can’t reach the machine for this task</p>
+                                <p className="text-sm">
+                                  Its runner is offline, so the workspace can’t be opened. The path
+                                  itself is unchanged.
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="mb-2">Folder not found on this task’s machine</p>
+                                <p className="text-sm font-mono text-xs">
+                                  {effectiveRepoPath ?? project?.path}
+                                </p>
+                                <p className="text-sm mt-2">
+                                  It may have moved or been deleted. Pick it again in project
+                                  settings.
+                                </p>
+                              </>
+                            )}
                           </div>
                         </div>
                       )}
@@ -2642,6 +2698,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       <FileEditorView
                         ref={fileEditorRefCallback}
                         projectPath={effectiveRepoPath}
+                        // Read and write the SAME filesystem the task's agents
+                        // work in. Without this the panel reads the hub's disk,
+                        // so a remote task's editor shows files no agent can see
+                        // and a save lands where nothing is running.
+                        target={{ taskId: task.id }}
                         initialEditorState={task.editor_open_files}
                         onEditorStateChange={handleEditorStateChange}
                       />
@@ -2887,20 +2948,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                   <button
                                     className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
                                     title="Change working directory"
-                                    onClick={async () => {
-                                      const result =
-                                        await trpcClient.app.dialog.showOpenDialog.mutate({
-                                          title: 'Select Working Directory',
-                                          defaultPath:
-                                            task.base_dir ?? effectiveRepoPath ?? undefined,
-                                          properties: ['openDirectory']
-                                        })
-                                      if (result.canceled || !result.filePaths[0]) return
-                                      await updateTaskAndNotify({
-                                        id: task.id,
-                                        baseDir: result.filePaths[0]
-                                      })
-                                    }}
+                                    onClick={() => setBaseDirPickerOpen(true)}
                                   >
                                     <FileCode className="size-3.5 text-muted-foreground" />
                                   </button>
@@ -2915,6 +2963,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                       <X className="size-3.5 text-muted-foreground" />
                                     </button>
                                   )}
+                                  {/* Scoped to the TASK, so it browses the runner
+                                      this task's agents spawn on — a cwd chosen on
+                                      any other machine would not exist for them. */}
+                                  <WorkspaceDirPicker
+                                    open={baseDirPickerOpen}
+                                    onOpenChange={setBaseDirPickerOpen}
+                                    onSelect={(picked) => {
+                                      void updateTaskAndNotify({ id: task.id, baseDir: picked })
+                                    }}
+                                    target={{ taskId: task.id }}
+                                    title="Select working directory"
+                                    defaultPath={task.base_dir ?? effectiveRepoPath ?? null}
+                                  />
                                 </div>
                                 {task.worktree_path && (
                                   <Button

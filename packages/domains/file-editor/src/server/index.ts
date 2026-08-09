@@ -26,3 +26,27 @@ export {
   closeAllFileWatchers,
   type FileWatchEvent
 } from './watcher'
+
+export {
+  discoverRepos,
+  isGitRepoDir,
+  DEFAULT_REPO_SCAN_DEPTH,
+  type DiscoveredRepo,
+  type DiscoveredRepoKind
+} from './repo-discovery'
+
+export {
+  createLocalWorkspaceFs,
+  createLocalWorkspaceFsAdapters,
+  WORKSPACE_MAX_LIST_ALL_FILES,
+  WORKSPACE_MAX_SEARCH_RESULTS,
+  type BrowseEntry,
+  type BrowseOptions,
+  type BrowseResult,
+  type ListAllFilesResult,
+  type LocalWorkspaceFs,
+  type SearchResult,
+  type SetRootsResult,
+  type WorkspaceFsAdapters,
+  type WorkspaceRoots
+} from './workspace-fs'

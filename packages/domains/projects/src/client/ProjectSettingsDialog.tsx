@@ -73,7 +73,7 @@ export function ProjectSettingsDialog({
   >('general')
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const detectedRepos = useDetectedRepos(open ? (project?.path ?? null) : null)
+  const detectedRepos = useDetectedRepos(open ? (project?.path ?? null) : null, project?.id)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
   const checkIntegrationLock = useCallback(async () => {

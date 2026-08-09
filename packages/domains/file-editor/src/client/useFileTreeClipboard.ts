@@ -4,6 +4,7 @@ import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import type { DirEntry } from '../shared'
 import { uniqueName, duplicateName } from '../shared'
+import { useWorkspaceIsLocal, useWorkspaceTarget } from './workspace-target'
 
 export interface ClipboardState {
   paths: string[]
@@ -24,6 +25,10 @@ export function useFileTreeClipboard({
   onFileRenamed
 }: UseFileTreeClipboardArgs) {
   const trpc = useTRPC()
+  // Which machine these filesystem calls are for. Ambient for the whole
+  // panel — see ./workspace-target. Spread into every input so it also
+  // keys the query cache.
+  const target = useWorkspaceTarget()
   const queryClient = useQueryClient()
   const copyMutation = useMutation(trpc.fileEditor.copy.mutationOptions())
   const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
@@ -108,9 +113,15 @@ export function useFileTreeClipboard({
             const destPath = resolveCollisionPath(rawDest, targetDir)
             try {
               if (clipboard.mode === 'copy') {
-                await copyMutation.mutateAsync({ rootPath: projectPath, srcPath, destPath })
+                await copyMutation.mutateAsync({
+                  ...target,
+                  rootPath: projectPath,
+                  srcPath,
+                  destPath
+                })
               } else {
                 await renameMutation.mutateAsync({
+                  ...target,
                   rootPath: projectPath,
                   oldPath: srcPath,
                   newPath: destPath
@@ -141,9 +152,15 @@ export function useFileTreeClipboard({
               const name = srcRel.includes('/') ? srcRel.slice(srcRel.lastIndexOf('/') + 1) : srcRel
               const rawDest = targetDir ? `${targetDir}/${name}` : name
               const destPath = resolveCollisionPath(rawDest, targetDir)
-              await copyMutation.mutateAsync({ rootPath: projectPath, srcPath: srcRel, destPath })
+              await copyMutation.mutateAsync({
+                ...target,
+                rootPath: projectPath,
+                srcPath: srcRel,
+                destPath
+              })
             } else {
               await copyInMutation.mutateAsync({
+                ...target,
                 rootPath: projectPath,
                 absoluteSrc: abs,
                 targetDir
@@ -185,7 +202,12 @@ export function useFileTreeClipboard({
         const destName = duplicateName(entry.name, names)
         const destPath = parentDir ? `${parentDir}/${destName}` : destName
         try {
-          await copyMutation.mutateAsync({ rootPath: projectPath, srcPath: entry.path, destPath })
+          await copyMutation.mutateAsync({
+            ...target,
+            rootPath: projectPath,
+            srcPath: entry.path,
+            destPath
+          })
           dirsToReload.add(parentDir)
         } catch (err) {
           console.error('Duplicate failed:', err)
@@ -206,12 +228,18 @@ export function useFileTreeClipboard({
     [projectPath]
   )
 
+  // Deliberately NOT routed: `showInFinder` resolves against the DESKTOP, which
+  // is the only machine with a file manager the user can see. `canRevealInFinder`
+  // lets the menu hide the entry rather than offer one that would reveal an
+  // unrelated directory that happens to share the path.
+  const canRevealInFinder = useWorkspaceIsLocal()
   const handleRevealInFinder = useCallback(
     (entry: DirEntry) => {
+      if (!canRevealInFinder) return
       void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: entry.path })
       track('reveal_in_finder')
     },
-    [projectPath]
+    [projectPath, canRevealInFinder]
   )
 
   return {
@@ -224,6 +252,7 @@ export function useFileTreeClipboard({
     handlePaste,
     handleDuplicate,
     handleCopyPath,
-    handleRevealInFinder
+    handleRevealInFinder,
+    canRevealInFinder
   }
 }

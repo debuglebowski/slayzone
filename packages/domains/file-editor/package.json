@@ -15,7 +15,9 @@
     "./client/useWatchedFile": "./src/client/useWatchedFile.ts",
     "./client/SearchableCodeView": "./src/client/SearchableCodeView.tsx",
     "./client/EditorToc": "./src/client/EditorToc.tsx",
-    "./client/markdown-headings": "./src/client/markdown-headings.ts"
+    "./client/markdown-headings": "./src/client/markdown-headings.ts",
+    "./client/WorkspaceDirPicker": "./src/client/WorkspaceDirPicker.tsx",
+    "./client/workspace-target": "./src/client/workspace-target.tsx"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

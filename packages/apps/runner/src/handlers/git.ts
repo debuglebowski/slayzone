@@ -67,7 +67,10 @@ const SETUP_SCRIPT = '.slay/worktree-setup.sh'
 const SETUP_SCRIPT_TIMEOUT_MS = 5 * 60_000
 
 export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
-  const roots = ctx.config.allowedRoots
+  // Read the jail through `ctx` on every call, never captured:
+  // `runner.setAllowedRoots` edits it live, and a captured array would keep
+  // enforcing the boot-time set long after the user widened it.
+  const allow = (candidate: string): string => assertPathAllowed(candidate, ctx.config.allowedRoots)
 
   // Result key is `isGitRepo`, matching `gitIsGitRepoResultSchema` in the SHARED
   // frame contract. It used to be `isRepo`, so the hub's parse threw
@@ -77,7 +80,7 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
   // mismatch: two sides declaring the same wire shape independently.
   async function isGitRepo(rawParams: unknown): Promise<{ isGitRepo: boolean }> {
     const { path } = isGitRepoParams.parse(rawParams)
-    const repoPath = assertPathAllowed(path, roots)
+    const repoPath = allow(path)
     try {
       await execGit(['rev-parse', '--git-dir'], repoPath)
       return { isGitRepo: true }
@@ -88,7 +91,7 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
 
   async function getCurrentBranch(rawParams: unknown): Promise<{ branch: string | null }> {
     const parsed = getCurrentBranchParams.parse(rawParams)
-    const repoPath = assertPathAllowed(parsed.repoPath, roots)
+    const repoPath = allow(parsed.repoPath)
     try {
       const out = await execGit(['branch', '--show-current'], repoPath)
       return { branch: out.trim() || null }
@@ -99,8 +102,8 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
 
   async function createWorktree(rawParams: unknown): Promise<{ ok: true }> {
     const params = createWorktreeParams.parse(rawParams)
-    const repoPath = assertPathAllowed(params.repoPath, roots)
-    const targetPath = assertPathAllowed(params.worktreePath, roots)
+    const repoPath = allow(params.repoPath)
+    const targetPath = allow(params.worktreePath)
     const args = ['worktree', 'add', targetPath]
     if (params.branch) args.push('-b', params.branch)
     if (params.sourceBranch) args.push(params.sourceBranch)
@@ -114,8 +117,8 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
     const params = removeWorktreeParams.parse(rawParams)
     // The shared frame names this `projectPath` (it is the parent repo the worktree
     // is registered in); the local copy called it `repoPath`.
-    const repoPath = assertPathAllowed(params.projectPath, roots)
-    const worktreePath = assertPathAllowed(params.worktreePath, roots)
+    const repoPath = allow(params.projectPath)
+    const worktreePath = allow(params.worktreePath)
 
     // Capture the worktree's branch BEFORE removing it (afterwards the checkout is
     // gone and the name is unrecoverable).
@@ -159,8 +162,8 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
     rawParams: unknown
   ): Promise<{ ran: boolean; success?: boolean; output?: string }> {
     const params = runWorktreeSetupScriptParams.parse(rawParams)
-    const worktreePath = assertPathAllowed(params.worktreePath, roots)
-    const repoPath = assertPathAllowed(params.repoPath, roots)
+    const worktreePath = allow(params.worktreePath)
+    const repoPath = allow(params.repoPath)
 
     const scriptPath = resolve(worktreePath, SETUP_SCRIPT)
     if (!existsSync(scriptPath)) return Promise.resolve({ ran: false })
@@ -216,8 +219,8 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
 
   async function copyIgnoredFiles(rawParams: unknown): Promise<{ copied: number }> {
     const params = copyIgnoredFilesParams.parse(rawParams)
-    const repoPath = assertPathAllowed(params.repoPath, roots)
-    const worktreePath = assertPathAllowed(params.worktreePath, roots)
+    const repoPath = allow(params.repoPath)
+    const worktreePath = allow(params.worktreePath)
 
     let relPaths: string[]
     if (params.behavior === 'all') {

@@ -25,6 +25,7 @@ import type { WebSocket } from 'ws'
 import { TypedEventEmitter } from '../shared/events'
 import {
   type CheckoutStatusParams,
+  type FsChangeParams,
   type EnrollParams,
   enrollParamsSchema,
   RUNNER_PROTOCOL_VERSION,
@@ -85,6 +86,9 @@ export type RunnerGatewayEvents = {
   'proc.exit': ProcExitParams & { runnerId: string }
   event: RunnerEventParams & { runnerId: string }
   'checkout.status': CheckoutStatusParams & { runnerId: string }
+  /** A watched file changed on a runner. Demuxed by `watchId` in the routed
+   *  workspace-fs adapters — see `createRemoteFsAdapters`. */
+  'fs.change': FsChangeParams & { runnerId: string }
   /** Malformed or unexpected frame (never fatal to the gateway). */
   'protocol-error': { runnerId: string | null; detail: string; line?: string }
 }
@@ -507,6 +511,9 @@ export function createHubRunnerGateway(options: HubRunnerGatewayOptions): HubRun
         return
       case RunnerNotificationMethods.checkoutStatus:
         events.emit('checkout.status', { runnerId, ...(parsed.data as CheckoutStatusParams) })
+        return
+      case RunnerNotificationMethods.fsChange:
+        events.emit('fs.change', { runnerId, ...(parsed.data as FsChangeParams) })
         return
     }
   }

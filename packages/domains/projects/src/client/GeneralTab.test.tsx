@@ -25,6 +25,13 @@ vi.mock('@slayzone/transport/client', () => ({
   })
 }))
 
+// The directory picker is its own unit with its own queries; GeneralTab only has
+// to open it. Stubbing keeps this file about the runner select and the path
+// field, and keeps the picker's data layer out of this mock.
+vi.mock('@slayzone/file-editor/client/WorkspaceDirPicker', () => ({
+  WorkspaceDirPicker: () => null
+}))
+
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: runnersData, isLoading: false, refetch: vi.fn() }),
   useMutation: (opts: { __key: string }) => ({

@@ -30,8 +30,30 @@ export interface TaskDetailData {
   browserTabs: BrowserTabsState
 }
 
-async function checkProjectPathExists(client: TrpcVanillaClient, path: string): Promise<boolean> {
-  return client.app.files.pathExists.query({ filePath: path })
+/**
+ * Does the project's directory exist on the machine that owns it?
+ *
+ * Routed to the task's runner, not to whichever hub answered the rest of this
+ * load. The old `app.files.pathExists` probed the HUB's disk, so a task whose
+ * workspace lives on a runner opened with `projectPathMissing: true` and the
+ * panel rendered "No repository path configured" for a path that was fine.
+ *
+ * A runner we cannot reach is NOT missing: `reachable: false` means the question
+ * went unanswered, and claiming the path is gone would be a guess. Any throw is
+ * read the same way — this runs inside the Suspense load, and an unreachable
+ * runner must not take the whole Task Detail page down with it.
+ */
+async function checkProjectPathMissing(
+  client: TrpcVanillaClient,
+  taskId: string,
+  path: string
+): Promise<boolean> {
+  try {
+    const res = await client.workspace.pathExists.query({ taskId, path })
+    return res.reachable && !res.exists
+  } catch {
+    return false
+  }
 }
 
 export { fetchTaskDetail }
@@ -60,7 +82,7 @@ async function fetchTaskDetail(taskId: string, hubId?: string): Promise<TaskDeta
   const project = projects.find((p) => p.id === loadedTask.project_id) ?? null
   let projectPathMissing = false
   if (project?.path) {
-    projectPathMissing = !(await checkProjectPathExists(trpc, project.path))
+    projectPathMissing = await checkProjectPathMissing(trpc, loadedTask.id, project.path)
   }
 
   // Resolve parent task

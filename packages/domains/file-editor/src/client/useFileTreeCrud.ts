@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import type { DirEntry } from '../shared'
+import { useWorkspaceTarget } from './workspace-target'
 
 export interface CreatingState {
   parentPath: string
@@ -31,6 +32,10 @@ export function useFileTreeCrud({
   setSelectedPaths
 }: UseFileTreeCrudArgs) {
   const trpc = useTRPC()
+  // Which machine these filesystem calls are for. Ambient for the whole
+  // panel — see ./workspace-target. Spread into every input so it also
+  // keys the query cache.
+  const target = useWorkspaceTarget()
   const createFileMutation = useMutation(trpc.fileEditor.createFile.mutationOptions())
   const createDirMutation = useMutation(trpc.fileEditor.createDir.mutationOptions())
   const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
@@ -62,10 +67,18 @@ export function useFileTreeCrud({
       const newPath = creating.parentPath ? `${creating.parentPath}/${name.trim()}` : name.trim()
       try {
         if (creating.type === 'file') {
-          await createFileMutation.mutateAsync({ rootPath: projectPath, filePath: newPath })
+          await createFileMutation.mutateAsync({
+            ...target,
+            rootPath: projectPath,
+            filePath: newPath
+          })
           track('file_created')
         } else {
-          await createDirMutation.mutateAsync({ rootPath: projectPath, dirPath: newPath })
+          await createDirMutation.mutateAsync({
+            ...target,
+            rootPath: projectPath,
+            dirPath: newPath
+          })
           track('folder_created')
         }
         await loadDir(creating.parentPath)
@@ -89,7 +102,7 @@ export function useFileTreeCrud({
       const parentDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${newName.trim()}` : newName.trim()
       try {
-        await renameMutation.mutateAsync({ rootPath: projectPath, oldPath, newPath })
+        await renameMutation.mutateAsync({ ...target, rootPath: projectPath, oldPath, newPath })
         track('file_renamed')
         onFileRenamed?.(oldPath, newPath)
         const srcPrefix = oldPath + '/'
@@ -123,7 +136,7 @@ export function useFileTreeCrud({
       const dirsToReload = new Set<string>()
       for (const p of paths) {
         try {
-          await deleteMutation.mutateAsync({ rootPath: projectPath, targetPath: p })
+          await deleteMutation.mutateAsync({ ...target, rootPath: projectPath, targetPath: p })
           track('file_deleted')
           dirsToReload.add(p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
         } catch (err) {

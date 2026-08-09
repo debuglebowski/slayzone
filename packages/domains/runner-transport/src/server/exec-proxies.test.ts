@@ -6,11 +6,13 @@
  * `RoutingGateway` slice of `HubRunnerGateway`.
  */
 import type { ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
+import type { LocalWorkspaceFs } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
 import {
+  createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
   createRoutingProcessBackend,
   createRoutingChatBackend,
@@ -1030,5 +1032,325 @@ describe('the no-runner error is actionable', () => {
     await expect(wt.createWorktree('task-9', '/r', '/wt', 'b')).rejects.toThrow(
       /worktree create for task task-9/
     )
+  })
+})
+
+// ===========================================================================
+// Workspace filesystem adapters
+// ===========================================================================
+
+/**
+ * A `LocalWorkspaceFs` that records rather than touching disk. Only the
+ * `runnerId: null` path may reach it, so any call recorded during a routed test
+ * is itself the failure — the whole point of this seam is that a workspace op
+ * never silently answers about the hub's disk.
+ */
+function makeLocalFs(): LocalWorkspaceFs & { calls: string[] } {
+  const calls: string[] = []
+  const note =
+    <T>(name: string, value: T) =>
+    (): T => {
+      calls.push(name)
+      return value
+    }
+  return {
+    calls,
+    listRoots: note('listRoots', {
+      roots: ['/home/local'],
+      home: '/home/local',
+      platform: 'linux',
+      sep: '/'
+    }),
+    listDir: async (path: string) => {
+      calls.push('listDir')
+      return { path, parent: null, entries: [] }
+    },
+    mkdir: async (path: string) => {
+      calls.push('mkdir')
+      return { path }
+    },
+    pathExists: note('pathExists', true),
+    setAllowedRoots: async () => {
+      calls.push('setAllowedRoots')
+      throw new Error('this host has no path jail to configure')
+    },
+    readDir: note('readDir', []),
+    readFile: note('readFile', { content: 'local' }),
+    writeFile: note('writeFile', undefined),
+    createFile: note('createFile', undefined),
+    createDir: note('createDir', undefined),
+    rename: note('rename', undefined),
+    delete: note('delete', undefined),
+    copyIn: note('copyIn', 'local.txt'),
+    copy: note('copy', undefined),
+    gitStatus: async () => {
+      calls.push('gitStatus')
+      return { files: {}, isGitRepo: false }
+    },
+    searchFiles: note('searchFiles', { results: [], truncated: false }),
+    listAllFiles: note('listAllFiles', { files: [], truncated: false }),
+    watch: () => {
+      calls.push('watch')
+      return () => {}
+    }
+  }
+}
+
+describe('createRemoteFsAdapters — browse ops', () => {
+  it('forwards listRoots/listDir/mkdir to the runner and parses the replies', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.listRoots', () => ({
+      roots: ['/srv/work'],
+      home: '/home/deploy',
+      platform: 'linux',
+      sep: '/'
+    }))
+    gateway.onMethod('fs.listDir', () => ({
+      path: '/srv/work',
+      parent: null,
+      entries: [{ name: 'app', path: '/srv/work/app', type: 'directory', isGitRepo: true }]
+    }))
+    gateway.onMethod('fs.mkdir', () => ({ path: '/srv/work/new' }))
+
+    const local = makeLocalFs()
+    const fs = createRemoteFsAdapters({ gateway, local })
+
+    expect(await fs.listRoots('runner-1')).toEqual({
+      roots: ['/srv/work'],
+      home: '/home/deploy',
+      platform: 'linux',
+      sep: '/'
+    })
+    const listed = await fs.listDir('runner-1', '/srv/work', { dirsOnly: true })
+    expect(listed.entries[0]?.isGitRepo).toBe(true)
+    expect(requireCall(gateway, 'fs.listDir').params).toMatchObject({
+      path: '/srv/work',
+      dirsOnly: true
+    })
+    expect(await fs.mkdir('runner-1', '/srv/work/new')).toEqual({ path: '/srv/work/new' })
+
+    // Nothing touched the hub's disk.
+    expect(local.calls).toEqual([])
+  })
+
+  // The bug this whole seam exists to fix: the hub answering a path question
+  // about its OWN disk while the workspace lives on a runner. A remote probe
+  // must never reach `local`, whatever the hub happens to have at that path.
+  it('probes pathExists on the runner, never on the hub', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.pathExists', () => ({ exists: false }))
+    const local = makeLocalFs()
+    const fs = createRemoteFsAdapters({ gateway, local })
+
+    expect(await fs.pathExists('runner-1', '/srv/work/app')).toBe(false)
+    expect(local.calls).toEqual([])
+    expect(requireCall(gateway, 'fs.pathExists').runnerId).toBe('runner-1')
+  })
+
+  // Not a fallback: null means no runner exists to ask (standalone/fork sidecar,
+  // or before the local runner enrolls), where the hub's disk is the only disk.
+  it('answers in-process when there is no runner', async () => {
+    const gateway = new FakeGateway()
+    const local = makeLocalFs()
+    const fs = createRemoteFsAdapters({ gateway, local })
+
+    expect(await fs.pathExists(null, '/tmp/x')).toBe(true)
+    await fs.listRoots(null)
+    await fs.listDir(null, '/tmp')
+    expect(local.calls).toEqual(['pathExists', 'listRoots', 'listDir'])
+    expect(gateway.calls).toEqual([])
+  })
+})
+
+describe('createRemoteFsAdapters — allowedRoots', () => {
+  it('forwards a jail edit to the runner and reports what was rejected', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('runner.setAllowedRoots', () => ({
+      roots: ['/srv/work'],
+      rejected: [{ path: '/nope', reason: 'does not exist on this runner' }]
+    }))
+    const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs() })
+
+    expect(await fs.setAllowedRoots('runner-1', ['/srv/work', '/nope'])).toEqual({
+      roots: ['/srv/work'],
+      rejected: [{ path: '/nope', reason: 'does not exist on this runner' }]
+    })
+  })
+
+  // A hub has no jail. Pretending to save would leave the user believing they
+  // had widened access that was never restricted in the first place.
+  it('refuses when there is no runner, rather than silently accepting', async () => {
+    const fs = createRemoteFsAdapters({ gateway: new FakeGateway(), local: makeLocalFs() })
+    await expect(fs.setAllowedRoots(null, ['/srv/work'])).rejects.toThrow(/no path jail/)
+  })
+})
+
+describe('createRemoteFsAdapters — editor ops', () => {
+  it('forwards each editor op to its frame and unwraps the payload', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.readDir', () => ({
+      entries: [{ name: 'src', path: 'src', type: 'directory' }]
+    }))
+    gateway.onMethod('fs.readFile', () => ({ content: 'remote' }))
+    gateway.onMethod('fs.writeFile', () => ({ ok: true }))
+    gateway.onMethod('fs.copyIn', () => ({ path: 'assets/pic.png' }))
+    gateway.onMethod('fs.gitStatus', () => ({ files: { 'a.ts': 'modified' }, isGitRepo: true }))
+    gateway.onMethod('fs.listAllFiles', () => ({ files: ['a.ts'], truncated: true }))
+    gateway.onMethod('fs.searchFiles', () => ({ results: [], truncated: false }))
+
+    const local = makeLocalFs()
+    const fs = createRemoteFsAdapters({ gateway, local })
+
+    expect(await fs.readDir('runner-1', '/srv/app', '')).toEqual([
+      { name: 'src', path: 'src', type: 'directory' }
+    ])
+    expect(await fs.readFile('runner-1', '/srv/app', 'a.ts')).toEqual({ content: 'remote' })
+    await fs.writeFile('runner-1', '/srv/app', 'a.ts', 'x')
+    expect(await fs.copyIn('runner-1', '/srv/app', '/tmp/pic.png')).toBe('assets/pic.png')
+    expect(await fs.gitStatus('runner-1', '/srv/app')).toEqual({
+      files: { 'a.ts': 'modified' },
+      isGitRepo: true
+    })
+    expect(local.calls).toEqual([])
+  })
+
+  // A capped whole-tree read must arrive labelled. Dropping `truncated` would
+  // present a partial tree as the complete one.
+  it('preserves the truncated flag on capped whole-tree reads', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.listAllFiles', () => ({ files: ['a.ts'], truncated: true }))
+    const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs() })
+    expect(await fs.listAllFiles('runner-1', '/srv/app')).toEqual({
+      files: ['a.ts'],
+      truncated: true
+    })
+  })
+})
+
+describe('createRemoteFsAdapters — watch', () => {
+  const runner = (runnerId: string): RunnerDescriptor => ({
+    runnerId,
+    name: runnerId,
+    platform: 'linux-x64',
+    version: '0.0.0',
+    capabilities: ['fs'],
+    connectedAt: 0,
+    lastSeenAt: 0
+  })
+
+  it('starts a watch and delivers only its own runner + watchId events', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.watchStart', () => ({ ok: true }))
+    gateway.onMethod('fs.watchStop', () => ({ ok: true }))
+    const fs = createRemoteFsAdapters({
+      gateway,
+      local: makeLocalFs(),
+      newWatchId: () => 'watch-1'
+    })
+
+    const seen: string[] = []
+    const stop = fs.watch('runner-1', '/srv/app', (e) => seen.push(`${e.type}:${e.relPath}`))
+    await vi.waitFor(() => expect(gateway.requestsOf('fs.watchStart')).toHaveLength(1))
+
+    gateway.emit('fs.change', {
+      runnerId: 'runner-1',
+      watchId: 'watch-1',
+      type: 'changed',
+      relPath: 'a.ts'
+    })
+    // Another watch on the same runner, and the same watchId on another runner —
+    // both must be ignored, or two panels watching one root cross-talk.
+    gateway.emit('fs.change', {
+      runnerId: 'runner-1',
+      watchId: 'watch-2',
+      type: 'changed',
+      relPath: 'other.ts'
+    })
+    gateway.emit('fs.change', {
+      runnerId: 'runner-2',
+      watchId: 'watch-1',
+      type: 'changed',
+      relPath: 'elsewhere.ts'
+    })
+
+    expect(seen).toEqual(['changed:a.ts'])
+    stop()
+    expect(requireCall(gateway, 'fs.watchStop').params).toEqual({ watchId: 'watch-1' })
+  })
+
+  it('stops delivering after dispose', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.watchStart', () => ({ ok: true }))
+    gateway.onMethod('fs.watchStop', () => ({ ok: true }))
+    const fs = createRemoteFsAdapters({
+      gateway,
+      local: makeLocalFs(),
+      newWatchId: () => 'watch-1'
+    })
+
+    const seen: string[] = []
+    const stop = fs.watch('runner-1', '/srv/app', (e) => seen.push(e.relPath))
+    await vi.waitFor(() => expect(gateway.requestsOf('fs.watchStart')).toHaveLength(1))
+    stop()
+    gateway.emit('fs.change', {
+      runnerId: 'runner-1',
+      watchId: 'watch-1',
+      type: 'changed',
+      relPath: 'a.ts'
+    })
+    expect(seen).toEqual([])
+  })
+
+  // Disposing before the start round-trip lands must still stop the runner-side
+  // watcher; otherwise a fast open/close leaks a watcher for the process lifetime.
+  it('stops a watch disposed before its start request resolves', async () => {
+    const gateway = new FakeGateway()
+    let releaseStart: (() => void) | undefined
+    gateway.onMethod('fs.watchStart', () => {
+      // Returned promise resolves only when the test releases it.
+      return new Promise<{ ok: true }>((resolve) => {
+        releaseStart = () => resolve({ ok: true })
+      })
+    })
+    gateway.onMethod('fs.watchStop', () => ({ ok: true }))
+    const fs = createRemoteFsAdapters({
+      gateway,
+      local: makeLocalFs(),
+      newWatchId: () => 'watch-1'
+    })
+
+    const stop = fs.watch('runner-1', '/srv/app', () => {})
+    stop()
+    releaseStart!()
+    await vi.waitFor(() => expect(gateway.requestsOf('fs.watchStop').length).toBeGreaterThan(0))
+  })
+
+  // Silence is indistinguishable from "nothing changed". A lost runner has to
+  // tear the watch down so the client resubscribes rather than trusting a frozen
+  // tree.
+  it('tears the watch down when its runner is lost', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.watchStart', () => ({ ok: true }))
+    gateway.onMethod('fs.watchStop', () => ({ ok: true }))
+    const fs = createRemoteFsAdapters({
+      gateway,
+      local: makeLocalFs(),
+      newWatchId: () => 'watch-1'
+    })
+
+    const seen: string[] = []
+    fs.watch('runner-1', '/srv/app', (e) => seen.push(e.relPath))
+    await vi.waitFor(() => expect(gateway.requestsOf('fs.watchStart')).toHaveLength(1))
+
+    gateway.emit('runner-connected', { runner: runner('runner-1') })
+    gateway.emit('runner-lost', { runnerId: 'runner-1', reason: 'heartbeat-timeout' })
+
+    gateway.emit('fs.change', {
+      runnerId: 'runner-1',
+      watchId: 'watch-1',
+      type: 'changed',
+      relPath: 'a.ts'
+    })
+    expect(seen).toEqual([])
   })
 })

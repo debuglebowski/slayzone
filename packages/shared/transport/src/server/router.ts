@@ -20,6 +20,7 @@ import { projectsRouter } from './routers/projects'
 import { projectGroupsRouter } from './routers/project-groups'
 import { ptyRouter } from './routers/pty'
 import { runnersRouter } from './routers/runners'
+import { workspaceRouter } from './routers/workspace'
 import { settingsRouter } from './routers/settings'
 import { tagsRouter } from './routers/tags'
 import { taskRouter } from './routers/task'
@@ -55,6 +56,7 @@ export const appRouter = router({
   pty: ptyRouter,
   runners: runnersRouter,
   settings: settingsRouter,
+  workspace: workspaceRouter,
   tags: tagsRouter,
   task: taskRouter,
   telemetry: telemetryRouter,

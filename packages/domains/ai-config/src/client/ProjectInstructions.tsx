@@ -26,6 +26,7 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import { useWatchedFile } from '@slayzone/file-editor/client/useWatchedFile'
 import type { AiConfigItem, CliProvider, SyncHealth, SyncReason } from '../shared'
 import { PROVIDER_PATHS, PROVIDER_LABELS } from '../shared/provider-registry'
+import { WorkspaceTargetProvider } from '@slayzone/file-editor/client/workspace-target'
 
 interface ProjectInstructionsProps {
   projectId?: string | null
@@ -81,7 +82,21 @@ function dedupeProviderFiles(
   return Array.from(byPath.values())
 }
 
-export function ProjectInstructions({ projectId, projectPath }: ProjectInstructionsProps) {
+/**
+ * The instructions file lives on the project's machine, so the watch inside
+ * `useWatchedFile` has to be routed there. The provider is the seam that carries
+ * it — without it the watch resolves to the connected default runner and would
+ * report changes from the wrong filesystem (or none at all).
+ */
+export function ProjectInstructions(props: ProjectInstructionsProps) {
+  return (
+    <WorkspaceTargetProvider target={{ projectId: props.projectId ?? undefined }}>
+      <ProjectInstructionsBody {...props} />
+    </WorkspaceTargetProvider>
+  )
+}
+
+function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructionsProps) {
   const trpcClient = useTRPCClient()
   const [providerHealth, setProviderHealth] = useState<
     Partial<

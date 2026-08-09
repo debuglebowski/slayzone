@@ -110,6 +110,10 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-bounda
 # reaching the desktop over AppDeps for the offscreen render alone.
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
+# Routing the filesystem to runners put the local runner's [homedir()] jail in
+# front of work the desktop used to do unjailed. This pins the widening policy
+# that keeps a project outside $HOME from silently breaking.
+run_test_electron_strict_loader packages/apps/hub/src/local-runner-roots.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
 # has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
 run_test_electron_strict_loader packages/apps/hub/src/supervised-bootstrap.test.ts
@@ -494,6 +498,7 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
+  packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \
   packages/domains/task/src/client/RunnerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \

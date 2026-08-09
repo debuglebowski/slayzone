@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@slayzone/file-editor": "workspace:*",
     "@slayzone/hooks": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/runner-transport": "workspace:*",

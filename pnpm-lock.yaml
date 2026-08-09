@@ -467,6 +467,9 @@ importers:
       '@slayzone/feedback':
         specifier: workspace:*
         version: link:../../domains/feedback
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../../domains/file-editor
       '@slayzone/hub-auth':
         specifier: workspace:*
         version: link:../../domains/hub-auth
@@ -643,6 +646,9 @@ importers:
 
   packages/apps/runner:
     dependencies:
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../../domains/file-editor
       '@slayzone/hooks':
         specifier: workspace:*
         version: link:../../shared/hooks
@@ -1284,6 +1290,9 @@ importers:
 
   packages/domains/projects:
     dependencies:
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../integrations
@@ -1336,6 +1345,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
       '@slayzone/processes':
         specifier: workspace:*
         version: link:../processes
@@ -1444,6 +1456,9 @@ importers:
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../integrations
@@ -2216,6 +2231,9 @@ importers:
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown

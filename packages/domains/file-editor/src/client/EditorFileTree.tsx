@@ -147,7 +147,8 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       handlePaste,
       handleDuplicate,
       handleCopyPath,
-      handleRevealInFinder
+      handleRevealInFinder,
+      canRevealInFinder
     } = useFileTreeClipboard({ projectPath, loadDir, dirContents, onFileRenamed })
 
     const {
@@ -274,6 +275,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       handleDuplicate,
       handleCopyPath,
       handleRevealInFinder,
+      canRevealInFinder,
       handleDeleteSelected
     }
 

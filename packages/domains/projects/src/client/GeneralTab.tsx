@@ -7,6 +7,7 @@ import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { ColorPicker } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
+import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { Project } from '@slayzone/projects/shared'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { useDialogStore } from '@slayzone/settings/client'
@@ -60,16 +61,10 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const fallbackLetters = (name || project.name).slice(0, 2).toUpperCase()
   const lettersPreview = iconLetters.trim().toUpperCase() || fallbackLetters
 
-  const handleBrowse = async () => {
-    const result = await showOpenDialog.mutateAsync({
-      title: 'Select Project Directory',
-      defaultPath: path || undefined,
-      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
-    })
-    if (!result.canceled && result.filePaths[0]) {
-      setPath(result.filePaths[0])
-    }
-  }
+  // The project directory lives on the machine that runs this project's agents,
+  // which need not be this one. A native dialog browses THIS desktop and would
+  // hand back a path that does not exist there — the picker browses the runner.
+  const [browseOpen, setBrowseOpen] = useState(false)
 
   const handleUploadIcon = async () => {
     const result = await showOpenDialog.mutateAsync({
@@ -159,11 +154,23 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
                 type="button"
                 variant="outline"
                 aria-label="Browse folder"
-                onClick={handleBrowse}
+                onClick={() => setBrowseOpen(true)}
               >
                 <FolderOpen className="h-4 w-4" />
               </IconButton>
             </div>
+            {/* Scoped to this project so the picker resolves the SAME runner its
+                agents will spawn on — including a default runner just changed in
+                the select below. */}
+            <WorkspaceDirPicker
+              open={browseOpen}
+              onOpenChange={setBrowseOpen}
+              onSelect={setPath}
+              target={{ runnerId: defaultRunnerId, projectId: project.id }}
+              title="Select project directory"
+              defaultPath={path || null}
+              allowCreate
+            />
             <p className="text-xs text-muted-foreground">
               Claude Code terminal will open in this directory
             </p>

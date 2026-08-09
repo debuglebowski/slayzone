@@ -4,6 +4,7 @@ import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/cli
 import { useVisibleInterval } from '@slayzone/ui'
 import type { DirEntry, GitFileStatus } from '../shared'
 import { STATUS_PRIORITY, compactChildren } from './EditorFileTree.utils'
+import { useWorkspaceTarget } from './workspace-target'
 
 export interface VisibleEntry {
   entry: DirEntry
@@ -28,6 +29,10 @@ export function useFileTreeData({
   onReady
 }: UseFileTreeDataArgs) {
   const trpc = useTRPC()
+  // Which machine these filesystem calls are for. Ambient for the whole
+  // panel — see ./workspace-target. Spread into every input so it also
+  // keys the query cache.
+  const target = useWorkspaceTarget()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   // Map of dirPath -> children entries (lazy loaded)
@@ -59,7 +64,9 @@ export function useFileTreeData({
   // --- Git status ---
   const [gitStatus, setGitStatus] = useState<Map<string, GitFileStatus>>(new Map())
 
-  const gitStatusQuery = useQuery(trpc.fileEditor.gitStatus.queryOptions({ rootPath: projectPath }))
+  const gitStatusQuery = useQuery(
+    trpc.fileEditor.gitStatus.queryOptions({ ...target, rootPath: projectPath })
+  )
 
   // External retrigger: refetch when refreshKey changes identity. react-query
   // dedups against the in-flight mount fetch, so the initial run is a no-op.
@@ -113,7 +120,7 @@ export function useFileTreeData({
 
   const loadDir = useCallback(
     async (dirPath: string) => {
-      const input = { rootPath: projectPath, dirPath }
+      const input = { ...target, rootPath: projectPath, dirPath }
       const items = await trpcClient.fileEditor.readDir.query(input)
       queryClient.setQueryData(trpc.fileEditor.readDir.queryKey(input), items)
       setDirContents((prev) => {
@@ -131,7 +138,7 @@ export function useFileTreeData({
 
   useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
-      { rootPath: projectPath },
+      { ...target, rootPath: projectPath },
       {
         onData: (event) => {
           const normalize = (p: string) => p.replace(/\/+$/, '')
@@ -183,7 +190,7 @@ export function useFileTreeData({
     if (!refreshKey) return
     void queryClient.invalidateQueries(trpc.fileEditor.readDir.queryFilter())
     void queryClient.invalidateQueries(
-      trpc.fileEditor.gitStatus.queryFilter({ rootPath: projectPath })
+      trpc.fileEditor.gitStatus.queryFilter({ ...target, rootPath: projectPath })
     )
     loadDir('')
     expandedFolders.forEach((dir) => loadDir(dir))

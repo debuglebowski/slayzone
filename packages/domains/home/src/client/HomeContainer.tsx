@@ -190,7 +190,11 @@ function HomeContainerImpl({
   )
 
   // Multi-repo detection for the git panel — same source as the task git panel.
-  const { repos: homeViewableRepos } = useProjectRepos(selectedProject?.path ?? null, null)
+  const { repos: homeViewableRepos } = useProjectRepos(
+    selectedProject?.path ?? null,
+    null,
+    selectedProject?.id
+  )
   const homeDetectedRepos = useMemo(
     () => homeViewableRepos.map((r) => ({ name: r.name, path: r.path, kind: r.kind })),
     [homeViewableRepos]

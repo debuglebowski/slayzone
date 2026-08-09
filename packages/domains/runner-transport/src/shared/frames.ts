@@ -11,14 +11,23 @@
  * Direction map (v1):
  *  runner → hub requests:      enroll, hello, heartbeat
  *  runner → hub notifications: pty.data, pty.exit, proc.data, proc.exit,
- *                              event, checkout.status
+ *                              event, checkout.status, fs.change
  *  hub → runner requests:      pty.spawn, pty.kill, pty.resize, pty.write,
  *                              pty.getBufferSince, git.isGitRepo,
  *                              git.getCurrentBranch, git.createWorktree,
  *                              git.removeWorktree, git.runWorktreeSetupScript,
- *                              git.copyIgnoredFiles, fs.pathExists,
- *                              fs.removeDir, proc.spawn, proc.kill, ping,
- *                              runner.shutdown
+ *                              git.copyIgnoredFiles, fs.* (see below),
+ *                              proc.spawn, proc.kill, ping, runner.shutdown
+ *
+ * The `fs.` namespace has three groups, kept distinct on purpose:
+ *   - raw probes    — fs.pathExists, fs.removeDir
+ *   - workspace browse (ABSOLUTE paths, jail-scoped) — fs.listRoots, fs.listDir,
+ *     fs.mkdir. Back the desktop's directory picker, which must describe the
+ *     runner's disk before a project root exists.
+ *   - file editor (ROOT-SCOPED, gitignore-aware) — fs.readDir, fs.readFile,
+ *     fs.writeFile, fs.createFile, fs.createDir, fs.rename, fs.delete,
+ *     fs.copyIn, fs.copy, fs.gitStatus, fs.searchFiles, fs.listAllFiles,
+ *     fs.watchStart, fs.watchStop.
  *
  * `pty.data.seq` is a per-session monotonic sequence number assigned by the
  * runner at emission and preserved end-to-end, so the hub can detect gaps and
@@ -139,7 +148,8 @@ export const RunnerNotificationMethods = {
   procData: 'proc.data',
   procExit: 'proc.exit',
   event: 'event',
-  checkoutStatus: 'checkout.status'
+  checkoutStatus: 'checkout.status',
+  fsChange: 'fs.change'
 } as const
 
 export const ptyDataParamsSchema = z.object({
@@ -209,13 +219,30 @@ export const procExitParamsSchema = z.object({
 })
 export type ProcExitParams = z.infer<typeof procExitParamsSchema>
 
+/**
+ * A watched file changed on the runner (file-editor panel).
+ *
+ * Correlated by `watchId`, which the HUB mints and passes to `fs.watchStart` —
+ * not by `rootPath`. Two tasks can watch the same root on the same runner, and a
+ * root-keyed stream could not tell their subscriptions apart on unsubscribe.
+ * `relPath` is relative to the watched root, matching `FileWatchEvent` in
+ * `@slayzone/file-editor/server`, which is what produces these events.
+ */
+export const fsChangeParamsSchema = z.object({
+  watchId: z.string().min(1),
+  type: z.enum(['changed', 'deleted']),
+  relPath: z.string()
+})
+export type FsChangeParams = z.infer<typeof fsChangeParamsSchema>
+
 export const runnerNotificationSchemas = {
   [RunnerNotificationMethods.ptyData]: ptyDataParamsSchema,
   [RunnerNotificationMethods.ptyExit]: ptyExitParamsSchema,
   [RunnerNotificationMethods.procData]: procDataParamsSchema,
   [RunnerNotificationMethods.procExit]: procExitParamsSchema,
   [RunnerNotificationMethods.event]: runnerEventParamsSchema,
-  [RunnerNotificationMethods.checkoutStatus]: checkoutStatusParamsSchema
+  [RunnerNotificationMethods.checkoutStatus]: checkoutStatusParamsSchema,
+  [RunnerNotificationMethods.fsChange]: fsChangeParamsSchema
 } as const
 export type RunnerNotificationMethod = keyof typeof runnerNotificationSchemas
 
@@ -246,6 +273,31 @@ export const HubToRunnerMethods = {
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
   fsPathExists: 'fs.pathExists',
   fsRemoveDir: 'fs.removeDir',
+  // workspace browse ops — ABSOLUTE paths inside the runner's allowedRoots, used
+  // by the desktop's directory picker before any project/root exists.
+  fsListRoots: 'fs.listRoots',
+  fsListDir: 'fs.listDir',
+  fsMkdir: 'fs.mkdir',
+  // file-editor ops — ROOT-SCOPED (rootPath + a path relative to it), gitignore
+  // aware. One-to-one with `@slayzone/file-editor/server`, which the runner
+  // imports directly rather than reimplementing.
+  fsReadDir: 'fs.readDir',
+  fsReadFile: 'fs.readFile',
+  fsWriteFile: 'fs.writeFile',
+  fsCreateFile: 'fs.createFile',
+  fsCreateDir: 'fs.createDir',
+  fsRename: 'fs.rename',
+  fsDelete: 'fs.delete',
+  fsCopyIn: 'fs.copyIn',
+  fsCopy: 'fs.copy',
+  fsGitStatus: 'fs.gitStatus',
+  fsSearchFiles: 'fs.searchFiles',
+  fsListAllFiles: 'fs.listAllFiles',
+  /** Whole-tree git repo discovery — one call, not one per directory. */
+  fsDiscoverRepos: 'fs.discoverRepos',
+  // file-editor watch lifecycle; changes stream back as `fs.change` notifications.
+  fsWatchStart: 'fs.watchStart',
+  fsWatchStop: 'fs.watchStop',
   // child-process ops (routed ProcessBackend + routed chat agents)
   procSpawn: 'proc.spawn',
   procKill: 'proc.kill',
@@ -254,7 +306,9 @@ export const HubToRunnerMethods = {
   /** Live child processes the runner still holds — drives reattach. */
   procList: 'proc.list',
   ping: 'ping',
-  runnerShutdown: 'runner.shutdown'
+  runnerShutdown: 'runner.shutdown',
+  /** Edit the runner's own path-jail (Settings → Runners). */
+  runnerSetAllowedRoots: 'runner.setAllowedRoots'
 } as const
 
 /** Reserved method namespaces for future hub → runner exec commands. */
@@ -438,6 +492,30 @@ export const pingResultSchema = z.object({
 })
 export type PingResult = z.infer<typeof pingResultSchema>
 
+/**
+ * Replace the runner's `allowedRoots` path-jail, persisting to its
+ * `runner.config.json` and applying without a restart.
+ *
+ * Not a privilege grant: a hub that can `pty.spawn` already runs arbitrary
+ * commands on the runner, so the jail is a safety rail against a mistaken path,
+ * not a security boundary against the hub. It exists so a stale project path
+ * cannot make the hub delete the wrong tree — which is exactly why the operator
+ * needs to be able to widen it when their projects legitimately live elsewhere.
+ */
+export const runnerSetAllowedRootsParamsSchema = z.object({
+  /** Absolute paths. Replaces the current set wholesale. */
+  roots: z.array(z.string().min(1))
+})
+export type RunnerSetAllowedRootsParams = z.infer<typeof runnerSetAllowedRootsParamsSchema>
+
+export const runnerSetAllowedRootsResultSchema = z.object({
+  /** The set actually applied, realpath-resolved and de-duplicated. */
+  roots: z.array(z.string()),
+  /** Requested roots that were dropped, with the reason (absent dir, relative). */
+  rejected: z.array(z.object({ path: z.string(), reason: z.string() }))
+})
+export type RunnerSetAllowedRootsResult = z.infer<typeof runnerSetAllowedRootsResultSchema>
+
 export const runnerShutdownParamsSchema = z.object({
   reason: z.string().optional(),
   /** Grace period before the runner may hard-exit. */
@@ -533,6 +611,275 @@ export const fsRemoveDirParamsSchema = z.object({
   path: z.string().min(1)
 })
 export type FsRemoveDirParams = z.infer<typeof fsRemoveDirParamsSchema>
+
+// ---------------------------------------------------------------------------
+// hub → runner requests: workspace browse ops
+//
+// ABSOLUTE paths, scoped to the runner's `allowedRoots`. These back the desktop's
+// directory picker, which has to answer "what is on the machine that will run the
+// agent" BEFORE a project (and therefore a root) exists — so unlike the editor ops
+// below they take no rootPath and return no relative paths.
+// ---------------------------------------------------------------------------
+
+/** No params: a runner's browsable roots are its configured path-jail. */
+export const fsListRootsParamsSchema = z.object({})
+export type FsListRootsParams = z.infer<typeof fsListRootsParamsSchema>
+
+export const fsListRootsResultSchema = z.object({
+  /** The runner's `allowedRoots`, realpath-resolved. Empty = fs access refused. */
+  roots: z.array(z.string()),
+  /** The runner user's home dir, for a sensible default expansion. */
+  home: z.string().nullable(),
+  /** `process.platform` — lets the client render paths in the runner's idiom. */
+  platform: z.string(),
+  /** Path separator on the runner, so the client never assumes POSIX. */
+  sep: z.string()
+})
+export type FsListRootsResult = z.infer<typeof fsListRootsResultSchema>
+
+export const fsListDirEntrySchema = z.object({
+  name: z.string(),
+  /** ABSOLUTE path on the runner. */
+  path: z.string(),
+  type: z.enum(['directory', 'file']),
+  isSymlink: z.boolean().optional(),
+  /** Directory contains a `.git` entry — surfaced so the picker can mark repos. */
+  isGitRepo: z.boolean().optional()
+})
+export type FsListDirEntry = z.infer<typeof fsListDirEntrySchema>
+
+export const fsListDirParamsSchema = z.object({
+  /** Absolute dir to list. Must resolve inside an allowed root. */
+  path: z.string().min(1),
+  /** Omit files. The picker selects directories, so it passes true. */
+  dirsOnly: z.boolean().optional(),
+  /** Include dotfiles/dirs. Default false — a picker showing `.cache` is noise. */
+  includeHidden: z.boolean().optional()
+})
+export type FsListDirParams = z.infer<typeof fsListDirParamsSchema>
+
+export const fsListDirResultSchema = z.object({
+  /** The realpath-resolved directory actually listed. */
+  path: z.string(),
+  /** Parent dir, or null when `path` IS an allowed root (nothing above it). */
+  parent: z.string().nullable(),
+  entries: z.array(fsListDirEntrySchema)
+})
+export type FsListDirResult = z.infer<typeof fsListDirResultSchema>
+
+export const fsMkdirParamsSchema = z.object({
+  /** Absolute path to create, recursively. Must land inside an allowed root. */
+  path: z.string().min(1)
+})
+export type FsMkdirParams = z.infer<typeof fsMkdirParamsSchema>
+
+export const fsMkdirResultSchema = z.object({
+  /** The created directory, realpath-resolved. */
+  path: z.string()
+})
+export type FsMkdirResult = z.infer<typeof fsMkdirResultSchema>
+
+// ---------------------------------------------------------------------------
+// hub → runner requests: file-editor ops
+//
+// ROOT-SCOPED: every path is relative to `rootPath`, gitignore is honoured, and
+// the shapes are one-to-one with `@slayzone/file-editor/server`. The runner
+// imports that module directly, so these schemas describe ITS types — the
+// compile-time assertions in `runner/src/handlers/fs.ts` pin the two together.
+//
+// `rootPath` still passes the allowedRoots jail on the runner; `assertWithinRoot`
+// inside file-editor then contains the relative part. Two independent guards,
+// deliberately: the jail bounds the machine, the root bounds the workspace.
+// ---------------------------------------------------------------------------
+
+/** Mirrors `DirEntry` from `@slayzone/file-editor/shared`. */
+export const fsDirEntrySchema = z.object({
+  name: z.string(),
+  /** Path RELATIVE to `rootPath`. */
+  path: z.string(),
+  type: z.enum(['file', 'directory']),
+  ignored: z.boolean().optional(),
+  isSymlink: z.boolean().optional()
+})
+
+export const fsReadDirParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  dirPath: z.string()
+})
+export type FsReadDirParams = z.infer<typeof fsReadDirParamsSchema>
+
+export const fsReadDirResultSchema = z.object({
+  entries: z.array(fsDirEntrySchema)
+})
+export type FsReadDirResult = z.infer<typeof fsReadDirResultSchema>
+
+export const fsReadFileParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  filePath: z.string().min(1),
+  force: z.boolean().optional()
+})
+export type FsReadFileParams = z.infer<typeof fsReadFileParamsSchema>
+
+/** Mirrors `ReadFileResult`. `content: null` + `tooLarge` = refused by size. */
+export const fsReadFileResultSchema = z.object({
+  content: z.string().nullable(),
+  tooLarge: z.boolean().optional(),
+  sizeBytes: z.number().optional()
+})
+export type FsReadFileResult = z.infer<typeof fsReadFileResultSchema>
+
+export const fsWriteFileParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  filePath: z.string().min(1),
+  content: z.string()
+})
+export type FsWriteFileParams = z.infer<typeof fsWriteFileParamsSchema>
+
+export const fsCreateFileParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  filePath: z.string().min(1)
+})
+export type FsCreateFileParams = z.infer<typeof fsCreateFileParamsSchema>
+
+export const fsCreateDirParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  dirPath: z.string().min(1)
+})
+export type FsCreateDirParams = z.infer<typeof fsCreateDirParamsSchema>
+
+export const fsRenameParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  oldPath: z.string().min(1),
+  newPath: z.string().min(1)
+})
+export type FsRenameParams = z.infer<typeof fsRenameParamsSchema>
+
+export const fsDeleteParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  targetPath: z.string().min(1)
+})
+export type FsDeleteParams = z.infer<typeof fsDeleteParamsSchema>
+
+export const fsCopyInParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  /** Absolute source ON THE RUNNER. Also jailed — it is a second machine path. */
+  absoluteSrc: z.string().min(1),
+  targetDir: z.string().optional()
+})
+export type FsCopyInParams = z.infer<typeof fsCopyInParamsSchema>
+
+export const fsCopyInResultSchema = z.object({
+  /** Path of the copy, relative to `rootPath`. */
+  path: z.string()
+})
+export type FsCopyInResult = z.infer<typeof fsCopyInResultSchema>
+
+export const fsCopyParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  srcPath: z.string().min(1),
+  destPath: z.string().min(1)
+})
+export type FsCopyParams = z.infer<typeof fsCopyParamsSchema>
+
+export const fsGitStatusParamsSchema = z.object({
+  rootPath: z.string().min(1)
+})
+export type FsGitStatusParams = z.infer<typeof fsGitStatusParamsSchema>
+
+/** Mirrors `GitStatusMap`. */
+export const fsGitStatusResultSchema = z.object({
+  files: z.record(
+    z.string(),
+    z.enum(['modified', 'staged', 'untracked', 'added', 'deleted', 'renamed', 'conflicted'])
+  ),
+  isGitRepo: z.boolean()
+})
+export type FsGitStatusResult = z.infer<typeof fsGitStatusResultSchema>
+
+/**
+ * Transport-layer caps on the two whole-tree reads.
+ *
+ * These used to be in-process calls where returning 200k paths cost an array;
+ * over the wire it is a single frame the hub must buffer, parse, and forward to
+ * every subscribed client. Capping HERE rather than per-caller means one number
+ * governs the wire, and `truncated` makes the cut visible instead of silently
+ * presenting a partial tree as complete.
+ */
+export const FS_MAX_LIST_ALL_FILES = 50_000
+export const FS_MAX_SEARCH_RESULTS = 2_000
+
+export const fsListAllFilesParamsSchema = z.object({
+  rootPath: z.string().min(1)
+})
+export type FsListAllFilesParams = z.infer<typeof fsListAllFilesParamsSchema>
+
+export const fsListAllFilesResultSchema = z.object({
+  /** Paths relative to `rootPath`, capped at {@link FS_MAX_LIST_ALL_FILES}. */
+  files: z.array(z.string()),
+  truncated: z.boolean()
+})
+export type FsListAllFilesResult = z.infer<typeof fsListAllFilesResultSchema>
+
+export const fsSearchFilesParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  query: z.string(),
+  options: z
+    .object({
+      matchCase: z.boolean().optional(),
+      regex: z.boolean().optional(),
+      maxResults: z.number().int().positive().optional()
+    })
+    .optional()
+})
+export type FsSearchFilesParams = z.infer<typeof fsSearchFilesParamsSchema>
+
+/** Mirrors `FileSearchResult[]`, capped at {@link FS_MAX_SEARCH_RESULTS}. */
+export const fsSearchFilesResultSchema = z.object({
+  results: z.array(
+    z.object({
+      path: z.string(),
+      matches: z.array(z.object({ line: z.number(), col: z.number(), lineText: z.string() }))
+    })
+  ),
+  truncated: z.boolean()
+})
+export type FsSearchFilesResult = z.infer<typeof fsSearchFilesResultSchema>
+
+export const fsDiscoverReposParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  maxDepth: z.number().int().positive().optional()
+})
+export type FsDiscoverReposParams = z.infer<typeof fsDiscoverReposParamsSchema>
+
+/** Mirrors `DiscoveredRepo[]` from `@slayzone/file-editor/server`. */
+export const fsDiscoverReposResultSchema = z.object({
+  repos: z.array(
+    z.object({
+      path: z.string(),
+      name: z.string(),
+      kind: z.enum(['project-root', 'child-repo', 'submodule']),
+      parentPath: z.string().nullable(),
+      hasGitmodules: z.boolean()
+    })
+  )
+})
+export type FsDiscoverReposResult = z.infer<typeof fsDiscoverReposResultSchema>
+
+export const fsWatchStartParamsSchema = z.object({
+  /** HUB-minted correlation id, echoed on every `fs.change` for this watch. */
+  watchId: z.string().min(1),
+  rootPath: z.string().min(1)
+})
+export type FsWatchStartParams = z.infer<typeof fsWatchStartParamsSchema>
+
+export const fsWatchStopParamsSchema = z.object({
+  watchId: z.string().min(1)
+})
+export type FsWatchStopParams = z.infer<typeof fsWatchStopParamsSchema>
+
+/** Shared by the write/lifecycle fs ops that return nothing meaningful. */
+export const fsOkResultSchema = z.object({ ok: z.literal(true) })
+export type FsOkResult = z.infer<typeof fsOkResultSchema>
 
 // ---------------------------------------------------------------------------
 // hub → runner requests: child-process ops

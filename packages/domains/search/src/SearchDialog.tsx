@@ -44,9 +44,12 @@ export function SearchDialog({
       setAllFiles(cacheRef.current.files)
       return
     }
-    trpcClient.fileEditor.listAllFiles.query({ rootPath: path }).then((list) => {
-      cacheRef.current = { path, files: list }
-      setAllFiles(list)
+    // `files` is capped at the transport layer; `truncated` says so. Nothing here
+    // acts on it yet, but destructuring keeps the cap visible at the call site
+    // rather than letting a partial tree look like the whole one.
+    trpcClient.fileEditor.listAllFiles.query({ rootPath: path }).then(({ files }) => {
+      cacheRef.current = { path, files }
+      setAllFiles(files)
     })
   }, [open, fileContext, trpcClient])
 

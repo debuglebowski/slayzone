@@ -59,6 +59,11 @@ const restartLocalRunnerSpy = vi.fn(() => Promise.resolve({ ok: true as const })
 /** The manual "re-check which runners are connected" round trip. */
 const refetchSpy = vi.fn(() => Promise.resolve({} as any))
 
+/** Reads/writes of a runner's filesystem path-jail, tagged with the asking hub. */
+const editRootsSpy = vi.fn(
+  (_call: { op: 'load' | 'save'; hub: string; runnerId: string; roots?: string[] }) => {}
+)
+
 /** Which hub's subtree is rendering — set by the test's `<Scope>` wrapper. */
 let renderingHubId = 'local'
 
@@ -73,18 +78,55 @@ vi.mock('@slayzone/transport/client', () => ({
       }
     }
   },
+  // The vanilla client, used only for the allowed-roots dialog's thunks. Tagged
+  // with the rendering hub for the same reason the query proxy is: an edit made
+  // from one hub's card must not read or write another hub's runner.
+  useTRPCClient: () => {
+    const hub = renderingHubId
+    return {
+      workspace: {
+        listRoots: {
+          query: (input: { runnerId: string }) => {
+            editRootsSpy({ op: 'load', hub, runnerId: input.runnerId })
+            return Promise.resolve({ roots: ['/home/kalle'], home: '/home/kalle' })
+          }
+        },
+        setAllowedRoots: {
+          mutate: (input: { runnerId: string; roots: string[] }) => {
+            editRootsSpy({ op: 'save', hub, runnerId: input.runnerId, roots: input.roots })
+            return Promise.resolve({ roots: input.roots, rejected: [] })
+          }
+        }
+      }
+    }
+  },
   electronBootstrap: { restartLocalRunner: () => restartLocalRunnerSpy() }
 }))
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: (opts: { __hub?: string }) => ({
-    data: (opts?.__hub !== undefined ? runnersByHub[opts.__hub] : undefined) ?? [],
-    isSuccess: queryState === 'success',
-    isError: queryState === 'error',
-    isFetching: queryState === 'loading',
-    // Records WHICH hub asked, so a refresh can be shown not to fan out.
-    refetch: () => refetchSpy(opts?.__hub)
-  }),
+  useQuery: (opts: { __hub?: string; queryFn?: () => Promise<unknown>; enabled?: boolean }) => {
+    // A plain-`queryFn` query (the allowed-roots dialog) is driven by its own
+    // thunk, not by the runner roster. Running it is the point: the thunk is what
+    // binds the read to a specific hub's client, which is exactly what the
+    // per-hub routing assertion checks.
+    const [data, setData] = React.useState<unknown>(undefined)
+    const started = React.useRef(false)
+    if (opts?.queryFn && opts.enabled !== false && !started.current) {
+      started.current = true
+      void opts.queryFn().then(setData)
+    }
+    if (opts?.queryFn) {
+      return { data, isSuccess: data !== undefined, isError: false, isPending: data === undefined }
+    }
+    return {
+      data: (opts?.__hub !== undefined ? runnersByHub[opts.__hub] : undefined) ?? [],
+      isSuccess: queryState === 'success',
+      isError: queryState === 'error',
+      isFetching: queryState === 'loading',
+      // Records WHICH hub asked, so a refresh can be shown not to fan out.
+      refetch: () => refetchSpy(opts?.__hub)
+    }
+  },
   useMutation: (opts: { __key?: string; __hub?: string }) => {
     const remote = opts?.__hub !== undefined && opts.__hub !== 'local'
     const revoke = opts?.__key === 'revoke'
@@ -425,6 +467,62 @@ describe('HubCard', () => {
     })
     expect(remoteRevokeSpy).toHaveBeenCalledWith({ runnerId: 'r-remote' })
     expect(revokeSpy).not.toHaveBeenCalled()
+  })
+
+  // The app's filesystem work runs on the runner that owns the workspace, so a
+  // folder outside these roots is one the UI genuinely cannot open. Offered for
+  // EVERY runner, local included — the local runner's default jail is only $HOME,
+  // and a project on an external drive would otherwise be unreachable with no
+  // way to say so.
+  it('offers the allowed-folders editor on every runner row', async () => {
+    runnersByHub = {
+      local: [
+        makeRunner({ id: 'r-1', name: 'local-runner' }),
+        makeRunner({ id: 'r-2', name: 'other' })
+      ]
+    }
+    await renderLocal()
+    expect(screen.getAllByTestId('runner-edit-roots')).toHaveLength(2)
+  })
+
+  // The dialog is a SINGLE instance living outside any hub's scope, so it is
+  // handed thunks bound to the asking hub's client. Without that, editing a
+  // remote runner's jail would read and write the local hub's.
+  it('reads and writes a remote runner’s folders against that runner’s own hub', async () => {
+    runnersByHub = {
+      local: [makeRunner({ id: 'r-1', name: 'mac-studio' })],
+      'hub-b': [makeRunner({ id: 'r-remote', name: 'vps-1' })]
+    }
+    await renderTwoHubs()
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId('runner-edit-roots')[1]!)
+    })
+    await waitFor(() => {
+      expect(editRootsSpy).toHaveBeenCalledWith({
+        op: 'load',
+        hub: 'hub-b',
+        runnerId: 'r-remote'
+      })
+    })
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('runner-roots-input'), {
+        target: { value: '/srv/projects' }
+      })
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('runner-roots-save'))
+    })
+
+    expect(editRootsSpy).toHaveBeenCalledWith({
+      op: 'save',
+      hub: 'hub-b',
+      runnerId: 'r-remote',
+      roots: ['/home/kalle', '/srv/projects']
+    })
   })
 
   // A loopback token cannot be used by a runner on another machine. Minting can't

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
   useTRPC,
   useTRPCClient,
@@ -14,8 +14,12 @@ import { Label } from '@slayzone/ui'
 import { ColorPicker } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
+import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { Project } from '@slayzone/projects/shared'
 export type ProjectStartMode = 'scratch' | 'github' | 'linear'
+
+/** Sentinel for "no explicit binding" — Select has no null value. */
+const DEFAULT_RUNNER_VALUE = '__default__'
 
 export interface ProjectCreationContext {
   startMode: ProjectStartMode
@@ -53,7 +57,6 @@ const START_OPTIONS: Array<{
 export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreateProjectDialogProps) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const showOpenDialog = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
   const [name, setName] = useState('')
   const [color, setColor] = useState(
     () => DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)]
@@ -70,19 +73,19 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const federatedHubs = fed && fed.hubs.length > 1 ? fed.hubs : []
   const [targetHubId, setTargetHubId] = useState(fed?.defaultHubId ?? 'local')
 
-  const handleBrowse = async () => {
-    const result = await showOpenDialog.mutateAsync({
-      title: 'Select Project Directory',
-      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
-    })
-    if (!result.canceled && result.filePaths[0]) {
-      setPath(result.filePaths[0])
-      // Auto-fill name from folder name if empty
-      if (!name.trim()) {
-        const folderName = result.filePaths[0].split('/').pop() || ''
-        setName(folderName)
-      }
-    }
+  // Which MACHINE the project lives on, distinct from which hub owns its row.
+  // A hub can have several runners; the path is meaningless without saying whose
+  // filesystem it is. Null = the hub's connected default runner.
+  const [targetRunnerId, setTargetRunnerId] = useState<string | null>(null)
+  const runnersQuery = useQuery(trpc.runners.list.queryOptions())
+  const runners = runnersQuery.data ?? []
+  const [browseOpen, setBrowseOpen] = useState(false)
+
+  const handlePicked = (picked: string): void => {
+    setPath(picked)
+    // Auto-fill name from the folder name if empty. Split on both separators —
+    // the chosen path belongs to the RUNNER, which may be a different OS.
+    if (!name.trim()) setName(picked.split(/[\\/]/).filter(Boolean).pop() ?? '')
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -104,9 +107,19 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
         color,
         path: path || undefined
       })
+      // Persist the machine choice: the path was browsed on THAT runner, so
+      // leaving the binding unset would let a later default change point the
+      // project's agents at a filesystem where the path does not exist.
+      if (targetRunnerId) {
+        await client.runners.setProjectDefaultRunner.mutate({
+          projectId: project.id,
+          runnerId: targetRunnerId
+        })
+      }
       onCreated(project, { startMode })
       setName('')
       setPath('')
+      setTargetRunnerId(null)
       setStartMode('scratch')
       setColor(DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)])
     } finally {
@@ -145,15 +158,51 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
                 type="button"
                 variant="outline"
                 aria-label="Browse folder"
-                onClick={handleBrowse}
+                onClick={() => setBrowseOpen(true)}
               >
                 <FolderOpen className="h-4 w-4" />
               </IconButton>
             </div>
+            <WorkspaceDirPicker
+              open={browseOpen}
+              onOpenChange={setBrowseOpen}
+              onSelect={handlePicked}
+              target={{ runnerId: targetRunnerId }}
+              title="Select project directory"
+              defaultPath={path || null}
+              allowCreate
+            />
             <p className="text-xs text-muted-foreground">
               Claude Code terminal will open in this directory
             </p>
           </div>
+          {/* Only when there is a choice to make. With one runner the path is
+              unambiguous, and a select with a single option is noise. */}
+          {runners.length > 1 && (
+            <div className="space-y-2">
+              <Label htmlFor="runner">Machine</Label>
+              <Select
+                value={targetRunnerId ?? DEFAULT_RUNNER_VALUE}
+                onValueChange={(v) => setTargetRunnerId(v === DEFAULT_RUNNER_VALUE ? null : v)}
+              >
+                <SelectTrigger id="runner" data-testid="create-project-runner">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_RUNNER_VALUE}>Default runner</SelectItem>
+                  {runners.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}
+                      {r.usable ? '' : ' (offline)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Whose filesystem the path above refers to, and where this project’s agents run.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Color</Label>
             <ColorPicker value={color} onChange={setColor} />

@@ -67,13 +67,17 @@ test('file-editor router: readFile content + rejects traversal', async () => {
   )
 })
 
+// Whole-tree reads are capped at the transport layer now that they cross a wire,
+// so the shape is `{ files, truncated }` — the flag has to reach the caller or a
+// partial tree reads as the complete one.
 test('file-editor router: listAllFiles recursive, excludes ignored', async () => {
-  const files = (await caller.listAllFiles({ rootPath })) as string[]
+  const { files, truncated } = await caller.listAllFiles({ rootPath })
   expect(files).toContain('readme.md')
   expect(files).toContain('src/main.ts')
   expect(files).toContain('src/utils.ts')
   expect(files.includes('debug.log')).toBe(false)
   expect(files.includes('node_modules/dep.js')).toBe(false)
+  expect(truncated).toBe(false)
 })
 
 test('file-editor router: writeFile mutates disk', async () => {

@@ -14,6 +14,7 @@ import {
   SelectValue,
   toast
 } from '@slayzone/ui'
+import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function DataSettingsTab() {
@@ -24,10 +25,13 @@ export function DataSettingsTab() {
   const [importedProjects, setImportedProjects] = useState<
     Array<{ id: string; name: string; path: string }>
   >([])
+  // One picker for the whole list — which row it is filling. An imported project
+  // has no runner binding yet, so it browses the connected default runner, which
+  // is also where its tasks will run until someone binds it elsewhere.
+  const [browsingIndex, setBrowsingIndex] = useState<number | null>(null)
 
   const exportProjectMutation = useMutation(trpc.app.exportImport.exportProject.mutationOptions())
   const importMutation = useMutation(trpc.app.exportImport.import.mutationOptions())
-  const showOpenDialogMutation = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
   const updateProjectMutation = useMutation(trpc.projects.update.mutationOptions())
 
   return (
@@ -111,26 +115,27 @@ export function DataSettingsTab() {
                   type="button"
                   variant="outline"
                   aria-label="Browse folder"
-                  onClick={async () => {
-                    const result = await showOpenDialogMutation.mutateAsync({
-                      title: 'Select Project Directory',
-                      defaultPath: p.path || undefined,
-                      properties: ['openDirectory']
-                    })
-                    if (!result.canceled && result.filePaths[0]) {
-                      setImportedProjects((prev) =>
-                        prev.map((proj, j) =>
-                          j === i ? { ...proj, path: result.filePaths[0] } : proj
-                        )
-                      )
-                    }
-                  }}
+                  onClick={() => setBrowsingIndex(i)}
                 >
                   <FolderOpen className="size-4" />
                 </IconButton>
               </div>
             </div>
           ))}
+          <WorkspaceDirPicker
+            open={browsingIndex !== null}
+            onOpenChange={(open) => !open && setBrowsingIndex(null)}
+            onSelect={(picked) =>
+              setImportedProjects((prev) =>
+                prev.map((proj, j) => (j === browsingIndex ? { ...proj, path: picked } : proj))
+              )
+            }
+            target={{ projectId: importedProjects[browsingIndex ?? 0]?.id }}
+            title="Select project directory"
+            defaultPath={
+              browsingIndex !== null ? (importedProjects[browsingIndex]?.path ?? null) : null
+            }
+          />
           <div className="flex gap-2">
             <Button
               onClick={async () => {

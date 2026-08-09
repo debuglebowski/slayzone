@@ -1,116 +1,29 @@
 /**
- * Repo discovery for the git panel: enumerates every git repo a task may want to view.
+ * Repo discovery for the git panel, addressed by RUNNER.
  *
- * Sources:
- * - Project root, if it is itself a git repo.
- * - Top-level child repos under projectPath (depth-capped + skip-list), for "wrapper folder" projects.
- * - Submodules of every git repo found above, recursively (via `git submodule status --recursive`).
+ * The walk itself moved to `@slayzone/file-editor/server` (`discoverRepos`) so it
+ * can execute on the machine that owns the directory. It used to run here, in the
+ * hub, against the hub's own disk — which resolved the terminal cwd, the editor
+ * root, and the git panel to the wrong place for any project living on a runner.
+ * What stays here is the part that is genuinely hub-side: the cache and the
+ * task-bound annotation.
  *
- * Results are flat with a `kind` discriminant + `parentPath` linkage. The viewer (RepoStrip)
- * groups submodules under their parent visually.
- *
- * NOT a worktree enumerator — `task.worktree_path` is overlaid by the caller via `taskBoundPath`.
+ * NOT a worktree enumerator — `task.worktree_path` is overlaid by the caller via
+ * `taskBoundPath`.
  */
 
-import { readdir, lstat as fsLstat } from 'fs/promises'
-import { existsSync } from 'fs'
+import type { WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import path from 'path'
-import { execGit } from './exec-async'
-import { isGitRepo } from './git-worktree'
 import type { RepoEntry, ListProjectReposOpts } from '../shared/types'
 
-const MAX_CHILD_DEPTH = 3
-const SKIP_DIRS = new Set([
-  'node_modules',
-  'dist',
-  'build',
-  '.next',
-  '.nuxt',
-  '.svelte-kit',
-  'target',
-  '.git',
-  '.venv',
-  'venv',
-  '__pycache__',
-  'vendor',
-  '.cache',
-  '.turbo',
-  'out',
-  'coverage',
-  '.parcel-cache',
-  '.idea',
-  '.vscode'
-])
-
 /**
- * Walk for git repos under root, capped at maxDepth, skipping known noise dirs.
- * Stops descending into a dir once it is identified as a git repo (we don't recurse
- * into a repo's working tree looking for nested repos — submodules handle that).
+ * Cache key is (runner, path), NOT path alone.
+ *
+ * Two runners routinely hold the same absolute path — `/home/user/dev/app` is
+ * the common case, not an exotic one — and a path-keyed cache would serve one
+ * machine's repo layout as the other's. Short TTL; only paid on tab focus /
+ * strip render.
  */
-async function walkForGitRoots(root: string, maxDepth: number): Promise<string[]> {
-  const found: string[] = []
-
-  async function walk(dir: string, depth: number): Promise<void> {
-    if (depth > maxDepth) return
-    let entries: string[]
-    try {
-      entries = await readdir(dir)
-    } catch {
-      return
-    }
-
-    await Promise.all(
-      entries.map(async (entry) => {
-        if (SKIP_DIRS.has(entry) || entry.startsWith('.')) return
-        const full = path.join(dir, entry)
-        let s
-        try {
-          s = await fsLstat(full)
-        } catch {
-          return
-        }
-        // Skip symlinks entirely — they can form cycles (esp. on macOS user dirs)
-        // and following them risks infinite recursion or counting the same repo twice.
-        if (s.isSymbolicLink()) return
-        if (!s.isDirectory()) return
-        if (await isGitRepo(full)) {
-          found.push(full)
-          return // don't recurse into a repo
-        }
-        await walk(full, depth + 1)
-      })
-    )
-  }
-
-  await walk(root, 1)
-  return found
-}
-
-/**
- * Parse `git submodule status --recursive` output.
- * Each line: " <sha> <path> [(branch)]" (leading char = ' ', '-', '+', or 'U').
- * Returns absolute paths (joined to the parent repo path).
- */
-async function listSubmodules(repoPath: string): Promise<string[]> {
-  if (!existsSync(path.join(repoPath, '.gitmodules'))) return []
-  let out: string
-  try {
-    out = await execGit(['submodule', 'status', '--recursive'], { cwd: repoPath })
-  } catch {
-    return []
-  }
-  const subs: string[] = []
-  for (const line of out.split('\n')) {
-    if (!line.trim()) continue
-    // Skip the leading status char + sha, then take next token as path.
-    // Format: "[ -+U]<sha> <path>[ (refname)]"
-    const m = line.match(/^[\s\-+U][0-9a-f]+\s+(\S+)/)
-    if (m) subs.push(path.join(repoPath, m[1]))
-  }
-  return subs
-}
-
-/** Cache key = projectPath. TTL short — only paid on tab focus / strip render. */
 interface CacheEntry {
   repos: RepoEntry[]
   expiresAt: number
@@ -118,6 +31,9 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>()
 const CACHE_TTL_MS = 5_000
 const CACHE_MAX = 50
+
+const cacheKey = (runnerId: string | null, projectPath: string): string =>
+  `${runnerId ?? 'local'}\u0000${projectPath}`
 
 function evictStale(): void {
   if (cache.size <= CACHE_MAX) return
@@ -131,76 +47,63 @@ function evictStale(): void {
   }
 }
 
+/** Drop cached layouts. Without a path, drops everything (all runners). */
 export function invalidateProjectReposCache(projectPath?: string): void {
-  if (projectPath) cache.delete(projectPath)
-  else cache.clear()
+  if (!projectPath) {
+    cache.clear()
+    return
+  }
+  for (const k of [...cache.keys()]) {
+    if (k.endsWith(`\u0000${projectPath}`)) cache.delete(k)
+  }
 }
 
 export async function listProjectRepos(
+  fs: WorkspaceFsAdapters,
+  runnerId: string | null,
   projectPath: string,
   opts: ListProjectReposOpts = {}
 ): Promise<RepoEntry[]> {
-  const cached = cache.get(projectPath)
+  const key = cacheKey(runnerId, projectPath)
+  const cached = cache.get(key)
   if (cached && cached.expiresAt > Date.now()) {
     return reannotateTaskBound(cached.repos, opts.taskBoundPath ?? null)
   }
 
   const taskBoundPath = opts.taskBoundPath ?? null
-  const rootIsGit = await isGitRepo(projectPath)
+  const discovered = await fs.discoverRepos(runnerId, projectPath)
+  const entries: RepoEntry[] = discovered.map((d) => ({
+    path: d.path,
+    name: d.name,
+    kind: d.kind,
+    parentPath: d.parentPath,
+    isTaskBound: d.path === taskBoundPath,
+    hasGitmodules: d.hasGitmodules
+  }))
 
-  // Top-level git roots: the project itself OR its children (mutually exclusive in practice).
-  const topLevelRoots = rootIsGit
-    ? [projectPath]
-    : await walkForGitRoots(projectPath, MAX_CHILD_DEPTH)
-
-  // For each top-level root, enumerate submodules (recursive).
-  const entries: RepoEntry[] = []
-  await Promise.all(
-    topLevelRoots.map(async (rootPath) => {
-      const kind = rootPath === projectPath ? 'project-root' : 'child-repo'
-      const hasGm = existsSync(path.join(rootPath, '.gitmodules'))
-      entries.push({
-        path: rootPath,
-        name: nameFor(projectPath, rootPath),
-        kind,
-        parentPath: null,
-        isTaskBound: rootPath === taskBoundPath,
-        hasGitmodules: hasGm
-      })
-
-      const subs = await listSubmodules(rootPath)
-      for (const subPath of subs) {
-        entries.push({
-          path: subPath,
-          name: nameFor(projectPath, subPath),
-          kind: 'submodule',
-          parentPath: rootPath,
-          isTaskBound: subPath === taskBoundPath,
-          hasGitmodules: existsSync(path.join(subPath, '.gitmodules'))
-        })
-      }
-    })
-  )
-
-  // Stable order: roots first (alpha), then submodules grouped under their root (alpha).
-  entries.sort((a, b) => {
-    const aRoot = a.parentPath ?? a.path
-    const bRoot = b.parentPath ?? b.path
-    if (aRoot !== bRoot) return aRoot.localeCompare(bRoot)
-    if (a.parentPath === null && b.parentPath !== null) return -1
-    if (a.parentPath !== null && b.parentPath === null) return 1
-    return a.path.localeCompare(b.path)
-  })
-
-  cache.set(projectPath, { repos: entries, expiresAt: Date.now() + CACHE_TTL_MS })
+  cache.set(key, { repos: entries, expiresAt: Date.now() + CACHE_TTL_MS })
   evictStale()
   return entries
 }
 
-function nameFor(projectPath: string, repoPath: string): string {
-  if (repoPath === projectPath) return path.basename(projectPath)
-  const rel = path.relative(projectPath, repoPath)
-  return rel || path.basename(repoPath)
+/**
+ * Immediate child git repos of a project directory ("wrapper folder" projects).
+ *
+ * A projection of the same discovery, so the two can no longer disagree about
+ * what counts as a repo — they were separate walks with subtly different rules.
+ */
+export async function detectChildRepos(
+  fs: WorkspaceFsAdapters,
+  runnerId: string | null,
+  projectPath: string
+): Promise<{ name: string; path: string }[]> {
+  const repos = await listProjectRepos(fs, runnerId, projectPath)
+  // A project that IS a repo has no child repos — multi-repo mode is off.
+  if (repos.some((r) => r.kind === 'project-root')) return []
+  return repos
+    .filter((r) => r.kind === 'child-repo')
+    .map((r) => ({ name: path.basename(r.path), path: r.path }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** Re-flag isTaskBound on cached entries without re-walking the filesystem. */

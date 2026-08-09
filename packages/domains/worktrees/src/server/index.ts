@@ -88,7 +88,11 @@ export {
   editPrComment
 } from './gh-cli'
 export { runAiCommand } from './merge-ai'
-export { listProjectRepos } from './list-project-repos'
+export {
+  listProjectRepos,
+  detectChildRepos,
+  invalidateProjectReposCache
+} from './list-project-repos'
 export {
   ensureColors,
   ensureColors as ensureWorktreeColors,
@@ -100,7 +104,6 @@ export { getGitWatcher, closeGitWatcher } from './git-watcher'
 export { worktreesEvents, type WorktreesEventMap } from './events'
 // Composite orchestrations + behavior resolvers shared with the IPC handlers.
 export {
-  detectChildRepos,
   detectWorktreesWithColors,
   createDbWorktreePolicyOps,
   resolveCopyBehavior,

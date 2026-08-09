@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, toast } from '@slayzo
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
+import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { CreateWorktreePhase } from '@slayzone/worktrees/shared'
 
 const PHASE_LABEL: Record<CreateWorktreePhase, string> = {
@@ -33,7 +34,6 @@ export function CreateWorktreeDialog({
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
-  const showOpenDialogMutation = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
   const createWorktreeMutation = useMutation(trpc.worktrees.createWorktree.mutationOptions())
   const [path, setPath] = useState('')
   const [branch, setBranch] = useState('')
@@ -41,15 +41,10 @@ export function CreateWorktreeDialog({
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<CreateWorktreePhase | null>(null)
 
-  const handleBrowse = async () => {
-    const result = await showOpenDialogMutation.mutateAsync({
-      title: 'Select Worktree Directory',
-      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
-    })
-    if (!result.canceled && result.filePaths[0]) {
-      setPath(result.filePaths[0])
-    }
-  }
+  // A worktree is created by `git worktree add` ON THE RUNNER, so the location
+  // has to be a directory that exists there — a path browsed on this desktop
+  // would simply fail to create.
+  const [browseOpen, setBrowseOpen] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -131,11 +126,20 @@ export function CreateWorktreeDialog({
                 type="button"
                 aria-label="Browse folder"
                 variant="outline"
-                onClick={handleBrowse}
+                onClick={() => setBrowseOpen(true)}
               >
                 <FolderOpen className="h-4 w-4" />
               </IconButton>
             </div>
+            <WorkspaceDirPicker
+              open={browseOpen}
+              onOpenChange={setBrowseOpen}
+              onSelect={setPath}
+              target={{ projectId }}
+              title="Select worktree location"
+              defaultPath={path || projectPath}
+              allowCreate
+            />
             <p className="text-xs text-muted-foreground">
               Directory where the worktree will be created
             </p>

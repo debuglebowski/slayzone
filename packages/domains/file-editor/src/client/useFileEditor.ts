@@ -4,6 +4,7 @@ import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/cli
 import { track } from '@slayzone/telemetry/client'
 import { useVisibleInterval } from '@slayzone/ui'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
+import { useWorkspaceTarget } from './workspace-target'
 
 export interface OpenFile {
   path: string
@@ -42,6 +43,10 @@ export function useFileEditor(
   initialEditorState?: EditorOpenFilesState | null
 ) {
   const trpc = useTRPC()
+  // Which machine these filesystem calls are for. Ambient for the whole
+  // panel — see ./workspace-target. Spread into every input so it also
+  // keys the query cache.
+  const target = useWorkspaceTarget()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const writeFileMutation = useMutation(trpc.fileEditor.writeFile.mutationOptions())
@@ -82,7 +87,7 @@ export function useFileEditor(
             continue
           }
           const result = await queryClient.fetchQuery(
-            trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath })
+            trpc.fileEditor.readFile.queryOptions({ ...target, rootPath: projectPath, filePath })
           )
           if (result.tooLarge) {
             setOpenFiles((prev) => {
@@ -132,6 +137,7 @@ export function useFileEditor(
         }
 
         const result = await trpcClient.fileEditor.readFile.query({
+          ...target,
           rootPath: projectPath,
           filePath
         })
@@ -220,7 +226,7 @@ export function useFileEditor(
   // onFileChanged IPC listener pair). Dispatch by event.type.
   useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
-      { rootPath: projectPath },
+      { ...target, rootPath: projectPath },
       {
         onData: (event) => {
           const rootPath = event.root
@@ -360,7 +366,7 @@ export function useFileEditor(
         }
 
         const result = await queryClient.fetchQuery(
-          trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath })
+          trpc.fileEditor.readFile.queryOptions({ ...target, rootPath: projectPath, filePath })
         )
         if (result.tooLarge) {
           setOpenFilesAndRef((prev) => {
@@ -400,7 +406,12 @@ export function useFileEditor(
     async (filePath: string) => {
       try {
         const result = await queryClient.fetchQuery(
-          trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath, force: true })
+          trpc.fileEditor.readFile.queryOptions({
+            ...target,
+            rootPath: projectPath,
+            filePath,
+            force: true
+          })
         )
         if (result.content == null) return
         setOpenFiles((prev) =>
@@ -432,6 +443,7 @@ export function useFileEditor(
       const file = openFiles.find((f) => f.path === filePath)
       if (!file || file.content == null || file.content === file.originalContent) return
       await writeFileMutation.mutateAsync({
+        ...target,
         rootPath: projectPath,
         filePath,
         content: file.content

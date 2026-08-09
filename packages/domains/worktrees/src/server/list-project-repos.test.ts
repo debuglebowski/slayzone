@@ -4,6 +4,14 @@
  */
 import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { listProjectRepos, invalidateProjectReposCache } from './list-project-repos.js'
+import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
+
+// The walk now executes on the machine that owns the directory, reached through
+// the workspace-fs seam. `runnerId: null` runs it in-process — the same code the
+// runner runs — so these disk-level assertions are unchanged by the move.
+const fs_ = createLocalWorkspaceFsAdapters()
+const listRepos = (root: string, opts?: unknown) =>
+  listProjectRepos(fs_, null, root, (opts ?? {}) as never)
 import { execSync } from 'child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -42,7 +50,7 @@ await describe('listProjectRepos: single-repo project', () => {
     invalidateProjectReposCache()
     const root = tmp()
     makeRepo(root)
-    const entries = await listProjectRepos(root)
+    const entries = await listRepos(root)
     expect(entries).toHaveLength(1)
     expect(entries[0].kind).toBe('project-root')
     expect(entries[0].path).toBe(root)
@@ -62,7 +70,7 @@ await describe('listProjectRepos: multi-repo wrapper', () => {
     makeRepo(path.join(root, 'app-b'))
     makeRepo(path.join(root, 'service-c'))
     fs.mkdirSync(path.join(root, 'docs')) // non-git dir, ignored
-    const entries = await listProjectRepos(root)
+    const entries = await listRepos(root)
     expect(entries).toHaveLength(3)
     const names = entries.map((e) => e.name).sort()
     expect(names[0]).toBe('app-a')
@@ -92,7 +100,7 @@ await describe('listProjectRepos: super-repo with submodules', () => {
     git(`git -c protocol.file.allow=always submodule add ${donorB} libs/sub-b`, root)
     git('git commit -qm "add submodules"', root)
 
-    const entries = await listProjectRepos(root)
+    const entries = await listRepos(root)
     expect(entries).toHaveLength(3)
     const root_ = entries.find((e) => e.kind === 'project-root')!
     const subs = entries.filter((e) => e.kind === 'submodule')
@@ -119,7 +127,7 @@ await describe('listProjectRepos: skip-list', () => {
     // Plant a fake repo inside node_modules — must be skipped
     makeRepo(path.join(root, 'node_modules', 'pkg'))
     makeRepo(path.join(root, 'dist', 'bundle'))
-    const entries = await listProjectRepos(root)
+    const entries = await listRepos(root)
     expect(entries).toHaveLength(1)
     expect(entries[0].name).toBe('real-app')
     fs.rmSync(root, { recursive: true, force: true })
@@ -134,7 +142,7 @@ await describe('listProjectRepos: taskBoundPath', () => {
     const root = tmp()
     makeRepo(path.join(root, 'one'))
     makeRepo(path.join(root, 'two'))
-    const entries = await listProjectRepos(root, { taskBoundPath: path.join(root, 'two') })
+    const entries = await listRepos(root, { taskBoundPath: path.join(root, 'two') })
     const bound = entries.filter((e) => e.isTaskBound)
     expect(bound).toHaveLength(1)
     expect(bound[0].name).toBe('two')
@@ -146,11 +154,11 @@ await describe('listProjectRepos: taskBoundPath', () => {
     const root = tmp()
     makeRepo(path.join(root, 'one'))
     makeRepo(path.join(root, 'two'))
-    const first = await listProjectRepos(root, { taskBoundPath: path.join(root, 'one') })
+    const first = await listRepos(root, { taskBoundPath: path.join(root, 'one') })
     expect(first.find((e) => e.name === 'one')!.isTaskBound).toBe(true)
     expect(first.find((e) => e.name === 'two')!.isTaskBound).toBe(false)
     // Same call w/ different bound — cached entries should re-flag
-    const second = await listProjectRepos(root, { taskBoundPath: path.join(root, 'two') })
+    const second = await listRepos(root, { taskBoundPath: path.join(root, 'two') })
     expect(second.find((e) => e.name === 'one')!.isTaskBound).toBe(false)
     expect(second.find((e) => e.name === 'two')!.isTaskBound).toBe(true)
     fs.rmSync(root, { recursive: true, force: true })
@@ -168,7 +176,7 @@ await describe('listProjectRepos: symlinks', () => {
     fs.symlinkSync(root, path.join(root, 'cycle'))
     // Symlink pointing at the real repo → would dup it
     fs.symlinkSync(path.join(root, 'real'), path.join(root, 'real-link'))
-    const entries = await listProjectRepos(root)
+    const entries = await listRepos(root)
     expect(entries).toHaveLength(1)
     expect(entries[0].name).toBe('real')
     fs.rmSync(root, { recursive: true, force: true })
@@ -185,7 +193,7 @@ await describe('listProjectRepos: depth cap', () => {
     makeRepo(path.join(root, 'a', 'b', 'c', 'too-deep'))
     // Depth 2: root/x/visible  → within cap
     makeRepo(path.join(root, 'x', 'visible'))
-    const entries = await listProjectRepos(root)
+    const entries = await listRepos(root)
     const names = entries.map((e) => e.name)
     expect(names.includes('a/b/c/too-deep')).toBe(false)
     expect(names.includes('x/visible')).toBe(true)

@@ -51,6 +51,11 @@ import { EditorDisplayPopover } from './EditorDisplayPopover'
 import { useFileDropZone } from './useFileDropZone'
 import { useEditorLayoutState } from './useEditorLayoutState'
 import { formatSize } from './FileEditorView.utils'
+import {
+  useWorkspaceIsLocal,
+  WorkspaceTargetProvider,
+  type WorkspaceTarget
+} from './workspace-target'
 
 export interface FileEditorViewHandle {
   openFile: (filePath: string, options?: OpenFileOptions) => void
@@ -60,12 +65,35 @@ export interface FileEditorViewHandle {
 
 interface FileEditorViewProps {
   projectPath: string
+  /**
+   * Which machine owns `projectPath`. Every filesystem call below is routed to
+   * it; omitting this falls back to the connected default runner, which is only
+   * correct for callers with no task context.
+   */
+  target?: WorkspaceTarget
   initialEditorState?: EditorOpenFilesState | null
   onEditorStateChange?: (state: EditorOpenFilesState) => void
 }
 
+/**
+ * The provider has to sit ABOVE the component that reads it, so the exported
+ * `FileEditorView` is the wrapper and the body is a separate component. Putting
+ * the provider inside the body would leave that body's own hooks reading the
+ * default (empty) target — i.e. the default runner — while everything beneath it
+ * read the right one.
+ */
 export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewProps>(
-  function FileEditorView({ projectPath, initialEditorState, onEditorStateChange }, ref) {
+  function FileEditorView(props, ref) {
+    return (
+      <WorkspaceTargetProvider target={props.target}>
+        <FileEditorViewBody {...props} ref={ref} />
+      </WorkspaceTargetProvider>
+    )
+  }
+)
+
+const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>(
+  function FileEditorViewBody({ projectPath, initialEditorState, onEditorStateChange }, ref) {
     const trpc = useTRPC()
     const showInFinderMutation = useMutation(trpc.fileEditor.showInFinder.mutationOptions())
     const {
@@ -304,11 +332,15 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       void navigator.clipboard.writeText(filePath)
     }, [])
 
+    // Not routed on purpose — `showInFinder` resolves against THIS desktop, the
+    // only machine whose file manager the user can see.
+    const canRevealInFinder = useWorkspaceIsLocal()
     const handleRevealInFinder = useCallback(
       (filePath: string) => {
+        if (!canRevealInFinder) return
         void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: filePath })
       },
-      [projectPath]
+      [projectPath, canRevealInFinder]
     )
 
     return (

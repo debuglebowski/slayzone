@@ -26,6 +26,7 @@ import { createFsHandlers } from './handlers/fs'
 import { createGitHandlers } from './handlers/git'
 import { createProcHandlers } from './handlers/proc'
 import { createPtyHandlers } from './handlers/pty'
+import { createRunnerConfigHandlers } from './handlers/runner-config'
 import type { HandlerContext, HubMethodTable, RunnerDialer, RunnerLog } from './handlers/types'
 
 /** Version advertised at enrollment; wave-1 skeleton is pre-release. */
@@ -101,7 +102,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
-    ...createFsHandlers(ctx)
+    ...createFsHandlers(ctx),
+    ...createRunnerConfigHandlers(ctx)
   }
 
   const handle = async (method: string, params: unknown): Promise<unknown> => {

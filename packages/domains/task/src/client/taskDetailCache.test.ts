@@ -45,7 +45,12 @@ const trpcClientMock = {
   },
   app: {
     files: { pathExists: { query: vi.fn() } }
-  }
+  },
+  // The project-path probe routes to the machine that owns the workspace, not to
+  // whichever hub answered the rest of the load. `reachable` is what separates
+  // "the runner says it is gone" from "we could not ask" — only the first may
+  // set `projectPathMissing`.
+  workspace: { pathExists: { query: vi.fn() } }
 }
 
 // Second hub's client — a distinct mock so a hub-routed fetch is observable.
@@ -58,7 +63,8 @@ const remoteHubClientMock = {
   },
   tags: { list: { query: vi.fn() }, getForTask: { query: vi.fn() } },
   projects: { list: { query: vi.fn() } },
-  app: { files: { pathExists: { query: vi.fn() } } }
+  app: { files: { pathExists: { query: vi.fn() } } },
+  workspace: { pathExists: { query: vi.fn() } }
 }
 
 vi.mock('@slayzone/transport/client', () => ({
@@ -79,6 +85,11 @@ beforeEach(() => {
   trpcClientMock.tags.getForTask.query.mockResolvedValue([makeTag()])
   trpcClientMock.projects.list.query.mockResolvedValue([makeProject()])
   trpcClientMock.app.files.pathExists.query.mockResolvedValue(true)
+  trpcClientMock.workspace.pathExists.query.mockResolvedValue({ exists: true, reachable: true })
+  remoteHubClientMock.workspace.pathExists.query.mockResolvedValue({
+    exists: true,
+    reachable: true
+  })
 })
 
 describe('fetchTaskDetail', () => {
@@ -106,10 +117,35 @@ describe('fetchTaskDetail', () => {
   })
 
   it('sets projectPathMissing when project path does not exist', async () => {
-    trpcClientMock.app.files.pathExists.query.mockResolvedValue(false)
+    trpcClientMock.workspace.pathExists.query.mockResolvedValue({
+      exists: false,
+      reachable: true
+    })
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.projectPathMissing).toBe(true)
+  })
+
+  // An offline runner means the question went unanswered. Reporting "missing"
+  // would send the user to fix a path that is very likely fine — the exact false
+  // alarm this routing exists to remove.
+  it('does not call the path missing when its runner could not be reached', async () => {
+    trpcClientMock.workspace.pathExists.query.mockResolvedValue({
+      exists: false,
+      reachable: false
+    })
+
+    const result = await fetchTaskDetail('task-1')
+    expect(result!.projectPathMissing).toBe(false)
+  })
+
+  // This runs inside the Suspense load — a throwing probe used to be able to
+  // reject the whole Task Detail page.
+  it('survives a probe that throws outright', async () => {
+    trpcClientMock.workspace.pathExists.query.mockRejectedValue(new Error('hub gone'))
+
+    const result = await fetchTaskDetail('task-1')
+    expect(result!.projectPathMissing).toBe(false)
   })
 
   it('uses task browser_tabs when present', async () => {

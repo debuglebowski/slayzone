@@ -28,6 +28,7 @@ import {
   DialogFooter,
   toast
 } from '@slayzone/ui'
+import { RunnerRootsDialog, type RootsTarget } from './RunnerRootsDialog'
 
 /**
  * The runner actions that must exist ONCE, not once per hub.
@@ -68,6 +69,8 @@ export interface RunnerActionsValue {
   showMintedToken: (minted: MintedToken) => void
   /** Ask for confirmation before revoking; the target carries its own thunk. */
   requestRevoke: (target: RevokeTarget) => void
+  /** Edit a runner's filesystem path-jail; the target carries hub-bound thunks. */
+  requestEditRoots: (target: RootsTarget) => void
   /** Confirm-gated restart of the app's own supervised runner. */
   requestRestart: () => void
   /** Start a local runner that never came up. No confirm — nothing is running. */
@@ -99,6 +102,7 @@ const RECONNECT_SETTLE_MS = 2000
 export function RunnerActionsProvider({ children }: { children: ReactNode }) {
   const [minted, setMinted] = useState<MintedToken | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<RevokeTarget | null>(null)
+  const [rootsTarget, setRootsTarget] = useState<RootsTarget | null>(null)
   const [restartOpen, setRestartOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [runnerRevision, setRunnerRevision] = useState(0)
@@ -138,6 +142,7 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
 
   const showMintedToken = useCallback((next: MintedToken) => setMinted(next), [])
   const requestRevoke = useCallback((target: RevokeTarget) => setRevokeTarget(target), [])
+  const requestEditRoots = useCallback((target: RootsTarget) => setRootsTarget(target), [])
   const requestRestart = useCallback(() => setRestartOpen(true), [])
   const requestStart = useCallback(() => void runRestart(), [runRestart])
 
@@ -173,6 +178,7 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
       value={{
         showMintedToken,
         requestRevoke,
+        requestEditRoots,
         requestRestart,
         requestStart,
         restarting,
@@ -180,6 +186,18 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+
+      {/* The runner's filesystem path-jail. Lives here for the same reason the
+          other two do — one instance, driven by whichever hub's block asked —
+          and the target carries hub-bound read/write thunks so an edit cannot
+          land on the wrong hub's runner. */}
+      {/* Keyed by runner so opening a DIFFERENT one gets a fresh dialog rather
+          than one still holding the previous runner's unsaved edits. */}
+      <RunnerRootsDialog
+        key={rootsTarget?.id ?? 'none'}
+        target={rootsTarget}
+        onClose={() => setRootsTarget(null)}
+      />
 
       {/* Enrollment token — one-time secret; modal forces a copy before dismiss. */}
       <Dialog open={!!minted} onOpenChange={(open) => !open && setMinted(null)}>

@@ -95,7 +95,7 @@ import type {
   EditPrCommentInput
 } from '@slayzone/worktrees/shared'
 import { router, publicProcedure } from '../trpc'
-import { getAppDeps } from '../app-deps'
+import { getAppDeps, getWorkspaceDeps } from '../app-deps'
 
 const u = z.unknown()
 const s = z.string()
@@ -112,12 +112,26 @@ export const worktreesRouter = router({
   }),
 
   isGitRepo: publicProcedure.input(obj({ path: s })).query(({ input }) => isGitRepo(input.path)),
+  // Repo discovery runs on the machine that owns the directory — it decides the
+  // terminal cwd, the editor root, and the git panel, so a hub-local walk pointed
+  // all three at the wrong filesystem for any project living on a runner.
+  // `projectId`/`taskId` resolve that machine the same way a pty spawn does.
   listProjectRepos: publicProcedure
-    .input(obj({ projectPath: s, opts: u.optional() }))
-    .query(({ input }) => listProjectRepos(input.projectPath, (input.opts ?? {}) as never)),
+    .input(
+      obj({ projectPath: s, projectId: s.optional(), taskId: s.optional(), opts: u.optional() })
+    )
+    .query(async ({ input }) => {
+      const { fs, resolveRunner } = getWorkspaceDeps()
+      const runnerId = await resolveRunner(input)
+      return listProjectRepos(fs, runnerId, input.projectPath, (input.opts ?? {}) as never)
+    }),
   detectChildRepos: publicProcedure
-    .input(obj({ projectPath: s }))
-    .query(({ input }) => detectChildRepos(input.projectPath)),
+    .input(obj({ projectPath: s, projectId: s.optional(), taskId: s.optional() }))
+    .query(async ({ input }) => {
+      const { fs, resolveRunner } = getWorkspaceDeps()
+      const runnerId = await resolveRunner(input)
+      return detectChildRepos(fs, runnerId, input.projectPath)
+    }),
   detectWorktrees: publicProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => detectWorktreesWithColors(input.repoPath)),

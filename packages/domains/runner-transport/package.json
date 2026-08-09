@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/file-editor": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/terminal": "workspace:*",

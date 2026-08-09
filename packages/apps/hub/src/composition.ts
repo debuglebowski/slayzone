@@ -26,6 +26,7 @@ import {
   setChatDeps,
   setAuthEvents,
   setRunnersDeps,
+  setWorkspaceDeps,
   requestGithubSignInStart,
   type AppDeps,
   type NotifyEventMap,
@@ -118,12 +119,15 @@ import {
   listAllProcesses,
   subscribeToProcessLogs
 } from '@slayzone/processes/server'
+import { createLocalWorkspaceFs } from '@slayzone/file-editor/server'
+import { missingRootsForProjects } from './local-runner-roots'
 // Runner transport: runner gateway + hub-auth + runner resolution, wired
 // unconditionally at boot (a hub always accepts runners).
 import {
   createHubRunnerGateway,
   createRoutingChatBackend,
   createRoutingPtyBackend,
+  createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
   type HubRunnerGateway
 } from '@slayzone/runner-transport/server'
@@ -540,6 +544,14 @@ export function composeServer(opts: {
   /** Effective runner for a task: explicit binding, else connected default. */
   const resolveRunnerForTask = async (taskId: string): Promise<string | null> =>
     resolveExecRunner(await resolveTaskRunnerId(db, taskId))
+  /** Same, for a project — its default binding, else the connected default. */
+  const resolveRunnerForProject = async (projectId: string): Promise<string | null> => {
+    const row = await db.get<{ default_runner_id?: string | null }>(
+      'SELECT default_runner_id FROM projects WHERE id = ?',
+      [projectId]
+    )
+    return resolveExecRunner(row?.default_runner_id ?? null)
+  }
 
   // Inject runner-aware spawn lookups BEFORE createPtyOps (which captures the
   // lookups at construction). Only `resolveRunnerId` is overridden; the mode-row /
@@ -641,13 +653,7 @@ export function composeServer(opts: {
     // Warm on the runner this project's tasks will actually resolve to. Reads the
     // project's default binding through the SAME resolver a spawn uses, so a warm
     // agent is never booted on a machine no task will land on.
-    resolveRunnerId: async (projectId) => {
-      const row = await db.get<{ default_runner_id?: string | null }>(
-        'SELECT default_runner_id FROM projects WHERE id = ?',
-        [projectId]
-      )
-      return resolveExecRunner(row?.default_runner_id ?? null)
-    }
+    resolveRunnerId: (projectId) => resolveRunnerForProject(projectId)
   })
   setChatDeps({
     // Override ONLY the runner resolution over the db defaults, so a chat spawn
@@ -1250,6 +1256,11 @@ export function composeServer(opts: {
     // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote runners (any
     // other name) keep the fresh-uuid path.
     const localRunnerName = DEFAULT_LOCAL_RUNNER_NAME
+    // Assigned further down, once the workspace-fs adapters exist. The
+    // `runner-connected` listener below only calls it on a later event, so the
+    // forward reference is never read before it is set.
+    let widenLocalRunnerRoots: (runnerId: string, runnerName: string) => Promise<void> = async () =>
+      undefined
     const runnerGateway = createHubRunnerGateway(
       createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
     )
@@ -1285,6 +1296,9 @@ export function composeServer(opts: {
     // whatever this hub is no longer tracking.
     runnerGateway.events.on('runner-connected', ({ runner }) => {
       void reapOrphanWarms(runner.runnerId)
+      // A nameless descriptor (`hello` reconnect before the roster fills) can
+      // never match the local runner's name, so it is correctly skipped.
+      void widenLocalRunnerRoots(runner.runnerId, runner.name ?? '')
     })
     // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
     // servers, not agents. `doSpawn` is synchronous and also driven by restart
@@ -1320,6 +1334,72 @@ export function composeServer(opts: {
         resolveRunnerId: (taskId) => resolveRunnerForTask(taskId),
         local: defaultWorktreeExecAdapters
       })
+    })
+    // Workspace filesystem — the directory picker, the project-path probe, and
+    // (later) the editor panel. Same resolution as the exec backends above, which
+    // is the entire point: the picker must browse the filesystem the agent will
+    // actually get. Serving these from the hub is what made a task on a remote
+    // runner report "No repository path configured" for a path that existed.
+    const workspaceFs = createRemoteFsAdapters({
+      gateway: runnerGateway,
+      local: createLocalWorkspaceFs()
+    })
+    // The supervised local runner defaults its jail to `[homedir()]`, but the
+    // desktop app that used to do this work had no jail at all — so routing the
+    // filesystem would have silently broken every project outside $HOME. Widen
+    // to cover what already works. See ./local-runner-roots.ts for why the unit
+    // is the project's PARENT (the default worktree layout is a sibling dir) and
+    // why only the LOCAL runner is touched.
+    widenLocalRunnerRoots = async (runnerId: string, runnerName: string): Promise<void> => {
+      if (runnerName !== localRunnerName) return
+      try {
+        const { roots } = await workspaceFs.listRoots(runnerId)
+        const rows = await db.all<{ path: string | null }>(
+          'SELECT DISTINCT path FROM projects WHERE path IS NOT NULL'
+        )
+        const additions = missingRootsForProjects(
+          rows.map((r) => r.path),
+          roots
+        )
+        if (additions.length === 0) return
+        const applied = await workspaceFs.setAllowedRoots(runnerId, [...roots, ...additions])
+        recordDiagnosticEvent({
+          level: 'info',
+          source: 'server',
+          event: 'runner.roots_widened',
+          message: `local runner jail widened for ${additions.length} project location(s)`,
+          payload: { runnerId, additions, applied: applied.roots, rejected: applied.rejected }
+        })
+      } catch (err) {
+        // Best-effort: a runner that refuses this is still usable for everything
+        // inside its existing jail, and the user can widen it by hand.
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'server',
+          event: 'runner.roots_widen_failed',
+          message: err instanceof Error ? err.message : String(err),
+          payload: { runnerId }
+        })
+      }
+    }
+    setWorkspaceDeps({
+      fs: workspaceFs,
+      resolveRunner: async ({ runnerId, taskId, projectId }) => {
+        // An id the user explicitly chose wins — the create-project flow picks a
+        // runner before any task or project row exists to resolve from.
+        if (runnerId != null) return resolveExecRunner(runnerId)
+        if (taskId != null) return resolveRunnerForTask(taskId)
+        if (projectId != null) return resolveRunnerForProject(projectId)
+        return resolveExecRunner(null)
+      },
+      // No runner at all = this hub's own disk, which for a supervised hub IS the
+      // desktop's. Otherwise only the co-spawned local runner shares a machine
+      // with the user; every remote one is somewhere they cannot see.
+      isLocalRunner: (runnerId) => {
+        if (runnerId == null) return true
+        const runner = runnerGateway.listRunners().find((r) => r.runnerId === runnerId)
+        return runner?.name === localRunnerName
+      }
     })
   })().catch((err) => {
     recordDiagnosticEvent({

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import { useWorkspaceTarget } from './workspace-target'
 
 export interface UseWatchedFileOptions {
   projectPath: string | null
@@ -37,6 +38,10 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   const { projectPath, relPath, read, save, debounceMs = 500 } = options
   const trpc = useTRPC()
 
+  // Which machine these filesystem calls are for. Ambient for the whole
+  // panel — see ./workspace-target. Spread into every input so it also
+  // keys the query cache.
+  const target = useWorkspaceTarget()
   const [content, setContentState] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [diskChanged, setDiskChanged] = useState(false)
@@ -193,7 +198,7 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
 
   useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
-      { rootPath: projectPath ?? '' },
+      { ...target, rootPath: projectPath ?? '' },
       {
         enabled: !!projectPath,
         onData: (event) => {

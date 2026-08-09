@@ -21,6 +21,8 @@ import type {
   createPtyOps,
   PtyEventMap
 } from '@slayzone/terminal/electron'
+import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
+import type { WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { IntegrationOps } from '@slayzone/integrations/server'
 import type { TaskOps } from '@slayzone/task/server'
 import type {
@@ -937,4 +939,58 @@ export function setAuthGate(fn: () => boolean): void {
 
 export function getAuthGate(): boolean {
   return authGate()
+}
+
+/**
+ * The workspace filesystem seam.
+ *
+ * Every fs op the UI runs against a workspace must execute on the machine that
+ * owns it — a runner, which may be another host. Serving these from the hub is
+ * what made a remote task report "No repository path configured" for a path that
+ * existed: the hub was answering about its own disk.
+ *
+ * `resolveRunner` deliberately mirrors the pty backend's resolution rather than
+ * reading `tasks.runner_id` directly, so the directory picker browses exactly the
+ * filesystem the agent will get. Precedence: an explicit `runnerId` the user
+ * chose → the task's binding → the project default → the connected default.
+ *
+ * Default: in-process adapters and a null resolver — correct for hosts with no
+ * runner gateway (the standalone/fork sidecar, tests), where the hub's disk is
+ * the only disk there is. The hub composition replaces both when it wires the
+ * runner gateway.
+ */
+export type WorkspaceRunnerTarget = {
+  /** A runner the caller already chose. Wins over every other field. */
+  runnerId?: string | null
+  taskId?: string
+  projectId?: string
+}
+
+export type WorkspaceDeps = {
+  fs: WorkspaceFsAdapters
+  resolveRunner: (target: WorkspaceRunnerTarget) => Promise<string | null>
+  /**
+   * Is this runner the desktop's own co-resident child?
+   *
+   * Only the desktop-local case can meaningfully "reveal in Finder" or hand a
+   * path to a local editor — there is no file manager on a headless runner, and
+   * revealing a folder on a machine the user is not sitting at is not the action
+   * they asked for. Defaults to true: a host with no runner gateway is by
+   * definition working on its own disk.
+   */
+  isLocalRunner: (runnerId: string | null) => boolean
+}
+
+let workspaceDeps: WorkspaceDeps = {
+  fs: createLocalWorkspaceFsAdapters(),
+  resolveRunner: async () => null,
+  isLocalRunner: () => true
+}
+
+export function setWorkspaceDeps(deps: WorkspaceDeps): void {
+  workspaceDeps = deps
+}
+
+export function getWorkspaceDeps(): WorkspaceDeps {
+  return workspaceDeps
 }

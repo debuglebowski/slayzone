@@ -45,6 +45,7 @@
  */
 
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
+import type { LocalWorkspaceFs, WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type {
   ChatBackend,
@@ -55,7 +56,18 @@ import type {
   PtySpawnSpec
 } from '@slayzone/terminal/server'
 import {
+  fsCopyInResultSchema,
+  fsDiscoverReposResultSchema,
+  fsGitStatusResultSchema,
+  fsListAllFilesResultSchema,
+  fsListDirResultSchema,
+  fsListRootsResultSchema,
+  fsMkdirResultSchema,
+  fsOkResultSchema,
   fsPathExistsResultSchema,
+  fsReadDirResultSchema,
+  fsReadFileResultSchema,
+  fsSearchFilesResultSchema,
   gitGetCurrentBranchResultSchema,
   gitIsGitRepoResultSchema,
   gitRemoveWorktreeResultSchema,
@@ -69,7 +81,8 @@ import {
   ptySpawnResultSchema,
   ptyWarmAdoptResultSchema,
   ptyWarmListResultSchema,
-  ptyWarmSpawnResultSchema
+  ptyWarmSpawnResultSchema,
+  runnerSetAllowedRootsResultSchema
 } from '../shared/frames'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { HubRunnerGateway } from './hub-gateway'
@@ -1348,6 +1361,274 @@ export function createRemoteWorktreeAdapters(
 
     removeArtifactDir(absDir) {
       return local.removeArtifactDir(absDir)
+    }
+  }
+}
+
+// ===========================================================================
+// Workspace filesystem adapters
+// ===========================================================================
+
+export interface RemoteFsAdaptersOptions {
+  gateway: RoutingGateway
+  /**
+   * In-process filesystem, used ONLY when `runnerId` is null — i.e. this hub has
+   * no runner to ask. See the note on `WorkspaceFsAdapters`: that is a boundary
+   * condition (standalone/fork sidecar, or before the local runner enrolls), not
+   * a preference for the hub's disk. Whenever a runner is connected the caller's
+   * resolver returns it and nothing here touches local.
+   */
+  local: LocalWorkspaceFs
+  /** Mint a correlation id for a watch. Injected so tests are deterministic. */
+  newWatchId?: () => string
+}
+
+let watchSeq = 0
+
+/**
+ * `WorkspaceFsAdapters` that forward filesystem work to a runner's `fs.*` frames.
+ *
+ * Every method takes the runner explicitly rather than deriving it from a taskId
+ * (as the worktree adapters do). The directory picker is the reason: it has to
+ * describe a machine's disk BEFORE a project — let alone a task — exists, so
+ * there is nothing to resolve from. Callers that do have a task resolve it once,
+ * with the same `resolveExecRunner` the pty backend uses, and pass the result.
+ */
+export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): WorkspaceFsAdapters {
+  const { gateway, local } = options
+  const newWatchId = options.newWatchId ?? (() => `w${++watchSeq}`)
+
+  const req = <T>(
+    runnerId: string,
+    method: string,
+    params: unknown,
+    schema: { parse: (v: unknown) => T }
+  ): Promise<T> => gateway.request(runnerId, method, params).then((res) => schema.parse(res))
+
+  return {
+    async listRoots(runnerId) {
+      if (runnerId == null) return local.listRoots()
+      return req(runnerId, HubToRunnerMethods.fsListRoots, {}, fsListRootsResultSchema)
+    },
+
+    async listDir(runnerId, path, opts) {
+      if (runnerId == null) return local.listDir(path, opts)
+      return req(
+        runnerId,
+        HubToRunnerMethods.fsListDir,
+        { path, dirsOnly: opts?.dirsOnly, includeHidden: opts?.includeHidden },
+        fsListDirResultSchema
+      )
+    },
+
+    async mkdir(runnerId, path) {
+      if (runnerId == null) return local.mkdir(path)
+      return req(runnerId, HubToRunnerMethods.fsMkdir, { path }, fsMkdirResultSchema)
+    },
+
+    async pathExists(runnerId, path) {
+      if (runnerId == null) return local.pathExists(path)
+      const res = await req(
+        runnerId,
+        HubToRunnerMethods.fsPathExists,
+        { path },
+        fsPathExistsResultSchema
+      )
+      return res.exists
+    },
+
+    async setAllowedRoots(runnerId, roots) {
+      if (runnerId == null) return local.setAllowedRoots(roots)
+      return req(
+        runnerId,
+        HubToRunnerMethods.runnerSetAllowedRoots,
+        { roots },
+        runnerSetAllowedRootsResultSchema
+      )
+    },
+
+    async discoverRepos(runnerId, rootPath, maxDepth) {
+      if (runnerId == null) return local.discoverRepos(rootPath, maxDepth)
+      const res = await req(
+        runnerId,
+        HubToRunnerMethods.fsDiscoverRepos,
+        { rootPath, maxDepth },
+        fsDiscoverReposResultSchema
+      )
+      return res.repos
+    },
+
+    async readDir(runnerId, rootPath, dirPath) {
+      if (runnerId == null) return local.readDir(rootPath, dirPath)
+      const res = await req(
+        runnerId,
+        HubToRunnerMethods.fsReadDir,
+        { rootPath, dirPath },
+        fsReadDirResultSchema
+      )
+      return res.entries
+    },
+
+    async readFile(runnerId, rootPath, filePath, force) {
+      if (runnerId == null) return local.readFile(rootPath, filePath, force)
+      return req(
+        runnerId,
+        HubToRunnerMethods.fsReadFile,
+        { rootPath, filePath, force },
+        fsReadFileResultSchema
+      )
+    },
+
+    async writeFile(runnerId, rootPath, filePath, content) {
+      if (runnerId == null) return local.writeFile(rootPath, filePath, content)
+      await req(
+        runnerId,
+        HubToRunnerMethods.fsWriteFile,
+        { rootPath, filePath, content },
+        fsOkResultSchema
+      )
+    },
+
+    async createFile(runnerId, rootPath, filePath) {
+      if (runnerId == null) return local.createFile(rootPath, filePath)
+      await req(runnerId, HubToRunnerMethods.fsCreateFile, { rootPath, filePath }, fsOkResultSchema)
+    },
+
+    async createDir(runnerId, rootPath, dirPath) {
+      if (runnerId == null) return local.createDir(rootPath, dirPath)
+      await req(runnerId, HubToRunnerMethods.fsCreateDir, { rootPath, dirPath }, fsOkResultSchema)
+    },
+
+    async rename(runnerId, rootPath, oldPath, newPath) {
+      if (runnerId == null) return local.rename(rootPath, oldPath, newPath)
+      await req(
+        runnerId,
+        HubToRunnerMethods.fsRename,
+        { rootPath, oldPath, newPath },
+        fsOkResultSchema
+      )
+    },
+
+    async delete(runnerId, rootPath, targetPath) {
+      if (runnerId == null) return local.delete(rootPath, targetPath)
+      await req(runnerId, HubToRunnerMethods.fsDelete, { rootPath, targetPath }, fsOkResultSchema)
+    },
+
+    async copyIn(runnerId, rootPath, absoluteSrc, targetDir) {
+      if (runnerId == null) return local.copyIn(rootPath, absoluteSrc, targetDir)
+      const res = await req(
+        runnerId,
+        HubToRunnerMethods.fsCopyIn,
+        { rootPath, absoluteSrc, targetDir },
+        fsCopyInResultSchema
+      )
+      return res.path
+    },
+
+    async copy(runnerId, rootPath, srcPath, destPath) {
+      if (runnerId == null) return local.copy(rootPath, srcPath, destPath)
+      await req(
+        runnerId,
+        HubToRunnerMethods.fsCopy,
+        { rootPath, srcPath, destPath },
+        fsOkResultSchema
+      )
+    },
+
+    async gitStatus(runnerId, rootPath) {
+      if (runnerId == null) return local.gitStatus(rootPath)
+      return req(runnerId, HubToRunnerMethods.fsGitStatus, { rootPath }, fsGitStatusResultSchema)
+    },
+
+    async searchFiles(runnerId, rootPath, query, opts) {
+      if (runnerId == null) return local.searchFiles(rootPath, query, opts)
+      return req(
+        runnerId,
+        HubToRunnerMethods.fsSearchFiles,
+        { rootPath, query, options: opts },
+        fsSearchFilesResultSchema
+      )
+    },
+
+    async listAllFiles(runnerId, rootPath) {
+      if (runnerId == null) return local.listAllFiles(rootPath)
+      return req(
+        runnerId,
+        HubToRunnerMethods.fsListAllFiles,
+        { rootPath },
+        fsListAllFilesResultSchema
+      )
+    },
+
+    /**
+     * Routed watch.
+     *
+     * Returns its disposer SYNCHRONOUSLY (callers are tRPC `observable()` bodies,
+     * which must hand back a teardown before any await) while the `fs.watchStart`
+     * round-trip runs in the background. Disposing before that lands sets
+     * `stopped`, so the late `then` sends `fs.watchStop` immediately instead of
+     * leaving an orphan watcher running on the runner forever.
+     *
+     * A runner disconnect COMPLETES the stream rather than silently going quiet:
+     * the client must learn its view may be stale and resubscribe, and a watcher
+     * that stops emitting is indistinguishable from a directory that stopped
+     * changing.
+     */
+    watch(runnerId, rootPath, listener) {
+      if (runnerId == null) return local.watch(rootPath, listener)
+
+      const watchId = newWatchId()
+      let stopped = false
+
+      const onChange = (e: {
+        runnerId: string
+        watchId: string
+        type: 'changed' | 'deleted'
+        relPath: string
+      }): void => {
+        if (e.runnerId !== runnerId || e.watchId !== watchId) return
+        listener({ type: e.type, root: rootPath, relPath: e.relPath })
+      }
+      const onDisconnected = (e: { runnerId: string }): void => {
+        if (e.runnerId === runnerId) stop()
+      }
+
+      gateway.events.on('fs.change', onChange)
+      gateway.events.on('runner-disconnected', onDisconnected)
+      gateway.events.on('runner-lost', onDisconnected)
+
+      void gateway
+        .request(runnerId, HubToRunnerMethods.fsWatchStart, { watchId, rootPath })
+        .then(() => {
+          if (stopped) {
+            void gateway
+              .request(runnerId, HubToRunnerMethods.fsWatchStop, { watchId })
+              .catch(() => {
+                /* runner gone — its watcher died with the connection */
+              })
+          }
+        })
+        .catch((err) => {
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'server',
+            event: 'fs.watch_start_failed',
+            message: err instanceof Error ? err.message : String(err),
+            payload: { runnerId, rootPath }
+          })
+        })
+
+      function stop(): void {
+        if (stopped) return
+        stopped = true
+        gateway.events.off('fs.change', onChange)
+        gateway.events.off('runner-disconnected', onDisconnected)
+        gateway.events.off('runner-lost', onDisconnected)
+        void gateway.request(runnerId!, HubToRunnerMethods.fsWatchStop, { watchId }).catch(() => {
+          /* already gone */
+        })
+      }
+      return stop
     }
   }
 }

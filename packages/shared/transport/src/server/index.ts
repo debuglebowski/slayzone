@@ -3,6 +3,12 @@ export { router, publicProcedure, openProcedure, middleware, mergeRouters } from
 export type { TrpcContext, TrpcServerDeps, TrpcContextFactory } from './context'
 export { startTrpcServer, stopTrpcServer, type StartTrpcServerOpts } from './ws-server'
 export { setChatDeps, getChatDeps, type ChatDeps } from './app-deps'
+export {
+  setWorkspaceDeps,
+  getWorkspaceDeps,
+  type WorkspaceDeps,
+  type WorkspaceRunnerTarget
+} from './app-deps'
 export { setPtyDeps, getPtyDeps, type PtyDeps } from './app-deps'
 export { setIntegrationOps, getIntegrationOps } from './app-deps'
 export { setTaskDeps, getTaskOps } from './app-deps'

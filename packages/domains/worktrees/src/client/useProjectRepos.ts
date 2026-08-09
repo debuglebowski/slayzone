@@ -22,12 +22,14 @@ export interface UseProjectReposResult {
 
 export function useProjectRepos(
   projectPath: string | null,
-  taskBoundPath: string | null
+  taskBoundPath: string | null,
+  /** Routes the scan to the machine that owns the project. */
+  projectId?: string
 ): UseProjectReposResult {
   const trpc = useTRPC()
   const query = useQuery(
     trpc.worktrees.listProjectRepos.queryOptions(
-      { projectPath: projectPath ?? '', opts: { taskBoundPath } },
+      { projectPath: projectPath ?? '', projectId, opts: { taskBoundPath } },
       { enabled: !!projectPath }
     )
   )
