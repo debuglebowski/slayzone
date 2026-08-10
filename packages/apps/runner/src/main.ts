@@ -23,10 +23,13 @@ import {
 import type { RunnerConfig } from './config'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createFsHandlers } from './handlers/fs'
+import { createGhHandlers } from './handlers/gh'
 import { createGitHandlers } from './handlers/git'
 import { createProcHandlers } from './handlers/proc'
+import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
 import { createRunnerConfigHandlers } from './handlers/runner-config'
+import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, RunnerDialer, RunnerLog } from './handlers/types'
 
 /** Version advertised at enrollment; wave-1 skeleton is pre-release. */
@@ -55,6 +58,12 @@ export interface HubRequestHandlerDeps {
   /** Runner loopback agent-hook URL — overlaid into every spawned agent's env
    *  (see HandlerContext.agentHookUrl). Absent → env passthrough (tests). */
   agentHookUrl?: string
+  /**
+   * Where this runner keeps each project on disk. Read lazily: the map comes
+   * from a file and the dispatch table is built synchronously, so the handlers
+   * register immediately and report "still loading" until it arrives.
+   */
+  getProjectPaths?: () => ProjectPathStore | null
 }
 
 export interface HubRequestDispatch {
@@ -86,8 +95,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {})
   }
 
-  const pty = createPtyHandlers(ctx)
-  const proc = createProcHandlers(ctx)
+  const pty = createPtyHandlers(ctx, deps.getProjectPaths)
+  const proc = createProcHandlers(ctx, deps.getProjectPaths)
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
     const parsed = runnerShutdownParamsSchema.safeParse(params ?? {})
@@ -103,7 +112,9 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...proc.handlers,
     ...createGitHandlers(ctx),
     ...createFsHandlers(ctx),
-    ...createRunnerConfigHandlers(ctx)
+    ...createRunnerConfigHandlers(ctx),
+    ...createGhHandlers(ctx),
+    ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
   }
 
   const handle = async (method: string, params: unknown): Promise<unknown> => {
@@ -176,6 +187,16 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     log
   })
 
+  // Where this runner keeps its projects. Loaded async (one file read) and
+  // late-bound, like the agent-hook URL — the dispatch table is synchronous.
+  let projectPaths: ProjectPathStore | null = null
+  void createProjectPathStore(hubHostFromUrl(config.hubUrl))
+    .then((store) => {
+      projectPaths = store
+      log('project path map loaded', { file: store.filePath, count: store.list().length })
+    })
+    .catch((err) => log('project path map failed to load', { error: String(err) }))
+
   dispatch = createHubRequestHandler({
     shutdown: (reason) => {
       log('runner shutdown requested by hub', { reason })
@@ -183,7 +204,8 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     },
     dialer,
     config,
-    log
+    log,
+    getProjectPaths: () => projectPaths
   })
 
   dialer.events.on('connected', ({ runnerId, mode }) => log('connected to hub', { runnerId, mode }))

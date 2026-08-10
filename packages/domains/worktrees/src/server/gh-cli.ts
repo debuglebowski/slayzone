@@ -22,8 +22,34 @@ async function resolveGhPath(): Promise<string | null> {
   return ghPath
 }
 
-/** Run gh with the user's shell environment so PATH is correct. */
-async function spawnGh(args: string[], opts: { cwd?: string; timeout?: number } = {}) {
+/**
+ * Where `gh` actually runs.
+ *
+ * Injectable because `gh` authenticates as whoever owns the machine it runs on:
+ * executing it here meant the PR panel spoke as the HUB while the agent pushed as
+ * the RUNNER — two identities for one repository, only one of them holding
+ * credentials. The hub injects a routed executor so the process lands on the
+ * runner; the eleven typed functions below, and all their JSON parsing, are
+ * untouched.
+ *
+ * ONE seam rather than eleven routed functions: this is already the single
+ * chokepoint every one of them goes through.
+ */
+export interface GhExecutor {
+  (
+    args: string[],
+    opts: { cwd?: string; timeout?: number; stdin?: string }
+  ): Promise<{ status: number | null; stdout: string; stderr: string }>
+}
+
+/**
+ * Run gh in THIS process, with the user's shell environment so PATH is correct.
+ *
+ * Exported so a routed executor can delegate to it for the zero-runner case,
+ * where this host's disk is the only one and its own `gh` is therefore the only
+ * meaningful identity.
+ */
+export const runGhLocally: GhExecutor = async (args, opts) => {
   if (!ghPath) await resolveGhPath()
   if (!ghPath) throw new Error('gh CLI not found')
 
@@ -32,6 +58,24 @@ async function spawnGh(args: string[], opts: { cwd?: string; timeout?: number } 
   const cmd = [ghPath, ...args].map((a) => `'${a.replace(/'/g, `'"'"'`)}'`).join(' ')
 
   return execAsync(shell, [...shellArgs, '-c', cmd], { ...opts, source: 'gh' })
+}
+
+let ghExecutor: GhExecutor = runGhLocally
+
+/**
+ * Point every gh call at a runner. Called by the hub composition once the runner
+ * gateway exists; without it the local executor stands, which is correct for a
+ * host with no runners.
+ */
+export function setGhExecutor(executor: GhExecutor | null): void {
+  ghExecutor = executor ?? runGhLocally
+}
+
+async function spawnGh(
+  args: string[],
+  opts: { cwd?: string; timeout?: number; stdin?: string } = {}
+) {
+  return ghExecutor(args, opts)
 }
 
 interface RawGhPr {

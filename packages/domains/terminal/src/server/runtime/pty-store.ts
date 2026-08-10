@@ -311,10 +311,14 @@ export function createPtyOps(db: SlayzoneDb) {
     let warmClaim: ReturnType<typeof claimWarmShell> = null
     const taskId = opts.sessionId.split(':')[0]
     let runnerId: string | null = null
+    // Resolved regardless of whether a warm agent is claimed: it is threaded into
+    // the spawn spec so the RUNNER can resolve its own cwd when the caller has no
+    // absolute path to give (see PtySpawnSpec.projectId).
+    let projectId: string | null = null
     if (taskId) {
       runnerId = await lookups.resolveRunnerId(taskId)
+      projectId = await lookups.getTaskProjectId(taskId)
       if (runnerId != null) {
-        const projectId = await lookups.getTaskProjectId(taskId)
         if (projectId) {
           warmClaim = claimWarmShell({
             projectId,
@@ -334,6 +338,7 @@ export function createPtyOps(db: SlayzoneDb) {
       win: targetWin,
       sessionId: opts.sessionId,
       runnerId,
+      projectId,
       cwd: opts.cwd,
       conversationId: opts.conversationId,
       existingConversationId: opts.existingConversationId,

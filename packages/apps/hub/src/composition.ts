@@ -120,9 +120,17 @@ import {
   subscribeToProcessLogs
 } from '@slayzone/processes/server'
 import { createLocalWorkspaceFs } from '@slayzone/file-editor/server'
+import { runGhLocally, setGhExecutor } from '@slayzone/worktrees/server'
 import { missingRootsForProjects } from './local-runner-roots'
+import { seedProjectPaths } from './seed-runner-project-paths'
+import { recordRunnerProjectPaths } from '@slayzone/runners/server'
 // Runner transport: runner gateway + hub-auth + runner resolution, wired
 // unconditionally at boot (a hub always accepts runners).
+import {
+  ghExecResultSchema,
+  HubToRunnerMethods,
+  projectListResultSchema
+} from '@slayzone/runner-transport/shared'
 import {
   createHubRunnerGateway,
   createRoutingChatBackend,
@@ -1261,6 +1269,9 @@ export function composeServer(opts: {
     // forward reference is never read before it is set.
     let widenLocalRunnerRoots: (runnerId: string, runnerName: string) => Promise<void> = async () =>
       undefined
+    let seedLocalProjectPaths: (runnerId: string, runnerName: string) => Promise<void> = async () =>
+      undefined
+    let mirrorRunnerProjectPaths: (runnerId: string) => Promise<void> = async () => undefined
     const runnerGateway = createHubRunnerGateway(
       createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
     )
@@ -1299,6 +1310,8 @@ export function composeServer(opts: {
       // A nameless descriptor (`hello` reconnect before the roster fills) can
       // never match the local runner's name, so it is correctly skipped.
       void widenLocalRunnerRoots(runner.runnerId, runner.name ?? '')
+      void seedLocalProjectPaths(runner.runnerId, runner.name ?? '')
+      void mirrorRunnerProjectPaths(runner.runnerId)
     })
     // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
     // servers, not agents. `doSpawn` is synchronous and also driven by restart
@@ -1335,6 +1348,25 @@ export function composeServer(opts: {
         local: defaultWorktreeExecAdapters
       })
     })
+    // `gh` authenticates as whoever owns the machine it runs on. Run on the hub,
+    // the PR panel spoke as the HUB while the agent pushed as the RUNNER — two
+    // identities for one repository, and only one of them held credentials for it.
+    // Route the single `spawnGh` chokepoint; the eleven typed gh functions and
+    // their parsing stay here untouched.
+    setGhExecutor(async (args, opts) => {
+      const runnerId = resolveExecRunner(null)
+      // No runner = this hub's own disk is the only one, so its own `gh` is the
+      // only meaningful identity. Falls through to the local executor.
+      if (runnerId == null || !opts.cwd) return runGhLocally(args, opts)
+      const res = await runnerGateway.request(runnerId, HubToRunnerMethods.ghExec, {
+        args,
+        cwd: opts.cwd,
+        ...(opts.timeout ? { timeoutMs: opts.timeout } : {}),
+        ...(opts.stdin === undefined ? {} : { stdin: opts.stdin })
+      })
+      return ghExecResultSchema.parse(res)
+    })
+
     // Workspace filesystem — the directory picker, the project-path probe, and
     // (later) the editor panel. Same resolution as the exec backends above, which
     // is the entire point: the picker must browse the filesystem the agent will
@@ -1377,6 +1409,76 @@ export function composeServer(opts: {
           level: 'warn',
           source: 'server',
           event: 'runner.roots_widen_failed',
+          message: err instanceof Error ? err.message : String(err),
+          payload: { runnerId }
+        })
+      }
+    }
+    // Hand the legacy hub-side `projects.path` values to the local runner once,
+    // so deleting that column does not blank every project an existing install
+    // has. Local runner only: a remote runner's disk is a different machine, and
+    // seeding it with the hub's paths would record mappings wrong by
+    // construction — the exact assumption this change removes.
+    seedLocalProjectPaths = async (runnerId: string, runnerName: string): Promise<void> => {
+      if (runnerName !== localRunnerName) return
+      try {
+        const rows = await db.all<{ id: string; path: string | null }>(
+          'SELECT id, path FROM projects WHERE path IS NOT NULL'
+        )
+        if (rows.length === 0) return
+        const outcome = await seedProjectPaths(rows, {
+          resolve: (projectId) => workspaceFs.resolveProjectPath(runnerId, projectId),
+          exists: (path) => workspaceFs.pathExists(runnerId, path),
+          adopt: (projectId, path) =>
+            workspaceFs.setProjectPath(runnerId, projectId, path, 'adopted')
+        })
+        if (outcome.adopted.length === 0) return
+        recordDiagnosticEvent({
+          level: 'info',
+          source: 'server',
+          event: 'runner.project_paths_seeded',
+          message: `local runner adopted ${outcome.adopted.length} project path(s)`,
+          payload: { runnerId, ...outcome }
+        })
+      } catch (err) {
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'server',
+          event: 'runner.project_paths_seed_failed',
+          message: err instanceof Error ? err.message : String(err),
+          payload: { runnerId }
+        })
+      }
+    }
+    // Pull the runner's own project→path map into the hub's mirror. The runner
+    // authors it; this only records. The mirror serves the one direction a runner
+    // cannot answer alone — `resolve-by-path`, i.e. `slay` asking which project
+    // its working directory belongs to.
+    //
+    // Runs AFTER the seed above, on every connect, so a re-pointed checkout or a
+    // project the runner has since dropped is reflected rather than remembered.
+    mirrorRunnerProjectPaths = async (runnerId: string): Promise<void> => {
+      try {
+        const listed = await runnerGateway.request(runnerId, HubToRunnerMethods.projectList, {})
+        const parsed = projectListResultSchema.safeParse(listed)
+        if (!parsed.success) return
+        await recordRunnerProjectPaths(
+          db,
+          runnerId,
+          parsed.data.projects.map((p) => ({
+            projectId: p.projectId,
+            path: p.path,
+            source: p.source
+          }))
+        )
+      } catch (err) {
+        // A runner too old to answer `project.list`, or one that dropped
+        // mid-request. The mirror simply keeps whatever it last knew, and
+        // `resolve-by-path` still has the legacy column to fall back on.
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'server',
+          event: 'runner.project_mirror_failed',
           message: err instanceof Error ? err.message : String(err),
           payload: { runnerId }
         })

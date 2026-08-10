@@ -1,12 +1,17 @@
 import type { Express } from 'express'
+import { resolveProjectByPath } from '@slayzone/runners/server'
 import type { RestApiDeps } from '../types'
 import { queryString } from '../resolve'
 
 /**
- * GET /api/projects/resolve-by-path?path=<dir> — find the project whose
- * configured path contains the given directory (deepest match wins).
- * Mirrors the CLI's `resolveProjectByPath` (cli/src/db-helpers.mts), which
- * backs `slay tasks list`-style project inference from $PWD.
+ * GET /api/projects/resolve-by-path?path=<dir> — which project contains this
+ * directory? Deepest match wins. Backs `slay`'s project inference from $PWD.
+ *
+ * This is the ONE direction the hub genuinely needs paths for, and why the
+ * runner-reported mirror (`runner_project_checkouts`) exists: asking every
+ * connected runner in turn would be slow and ambiguous. Forward resolution —
+ * "where does this project live for that agent" — is the runner's job and no
+ * longer happens here at all.
  */
 export function registerProjectsResolveByPathRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/projects/resolve-by-path', async (req, res) => {
@@ -16,23 +21,7 @@ export function registerProjectsResolveByPathRoute(app: Express, deps: RestApiDe
       return
     }
     try {
-      const normalized = dirPath.replace(/\/+$/, '')
-      const projects = await deps.db.all<{ id: string; name: string; path: string }>(
-        `SELECT id, name, path FROM projects WHERE path IS NOT NULL`
-      )
-
-      let best: { id: string; name: string; path: string } | null = null
-      let bestLen = -1
-      for (const p of projects) {
-        const pPath = p.path.replace(/\/+$/, '')
-        if (normalized === pPath || normalized.startsWith(pPath + '/')) {
-          if (pPath.length > bestLen) {
-            best = p
-            bestLen = pPath.length
-          }
-        }
-      }
-
+      const best = await resolveProjectByPath(deps.db, dirPath)
       if (!best) {
         res.status(404).json({ ok: false, error: `No project found for directory: ${dirPath}` })
         return

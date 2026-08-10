@@ -512,6 +512,9 @@ importers:
       '@slayzone/types':
         specifier: workspace:*
         version: link:../../shared/types
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.17.0
         version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)

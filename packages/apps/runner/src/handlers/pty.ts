@@ -60,8 +60,38 @@ export interface PtyHandlers {
  * Build the pty handler table. Sessions are tracked in a Map keyed by
  * `sessionId` and cleaned up on process exit.
  */
-export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
+/**
+ * `getProjectPaths` lets a cwd-less spawn resolve its own directory. The hub no
+ * longer knows where a project lives on this machine — it held one path column
+ * covering every runner — so `pty.spawn` may arrive carrying `projectId` instead
+ * of `cwd`, and this side does the lookup.
+ */
+export function createPtyHandlers(
+  ctx: HandlerContext,
+  getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null
+): PtyHandlers {
   const sessions = new Map<string, PtySession>()
+
+  /**
+   * An explicit `cwd` wins: it is either a worktree this runner created or a
+   * `task.base_dir` the user set, never a hub guess about someone else's disk.
+   * Otherwise resolve the project's own checkout here.
+   *
+   * A project with no mapping fails LOUDLY. Falling back to the runner's launch
+   * directory would start the agent in the wrong tree and look like it worked,
+   * which is the exact failure this whole seam removes.
+   */
+  function resolveCwd(opts: { cwd?: string; projectId?: string }): string {
+    if (opts.cwd) return opts.cwd
+    if (!opts.projectId) throw new Error('pty.spawn needs either cwd or projectId')
+    const entry = getProjectPaths?.()?.get(opts.projectId)
+    if (!entry) {
+      throw new Error(
+        `project ${opts.projectId} is not checked out on this runner — adopt a folder or enable remote git for it`
+      )
+    }
+    return entry.path
+  }
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {
     // Base channel: the runner inherits its parent (supervisor) process.env, so
@@ -98,13 +128,15 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
     opts: {
       command: string
       args?: string[]
-      cwd: string
+      cwd?: string
       env?: Record<string, string>
       cols?: number
       rows?: number
+      projectId?: string
       warm?: { cwd: string; startedAt: number }
     }
   ): PtySession {
+    const cwd = resolveCwd(opts)
     // Replace any pre-existing session with the same id (defensive against a
     // stale session that never signalled exit).
     const existing = sessions.get(id)
@@ -119,7 +151,7 @@ export function createPtyHandlers(ctx: HandlerContext): PtyHandlers {
 
     const proc = pty.spawn(opts.command, opts.args ?? [], {
       name: 'xterm-color',
-      cwd: opts.cwd,
+      cwd,
       env: buildEnv(opts.env),
       cols: opts.cols ?? 80,
       rows: opts.rows ?? 24

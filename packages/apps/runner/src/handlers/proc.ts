@@ -74,7 +74,14 @@ export interface ProcHandlers {
   disposeAll(): void
 }
 
-export function createProcHandlers(ctx: HandlerContext): ProcHandlers {
+/**
+ * `getProjectPaths` lets a cwd-less spawn resolve its own directory — the hub no
+ * longer knows where a project lives on this machine. See `pty.ts`.
+ */
+export function createProcHandlers(
+  ctx: HandlerContext,
+  getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null
+): ProcHandlers {
   const procs = new Map<string, ProcSession>()
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {
@@ -101,7 +108,13 @@ export function createProcHandlers(ctx: HandlerContext): ProcHandlers {
 
   function procSpawn(rawParams: unknown): { pid: number | null } {
     const params = procSpawnParamsSchema.parse(rawParams)
-    const cwd = params.cwd ? assertPathAllowed(params.cwd, ctx.config.allowedRoots) : undefined
+    // An explicit cwd wins (a worktree, or a task.base_dir the user set). Else
+    // resolve the project's checkout here. Neither → undefined, which is the
+    // pre-existing behaviour for a process that genuinely has no directory.
+    const resolved =
+      params.cwd ??
+      (params.projectId ? getProjectPaths?.()?.get(params.projectId)?.path : undefined)
+    const cwd = resolved ? assertPathAllowed(resolved, ctx.config.allowedRoots) : undefined
 
     // Replace any pre-existing process with the same sessionId.
     const existing = procs.get(params.sessionId)

@@ -13,6 +13,8 @@ export {
   listCheckoutsForProject,
   setTaskRunner,
   setProjectDefaultRunner,
+  setProjectLockedRunner,
+  setRunnerOwner,
   resolveTaskRunnerId,
   resolveTaskRunnerIdOrDefault,
   type RegisterRunnerInput,
@@ -33,3 +35,11 @@ export {
 // so sidecar composition (which already imports from '@slayzone/runners/server')
 // reads it from one place. Single source of truth for the local runner's name.
 export { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
+
+export {
+  recordRunnerProjectPaths,
+  listProjectLocations,
+  resolveProjectByPath,
+  type ProjectPathSource,
+  type RunnerProjectPath
+} from './project-paths'

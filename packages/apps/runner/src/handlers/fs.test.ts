@@ -319,7 +319,7 @@ describe('createFsHandlers — watch lifecycle', () => {
     expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
     writeFileSync(join(dir, 'touched.txt'), 'x')
     // The watcher debounces 100ms before emitting.
-    await vi.waitFor(() => expect(notify).toHaveBeenCalled(), { timeout: 3000 })
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled(), { timeout: 5000 })
 
     const [method, params] = notify.mock.calls[0] as unknown as [string, { watchId: string }]
     expect(method).toBe(RunnerNotificationMethods.fsChange)
@@ -330,7 +330,7 @@ describe('createFsHandlers — watch lifecycle', () => {
     writeFileSync(join(dir, 'after-stop.txt'), 'x')
     await new Promise((r) => setTimeout(r, 300))
     expect(notify).not.toHaveBeenCalled()
-  })
+  }, 20_000) // macOS `fs.watch` recursive rides FSEvents, whose latency grows with load. // Must exceed the waitFor above, or the test times out before the wait can.
 
   // A hub retry after reconnect must not leave two live subscriptions feeding one
   // client — the panel would see every change twice and refetch twice.
@@ -341,7 +341,7 @@ describe('createFsHandlers — watch lifecycle', () => {
     handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
     handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
     writeFileSync(join(dir, 'once.txt'), 'x')
-    await vi.waitFor(() => expect(notify).toHaveBeenCalled(), { timeout: 3000 })
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled(), { timeout: 5000 })
     await new Promise((r) => setTimeout(r, 300))
 
     const forThisFile = notify.mock.calls.filter(
@@ -350,7 +350,7 @@ describe('createFsHandlers — watch lifecycle', () => {
     expect(forThisFile).toHaveLength(1)
 
     handlers[M.fsWatchStop]({ watchId: 'w1' })
-  })
+  }, 20_000)
 
   it('refuses to watch a root outside the jail', () => {
     const child = join(dir, 'child')

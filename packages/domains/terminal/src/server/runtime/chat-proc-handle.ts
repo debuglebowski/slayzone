@@ -72,7 +72,14 @@ export interface ChatSpawnSpec {
    */
   binaryName: string
   args: string[]
+  /**
+   * Absolute cwd, or empty to let the RUNNER resolve it from `projectId`. The
+   * hub cannot: it held one path column covering every runner, so it could only
+   * ever be right about one of them.
+   */
   cwd: string
+  /** Lets the runner resolve its own cwd when `cwd` is empty. */
+  projectId?: string | null
   /** Identity/MCP env overlay for this spawn. */
   env: Record<string, string>
 }

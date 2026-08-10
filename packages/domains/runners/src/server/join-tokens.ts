@@ -27,6 +27,16 @@ export interface MintJoinTokenInput {
   certFingerprint: string
   ttlMs: number
   label: string
+  /**
+   * The user who minted this token, when the hub knows one.
+   *
+   * A token is the only thing that crosses from "a user clicked mint" to "a
+   * machine enrolled", so it is the only place ownership can be carried without
+   * asking the runner to assert an identity it cannot prove. Null on an
+   * unauthenticated loopback hub — the normal local case — and an unowned runner
+   * then stays honestly unowned.
+   */
+  mintedByUserId?: string | null
   /** Clock override for tests. */
   now?: number
 }
@@ -42,7 +52,14 @@ export interface MintedJoinToken {
 }
 
 export type VerifyJoinTokenResult =
-  | { ok: true; tokenId: string; label: string; payload: JoinTokenPayload }
+  | {
+      ok: true
+      tokenId: string
+      label: string
+      payload: JoinTokenPayload
+      /** Carried to `runners.owner_user_id` at enroll. Null = unowned. */
+      mintedByUserId: string | null
+    }
   | { ok: false; reason: 'malformed' | 'unknown' | 'used' | 'expired' }
 
 /** The at-rest form of a token: lowercase hex sha256 of the full token string. */
@@ -92,9 +109,10 @@ export async function mintJoinToken(
   const id = randomUUID()
   const expiresAt = now + input.ttlMs
   await db.run(
-    `INSERT INTO join_tokens (id, token_hash, label, created_at, expires_at, used_at, runner_id)
-     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-    [id, hashJoinToken(token), input.label, now, expiresAt]
+    `INSERT INTO join_tokens
+       (id, token_hash, label, created_at, expires_at, used_at, runner_id, minted_by_user_id)
+     VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
+    [id, hashJoinToken(token), input.label, now, expiresAt, input.mintedByUserId ?? null]
   )
   return { id, token, label: input.label, created_at: now, expires_at: expiresAt }
 }
@@ -125,5 +143,11 @@ export async function verifyJoinToken(
   )
   if (res.changes === 0) return { ok: false, reason: 'used' }
 
-  return { ok: true, tokenId: row.id, label: row.label, payload }
+  return {
+    ok: true,
+    tokenId: row.id,
+    label: row.label,
+    payload,
+    mintedByUserId: row.minted_by_user_id ?? null
+  }
 }

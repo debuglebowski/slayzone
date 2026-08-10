@@ -58,6 +58,9 @@ import type {
 import {
   fsCopyInResultSchema,
   fsDiscoverReposResultSchema,
+  projectResolvePathResultSchema,
+  projectEnsureCheckoutResultSchema,
+  projectSetPathResultSchema,
   fsGitStatusResultSchema,
   fsListAllFilesResultSchema,
   fsListDirResultSchema,
@@ -82,6 +85,7 @@ import {
   ptyWarmAdoptResultSchema,
   ptyWarmListResultSchema,
   ptyWarmSpawnResultSchema,
+  runnerGitReadinessResultSchema,
   runnerSetAllowedRootsResultSchema
 } from '../shared/frames'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -814,7 +818,12 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           sessionId: spec.sessionId,
           command: spec.file,
           args: spec.args,
-          cwd: spec.options.cwd,
+          // Send cwd only when there IS one — an empty string used to travel as a
+          // "path" and land the agent in the runner's launch directory. Absent,
+          // the runner resolves the project's own checkout from `projectId`,
+          // which is the only side that knows where it is.
+          ...(spec.options.cwd ? { cwd: spec.options.cwd } : {}),
+          ...(spec.projectId ? { projectId: spec.projectId } : {}),
           env: spec.options.env,
           cols: spec.options.cols,
           rows: spec.options.rows
@@ -1066,7 +1075,10 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
             sessionId: spec.id,
             command: spec.command,
             shell: true,
-            cwd: spec.cwd,
+            // Same rule as pty.spawn: an absent cwd lets the runner resolve the
+            // project's checkout, rather than an empty string travelling as a path.
+            ...(spec.cwd ? { cwd: spec.cwd } : {}),
+            ...(spec.projectId ? { projectId: spec.projectId } : {}),
             env: spec.env
           }
         )
@@ -1141,7 +1153,10 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
           sessionId: procSpec.id,
           command: spec.binaryName,
           args: spec.args,
-          cwd: spec.cwd,
+          // Same rule as pty/proc: absent rather than empty, so the runner
+          // resolves the project's checkout instead of taking '' as a path.
+          ...(spec.cwd ? { cwd: spec.cwd } : {}),
+          ...(spec.projectId ? { projectId: spec.projectId } : {}),
           env: spec.env
         })
       })
@@ -1444,6 +1459,51 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
         HubToRunnerMethods.runnerSetAllowedRoots,
         { roots },
         runnerSetAllowedRootsResultSchema
+      )
+    },
+
+    async resolveProjectPath(runnerId, projectId) {
+      if (runnerId == null) return local.resolveProjectPath(projectId)
+      return req(
+        runnerId,
+        HubToRunnerMethods.projectResolvePath,
+        { projectId },
+        projectResolvePathResultSchema
+      )
+    },
+
+    async setProjectPath(runnerId, projectId, path, source) {
+      if (runnerId == null) return local.setProjectPath(projectId, path, source)
+      return req(
+        runnerId,
+        HubToRunnerMethods.projectSetPath,
+        { projectId, path, source },
+        projectSetPathResultSchema
+      )
+    },
+
+    async forgetProjectPath(runnerId, projectId) {
+      if (runnerId == null) return local.forgetProjectPath(projectId)
+      await req(runnerId, HubToRunnerMethods.projectForgetPath, { projectId }, fsOkResultSchema)
+    },
+
+    async gitReadiness(runnerId, repoUrl) {
+      if (runnerId == null) return local.gitReadiness()
+      return req(
+        runnerId,
+        HubToRunnerMethods.runnerGitReadiness,
+        repoUrl ? { repoUrl } : {},
+        runnerGitReadinessResultSchema
+      )
+    },
+
+    async ensureProjectCheckout(runnerId, input) {
+      if (runnerId == null) return local.ensureProjectCheckout(input.projectId)
+      return req(
+        runnerId,
+        HubToRunnerMethods.projectEnsureCheckout,
+        input,
+        projectEnsureCheckoutResultSchema
       )
     },
 

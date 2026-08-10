@@ -10,6 +10,7 @@ import {
 } from '@slayzone/projects/server'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
 import { router, publicProcedure } from '../trpc'
+import { getRunnersDepsOrNull } from '../app-deps'
 
 const createProjectInput = z.object({
   name: z.string().min(1),
@@ -30,9 +31,31 @@ const iconsDir = (dataRoot: string): string => join(dataRoot, 'project-icons')
 export const projectsRouter = router({
   list: publicProcedure.query(({ ctx }) => listAllProjects(ctx.db)),
 
-  create: publicProcedure
-    .input(createProjectInput)
-    .mutation(({ ctx, input }) => createProject(ctx.db, input as CreateProjectInput)),
+  /**
+   * Create a project.
+   *
+   * Refused when no runner can hold it. A project's files live on a runner, so
+   * with none connected there is nowhere to put a path and nowhere its agents
+   * could run — and the picker would quietly browse the hub's own disk, which is
+   * exactly the wrong-machine confusion this seam removes. Better to say so at
+   * the one moment the user is looking at it.
+   *
+   * The check is `listUsableRunners`, not `listRunners`: a socket that is open but
+   * silent cannot take work, and offering to create against it would produce a
+   * project whose first agent start hangs.
+   */
+  create: publicProcedure.input(createProjectInput).mutation(({ ctx, input }) => {
+    const gateway = getRunnersDepsOrNull()?.getGateway()
+    // No gateway wired at all = the fork sidecar or a pre-init boot, where this
+    // process IS the only machine. Not the "no runner" case, so not refused.
+    if (gateway && gateway.listUsableRunners().length === 0) {
+      throw new Error(
+        'No runner is connected, so a project has no machine to live on. ' +
+          'Start the local runner (Settings → Connections) or enroll one, then try again.'
+      )
+    }
+    return createProject(ctx.db, input as CreateProjectInput)
+  }),
 
   update: publicProcedure
     .input(updateProjectInput)

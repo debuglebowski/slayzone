@@ -1098,6 +1098,11 @@ async function spawnSubprocess(session: Session): Promise<void> {
       runnerId: opts.runnerId ?? null,
       binaryName: backend.binaryName,
       args,
+      // No `projectId` here yet: the chat opts chain does not carry one, so chat
+      // still relies on the hub-computed `cwd` exactly as before. Not a
+      // regression — but it means a chat agent cannot yet benefit from
+      // runner-side path resolution the way a terminal agent can. Threading a
+      // project through `chat-handlers` closes it.
       cwd: opts.cwd,
       // `opts.env` is `NodeJS.ProcessEnv` (values may be undefined); the wire
       // contract is `Record<string, string>`, so drop unset keys rather than

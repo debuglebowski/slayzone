@@ -114,6 +114,15 @@ run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
 run_test_electron_strict_loader packages/apps/hub/src/local-runner-roots.test.ts
+# `projects.path` is being deleted; this is the one-time hand-off of its values to
+# the local runner. It must never overwrite a mapping the user re-pointed, and
+# must never record a path that is not on that machine.
+run_test_electron_strict_loader packages/apps/hub/src/seed-runner-project-paths.test.ts
+# The hub's MIRROR of runner-reported paths, on the v149 table that modelled this
+# and was never wired. Pins that a report replaces a runner's rows wholesale (a
+# stale row would be trusted by reverse lookup) and that `resolve-by-path` still
+# answers from the legacy column during the upgrade window.
+run_test_electron_strict_loader packages/domains/runners/src/server/project-paths.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
 # has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
 run_test_electron_strict_loader packages/apps/hub/src/supervised-bootstrap.test.ts
@@ -508,6 +517,29 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/domains/runner-transport/src/server/exec-proxies.test.ts \
   packages/apps/runner/src/ring-buffer.test.ts; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+fi
+
+# The runner is a separate app with its OWN vitest config (node environment, no
+# jsdom). Its handler suites — pty/proc/fs/git/project/gh/runner-config, ~150
+# assertions — were never in this aggregate, so they only ran if someone happened
+# to run the package directly. Listing the files under the app's jsdom config is
+# not a substitute: `fs.watch({recursive:true})` never delivers there, at any
+# timeout. Run each package's own suite instead.
+echo ""
+echo "=== packages/apps/runner (own vitest config) ==="
+if ( set -o pipefail; pnpm --filter @slayzone/runner test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+fi
+
+# Same reason: the hub⇄runner fs round trip loads the real runner handlers.
+echo ""
+echo "=== packages/domains/runner-transport (own vitest config) ==="
+if ( set -o pipefail; pnpm --filter @slayzone/runner-transport test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))

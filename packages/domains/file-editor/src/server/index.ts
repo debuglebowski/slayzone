@@ -44,6 +44,7 @@ export {
   type BrowseOptions,
   type BrowseResult,
   type ListAllFilesResult,
+  type ProjectLocation,
   type LocalWorkspaceFs,
   type SearchResult,
   type SetRootsResult,

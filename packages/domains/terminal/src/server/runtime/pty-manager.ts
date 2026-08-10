@@ -1178,6 +1178,13 @@ export interface CreatePtyOptions {
    * spawn; resolved by pty-store's `ptyCreate` via `PtySpawnLookups`.
    */
   runnerId?: string | null
+  /**
+   * Threaded into the spawn spec so the RUNNER can resolve its own cwd. `cwd`
+   * below still wins when non-empty — a worktree path or a `task.base_dir`
+   * override is a directory the runner created or was explicitly told about,
+   * not a hub guess about someone else's disk.
+   */
+  projectId?: string | null
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
@@ -1628,6 +1635,7 @@ export async function createPty(
       sessionId,
       taskId,
       runnerId,
+      projectId: opts.projectId ?? null,
       file: rawFile,
       args: rawArgs,
       options: spawnOptions,

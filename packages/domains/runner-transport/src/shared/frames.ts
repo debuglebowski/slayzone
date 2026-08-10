@@ -305,24 +305,54 @@ export const HubToRunnerMethods = {
   procGetBufferSince: 'proc.getBufferSince',
   /** Live child processes the runner still holds — drives reattach. */
   procList: 'proc.list',
+  // project → path mapping. The RUNNER owns where a project lives on its own
+  // disk; the hub knows only which runner. See `project.resolvePath` below.
+  projectResolvePath: 'project.resolvePath',
+  projectSetPath: 'project.setPath',
+  projectForgetPath: 'project.forgetPath',
+  projectList: 'project.list',
+  /** Ensure a project is checked out here, cloning it if remote-git mode is on. */
+  projectEnsureCheckout: 'project.ensureCheckout',
   ping: 'ping',
   runnerShutdown: 'runner.shutdown',
   /** Edit the runner's own path-jail (Settings → Runners). */
-  runnerSetAllowedRoots: 'runner.setAllowedRoots'
+  runnerSetAllowedRoots: 'runner.setAllowedRoots',
+  /** Can this runner reach git / a given repo with its own credentials? */
+  runnerGitReadiness: 'runner.gitReadiness',
+  /** Run `gh` on the runner (PR panel). One frame, not one per gh subcommand. */
+  ghExec: 'gh.exec'
 } as const
 
 /** Reserved method namespaces for future hub → runner exec commands. */
-export const RESERVED_HUB_METHOD_PREFIXES = ['pty.', 'fs.', 'git.', 'proc.'] as const
+export const RESERVED_HUB_METHOD_PREFIXES = ['pty.', 'fs.', 'git.', 'proc.', 'project.'] as const
 
-export const ptySpawnParamsSchema = z.object({
-  sessionId: z.string().min(1),
-  command: z.string().min(1),
-  args: z.array(z.string()).optional(),
-  cwd: z.string().min(1),
-  env: z.record(z.string(), z.string()).optional(),
-  cols: z.number().int().positive().optional(),
-  rows: z.number().int().positive().optional()
-})
+export const ptySpawnParamsSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    /**
+     * Absolute cwd. Optional now: when absent the RUNNER resolves it from
+     * `projectId` against its own `project.*` mapping, because the hub cannot —
+     * it held one path column naming a directory on a machine it does not own.
+     *
+     * Still sent, and authoritative when it is, for the two cases where the path
+     * is not a hub guess: a worktree the runner itself created, and an explicit
+     * `task.base_dir` override.
+     */
+    cwd: z.string().min(1).optional(),
+    /** Lets the runner resolve its own cwd when `cwd` is absent. */
+    projectId: z.string().min(1).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    cols: z.number().int().positive().optional(),
+    rows: z.number().int().positive().optional()
+  })
+  // Neither one means a spawn with nowhere to run. Refuse at the schema rather
+  // than landing an agent in the runner's launch directory, which is the kind of
+  // silent wrong-cwd this whole change exists to remove.
+  .refine((p) => p.cwd !== undefined || p.projectId !== undefined, {
+    message: 'pty.spawn needs either cwd or projectId'
+  })
 export type PtySpawnParams = z.infer<typeof ptySpawnParamsSchema>
 
 export const ptySpawnResultSchema = z.object({
@@ -515,6 +545,175 @@ export const runnerSetAllowedRootsResultSchema = z.object({
   rejected: z.array(z.object({ path: z.string(), reason: z.string() }))
 })
 export type RunnerSetAllowedRootsResult = z.infer<typeof runnerSetAllowedRootsResultSchema>
+
+// ---------------------------------------------------------------------------
+// hub → runner requests: project → path mapping
+//
+// `projects.path` used to live on the hub: ONE column naming a directory the hub
+// cannot see, on a machine it does not own. Two runners laying the same project
+// out differently made the hub necessarily wrong about one of them, and a Windows
+// runner does not even agree on the separator.
+//
+// So the hub knows WHAT a project is (id, name, repo URL) and each runner knows
+// WHERE it put that project. A path reaches a runner two ways, both first-class:
+// ADOPTED (the user pointed at a folder that already exists there — the dominant
+// local case) or PROVISIONED (remote-git mode cloned it).
+// ---------------------------------------------------------------------------
+
+export const projectPathSourceSchema = z.enum(['adopted', 'provisioned'])
+export type ProjectPathSource = z.infer<typeof projectPathSourceSchema>
+
+export const projectResolvePathParamsSchema = z.object({
+  projectId: z.string().min(1)
+})
+export type ProjectResolvePathParams = z.infer<typeof projectResolvePathParamsSchema>
+
+/**
+ * `path: null` = this runner has no checkout of that project.
+ *
+ * A real, actionable state — not an error. It is the honest answer the single
+ * hub-side column could never give: it always had *a* path, even for a machine
+ * that had never seen the project.
+ */
+export const projectResolvePathResultSchema = z.object({
+  path: z.string().nullable(),
+  source: projectPathSourceSchema.optional(),
+  /** False when the recorded path has since vanished from disk. */
+  exists: z.boolean().optional()
+})
+export type ProjectResolvePathResult = z.infer<typeof projectResolvePathResultSchema>
+
+export const projectSetPathParamsSchema = z.object({
+  projectId: z.string().min(1),
+  /** Absolute path ON THE RUNNER. Must resolve inside `allowedRoots`. */
+  path: z.string().min(1),
+  source: projectPathSourceSchema
+})
+export type ProjectSetPathParams = z.infer<typeof projectSetPathParamsSchema>
+
+export const projectSetPathResultSchema = z.object({
+  /** The realpath-resolved path actually recorded. */
+  path: z.string()
+})
+export type ProjectSetPathResult = z.infer<typeof projectSetPathResultSchema>
+
+export const projectForgetPathParamsSchema = z.object({
+  projectId: z.string().min(1)
+})
+export type ProjectForgetPathParams = z.infer<typeof projectForgetPathParamsSchema>
+
+export const projectListParamsSchema = z.object({})
+export type ProjectListParams = z.infer<typeof projectListParamsSchema>
+
+export const projectListResultSchema = z.object({
+  projects: z.array(
+    z.object({
+      projectId: z.string(),
+      path: z.string(),
+      source: projectPathSourceSchema,
+      exists: z.boolean()
+    })
+  )
+})
+export type ProjectListResult = z.infer<typeof projectListResultSchema>
+
+/**
+ * Make sure this project is usable on this runner before an agent starts.
+ *
+ * Called at session start, which is the only moment that has everything it needs:
+ * the runner knows its own disk, the hub knows the project's identity, and the
+ * user is waiting — so a clone here is legible progress rather than a background
+ * surprise.
+ *
+ * `repoUrl` present = remote-git mode; the runner may CREATE the checkout. Absent
+ * = an adopted folder, and a missing directory is reported, never recreated:
+ * cloning over a path the user chose could destroy work that was never pushed.
+ */
+export const projectEnsureCheckoutParamsSchema = z.object({
+  projectId: z.string().min(1),
+  /** Correlates the `checkout.status` notifications this call emits. */
+  checkoutId: z.string().min(1),
+  /** Set only in remote-git mode. Its absence is what forbids creation. */
+  repoUrl: z.string().min(1).optional(),
+  branch: z.string().min(1).optional(),
+  /** Where a provisioned checkout goes: `<workspaceRoot>/<projectId>`. */
+  workspaceRoot: z.string().min(1).optional()
+})
+export type ProjectEnsureCheckoutParams = z.infer<typeof projectEnsureCheckoutParamsSchema>
+
+export const projectEnsureCheckoutResultSchema = z.object({
+  path: z.string().nullable(),
+  /**
+   * What the runner did. `present` = already there; `cloned` = created just now;
+   * `missing` = recorded but gone and NOT recreatable (adopted); `unavailable` =
+   * no mapping and no way to make one.
+   */
+  outcome: z.enum(['present', 'cloned', 'missing', 'unavailable']),
+  error: z.string().optional()
+})
+export type ProjectEnsureCheckoutResult = z.infer<typeof projectEnsureCheckoutResultSchema>
+
+/**
+ * Can this runner do git work, with the credentials it already has?
+ *
+ * SlayZone stores no git secrets and should not start: agents already push from
+ * the runner using its own `gh auth` / ssh-agent / credential helper. So rather
+ * than taking custody, make the prerequisite VISIBLE — "this runner cannot reach
+ * that repo" becomes a fact fixed once with `gh auth login` on that box, instead
+ * of a clone that dies mid-provision with a git error buried in a log.
+ */
+export const runnerGitReadinessParamsSchema = z.object({
+  /** Probe reachability of this specific repo too, not just the toolchain. */
+  repoUrl: z.string().min(1).optional()
+})
+export type RunnerGitReadinessParams = z.infer<typeof runnerGitReadinessParamsSchema>
+
+export const runnerGitReadinessResultSchema = z.object({
+  gitInstalled: z.boolean(),
+  ghInstalled: z.boolean(),
+  /** `gh auth status` succeeded. False also when gh is absent. */
+  ghAuthenticated: z.boolean(),
+  /** Present only when a `repoUrl` was given: did `git ls-remote` succeed? */
+  repoReachable: z.boolean().optional(),
+  /** First failing probe's message, for the UI to show verbatim. */
+  detail: z.string().optional()
+})
+export type RunnerGitReadinessResult = z.infer<typeof runnerGitReadinessResultSchema>
+
+/**
+ * Run `gh` where the git work happens.
+ *
+ * ONE generic frame rather than one per subcommand. The hub already has a single
+ * `spawnGh` chokepoint with eleven typed functions above it (`listOpenPrs`,
+ * `createPr`, `getPrComments`, …); routing the chokepoint keeps that typing and
+ * its parsing on the hub while the process runs on the runner. Eleven frames
+ * would be eleven chances for the schema drift this contract has already paid
+ * for four times.
+ *
+ * Why route it at all: `gh` authenticates as whoever owns the machine it runs on.
+ * On the hub the PR panel spoke as the HUB while the agent pushed as the RUNNER —
+ * two identities for one repo, and only one of them had credentials.
+ *
+ * `args` is argv, never a shell string: a PR title or comment body is arbitrary
+ * user text, and handing it to a shell would make quoting a security boundary.
+ */
+export const ghExecParamsSchema = z.object({
+  args: z.array(z.string()),
+  /** Repo directory. Passes the runner's allowedRoots jail. */
+  cwd: z.string().min(1),
+  timeoutMs: z.number().int().positive().optional(),
+  /** Written to gh's stdin — used for a PR body, which can be long. */
+  stdin: z.string().optional()
+})
+export type GhExecParams = z.infer<typeof ghExecParamsSchema>
+
+export const ghExecResultSchema = z.object({
+  /** Null when the process was killed by a signal or never started. */
+  status: z.number().int().nullable(),
+  stdout: z.string(),
+  stderr: z.string()
+})
+export type GhExecResult = z.infer<typeof ghExecResultSchema>
 
 export const runnerShutdownParamsSchema = z.object({
   reason: z.string().optional(),
@@ -887,6 +1086,8 @@ export type FsOkResult = z.infer<typeof fsOkResultSchema>
 
 export const procSpawnParamsSchema = z.object({
   sessionId: z.string().min(1),
+  /** Resolve cwd from this project when `cwd` is absent. See `pty.spawn`. */
+  projectId: z.string().min(1).optional(),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   /**

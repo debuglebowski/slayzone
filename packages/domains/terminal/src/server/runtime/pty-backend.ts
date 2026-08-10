@@ -19,9 +19,24 @@ export interface PtySpawnSpec {
   sessionId: string
   taskId: string
   runnerId: string | null
+  /**
+   * Which project this session belongs to, so the RUNNER can resolve its own
+   * cwd. The hub cannot: it held one `projects.path` column naming a directory
+   * on a machine it does not own, which could only ever be right about one
+   * runner.
+   *
+   * `options.cwd` still wins when set, and legitimately so — a worktree path or
+   * a `task.base_dir` override is a directory the runner itself created or was
+   * explicitly told about, not a hub guess.
+   */
+  projectId: string | null
   file: string
   args: string[]
   options: {
+    /**
+     * Absolute cwd, or empty to let the runner resolve it from `projectId`.
+     * Empty + no projectId is a spawn with nowhere to run and is refused.
+     */
     cwd: string
     env: Record<string, string>
     cols: number

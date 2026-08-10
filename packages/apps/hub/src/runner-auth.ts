@@ -27,6 +27,7 @@ import {
   getRunner,
   hashJoinToken,
   registerOrReplaceRunner,
+  setRunnerOwner,
   registerRunner,
   retireStaleLocalRunners,
   touchRunnerLastSeen,
@@ -150,6 +151,11 @@ export function createRunnerAuthAdapters(deps: RunnerAuthAdapterDeps): RunnerAut
         authKeyId: minted.keyId,
         now: at
       })
+      // A runner process runs as exactly one OS account, so it belongs to exactly
+      // one SlayZone user. The join token carried who minted it — the only path
+      // from "a user clicked mint" to "a machine enrolled" — and null stays null
+      // rather than attributing the machine to a guess.
+      await setRunnerOwner(db, runnerId, verified.mintedByUserId)
       // One-time (idempotent) collapse of any pre-fix duplicate local rows: retire
       // every OTHER row sharing the local name. No-op once collapsed. Identity-only
       // (by name) — never status-based, never touches a remote runner.
@@ -164,6 +170,7 @@ export function createRunnerAuthAdapters(deps: RunnerAuthAdapterDeps): RunnerAut
         authKeyId: minted.keyId,
         now: at
       })
+      await setRunnerOwner(db, runnerId, verified.mintedByUserId)
     }
 
     grace.set(key, { runnerId, apiKey: minted.key, expiresAt: at + graceMs })

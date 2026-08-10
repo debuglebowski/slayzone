@@ -3608,6 +3608,99 @@ export const migrations: Migration[] = [
            AND origin <> 'pending-spawn';
       `)
     }
+  },
+  {
+    version: 159,
+    up: (db) => {
+      // `runner_project_checkouts` (v149) already models "where each runner has
+      // each project checked out". It was never wired to anything — this is the
+      // change that starts using it, and it needs one more fact.
+      //
+      // HOW the checkout got there decides what may be done to it. A PROVISIONED
+      // one was cloned from a repo URL, so a missing directory can be re-cloned
+      // without asking. An ADOPTED one is a folder the user pointed at; if it
+      // disappears, recreating it would be inventing a checkout they never asked
+      // for, and cloning over it could destroy local work that was never pushed.
+      //
+      // Default 'adopted' is the safe reading for any pre-existing row: it is the
+      // value that forbids automatic recreation. (There are none today — nothing
+      // wrote this table — but a default that fails safe costs nothing.)
+      db.exec(`
+        ALTER TABLE runner_project_checkouts
+          ADD COLUMN source TEXT NOT NULL DEFAULT 'adopted';
+
+        CREATE INDEX idx_runner_checkouts_path ON runner_project_checkouts(root_path);
+      `)
+    }
+  },
+  {
+    version: 160,
+    up: (db) => {
+      // Remote-git mode: the project identity a runner can PROVISION from.
+      //
+      // With the path gone from the hub, a runner that has never seen a project
+      // has nothing to go on. `git_mode = 'remote'` gives it the one piece of
+      // identity that is human-meaningful and machine-actionable — a clone URL —
+      // so a first agent session can create the checkout instead of failing with
+      // "not checked out here".
+      //
+      // Default 'off' keeps every existing project exactly as it is: a folder
+      // someone adopted, which must never be re-cloned over. That distinction is
+      // the whole reason `runner_project_checkouts.source` exists.
+      //
+      // No credentials here, deliberately. SlayZone stores none today (no
+      // GIT_ASKPASS, no token injection anywhere in the tree) and a URL is not a
+      // secret — the runner clones with whatever `gh auth` / ssh-agent that
+      // machine already has, which is the same prerequisite its agents already
+      // rely on to push.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN git_mode TEXT NOT NULL DEFAULT 'off'
+          CHECK (git_mode IN ('off', 'remote'));
+        ALTER TABLE projects ADD COLUMN repo_url TEXT;
+        ALTER TABLE projects ADD COLUMN default_branch TEXT;
+      `)
+    }
+  },
+  {
+    version: 161,
+    up: (db) => {
+      // Who a runner belongs to, and whether a project is pinned to one.
+      //
+      // `runners.owner_user_id`: a runner process runs as exactly ONE OS account,
+      // so two SlayZone users sharing one runner share a filesystem, a credential
+      // set, and a process owner. Per-user subfolders inside it would be
+      // organisation, not isolation, and rotating credentials by time does not
+      // help — a long-running agent outlives the rotation. A shared machine is
+      // still fine; it just runs one runner per OS account, which is the unit that
+      // actually carries an identity.
+      //
+      // NULL = pre-existing / unclaimed, which every runner is today. Not
+      // backfilled: inventing an owner would be a claim about who a machine
+      // belongs to that nothing here knows.
+      //
+      // `projects.locked_runner_id`: pin a project to one machine, disabling the
+      // per-task `tasks.runner_id` override. Opt-in, because that override is real
+      // shipped functionality (the RunnerCard in the task sidebar) and removing it
+      // to tidy the model would be a cap.
+      db.exec(`
+        ALTER TABLE runners ADD COLUMN owner_user_id TEXT;
+        ALTER TABLE projects ADD COLUMN locked_runner_id TEXT;
+      `)
+    }
+  },
+  {
+    version: 162,
+    up: (db) => {
+      // Who minted a join token, so the runner that redeems it can inherit an
+      // owner. A token is the only thing that crosses from "a user clicked mint"
+      // to "a machine enrolled", so it is the only place the attribution can be
+      // carried without asking the runner to assert an identity it cannot prove.
+      //
+      // NULL on every existing token and on any mint from an unauthenticated
+      // loopback hub, which is the normal local case — an unowned runner stays
+      // unowned rather than being attributed to a guess.
+      db.exec(`ALTER TABLE join_tokens ADD COLUMN minted_by_user_id TEXT;`)
+    }
   }
 ]
 

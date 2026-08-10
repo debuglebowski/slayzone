@@ -85,7 +85,10 @@ export {
   mergePr,
   getPrDiff,
   getGhUser,
-  editPrComment
+  editPrComment,
+  setGhExecutor,
+  runGhLocally,
+  type GhExecutor
 } from './gh-cli'
 export { runAiCommand } from './merge-ai'
 export {

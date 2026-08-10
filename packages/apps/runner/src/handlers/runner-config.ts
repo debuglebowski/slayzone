@@ -18,12 +18,15 @@
  * @module runner/handlers/runner-config
  */
 
+import { execFile } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { updateRunnerConfigFile } from '@slayzone/platform/slayzone-config'
 import {
   HubToRunnerMethods,
+  runnerGitReadinessParamsSchema,
   runnerSetAllowedRootsParamsSchema,
+  type RunnerGitReadinessResult,
   type RunnerSetAllowedRootsResult
 } from '@slayzone/runner-transport/shared'
 import type { HandlerContext, HubMethodTable } from './types'
@@ -82,7 +85,54 @@ export function createRunnerConfigHandlers(ctx: HandlerContext): HubMethodTable 
     return { roots: applied, rejected }
   }
 
+  /** Run a command, resolving to its failure message rather than throwing. */
+  function probe(cmd: string, args: string[]): Promise<string | null> {
+    return new Promise((res) => {
+      execFile(cmd, args, { timeout: 15_000 }, (err, _out, stderr) =>
+        res(err ? stderr?.trim() || err.message : null)
+      )
+    })
+  }
+
+  /**
+   * Report whether this runner can do git work with its own credentials.
+   *
+   * Reports, never fixes. SlayZone holds no git secrets — agents already push
+   * from here using whatever `gh auth` / ssh-agent this machine has — so the
+   * useful thing is to make that prerequisite legible instead of taking custody
+   * of it. A missing login becomes something an operator fixes once on this box.
+   */
+  async function gitReadiness(rawParams: unknown): Promise<RunnerGitReadinessResult> {
+    const { repoUrl } = runnerGitReadinessParamsSchema.parse(rawParams ?? {})
+
+    const gitErr = await probe('git', ['--version'])
+    const ghErr = await probe('gh', ['--version'])
+    const ghInstalled = ghErr === null
+    // `gh auth status` is only meaningful if gh exists; asking otherwise would
+    // report "unauthenticated" for a machine that authenticates over ssh.
+    const ghAuthErr = ghInstalled ? await probe('gh', ['auth', 'status']) : 'gh not installed'
+
+    let repoReachable: boolean | undefined
+    let repoErr: string | null = null
+    if (repoUrl) {
+      // The real question: can THIS machine reach THAT repo? A toolchain that
+      // exists proves nothing about credentials for a specific remote.
+      repoErr = await probe('git', ['ls-remote', '--heads', repoUrl])
+      repoReachable = repoErr === null
+    }
+
+    const detail = gitErr ?? repoErr ?? (ghInstalled ? ghAuthErr : null)
+    return {
+      gitInstalled: gitErr === null,
+      ghInstalled,
+      ghAuthenticated: ghInstalled && ghAuthErr === null,
+      ...(repoReachable === undefined ? {} : { repoReachable }),
+      ...(detail ? { detail } : {})
+    }
+  }
+
   return {
-    [HubToRunnerMethods.runnerSetAllowedRoots]: setAllowedRoots
+    [HubToRunnerMethods.runnerSetAllowedRoots]: setAllowedRoots,
+    [HubToRunnerMethods.runnerGitReadiness]: gitReadiness
   }
 }

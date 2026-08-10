@@ -323,14 +323,36 @@ export async function setProjectDefaultRunner(
  * unbound task must resolve to a real runner rather than to "the hub".
  */
 export async function resolveTaskRunnerId(db: SlayzoneDb, taskId: string): Promise<string | null> {
+  // `locked_runner_id` wins over BOTH the task's own pin and the project default.
+  // That is the point of locking: a project's checkout lives at one path on one
+  // machine, so letting a task override the runner would hand its agent a
+  // directory that may not exist there.
   const row = await db.get<{ runner_id: string | null }>(
-    `SELECT COALESCE(t.runner_id, p.default_runner_id) AS runner_id
+    `SELECT COALESCE(p.locked_runner_id, t.runner_id, p.default_runner_id) AS runner_id
      FROM tasks t
      LEFT JOIN projects p ON p.id = t.project_id
      WHERE t.id = ?`,
     [taskId]
   )
   return row?.runner_id ?? null
+}
+
+/** Pin every task in a project to one runner, or unpin with `null`. */
+export async function setProjectLockedRunner(
+  db: SlayzoneDb,
+  projectId: string,
+  runnerId: string | null
+): Promise<void> {
+  await db.run(`UPDATE projects SET locked_runner_id = ? WHERE id = ?`, [runnerId, projectId])
+}
+
+/** Record which SlayZone user a runner belongs to (set at enroll). */
+export async function setRunnerOwner(
+  db: SlayzoneDb,
+  runnerId: string,
+  ownerUserId: string | null
+): Promise<void> {
+  await db.run(`UPDATE runners SET owner_user_id = ? WHERE id = ?`, [ownerUserId, runnerId])
 }
 
 /**

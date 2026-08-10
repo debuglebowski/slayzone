@@ -44,6 +44,8 @@ export interface JoinToken {
   used_at: number | null
   /** Runner that eventually enrolled with this token. */
   runner_id: string | null
+  /** User who minted it; becomes that runner's owner at enroll. NULL = unowned. */
+  minted_by_user_id?: string | null
 }
 
 /** Row in `runner_project_checkouts` — where a runner has a project checked out. */

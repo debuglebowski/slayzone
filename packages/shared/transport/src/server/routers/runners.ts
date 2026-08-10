@@ -6,6 +6,7 @@ import {
   mintJoinToken as storeMintJoinToken,
   revokeRunner as storeRevokeRunner,
   setProjectDefaultRunner as storeSetProjectDefaultRunner,
+  setProjectLockedRunner as storeSetProjectLockedRunner,
   setTaskRunner as storeSetTaskRunner,
   resolveTaskRunnerId as storeResolveTaskRunnerId
 } from '@slayzone/runners/server'
@@ -99,7 +100,11 @@ export const runnersRouter = router({
         hubUrl,
         certFingerprint,
         ttlMs: input.ttlMs ?? DEFAULT_JOIN_TOKEN_TTL_MS,
-        label: input.label
+        label: input.label,
+        // Carries this user onto the runner that redeems the token. Null on an
+        // unauthenticated loopback hub (the normal local case), which leaves the
+        // runner honestly unowned rather than attributed to a guess.
+        mintedByUserId: ctx.principal?.userId ?? null
       })
       return {
         id: minted.id,
@@ -125,6 +130,22 @@ export const runnersRouter = router({
     .input(z.object({ projectId: z.string(), runnerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
       await storeSetProjectDefaultRunner(ctx.db, input.projectId, input.runnerId)
+      return { ok: true as const }
+    }),
+
+  /**
+   * Pin a project to ONE runner (`null` unpins).
+   *
+   * A locked project ignores the per-task `tasks.runner_id` override, and must:
+   * the project's checkout lives at one path on one machine, so letting a task
+   * pick a different runner would hand its agent a directory that need not exist
+   * there. Opt-in rather than the default, because that override is real shipped
+   * functionality and removing it to tidy the model would be a cap.
+   */
+  setProjectLockedRunner: publicProcedure
+    .input(z.object({ projectId: z.string(), runnerId: z.string().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      await storeSetProjectLockedRunner(ctx.db, input.projectId, input.runnerId)
       return { ok: true as const }
     }),
 
