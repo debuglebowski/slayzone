@@ -472,6 +472,13 @@ export function HubCard({
                     />
                   </td>
                   <td className="w-24 py-2 text-right">
+                    {/* Can this runner do git work with the credentials it has?
+                        Reported, never fixed: SlayZone stores no git secrets, and
+                        agents already push from here using this machine's own
+                        `gh auth` / ssh-agent. Making the prerequisite visible is
+                        what turns a clone that dies mid-provision into something
+                        an operator fixes once with `gh auth login`. */}
+                    <RunnerGitStatus runnerId={runner.id} connected={runner.connected} />
                     {/* Which folders this runner may touch. Offered for EVERY
                         runner, local included: the app's filesystem work now runs
                         on the runner that owns the workspace, so a project outside
@@ -661,5 +668,43 @@ export function HubCard({
         </>
       }
     />
+  )
+}
+
+/**
+ * Git readiness for one runner, as a quiet inline marker.
+ *
+ * Only rendered for a CONNECTED runner: probing an offline one would report "not
+ * ready" for a machine that is merely asleep, which is a different and misleading
+ * claim. Nothing is shown while the answer is unknown — an absent marker reads as
+ * "no news", a red one reads as "broken".
+ */
+function RunnerGitStatus({
+  runnerId,
+  connected
+}: {
+  runnerId: string
+  connected: boolean
+}): React.JSX.Element | null {
+  const trpc = useTRPC()
+  const query = useQuery(
+    trpc.workspace.gitReadiness.queryOptions({ runnerId }, { enabled: connected })
+  )
+  if (!connected || !query.data) return null
+
+  const { gitInstalled, ghAuthenticated, detail } = query.data
+  // git is the hard requirement; gh only matters for the PR panel, so a runner
+  // without it is degraded rather than broken and says so in the tooltip.
+  if (gitInstalled && ghAuthenticated) return null
+
+  const label = !gitInstalled ? 'git missing' : 'gh not signed in'
+  return (
+    <span
+      className="text-muted-foreground shrink-0 text-[10px]"
+      title={detail ?? label}
+      data-testid="runner-git-status"
+    >
+      {label}
+    </span>
   )
 }

@@ -343,6 +343,10 @@ async function buildHydrateOpts(
     taskId: opts.taskId,
     mode: opts.mode,
     cwd: opts.cwd,
+    // Lets the runner resolve its own cwd, exactly as a terminal agent does.
+    // Without it a chat agent depended on the hub-computed path — the one thing
+    // the hub cannot know about another machine.
+    projectId: await data.getTaskProjectId(opts.taskId),
     conversationId: fresh ? null : (providerCfg.chatConversationId ?? null),
     providerFlags,
     runnerId,

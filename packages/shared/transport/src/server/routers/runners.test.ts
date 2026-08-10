@@ -15,7 +15,13 @@ import crypto from 'node:crypto'
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
 import { runnersRouter } from './runners.js'
 import { setRunnersDeps, type RunnersDeps } from '../app-deps.js'
-import { registerRunner, decodeJoinToken } from '@slayzone/runners/server'
+import {
+  registerRunner,
+  decodeJoinToken,
+  resolveTaskRunnerId,
+  setProjectLockedRunner
+} from '@slayzone/runners/server'
+import { createDbChatDataOps } from '@slayzone/terminal/server'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-runners-')) }
@@ -164,4 +170,33 @@ test('runners.list: `usable` is independent of `connected`', async () => {
   const healthy = (await caller.list()) as Array<{ id: string; usable: boolean }>
   expect(healthy.find((x) => x.id === r.id)?.usable).toBe(true)
   usableRunnerIds = null
+})
+
+// A chat agent and a terminal agent for the SAME task must land on the SAME
+// machine. Runner resolution is written TWICE — `resolveTaskRunnerId` in the
+// runners store, and an inlined statement in chat-data-ops — so a lock honoured
+// by one and not the other would split one task's work across two runners, only
+// one of which holds the checkout.
+test('project lock outranks the task pin, identically for pty and chat', async () => {
+  await h.slayDb.run(
+    `INSERT INTO projects (id, name, color, sort_order, default_runner_id)
+     VALUES ('p-lock', 'P', '#fff', 0, 'r-default')`
+  )
+  await h.slayDb.run(
+    `INSERT INTO tasks (id, project_id, title, status, runner_id)
+     VALUES ('t-lock', 'p-lock', 'T', 'todo', 'r-task')`
+  )
+
+  // Unlocked: the task's own pin wins, as it always has.
+  expect(await resolveTaskRunnerId(h.slayDb, 't-lock')).toBe('r-task')
+  expect(await createDbChatDataOps(h.slayDb).resolveRunnerId('t-lock')).toBe('r-task')
+
+  await setProjectLockedRunner(h.slayDb, 'p-lock', 'r-locked')
+  expect(await resolveTaskRunnerId(h.slayDb, 't-lock')).toBe('r-locked')
+  expect(await createDbChatDataOps(h.slayDb).resolveRunnerId('t-lock')).toBe('r-locked')
+
+  // And unpinning restores the previous answer rather than sticking.
+  await setProjectLockedRunner(h.slayDb, 'p-lock', null)
+  expect(await resolveTaskRunnerId(h.slayDb, 't-lock')).toBe('r-task')
+  expect(await createDbChatDataOps(h.slayDb).resolveRunnerId('t-lock')).toBe('r-task')
 })

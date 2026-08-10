@@ -846,6 +846,13 @@ export interface CreateChatOpts {
    * and a non-routing (test/default) setup ignores it entirely.
    */
   runnerId?: string | null
+  /**
+   * Project this session belongs to, so the RUNNER can resolve its own cwd when
+   * `cwd` is empty — the hub cannot, having no path column that could be right
+   * about more than one machine. `cwd` still wins when set (a worktree, or a
+   * `task.base_dir` the user chose). Mirrors `PtySpawnSpec.projectId`.
+   */
+  projectId?: string | null
   /** Extra env overrides (PATH enrichment already applied by caller or inherited). */
   env?: NodeJS.ProcessEnv
   /**
@@ -1098,11 +1105,10 @@ async function spawnSubprocess(session: Session): Promise<void> {
       runnerId: opts.runnerId ?? null,
       binaryName: backend.binaryName,
       args,
-      // No `projectId` here yet: the chat opts chain does not carry one, so chat
-      // still relies on the hub-computed `cwd` exactly as before. Not a
-      // regression — but it means a chat agent cannot yet benefit from
-      // runner-side path resolution the way a terminal agent can. Threading a
-      // project through `chat-handlers` closes it.
+      // Carried so a chat agent resolves its cwd exactly as a terminal agent
+      // does. Without it chat depended on the hub-computed path, which is the
+      // one thing the hub cannot know for another machine.
+      projectId: opts.projectId ?? null,
       cwd: opts.cwd,
       // `opts.env` is `NodeJS.ProcessEnv` (values may be undefined); the wire
       // contract is `Record<string, string>`, so drop unset keys rather than

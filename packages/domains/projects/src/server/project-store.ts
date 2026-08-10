@@ -117,6 +117,18 @@ export async function updateProject(
     fields.push('starred = ?')
     values.push(data.starred ? 1 : 0)
   }
+  if (data.gitMode !== undefined) {
+    fields.push('git_mode = ?')
+    values.push(data.gitMode)
+  }
+  if (data.repoUrl !== undefined) {
+    fields.push('repo_url = ?')
+    values.push(data.repoUrl)
+  }
+  if (data.defaultBranch !== undefined) {
+    fields.push('default_branch = ?')
+    values.push(data.defaultBranch)
+  }
   if (data.worktreeSourceBranch !== undefined) {
     fields.push('worktree_source_branch = ?')
     values.push(data.worktreeSourceBranch)

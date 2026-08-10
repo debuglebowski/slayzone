@@ -7,6 +7,7 @@ import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { ColorPicker } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
+import { Checkbox } from '@slayzone/ui'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { Project } from '@slayzone/projects/shared'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
@@ -33,6 +34,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const setProjectDefaultRunner = useMutation(
     trpc.runners.setProjectDefaultRunner.mutationOptions()
   )
+  const setProjectLockedRunner = useMutation(trpc.runners.setProjectLockedRunner.mutationOptions())
   const [name, setName] = useState('')
   const [color, setColor] = useState('')
   const [path, setPath] = useState('')
@@ -45,6 +47,12 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   // at runtime (parseProject spreads the row) but not yet on the shared Project type
   // — read via a narrow local cast. null = Local (in-process).
   const [defaultRunnerId, setDefaultRunnerId] = useState<string | null>(null)
+  // Lock + remote-git mode. The lock persists immediately (it is a binding, like
+  // the default runner); the git fields ride the form save with name/path.
+  const [lockedRunnerId, setLockedRunnerId] = useState<string | null>(null)
+  const [gitMode, setGitMode] = useState<'off' | 'remote'>('off')
+  const [repoUrl, setRepoUrl] = useState('')
+  const [defaultBranch, setDefaultBranch] = useState('')
 
   useEffect(() => {
     setName(project.name)
@@ -54,6 +62,10 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setIconImagePath(project.icon_image_path)
     setIconCacheKey(project.updated_at)
     setDefaultRunnerId((project as { default_runner_id?: string | null }).default_runner_id ?? null)
+    setLockedRunnerId(project.locked_runner_id ?? null)
+    setGitMode(project.git_mode ?? 'off')
+    setRepoUrl(project.repo_url ?? '')
+    setDefaultBranch(project.default_branch ?? '')
   }, [project])
 
   const runners = runnersQuery.data ?? []
@@ -105,6 +117,25 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     const runnerId = value === LOCAL_RUNNER_VALUE ? null : value
     setDefaultRunnerId(runnerId)
     await setProjectDefaultRunner.mutateAsync({ projectId: project.id, runnerId })
+    // A lock follows the default. Leaving it pointed at the old runner would mean
+    // the UI shows one machine while every task resolves to another.
+    if (lockedRunnerId) {
+      setLockedRunnerId(runnerId)
+      await setProjectLockedRunner.mutateAsync({ projectId: project.id, runnerId })
+    }
+  }
+
+  /**
+   * Lock to the CURRENT default runner, or unlock.
+   *
+   * Deliberately not a runner picker of its own: two controls naming a machine
+   * for one project is an invitation to set them to different runners, and the
+   * lock's whole purpose is that there is exactly one.
+   */
+  const handleLockChange = async (locked: boolean): Promise<void> => {
+    const runnerId = locked ? defaultRunnerId : null
+    setLockedRunnerId(runnerId)
+    await setProjectLockedRunner.mutateAsync({ projectId: project.id, runnerId })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -119,7 +150,13 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
         name: name.trim(),
         color,
         path: path || null,
-        iconLetters: trimmedLetters.length > 0 ? trimmedLetters : null
+        iconLetters: trimmedLetters.length > 0 ? trimmedLetters : null,
+        gitMode,
+        // Empty means "not set", not an empty URL — an empty string would pass the
+        // `git_mode === 'remote' && repo_url` check on the server and produce a
+        // clone of nothing.
+        repoUrl: repoUrl.trim() || null,
+        defaultBranch: defaultBranch.trim() || null
       })
 
       onUpdated(updated)
@@ -198,8 +235,70 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
               </Select>
             )}
             <p className="text-xs text-muted-foreground">
-              Where tasks in this project run by default. Tasks can override this individually.
+              Where tasks in this project run by default.{' '}
+              {lockedRunnerId
+                ? 'Locked below, so tasks cannot override it.'
+                : 'Tasks can override this individually.'}
             </p>
+          </div>
+          {/* Locking exists because the project's checkout sits at ONE path on ONE
+              machine. Letting a task pick a different runner would hand its agent
+              a directory that need not exist there. Opt-in, because the per-task
+              override is real functionality worth keeping for the cases where the
+              project genuinely is checked out in several places. */}
+          {runners.length > 1 && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="lock-runner"
+                  checked={!!lockedRunnerId}
+                  onCheckedChange={(checked) => void handleLockChange(checked === true)}
+                />
+                <Label htmlFor="lock-runner">Lock to this runner</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Every task uses the default runner above, ignoring per-task overrides. Use this when
+                the project is only checked out on one machine.
+              </p>
+            </div>
+          )}
+          {/* Remote git mode: the identity a runner can PROVISION from. Without a
+              URL, a runner that has never seen this project has nothing to go on
+              and its first agent start fails with "not checked out here". */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="git-remote"
+                checked={gitMode === 'remote'}
+                onCheckedChange={(checked) => setGitMode(checked === true ? 'remote' : 'off')}
+              />
+              <Label htmlFor="git-remote">Clone from a git remote when a runner needs it</Label>
+            </div>
+            {gitMode === 'remote' ? (
+              <div className="space-y-2 pt-1">
+                <Input
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                  placeholder="git@github.com:owner/repo.git"
+                  className="max-w-lg"
+                />
+                <Input
+                  value={defaultBranch}
+                  onChange={(e) => setDefaultBranch(e.target.value)}
+                  placeholder="Branch (optional)"
+                  className="max-w-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  A runner without this project clones it on first use. It authenticates with that
+                  machine&apos;s own git credentials — SlayZone stores none.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Off: each runner uses a folder you point it at. A folder that goes missing is
+                reported, never re-cloned over.
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <Label>Color</Label>

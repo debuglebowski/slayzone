@@ -95,6 +95,9 @@ export interface ChatDataOps {
   /** Effective runner for this task, or null for the hub. Mirrors the pty spawn
    *  lookups' `resolveRunnerId`; the default impl reads the tasks/projects rows. */
   resolveRunnerId(taskId: string): Promise<string | null>
+  /** Project this task belongs to, so the RUNNER can resolve its own cwd.
+   *  Mirrors the pty spawn lookups' `getTaskProjectId`. */
+  getTaskProjectId(taskId: string): Promise<string | null>
   bumpAutocompleteUsage(source: string, name: string): Promise<void>
   getAutocompleteUsage(): Promise<UsageMap>
 }
@@ -283,14 +286,27 @@ export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
     },
 
     resolveRunnerId: async (taskId) => {
+      // `locked_runner_id` first, matching `resolveTaskRunnerId` in the runners
+      // store: a locked project's checkout lives at one path on one machine, so a
+      // task-level override would hand its agent a directory that need not exist
+      // there. Divergence here would route a chat agent and a terminal agent for
+      // the SAME task to different runners.
       const row = await db.get<{ runner_id: string | null }>(
-        `SELECT COALESCE(t.runner_id, p.default_runner_id) AS runner_id
+        `SELECT COALESCE(p.locked_runner_id, t.runner_id, p.default_runner_id) AS runner_id
            FROM tasks t
            LEFT JOIN projects p ON p.id = t.project_id
           WHERE t.id = ?`,
         [taskId]
       )
       return row?.runner_id ?? null
+    },
+
+    getTaskProjectId: async (taskId) => {
+      const row = await db.get<{ project_id: string | null }>(
+        `SELECT project_id FROM tasks WHERE id = ?`,
+        [taskId]
+      )
+      return row?.project_id ?? null
     },
 
     bumpAutocompleteUsage: (source, name) => bumpAutocompleteUsage(db, source, name),
