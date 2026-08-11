@@ -139,6 +139,56 @@ const REMOTE: RemoteMcpEnv = {
   )
 }
 
+// A db that answers only the `terminal_modes.type` lookup — enough to resolve a
+// custom provider's agent. `mode` is the row's declared type, or undefined for
+// an unknown id (mirrors a deleted provider).
+function dbWithModeType(type: string | undefined): never {
+  return {
+    get: async (sql: string) =>
+      sql.includes('FROM terminal_modes') ? (type ? { type } : undefined) : undefined
+  } as never
+}
+
+// 1d. CUSTOM provider wrapping a hook-capable agent → hook-capable.
+//     Regression guard: gating on the MODE ID made every user-defined provider
+//     permanently hook-incapable, so notify.sh exited at its URL guard, the
+//     conversation was never confirmed, its ledger row stayed `pending-spawn`
+//     (not an honored origin) and each restart re-minted instead of resuming.
+{
+  const env = await buildMcpEnv(dbWithModeType('claude-code'), 'task-c', 'ccremote-t3b61' as never)
+  assert(
+    'SLAYZONE_AGENT_HOOK_URL' in env,
+    'custom provider wrapping claude-code must get the hook URL'
+  )
+  assert(
+    env.SLAYZONE_AGENT_ID === 'claude-code',
+    `SLAYZONE_AGENT_ID must be the AGENT, not the mode id — the server rejects unknown agents; got: ${env.SLAYZONE_AGENT_ID}`
+  )
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
+  assert(ctx.agentId === 'claude-code', 'ctx.agentId is the wrapped agent')
+  assert(
+    ctx.mode === 'ccremote-t3b61',
+    `ctx.mode must carry the real mode so the ledger is keyed by it (not the built-in's row), got: ${ctx.mode}`
+  )
+}
+
+// 1e. Built-in mode → ctx carries NO `mode` key, so hook payloads for every
+//     existing provider stay byte-identical to before the custom-provider fix.
+{
+  const env = await buildMcpEnv(null, 'task-b', 'claude-code')
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
+  assert(!('mode' in ctx), 'built-in ctx must omit `mode` (identical to pre-fix payload)')
+}
+
+// 1f. Custom provider whose declared type is NOT hook-capable → still no hook env.
+{
+  const env = await buildMcpEnv(dbWithModeType('some-shell'), 'task-d', 'my-shell-mode' as never)
+  assert(
+    !('SLAYZONE_AGENT_HOOK_CONTEXT' in env),
+    'custom provider wrapping a non-hook agent must NOT become hook-capable'
+  )
+}
+
 // 2. Local, explicit `remote = null` → identical to omitting it entirely.
 {
   const a = await buildMcpEnv(null, 'task-2', 'claude-code')
