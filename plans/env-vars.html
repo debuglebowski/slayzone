@@ -376,7 +376,7 @@ const DATA = [
   ["SLAYZONE_SUPERVISED","Hub","R","1 = host-supervised, unset = standalone; gates all standalone logic (config.json, prompts, secret gen)","unset",""],
   ["SLAYZONE_ROOT","Hub","R","State anchor; standalone seeds to cwd(). DB + logs derive as <ROOT>/storage","cwd()",""],
   ["SLAYZONE_DEV","Hub","R","Dev vs prod DB filename (slayzone.dev.sqlite / slayzone.sqlite)","prod",""],
-  ["SLAYZONE_HUB_ADDRESS","Hub","R","The address it BINDS — authority only, host[:port]. Bare host = OS-assigned port. One listener (/trpc + /runners, demuxed by path)","127.0.0.1 + OS-assign",""],
+  ["SLAYZONE_HUB_ADDRESS","Hub","R","The address it BINDS — authority only, host[:port]. Bare host = OS-assigned port. One listener (/trpc + /computers, demuxed by path)","127.0.0.1 + OS-assign",""],
   ["SLAYZONE_MODE","Hub","R","Single transport lever: local = http/ws + loopback-only bind (fails loud on a wider bind), remote = https/wss + client auth","local",""],
   ["SLAYZONE_HUB_PUBLIC_ADDRESS","Hub","R","External authority baked into join tokens + remote agents' hub base; REQUIRED in remote mode (boot throws without it)","loopback:<bound port>",""],
   ["SLAYZONE_HUB_AUTH_SECRET","Hub","R","HMAC signing key for ALL hub-auth (better-auth session/cookie signer + runner enroll/api-key creds); standalone generates & persists 256-bit (0600, config.json key stays `runnerTransportSecret`)","gen / dev const (supervised)",""],
@@ -412,11 +412,11 @@ const DATA = [
   ["COMSPEC","Hub","R","Windows-only last-resort shell when SHELL and userInfo() both fail","cmd.exe",""],
 
   // ---- Runner ----
-  ["SLAYZONE_HUB_ADDRESS","Runner","R","The address it DIALS — authority only; ws(s)://<addr>/runners is composed from it + MODE. Highest precedence over config.json/join token","from config.json / join token",""],
+  ["SLAYZONE_HUB_ADDRESS","Runner","R","The address it DIALS — authority only; ws(s)://<addr>/computers is composed from it + MODE. Highest precedence over config.json/join token","from config.json / join token",""],
   ["SLAYZONE_HUB_JOIN_TOKEN","Runner","R","Enrollment token (embeds hub url + cert pin)","none post-enroll",""],
   ["SLAYZONE_MODE","Runner","R","remote → force wss:// (reject plaintext ws://)","local",""],
   ["SLAYZONE_SUPERVISED","Runner","R","1 = host-spawned: skip cwd-seed, config.json prompts; name → local-runner, path-jail → [homedir()]","unset",""],
-  ["SLAYZONE_ROOT","Runner","R+S","Anchor; standalone seeds to cwd(). Creds at <ROOT>/runners, config at <ROOT>/config.json","cwd()",""],
+  ["SLAYZONE_ROOT","Runner","R+S","Anchor; standalone seeds to cwd(). Creds at <ROOT>/computers, config at <ROOT>/config.json","cwd()",""],
   ["SLAYZONE_NONINTERACTIVE","Runner","R","Disable first-run setup prompt","prompt on TTY",""],
   ["SLAYZONE_AGENT_HOOK_URL","Runner","S","Overrides the hub's value with the runner's OWN loopback relay at every agent spawn","runner loopback",""],
   ["HOME","Runner","R","Home fallback for anchor","OS home",""],
@@ -505,7 +505,7 @@ const REQUIRED = {
   // --- conditional: required only under a stated condition ---
   SLAYZONE_HUB_PUBLIC_ADDRESS: ['conditional','Boot THROWS when SLAYZONE_MODE=remote and it is unset (hub/src/server.ts). In local mode it defaults to the bound loopback authority'],
   SLAYZONE_HUB_ADDRESS: ['conditional','Runner: required for FIRST contact — absent a <ROOT>/config.json or a join token, config resolution throws. Hub: optional (binds loopback + an OS-assigned port). CLI: optional (falls back to the app’s settings.server_port)'],
-  SLAYZONE_HUB_JOIN_TOKEN: ['conditional','Required for a runner’s first contact only (it carries the hub authority + cert pin); unused once enrolled creds exist under <ROOT>/runners'],
+  SLAYZONE_HUB_JOIN_TOKEN: ['conditional','Required for a runner’s first contact only (it carries the hub authority + cert pin); unused once enrolled creds exist under <ROOT>/computers'],
   SLAYZONE_HUB_TOKEN: ['conditional','Required when dialing a hub that enforces auth (verified on /trpc + /api/* + /mcp); otherwise hub.json’s token is used. Set-but-empty = deliberately no token'],
   SLAYZONE_TASK_ID: ['conditional','Agent: the OpenCode plugin no-ops without it, so no lifecycle event reaches notify.sh at all. CLI: falls back to SLAYZONE_SESSION_ID, then errors only if both are unset'],
   SLAYZONE_HOOK_CONTEXT: ['conditional','Only needed from a PRE-v4 app: notify.sh reads it as ${NEW:-$OLD}, so an older channel’s app feeding a newer shared script still resolves a task'],

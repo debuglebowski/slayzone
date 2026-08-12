@@ -7,7 +7,7 @@
  * bundle has to exist before ANY spec launches, which is why `global-setup.ts`
  * calls this once per run rather than each runner spec doing it itself.
  *
- * Lifted verbatim from `e2e/runners/110-runner-loopback.spec.ts`, which still
+ * Lifted verbatim from `e2e/computers/110-runner-loopback.spec.ts`, which still
  * calls it directly (it spawns its own explicit loopback runner and must not
  * depend on global-setup ordering).
  */

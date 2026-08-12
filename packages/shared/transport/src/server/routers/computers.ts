@@ -33,7 +33,7 @@ import {
 
 const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes
 
-export const runnersRouter = router({
+export const computersRouter = router({
   /**
    * All non-revoked runners from the store, each annotated with live status from
    * the runner gateway (when wired). A runner in the store but not currently dialed

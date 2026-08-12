@@ -1,12 +1,12 @@
 /**
  * Derive the runner-transport URL a minted join token carries.
  *
- * `/runners` no longer has its own listener/port — it rides the ONE hub listener
+ * `/computers` no longer has its own listener/port — it rides the ONE hub listener
  * (`/trpc` + `/health` + `/mcp` + REST), demuxed by path (see server.ts). So there
  * is nothing to bind here; this module is now a pure URL-deriver:
  *
- *   local  → `ws://<loopback>:<hubPort>/runners`  (dev / e2e / supervised)
- *   remote → `wss://<public-address>/runners`      (from SLAYZONE_HUB_PUBLIC_ADDRESS)
+ *   local  → `ws://<loopback>:<hubPort>/computers`  (dev / e2e / supervised)
+ *   remote → `wss://<public-address>/computers`      (from SLAYZONE_HUB_PUBLIC_ADDRESS)
  *
  * The runner learns proto/host/port from this URL when it comes from a join token;
  * via the env channel it gets AUTHORITY ONLY (`SLAYZONE_HUB_ADDRESS` = host[:port])
@@ -46,22 +46,22 @@ export interface DeriveRunnerHubUrlOptions {
 }
 
 /**
- * Build the `ws(s)://…/runners` URL to embed in join tokens.
+ * Build the `ws(s)://…/computers` URL to embed in join tokens.
  *
- * - remote: `wss://<public-address>/runners` from SLAYZONE_HUB_PUBLIC_ADDRESS.
+ * - remote: `wss://<public-address>/computers` from SLAYZONE_HUB_PUBLIC_ADDRESS.
  *   The value is authority ONLY, so there is no scheme to disagree about — `wss`
  *   is implied by remote mode. Returns null for a missing/malformed address; the
  *   caller then leaves runner enroll unavailable rather than embedding a broken
  *   target in a token.
- * - local: `ws://<loopback>:<port>/runners`.
+ * - local: `ws://<loopback>:<port>/computers`.
  */
 export function deriveRunnerHubUrl(opts: DeriveRunnerHubUrlOptions): string | null {
   if (!opts.remote) {
-    return `ws://${dialableLoopback(opts.host)}:${opts.port}/runners`
+    return `ws://${dialableLoopback(opts.host)}:${opts.port}/computers`
   }
   const raw = opts.publicAddress?.trim()
   // A bare host keeps the default TLS port implicit (443) — the normal
   // reverse-proxy / published-DNS shape for a remote hub.
   if (!raw || !isBareAuthority(raw)) return null
-  return hubUrlFromAddr(raw, 'ws', '/runners', 'remote')
+  return hubUrlFromAddr(raw, 'ws', '/computers', 'remote')
 }

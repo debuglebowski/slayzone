@@ -55,7 +55,7 @@ const NOT_BOOTSTRAP = new Set<string>(['/api/auth/deep-link'])
  * Routes that carry their OWN stronger guard and must not additionally require a
  * bearer.
  *
- * `/api/runners/join-token`: the Electron MAIN process mints a token over
+ * `/api/computers/join-token`: the Electron MAIN process mints a token over
  * loopback at boot to auto-enroll the co-located runner, and main has no session
  * (no tRPC client, no credentials) — requiring a bearer would break local-runner
  * auto-enroll on an otherwise-enforcing hub. The route self-guards on loopback OR
@@ -79,7 +79,7 @@ const NOT_BOOTSTRAP = new Set<string>(['/api/auth/deep-link'])
  * also why the user routes put the target email in the request body rather than in
  * a `/:email` path segment.
  */
-const SELF_GUARDED = new Set<string>(['/api/runners/join-token', '/api/hub/users'])
+const SELF_GUARDED = new Set<string>(['/api/computers/join-token', '/api/hub/users'])
 
 /** The MCP tool endpoint — same power as the tRPC router, so same gating. */
 const MCP_PATH = '/mcp'

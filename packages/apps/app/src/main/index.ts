@@ -645,14 +645,14 @@ function revealSidecarLogInFinder(): void {
  * Mint a runner join token over LOOPBACK REST against the sidecar (hub/runner
  * split, Wave3.5-D3). Retries while the runner listener is still binding — the
  * sidecar reports "ready" (health) as soon as its shared http server listens,
- * but the SEPARATE /runners wss listener binds a beat later + only THEN feeds its
- * url/fingerprint to the runners registry (server.ts), so `/api/runners/join-token`
+ * but the SEPARATE /computers wss listener binds a beat later + only THEN feeds its
+ * url/fingerprint to the runners registry (server.ts), so `/api/computers/join-token`
  * 503s until then. Returns the token + wss url, or null once the budget is spent.
  */
 async function mintLocalRunnerJoinToken(
   sidecarPort: number
 ): Promise<{ token: string; hubUrl: string } | null> {
-  const url = `http://127.0.0.1:${sidecarPort}/api/runners/join-token`
+  const url = `http://127.0.0.1:${sidecarPort}/api/computers/join-token`
   const MAX_ATTEMPTS = 40
   const RETRY_DELAY_MS = 1000
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -771,8 +771,8 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
       // Auto-enroll: the freshly minted token embeds the cert fingerprint the
       // runner pins. The env channel carries the hub AUTHORITY only
       // (host[:port]) — the runner re-derives ws(s):// from SLAYZONE_MODE and
-      // appends /runners (see runner config.ts). Extract the authority from the
-      // mint's full ws(s)://host[:port]/runners url. OVERRIDES any inherited
+      // appends /computers (see runner config.ts). Extract the authority from the
+      // mint's full ws(s)://host[:port]/computers url. OVERRIDES any inherited
       // value so the local runner always dials THIS boot's hub.
       SLAYZONE_HUB_ADDRESS: new URL(minted.hubUrl).host,
       // No SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS handoff: under
@@ -2402,7 +2402,7 @@ app
                     }
                   : {})
                 // The sidecar always builds the runner gateway/auth (a hub always
-                // accepts runners) — no env flag needed. `/runners` rides the ONE hub
+                // accepts runners) — no env flag needed. `/computers` rides the ONE hub
                 // listener (same port as /trpc), demuxed by path; supervised binds
                 // loopback (127.0.0.1), so the co-located runner reaches it locally.
               },
@@ -2489,9 +2489,9 @@ app
     //
     // The auto-enroll resolves the ordering the wave-2 skeleton deferred: main has
     // NO tRPC client to the sidecar (the capability bridge only flows sidecar→main),
-    // and the runner /runners wss URL is on an OS-assigned port main never learns.
+    // and the runner /computers wss URL is on an OS-assigned port main never learns.
     // So main waits for the sidecar to report ready, then mints a join token over
-    // LOOPBACK REST (`POST /api/runners/join-token`, which wraps the same store
+    // LOOPBACK REST (`POST /api/computers/join-token`, which wraps the same store
     // logic as the runners tRPC proc + returns the wss runner URL). It injects that
     // token + url into the runner env; the runner decodes the token → cert
     // fingerprint → dials wss with pinning → enrolls. If minting fails after

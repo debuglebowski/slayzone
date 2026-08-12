@@ -3,7 +3,7 @@ import { listRunners as storeListRunners } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 
 /**
- * REST: `GET /api/runners` — the runners this hub knows, with live status.
+ * REST: `GET /api/computers` — the runners this hub knows, with live status.
  *
  * WHY THE CLI NEEDS THIS. A runner binds no port, so unlike a hub there is nothing
  * on this machine to sweep for. `slay runner ls` therefore used to enumerate UNIT
@@ -22,7 +22,7 @@ import type { RestApiDeps } from '../types'
  * hub still requires a session; a loopback hub answers its own machine as before.
  */
 export function registerRunnersListRoute(app: Express, deps: RestApiDeps): void {
-  app.get('/api/runners', async (_req, res) => {
+  app.get('/api/computers', async (_req, res) => {
     try {
       const rows = await storeListRunners(deps.db)
       // Live status comes from the gateway when it is wired. An un-wired gateway

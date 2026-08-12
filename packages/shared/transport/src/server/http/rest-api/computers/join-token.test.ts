@@ -1,5 +1,5 @@
 /**
- * REST: POST /api/runners/join-token contract tests (Wave3.5-D3).
+ * REST: POST /api/computers/join-token contract tests (Wave3.5-D3).
  * Run with the electron+loader runner (better-sqlite3 native ABI via the harness DB).
  *
  * The route is the mint channel the Electron MAIN process hits at boot to
@@ -38,7 +38,7 @@ const h = await createTestHarness()
 
 /** A bound runner listener (runner ON, url + fingerprint present). */
 const boundRunners = {
-  getHubUrl: () => 'wss://127.0.0.1:54321/runners',
+  getHubUrl: () => 'wss://127.0.0.1:54321/computers',
   getCertFingerprint: () => 'abcdef0123456789'
 }
 
@@ -54,20 +54,20 @@ function mount(runners: RestApiDeps['runners'], restAuth?: RestApiDeps['restAuth
   return mountRestApp(app)
 }
 
-await describe('POST /api/runners/join-token', () => {
+await describe('POST /api/computers/join-token', () => {
   test('runner ON + bound: mints a decodable szjt1 token embedding the wss hub url', async () => {
     const rest = await mount(boundRunners)
     try {
       const res = await rest.request<{ token: string; hubUrl: string }>(
         'POST',
-        '/api/runners/join-token',
+        '/api/computers/join-token',
         { label: 'local-runner' }
       )
       expect(res.status).toBe(200)
-      expect(res.body.hubUrl).toBe('wss://127.0.0.1:54321/runners')
+      expect(res.body.hubUrl).toBe('wss://127.0.0.1:54321/computers')
       const payload = decodeJoinToken(res.body.token)
       expect(payload).not.toBeNull()
-      expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/runners')
+      expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/computers')
       expect(payload!.certFingerprint).toBe('abcdef0123456789')
     } finally {
       await rest.close()
@@ -77,7 +77,7 @@ await describe('POST /api/runners/join-token', () => {
   test('runner ON but listener not yet bound (null url): 503', async () => {
     const rest = await mount({ getHubUrl: () => null, getCertFingerprint: () => null })
     try {
-      const res = await rest.request<{ error: string }>('POST', '/api/runners/join-token', {})
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(503)
     } finally {
       await rest.close()
@@ -87,7 +87,7 @@ await describe('POST /api/runners/join-token', () => {
   test('runner OFF (runners slot absent): 503, never mints', async () => {
     const rest = await mount(undefined)
     try {
-      const res = await rest.request<{ error: string }>('POST', '/api/runners/join-token', {})
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(503)
     } finally {
       await rest.close()
@@ -99,7 +99,7 @@ await describe('POST /api/runners/join-token', () => {
     try {
       const res = await rest.request<{ token: string; hubUrl: string }>(
         'POST',
-        '/api/runners/join-token',
+        '/api/computers/join-token',
         {}
       )
       expect(res.status).toBe(200)
@@ -121,7 +121,7 @@ await describe('POST /api/runners/join-token', () => {
       }
     })
     try {
-      const res = await rest.request<{ token: string }>('POST', '/api/runners/join-token', {})
+      const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(200)
       // Not merely "allowed": the bearer must not even be consulted, so a
       // co-located caller can never be broken by an auth-side regression.

@@ -9,7 +9,7 @@
  * credential key changes ⇒ the runner can't `hello` with prior creds ⇒
  * RE-ENROLLS as a new `runners` row (an orphaned `local-runner` per relaunch).
  *
- * Single-listener model: `/runners` rides the ONE hub port (no separate runner
+ * Single-listener model: `/computers` rides the ONE hub port (no separate runner
  * listener), and that hub port is STABLE per-environment (SIDECAR_FIXED_PORT /
  * claimServerPort). So the credential key is stable BY CONSTRUCTION — there is no
  * separate runner-port persistence layer to keep in sync. This test proves the
@@ -84,7 +84,7 @@ function createMigratedDb(): { db: SlayzoneDb; close: () => void } {
 
 const HOST = '127.0.0.1'
 const LOCAL_NAME = 'local-runner'
-/** The stable per-environment hub port `/runners` rides (SIDECAR_FIXED_PORT.test).
+/** The stable per-environment hub port `/computers` rides (SIDECAR_FIXED_PORT.test).
  *  Constant across boots BY CONSTRUCTION — that stability is the whole point. */
 const HUB_PORT = 51102
 
@@ -109,7 +109,7 @@ interface BootResult {
 }
 
 /** One sidecar boot + one runner (re)connect against the SAME persisted store.
- *  Mirrors server.ts: derive the `/runners` URL from the (stable) hub port, mint a
+ *  Mirrors server.ts: derive the `/computers` URL from the (stable) hub port, mint a
  *  token embedding it, then run the runner's authenticate logic. */
 async function simulateBoot(deps: BootDeps): Promise<BootResult> {
   const hubUrl = deriveRunnerHubUrl({ remote: false, host: HOST, port: deps.hubPort ?? HUB_PORT })!
@@ -224,7 +224,7 @@ async function main(): Promise<void> {
         const remoteAdapters = createRunnerAuthAdapters({ db, auth }) // no localRunnerName → fresh uuids
         for (const label of ['orphan-1', 'orphan-2', 'orphan-3']) {
           const t = await mintJoinToken(db, {
-            hubUrl: `wss://${HOST}:59999/runners`,
+            hubUrl: `wss://${HOST}:59999/computers`,
             certFingerprint: 'sha256:deadbeef',
             ttlMs: 60_000,
             label
@@ -240,7 +240,7 @@ async function main(): Promise<void> {
         }
         // A real remote runner (different name) — a sleeping laptop; must NOT be reaped.
         const remoteToken = await mintJoinToken(db, {
-          hubUrl: `wss://${HOST}:59999/runners`,
+          hubUrl: `wss://${HOST}:59999/computers`,
           certFingerprint: 'sha256:deadbeef',
           ttlMs: 60_000,
           label: 'sleeping-laptop'

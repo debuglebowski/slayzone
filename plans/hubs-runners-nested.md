@@ -67,7 +67,7 @@ Why a provider rather than props: the dialogs currently reach `RunnersHubRows` t
 - Renders its own `<table>` block (was: bare `<tr>`s into the shell's tbody).
 - Drops `showHubColumn`, `hubLabel`, `onCount`, `revision`; keeps `hubId`, `isLocalHub`.
 - Renders its own count line and empty state.
-- **Gains mint**: `useMutation(trpc.runners.mintJoinToken.mutationOptions())` + inline label form + `+ Add runner`; on success calls `showMintedToken({token, hubLabel, hubUrl})` and invalidates its own `runners.list`.
+- **Gains mint**: `useMutation(trpc.computers.mintJoinToken.mutationOptions())` + inline label form + `+ Add runner`; on success calls `showMintedToken({token, hubLabel, hubUrl})` and invalidates its own `runners.list`.
 - Keeps the local-runner specials verbatim: `DEFAULT_LOCAL_RUNNER_NAME` restart button, and the `runner-local-missing` / `Start` row.
 - Revoke keeps the closed-over thunk idiom — unchanged.
 
@@ -99,7 +99,7 @@ TDD: run these first, watch them fail, then port.
 
 - **`RunnersSettingsTab.test.tsx`** (543 ln) → split into `HubRunnersBlock.test.tsx` (mint, revoke, local-runner restart/start/missing — mocks `useTRPC` only) and additions to a `HubsSettingsTab` test for group resolution (live / unsaved / local-off / no-federation). Assertions to retire: `runner-hub-cell` (×3), `runner-add-hub` (×3), `runners-table` count.
 - **`e2e/core/102-runner-settings-tab.spec.ts`** — keep testids `runner-add-open`, `runner-local-restart`, `runner-local-start`, `runner-local-restart-confirm` so this spec needs only a scoping change. `runner-add-open` is now per hub → scope it under a new `hub-group-${hubId}` container testid.
-- **`e2e/runners/112-multi-hub-federation.spec.ts:635-652`** — rewrite: `runners-table` count-1 assertion and the `runner-add-hub` picker both go away; replace with "click `+ Add runner` inside hub B's group → `runner-minted-hub` names Hub B".
+- **`e2e/computers/112-multi-hub-federation.spec.ts:635-652`** — rewrite: `runners-table` count-1 assertion and the `runner-add-hub` picker both go away; replace with "click `+ Add runner` inside hub B's group → `runner-minted-hub` names Hub B".
 
 ## Risks
 

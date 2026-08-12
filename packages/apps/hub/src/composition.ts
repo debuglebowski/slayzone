@@ -1089,15 +1089,15 @@ export function composeServer(opts: {
     // FUTURE TRIGGER: if runners ever become UNTRUSTED / multi-tenant, restore
     // scoping as a CHANNEL-level claim (runner X may only drive tasks assigned to
     // X), NOT a per-agent bearer.
-    // Runner listener info for the loopback `POST /api/runners/join-token` route —
+    // Runner listener info for the loopback `POST /api/computers/join-token` route —
     // the MAIN process's boot-time auto-enroll mints through it (no tRPC client in
     // main). Closed over the SAME late-bound refs the runners registry reads
-    // (setRunnerListenerInfo feeds them once the /runners listener binds).
+    // (setRunnerListenerInfo feeds them once the /computers listener binds).
     runners: {
       getHubUrl: () => runnerHubUrl,
       getCertFingerprint: () => runnerCertFingerprint,
       // Same late-bound ref the tRPC `runners.list` reads, so the REST twin
-      // (`GET /api/runners`, what `slay runner ls` calls) can never report a
+      // (`GET /api/computers`, what `slay runner ls` calls) can never report a
       // different connection status than the app's Runners tab.
       getGateway: () => runnerGatewayRef
     },
@@ -1127,7 +1127,7 @@ export function composeServer(opts: {
       remove: async (email) => (hubAuthRef ? removeHubUser(hubAuthRef, email) : 'not-found')
     },
     // Bearer authority for routes that admit an authenticated OFF-BOX caller —
-    // today only `POST /api/runners/join-token`, so `slay runner mint` can target a
+    // today only `POST /api/computers/join-token`, so `slay runner mint` can target a
     // hub on another machine (see that route's WHO MAY CALL IT note).
     //
     // Deliberately the SAME two pieces the outer gate uses — `isRemoteMode() &&

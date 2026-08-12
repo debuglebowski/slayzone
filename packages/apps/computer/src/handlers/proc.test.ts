@@ -20,7 +20,7 @@ function makeCtx(roots: string[]) {
     }
   }
   const config: RunnerConfig = {
-    hubUrl: 'ws://localhost:0/runners',
+    hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: roots,
     capabilities: ['proc']

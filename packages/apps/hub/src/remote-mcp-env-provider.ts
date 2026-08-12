@@ -17,7 +17,7 @@ export type SyncRemoteMcpEnvProvider = (args: {
  * Turn the operator-supplied hub PUBLIC ADDRESS (`host[:port]`, no scheme, no
  * path) into the http(s) base URL the RemoteMcpEnv contract wants. The scheme is
  * DERIVED from SLAYZONE_MODE, never carried in the value — so this base URL and
- * the runner's `ws(s)://…/runners` can never disagree about it.
+ * the runner's `ws(s)://…/computers` can never disagree about it.
  *
  * Returns null for a value that is not a bare authority (a scheme or path snuck
  * in), so the provider degrades the spawn to loopback rather than handing a broken
@@ -25,7 +25,7 @@ export type SyncRemoteMcpEnvProvider = (args: {
  *
  * NOTE: authority-only means a path-prefixed reverse-proxy mount
  * (`https://host/slayzone`) is not expressible here. Nothing consumes such a
- * prefix today — deriveRunnerHubUrl forces `/runners` and this base URL is only
+ * prefix today — deriveRunnerHubUrl forces `/computers` and this base URL is only
  * ever concatenated with absolute `/api/...` paths.
  */
 function publicHubBaseUrl(raw: string): string | null {

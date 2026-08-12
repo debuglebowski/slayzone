@@ -86,7 +86,7 @@ export type StatusHints = Partial<Record<number, string>>
  *
  * @param unwrap `'data'` for the `{ok, data}` envelope the `/api/hub/*` routes use;
  *               `'raw'` for a route that returns its payload at the top level (the
- *               older `/api/runners/join-token` shape).
+ *               older `/api/computers/join-token` shape).
  */
 export async function hubRequest<T>(opts: {
   target: HubRequestTarget

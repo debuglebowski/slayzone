@@ -304,18 +304,18 @@ export function HubCard({
   // A hub always accepts runners, so the list is always available (no mode to
   // enable). `list` merges live connection status when a runner is connected;
   // it's a plain DB read otherwise.
-  const runnersQuery = useQuery(trpc.runners.list.queryOptions())
+  const runnersQuery = useQuery(trpc.computers.list.queryOptions())
   const runners = runnersQuery.data ?? []
 
-  const revokeMutation = useMutation(trpc.runners.revokeRunner.mutationOptions())
-  const mintMutation = useMutation(trpc.runners.mintJoinToken.mutationOptions())
+  const revokeMutation = useMutation(trpc.computers.revokeRunner.mutationOptions())
+  const mintMutation = useMutation(trpc.computers.mintJoinToken.mutationOptions())
 
   // Refetch after the local runner is restarted/started. The runner re-dials
   // asynchronously after the spawn returns and `runners.list` does not poll, so
   // without this the list would sit on "Disconnected".
   useEffect(() => {
     if (runnerRevision === 0) return
-    void queryClient.invalidateQueries(trpc.runners.list.queryFilter())
+    void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
   }, [runnerRevision, queryClient, trpc])
 
   // Only meaningful on the local hub. Gated on `isSuccess` so the first render
@@ -331,7 +331,7 @@ export function HubCard({
       showMintedToken({ token: res.token, hubLabel, hubUrl: res.hubUrl })
       setLabel('')
       setAdding(false)
-      void queryClient.invalidateQueries(trpc.runners.list.queryFilter())
+      void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
       toast.success('Enrollment token created')
     } catch (err) {
       toast.error(`Could not create token: ${err instanceof Error ? err.message : String(err)}`)
@@ -531,7 +531,7 @@ export function HubCard({
                             // revoke cannot be routed to the wrong hub.
                             revoke: async () => {
                               await revokeMutation.mutateAsync({ runnerId: runner.id })
-                              void queryClient.invalidateQueries(trpc.runners.list.queryFilter())
+                              void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
                             }
                           })
                         }

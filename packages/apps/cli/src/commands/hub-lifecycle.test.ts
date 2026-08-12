@@ -744,7 +744,7 @@ async function main(): Promise<void> {
 
     // --- remote hub setup ---------------------------------------------------
     //
-    // A hub with no public address mints `ws://127.0.0.1:<port>/runners` tokens, which
+    // A hub with no public address mints `ws://127.0.0.1:<port>/computers` tokens, which
     // no other machine can use — and mint SUCCEEDS, so the failure is silent.
     // `--public-address` is what makes a reachable deployment; these cases assert the
     // config it persists (the boot itself needs TLS + public DNS, so it is not booted

@@ -140,7 +140,7 @@ async function hubRunners(): Promise<HubRunnerRow[] | null> {
     return null
   }
   try {
-    const res = await fetch(`${baseUrl}/api/runners`, {
+    const res = await fetch(`${baseUrl}/api/computers`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: AbortSignal.timeout(3000)
     })

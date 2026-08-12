@@ -160,19 +160,19 @@ export interface RestApiDeps {
   /**
    * Runner listener info accessors (hub/runner split, Wave3.5-D3). Set ONLY under
    * the composition root wires it, closed over the same late-bound refs the
-   * `runnersRouter`'s `RunnersDeps` reads). Powers `POST /api/runners/join-token`
+   * `computersRouter`'s `RunnersDeps` reads). Powers `POST /api/computers/join-token`
    * — the loopback channel the Electron MAIN process hits at boot to mint a token
    * for its auto-enrolling local runner (main has no tRPC client to the sidecar).
    * Absent (runner off — the default) → the route 503s and nothing mints, so the
    * default boot is byte-identical.
    */
   runners?: {
-    /** `wss://host:port/runners` URL the join token embeds. Null until bound. */
+    /** `wss://host:port/computers` URL the join token embeds. Null until bound. */
     getHubUrl: () => string | null
     /** Hub TLS leaf sha256 (lowercase hex) the token pins. Null until loaded. */
     getCertFingerprint: () => string | null
     /**
-     * The live runner gateway, for `GET /api/runners` connection status. Null until
+     * The live runner gateway, for `GET /api/computers` connection status. Null until
      * the async runner init resolves, and permanently null if it failed — that route
      * degrades to store rows with `connected: false` rather than erroring, so this
      * stays optional and nothing depends on it being present.

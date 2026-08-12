@@ -98,7 +98,7 @@ async function loadRunnerProcHandlers(): Promise<LoadedRunner | null> {
       }
     },
     config: {
-      hubUrl: 'ws://127.0.0.1:0/runners',
+      hubUrl: 'ws://127.0.0.1:0/computers',
       name: 'roundtrip',
       allowedRoots: [realpathSync(tmpdir())],
       capabilities: ['proc']

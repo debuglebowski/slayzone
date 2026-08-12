@@ -10,7 +10,7 @@
  * so a value can never bleed from one role into the other.
  *
  * WHY NO SCHEME IN THE ENV CHANNEL: the two dial-side consumers need different
- * schemes (the runner `ws(s)://…/runners`, the CLI `http(s)://…`), so a stored
+ * schemes (the runner `ws(s)://…/computers`, the CLI `http(s)://…`), so a stored
  * scheme meant one of them was always reading the wrong shape — the retired
  * `SLAYZONE_HUB_URL` bug (a runner-hosted `slay` inheriting a `ws://` url and
  * hard-exiting). Both now DERIVE the scheme from the single `SLAYZONE_MODE`
@@ -51,7 +51,7 @@ export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localh
  *              proxy shape for a remote hub).
  * @param kind  `'ws'` for the runner transport (ws/wss) or `'http'` for the CLI
  *              REST base (http/https).
- * @param path  optional path to append (e.g. `'/runners'`). Empty by default.
+ * @param path  optional path to append (e.g. `'/computers'`). Empty by default.
  * @param mode  the deployment mode. Defaults to `getSlayzoneMode()` (reads
  *              `process.env`); pass an explicit mode to stay hermetic under a
  *              test that supplies its own env (e.g. `loadRunnerConfig(customEnv)`).
@@ -101,11 +101,11 @@ export function isBareAuthority(addr: string): boolean {
 }
 
 /**
- * True when a `ws(s)://…/runners` URL names THIS machine — so a join token
+ * True when a `ws(s)://…/computers` URL names THIS machine — so a join token
  * carrying it is only usable by a runner on the SAME box.
  *
  * WHY THIS EXISTS: a hub in local mode derives its runner URL as
- * `ws://<loopback>:<hubPort>/runners` unconditionally (see the hub's
+ * `ws://<loopback>:<hubPort>/computers` unconditionally (see the hub's
  * `deriveRunnerHubUrl`). That is right for the co-located runner the desktop app
  * auto-enrolls, and useless for any other machine — an off-box runner handed such
  * a token dials its own loopback and silently never connects. Minting cannot

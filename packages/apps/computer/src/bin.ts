@@ -6,7 +6,7 @@
  *   slayzone-computer
  *
  * SLAYZONE_HUB_ADDRESS carries the hub AUTHORITY only (host[:port]); the dial
- * scheme (ws/wss) is derived from SLAYZONE_MODE, and `/runners` is appended.
+ * scheme (ws/wss) is derived from SLAYZONE_MODE, and `/computers` is appended.
  *
  * On an interactive terminal a fresh runner (no join token AND no stored
  * credentials) is prompted for its join token + path-jail + name, then offered
@@ -60,7 +60,7 @@ async function maybeInteractiveSetup(): Promise<{
   // deriving the credential-store host key; runner.config.json still carries a full url.
   const envAddress = process.env[ENV_VARS.hubAddress]
   const hubUrl =
-    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/runners') : cfg.hubUrl
+    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/computers') : cfg.hubUrl
   if (hubUrl !== undefined) {
     try {
       // Creds derive from the ROOT anchor (`<ROOT>/runner.state.json`) — no override knob.
@@ -79,7 +79,7 @@ async function maybeInteractiveSetup(): Promise<{
       {
         configKey: 'joinToken',
         envKey: ENV_VARS.joinToken,
-        label: 'Hub join token (from `POST /api/runners/join-token` on the hub)'
+        label: 'Hub join token (from `POST /api/computers/join-token` on the hub)'
       },
       {
         // envKey is inert — the resolver has no env channel for the path-jail

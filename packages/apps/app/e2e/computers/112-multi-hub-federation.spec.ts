@@ -175,7 +175,7 @@ async function attachRunnerToHub(opts: {
   name: string
 }): Promise<HubRunner> {
   const minted = (await withHubClient(opts.hubUrl, (c) =>
-    c.runners.mintJoinToken.mutate({ label: opts.name })
+    c.computers.mintJoinToken.mutate({ label: opts.name })
   )) as { token: string }
   const payload = JSON.parse(
     Buffer.from(minted.token.slice(minted.token.indexOf('.') + 1), 'base64url').toString('utf8')
@@ -213,7 +213,7 @@ async function attachRunnerToHub(opts: {
   await expect
     .poll(
       async () => {
-        const rows = (await withHubClient(opts.hubUrl, (c) => c.runners.list.query())) as Array<{
+        const rows = (await withHubClient(opts.hubUrl, (c) => c.computers.list.query())) as Array<{
           id: string
           usable: boolean
         }>
@@ -680,7 +680,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(mintedHub).toContainText('Hub B')
       // The dial target must be the REMOTE hub's own port — the proof the mint was
       // routed rather than served by the default hub.
-      await expect(mintedHub).toContainText(`:${remotePort}/runners`)
+      await expect(mintedHub).toContainText(`:${remotePort}/computers`)
 
       // A mint creates a join_tokens row, NOT a runner row, so the remote hub's
       // runner list is still empty — assert the token instead, via the hub that
@@ -690,7 +690,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const payload = JSON.parse(
         Buffer.from(tokenText.slice('szjt1.'.length), 'base64url').toString('utf8')
       ) as { hubUrl: string }
-      expect(payload.hubUrl).toBe(`ws://127.0.0.1:${remotePort}/runners`)
+      expect(payload.hubUrl).toBe(`ws://127.0.0.1:${remotePort}/computers`)
     } finally {
       if (launched) await launched.close()
       if (hub) await hub.stop()

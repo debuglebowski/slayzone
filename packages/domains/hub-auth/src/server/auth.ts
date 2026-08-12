@@ -46,7 +46,7 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // Accounts therefore come from `createHubUser` (./users.ts), reached over the
     // loopback-only `/api/hub/users` route that backs `slay hub users add` — a
     // shell on the hub box is the credential, exactly as for
-    // `POST /api/runners/join-token`.
+    // `POST /api/computers/join-token`.
     emailAndPassword: { enabled: true, disableSignUp: true },
     // Hard guarantee: never phone home (better-auth telemetry is opt-in, we
     // still pin it off).

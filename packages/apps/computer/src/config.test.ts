@@ -22,13 +22,13 @@ afterEach(() => {
 
 describe('loadRunnerConfig', () => {
   it('builds a config from env with sensible defaults (ADDRESS → ws:// in local mode)', () => {
-    // Env carries authority only; local mode (default) composes ws://…/runners.
+    // Env carries authority only; local mode (default) composes ws://…/computers.
     const config = loadRunnerConfig({
       [ENV_VARS.hubAddress]: 'hub.example:8443',
       [ENV_VARS.joinToken]: 'jt-1'
     })
     expect(config).toEqual({
-      hubUrl: 'ws://hub.example:8443/runners',
+      hubUrl: 'ws://hub.example:8443/computers',
       joinToken: 'jt-1',
       name: hostname(),
       allowedRoots: [],
@@ -36,12 +36,12 @@ describe('loadRunnerConfig', () => {
     })
   })
 
-  it('ADDRESS composes wss://…/runners in remote mode', () => {
+  it('ADDRESS composes wss://…/computers in remote mode', () => {
     const config = loadRunnerConfig({
       [ENV_VARS.hubAddress]: 'hub.example.com',
       SLAYZONE_MODE: 'remote'
     })
-    expect(config.hubUrl).toBe('wss://hub.example.com/runners')
+    expect(config.hubUrl).toBe('wss://hub.example.com/computers')
   })
 
   it('reads allowedRoots from the shared config (standalone operator channel)', () => {
@@ -91,16 +91,16 @@ describe('loadRunnerConfig', () => {
   it('reads hubUrl/name/pinnedCertSha256 from the shared config', () => {
     // The single <ROOT>/config.json carries the pin too (the former
     // SLAYZONE_RUNNER_CONFIG path-pointing env var is gone). Creds always derive
-    // from the ROOT anchor (`<ROOT>/runners`) — no credentialsDir knob.
+    // from the ROOT anchor (`<ROOT>/computers`) — no credentialsDir knob.
     const config = loadRunnerConfig(
       {},
       {
-        hubUrl: 'wss://from-config.example/runners',
+        hubUrl: 'wss://from-config.example/computers',
         runnerName: 'from-config',
         pinnedCertSha256: 'a'.repeat(64)
       }
     )
-    expect(config.hubUrl).toBe('wss://from-config.example/runners')
+    expect(config.hubUrl).toBe('wss://from-config.example/computers')
     expect(config.name).toBe('from-config')
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
@@ -108,10 +108,10 @@ describe('loadRunnerConfig', () => {
   it('env ADDRESS wins over the shared config full url', () => {
     const config = loadRunnerConfig(
       { [ENV_VARS.hubAddress]: 'from-env.example' },
-      { hubUrl: 'wss://from-config.example/runners' }
+      { hubUrl: 'wss://from-config.example/computers' }
     )
-    // Env authority (local mode) composes ws://…/runners and beats config.json.
-    expect(config.hubUrl).toBe('ws://from-env.example/runners')
+    // Env authority (local mode) composes ws://…/computers and beats config.json.
+    expect(config.hubUrl).toBe('ws://from-env.example/computers')
   })
 
   it('fails with a readable error when hub address is missing', () => {
@@ -120,19 +120,19 @@ describe('loadRunnerConfig', () => {
 
   it('is self-sufficient from a join token alone (hubUrl + pin extracted)', () => {
     const token = mintToken({
-      hubUrl: 'wss://hub.example:8443/runners',
+      hubUrl: 'wss://hub.example:8443/computers',
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
     const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
-    expect(config.hubUrl).toBe('wss://hub.example:8443/runners')
+    expect(config.hubUrl).toBe('wss://hub.example:8443/computers')
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
     expect(config.joinToken).toBe(token)
   })
 
   it('lets an explicit env hubUrl + config pin override the join-token values', () => {
     const token = mintToken({
-      hubUrl: 'wss://from-token/runners',
+      hubUrl: 'wss://from-token/computers',
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
@@ -147,7 +147,7 @@ describe('loadRunnerConfig', () => {
       },
       { pinnedCertSha256: 'b'.repeat(64) }
     )
-    expect(config.hubUrl).toBe('wss://override.example/runners')
+    expect(config.hubUrl).toBe('wss://override.example/computers')
     expect(config.pinnedCertSha256).toBe('b'.repeat(64))
   })
 
@@ -159,7 +159,7 @@ describe('loadRunnerConfig', () => {
 
   it('fails fast when an EXPLICIT config.json pin is set on a ws:// hub url (no silent downgrade)', () => {
     expect(() =>
-      loadRunnerConfig({}, { hubUrl: 'ws://hub.example/runners', pinnedCertSha256: 'a'.repeat(64) })
+      loadRunnerConfig({}, { hubUrl: 'ws://hub.example/computers', pinnedCertSha256: 'a'.repeat(64) })
     ).toThrow(/requires a wss:\/\/ hub url/)
   })
 
@@ -167,12 +167,12 @@ describe('loadRunnerConfig', () => {
     // A ws:// join token carries a fingerprint but the pin is NOT explicit — it is
     // softly ignored downstream (startRunner), so config assembly must not throw.
     const token = mintToken({
-      hubUrl: 'ws://127.0.0.1:9000/runners',
+      hubUrl: 'ws://127.0.0.1:9000/computers',
       certFingerprint: 'a'.repeat(64),
       secret: 's'
     })
     const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
-    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/runners')
+    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/computers')
     // The decoded pin is still present in config; startRunner drops it for ws://.
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
@@ -192,7 +192,7 @@ describe('loadRunnerConfig', () => {
   // so drive it through the shared config.
   it('rejects a plaintext ws:// hub url (from config.json) in remote mode', () => {
     expect(() =>
-      loadRunnerConfig({ SLAYZONE_MODE: 'remote' }, { hubUrl: 'ws://hub.example/runners' })
+      loadRunnerConfig({ SLAYZONE_MODE: 'remote' }, { hubUrl: 'ws://hub.example/computers' })
     ).toThrow(/wss:\/\//)
   })
 
@@ -201,12 +201,12 @@ describe('loadRunnerConfig', () => {
       [ENV_VARS.hubAddress]: 'hub.example',
       SLAYZONE_MODE: 'remote'
     })
-    expect(config.hubUrl).toBe('wss://hub.example/runners')
+    expect(config.hubUrl).toBe('wss://hub.example/computers')
   })
 
   it('still composes ws:// in local mode (dev/loopback)', () => {
     const config = loadRunnerConfig({ [ENV_VARS.hubAddress]: '127.0.0.1:9000' })
-    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/runners')
+    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/computers')
   })
 
   // --- shared <ROOT>/config.json layering (env > shared > default) ---
@@ -214,12 +214,12 @@ describe('loadRunnerConfig', () => {
     const config = loadRunnerConfig(
       {},
       {
-        hubUrl: 'wss://shared.example/runners',
+        hubUrl: 'wss://shared.example/computers',
         joinToken: 'jt-shared',
         runnerName: 'shared-runner'
       }
     )
-    expect(config.hubUrl).toBe('wss://shared.example/runners')
+    expect(config.hubUrl).toBe('wss://shared.example/computers')
     expect(config.joinToken).toBe('jt-shared')
     expect(config.name).toBe('shared-runner')
   })
@@ -227,10 +227,10 @@ describe('loadRunnerConfig', () => {
   it('ENV wins over the shared config; unset keys fall through', () => {
     const config = loadRunnerConfig(
       { [ENV_VARS.hubAddress]: 'from-env.example' },
-      { hubUrl: 'wss://shared.example/runners', runnerName: 'shared-runner' }
+      { hubUrl: 'wss://shared.example/computers', runnerName: 'shared-runner' }
     )
-    // Env authority (local mode) composes ws://…/runners and beats config.json.
-    expect(config.hubUrl).toBe('ws://from-env.example/runners')
+    // Env authority (local mode) composes ws://…/computers and beats config.json.
+    expect(config.hubUrl).toBe('ws://from-env.example/computers')
     expect(config.name).toBe('shared-runner') // shared name survives (no env override)
   })
 
@@ -257,13 +257,13 @@ describe('loadRunnerConfig', () => {
       process.env.SLAYZONE_SUPERVISED = '1'
       writeFileSync(
         join(dir, 'config.json'),
-        JSON.stringify({ hubUrl: 'wss://shared.example/runners' })
+        JSON.stringify({ hubUrl: 'wss://shared.example/computers' })
       )
       // Supervised ⇒ shared skipped ⇒ no hub source anywhere ⇒ throws.
       expect(() => loadRunnerConfig()).toThrow(/SLAYZONE_HUB_ADDRESS/)
       // Sanity: with SUPERVISED unset, the SAME shared config IS read (no throw).
       delete process.env.SLAYZONE_SUPERVISED
-      expect(loadRunnerConfig().hubUrl).toBe('wss://shared.example/runners')
+      expect(loadRunnerConfig().hubUrl).toBe('wss://shared.example/computers')
     } finally {
       const restore = (k: string, v: string | undefined): void => {
         if (v === undefined) delete process.env[k]
@@ -317,7 +317,7 @@ describe('loadRunnerConfig', () => {
       // under the old name cannot smuggle in a hub url either: with no hubAddress
       // there is no hub source left and the schema reports it.
       const token = mintToken({
-        hubUrl: 'wss://hub.example:8443/runners',
+        hubUrl: 'wss://hub.example:8443/computers',
         certFingerprint: 'a'.repeat(64),
         secret: 's'
       })
@@ -328,12 +328,12 @@ describe('loadRunnerConfig', () => {
 
     it('is self-sufficient from the token alone (hubUrl + pin extracted)', () => {
       const token = mintToken({
-        hubUrl: 'wss://hub.example:8443/runners',
+        hubUrl: 'wss://hub.example:8443/computers',
         certFingerprint: 'a'.repeat(64),
         secret: 's'
       })
       const config = loadRunnerConfig({ [ENV_VARS.joinToken]: token })
-      expect(config.hubUrl).toBe('wss://hub.example:8443/runners')
+      expect(config.hubUrl).toBe('wss://hub.example:8443/computers')
       expect(config.pinnedCertSha256).toBe('a'.repeat(64))
       expect(config.joinToken).toBe(token)
     })

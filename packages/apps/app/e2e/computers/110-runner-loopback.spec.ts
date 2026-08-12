@@ -12,10 +12,10 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  * Validates the WHOLE hub/runner chain over a real runner link, in-process:
  *   1. Boot a fully isolated app with boot-config `{ server_mode:'local' }`. A hub
  *      always accepts runners, so the sidecar comes up with the gateway + hub-auth
- *      + identity live, and binds the TLS `/runners` wss listener on its own port
+ *      + identity live, and binds the TLS `/computers` wss listener on its own port
  *      (separate https server from the shared http /trpc; see server.ts).
  *   2. Mint a real join token via the `runners.mintJoinToken` tRPC mutation
- *      (embeds the hub's bound `wss://…/runners` URL + cert fingerprint to pin).
+ *      (embeds the hub's bound `wss://…/computers` URL + cert fingerprint to pin).
  *   3. Spawn the bundled @slayzone/computer as a loopback child process, pointed
  *      at that token → it dials the hub, enrolls, and appears connected in
  *      `runners.list`.
@@ -31,7 +31,7 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  *   (a) AUTO-ENROLL runner (Wave3.5-D3) — set `SLAYZONE_E2E_ALLOW_RUNNER=1` so
  *       the in-app supervisor spawns the runner itself: main waits for the
  *       sidecar ready, mints a token over loopback REST (`POST
- *       /api/runners/join-token`), injects it + the wss url into the runner env,
+ *       /api/computers/join-token`), injects it + the wss url into the runner env,
  *       and the runner auto-enrolls with ZERO manual token/spawn. Asserts the
  *       local runner reaches "connected" in `runners.list`. (The full pty-exec
  *       round-trip stays on the manual test (b) — auto-enroll timing to a live
@@ -130,7 +130,7 @@ function spawnLoopbackRunner(opts: {
       // <ROOT>/runner.config.json (it skips the shared file when SUPERVISED=1).
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: opts.rootDir,
-      // Authority only — the runner composes ws(s)://<addr>/runners from
+      // Authority only — the runner composes ws(s)://<addr>/computers from
       // SLAYZONE_MODE (local here → ws, matching the loopback hub).
       SLAYZONE_HUB_ADDRESS: new URL(opts.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: opts.joinToken,
@@ -178,7 +178,7 @@ function spawnLoopbackRunner(opts: {
 function listRunners(page: Page): Promise<Array<{ id: string; name: string; connected: boolean }>> {
   return page.evaluate(
     () =>
-      window.getTrpcVanillaClient().runners.list.query() as Promise<
+      window.getTrpcVanillaClient().computers.list.query() as Promise<
         Array<{ id: string; name: string; connected: boolean }>
       >
   )
@@ -192,7 +192,7 @@ base.describe('Runner loopback (runner ON)', () => {
     const launched = await launchIsolatedElectron({
       name: 'runner-loopback',
       seedUserData: (userDataDir) => {
-        // Local mode — a hub always builds the gateway + binds the /runners
+        // Local mode — a hub always builds the gateway + binds the /computers
         // listener, so no flag is needed.
         fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
         fs.writeFileSync(
@@ -229,7 +229,7 @@ base.describe('Runner loopback (runner ON)', () => {
                 () =>
                   window
                     .getTrpcVanillaClient()
-                    .runners.mintJoinToken.mutate({ label: 'e2e-loopback' }) as Promise<{
+                    .computers.mintJoinToken.mutate({ label: 'e2e-loopback' }) as Promise<{
                     token: string
                   }>
               )
@@ -244,11 +244,11 @@ base.describe('Runner loopback (runner ON)', () => {
       expect(minted).not.toBeNull()
       const token = minted!.token
       const hubUrl = decodeHubUrl(token)
-      // `/runners` rides the ONE hub listener, demuxed by path, and its scheme
+      // `/computers` rides the ONE hub listener, demuxed by path, and its scheme
       // follows SLAYZONE_MODE: local (this test) → plaintext `ws://` loopback on the
       // hub's own port; only remote terminates TLS and mints `wss://` (from
       // SLAYZONE_HUB_PUBLIC_ADDRESS). The runner extracts this url from the token.
-      expect(hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/runners$/)
+      expect(hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/computers$/)
 
       // Spawn the loopback runner against the freshly minted token. Its creds +
       // allowedRoots live under the isolated userdata dir (nothing leaks).
@@ -299,7 +299,7 @@ base.describe('Runner loopback (runner ON)', () => {
 
       await page.evaluate(
         ({ tId, rId }) =>
-          window.getTrpcVanillaClient().runners.setTaskRunner.mutate({
+          window.getTrpcVanillaClient().computers.setTaskRunner.mutate({
             taskId: tId,
             runnerId: rId
           }),
@@ -307,7 +307,7 @@ base.describe('Runner loopback (runner ON)', () => {
       )
       // Sanity: the binding resolves to our runner (routing reads this per-spawn).
       const resolved = await page.evaluate(
-        (tId) => window.getTrpcVanillaClient().runners.resolveTaskRunner.query({ taskId: tId }),
+        (tId) => window.getTrpcVanillaClient().computers.resolveTaskRunner.query({ taskId: tId }),
         taskId
       )
       expect(resolved.runnerId).toBe(runnerId)
@@ -438,7 +438,7 @@ base.describe('Runner loopback (runner ON)', () => {
       // Boot with the supervisor explicitly OPTED OUT (`SLAYZONE_E2E_NO_RUNNER=1`)
       // — e2e is otherwise runner-ON by default, which would auto-spawn a local
       // runner and invalidate the zero-connected assertion below. This proves the
-      // always-on contract: the hub still builds the gateway + binds the /runners
+      // always-on contract: the hub still builds the gateway + binds the /computers
       // listener at boot, so mintJoinToken succeeds and a runner COULD connect —
       // there just isn't one spawned in this test.
       const launched = await launchIsolatedElectron({
@@ -476,7 +476,7 @@ base.describe('Runner loopback (runner ON)', () => {
                 try {
                   const res = (await window
                     .getTrpcVanillaClient()
-                    .runners.mintJoinToken.mutate({ label: 'always-on' })) as { token?: string }
+                    .computers.mintJoinToken.mutate({ label: 'always-on' })) as { token?: string }
                   return typeof res.token === 'string' && res.token.startsWith('szjt1.')
                 } catch {
                   return false

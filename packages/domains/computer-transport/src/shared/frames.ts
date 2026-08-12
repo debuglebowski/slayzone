@@ -50,7 +50,7 @@ import { z } from 'zod'
 export const RUNNER_EXIT_NEEDS_RE_ENROLLMENT = 78
 
 /** Bump on any breaking change to the frames below. */
-export const RUNNER_PROTOCOL_VERSION = 1
+export const RUNNER_PROTOCOL_VERSION = 2
 
 /** JSON-RPC application error codes used by the runner protocol. */
 export const RunnerTransportErrorCodes = {

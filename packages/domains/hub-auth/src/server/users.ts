@@ -14,7 +14,7 @@ import { RUNNER_SERVICE_USER_EMAIL } from './runner-keys'
  * self-register into full access. With signup closed, accounts have to come from
  * somewhere: this module, reached over the loopback-only `/api/hub/users` route.
  * A shell on the hub box is the credential, exactly as for
- * `POST /api/runners/join-token`.
+ * `POST /api/computers/join-token`.
  *
  * Shape mirrors `runner-keys.ts` deliberately — both reach through `auth.$context`
  * to better-auth's internal adapter for things the public `auth.api` surface only

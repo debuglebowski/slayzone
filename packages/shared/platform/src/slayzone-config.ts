@@ -86,7 +86,7 @@ export interface RunnerConfig {
   joinToken?: string
   /** Human-readable runner name. */
   runnerName?: string
-  /** Full `ws(s)://…/runners` endpoint a standalone runner dials. */
+  /** Full `ws(s)://…/computers` endpoint a standalone runner dials. */
   hubUrl?: string
   /** Filesystem roots the runner may operate under. Locally-declared, never pushed from the hub. Defaults to `[<ROOT>]` when absent. */
   allowedRoots?: string[]

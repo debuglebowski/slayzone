@@ -825,7 +825,7 @@ export function getProcessesDeps(): ProcessesDeps {
   return processesDeps
 }
 
-// Runners / runner deps — the hub/runner-split surface the `runnersRouter` needs
+// Runners / runner deps — the hub/runner-split surface the `computersRouter` needs
 // that transport cannot own itself: the live runner gateway (runner-WS connection
 // status) plus the two values `mintJoinToken` bakes into a join token (the runner
 // WS URL a runner dials + the hub TLS cert fingerprint it pins). All three are
@@ -868,7 +868,7 @@ export type RunnerGateway = {
 export type RunnersDeps = {
   /** Live runner gateway, or null until the async runner init resolves. */
   getGateway: () => RunnerGateway | null
-  /** ws(s)://host:port/runners URL a join token embeds for the runner to dial.
+  /** ws(s)://host:port/computers URL a join token embeds for the runner to dial.
    *  Null until the runner listener's port is bound. */
   getHubUrl: () => string | null
   /** Hub TLS leaf-cert sha256 (lowercase hex) a join token pins. Null until the
@@ -899,9 +899,9 @@ export function getRunnersDepsOrNull(): RunnersDeps | null {
  * connecting client via `hub.describe`. Both getters degrade to a safe default
  * (no identity loaded / no auth) so the `hub.describe` query works with
  * multi-hub OFF — the co-located local sidecar has no cert + no auth. Wired by
- * the server composition only when a hub identity is loaded (multi_hub/runners) or
+ * the server composition only when a hub identity is loaded (multi_hub/computers) or
  * auth is enforced (Phase 6). Deliberately separate from `RunnersDeps` (the
- * runner-facing `/runners` axis) — this is the client-facing `/trpc` axis.
+ * runner-facing `/computers` axis) — this is the client-facing `/trpc` axis.
  */
 export type HubDescribeDeps = {
   /** The hub's own TLS leaf-cert sha256 (lowercase hex), or null when no hub

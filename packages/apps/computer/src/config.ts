@@ -41,20 +41,20 @@ export type RunnerConfig = z.infer<typeof runnerConfigSchema>
 
 export const ENV_VARS = {
   // Authority ONLY — `host[:port]`, no scheme, no path. The dial scheme
-  // (ws/wss) is derived from SLAYZONE_MODE via hubUrlFromAddr, and `/runners` is
+  // (ws/wss) is derived from SLAYZONE_MODE via hubUrlFromAddr, and `/computers` is
   // appended here, so this env channel can never carry a scheme the CLI would
   // reinterpret (the retired `SLAYZONE_HUB_URL` ws-vs-http collision). runner.config.json
   // `hubUrl` + the join token still carry a FULL url (they're not env-inherited
   // into terminals, so outside the collision).
   hubAddress: 'SLAYZONE_HUB_ADDRESS',
   // HUB_-prefixed because the token is hub-scoped BY VALUE, not by reader: the hub
-  // mints it and it embeds the hub's `wss://…/runners` url, the hub's TLS cert
+  // mints it and it embeds the hub's `wss://…/computers` url, the hub's TLS cert
   // fingerprint, and a secret checked against the hub's `join_tokens` row.
   // `mintJoinToken` binds it to NO runner (runner_id is NULL until redemption), so
   // any runner can redeem any unused token — the old `SLAYZONE_RUNNER_JOIN_TOKEN`
   // named its CONSUMER, which is what CLAUDE.md rule 2 forbids. `_TOKEN` suffix +
   // `HUB_` family per rule 3, matching the domain term used everywhere else
-  // (`szjt1.`, the `join_tokens` table, mintJoinToken, POST /api/runners/join-token).
+  // (`szjt1.`, the `join_tokens` table, mintJoinToken, POST /api/computers/join-token).
   joinToken: 'SLAYZONE_HUB_JOIN_TOKEN'
   // No alias for the pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN`: it never shipped.
   // The published runner betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, and
@@ -182,7 +182,7 @@ export function loadRunnerConfig(
 ): RunnerConfig {
   const fromShared = fromSharedConfig(shared)
 
-  // A join token is self-sufficient: it embeds the hub's `wss://…/runners` URL and
+  // A join token is self-sufficient: it embeds the hub's `wss://…/computers` URL and
   // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
   // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_HUB_JOIN_TOKEN=… runner` works
   // with no other config. An explicit hubUrl / pin (file or env) still wins, so an
@@ -197,14 +197,14 @@ export function loadRunnerConfig(
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 
   // The env channel carries only the hub AUTHORITY (host[:port]); compose the
-  // full `ws(s)://<addr>/runners` dial url here, scheme from SLAYZONE_MODE (read
+  // full `ws(s)://<addr>/computers` dial url here, scheme from SLAYZONE_MODE (read
   // from the passed `env` so tests stay hermetic). runner.config.json / join-token
   // fallbacks below still supply a full url directly.
   const mode: SlayzoneMode =
     env.SLAYZONE_MODE?.trim().toLowerCase() === 'remote' ? 'remote' : 'local'
   const envAddress = env[ENV_VARS.hubAddress]
   const hubUrlFromEnv =
-    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/runners', mode) : undefined
+    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/computers', mode) : undefined
 
   const merged = {
     // Supervised local runner → the shared const so the hub's dedup collapses it

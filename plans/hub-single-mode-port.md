@@ -8,7 +8,7 @@ protocol/port knobs. Simplest end state, effort irrelevant.
 - `local` (default): ONE plain `http`/`ws` listener on `SLAYZONE_HUB_HOST:SLAYZONE_HUB_PORT`.
 - `remote`: ONE `https`/`wss` listener (hub identity leaf) on the same host:port.
 
-The single listener path-demuxes: `/trpc` (clients, origin-guarded), `/runners`
+The single listener path-demuxes: `/trpc` (clients, origin-guarded), `/computers`
 (runners, no-origin), `/health`, `/api/*`, `/mcp`, REST-proxy.
 
 Constraint that makes this safe: runner-remote ⟹ hub-remote (never a remote runner
@@ -25,7 +25,7 @@ on a local hub). So the hub's own mode fully determines every link's protocol.
 
 Deleted entirely:
 - `SLAYZONE_HUB_TLS_PORT` — protocol implied by mode, never a separate port.
-- `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` — `/runners` rides the shared port.
+- `SLAYZONE_HUB_RUNNER_TRANSPORT_PORT` — `/computers` rides the shared port.
 - `SLAYZONE_HUB_RUNNER_TRANSPORT_HOST` — one listener, one bind host.
 - `settings.runner_transport_port` persistence layer (`resolveDesiredRunnerPort`,
   `claimRunnerServerPort`) — existed ONLY to keep the runner URL port stable across
@@ -38,7 +38,7 @@ DB key `settings.server_port` (CLI discovery channel) is NOT an env var — unto
 ## Why the runner needs no code change
 
 Runner is entirely URL-driven (join token / `SLAYZONE_HUB_URL`). Both `/trpc`-TLS and
-`/runners` already share the SAME hub identity leaf → fingerprint unchanged. The only
+`/computers` already share the SAME hub identity leaf → fingerprint unchanged. The only
 identity-breaking variable is the port in the URL (credential key = `host_port`).
 Collapse changes that port ONCE → one-time re-key:
 - supervised/local runner is name-keyed on the hub (UPSERT dedup) → benign re-enroll.
@@ -60,7 +60,7 @@ Runner-listener must advertise `ws://` in local, `wss://` in remote (today hardc
 1. Rename `SLAYZONE_SERVER_PORT`→`SLAYZONE_HUB_PORT`, `SLAYZONE_SERVER_HOST`→`SLAYZONE_HUB_HOST`
    across all tracked files (mechanical; exact unique tokens, no substring collisions).
 2. `server.ts`: build ONE `createServer`/`createHttpsServer` by mode; single `noServer`
-   WSS demux for `/trpc` + `/runners` on `upgrade`; delete `tlsHttpsServer`/`tlsWss`/
+   WSS demux for `/trpc` + `/computers` on `upgrade`; delete `tlsHttpsServer`/`tlsWss`/
    `runnerHttpsServer`/separate binds. Preserve origin-guard on `/trpc`, cert-pin
    (leaf) in remote, remote fail-loud guards.
 3. `runner-listener.ts`: advertise scheme by mode; drop the separate-port machinery

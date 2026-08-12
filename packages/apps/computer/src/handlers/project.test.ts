@@ -32,7 +32,7 @@ afterEach(() => {
 
 function ctxWith(roots: string[]) {
   const config: RunnerConfig = {
-    hubUrl: 'wss://hub.example:8443/runners',
+    hubUrl: 'wss://hub.example:8443/computers',
     name: 'test',
     allowedRoots: roots,
     capabilities: ['fs']

@@ -103,7 +103,7 @@ test('valid config parses all known keys, drops wrong types', () => {
     JSON.stringify({
       joinToken: 'jt-1',
       runnerName: 'r1',
-      hubUrl: 'wss://hub/runners',
+      hubUrl: 'wss://hub/computers',
       allowedRoots: ['/srv/a', '/srv/b'],
       pinnedCertSha256: 'a'.repeat(64),
       // wrong-typed / unknown → dropped
@@ -114,7 +114,7 @@ test('valid config parses all known keys, drops wrong types', () => {
   const cfg = loadRunnerConfigFile(p)
   assertEq(cfg.joinToken, 'jt-1', 'joinToken')
   assertEq(cfg.runnerName, 'r1', 'runnerName')
-  assertEq(cfg.hubUrl, 'wss://hub/runners', 'hubUrl')
+  assertEq(cfg.hubUrl, 'wss://hub/computers', 'hubUrl')
   assertEq(JSON.stringify(cfg.allowedRoots), JSON.stringify(['/srv/a', '/srv/b']), 'allowedRoots')
   assertEq(cfg.pinnedCertSha256, 'a'.repeat(64), 'pinnedCertSha256')
   assert(!('extra' in cfg), 'unknown key dropped')
@@ -156,9 +156,9 @@ console.log('─'.repeat(40))
 test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
   const dir = tmp()
   const p = join(dir, 'sub', 'runner.config.json')
-  saveRunnerConfigFile({ hubUrl: 'wss://a/runners', runnerName: 'r1' }, p)
+  saveRunnerConfigFile({ hubUrl: 'wss://a/computers', runnerName: 'r1' }, p)
   const back = loadRunnerConfigFile(p)
-  assertEq(back.hubUrl, 'wss://a/runners', 'hubUrl round-trip')
+  assertEq(back.hubUrl, 'wss://a/computers', 'hubUrl round-trip')
   assertEq(back.runnerName, 'r1', 'runnerName round-trip')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file mode 0600')
@@ -170,22 +170,22 @@ test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
 test('updateRunnerConfigFile merges over on-disk base (no clobber of other keys)', () => {
   const dir = tmp()
   const p = join(dir, 'runner.config.json')
-  saveRunnerConfigFile({ hubUrl: 'wss://a/runners' }, p)
+  saveRunnerConfigFile({ hubUrl: 'wss://a/computers' }, p)
   const merged = updateRunnerConfigFile({ joinToken: 'jt-2' }, p)
-  assertEq(merged.hubUrl, 'wss://a/runners', 'kept hubUrl')
+  assertEq(merged.hubUrl, 'wss://a/computers', 'kept hubUrl')
   assertEq(merged.joinToken, 'jt-2', 'added joinToken')
   const onDisk = loadRunnerConfigFile(p)
   assertEq(onDisk.joinToken, 'jt-2', 'persisted')
-  assertEq(onDisk.hubUrl, 'wss://a/runners', 'persisted hubUrl')
+  assertEq(onDisk.hubUrl, 'wss://a/computers', 'persisted hubUrl')
   rmSync(dir, { recursive: true, force: true })
 })
 
 test('update ignores undefined patch values (does not erase)', () => {
   const dir = tmp()
   const p = join(dir, 'runner.config.json')
-  saveRunnerConfigFile({ hubUrl: 'wss://a/runners' }, p)
+  saveRunnerConfigFile({ hubUrl: 'wss://a/computers' }, p)
   const merged = updateRunnerConfigFile({ hubUrl: undefined, runnerName: 'r2' }, p)
-  assertEq(merged.hubUrl, 'wss://a/runners', 'undefined did not erase hubUrl')
+  assertEq(merged.hubUrl, 'wss://a/computers', 'undefined did not erase hubUrl')
   assertEq(merged.runnerName, 'r2', 'added runnerName')
   rmSync(dir, { recursive: true, force: true })
 })
@@ -218,12 +218,12 @@ test('runner.config.json absent, legacy config.json present ⇒ runner keys coer
   const legacyPath = join(dir, 'config.json')
   writeFileSync(
     legacyPath,
-    JSON.stringify({ joinToken: 'legacy-jt', hubUrl: 'wss://legacy/runners' })
+    JSON.stringify({ joinToken: 'legacy-jt', hubUrl: 'wss://legacy/computers' })
   )
   const cfgPath = join(dir, 'runner.config.json')
   const cfg = loadRunnerConfigFile(cfgPath)
   assertEq(cfg.joinToken, 'legacy-jt', 'joinToken from legacy file')
-  assertEq(cfg.hubUrl, 'wss://legacy/runners', 'hubUrl from legacy file')
+  assertEq(cfg.hubUrl, 'wss://legacy/computers', 'hubUrl from legacy file')
   assert(!existsSync(cfgPath), 'never auto-upgrades — runner.config.json not created by a read')
   rmSync(dir, { recursive: true, force: true })
 })

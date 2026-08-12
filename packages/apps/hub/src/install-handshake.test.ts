@@ -3,7 +3,7 @@
  *
  * Boots the built hub bin (dist/bin.cjs) as a STANDALONE process against a fully
  * isolated tmp home + store + OS-assigned ports, mints a join token over the
- * loopback REST channel (`POST /api/runners/join-token`), spawns the built runner
+ * loopback REST channel (`POST /api/computers/join-token`), spawns the built runner
  * bin pointed at that token, and asserts the runner ENROLLS end-to-end (shows
  * `connected: true` in `runners.list`). This is the deploy path the desktop app's
  * local-runner-supervisor + the published npm packages both exercise — here over
@@ -16,7 +16,7 @@
  *     store, and ELECTRON_RUN_AS_NODE), mirroring e2e/fixtures/electron.ts. Only the
  *     explicit isolation vars below are re-added.
  *   - SLAYZONE_ROOT (hub + runner, separate dirs) points under one throwaway
- *     mkdtemp dir (the runner's creds derive at <ROOT>/runners); ports are 0
+ *     mkdtemp dir (the runner's creds derive at <ROOT>/computers); ports are 0
  *     (OS-assigned) so nothing collides with a running app's claimed port.
  *   - The test records the real dev+prod primary DBs' mtime+size before/after and
  *     asserts byte-identical, and asserts the hub's OWN resolved db path (parsed
@@ -233,10 +233,10 @@ async function main(): Promise<void> {
     })
 
     // --- mint a join token over the loopback REST channel --------------------
-    // Poll: the route 503s until the /runners listener has bound (runner mode on).
+    // Poll: the route 503s until the /computers listener has bound (runner mode on).
     const tok = await poll(
       async () => {
-        const r = await fetch(`http://127.0.0.1:${hubPort}/api/runners/join-token`, {
+        const r = await fetch(`http://127.0.0.1:${hubPort}/api/computers/join-token`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ label: 'install-handshake' })
@@ -253,10 +253,10 @@ async function main(): Promise<void> {
     // pins only on `wss:`).
     // The remote `wss://`-from-SLAYZONE_HUB_PUBLIC_ADDRESS derivation is unit-covered in
     // runner-tls-listener.test.ts; asserting wss here would contradict the boot.
-    await test('POST /api/runners/join-token mints a pinned szjt1 token + local ws runner url', async () => {
+    await test('POST /api/computers/join-token mints a pinned szjt1 token + local ws runner url', async () => {
       assert(typeof tok.token === 'string' && tok.token.startsWith('szjt1.'), 'szjt1 token')
       assert(
-        tok.hubUrl === `ws://127.0.0.1:${hubPort}/runners`,
+        tok.hubUrl === `ws://127.0.0.1:${hubPort}/computers`,
         `local runner url is ws:// on the hub port, got: ${tok.hubUrl}`
       )
     })
@@ -272,7 +272,7 @@ async function main(): Promise<void> {
     runner = spawnChild(RUNNER_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: runnerRootDir,
-      // Authority only — runner composes ws(s)://<addr>/runners from SLAYZONE_MODE.
+      // Authority only — runner composes ws(s)://<addr>/computers from SLAYZONE_MODE.
       SLAYZONE_HUB_ADDRESS: new URL(tok.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: tok.token
     })
@@ -283,13 +283,13 @@ async function main(): Promise<void> {
     const trpc = createTRPCClient({
       links: [wsLink({ client: built, transformer: superjson })]
     }) as unknown as {
-      runners: { list: { query: () => Promise<Array<{ name: string; connected: boolean }>> } }
+      computers: { list: { query: () => Promise<Array<{ name: string; connected: boolean }>> } }
     }
 
     await test('the runner enrolls and reports connected in runners.list', async () => {
       const row = await poll(
         async () => {
-          const rows = await trpc.runners.list.query()
+          const rows = await trpc.computers.list.query()
           const r = rows.find((x) => x.name === 'install-handshake-runner')
           return r && r.connected ? r : null
         },

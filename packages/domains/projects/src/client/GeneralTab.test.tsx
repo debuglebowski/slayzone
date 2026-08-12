@@ -16,10 +16,10 @@ vi.mock('@slayzone/transport/client', () => ({
       uploadIcon: { mutationOptions: () => ({ __key: 'uploadIcon' }) },
       update: { mutationOptions: () => ({ __key: 'projects.update' }) }
     },
-    runners: {
-      list: { queryOptions: () => ({ queryKey: ['runners.list'] }) },
+    computers: {
+      list: { queryOptions: () => ({ queryKey: ['computers.list'] }) },
       setProjectDefaultRunner: {
-        mutationOptions: () => ({ __key: 'runners.setProjectDefaultRunner' })
+        mutationOptions: () => ({ __key: 'computers.setProjectDefaultRunner' })
       }
     }
   })
@@ -36,7 +36,7 @@ vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: runnersData, isLoading: false, refetch: vi.fn() }),
   useMutation: (opts: { __key: string }) => ({
     mutateAsync:
-      opts.__key === 'runners.setProjectDefaultRunner'
+      opts.__key === 'computers.setProjectDefaultRunner'
         ? setProjectDefaultRunnerSpy
           : genericMutateAsync
   })

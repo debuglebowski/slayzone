@@ -100,12 +100,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Hub TLS identity (creates <dataRoot>/identity/ on first run). Its
   // `fingerprintSha256Hex` is fed to the runners registry so `mintJoinToken` can
   // pin it in a join token, AND its key/cert terminate TLS on the SEPARATE https
-  // `/runners` listener stood up below. Cert-pinning is enforced end-to-end: the
+  // `/computers` listener stood up below. Cert-pinning is enforced end-to-end: the
   // hub presents this leaf, the runner pins its fingerprint (from the join token)
   // before sending any runner frame (see hub-dialer verifyPinnedCert). Loaded
   // whenever the gateway came up (i.e. always, barring an init failure).
   //
-  // The /runners listener is its OWN https server on its OWN port — the shared HTTP
+  // The /computers listener is its OWN https server on its OWN port — the shared HTTP
   // server (/trpc + /health + /mcp + /api + REST-proxy) stays plain http, so the
   // renderer / CLI / e2e loopback assumptions are unchanged; isolating the runner
   // link onto a second listener keeps the shared server plain.
@@ -174,7 +174,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // SLAYZONE_MODE is the SINGLE lever for the whole hub's transport: `local`
   // (default) serves plain http/ws on loopback (dev, e2e, supervised); `remote`
   // serves https/wss terminated with the hub identity leaf. There is no separate
-  // TLS port and no separate runner port — `/trpc` (clients) and `/runners`
+  // TLS port and no separate runner port — `/trpc` (clients) and `/computers`
   // (runners) ride the ONE listener below, demuxed by path. Protocol is never a
   // knob; it is implied by mode. Both axes present the same identity leaf in
   // remote, so a runner's pinned fingerprint is unchanged from the old split.
@@ -194,7 +194,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Single muxed server: /health (pre-express, stays alive even if the express
   // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
   // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/* + /mcp via express.
-  // `/trpc` + `/runners` WS upgrades are demuxed in the `upgrade` handler below.
+  // `/trpc` + `/computers` WS upgrades are demuxed in the `upgrade` handler below.
   //
   // Everything past /health rides the same bearer gate as `/trpc` (see
   // rest-auth.ts). Inert when the hub doesn't enforce auth: `restAuthAction`
@@ -267,7 +267,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   //   /trpc    — clients (renderer / federated hubs), origin-guarded. In remote
   //              mode the leaf terminates TLS so clients dial `wss://…/trpc` and
   //              pin the cert (renderer pins in main via setCertificateVerifyProc).
-  //   /runners — runners (non-browser), NO origin allowlist (authenticated by the
+  //   /computers — runners (non-browser), NO origin allowlist (authenticated by the
   //              runner protocol: enroll/hello frames + join token). In remote mode
   //              the SAME leaf terminates TLS, so the runner's pinned fingerprint
   //              (carried in its join token) is enforced end-to-end, unchanged from
@@ -286,7 +286,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         return
       }
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
-    } else if (pathname === '/runners' && runnerWss && runnerGateway) {
+    } else if (pathname === '/computers' && runnerWss && runnerGateway) {
       runnerWss.handleUpgrade(req, socket, head, (ws) => runnerGateway.handleConnection(ws))
     } else {
       // No handler owns this path — reject rather than leave the socket dangling.
@@ -360,9 +360,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   state.ready = true
   composition.setBoundPort(actualPort)
 
-  // Runner `/runners` rides the SAME listener as `/trpc` (bound above) — no
+  // Runner `/computers` rides the SAME listener as `/trpc` (bound above) — no
   // separate port to claim, no separate bind to fail. Feed the runners registry
-  // the `ws(s)://…/runners` URL + cert fingerprint so `mintJoinToken`
+  // the `ws(s)://…/computers` URL + cert fingerprint so `mintJoinToken`
   // embeds them. Scheme follows mode: local → `ws://` loopback (dev/supervised);
   // remote → `wss://` derived from SLAYZONE_HUB_PUBLIC_ADDRESS (the hub's
   // external address, needed alongside its bind address whenever the two differ —
@@ -483,7 +483,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           /* ignore */
         }
       }
-      // `/runners` shares the one httpServer as a noServer WSS — close it to drop
+      // `/computers` shares the one httpServer as a noServer WSS — close it to drop
       // the gateway sockets; there is no separate runner/TLS listener to close.
       if (runnerWss) {
         try {

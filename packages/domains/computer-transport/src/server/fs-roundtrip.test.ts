@@ -90,7 +90,7 @@ async function loadRunnerFsHandlers(roots: string[]): Promise<LoadedRunner | nul
       }
     },
     config: {
-      hubUrl: 'ws://127.0.0.1:0/runners',
+      hubUrl: 'ws://127.0.0.1:0/computers',
       name: 'roundtrip',
       allowedRoots: roots,
       capabilities: ['fs']

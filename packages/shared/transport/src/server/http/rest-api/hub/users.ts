@@ -11,7 +11,7 @@ import type { RestApiDeps } from '../types'
  * token-less client to reach — which had made any reachable hub
  * self-registerable. So accounts need a channel that is authoritative WITHOUT a
  * pre-existing credential. Being on the box is that authority, exactly as for
- * `POST /api/runners/join-token`: an operator SSH'd into the VPS runs `slay`, which
+ * `POST /api/computers/join-token`: an operator SSH'd into the VPS runs `slay`, which
  * dials loopback.
  *
  * ONE PATH, THREE METHODS. The bearer gate's `SELF_GUARDED` set

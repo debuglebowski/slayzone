@@ -201,7 +201,7 @@ async function main(): Promise<void> {
     // The Electron MAIN process mints over loopback with no bearer at boot; a
     // bearer requirement here would break local-runner auto-enroll on a remote
     // hub. The route itself 403s a non-loopback peer.
-    assertEq(remoteWan('/api/runners/join-token'), 'allow', 'join-token exempt')
+    assertEq(remoteWan('/api/computers/join-token'), 'allow', 'join-token exempt')
   })
 
   await test('hub user management stays open (its own loopback guard is the protection)', () => {
@@ -243,7 +243,7 @@ async function main(): Promise<void> {
     // `/api/authx` is NOT under the bootstrap prefix; `/mcp-foo` is not `/mcp`.
     assertEq(remoteWan('/api/authx/steal'), 'verify', '/api/authx is guarded')
     assertEq(remoteWan('/api/auth'), 'verify', 'bare /api/auth (no slash) is guarded')
-    assertEq(remoteWan('/api/runners/join-token/../tasks'), 'verify', 'not the exact join path')
+    assertEq(remoteWan('/api/computers/join-token/../tasks'), 'verify', 'not the exact join path')
     assertEq(remoteWan('/mcp-not-really'), 'allow', 'unrelated path stays ungated (404s)')
   })
 
@@ -369,7 +369,7 @@ async function main(): Promise<void> {
     await test('withRestAuth: exempt + ungated paths pass through with no bearer', async () => {
       const h = await mountGate({ required: true, auth, forceOffBox: true })
       try {
-        for (const path of ['/api/auth/sign-in/email', '/api/runners/join-token', '/whatever']) {
+        for (const path of ['/api/auth/sign-in/email', '/api/computers/join-token', '/whatever']) {
           const res = await h.get(path)
           assertEq(res.status, 200, `${path} passes through`)
           assertEq(res.reached, true, `${path} reached the inner handler`)

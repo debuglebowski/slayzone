@@ -271,10 +271,10 @@ async function startHub(): Promise<{ port: number }> {
 
 /** Mint a single-use join token over the hub's loopback REST channel. */
 async function mintToken(port: number, label: string): Promise<string> {
-  // The route 503s until the /runners listener has bound, hence the poll.
+  // The route 503s until the /computers listener has bound, hence the poll.
   const tok = await poll(
     async () => {
-      const r = await fetch(`http://127.0.0.1:${port}/api/runners/join-token`, {
+      const r = await fetch(`http://127.0.0.1:${port}/api/computers/join-token`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ label })
@@ -353,7 +353,7 @@ async function main(): Promise<void> {
       // The hub collapses every enroll named `local-runner` onto one deterministic id
       // (the desktop app's co-located runner), so a second one would hijack that row.
       const fake = `szjt1.${Buffer.from(
-        JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/runners', certFingerprint: 'ab', secret: 's' })
+        JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', certFingerprint: 'ab', secret: 's' })
       ).toString('base64url')}`
       const res = slayNoService(
         ['runner', 'create', 'local-runner', '--token', fake, '--root', rejectRoot],
@@ -389,7 +389,7 @@ async function main(): Promise<void> {
       )
       try {
         const fake = `szjt1.${Buffer.from(
-          JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/runners', certFingerprint: 'ab', secret: 's' })
+          JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', certFingerprint: 'ab', secret: 's' })
         ).toString('base64url')}`
         const res = slay(['runner', 'create', name, '--token', fake, '--root', rejectRoot], {
           root: rejectRoot
@@ -455,7 +455,7 @@ async function main(): Promise<void> {
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
       const out = JSON.parse(res.stdout) as { token: string; hubUrl: string }
       assert(out.token.startsWith('szjt1.'), `szjt1 token, got ${out.token.slice(0, 12)}…`)
-      assertEq(out.hubUrl, `ws://127.0.0.1:${hub.port}/runners`, 'names the hub it minted on')
+      assertEq(out.hubUrl, `ws://127.0.0.1:${hub.port}/computers`, 'names the hub it minted on')
       // The decoded payload must agree with the reported hubUrl — that equality is
       // what makes `runner ls`'s HUB column and `create`'s decode trustworthy.
       const decoded = decodeJoinToken(out.token)
@@ -526,7 +526,7 @@ async function main(): Promise<void> {
       ) as Record<string, unknown>
       assertEq(cfg.joinToken, token, 'token persisted')
       assertEq(cfg.runnerName, runnerName, 'name persisted')
-      assertEq(cfg.hubUrl, `ws://127.0.0.1:${hub.port}/runners`, 'hub url decoded from the token')
+      assertEq(cfg.hubUrl, `ws://127.0.0.1:${hub.port}/computers`, 'hub url decoded from the token')
       assert(
         Array.isArray(cfg.allowedRoots) && (cfg.allowedRoots as string[])[0] === workDir,
         `--allow reached the path-jail: ${JSON.stringify(cfg.allowedRoots)}`
@@ -628,7 +628,7 @@ async function main(): Promise<void> {
         join(orphanRoot, 'runner.config.json'),
         JSON.stringify({
           runnerName: orphanName,
-          hubUrl: `ws://127.0.0.1:${hub.port}/runners`
+          hubUrl: `ws://127.0.0.1:${hub.port}/computers`
         }),
         { mode: 0o600 }
       )

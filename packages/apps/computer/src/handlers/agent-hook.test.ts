@@ -19,7 +19,7 @@ function makeCtx() {
     }
   }
   const config: RunnerConfig = {
-    hubUrl: 'ws://localhost:0/runners',
+    hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: [tmpdir()],
     capabilities: ['pty']
@@ -118,7 +118,7 @@ describe('createAgentHookServer (runner loopback relay)', () => {
       }
     }
     const config: RunnerConfig = {
-      hubUrl: 'ws://localhost:0/runners',
+      hubUrl: 'ws://localhost:0/computers',
       name: 'test',
       allowedRoots: [tmpdir()],
       capabilities: ['pty']

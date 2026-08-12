@@ -625,7 +625,7 @@ export function hubCommand(): Command {
         // --- remote-hub setup ---------------------------------------------------
         //
         // WHY THIS EXISTS. Without a public address a hub boots in LOCAL mode, and
-        // `deriveRunnerHubUrl` then embeds `ws://127.0.0.1:<port>/runners` in every
+        // `deriveRunnerHubUrl` then embeds `ws://127.0.0.1:<port>/computers` in every
         // join token it mints. Minting still succeeds — so the failure is silent: a
         // runner on another machine dials its OWN loopback and never connects.
         // `--public-address` is what turns that into a usable deployment.
@@ -714,7 +714,7 @@ export function hubCommand(): Command {
           console.log('Mode:   remote (client auth + TLS enforced)')
           console.log(`Bind:   ${address ?? '(hub block default)'}`)
           console.log(`Public: ${publicAddress}`)
-          console.log(`Join tokens will point runners at wss://${publicAddress}/runners.`)
+          console.log(`Join tokens will point runners at wss://${publicAddress}/computers.`)
           // Printed BEFORE the boot wait, not after: remote mode enforces auth AND
           // closes public signup, so a hub with no account is permanently
           // unauthenticatable — and a first boot that fails (a missing cert chain, a

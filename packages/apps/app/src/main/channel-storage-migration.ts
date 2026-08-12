@@ -23,7 +23,7 @@ import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-util
  * per-channel completion marker and neither slice blocks the other.
  *
  * ── The runner slice is a TRANSFORM, not a directory copy: today's per-hub
- * credential files (`<legacyRoot>/runners/<hub-host>.json`) become entries in
+ * credential files (`<legacyRoot>/computers/<hub-host>.json`) become entries in
  * one shared map file (`<runnerRoot>/runner.state.json`), matching the
  * consolidation `credential-store.ts` already does for new writes.
  */
@@ -110,7 +110,7 @@ function migrateHubSlice(legacyRoot: string, hubRoot: string, packaged: boolean)
 
 /**
  * Runner slice: read every legacy per-hub credential file
- * (`<legacyRoot>/runners/<hub-host>.json`) and merge each one in as a key of
+ * (`<legacyRoot>/computers/<hub-host>.json`) and merge each one in as a key of
  * the new shared `<runnerRoot>/runner.state.json` map — via the same
  * `updateJsonFile` atomic-merge primitive `slayzone-config.ts` already uses,
  * not a bespoke write path. A malformed legacy file is skipped (logged, not

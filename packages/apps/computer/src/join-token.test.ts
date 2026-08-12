@@ -28,7 +28,7 @@ function fakeDb(): SlayzoneDb {
 describe('decodeJoinToken', () => {
   it('round-trips a well-formed token', () => {
     const payload: JoinTokenPayload = {
-      hubUrl: 'wss://hub.example:8443/runners',
+      hubUrl: 'wss://hub.example:8443/computers',
       certFingerprint: 'a'.repeat(64),
       secret: 'c2VjcmV0'
     }
@@ -38,12 +38,12 @@ describe('decodeJoinToken', () => {
   it('is byte-compatible with the hub minter payload shape', () => {
     // Exactly what @slayzone/computers/server mintJoinToken emits.
     const token = encode({
-      hubUrl: 'wss://127.0.0.1:51099/runners',
+      hubUrl: 'wss://127.0.0.1:51099/computers',
       certFingerprint: 'deadbeef'.repeat(8),
       secret: Buffer.from('x'.repeat(32)).toString('base64url')
     })
     const decoded = decodeJoinToken(token)
-    expect(decoded?.hubUrl).toBe('wss://127.0.0.1:51099/runners')
+    expect(decoded?.hubUrl).toBe('wss://127.0.0.1:51099/computers')
     expect(decoded?.certFingerprint).toBe('deadbeef'.repeat(8))
   })
 
@@ -79,14 +79,14 @@ describe('decodeJoinToken', () => {
     // mintJoinToken. If the hub ever changes the prefix or payload shape, this
     // fails here even though the local encode()-based tests above stay green.
     const minted = await mintJoinToken(fakeDb(), {
-      hubUrl: 'wss://127.0.0.1:51099/runners',
+      hubUrl: 'wss://127.0.0.1:51099/computers',
       certFingerprint: 'deadbeef'.repeat(8),
       ttlMs: 60_000,
       label: 'drift-guard'
     })
     const decoded = decodeJoinToken(minted.token)
     expect(decoded).not.toBeNull()
-    expect(decoded?.hubUrl).toBe('wss://127.0.0.1:51099/runners')
+    expect(decoded?.hubUrl).toBe('wss://127.0.0.1:51099/computers')
     expect(decoded?.certFingerprint).toBe('deadbeef'.repeat(8))
     // The minter injects a random 256-bit secret — decoded, non-empty, base64url.
     expect(typeof decoded?.secret).toBe('string')

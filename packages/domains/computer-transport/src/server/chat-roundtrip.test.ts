@@ -69,7 +69,7 @@ async function loadRunner(): Promise<{
       }
     },
     config: {
-      hubUrl: 'ws://127.0.0.1:0/runners',
+      hubUrl: 'ws://127.0.0.1:0/computers',
       name: 'chat-roundtrip',
       allowedRoots: [realpathSync(tmpdir())],
       capabilities: ['proc']

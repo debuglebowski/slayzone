@@ -175,7 +175,7 @@ All five phases landed. 119 assertions green across the touched suites (runner-l
 
 ### Deviations from the plan
 
-- **`GET /api/runners` had to be written.** The plan said "reuse `runners.list`" — but
+- **`GET /api/computers` had to be written.** The plan said "reuse `runners.list`" — but
   that is tRPC, and the CLI has no tRPC client (the same wall `join-token` hit). Added
   the REST twin plus a `getGateway` accessor on `RestApiDeps.runners`, wired to the
   SAME late-bound ref the tRPC procedure reads, so the two can never report different

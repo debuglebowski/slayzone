@@ -8,7 +8,7 @@ import { createHubRequestHandler, startRunner } from './main'
 const fakeDialer: RunnerDialer = { notify: () => true }
 
 const testConfig: RunnerConfig = {
-  hubUrl: 'ws://localhost:0/runners',
+  hubUrl: 'ws://localhost:0/computers',
   name: 'test-runner',
   allowedRoots: ['/tmp'],
   capabilities: ['pty', 'git', 'fs', 'proc']
@@ -91,7 +91,7 @@ describe('startRunner cert-pin guard', () => {
     const handle = startRunner(
       {
         ...testConfig,
-        hubUrl: 'wss://127.0.0.1:0/runners',
+        hubUrl: 'wss://127.0.0.1:0/computers',
         pinnedCertSha256: 'a'.repeat(64)
       },
       { credentialStore: memoryStore() }
@@ -115,7 +115,7 @@ describe('startRunner cert-pin guard', () => {
       handle = startRunner(
         {
           ...testConfig,
-          hubUrl: 'ws://127.0.0.1:0/runners',
+          hubUrl: 'ws://127.0.0.1:0/computers',
           pinnedCertSha256: 'a'.repeat(64)
         },
         { credentialStore: memoryStore() }

@@ -1,13 +1,13 @@
 /**
- * Runner `/runners` cert-pinning seam + URL derivation (single-listener model).
+ * Runner `/computers` cert-pinning seam + URL derivation (single-listener model).
  *
- * `/runners` no longer has its own listener — it rides the ONE hub listener,
+ * `/computers` no longer has its own listener — it rides the ONE hub listener,
  * demuxed by path (server.ts). In remote mode that listener terminates TLS with
  * the hub identity leaf (loadOrCreateHubIdentity), so a runner still pins the
  * leaf's sha256 fingerprint (carried in its join token) on the ws 'upgrade' event
  * before sending any runner frame (hub-dialer verifyPinnedCert). This test proves
  * the pin seam still holds on the SHARED listener, and that `deriveRunnerHubUrl`
- * emits the right `ws(s)://…/runners` URL per mode.
+ * emits the right `ws(s)://…/computers` URL per mode.
  *
  * Pure Node (real https + ws + @peculiar/x509 via hub-identity; no better-sqlite3,
  * so plain `npx tsx`):
@@ -64,15 +64,15 @@ interface TlsRunnerHub {
 }
 
 /** Stand up the SHARED-listener shape server.ts uses in remote mode: one https
- *  server (hub identity leaf) whose `/trpc` + `/runners` upgrades are demuxed to
- *  noServer WSS handlers — here we only wire `/runners` (the pin seam under test). */
+ *  server (hub identity leaf) whose `/trpc` + `/computers` upgrades are demuxed to
+ *  noServer WSS handlers — here we only wire `/computers` (the pin seam under test). */
 async function startTlsRunnerHub(dir: string): Promise<TlsRunnerHub> {
   const identity = await loadOrCreateHubIdentity(dir)
   const https = createHttpsServer({ key: identity.keyPem, cert: identity.certPem })
   const wss = new WebSocketServer({ noServer: true })
   https.on('upgrade', (req, socket, head) => {
     const pathname = (req.url ?? '').split('?')[0]
-    if (pathname !== '/runners') {
+    if (pathname !== '/computers') {
       socket.destroy()
       return
     }
@@ -123,13 +123,13 @@ function dialAndCaptureLeaf(url: string): Promise<{ der: Uint8Array | null; open
 }
 
 async function main(): Promise<void> {
-  console.log('runner /runners cert-pin seam (shared listener) + URL derivation')
+  console.log('runner /computers cert-pin seam (shared listener) + URL derivation')
 
   await test('hub identity cert TLS-terminates the shared listener and its fingerprint is the pinned leaf', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'runner-tls-listener-'))
     const hub = await startTlsRunnerHub(dir)
     try {
-      assert(/^wss:\/\/127\.0\.0\.1:\d+\/runners$/.test(hub.url), `wss url shape: ${hub.url}`)
+      assert(/^wss:\/\/127\.0\.0\.1:\d+\/computers$/.test(hub.url), `wss url shape: ${hub.url}`)
       const { der, opened } = await dialAndCaptureLeaf(hub.url)
       assert(opened, 'wss handshake completed over the https listener')
       assert(der !== null, 'client observed a leaf certificate on the upgrade')
@@ -169,13 +169,13 @@ async function main(): Promise<void> {
   await test('deriveRunnerHubUrl: local → ws:// loopback on the hub port', async () => {
     assert(
       deriveRunnerHubUrl({ remote: false, host: '127.0.0.1', port: 51101 }) ===
-        'ws://127.0.0.1:51101/runners',
+        'ws://127.0.0.1:51101/computers',
       'local loopback ws url'
     )
     // A wildcard bind host goes into the token as a dialable loopback, never 0.0.0.0.
     assert(
       deriveRunnerHubUrl({ remote: false, host: '0.0.0.0', port: 51101 }) ===
-        'ws://127.0.0.1:51101/runners',
+        'ws://127.0.0.1:51101/computers',
       'wildcard bind → loopback in the token'
     )
   })
@@ -187,7 +187,7 @@ async function main(): Promise<void> {
         host: '0.0.0.0',
         port: 51101,
         publicAddress: 'hub.example:8443'
-      }) === 'wss://hub.example:8443/runners',
+      }) === 'wss://hub.example:8443/computers',
       'explicit port preserved'
     )
     assert(
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
         host: '0.0.0.0',
         port: 51101,
         publicAddress: 'hub.example'
-      }) === 'wss://hub.example/runners',
+      }) === 'wss://hub.example/computers',
       'bare host keeps the implicit TLS port (443)'
     )
     assert(
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
         host: '0.0.0.0',
         port: 51101,
         publicAddress: '[2001:db8::1]:9000'
-      }) === 'wss://[2001:db8::1]:9000/runners',
+      }) === 'wss://[2001:db8::1]:9000/computers',
       'bracketed IPv6 authority'
     )
   })
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
         remote: true,
         host: '0.0.0.0',
         port: 51101,
-        publicAddress: 'hub.example/runners'
+        publicAddress: 'hub.example/computers'
       }) === null,
       'a path → null'
     )

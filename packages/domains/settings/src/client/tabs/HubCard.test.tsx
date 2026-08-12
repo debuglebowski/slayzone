@@ -34,7 +34,7 @@ const mintSpy = vi.fn(() =>
   Promise.resolve({
     token: 'szjt1.MOCKTOKEN',
     label: 'x',
-    hubUrl: 'ws://127.0.0.1:51100/runners'
+    hubUrl: 'ws://127.0.0.1:51100/computers'
   } as any)
 )
 const revokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
@@ -45,7 +45,7 @@ const remoteMintSpy = vi.fn((_input: any, hub?: string) =>
     // 'hub-lo' stands for a hub whose dial address is loopback — legitimate when
     // the runner is co-located, and the case the token dialog must warn about.
     hubUrl:
-      hub === 'hub-lo' ? 'ws://127.0.0.1:51100/runners' : 'wss://hub-b.example.com:8443/runners'
+      hub === 'hub-lo' ? 'ws://127.0.0.1:51100/computers' : 'wss://hub-b.example.com:8443/computers'
   } as any)
 )
 const remoteRevokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
@@ -71,7 +71,7 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => {
     const hub = renderingHubId
     return {
-      runners: {
+      computers: {
         list: { queryOptions: () => ({ __hub: hub }), queryFilter: () => ({ __hub: hub }) },
         mintJoinToken: { mutationOptions: () => ({ __key: 'mint', __hub: hub }) },
         revokeRunner: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }

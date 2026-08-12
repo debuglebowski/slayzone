@@ -119,7 +119,7 @@ Omit it and the hub anchors to its launch directory.
 The client-facing `/trpc` socket is **unauthenticated** and binds `127.0.0.1`
 by default. Do **not** point `SLAYZONE_HUB_ADDRESS` at a non-loopback host to
 expose it beyond loopback except on a fully trusted network — user
-authentication on `/trpc` is not yet implemented. Runner traffic (`/runners`) is TLS + cert-pinned and safe to expose.
+authentication on `/trpc` is not yet implemented. Runner traffic (`/computers`) is TLS + cert-pinned and safe to expose.
 
 GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
@@ -258,7 +258,7 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_ROOT
        -u ELECTRON_RUN_AS_NODE)
 
 # Fixed loopback port for the hub's ONE listener (tRPC + health + join-token REST +
-# /runners, demuxed by path). The runner URL embedded in the minted token rides
+# /computers, demuxed by path). The runner URL embedded in the minted token rides
 # this same port; there is no separate runner port to set.
 HUB_PORT=47811
 env "${SCRUB[@]}" \
@@ -286,11 +286,11 @@ for i in $(seq 1 30); do
 done
 echo "   ✓ hub booted from the published tarball under plain node"
 
-# Mint a join token over the loopback REST channel (503 until the /runners wss
+# Mint a join token over the loopback REST channel (503 until the /computers wss
 # listener has bound). Needs a JSON body; curl is universally present on CI.
 TOKEN_JSON=""
 for i in $(seq 1 20); do
-  TOKEN_JSON="$(curl -s -X POST "http://127.0.0.1:$HUB_PORT/api/runners/join-token" \
+  TOKEN_JSON="$(curl -s -X POST "http://127.0.0.1:$HUB_PORT/api/computers/join-token" \
     -H 'content-type: application/json' -d '{"label":"publish-smoke"}' 2>/dev/null || true)"
   echo "$TOKEN_JSON" | grep -q '"token"' && break
   [ "$i" = "20" ] && smoke_fail "join-token mint never succeeded (runner listener bind?)"
@@ -302,9 +302,9 @@ echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
 
 # Boot the runner from ITS tarball (proves node-pty rebuilt for the consumer ABI)
 # and point it at the minted token — which is self-sufficient: it embeds the hub's
-# `wss://…/runners` url AND the cert fingerprint to pin, so no address env is
+# `wss://…/computers` url AND the cert fingerprint to pin, so no address env is
 # needed (and none would do: SLAYZONE_HUB_ADDRESS is authority-only, and in the
-# default local mode it composes plaintext `ws://` — wrong for the TLS /runners
+# default local mode it composes plaintext `ws://` — wrong for the TLS /computers
 # listener). The FS path-jail has no env channel either — it comes from
 # <ROOT>/config.json `allowedRoots` (or the SLAYZONE_ROOT default in bin.ts).
 echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"

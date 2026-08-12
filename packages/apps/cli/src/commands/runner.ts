@@ -91,7 +91,7 @@ const CONNECTED_RE = /"mode":"(enroll|hello)"/
 /**
  * Say so when a token's dial target names the hub's OWN machine.
  *
- * A hub in local mode embeds `ws://<loopback>:<port>/runners` in every token it
+ * A hub in local mode embeds `ws://<loopback>:<port>/computers` in every token it
  * mints. That is correct for a co-located runner — the desktop app's auto-enrolled
  * one, or a `create` run on the hub box — and useless anywhere else: the runner
  * dials its own loopback and silently never connects.
@@ -417,7 +417,7 @@ export function runnerCommand(): Command {
       const target = await resolveHubRequestTarget('runner mint', discoverHubs)
       const minted = await hubRequest<{ token: string; hubUrl: string }>({
         target,
-        path: '/api/runners/join-token',
+        path: '/api/computers/join-token',
         method: 'POST',
         body: {
           label: label ?? 'runner',

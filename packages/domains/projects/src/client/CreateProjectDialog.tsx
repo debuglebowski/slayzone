@@ -77,7 +77,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   // A hub can have several runners; the path is meaningless without saying whose
   // filesystem it is. Null = the hub's connected default runner.
   const [targetRunnerId, setTargetRunnerId] = useState<string | null>(null)
-  const runnersQuery = useQuery(trpc.runners.list.queryOptions())
+  const runnersQuery = useQuery(trpc.computers.list.queryOptions())
   const runners = runnersQuery.data ?? []
   const [browseOpen, setBrowseOpen] = useState(false)
 
@@ -111,7 +111,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
       // leaving the binding unset would let a later default change point the
       // project's agents at a filesystem where the path does not exist.
       if (targetRunnerId) {
-        await client.runners.setProjectDefaultRunner.mutate({
+        await client.computers.setProjectDefaultRunner.mutate({
           projectId: project.id,
           runnerId: targetRunnerId
         })

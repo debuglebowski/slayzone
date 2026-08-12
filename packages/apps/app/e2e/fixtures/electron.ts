@@ -508,7 +508,7 @@ export async function launchIsolatedElectron(opts: {
  * e2e boots runner-ON (see index.ts's local-runner supervisor gate), but the
  * auto-enroll chain is deliberately OFF the boot critical path: main waits for
  * the sidecar to be ready, mints a join token over loopback REST (retrying up to
- * ~40s while the /runners listener binds), spawns the runner, and only then does
+ * ~40s while the /computers listener binds), spawns the runner, and only then does
  * it dial + enroll. `#root` is present long before any of that finishes.
  *
  * Every agent spawn routes through a runner, so a spec that starts a terminal or
@@ -535,7 +535,7 @@ async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boo
     try {
       const rows = await page.evaluate(
         async () =>
-          (await window.getTrpcVanillaClient().runners.list.query()) as Array<{
+          (await window.getTrpcVanillaClient().computers.list.query()) as Array<{
             id?: string
             name?: string
             connected?: boolean

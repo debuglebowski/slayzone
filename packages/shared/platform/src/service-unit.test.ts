@@ -96,10 +96,10 @@ const SPEC: ServiceUnitSpec = {
 const RUNNER_SPEC: ServiceUnitSpec = {
   kind: 'runner',
   name: 'builder',
-  root: '/srv/runners/builder',
+  root: '/srv/computers/builder',
   command: '/usr/local/bin/node',
   args: ['/opt/computer/dist/bin.cjs'],
-  logDir: '/srv/runners/builder/logs'
+  logDir: '/srv/computers/builder/logs'
 }
 
 console.log('\nservice-unit: backend detection')
@@ -346,8 +346,8 @@ test('runner identity is namespaced apart from the hub', () => {
 test('runner plist/unit identify the runner and use runner log names', () => {
   const plist = renderLaunchdPlist(RUNNER_SPEC)
   assert(plist.includes('<string>com.slayzone.runner.builder</string>'), `label: ${plist}`)
-  assert(plist.includes('/srv/runners/builder/logs/runner.out.log'), 'stdout log')
-  assert(plist.includes('/srv/runners/builder/logs/runner.err.log'), 'stderr log')
+  assert(plist.includes('/srv/computers/builder/logs/runner.out.log'), 'stdout log')
+  assert(plist.includes('/srv/computers/builder/logs/runner.err.log'), 'stderr log')
   assert(!plist.includes('hub.out.log'), 'no hub log name leaked')
   const unit = renderSystemdUnit(RUNNER_SPEC)
   assert(unit.includes('Description=SlayZone runner (builder)'), `description: ${unit}`)
@@ -359,7 +359,7 @@ test('a runner unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
   // channel (runner/src/config.ts) — they come from <ROOT>/config.json, which is
   // 0600. A unit file is 0644, so a token must never reach it.
   const unit = renderSystemdUnit(RUNNER_SPEC)
-  assert(unit.includes('Environment=SLAYZONE_ROOT=/srv/runners/builder'), 'root pinned')
+  assert(unit.includes('Environment=SLAYZONE_ROOT=/srv/computers/builder'), 'root pinned')
   assert(!unit.includes('SLAYZONE_HUB_NAME'), 'no hub name var')
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no hub address var')
   assert(!unit.includes('SLAYZONE_HUB_JOIN_TOKEN'), 'never a join token in a 0644 unit')

@@ -38,9 +38,9 @@ export function RunnerCard({
   projectDefaultRunnerId
 }: RunnerCardProps): React.JSX.Element {
   const trpc = useTRPC()
-  const runnersQuery = useQuery(trpc.runners.list.queryOptions())
-  const resolvedQuery = useQuery(trpc.runners.resolveTaskRunner.queryOptions({ taskId }))
-  const setTaskRunner = useMutation(trpc.runners.setTaskRunner.mutationOptions())
+  const runnersQuery = useQuery(trpc.computers.list.queryOptions())
+  const resolvedQuery = useQuery(trpc.computers.resolveTaskRunner.queryOptions({ taskId }))
+  const setTaskRunner = useMutation(trpc.computers.setTaskRunner.mutationOptions())
 
   const runners = runnersQuery.data ?? []
 

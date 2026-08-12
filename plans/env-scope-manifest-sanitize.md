@@ -27,7 +27,7 @@ sanitize at their own terminal boundary): `app/.../index.ts:2252` (sidecar),
 
 **HUB_URL collision confirmed.** Sole writer into a child env is
 `index.ts:690` — local-runner supervisor sets `SLAYZONE_HUB_URL = minted.hubUrl`
-(a `wss://…/runners` URL). That ws value rides the runner's `process.env` into
+(a `wss://…/computers` URL). That ws value rides the runner's `process.env` into
 `buildEnv` → every runner-hosted terminal → `slay` reads it via
 `cli/hub-config.ts:86,92` → `normalizeHubUrl` rejects non-http → `process.exit(1)`.
 - runner reads it as ws(s): `runner/config.ts:42,190`, hard-errors on ws under
@@ -181,7 +181,7 @@ export function hubUrlFromAddr(addr: string, kind: 'ws' | 'http', path = ''): st
 **Q1 — both consumers derive scheme from MODE.**
 - Runner (`runner/config.ts`): DOES read `SLAYZONE_MODE` today (`:220`, remote+ws
   hard-error). Change `ENV_VARS.hubUrl` to read `SLAYZONE_HUB_ADDRESS`, then build
-  `hubUrlFromAddr(addr,'ws','/runners')`. The remote+ws guard becomes dead
+  `hubUrlFromAddr(addr,'ws','/computers')`. The remote+ws guard becomes dead
   (unrepresentable) — replace with a clarifying comment; keep the `assertModeHostConsistency`-style checks.
 - CLI (`cli/hub-config.ts`): does NOT read MODE today (verified). ADD it — CLI
   already deps `@slayzone/platform`. `resolveHubTarget` reads `SLAYZONE_HUB_ADDRESS`
@@ -218,7 +218,7 @@ the DB with no address env.
 **Q4 — REVERSED (as built): `SLAYZONE_HUB_PUBLIC_ADDRESS`, authority-only too.**
 The plan kept `_PUBLIC_URL` as a full URL because no consumer reinterprets it.
 Built as an address instead: a stored scheme there is *dead weight* (remote mode
-already forces `wss`/`https`, and the path is always forced to `/runners`), and
+already forces `wss`/`https`, and the path is always forced to `/computers`), and
 one grammar for both address vars is the simpler invariant. Semantics: hub-only,
 authority-only, the address the hub **writes into join tokens** — needed alongside
 the bind address only when the two differ (reverse proxy / NAT).
@@ -234,7 +234,7 @@ published-DNS / reverse-proxy shape). IPv6 must be bracketed in the authority
 
 Edits (as built):
 - New `platform/src/hub-addr.ts` + subpath export + unit test: `hubUrlFromAddr`, `isBareAuthority`, `parseHubAddress`, `LOOPBACK_HOSTS`. `hubUrlFromAddr` takes an explicit `mode` param (default `getSlayzoneMode()`) so a test passing its own env stays hermetic.
-- `runner/config.ts`: `ENV_VARS.hubAddress` = `SLAYZONE_HUB_ADDRESS`; resolve via `hubUrlFromAddr(addr,'ws','/runners',mode)`. The remote+ws guard STAYS (now unreachable from env, still live for the config.json / join-token full-url paths).
+- `runner/config.ts`: `ENV_VARS.hubAddress` = `SLAYZONE_HUB_ADDRESS`; resolve via `hubUrlFromAddr(addr,'ws','/computers',mode)`. The remote+ws guard STAYS (now unreachable from env, still live for the config.json / join-token full-url paths).
 - CLI `hub-config.ts`: `SLAYZONE_HUB_ADDRESS` + MODE → `hubUrlFromAddr(addr,'http')`; `hub.json` full-url + token behavior unchanged. `cli/db.ts`: `loopbackHubPort()` gate.
 - Hub bind side (`paths.ts`, `hub/src/server.ts`, `standalone-config.ts`, `bin.ts`): read `SLAYZONE_HUB_ADDRESS` via `parseHubAddress`. Legacy `config.json` `port`/`publicUrl` keys are still READ (existing files keep booting) and never written.
 - `hub/src/runner-listener.ts` + `remote-mcp-env-provider.ts`: `publicAddress` (authority) instead of `publicUrl`.
@@ -253,7 +253,7 @@ the rename AND the strip independently close the leak.
 2. **Runner pty boundary** — extend `runner/handlers/pty.test.ts` (already spawns `env`): assert an injected `SLAYZONE_HUB_ADDRESS`/`SLAYZONE_HUB_TOKEN`/`ELECTRON_RUN_AS_NODE` is ABSENT in child, `PATH` present, hook-url overlay still applied → RED → route `buildEnv` through sanitize.
 3. **Runner proc + git** — mirror boundary tests → RED → apply.
 4. **PTY manager + warm + chat + process-backend + git-snapshot** — unit/e2e asserting no infra/secret leak, identity overlay intact → RED → apply.
-5. **HUB_ADDRESS migration** — `hub-addr.test.ts` (local→ws/http, remote→wss/https, path append) → RED → `hub-addr.ts`. Then `runner/config` test reads `SLAYZONE_HUB_ADDRESS`+MODE→`ws(s)://addr/runners`; CLI `hub.test.ts` gains a `SLAYZONE_HUB_ADDRESS`+MODE→`http(s)://addr` case (keep the `hub.json` full-url cases); update `index.ts:690` writer (authority extract) + e2e → GREEN.
+5. **HUB_ADDRESS migration** — `hub-addr.test.ts` (local→ws/http, remote→wss/https, path append) → RED → `hub-addr.ts`. Then `runner/config` test reads `SLAYZONE_HUB_ADDRESS`+MODE→`ws(s)://addr/computers`; CLI `hub.test.ts` gains a `SLAYZONE_HUB_ADDRESS`+MODE→`http(s)://addr` case (keep the `hub.json` full-url cases); update `index.ts:690` writer (authority extract) + e2e → GREEN.
 6. `pnpm typecheck` + affected package tests + relevant e2e (`110-runner-loopback`, terminal/runner specs).
 
 ## 7. Resolved decisions + open questions
@@ -279,7 +279,7 @@ runner (`runner_id` NULL until redemption) and its payload is entirely hub
 identity (hub url + hub cert fingerprint + a secret verified against the hub's
 `join_tokens` row), so the old name described its CONSUMER — the one thing rule 2
 forbids. `_TOKEN`/`HUB_` per rule 3, matching the domain term used at every other
-layer (`szjt1.`, `join_tokens`, `mintJoinToken`, `POST /api/runners/join-token`);
+layer (`szjt1.`, `join_tokens`, `mintJoinToken`, `POST /api/computers/join-token`);
 `ENROLL` was rejected for drifting from that term. The near-collision with
 `SLAYZONE_HUB_TOKEN` (CLI→hub REST bearer) was accepted: different processes read
 them, both are `secret` scope, and a mix-up fails closed on a missing required

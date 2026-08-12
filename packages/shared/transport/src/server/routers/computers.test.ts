@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
-import { runnersRouter } from './runners.js'
+import { computersRouter } from './computers.js'
 import { setRunnersDeps, type RunnersDeps } from '../app-deps.js'
 import {
   registerRunner,
@@ -24,7 +24,7 @@ import { createDbChatDataOps } from '@slayzone/terminal/server'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-runners-')) }
-const caller = runnersRouter.createCaller(ctx)
+const caller = computersRouter.createCaller(ctx)
 
 // Seed a project + task for the runner-binding mutations.
 const projectId = crypto.randomUUID()
@@ -52,7 +52,7 @@ const fakeDeps: RunnersDeps = {
     listRunners: () => asDescriptors(liveRunnerIds),
     listUsableRunners: () => asDescriptors(usableRunnerIds ?? liveRunnerIds)
   }),
-  getHubUrl: () => 'ws://127.0.0.1:8788/runners',
+  getHubUrl: () => 'ws://127.0.0.1:8788/computers',
   getCertFingerprint: () => 'abcdef0123456789'
 }
 setRunnersDeps(fakeDeps)
@@ -87,7 +87,7 @@ test('runners.mintJoinToken: returns a decodable szjt1 token embedding hub URL +
   expect(typeof minted.token).toBe('string')
   const payload = decodeJoinToken(minted.token)
   expect(payload).not.toBeNull()
-  expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/runners')
+  expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/computers')
   expect(payload!.certFingerprint).toBe('abcdef0123456789')
   expect(minted.expiresAt).toBeGreaterThan(minted.createdAt)
   // The dial target is returned ALONGSIDE the token so a client can tell whether
@@ -95,7 +95,7 @@ test('runners.mintJoinToken: returns a decodable szjt1 token embedding hub URL +
   // `Buffer`, which the renderer does not have. Not a secret: it is embedded in
   // the token the mint dialog already displays in full. Also brings this proc's
   // shape in line with the REST route, which has always returned it.
-  expect(minted.hubUrl).toBe('ws://127.0.0.1:8788/runners')
+  expect(minted.hubUrl).toBe('ws://127.0.0.1:8788/computers')
 })
 
 test('runners.setProjectDefaultRunner + setTaskRunner + resolveTaskRunner', async () => {

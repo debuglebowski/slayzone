@@ -41,14 +41,14 @@ const refetchSpy = vi.fn()
 
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
-    runners: {
-      list: { queryOptions: () => ({ queryKey: ['runners.list'] }) },
+    computers: {
+      list: { queryOptions: () => ({ queryKey: ['computers.list'] }) },
       resolveTaskRunner: {
         queryOptions: (input: { taskId: string }) => ({
-          queryKey: ['runners.resolveTaskRunner', input]
+          queryKey: ['computers.resolveTaskRunner', input]
         })
       },
-      setTaskRunner: { mutationOptions: () => ({ __mutationKey: 'runners.setTaskRunner' }) }
+      setTaskRunner: { mutationOptions: () => ({ __mutationKey: 'computers.setTaskRunner' }) }
     }
   })
 }))
@@ -56,13 +56,13 @@ vi.mock('@slayzone/transport/client', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (opts: { queryKey: unknown[] }) => {
     const key = opts.queryKey[0]
-    if (key === 'runners.list') {
+    if (key === 'computers.list') {
       return { data: runnersData, isLoading: false, refetch: refetchSpy }
     }
     return { data: { runnerId: resolvedRunnerId }, isLoading: false, refetch: refetchSpy }
   },
   useMutation: (opts: { __mutationKey: string }) => ({
-    mutateAsync: opts.__mutationKey === 'runners.setTaskRunner' ? setTaskRunnerSpy : vi.fn(),
+    mutateAsync: opts.__mutationKey === 'computers.setTaskRunner' ? setTaskRunnerSpy : vi.fn(),
     mutate: vi.fn(),
     isPending: false
   })

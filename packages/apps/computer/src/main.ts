@@ -143,7 +143,7 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     (() => {
       // Logging is opt-in — with no sink, runner lifecycle diagnostics are discarded.
     })
-  // Creds always derive from the ROOT anchor (`<ROOT>/runners`, see
+  // Creds always derive from the ROOT anchor (`<ROOT>/computers`, see
   // credential-store slayzoneRootDir) — no override knob. Tests inject a store
   // via deps.credentialStore.
   const credentialStore =
@@ -154,7 +154,7 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
   // fails loudly in loadRunnerConfig — so any pin reaching here on a ws:// url can
   // only be the join-token-DECODED fingerprint (the auto path). Softly drop it so a
   // ws token stays usable for loopback/dev; the real runner path is wss:// (the hub's
-  // /runners listener is https), where the pin is fed through and enforced.
+  // /computers listener is https), where the pin is fed through and enforced.
   const isSecureUrl = (() => {
     try {
       return new URL(config.hubUrl).protocol === 'wss:'

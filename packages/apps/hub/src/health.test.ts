@@ -3,7 +3,7 @@
  * Phase 1).
  *
  * `/health` is the sole discovery channel for `slay hub ls` — it must carry
- * enough identity to name a hub (name/root/pid/mode/supervised/runners) without
+ * enough identity to name a hub (name/root/pid/mode/supervised/computers) without
  * any shared state. And because a hub may bind wider than loopback, the fields
  * that describe the FILESYSTEM (root, dbPath) or the process (pid) must be
  * withheld from non-loopback callers: today `dbPath` is served to anyone who can

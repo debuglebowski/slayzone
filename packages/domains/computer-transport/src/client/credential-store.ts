@@ -48,7 +48,7 @@ export interface RunnerCredentialStore {
   readonly filePath: string
 }
 
-/** `wss://hub.example:8443/runners` → `hub.example_8443` (map key). */
+/** `wss://hub.example:8443/computers` → `hub.example_8443` (map key). */
 export function hubHostFromUrl(url: string): string {
   const parsed = new URL(url)
   return parsed.port ? `${parsed.hostname}_${parsed.port}` : parsed.hostname

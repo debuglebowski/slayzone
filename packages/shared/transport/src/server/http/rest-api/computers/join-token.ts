@@ -3,7 +3,7 @@ import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 
 /**
- * REST: `POST /api/runners/join-token` — mint a single-use runner enrollment
+ * REST: `POST /api/computers/join-token` — mint a single-use runner enrollment
  * token over loopback (hub/runner split, Wave3.5-D3).
  *
  * WHY REST (not tRPC): the Electron MAIN process has no tRPC client to the
@@ -16,7 +16,7 @@ import type { RestApiDeps } from '../types'
  *
  * Gating (mirrors the runners router's `mintJoinToken`): only functional under
  * `deps.runners` is wired by the composition (always, barring init failure),
- * and its getters return the runner listener's bound `wss://…/runners` URL + hub
+ * and its getters return the runner listener's bound `wss://…/computers` URL + hub
  * cert fingerprint — both null until the listener has bound. So:
  *   - runner OFF (`deps.runners` absent)              → 503 (never mints)
  *   - runner ON but listener not yet bound (null url) → 503 (caller retries)
@@ -46,7 +46,7 @@ import type { RestApiDeps } from '../types'
  * distinguishes "wrong machine" from "no credential".
  */
 
-const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes (matches runnersRouter)
+const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes (matches computersRouter)
 
 /**
  * True for IPv4/IPv6 loopback, incl. the IPv4-mapped-IPv6 form node reports.
@@ -90,7 +90,7 @@ export function joinTokenAuthDecision(opts: {
 }
 
 export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): void {
-  app.post('/api/runners/join-token', async (req, res) => {
+  app.post('/api/computers/join-token', async (req, res) => {
     const loopback = isLoopbackAddress(req.socket.remoteAddress ?? undefined)
     // An absent `restAuth` slot (the Electron host) means no bearer authority at
     // all, which collapses this to loopback-only — today's behavior exactly.

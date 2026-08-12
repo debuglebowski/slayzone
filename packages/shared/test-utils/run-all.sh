@@ -148,7 +148,7 @@ run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
 # Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
-run_test_electron_strict_loader packages/shared/transport/src/server/routers/runners.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/computers.test.ts
 # Hub↔runner install handshake — boots the built hub+runner bins, isolated (tmp
 # home/store, ports 0, scrubbed env), asserts the runner enrolls + the real
 # dev/prod DBs stay byte-unchanged. Auto-builds both bundles on demand (first run
@@ -274,7 +274,7 @@ run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 runner restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
 run_test_electron_strict_loader packages/apps/hub/src/runner-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
-run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/runners/join-token.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/computers/join-token.test.ts
 # Loopback operator account routes (`slay hub users`). no_loader: the routes never
 # touch the DB (the hubUsers capability is stubbed), so no Electron-ABI harness.
 run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/users.test.ts

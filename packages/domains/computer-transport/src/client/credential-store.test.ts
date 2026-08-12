@@ -116,8 +116,8 @@ describe('multi-hub isolation (the reason this is a map, not a per-host file)', 
 
 describe('credential map path + host validation', () => {
   it('hubHostFromUrl folds host and port', () => {
-    expect(hubHostFromUrl('wss://hub.example:8443/runners')).toBe('hub.example_8443')
-    expect(hubHostFromUrl('wss://hub.example/runners')).toBe('hub.example')
+    expect(hubHostFromUrl('wss://hub.example:8443/computers')).toBe('hub.example_8443')
+    expect(hubHostFromUrl('wss://hub.example/computers')).toBe('hub.example')
     expect(hubHostFromUrl('ws://127.0.0.1:9000')).toBe('127.0.0.1_9000')
   })
 
