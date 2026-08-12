@@ -2,7 +2,20 @@ export type TerminalMode = string
 // `hibernated` is a CLIENT-SYNTHESIZED status (PtyContext): the PTY is actually
 // dead, but the idle-close feature killed it and the UI shows it as sleeping
 // (💤) until the user reopens. Main never emits it via the state machine.
-export type TerminalState = 'starting' | 'running' | 'idle' | 'error' | 'dead' | 'hibernated'
+//
+// `background` = the MAIN agent loop is not working (turn complete) but at least
+// one of its background subagents still is. A claude session is a TREE (one main
+// loop + N concurrent subagents sharing one PTY), so "working" and "needs me"
+// are two different questions; collapsing the tree onto `running`/`idle` forced a
+// lie in one direction or the other. See `server/agent-tree.ts`.
+export type TerminalState =
+  | 'starting'
+  | 'running'
+  | 'background'
+  | 'idle'
+  | 'error'
+  | 'dead'
+  | 'hibernated'
 
 /**
  * True when state represents a session whose backing process is still around.

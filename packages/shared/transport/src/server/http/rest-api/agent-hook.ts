@@ -3,7 +3,13 @@ import express from 'express'
 import { z } from 'zod'
 import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone/terminal/shared'
 import { mapEventType } from '@slayzone/terminal/shared'
-import { isHookDrivenMode } from '@slayzone/terminal/server'
+import {
+  isHookDrivenMode,
+  applyAgentHook,
+  createAgentTree,
+  subagentIdOf,
+  type AgentTree
+} from '@slayzone/terminal/server'
 import {
   recordConversation,
   findPendingSpawn,
@@ -24,94 +30,70 @@ import type { RestApiDeps, TerminalStateBridge } from './types'
 export type { TerminalStateBridge } from './types'
 
 /**
- * Built-in Claude tools that BLOCK the agent waiting for a user keystroke.
- * Claude Code does NOT fire `Notification` for these (Notification only fires
- * for permission_prompt, idle_prompt, auth_success, and MCP elicitation_dialog
- * — not for native blocking tools). Without this allowlist, PreToolUse pins
- * the session on 'running' until the user answers, the silence-timer trips
- * 5 minutes later, or the turn ends — sidebar shows the loading spinner the
- * whole time and `needs_attention` never lights up.
+ * Per-session claude agent TREE (see `@slayzone/terminal/server` → agent-tree.ts).
  *
- * Add new built-in blocking tools here when Anthropic ships them.
+ * A claude session is one main loop + N CONCURRENT background subagents sharing
+ * one PTY and one hook context, so state cannot be a pure function of the last
+ * hook — it is DERIVED from per-session facts (main working / awaiting user /
+ * which subagents are in flight). This map holds those facts.
+ *
+ * Lives here rather than on the PTY session because this route is already the
+ * single authority for hook → state (shared by the Express route AND the hub's
+ * ws-relay consumer), so there is exactly one writer and no bridge surface to
+ * keep in sync. Evicted on `SessionEnd`; bounded in the same spirit as
+ * `poolSessionTaskIdCache` above (one small record per PTY session).
  */
-const CLAUDE_BLOCKING_TOOLS: ReadonlySet<string> = new Set(['AskUserQuestion', 'ExitPlanMode'])
+const agentTrees = new Map<string, AgentTree>()
+
+function treeFor(sessionId: string): AgentTree {
+  let tree = agentTrees.get(sessionId)
+  if (!tree) {
+    tree = createAgentTree()
+    agentTrees.set(sessionId, tree)
+  }
+  return tree
+}
 
 /**
- * Claude Code raw hook event → TerminalState. Keys on the RAW name (not the
- * normalized lifecycle type) because PreToolUse + PostToolUse both normalize
- * to start/stop pairs that would flicker the UI on every tool call inside a
- * single turn. Only the turn-boundary events drive state:
+ * Claude Code raw hook → TerminalState, via the session's agent tree.
  *
- *   UserPromptSubmit                → 'running' (active inside a turn)
- *   PreToolUse (non-blocking tool)  → 'running'
- *   PreToolUse (blocking tool)      → 'idle'    (agent paused for user)
- *   PostToolUse (blocking tool)     → 'running' (user answered → agent resumed)
- *   PostToolUse (non-blocking tool) → null      (no-op; mid-turn, already 'running')
- *   Stop / SessionEnd               → 'idle'    (turn complete / session over)
- *   Notification                    → 'idle'    (claude paused for user — sidebar dot)
- *   SessionStart / SubagentStop /
- *   PreCompact                      → null      (no-op; mid-turn or already-handled)
+ * Keys on the RAW event name (not the normalized lifecycle type) because
+ * PreToolUse + PostToolUse both normalize to start/stop pairs that would flicker
+ * the UI on every tool call inside a single turn. The tree adds the axis a
+ * per-event mapping structurally cannot express: WHO fired the hook — the main
+ * loop, or one of its background subagents. Without it a helper's PreToolUse
+ * asserted "the agent is working" over the main loop's parked-on-a-question
+ * state, so the task span green while it waited for an answer AND the amber cue
+ * was wiped (`* → running` clears `needs_attention`).
  *
- * Mid-turn no-ops are deliberate: PostToolUse fires after every tool but the
- * agent is still working until Stop. Letting it flip to 'idle' caused the
- * sidebar to flicker on every tool call inside one turn.
+ * Resulting states (full ladder + rationale in agent-tree.ts):
+ *   main UserPromptSubmit            → 'running'
+ *   main PreToolUse (non-blocking)   → 'running'
+ *   main PreToolUse (blocking tool)  → 'idle'       (parked; outranks helpers)
+ *   main PostToolUse (blocking tool) → 'running'    (user answered → resumed)
+ *   main PostToolUse (non-blocking)  → null         (no-op; mid-turn)
+ *   main Stop / SessionEnd           → 'idle', or 'background' if helpers remain
+ *   main Notification                → 'idle'
+ *   subagent any                     → 'running' while the main loop works,
+ *                                      else 'background', draining to 'idle' on
+ *                                      the last SubagentStop
+ *   SessionStart / PreCompact        → null         (no-op; markActive only)
  */
-function claudeCodeHookToTerminalState(hookEvent: string, raw?: unknown): TerminalState | null {
-  switch (hookEvent) {
-    case 'UserPromptSubmit':
-      return 'running'
-    case 'PreToolUse': {
-      const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
-      if (typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)) return 'idle'
-      return 'running'
-    }
-    case 'PostToolUse': {
-      // The symmetric partner to the PreToolUse blocking-tool branch above, and
-      // the fix for "task sits idle (no spinner) after the user accepts a plan".
-      //
-      // WHY THIS IS NEEDED — the gap it closes:
-      //   A blocking tool (ExitPlanMode / AskUserQuestion) parks the session on
-      //   'idle' at PreToolUse while Claude waits for the user. On ACCEPT, Claude
-      //   runs the tool to completion and emits PostToolUse — and then keeps
-      //   working (thinking, writing the implementation) for as long as it takes
-      //   before its FIRST real tool call fires the next PreToolUse→'running'.
-      //   Measured gaps of 2+ minutes. Crucially there is NO UserPromptSubmit on
-      //   accept (the user didn't type a prompt), so this PostToolUse is the ONLY
-      //   hook that proves the agent resumed. Drop it (the old behaviour) and the
-      //   spinner stays dark through the whole gap.
-      //
-      // WHY KEYING ON EVENT PRESENCE IS SOUND (no is_error / accept-vs-reject
-      // inspection needed) — and why this is gated to BLOCKING tools only:
-      //   For a blocking tool, "execution" == the user's decision. ACCEPT → the
-      //   tool runs → PostToolUse fires. REJECT / Esc → the PreToolUse is denied,
-      //   the tool never executes → NO PostToolUse ever arrives here. Verified
-      //   empirically against the live hook log: rejected ExitPlanMode produced
-      //   zero PostToolUse; only accepts did. So for a blocking tool,
-      //   receiving PostToolUse ⟺ the user accepted ⟹ 'running'. The reject/Esc
-      //   path is therefore untouched by this branch (it correctly stays 'idle'
-      //   via PreToolUse, then resumes via UserPromptSubmit if the user replies).
-      //
-      // WHY NOT GENERALISE TO ALL PostToolUse:
-      //   A NON-blocking tool fires PostToolUse even when it ran-but-failed
-      //   (e.g. Bash exits non-zero). Mapping those to 'running' would be wrong,
-      //   AND would re-introduce the per-tool sidebar flicker the no-op was added
-      //   to kill. Blocking tools have no "ran-but-failed" state, so the
-      //   CLAUDE_BLOCKING_TOOLS gate is exactly what makes this safe WITHOUT an
-      //   is_error check (which isn't even carried on the PostToolUse payload).
-      //   Future blocking built-ins added to CLAUDE_BLOCKING_TOOLS inherit both
-      //   the pause (PreToolUse) and the resume (here) for free — one allowlist,
-      //   no drift. Non-blocking PostToolUse stays the no-op it always was.
-      const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
-      if (typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)) return 'running'
-      return null
-    }
-    case 'Stop':
-    case 'SessionEnd':
-    case 'Notification':
-      return 'idle'
-    default:
-      return null
-  }
+function claudeCodeHookToTerminalState(
+  sessionId: string,
+  hookEvent: string,
+  raw?: unknown
+): TerminalState | null {
+  const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
+  const state = applyAgentHook(treeFor(sessionId), {
+    hookEvent,
+    toolName: typeof toolName === 'string' ? toolName : undefined,
+    subagentId: subagentIdOf(raw)
+  })
+  // Session over — drop the tree so a long-lived app doesn't accumulate one per
+  // session. A respawn reusing the same id simply starts from a fresh tree.
+  if (hookEvent === 'SessionEnd') agentTrees.delete(sessionId)
+  return state
 }
 
 /**
@@ -202,15 +184,18 @@ const firstTurnMarked = new Set<string>()
  */
 const TURN_PROOF_EVENTS = new Set(['UserPromptSubmit', 'Stop'])
 
-/** Dispatch to the per-agent raw-hook-event → TerminalState mapper. */
+/** Dispatch to the per-agent raw-hook-event → TerminalState mapper. Only claude
+ *  needs the sessionId: it is the one provider with a concurrent agent tree, so
+ *  its state is derived from per-session facts rather than the lone event. */
 function hookToTerminalState(
   agentId: string,
+  sessionId: string,
   hookEvent: string,
   raw?: unknown
 ): TerminalState | null {
   if (agentId === 'codex') return codexHookToTerminalState(hookEvent)
   if (agentId === 'antigravity') return antigravityHookToTerminalState(hookEvent)
-  return claudeCodeHookToTerminalState(hookEvent, raw)
+  return claudeCodeHookToTerminalState(sessionId, hookEvent, raw)
 }
 
 /**
@@ -230,7 +215,7 @@ function hookToTerminalState(
  * genuine permission prompts are rare under `--allow-dangerously-skip-permissions`
  * and are still caught by the output `detectPrompt` backstop.
  */
-function hookToAwaitingUser(agentId: string, hookEvent: string, raw?: unknown): boolean | null {
+function hookToAwaitingUser(agentId: string, sessionId: string, hookEvent: string): boolean | null {
   if (agentId === 'codex') {
     if (hookEvent === 'PermissionRequest') return true
     if (hookEvent === 'UserPromptSubmit' || hookEvent === 'PreToolUse' || hookEvent === 'Stop')
@@ -241,26 +226,14 @@ function hookToAwaitingUser(agentId: string, hookEvent: string, raw?: unknown): 
     if (hookEvent === 'PreInvocation' || hookEvent === 'Stop') return false
     return null
   }
-  // claude-code
-  if (hookEvent === 'PreToolUse') {
-    const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
-    return typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)
-  }
-  if (hookEvent === 'PostToolUse') {
-    // Mirror of the PreToolUse branch: a blocking tool's PostToolUse fires only
-    // when the user accepted/answered (reject/Esc denies PreToolUse → no
-    // PostToolUse), so it is the authoritative "no longer blocked" signal.
-    // Clearing here keeps the awaiting flag coherent with the 'running' state
-    // that claudeCodeHookToTerminalState now returns for the same event — a
-    // running+awaiting pair would be contradictory and confuse the idle-close
-    // gate. Non-blocking PostToolUse stays a no-op (returns null below).
-    const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
-    if (typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)) return false
-    return null
-  }
-  if (hookEvent === 'UserPromptSubmit' || hookEvent === 'Stop' || hookEvent === 'SessionEnd')
-    return false
-  return null
+  // claude-code: the agent tree already owns this fact — it is the same
+  // `awaitingUser` axis the state ladder resolves from, updated by
+  // `claudeCodeHookToTerminalState` immediately before this call. Reading it back
+  // (instead of re-deriving from the event) keeps ONE truth, and gives the
+  // hibernation gate the subagent fix for free: a helper's PreToolUse no longer
+  // reports "not blocked" for a main loop that is parked on a question, so a task
+  // mid-question can no longer be idle-closed.
+  return agentTrees.get(sessionId)?.awaitingUser ?? null
 }
 
 /** Stringify + clamp for diagnostic storage. Keeps raw hook payloads from
@@ -684,7 +657,9 @@ export async function processAgentHook(
     const mode = hook.agentId as TerminalMode
     const sessionId = bridge.findSession(resolvedTaskId, mode)
     if (sessionId) {
-      const newState = hookToTerminalState(hook.agentId, hook.hookEvent, hook.raw)
+      const newState = hookToTerminalState(hook.agentId, sessionId, hook.hookEvent, hook.raw)
+      const subagentId = subagentIdOf(hook.raw)
+      const agentType = (hook.raw as { agent_type?: unknown } | undefined)?.agent_type
       recordDiagnosticEvent({
         level: 'info',
         source: 'pty',
@@ -699,6 +674,18 @@ export async function processAgentHook(
           agentId: hook.agentId,
           releaseChannel: hook.releaseChannel ?? 'unknown',
           mappedState: newState ?? 'mark-active',
+          // WHO fired this hook — the main loop or a background subagent — plus
+          // the live tree. Surfaced because diagnosing the subagent-masks-a-
+          // pending-question bug otherwise required cross-checking the agent's
+          // own transcript to tell the two apart.
+          subagent: subagentId ? { id: subagentId, type: agentType ?? 'unknown' } : false,
+          agentTree: agentTrees.get(sessionId)
+            ? {
+                mainWorking: agentTrees.get(sessionId)!.mainWorking,
+                awaitingUser: agentTrees.get(sessionId)!.awaitingUser,
+                activeSubagents: agentTrees.get(sessionId)!.subagents.size
+              }
+            : undefined,
           raw: truncateForDiag(hook.raw, 4096)
         }
       })
@@ -714,7 +701,7 @@ export async function processAgentHook(
       // Feed the idle-close gate the authoritative "blocked on user" signal —
       // distinguishes a paused-mid-interaction agent (don't hibernate) from a
       // completed turn (both report 'idle').
-      const awaiting = hookToAwaitingUser(hook.agentId, hook.hookEvent, hook.raw)
+      const awaiting = hookToAwaitingUser(hook.agentId, sessionId, hook.hookEvent)
       if (awaiting !== null) bridge.noteAwaitingInput?.(sessionId, awaiting)
     }
   }

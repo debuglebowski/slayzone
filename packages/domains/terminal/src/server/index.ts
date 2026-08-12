@@ -11,6 +11,18 @@ export {
 } from './engagement'
 export { syncTerminalModes } from './startup-sync'
 export { isHookDrivenMode, HOOK_DRIVEN_MODES } from './adapters'
+// The claude agent TREE (one main loop + N concurrent background subagents on one
+// PTY). Pure model behind TerminalState for hook-driven claude sessions — keeps a
+// helper's tool call from overwriting "the main agent is waiting for your answer".
+export {
+  applyAgentHook,
+  createAgentTree,
+  resolveState,
+  subagentIdOf,
+  CLAUDE_BLOCKING_TOOLS,
+  type AgentTree,
+  type AgentHookSignal
+} from './agent-tree'
 export {
   encodeClaudeProjectDir,
   claudeProjectDir,

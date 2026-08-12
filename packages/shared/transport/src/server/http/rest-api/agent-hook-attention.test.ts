@@ -223,6 +223,84 @@ await describe('POST /api/agent-hook → handleAttentionTransition', () => {
     expect(readFlag(id)).toBe(1)
   })
 
+  // ── Background subagents (claude agent TREE) ──────────────────────────────
+  // A claude session is one main loop + N CONCURRENT background subagents, all
+  // sharing one PTY / session id / hook context. Subagent hooks carry `agent_id`
+  // + `agent_type`; main-loop hooks carry neither. Without that distinction a
+  // subagent's tool call reads as "the main agent is working" and overwrites the
+  // main loop's parked-on-a-question state (measured: 37 min of green spinner
+  // while the agent waited for an answer, amber cue wiped).
+  const SUB = { agent_id: 'a283110c20b8651d8', agent_type: 'Explore' }
+
+  test('subagent tool call does NOT resume a session parked on a question', async () => {
+    const id = seedTask()
+    currentState = 'running'
+    hasUserInput = true
+    // Main agent asks → parks on the question.
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'AskUserQuestion' })).toBe(200)
+    expect(currentState).toBe('idle')
+    expect(readFlag(id)).toBe(1)
+
+    // A background subagent runs a tool. Must NOT claim the main agent resumed.
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'Bash', ...SUB })).toBe(200)
+    expect(currentState).toBe('idle')
+    // …and must NOT erase the "needs you" cue the pause just earned.
+    expect(readFlag(id)).toBe(1)
+  })
+
+  test('subagent work after the main turn ends → background (not running, not idle)', async () => {
+    const id = seedTask()
+    currentState = 'idle'
+    hasUserInput = true
+    expect(await postHook(id, 'UserPromptSubmit')).toBe(200)
+    // Main agent spawns a background subagent, then finishes its own turn.
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'Agent' })).toBe(200)
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'Bash', ...SUB })).toBe(200)
+    expect(await postHook(id, 'Stop')).toBe(200)
+    // Main loop is done but the helper is still working → work IS in flight.
+    expect(currentState).toBe('background')
+  })
+
+  test('last SubagentStop drains background → idle (no stuck state)', async () => {
+    const id = seedTask()
+    currentState = 'idle'
+    hasUserInput = true
+    expect(await postHook(id, 'UserPromptSubmit')).toBe(200)
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'Bash', ...SUB })).toBe(200)
+    expect(await postHook(id, 'Stop')).toBe(200)
+    expect(currentState).toBe('background')
+    // The one helper finishes → nothing left in flight.
+    expect(await postHook(id, 'SubagentStop', SUB)).toBe(200)
+    expect(currentState).toBe('idle')
+    // Turn genuinely settled with user input → amber cue earned.
+    expect(readFlag(id)).toBe(1)
+  })
+
+  test('subagent work while the main agent works → stays running (no downgrade)', async () => {
+    const id = seedTask()
+    currentState = 'idle'
+    hasUserInput = true
+    expect(await postHook(id, 'UserPromptSubmit')).toBe(200)
+    expect(currentState).toBe('running')
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'Bash', ...SUB })).toBe(200)
+    expect(currentState).toBe('running')
+    expect(await postHook(id, 'SubagentStop', SUB)).toBe(200)
+    expect(currentState).toBe('running')
+  })
+
+  test('answering the question resumes running even with a helper still active', async () => {
+    const id = seedTask()
+    currentState = 'running'
+    hasUserInput = true
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'Bash', ...SUB })).toBe(200)
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'AskUserQuestion' })).toBe(200)
+    expect(currentState).toBe('idle')
+    // User answers → the blocking tool's PostToolUse is the only resume proof.
+    expect(await postHook(id, 'PostToolUse', { tool_name: 'AskUserQuestion' })).toBe(200)
+    expect(currentState).toBe('running')
+    expect(readFlag(id)).toBe(0)
+  })
+
   test('non-claude agent (codex) → bridge not consulted', async () => {
     const id = seedTask()
     currentState = 'running'

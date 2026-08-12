@@ -9,6 +9,9 @@ interface Props {
 const DOT_COLORS: Record<TerminalState, string> = {
   starting: '#fbbf24',
   running: '#fbbf24',
+  // Background subagent work — same hue as `running`; the pulse below is what
+  // distinguishes them (see FloatingGlobalAgentPanelCollapsed's STATUS_MAP).
+  background: '#fbbf24',
   idle: '#4ade80',
   error: '#ef4444',
   dead: '#666',

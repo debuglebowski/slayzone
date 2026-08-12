@@ -54,6 +54,10 @@ export function TerminalProgressDot({
   const dotColor = stateStyle?.color ?? 'bg-muted-foreground/40'
   const stateLabel = stateStyle?.label ?? 'No session'
   const isRunning = !attentionWins && state === 'running'
+  // Main agent done, background subagents still working: same spinner affordance
+  // (work IS happening) at half speed and reduced opacity, so it reads as
+  // "progressing, but nothing needs you" next to a real `running` spinner.
+  const isBackground = !attentionWins && state === 'background'
   // Hibernated (idle-closed) sessions show a pause icon instead of a dot.
   const isHibernated = !attentionWins && state === 'hibernated'
 
@@ -96,12 +100,16 @@ export function TerminalProgressDot({
             )}
             aria-label={stateLabel}
           />
-        ) : isRunning ? (
+        ) : isRunning || isBackground ? (
           <Loader2
             size={innerSize}
             strokeWidth={2.75}
             className={cn(
               'relative z-10 shrink-0 animate-spin',
+              // Half speed for background work. Arbitrary duration only — the
+              // animation itself is untouched, so nothing about the existing
+              // running spinner changes.
+              isBackground && '[animation-duration:2s]',
               stateStyle?.textColor ?? 'text-green-500'
             )}
             aria-label={stateLabel}

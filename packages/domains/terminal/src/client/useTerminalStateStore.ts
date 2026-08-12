@@ -25,7 +25,11 @@ import {
 } from '@slayzone/transport/client'
 import type { TerminalState } from '@slayzone/terminal/shared'
 
-const ALIVE_STATES: ReadonlySet<TerminalState> = new Set(['running', 'idle'])
+// `background` (main agent done, its background subagents still working) is as
+// alive as `running` — it must count for useActiveTaskIds AND be eligible for the
+// reconcile Pass-2 sweep, or a background session that dropped its exit event
+// would never converge to 'dead'.
+const ALIVE_STATES: ReadonlySet<TerminalState> = new Set(['running', 'background', 'idle'])
 
 function taskIdFromSessionId(sessionId: string): string {
   const idx = sessionId.indexOf(':')

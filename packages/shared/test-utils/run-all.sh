@@ -347,6 +347,12 @@ run_test packages/domains/diagnostics/src/server/config-push.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
 run_test packages/domains/terminal/src/server/state-machine.test.ts
+# Terminal — claude agent TREE ladder: a background subagent must never overwrite
+# "the main agent is waiting for your answer" (spinner lied for 37 min).
+run_test packages/domains/terminal/src/server/agent-tree.test.ts
+# Terminal — renderer state store reconcile/self-heal. Was never registered here,
+# so its 22 assertions only ran if someone happened to invoke the file by hand.
+run_test packages/domains/terminal/src/client/useTerminalStateStore.test.ts
 # Terminal — idle-close engagement (browser/other-panel interaction keeps agent warm)
 run_test packages/domains/terminal/src/server/engagement.test.ts
 run_test packages/domains/terminal/src/server/session-error-gate.test.ts

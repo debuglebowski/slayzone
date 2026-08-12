@@ -13,6 +13,9 @@ interface Props {
 const STATUS_MAP: Record<TerminalState, { color: string; pulse: boolean; text: string }> = {
   starting: { color: '#fbbf24', pulse: true, text: 'starting...' },
   running: { color: '#fbbf24', pulse: true, text: 'working...' },
+  // Main agent done, background subagents still working — same hue as `running`
+  // (work in flight) but no pulse, so it doesn't read as "needs you".
+  background: { color: '#fbbf24', pulse: false, text: 'background work' },
   idle: { color: '#4ade80', pulse: false, text: 'idle' },
   error: { color: '#ef4444', pulse: false, text: 'error' },
   dead: { color: '#666', pulse: false, text: 'session ended' },
