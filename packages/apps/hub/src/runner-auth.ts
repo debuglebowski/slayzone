@@ -88,7 +88,7 @@ interface GraceEntry {
  * grace window returns that exact pair without re-consuming the token or
  * registering a second runner.
  *
- * Chosen over the alternative (persist `join_tokens.runner_id` and re-mint on a
+ * Chosen over the alternative (persist `join_tokens.computer_id` and re-mint on a
  * `used` result) because it (a) returns the IDENTICAL credential first handed
  * out — no orphaned API keys — and (b) needs no new store surface, honoring
  * barrel-only consumption of the runners domain. The reconnect it covers happens

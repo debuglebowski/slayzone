@@ -1,7 +1,7 @@
 /**
  * The hub's mirror of runner-reported project paths.
  *
- * Built on `runner_project_checkouts` (v149), which modelled exactly this and had
+ * Built on `project_placements` (v149), which modelled exactly this and had
  * never been wired to anything. The runner authors; the hub records. What matters
  * here is that recording is WHOLESALE (a project a runner dropped must vanish, not
  * linger for reverse lookup to trust) and that the legacy `projects.path` column
@@ -22,11 +22,11 @@ const db = h.slayDb
  * runners) is the point of this file, so the read moves inline.
  */
 async function locations(projectId: string): Promise<{ runnerId: string; path: string }[]> {
-  const rows = await db.all<{ runner_id: string; root_path: string }>(
-    `SELECT runner_id, root_path FROM runner_project_checkouts WHERE project_id = ?`,
+  const rows = await db.all<{ computer_id: string; root_path: string }>(
+    `SELECT computer_id, root_path FROM project_placements WHERE project_id = ?`,
     [projectId]
   )
-  return rows.map((r) => ({ runnerId: r.runner_id, path: r.root_path }))
+  return rows.map((r) => ({ runnerId: r.computer_id, path: r.root_path }))
 }
 
 async function makeProject(id: string, name: string, path: string | null): Promise<void> {

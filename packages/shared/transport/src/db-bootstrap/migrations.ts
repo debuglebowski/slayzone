@@ -3658,6 +3658,39 @@ export const migrations: Migration[] = [
       // unowned rather than being attributed to a guess.
       db.exec(`ALTER TABLE join_tokens ADD COLUMN minted_by_user_id TEXT;`)
     }
+  },
+  {
+    version: 163,
+    up: (db) => {
+      // "Runner" was CI vocabulary — ephemeral, fungible, job-scoped — for a thing
+      // that holds your checkouts, your credentials and your ptys across restarts.
+      // The unit is a machine you own and keep, so it is a COMPUTER.
+      //
+      // Renames rather than a rebuild: SQLite's RENAME COLUMN rewrites the stored
+      // schema text, so `runner_project_checkouts`' composite PRIMARY KEY
+      // (runner_id, project_id) follows automatically, and RENAME TO carries the
+      // table's indexes. Nothing here declares a foreign key and no view or
+      // trigger references these tables, so there is no dependency to repair.
+      //
+      // `project_placements` rather than `..._checkouts`: with provisioning gone
+      // the row is not a checkout lifecycle, it is "this project sits at this path
+      // on this computer" — one placement per pair.
+      //
+      // The index cannot be renamed in place (SQLite has no RENAME INDEX), so it
+      // is dropped and recreated under the new name.
+      db.exec(`
+        ALTER TABLE runners RENAME TO computers;
+        ALTER TABLE runner_project_checkouts RENAME TO project_placements;
+
+        ALTER TABLE project_placements RENAME COLUMN runner_id TO computer_id;
+        ALTER TABLE join_tokens RENAME COLUMN runner_id TO computer_id;
+        ALTER TABLE tasks RENAME COLUMN runner_id TO computer_id;
+        ALTER TABLE projects RENAME COLUMN default_runner_id TO default_computer_id;
+
+        DROP INDEX IF EXISTS idx_runner_checkouts_path;
+        CREATE INDEX idx_project_placements_path ON project_placements(root_path);
+      `)
+    }
   }
 ]
 

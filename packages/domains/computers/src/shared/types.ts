@@ -40,7 +40,7 @@ export interface JoinToken {
   /** Consumption marker: NULL = unclaimed, set exactly once by verify. */
   used_at: number | null
   /** Runner that eventually enrolled with this token. */
-  runner_id: string | null
+  computer_id: string | null
   /** User who minted it; becomes that runner's owner at enroll. NULL = unowned. */
   minted_by_user_id?: string | null
 }

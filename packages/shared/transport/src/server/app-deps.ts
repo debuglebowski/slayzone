@@ -950,7 +950,7 @@ export function getAuthGate(): boolean {
  * existed: the hub was answering about its own disk.
  *
  * `resolveRunner` deliberately mirrors the pty backend's resolution rather than
- * reading `tasks.runner_id` directly, so the directory picker browses exactly the
+ * reading `tasks.computer_id` directly, so the directory picker browses exactly the
  * filesystem the agent will get. Precedence: an explicit `runnerId` the user
  * chose → the task's binding → the project default → the connected default.
  *

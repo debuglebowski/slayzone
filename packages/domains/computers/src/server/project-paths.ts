@@ -1,7 +1,7 @@
 /**
  * The hub's MIRROR of where each runner keeps each project.
  *
- * Built on `runner_project_checkouts` (v149), which already modelled exactly this
+ * Built on `project_placements` (v149), which already modelled exactly this
  * — "where each runner has each project checked out, one row per pair" — and had
  * never been wired to anything. This is the change that starts using it.
  *
@@ -36,7 +36,7 @@ export async function recordRunnerProjectPaths(
   await db.batchTxn([
     {
       type: 'run',
-      sql: 'DELETE FROM runner_project_checkouts WHERE runner_id = ?',
+      sql: 'DELETE FROM project_placements WHERE computer_id = ?',
       params: [runnerId]
     },
     ...entries.map((e) => ({
@@ -46,8 +46,8 @@ export async function recordRunnerProjectPaths(
       // reader JOINs `projects`, so an orphan row is invisible and the runner's
       // next report clears it. Rejecting instead would mean one deleted project
       // could fail a whole runner's report.
-      sql: `INSERT INTO runner_project_checkouts
-              (runner_id, project_id, root_path, status, updated_at)
+      sql: `INSERT INTO project_placements
+              (computer_id, project_id, root_path, status, updated_at)
             VALUES (?, ?, ?, 'ready', ?)`,
       params: [runnerId, e.projectId, e.path, now]
     }))
@@ -74,7 +74,7 @@ export async function resolveProjectByPath(
 
   const mirrored = await db.all<{ id: string; name: string; path: string }>(
     `SELECT p.id AS id, p.name AS name, c.root_path AS path
-       FROM runner_project_checkouts c
+       FROM project_placements c
        JOIN projects p ON p.id = c.project_id`
   )
   const legacy = await db.all<{ id: string; name: string; path: string }>(

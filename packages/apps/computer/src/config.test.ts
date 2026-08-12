@@ -279,7 +279,7 @@ describe('loadRunnerConfig', () => {
   // --- join token: ONE env name, no aliases ---
   // The token is minted BY the hub and embeds the hub's url + cert pin + a secret
   // verified against the hub's `join_tokens` row; `mintJoinToken` binds it to NO
-  // runner (runner_id is NULL until redemption). So the value is hub-scoped, and
+  // runner (computer_id is NULL until redemption). So the value is hub-scoped, and
   // the pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN` described its consumer — the one
   // thing CLAUDE.md rule 2 forbids. It is RETIRED outright, not aliased: it never
   // shipped (published runner betas 0.36.0-beta.2/3 read `SLAYZONE_JOIN_TOKEN`),

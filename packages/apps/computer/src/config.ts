@@ -50,7 +50,7 @@ export const ENV_VARS = {
   // HUB_-prefixed because the token is hub-scoped BY VALUE, not by reader: the hub
   // mints it and it embeds the hub's `wss://…/computers` url, the hub's TLS cert
   // fingerprint, and a secret checked against the hub's `join_tokens` row.
-  // `mintJoinToken` binds it to NO runner (runner_id is NULL until redemption), so
+  // `mintJoinToken` binds it to NO runner (computer_id is NULL until redemption), so
   // any runner can redeem any unused token — the old `SLAYZONE_RUNNER_JOIN_TOKEN`
   // named its CONSUMER, which is what CLAUDE.md rule 2 forbids. `_TOKEN` suffix +
   // `HUB_` family per rule 3, matching the domain term used everywhere else

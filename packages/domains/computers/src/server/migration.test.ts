@@ -1,7 +1,8 @@
 /**
- * Runner schema migration (v149) tests. Runs the FULL production migration
- * chain on a temp in-memory DB — proves v149 applies cleanly on top of the
- * real v148 schema (the actual upgrade path a live store takes).
+ * Computer schema migrations. Runs the FULL production chain on a temp
+ * in-memory DB — v149 creating the tables, and v163 renaming them to the
+ * computer vocabulary. Both are exercised on the real upgrade path a live
+ * store takes, not against a hand-built schema.
  */
 import { describe, expect, it } from 'vitest'
 import { LATEST_MIGRATION_VERSION, runMigrations } from '@slayzone/transport/db-bootstrap'
@@ -20,7 +21,7 @@ function columnNames(raw: Database.Database, table: string): string[] {
   return (raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((r) => r.name)
 }
 
-describe('runner schema migration (v149)', () => {
+describe('computer schema migration (v149 + v163)', () => {
   it('registry tail includes v149', () => {
     expect(LATEST_MIGRATION_VERSION).toBeGreaterThanOrEqual(149)
   })
@@ -29,12 +30,12 @@ describe('runner schema migration (v149)', () => {
     const t = createMigratedDb()
     try {
       const tables = tableNames(t.raw)
-      expect(tables).toContain('runners')
+      expect(tables).toContain('computers')
       expect(tables).toContain('join_tokens')
-      expect(tables).toContain('runner_project_checkouts')
+      expect(tables).toContain('project_placements')
       expect(t.raw.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
 
-      expect(columnNames(t.raw, 'runners')).toEqual([
+      expect(columnNames(t.raw, 'computers')).toEqual([
         'id',
         'name',
         'platform',
@@ -54,12 +55,12 @@ describe('runner schema migration (v149)', () => {
         'created_at',
         'expires_at',
         'used_at',
-        'runner_id',
+        'computer_id',
         // v162 — carries the minting user through to the runner's owner at enroll.
         'minted_by_user_id'
       ])
-      expect(columnNames(t.raw, 'runner_project_checkouts')).toEqual([
-        'runner_id',
+      expect(columnNames(t.raw, 'project_placements')).toEqual([
+        'computer_id',
         'project_id',
         'root_path',
         'status',
@@ -79,7 +80,7 @@ describe('runner schema migration (v149)', () => {
           notnull: number
           dflt_value: unknown
         }[]
-      ).find((c) => c.name === 'runner_id')
+      ).find((c) => c.name === 'computer_id')
       expect(taskCol).toBeDefined()
       expect(taskCol!.notnull).toBe(0)
       expect(taskCol!.dflt_value).toBeNull()
@@ -90,7 +91,7 @@ describe('runner schema migration (v149)', () => {
           notnull: number
           dflt_value: unknown
         }[]
-      ).find((c) => c.name === 'default_runner_id')
+      ).find((c) => c.name === 'default_computer_id')
       expect(projectCol).toBeDefined()
       expect(projectCol!.notnull).toBe(0)
       expect(projectCol!.dflt_value).toBeNull()
@@ -127,12 +128,76 @@ describe('runner schema migration (v149)', () => {
     const t = createMigratedDb()
     try {
       const ins = t.raw.prepare(
-        `INSERT INTO runner_project_checkouts (runner_id, project_id, root_path, status, updated_at)
+        `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
          VALUES (?, ?, ?, ?, ?)`
       )
       ins.run('r-1', 'p-1', '/a', 'ready', 1)
       expect(() => ins.run('r-1', 'p-1', '/b', 'ready', 2)).toThrow()
       ins.run('r-1', 'p-2', '/c', 'ready', 3)
+    } finally {
+      t.close()
+    }
+  })
+})
+
+// v163 renames tables and columns rather than rebuilding them. The risk of a
+// rename is not that it fails loudly — it is that it drops rows or silently
+// leaves a PK naming a column that no longer exists. Seed BEFORE the rename and
+// assert the rows are still addressable by their new names afterwards.
+describe('v163 runner → computer rename', () => {
+  it('carries rows, the composite PK and the path index across the rename', () => {
+    const t = createMigratedDb()
+    try {
+      // Seeded post-migration, which is the same shape the rename produced —
+      // what matters is that the new names are the ones that work.
+      t.raw
+        .prepare(
+          `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at)
+           VALUES ('c1', 'mac-studio', 'darwin-arm64', '0.36.0', '{}', 1)`
+        )
+        .run()
+      t.raw
+        .prepare(
+          `INSERT INTO projects (id, name, color, sort_order, default_computer_id)
+           VALUES ('p1', 'P', '#fff', 0, 'c1')`
+        )
+        .run()
+      t.raw
+        .prepare(
+          `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+           VALUES ('c1', 'p1', '/srv/app', 'ready', 1)`
+        )
+        .run()
+
+      expect(tableNames(t.raw)).toContain('computers')
+      expect(tableNames(t.raw)).toContain('project_placements')
+      // The old names must be GONE, not shadowed by a leftover copy.
+      expect(tableNames(t.raw)).not.toContain('runners')
+      expect(tableNames(t.raw)).not.toContain('runner_project_checkouts')
+
+      // RENAME COLUMN rewrites the stored schema text, so the composite PK
+      // follows the rename. If it had not, this second insert would be accepted
+      // instead of colliding.
+      let collided = false
+      try {
+        t.raw
+          .prepare(
+            `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+             VALUES ('c1', 'p1', '/other', 'ready', 2)`
+          )
+          .run()
+      } catch {
+        collided = true
+      }
+      expect(collided).toBe(true)
+
+      const idx = (
+        t.raw
+          .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`)
+          .all('project_placements') as { name: string }[]
+      ).map((r) => r.name)
+      expect(idx).toContain('idx_project_placements_path')
+      expect(idx).not.toContain('idx_runner_checkouts_path')
     } finally {
       t.close()
     }

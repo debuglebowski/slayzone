@@ -36,7 +36,7 @@ export const resetForTestTxns = {
     // preserving the connection.
     let runners: Record<string, unknown>[] = []
     try {
-      runners = db.prepare('SELECT * FROM runners').all() as Record<string, unknown>[]
+      runners = db.prepare('SELECT * FROM computers').all() as Record<string, unknown>[]
     } catch {
       // Table absent (fresh DB / pre-v149 schema) — nothing to preserve.
     }
@@ -58,7 +58,7 @@ export const resetForTestTxns = {
       if (cols.length === 0) continue
       try {
         db.prepare(
-          `INSERT OR REPLACE INTO runners (${cols.map((c) => `"${c}"`).join(', ')})
+          `INSERT OR REPLACE INTO computers (${cols.map((c) => `"${c}"`).join(', ')})
            VALUES (${cols.map(() => '?').join(', ')})`
         ).run(...cols.map((c) => row[c] as never))
       } catch {

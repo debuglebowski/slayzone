@@ -110,7 +110,7 @@ export async function mintJoinToken(
   const expiresAt = now + input.ttlMs
   await db.run(
     `INSERT INTO join_tokens
-       (id, token_hash, label, created_at, expires_at, used_at, runner_id, minted_by_user_id)
+       (id, token_hash, label, created_at, expires_at, used_at, computer_id, minted_by_user_id)
      VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
     [id, hashJoinToken(token), input.label, now, expiresAt, input.mintedByUserId ?? null]
   )

@@ -7,8 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
  * Per-task runner selector (hub/runner split, wave 3 UI).
  *
  * Backend model (see `runners` router / store):
- *   - `tasks.runner_id`          : NULL = inherit the project default; else pinned.
- *   - `projects.default_runner_id`: NULL = no explicit default (exec uses the
+ *   - `tasks.computer_id`          : NULL = inherit the project default; else pinned.
+ *   - `projects.default_computer_id`: NULL = no explicit default (exec uses the
  *     connected default runner, else runs in-process); else a specific runner.
  *   - `resolveTaskRunner`        : the effective (coalesced) runner — null = local.
  *

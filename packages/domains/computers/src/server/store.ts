@@ -5,7 +5,7 @@ import { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
 
 /**
  * Runner store: CRUD over the v149 runner tables (`runners`,
- * `runner_project_checkouts`) plus the task/project runner-binding columns.
+ * `project_placements`) plus the task/project runner-binding columns.
  * Dark in wave 1 — no tRPC surface yet; the integration wave wires callers.
  */
 
@@ -40,7 +40,7 @@ export async function registerRunner(
     revoked_at: null
   }
   await db.run(
-    `INSERT INTO runners
+    `INSERT INTO computers
        (id, name, platform, version, capabilities_json, auth_key_id, last_seen_at, created_at, revoked_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
@@ -74,7 +74,7 @@ export function deterministicLocalRunnerId(name: string): string {
   const hex = createHash('sha256').update(`local-runner:${name}`, 'utf8').digest('hex')
   // Format as a uuid-v4-shaped string (8-4-4-4-12) so it is indistinguishable in
   // shape from `randomUUID()` ids everywhere downstream (api-key metadata, task
-  // bindings, join_tokens.runner_id) — it is just a STABLE one for this name.
+  // bindings, join_tokens.computer_id) — it is just a STABLE one for this name.
   return [
     hex.slice(0, 8),
     hex.slice(8, 12),
@@ -101,7 +101,7 @@ export async function registerOrReplaceRunner(
   const capabilities_json = JSON.stringify(input.capabilities ?? {})
   const auth_key_id = input.authKeyId ?? null
   await db.run(
-    `INSERT INTO runners
+    `INSERT INTO computers
        (id, name, platform, version, capabilities_json, auth_key_id, last_seen_at, created_at, revoked_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
      ON CONFLICT(id) DO UPDATE SET
@@ -142,7 +142,7 @@ export async function registerOrReplaceRunner(
  *   - never consults connection status — at boot nothing is connected, and a
  *     disconnected remote runner is legitimate; this reaps by IDENTITY only.
  *
- * Because `tasks.runner_id` / `projects.default_runner_id` are plain TEXT with no
+ * Because `tasks.computer_id` / `projects.default_computer_id` are plain TEXT with no
  * FK (nothing repoints or nulls them on delete), a bare DELETE of the orphan rows
  * would leave any task/project bound to an old local id DANGLING —
  * `resolveTaskRunnerId` would then return a dead id and the routing pty backend
@@ -162,7 +162,7 @@ export async function retireStaleLocalRunners(
 ): Promise<number> {
   // Read-only probe first: the common steady-state path has no duplicates, so
   // avoid opening a write transaction (and the repoint/delete churn) every enroll.
-  const stale = await db.all<{ id: string }>(`SELECT id FROM runners WHERE name = ? AND id <> ?`, [
+  const stale = await db.all<{ id: string }>(`SELECT id FROM computers WHERE name = ? AND id <> ?`, [
     opts.name,
     opts.keepRunnerId
   ])
@@ -172,21 +172,21 @@ export async function retireStaleLocalRunners(
   const placeholders = staleIds.map(() => '?').join(', ')
   // Atomic collapse: repoint task + project bindings off the orphan ids onto the
   // survivor, THEN delete the orphan runner rows — one transaction so a task can
-  // never observe a dangling runner_id mid-collapse.
+  // never observe a dangling computer_id mid-collapse.
   const results = (await db.batchTxn([
     {
       type: 'run',
-      sql: `UPDATE tasks SET runner_id = ? WHERE runner_id IN (${placeholders})`,
+      sql: `UPDATE tasks SET computer_id = ? WHERE computer_id IN (${placeholders})`,
       params: [opts.keepRunnerId, ...staleIds]
     },
     {
       type: 'run',
-      sql: `UPDATE projects SET default_runner_id = ? WHERE default_runner_id IN (${placeholders})`,
+      sql: `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
       params: [opts.keepRunnerId, ...staleIds]
     },
     {
       type: 'run',
-      sql: `DELETE FROM runners WHERE id IN (${placeholders})`,
+      sql: `DELETE FROM computers WHERE id IN (${placeholders})`,
       params: staleIds
     }
   ])) as Array<{ changes: number }>
@@ -195,7 +195,7 @@ export async function retireStaleLocalRunners(
 }
 
 export async function getRunner(db: SlayzoneDb, id: string): Promise<RunnerRecord | null> {
-  return (await db.get<RunnerRecord>(`SELECT * FROM runners WHERE id = ?`, [id])) ?? null
+  return (await db.get<RunnerRecord>(`SELECT * FROM computers WHERE id = ?`, [id])) ?? null
 }
 
 /** Active runners by default; `includeRevoked` returns the full ledger. */
@@ -205,8 +205,8 @@ export async function listRunners(
 ): Promise<RunnerRecord[]> {
   return db.all<RunnerRecord>(
     opts.includeRevoked
-      ? `SELECT * FROM runners ORDER BY created_at ASC, id ASC`
-      : `SELECT * FROM runners WHERE revoked_at IS NULL ORDER BY created_at ASC, id ASC`
+      ? `SELECT * FROM computers ORDER BY created_at ASC, id ASC`
+      : `SELECT * FROM computers WHERE revoked_at IS NULL ORDER BY created_at ASC, id ASC`
   )
 }
 
@@ -217,7 +217,7 @@ export async function touchRunnerLastSeen(
   at: number = Date.now()
 ): Promise<void> {
   await db.run(
-    `UPDATE runners SET last_seen_at = ?
+    `UPDATE computers SET last_seen_at = ?
      WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at < ?)`,
     [at, id, at]
   )
@@ -229,18 +229,18 @@ export async function revokeRunner(
   id: string,
   at: number = Date.now()
 ): Promise<void> {
-  await db.run(`UPDATE runners SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, [at, id])
+  await db.run(`UPDATE computers SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, [at, id])
 }
 
 // --- task/project runner binding ----------------------------------------------
 
-/** `null` = inherit the project default (`projects.default_runner_id`). */
+/** `null` = inherit the project default (`projects.default_computer_id`). */
 export async function setTaskRunner(
   db: SlayzoneDb,
   taskId: string,
   runnerId: string | null
 ): Promise<void> {
-  await db.run(`UPDATE tasks SET runner_id = ? WHERE id = ?`, [runnerId, taskId])
+  await db.run(`UPDATE tasks SET computer_id = ? WHERE id = ?`, [runnerId, taskId])
 }
 
 /** `null` = no explicit default; exec falls back to the connected default runner,
@@ -250,12 +250,12 @@ export async function setProjectDefaultRunner(
   projectId: string,
   runnerId: string | null
 ): Promise<void> {
-  await db.run(`UPDATE projects SET default_runner_id = ? WHERE id = ?`, [runnerId, projectId])
+  await db.run(`UPDATE projects SET default_computer_id = ? WHERE id = ?`, [runnerId, projectId])
 }
 
 /**
- * The task's EXPLICIT runner binding: its own `runner_id`, else its project's
- * `default_runner_id`. `null` = nothing bound, which does NOT mean "run locally"
+ * The task's EXPLICIT runner binding: its own `computer_id`, else its project's
+ * `default_computer_id`. `null` = nothing bound, which does NOT mean "run locally"
  * — see {@link resolveTaskRunnerIdOrDefault}, which falls back to the connected
  * default runner. (Runners run the agents; there is no in-process spawn path.)
  *
@@ -267,14 +267,14 @@ export async function resolveTaskRunnerId(db: SlayzoneDb, taskId: string): Promi
   // The task's own pin wins over the project default. `chat-data-ops.ts`
   // `resolveRunnerId` MUST stay identical — divergence would route a chat agent
   // and a terminal agent for the SAME task to different runners.
-  const row = await db.get<{ runner_id: string | null }>(
-    `SELECT COALESCE(t.runner_id, p.default_runner_id) AS runner_id
+  const row = await db.get<{ computer_id: string | null }>(
+    `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
      FROM tasks t
      LEFT JOIN projects p ON p.id = t.project_id
      WHERE t.id = ?`,
     [taskId]
   )
-  return row?.runner_id ?? null
+  return row?.computer_id ?? null
 }
 
 /** Record which SlayZone user a runner belongs to (set at enroll). */
@@ -283,15 +283,15 @@ export async function setRunnerOwner(
   runnerId: string,
   ownerUserId: string | null
 ): Promise<void> {
-  await db.run(`UPDATE runners SET owner_user_id = ? WHERE id = ?`, [ownerUserId, runnerId])
+  await db.run(`UPDATE computers SET owner_user_id = ? WHERE id = ?`, [ownerUserId, runnerId])
 }
 
 /**
  * Effective runner for a task, including the implicit default.
  *
  * Resolution order:
- *   1. the task's explicit `runner_id`
- *   2. its project's `default_runner_id`
+ *   1. the task's explicit `computer_id`
+ *   2. its project's `default_computer_id`
  *   3. the sole connected runner, if exactly one is connected
  *   4. the connected runner named {@link DEFAULT_LOCAL_RUNNER_NAME} (the
  *      co-located one the app auto-enrolls)

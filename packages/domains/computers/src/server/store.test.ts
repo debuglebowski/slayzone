@@ -252,11 +252,11 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
 
     // Bindings now resolve to the SURVIVING local runner, not a dead id.
     expect(await resolveTaskRunnerId(t.db, 'task-b')).toBe(keep)
-    const proj = await t.db.get<{ default_runner_id: string | null }>(
-      `SELECT default_runner_id FROM projects WHERE id = ?`,
+    const proj = await t.db.get<{ default_computer_id: string | null }>(
+      `SELECT default_computer_id FROM projects WHERE id = ?`,
       ['proj-b']
     )
-    expect(proj!.default_runner_id).toBe(keep)
+    expect(proj!.default_computer_id).toBe(keep)
   })
 
   it('leaves bindings to UNRELATED (remote) runners untouched during a local collapse', async () => {

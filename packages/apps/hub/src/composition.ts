@@ -554,11 +554,11 @@ export function composeServer(opts: {
     resolveExecRunner(await resolveTaskRunnerId(db, taskId))
   /** Same, for a project — its default binding, else the connected default. */
   const resolveRunnerForProject = async (projectId: string): Promise<string | null> => {
-    const row = await db.get<{ default_runner_id?: string | null }>(
-      'SELECT default_runner_id FROM projects WHERE id = ?',
+    const row = await db.get<{ default_computer_id?: string | null }>(
+      'SELECT default_computer_id FROM projects WHERE id = ?',
       [projectId]
     )
-    return resolveExecRunner(row?.default_runner_id ?? null)
+    return resolveExecRunner(row?.default_computer_id ?? null)
   }
 
   // Inject runner-aware spawn lookups BEFORE createPtyOps (which captures the

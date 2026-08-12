@@ -289,14 +289,14 @@ export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
       // Task pin over project default — IDENTICAL to `resolveTaskRunnerId` in
       // the runners store. Divergence here would route a chat agent and a
       // terminal agent for the SAME task to different runners.
-      const row = await db.get<{ runner_id: string | null }>(
-        `SELECT COALESCE(t.runner_id, p.default_runner_id) AS runner_id
+      const row = await db.get<{ computer_id: string | null }>(
+        `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
            FROM tasks t
            LEFT JOIN projects p ON p.id = t.project_id
           WHERE t.id = ?`,
         [taskId]
       )
-      return row?.runner_id ?? null
+      return row?.computer_id ?? null
     },
 
     getTaskProjectId: async (taskId) => {

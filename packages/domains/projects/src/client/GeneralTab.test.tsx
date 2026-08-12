@@ -124,7 +124,7 @@ function makeProject(overrides: Record<string, unknown> = {}): Project {
     path: '/tmp/test',
     icon_letters: null,
     icon_image_path: null,
-    default_runner_id: null,
+    default_computer_id: null,
     columns_config: null,
     created_at: '2026-01-01',
     updated_at: '2026-01-01',
@@ -183,7 +183,7 @@ describe('GeneralTab default runner', () => {
 
   it('selecting Local fires setProjectDefaultRunner with null', async () => {
     runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
-    renderTab(makeProject({ default_runner_id: 'runner-a' }))
+    renderTab(makeProject({ default_computer_id: 'runner-a' }))
     fireEvent.change(screen.getByTestId('default-runner-select'), {
       target: { value: '__local__' }
     })
@@ -197,7 +197,7 @@ describe('GeneralTab default runner', () => {
 
   it('preselects the project default runner', () => {
     runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
-    renderTab(makeProject({ default_runner_id: 'runner-a' }))
+    renderTab(makeProject({ default_computer_id: 'runner-a' }))
     expect((screen.getByTestId('default-runner-select') as HTMLSelectElement).value).toBe(
       'runner-a'
     )

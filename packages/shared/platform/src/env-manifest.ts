@@ -65,7 +65,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_AUTH_SECRET: 'secret',
   // Hub-scoped by VALUE: the hub mints it, and it embeds the hub's url, the hub's
   // TLS cert fingerprint, and a secret verified against the hub's `join_tokens`
-  // row. `mintJoinToken` binds it to NO runner (runner_id stays NULL until
+  // row. `mintJoinToken` binds it to NO runner (computer_id stays NULL until
   // redemption), so any runner can redeem any unused token — there is no runner in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).
   SLAYZONE_HUB_JOIN_TOKEN: 'secret',

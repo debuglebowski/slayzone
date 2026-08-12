@@ -41,7 +41,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const [iconCacheKey, setIconCacheKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [iconBusy, setIconBusy] = useState(false)
-  // Default runner (hub/runner split). `default_runner_id` is a v149 column present
+  // Default runner (hub/runner split). `default_computer_id` is a v149 column present
   // at runtime (parseProject spreads the row) but not yet on the shared Project type
   // — read via a narrow local cast. null = Local (in-process).
   const [defaultRunnerId, setDefaultRunnerId] = useState<string | null>(null)
@@ -53,7 +53,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setIconLetters(project.icon_letters || '')
     setIconImagePath(project.icon_image_path)
     setIconCacheKey(project.updated_at)
-    setDefaultRunnerId((project as { default_runner_id?: string | null }).default_runner_id ?? null)
+    setDefaultRunnerId((project as { default_computer_id?: string | null }).default_computer_id ?? null)
   }, [project])
 
   const runners = runnersQuery.data ?? []

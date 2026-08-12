@@ -179,11 +179,11 @@ test('runners.list: `usable` is independent of `connected`', async () => {
 // one COALESCE, this fails until you change the other.
 test('pty and chat resolve a task to the SAME runner at every precedence step', async () => {
   await h.slayDb.run(
-    `INSERT INTO projects (id, name, color, sort_order, default_runner_id)
+    `INSERT INTO projects (id, name, color, sort_order, default_computer_id)
      VALUES ('p-res', 'P', '#fff', 0, 'r-default')`
   )
   await h.slayDb.run(
-    `INSERT INTO tasks (id, project_id, title, status, runner_id)
+    `INSERT INTO tasks (id, project_id, title, status, computer_id)
      VALUES ('t-res', 'p-res', 'T', 'todo', 'r-task')`
   )
 
@@ -196,11 +196,11 @@ test('pty and chat resolve a task to the SAME runner at every precedence step', 
   expect(await both('t-res')).toEqual(['r-task', 'r-task'])
 
   // Unpinned, it falls through to the project default.
-  await h.slayDb.run(`UPDATE tasks SET runner_id = NULL WHERE id = 't-res'`)
+  await h.slayDb.run(`UPDATE tasks SET computer_id = NULL WHERE id = 't-res'`)
   expect(await both('t-res')).toEqual(['r-default', 'r-default'])
 
   // Neither set: null, so the caller applies its own fallback rather than
   // silently inheriting some other project's machine.
-  await h.slayDb.run(`UPDATE projects SET default_runner_id = NULL WHERE id = 'p-res'`)
+  await h.slayDb.run(`UPDATE projects SET default_computer_id = NULL WHERE id = 'p-res'`)
   expect(await both('t-res')).toEqual([null, null])
 })

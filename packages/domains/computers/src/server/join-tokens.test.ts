@@ -65,7 +65,7 @@ describe('mintJoinToken', () => {
     >
     expect(row.token_hash).toBe(createHash('sha256').update(minted.token, 'utf8').digest('hex'))
     expect(row.used_at).toBeNull()
-    expect(row.runner_id).toBeNull()
+    expect(row.computer_id).toBeNull()
     for (const [key, value] of Object.entries(row)) {
       if (typeof value !== 'string') continue
       expect(value === minted.token, `column ${key} must not hold the token`).toBe(false)
