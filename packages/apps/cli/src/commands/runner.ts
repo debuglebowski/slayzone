@@ -471,7 +471,8 @@ export function runnerCommand(): Command {
         console.log('No runners here. Create one with `slay runner create <name> --token <token>`.')
         // Only mention supervision when it is actually missing — on a healthy box
         // this is noise, and the reason names the fix that applies to THIS machine.
-        if (backend === 'none') console.log(`\n${explainNoBackend(detectBackendWithReason().reason)}`)
+        if (backend === 'none')
+          console.log(`\n${explainNoBackend(detectBackendWithReason().reason)}`)
         return
       }
       const state = (r: RunnerFacts): string => {

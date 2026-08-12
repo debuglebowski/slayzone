@@ -62,12 +62,6 @@ export interface Project {
   icon_letters: string | null
   /** Absolute path to icon image on disk. Overrides letters when set. */
   icon_image_path: string | null
-  /** `remote` = a runner may clone `repo_url`; `off` = adopted folders only. */
-  git_mode?: 'off' | 'remote'
-  repo_url?: string | null
-  default_branch?: string | null
-  /** Pins every task to one runner, overriding the per-task binding. */
-  locked_runner_id?: string | null
   /**
    * Position. When `group_id` is null → position in the top-level sidebar list
    * (shared integer space with `ProjectGroup.sort_order`). When `group_id` is
@@ -145,13 +139,4 @@ export interface UpdateProjectInput {
   iconImagePath?: string | null
   lockConfig?: ProjectLockConfig | null
   starred?: boolean
-  /**
-   * `remote` lets a runner PROVISION a checkout it does not have, by cloning
-   * `repoUrl`. `off` means the folder was adopted, and a missing one is reported
-   * rather than recreated — cloning over a path the user chose could destroy work
-   * that was never pushed.
-   */
-  gitMode?: 'off' | 'remote'
-  repoUrl?: string | null
-  defaultBranch?: string | null
 }

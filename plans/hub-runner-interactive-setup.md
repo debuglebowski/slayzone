@@ -1,7 +1,7 @@
 # Interactive setup for standalone hub + runner
 
 ## Goal
-`npx @slayzone/hub` / `npx @slayzone/runner` — when a required (runner) or recommended
+`npx @slayzone/hub` / `npx @slayzone/computer` — when a required (runner) or recommended
 (hub) value is missing AND stdin is an interactive TTY, prompt for it, then (after a
 `[Y/n]` confirm) persist to `<ROOT>/config.json` before booting. Non-TTY / supervised
 keeps today's exact behavior (auto-gen or fail-fast).
@@ -57,7 +57,7 @@ keys (so the downstream `applyStandaloneHubConfig` / `loadRunnerConfig` see them
 normal env path), which keeps the resolution logic single-sourced — the prompt is just
 another (interactive) env producer sitting at the top.
 
-## Runner wiring (`packages/apps/runner/src/bin.ts`)
+## Runner wiring (`packages/apps/computer/src/bin.ts`)
 Runner is the one that hard-fails today. New order in `main()`:
 1. Seed `SLAYZONE_ROOT=cwd` (unchanged, must precede everything).
 2. `if (canPrompt())` → check for missing REQUIRED/recommended runner inputs by reading
@@ -109,7 +109,7 @@ prompted — it's a generated secret, not a user value).
 - NEW `packages/shared/platform/src/config-prompt.ts`
 - NEW `packages/shared/platform/src/config-prompt.test.ts`
 - EDIT `packages/shared/platform/package.json` — add `./config-prompt` export subpath
-- EDIT `packages/apps/runner/src/bin.ts`
+- EDIT `packages/apps/computer/src/bin.ts`
 - EDIT `packages/apps/hub/src/bin.ts`
 - (maybe) EDIT `scripts/publish-hub-runner.sh` READMEs — one line on first-run prompt
 

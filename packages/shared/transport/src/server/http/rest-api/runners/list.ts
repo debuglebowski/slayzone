@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { listRunners as storeListRunners } from '@slayzone/runners/server'
+import { listRunners as storeListRunners } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 
 /**

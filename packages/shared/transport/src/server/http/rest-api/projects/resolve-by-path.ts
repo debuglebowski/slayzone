@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { resolveProjectByPath } from '@slayzone/runners/server'
+import { resolveProjectByPath } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 import { queryString } from '../resolve'
 

@@ -26,7 +26,7 @@ import {
   describe
 } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
-import { decodeJoinToken } from '@slayzone/runners/server'
+import { decodeJoinToken } from '@slayzone/computers/server'
 import {
   isLoopbackAddress,
   joinTokenAuthDecision,

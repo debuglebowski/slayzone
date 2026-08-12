@@ -10,7 +10,7 @@
  *
  * (Runner credentials — `runner.state.json`, system-generated, rewritten on every
  * reconnect/rotation — are a separate concern owned entirely by
- * `@slayzone/runner-transport`'s `credential-store.ts`, not this module. That
+ * `@slayzone/computer-transport`'s `credential-store.ts`, not this module. That
  * package deliberately doesn't depend on `@slayzone/platform` to keep the runner
  * bundle lean, so it isn't re-modeled here.)
  *

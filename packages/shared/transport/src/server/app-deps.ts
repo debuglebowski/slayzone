@@ -843,7 +843,7 @@ export function getProcessesDeps(): ProcessesDeps {
 
 /** Structural slice of the runner gateway the runners router reads — connection
  *  status only. Kept structural (not the full `HubRunnerGateway`) so transport
- *  stays decoupled from `@slayzone/runner-transport`.
+ *  stays decoupled from `@slayzone/computer-transport`.
  *
  *  NOTE: structural mirrors of a real interface drift silently (that class of bug
  *  cost four wire-contract fixes in the runner handlers). Keep this a strict

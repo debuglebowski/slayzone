@@ -6,10 +6,9 @@ import {
   mintJoinToken as storeMintJoinToken,
   revokeRunner as storeRevokeRunner,
   setProjectDefaultRunner as storeSetProjectDefaultRunner,
-  setProjectLockedRunner as storeSetProjectLockedRunner,
   setTaskRunner as storeSetTaskRunner,
   resolveTaskRunnerId as storeResolveTaskRunnerId
-} from '@slayzone/runners/server'
+} from '@slayzone/computers/server'
 
 /**
  * Runners router — the tRPC surface over the hub/runner-split runner (hub side).
@@ -130,22 +129,6 @@ export const runnersRouter = router({
     .input(z.object({ projectId: z.string(), runnerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
       await storeSetProjectDefaultRunner(ctx.db, input.projectId, input.runnerId)
-      return { ok: true as const }
-    }),
-
-  /**
-   * Pin a project to ONE runner (`null` unpins).
-   *
-   * A locked project ignores the per-task `tasks.runner_id` override, and must:
-   * the project's checkout lives at one path on one machine, so letting a task
-   * pick a different runner would hand its agent a directory that need not exist
-   * there. Opt-in rather than the default, because that override is real shipped
-   * functionality and removing it to tidy the model would be a cap.
-   */
-  setProjectLockedRunner: publicProcedure
-    .input(z.object({ projectId: z.string(), runnerId: z.string().nullable() }))
-    .mutation(async ({ ctx, input }) => {
-      await storeSetProjectLockedRunner(ctx.db, input.projectId, input.runnerId)
       return { ok: true as const }
     }),
 

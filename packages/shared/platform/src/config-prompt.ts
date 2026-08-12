@@ -1,7 +1,7 @@
 /**
  * Interactive first-run setup for the STANDALONE hub + runner bins.
  *
- * When a standalone `slayzone-hub` / `slayzone-runner` boots on an interactive
+ * When a standalone `slayzone-hub` / `slayzone-computer` boots on an interactive
  * terminal and a required (runner) or recommended (hub) value is missing, the
  * bin prompts for it, prints a summary, and — after a `[Y/n]` confirmation —
  * persists it to whichever config file the caller names (`hub.config.json` or

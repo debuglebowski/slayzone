@@ -131,8 +131,7 @@ export const workspaceRouter = router({
     .input(
       targetInput.extend({
         projectId: z.string().min(1),
-        path: z.string().min(1),
-        source: z.enum(['adopted', 'provisioned']).default('adopted')
+        path: z.string().min(1)
       })
     )
     .mutation(async ({ input }) => {
@@ -140,68 +139,7 @@ export const workspaceRouter = router({
       const runnerId = await resolveRunner(input)
       return {
         runnerId,
-        ...(await fs.setProjectPath(runnerId, input.projectId, input.path, input.source))
-      }
-    }),
-
-  /**
-   * Make a project usable on the target machine, cloning it when the project is
-   * in remote-git mode.
-   *
-   * Called before an agent session starts — the one moment that has everything:
-   * the runner knows its disk, the hub knows the project's identity, and the user
-   * is present, so a clone reads as progress rather than a background surprise.
-   * Progress streams as `checkout.status`.
-   */
-  ensureCheckout: publicProcedure
-    .input(targetInput.extend({ projectId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      // Remote-git mode is what permits CREATING a checkout. Without a URL the
-      // runner reports a missing folder rather than recreating one the user
-      // chose — cloning over it could destroy unpushed work.
-      const project = await ctx.db.get<{
-        git_mode: string | null
-        repo_url: string | null
-        default_branch: string | null
-      }>('SELECT git_mode, repo_url, default_branch FROM projects WHERE id = ?', [input.projectId])
-      const remote = project?.git_mode === 'remote' && project.repo_url
-      return {
-        runnerId,
-        ...(await fs.ensureProjectCheckout(runnerId, {
-          projectId: input.projectId,
-          checkoutId: `${input.projectId}:${Date.now()}`,
-          ...(remote ? { repoUrl: project.repo_url as string } : {}),
-          ...(remote && project.default_branch ? { branch: project.default_branch } : {})
-        }))
-      }
-    }),
-
-  /**
-   * Can that machine do git work with the credentials it already has?
-   *
-   * SlayZone stores no git secrets and should not start — agents already push
-   * from the runner using its own `gh auth` / ssh-agent. This makes the
-   * prerequisite visible so a missing login is fixed once on that box, rather
-   * than surfacing as a clone that dies mid-provision.
-   */
-  gitReadiness: publicProcedure
-    .input(targetInput.extend({ repoUrl: z.string().min(1).optional() }))
-    .query(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      try {
-        return { runnerId, reachable: true, ...(await fs.gitReadiness(runnerId, input.repoUrl)) }
-      } catch (err) {
-        return {
-          runnerId,
-          reachable: false,
-          gitInstalled: false,
-          ghInstalled: false,
-          ghAuthenticated: false,
-          detail: err instanceof Error ? err.message : String(err)
-        }
+        ...(await fs.setProjectPath(runnerId, input.projectId, input.path))
       }
     }),
 

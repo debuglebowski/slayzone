@@ -74,7 +74,7 @@ const MEMBER_TABLE_NAME = 'member'
  * 128 bits of entropy, base64url so it survives copy/paste out of a terminal and
  * into a password manager unmangled (no shell-significant characters, no
  * ambiguity about trailing `=`). Same idiom as the join-token secret in
- * `@slayzone/runners/server` join-tokens.ts.
+ * `@slayzone/computers/server` join-tokens.ts.
  */
 function generatePassword(): string {
   return randomBytes(16).toString('base64url')

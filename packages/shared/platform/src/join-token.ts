@@ -2,7 +2,7 @@
  * Stateless join-token decode — the CONSUMER side of the szjt1 grammar.
  *
  * A join token is `szjt1.<base64url(JSON{hubUrl,certFingerprint,secret})>` — the
- * exact format minted by the hub in `@slayzone/runners/server` (join-tokens.ts).
+ * exact format minted by the hub in `@slayzone/computers/server` (join-tokens.ts).
  *
  * TWO CONSUMERS, ONE DECODER:
  *   - the RUNNER reads the embedded `hubUrl` + `certFingerprint` to dial + pin the
@@ -12,7 +12,7 @@
  *     the `hubUrl` out of it for `slay runner ls`.
  *
  * This is a dependency-free re-implementation of the hub-side `decodeJoinToken`.
- * Importing the hub decoder from `@slayzone/runners/server` would drag its `./store`
+ * Importing the hub decoder from `@slayzone/computers/server` would drag its `./store`
  * module (and thus better-sqlite3) into both the runner and the CLI bundle. The token
  * grammar is trivial and stable (`szjt1.` prefix), so decoding it here is the
  * smallest sustainable option — kept byte-compatible with the minter, which
@@ -24,7 +24,7 @@
  * @module platform/join-token
  */
 
-/** Prefix of a v1 join token — must match `@slayzone/runners/server`. */
+/** Prefix of a v1 join token — must match `@slayzone/computers/server`. */
 export const JOIN_TOKEN_PREFIX = 'szjt1'
 
 /** Decoded contents of a join token — what an enrolling runner needs. */

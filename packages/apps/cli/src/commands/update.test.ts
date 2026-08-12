@@ -268,7 +268,7 @@ async function main(): Promise<void> {
     resetNpm()
     clearInstallLogs()
     seed(npmRoot, '@slayzone/cli', '1.1.0-beta.1')
-    seed(npmRoot, '@slayzone/runner', '1.0.0')
+    seed(npmRoot, '@slayzone/computer', '1.0.0')
     setDistTags({ latest: '1.0.0', beta: '1.2.0-beta.3' })
     {
       await runUpdate()
@@ -276,7 +276,7 @@ async function main(): Promise<void> {
       check(
         'prerelease in use: targets beta for every outdated package',
         log.some((l) => l.includes('@slayzone/cli@1.2.0-beta.3')) &&
-          log.some((l) => l.includes('@slayzone/runner@1.2.0-beta.3')),
+          log.some((l) => l.includes('@slayzone/computer@1.2.0-beta.3')),
         log.join('|')
       )
     }
@@ -376,7 +376,7 @@ async function main(): Promise<void> {
     resetNpm()
     enableBun()
     clearInstallLogs()
-    seed(bunGlobalNodeModules, '@slayzone/runner', '0.9.0') // native deps
+    seed(bunGlobalNodeModules, '@slayzone/computer', '0.9.0') // native deps
     setDistTags({ latest: '1.0.0' })
     {
       const { stdout } = await runUpdate()
@@ -393,7 +393,7 @@ async function main(): Promise<void> {
       )
       check(
         'bun-only: installs the outdated package at the target version',
-        log.some((l) => l.includes('@slayzone/runner@1.0.0')),
+        log.some((l) => l.includes('@slayzone/computer@1.0.0')),
         log.join('|')
       )
     }

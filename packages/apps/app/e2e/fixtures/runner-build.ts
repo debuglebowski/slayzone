@@ -2,7 +2,7 @@
  * Shared runner-bundle builder for e2e.
  *
  * The runner bundle is NOT part of the app build pipeline (it has its own
- * `packages/apps/runner/build.mjs`), but e2e now boots runner-ON by default —
+ * `packages/apps/computer/build.mjs`), but e2e now boots runner-ON by default —
  * every worker's app spawns the co-located runner from `dist/bin.cjs`. So the
  * bundle has to exist before ANY spec launches, which is why `global-setup.ts`
  * calls this once per run rather than each runner spec doing it itself.
@@ -19,7 +19,7 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP_DIR = path.resolve(__dirname, '..', '..')
-const RUNNER_DIR = path.resolve(APP_DIR, '..', 'runner')
+const RUNNER_DIR = path.resolve(APP_DIR, '..', 'computer')
 
 /** Absolute path to the bundle the local-runner supervisor spawns. */
 export const RUNNER_BIN = path.join(RUNNER_DIR, 'dist', 'bin.cjs')

@@ -59,12 +59,6 @@ const restartLocalRunnerSpy = vi.fn(() => Promise.resolve({ ok: true as const })
 /** The manual "re-check which runners are connected" round trip. */
 const refetchSpy = vi.fn(() => Promise.resolve({} as any))
 
-/** What `workspace.gitReadiness` answers for every runner row in a test. */
-let gitReadinessResult: { gitInstalled: boolean; ghAuthenticated: boolean; detail?: string } = {
-  gitInstalled: true,
-  ghAuthenticated: true
-}
-
 /** Reads/writes of a runner's filesystem path-jail, tagged with the asking hub. */
 const editRootsSpy = vi.fn(
   (_call: { op: 'load' | 'save'; hub: string; runnerId: string; roots?: string[] }) => {}
@@ -81,14 +75,6 @@ vi.mock('@slayzone/transport/client', () => ({
         list: { queryOptions: () => ({ __hub: hub }), queryFilter: () => ({ __hub: hub }) },
         mintJoinToken: { mutationOptions: () => ({ __key: 'mint', __hub: hub }) },
         revokeRunner: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }
-      },
-      // Git readiness rides its own query per runner row. The marker is a quiet
-      // inline note, so the default answer here is "ready" — a probe that
-      // reported trouble in every test would bury the rows under noise.
-      workspace: {
-        gitReadiness: {
-          queryOptions: () => ({ __queryFn: () => gitReadinessResult })
-        }
       }
     }
   },
@@ -307,7 +293,6 @@ beforeEach(() => {
   queryState = 'success'
   // Reset per test: a readiness answer left over from a previous case would make
   // an unrelated row sprout a marker.
-  gitReadinessResult = { gitInstalled: true, ghAuthenticated: true }
   renderingHubId = 'local'
   mintSpy.mockClear()
   revokeSpy.mockClear()
@@ -514,37 +499,6 @@ describe('HubCard', () => {
   // The marker is deliberately quiet: nothing at all when the runner can do git
   // work, because a row per runner saying "fine" is noise. It appears only when
   // there is something an operator can act on.
-  it('says nothing about git when the runner is ready', async () => {
-    runnersByHub = { local: [makeRunner({ id: 'r-1', name: 'mac-studio' })] }
-    await renderLocal()
-    expect(screen.queryByTestId('runner-git-status')).toBeNull()
-  })
-
-  it('names a missing git and a signed-out gh, with the probe detail as the title', async () => {
-    gitReadinessResult = { gitInstalled: true, ghAuthenticated: false, detail: 'gh: not logged in' }
-    runnersByHub = { local: [makeRunner({ id: 'r-1', name: 'mac-studio' })] }
-    await renderLocal()
-    const marker = screen.getByTestId('runner-git-status')
-    expect(marker.textContent).toBe('gh not signed in')
-    expect(marker.getAttribute('title')).toBe('gh: not logged in')
-
-    cleanup()
-    // git is the hard requirement; gh only matters for the PR panel, so a runner
-    // missing git is reported as the more fundamental problem.
-    gitReadinessResult = { gitInstalled: false, ghAuthenticated: false }
-    await renderLocal()
-    expect(screen.getByTestId('runner-git-status').textContent).toBe('git missing')
-  })
-
-  // Probing an offline runner would report "not ready" for a machine that is
-  // merely asleep — a different and misleading claim.
-  it('says nothing about git for a runner that is not connected', async () => {
-    gitReadinessResult = { gitInstalled: false, ghAuthenticated: false }
-    runnersByHub = { local: [makeRunner({ id: 'r-1', name: 'mac-studio', connected: false })] }
-    await renderLocal()
-    expect(screen.queryByTestId('runner-git-status')).toBeNull()
-  })
-
   it('offers the allowed-folders editor on every runner row', async () => {
     runnersByHub = {
       local: [

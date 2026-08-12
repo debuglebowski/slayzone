@@ -16,7 +16,7 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  *      (separate https server from the shared http /trpc; see server.ts).
  *   2. Mint a real join token via the `runners.mintJoinToken` tRPC mutation
  *      (embeds the hub's bound `wss://…/runners` URL + cert fingerprint to pin).
- *   3. Spawn the bundled @slayzone/runner as a loopback child process, pointed
+ *   3. Spawn the bundled @slayzone/computer as a loopback child process, pointed
  *      at that token → it dials the hub, enrolls, and appears connected in
  *      `runners.list`.
  *   4. Bind a seeded task to that runnerId (`setTaskRunner`), open a `terminal`
@@ -50,11 +50,11 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 const APP_DIR = path.resolve(__dirname, '..', '..')
-const RUNNER_DIR = path.resolve(APP_DIR, '..', 'runner')
+const RUNNER_DIR = path.resolve(APP_DIR, '..', 'computer')
 const RUNNER_BIN = path.join(RUNNER_DIR, 'dist', 'bin.cjs')
 
 /** Build the runner bundle on demand — it is not part of the app build pipeline
- *  (see packages/apps/runner/build.mjs). Idempotent: skip when the bundle is
+ *  (see packages/apps/computer/build.mjs). Idempotent: skip when the bundle is
  *  present AND newer than every runner source file, else (re)build. */
 function ensureRunnerBuilt(): void {
   let needsBuild = !fs.existsSync(RUNNER_BIN)

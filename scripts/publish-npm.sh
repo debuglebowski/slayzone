@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# publish-npm.sh — build, verify, and publish @slayzone/hub, @slayzone/runner and
+# publish-npm.sh — build, verify, and publish @slayzone/hub, @slayzone/computer and
 # @slayzone/cli to npm.
 #
 # hub + runner are install-time-rebuild packages (native addons); the CLI has no
@@ -53,7 +53,7 @@ git -C "$REPO_ROOT" worktree add --detach "$WT" HEAD
 cd "$WT"
 pnpm install --frozen-lockfile
 pnpm --filter @slayzone/hub build
-pnpm --filter @slayzone/runner build
+pnpm --filter @slayzone/computer build
 pnpm --filter @slayzone/cli build
 
 # --- rewrite each package.json into a publishable, install-time-rebuild manifest ---
@@ -91,7 +91,7 @@ echo "==> Rewriting publish manifests"
 publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub ./dist/bin.cjs \
   "SlayZone hub — headless server (DB, routers, auth, runner gateway)" \
   better-sqlite3 node-pty bufferutil utf-8-validate
-publish_manifest packages/apps/runner "@slayzone/runner" slayzone-runner ./dist/bin.cjs \
+publish_manifest packages/apps/computer "@slayzone/computer" slayzone-computer ./dist/bin.cjs \
   "SlayZone runner — remote execution node (pty, git, fs, processes)" \
   node-pty bufferutil utf-8-validate
 # The CLI has NO native deps: build.mjs inlines every workspace dep and leaves only
@@ -123,13 +123,13 @@ authentication on `/trpc` is not yet implemented. Runner traffic (`/runners`) is
 
 GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
-cat > packages/apps/runner/README.md <<'EOF'
-# @slayzone/runner (SlayZone runner)
+cat > packages/apps/computer/README.md <<'EOF'
+# @slayzone/computer (SlayZone runner)
 
 A SlayZone execution node. Dials OUT to a hub over pinned `wss://` using a join
 token (mint one on the hub), then runs terminals/agents/git on this machine.
 
-    SLAYZONE_HUB_JOIN_TOKEN=<token from the hub> slayzone-runner
+    SLAYZONE_HUB_JOIN_TOKEN=<token from the hub> slayzone-computer
 
 The join token embeds the hub URL + cert fingerprint, so nothing else is
 required.
@@ -198,10 +198,10 @@ EOF
 # --- pack all three ---
 echo "==> npm pack"
 ( cd packages/apps/hub && npm pack --silent )
-( cd packages/apps/runner && npm pack --silent )
+( cd packages/apps/computer && npm pack --silent )
 ( cd packages/apps/cli && npm pack --silent )
 HUB_TGZ="$WT/packages/apps/hub/$(ls packages/apps/hub/*.tgz | xargs -n1 basename | tail -1)"
-RUN_TGZ="$WT/packages/apps/runner/$(ls packages/apps/runner/*.tgz | xargs -n1 basename | tail -1)"
+RUN_TGZ="$WT/packages/apps/computer/$(ls packages/apps/computer/*.tgz | xargs -n1 basename | tail -1)"
 CLI_TGZ="$WT/packages/apps/cli/$(ls packages/apps/cli/*.tgz | xargs -n1 basename | tail -1)"
 echo "   $HUB_TGZ"
 echo "   $RUN_TGZ"
@@ -229,7 +229,7 @@ mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
 # the same files npx runs — before anything else, so the failure names the
 # cause instead of surfacing as a confusing boot error further down.
 for b in "$SMOKE/hub/node_modules/.bin/slayzone-hub" \
-         "$SMOKE/runner/node_modules/.bin/slayzone-runner" \
+         "$SMOKE/runner/node_modules/.bin/slayzone-computer" \
          "$SMOKE/cli/node_modules/.bin/slay"; do
   # `.bin` entries are symlinks on posix and shim scripts on Windows; resolve so
   # we read the bundle itself.
@@ -311,7 +311,7 @@ echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_JOIN_TOKEN="$JOIN_TOKEN" \
   SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
-  "$SMOKE/runner/node_modules/.bin/slayzone-runner" > "$SMOKE/runner.log" 2>&1 &
+  "$SMOKE/runner/node_modules/.bin/slayzone-computer" > "$SMOKE/runner.log" 2>&1 &
 RPID=$!
 
 # Assert enrollment via the RUNNER's stdout: on a fresh runner the dialer logs
@@ -407,6 +407,6 @@ publish_one() {
   echo "   published $name@$VERSION"
 }
 publish_one packages/apps/hub "@slayzone/hub"
-publish_one packages/apps/runner "@slayzone/runner"
+publish_one packages/apps/computer "@slayzone/computer"
 publish_one packages/apps/cli "@slayzone/cli"
-echo "==> Done — @slayzone/hub + @slayzone/runner + @slayzone/cli @$VERSION at tag: $NPM_TAG"
+echo "==> Done — @slayzone/hub + @slayzone/computer + @slayzone/cli @$VERSION at tag: $NPM_TAG"

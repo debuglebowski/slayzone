@@ -71,7 +71,7 @@ export default function globalSetup(): void {
   // bundle, identical path. Killing it took down every agent pty on the machine
   // once per test run; `killStale` now requires the Playwright env marker, which
   // only a test-run process carries.
-  killStale('runner/dist/bin\\.cjs', 'runner')
+  killStale('computer/dist/bin\\.cjs', 'computer')
 
   // Under Playwright the app loads from out/main, so the sidecar's dev
   // scriptPath (`app.getAppPath()/../hub/dist/bin.cjs`) resolves to
@@ -85,14 +85,14 @@ export default function globalSetup(): void {
   }
 
   // Same shape for the local runner (hub/runner split): its dev scriptPath
-  // (`app.getAppPath()/../runner/dist/bin.cjs`) resolves to out/runner/... under
+  // (`app.getAppPath()/../computer/dist/bin.cjs`) resolves to out/computer/... under
   // Playwright, so the runner-loopback auto-enroll spec can find the bundle the
-  // runner build produced at packages/apps/runner/dist. Idempotent.
-  const runnerLinkPath = path.join(appDir, 'out', 'runner')
+  // runner build produced at packages/apps/computer/dist. Idempotent.
+  const runnerLinkPath = path.join(appDir, 'out', 'computer')
   if (!fs.existsSync(runnerLinkPath)) {
     fs.mkdirSync(path.dirname(runnerLinkPath), { recursive: true })
-    fs.symlinkSync(path.join('..', '..', 'runner'), runnerLinkPath)
-    console.log('[global-setup] Created out/runner symlink for the local runner')
+    fs.symlinkSync(path.join('..', '..', 'computer'), runnerLinkPath)
+    console.log('[global-setup] Created out/computer symlink for the local computer')
   }
 
   // e2e is runner-ON by default (every worker app auto-enrolls a co-located

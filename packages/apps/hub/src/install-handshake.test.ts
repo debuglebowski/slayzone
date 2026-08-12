@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const HUB_DIR = join(__dirname, '..') // packages/apps/hub
-const RUNNER_DIR = join(HUB_DIR, '..', 'runner') // packages/apps/runner
+const RUNNER_DIR = join(HUB_DIR, '..', 'computer') // packages/apps/computer
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const RUNNER_BIN = join(RUNNER_DIR, 'dist', 'bin.cjs')
 const ELECTRON_BIN = require('electron') as unknown as string

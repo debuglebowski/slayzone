@@ -98,7 +98,7 @@ const RUNNER_SPEC: ServiceUnitSpec = {
   name: 'builder',
   root: '/srv/runners/builder',
   command: '/usr/local/bin/node',
-  args: ['/opt/runner/dist/bin.cjs'],
+  args: ['/opt/computer/dist/bin.cjs'],
   logDir: '/srv/runners/builder/logs'
 }
 
@@ -334,7 +334,7 @@ console.log('─'.repeat(40))
 
 test('runner identity is namespaced apart from the hub', () => {
   assertEq(launchdLabel('runner', 'builder'), 'com.slayzone.runner.builder', 'launchd label')
-  assertEq(systemdUnitName('runner', 'builder'), 'slayzone-runner-builder.service', 'systemd unit')
+  assertEq(systemdUnitName('runner', 'builder'), 'slayzone-computer-builder.service', 'systemd unit')
   // Same NAME under the two kinds must never resolve to the same file, or
   // `runner rm dev` would delete a hub named dev.
   assert(

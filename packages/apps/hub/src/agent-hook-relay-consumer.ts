@@ -1,6 +1,6 @@
 import type { RestApiDeps, TerminalStateBridge } from '@slayzone/transport/server'
 import { processAgentHook } from '@slayzone/transport/server'
-import { AGENT_HOOK_EVENT_NAME } from '@slayzone/runner-transport/shared'
+import { AGENT_HOOK_EVENT_NAME } from '@slayzone/computer-transport/shared'
 
 /**
  * Minimal slice of the hub runner gateway this consumer needs: subscribe to the

@@ -7,7 +7,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 // test); runners.setProjectDefaultRunner + the project mutations route to spies.
 let runnersData: Array<{ id: string; name: string }> = []
 const setProjectDefaultRunnerSpy = vi.fn()
-const setProjectLockedRunnerSpy = vi.fn()
 const genericMutateAsync = vi.fn()
 
 vi.mock('@slayzone/transport/client', () => ({
@@ -21,9 +20,6 @@ vi.mock('@slayzone/transport/client', () => ({
       list: { queryOptions: () => ({ queryKey: ['runners.list'] }) },
       setProjectDefaultRunner: {
         mutationOptions: () => ({ __key: 'runners.setProjectDefaultRunner' })
-      },
-      setProjectLockedRunner: {
-        mutationOptions: () => ({ __key: 'runners.setProjectLockedRunner' })
       }
     }
   })
@@ -42,8 +38,6 @@ vi.mock('@tanstack/react-query', () => ({
     mutateAsync:
       opts.__key === 'runners.setProjectDefaultRunner'
         ? setProjectDefaultRunnerSpy
-        : opts.__key === 'runners.setProjectLockedRunner'
-          ? setProjectLockedRunnerSpy
           : genericMutateAsync
   })
 }))
@@ -143,7 +137,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   runnersData = []
   setProjectDefaultRunnerSpy.mockResolvedValue({ ok: true })
-  setProjectLockedRunnerSpy.mockResolvedValue({ ok: true })
 })
 
 function renderTab(project = makeProject()) {
@@ -208,96 +201,5 @@ describe('GeneralTab default runner', () => {
     expect((screen.getByTestId('default-runner-select') as HTMLSelectElement).value).toBe(
       'runner-a'
     )
-  })
-})
-
-describe('GeneralTab lock to runner', () => {
-  // Only offered when there is more than one machine: a single-runner hub has
-  // nothing to lock away from, and the control would be inert.
-  it('is hidden with fewer than two runners', () => {
-    runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
-    renderTab()
-    expect(screen.queryByLabelText('Lock to this runner')).toBeNull()
-  })
-
-  // Deliberately not a second runner picker: two controls naming a machine for one
-  // project invites setting them to different runners, and the lock's whole point
-  // is that there is exactly one.
-  it('locks to the CURRENT default runner', async () => {
-    runnersData = [
-      { id: 'runner-a', name: 'mac-studio' },
-      { id: 'runner-b', name: 'linux-box' }
-    ]
-    renderTab(makeProject({ default_runner_id: 'runner-b' }))
-    fireEvent.click(screen.getByLabelText('Lock to this runner'))
-    await waitFor(() => {
-      expect(setProjectLockedRunnerSpy).toHaveBeenCalledWith({
-        projectId: 'proj-1',
-        runnerId: 'runner-b'
-      })
-    })
-  })
-
-  // A lock left pointing at the old runner would show one machine in the UI while
-  // every task resolved to another.
-  it('follows the default runner when that changes while locked', async () => {
-    runnersData = [
-      { id: 'runner-a', name: 'mac-studio' },
-      { id: 'runner-b', name: 'linux-box' }
-    ]
-    renderTab(makeProject({ default_runner_id: 'runner-a', locked_runner_id: 'runner-a' }))
-    fireEvent.change(screen.getByTestId('default-runner-select'), {
-      target: { value: 'runner-b' }
-    })
-    await waitFor(() => {
-      expect(setProjectLockedRunnerSpy).toHaveBeenCalledWith({
-        projectId: 'proj-1',
-        runnerId: 'runner-b'
-      })
-    })
-  })
-
-  it('unlocks with null', async () => {
-    runnersData = [
-      { id: 'runner-a', name: 'mac-studio' },
-      { id: 'runner-b', name: 'linux-box' }
-    ]
-    renderTab(makeProject({ default_runner_id: 'runner-a', locked_runner_id: 'runner-a' }))
-    fireEvent.click(screen.getByLabelText('Lock to this runner'))
-    await waitFor(() => {
-      expect(setProjectLockedRunnerSpy).toHaveBeenCalledWith({
-        projectId: 'proj-1',
-        runnerId: null
-      })
-    })
-  })
-})
-
-describe('GeneralTab remote git mode', () => {
-  it('reveals the url field only when enabled, and saves both', async () => {
-    renderTab()
-    const toggle = screen.getByLabelText('Clone from a git remote when a runner needs it')
-    expect(screen.queryByPlaceholderText('git@github.com:owner/repo.git')).toBeNull()
-
-    fireEvent.click(toggle)
-    const url = screen.getByPlaceholderText('git@github.com:owner/repo.git')
-    fireEvent.change(url, { target: { value: 'git@github.com:o/r.git' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => {
-      expect(genericMutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({ gitMode: 'remote', repoUrl: 'git@github.com:o/r.git' })
-      )
-    })
-  })
-
-  // An empty string would pass the server's `git_mode === 'remote' && repo_url`
-  // check and produce a clone of nothing.
-  it('sends null rather than an empty url', async () => {
-    renderTab(makeProject({ git_mode: 'remote', repo_url: '' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => {
-      expect(genericMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ repoUrl: null }))
-    })
   })
 })

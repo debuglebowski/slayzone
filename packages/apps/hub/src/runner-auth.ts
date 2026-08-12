@@ -2,7 +2,7 @@
  * Runner auth adapter factory.
  *
  * Pure glue between three dark hub/runner-split domains and the runner hub
- * gateway: it adapts the `@slayzone/runners` store + join-token verifier and the
+ * gateway: it adapts the `@slayzone/computers` store + join-token verifier and the
  * `@slayzone/hub-auth` API-key mint/verify into the exact two callbacks the
  * gateway injects — `verifyEnrollment` and `verifyApiKey`. This module reaches
  * into no persistence of its own; it consumes each domain via its public barrel.
@@ -18,8 +18,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import type { HubRunnerGatewayOptions } from '@slayzone/runner-transport/server'
-import { RunnerTransportErrorCodes, RpcError } from '@slayzone/runner-transport/shared'
+import type { HubRunnerGatewayOptions } from '@slayzone/computer-transport/server'
+import { RunnerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
 import { type HubAuth, mintRunnerApiKey, verifyRunnerApiKey } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
@@ -32,7 +32,7 @@ import {
   retireStaleLocalRunners,
   touchRunnerLastSeen,
   verifyJoinToken
-} from '@slayzone/runners/server'
+} from '@slayzone/computers/server'
 
 /**
  * The two auth callbacks the runner hub gateway injects, sliced straight off the

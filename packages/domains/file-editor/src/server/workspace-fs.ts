@@ -123,7 +123,6 @@ export interface SearchResult {
 export interface ProjectLocation {
   /** Null = this runner has no checkout of that project. A real state. */
   path: string | null
-  source?: 'adopted' | 'provisioned'
   /** False when the recorded path has since vanished from disk. */
   exists?: boolean
 }
@@ -144,23 +143,8 @@ export interface LocalWorkspaceFs {
   setAllowedRoots(roots: string[]): Promise<SetRootsResult>
   discoverRepos(rootPath: string, maxDepth?: number): Promise<DiscoveredRepo[]>
   resolveProjectPath(projectId: string): ProjectLocation
-  setProjectPath(
-    projectId: string,
-    path: string,
-    source: 'adopted' | 'provisioned'
-  ): { path: string }
+  setProjectPath(projectId: string, path: string): { path: string }
   forgetProjectPath(projectId: string): void
-  ensureProjectCheckout(projectId: string): {
-    path: string | null
-    outcome: 'present' | 'cloned' | 'missing' | 'unavailable'
-  }
-  gitReadiness(): {
-    gitInstalled: boolean
-    ghInstalled: boolean
-    ghAuthenticated: boolean
-    repoReachable?: boolean
-    detail?: string
-  }
 
   readDir(rootPath: string, dirPath: string): DirEntry[]
   readFile(rootPath: string, filePath: string, force?: boolean): ReadFileResult
@@ -201,52 +185,14 @@ export interface WorkspaceFsAdapters {
    * column, which could only ever be right about one machine. Ask the runner.
    */
   resolveProjectPath(runnerId: string | null, projectId: string): Promise<ProjectLocation>
-  /** Record where a project lives on that runner (adopt, or after a clone). */
+  /** Record the folder the user pointed at as this project's checkout there. */
   setProjectPath(
     runnerId: string | null,
     projectId: string,
-    path: string,
-    source: 'adopted' | 'provisioned'
+    path: string
   ): Promise<{ path: string }>
   /** Drop the mapping. Never touches the checkout itself. */
   forgetProjectPath(runnerId: string | null, projectId: string): Promise<void>
-  /**
-   * Make a project usable on that runner before an agent starts — cloning it
-   * when `repoUrl` is given (remote-git mode). Without a URL a missing checkout
-   * is reported, never recreated: the folder was one the user chose.
-   */
-  ensureProjectCheckout(
-    runnerId: string | null,
-    input: {
-      projectId: string
-      checkoutId: string
-      repoUrl?: string
-      branch?: string
-      workspaceRoot?: string
-    }
-  ): Promise<{
-    path: string | null
-    outcome: 'present' | 'cloned' | 'missing' | 'unavailable'
-    error?: string
-  }>
-  /**
-   * Can that machine do git work with the credentials it already has?
-   *
-   * SlayZone stores no git secrets — agents already push from the runner using
-   * its own `gh auth` / ssh-agent. This makes that prerequisite visible instead
-   * of taking custody of it.
-   */
-  gitReadiness(
-    runnerId: string | null,
-    repoUrl?: string
-  ): Promise<{
-    gitInstalled: boolean
-    ghInstalled: boolean
-    ghAuthenticated: boolean
-    repoReachable?: boolean
-    detail?: string
-  }>
-
   /**
    * Every git repo under `rootPath`, discovered ON the target machine.
    *
@@ -402,7 +348,7 @@ export function createLocalWorkspaceFs(): LocalWorkspaceFs {
     resolveProjectPath(projectId) {
       const path = localProjectPaths.get(projectId)
       if (!path) return { path: null }
-      return { path, source: 'adopted' as const, exists: existsSync(path) }
+      return { path, exists: existsSync(path) }
     },
     setProjectPath(projectId, path) {
       const abs = realpathSync.native(resolve(path))
@@ -412,17 +358,6 @@ export function createLocalWorkspaceFs(): LocalWorkspaceFs {
     forgetProjectPath(projectId) {
       localProjectPaths.delete(projectId)
     },
-    // No runner means no provisioning story: this host has no workspace root and
-    // no clone lifecycle. Report what is there and stop, rather than inventing a
-    // checkout in a process that only exists for the fork sidecar and tests.
-    ensureProjectCheckout(projectId) {
-      const path = localProjectPaths.get(projectId)
-      if (!path) return { path: null, outcome: 'unavailable' as const }
-      return existsSync(path)
-        ? { path, outcome: 'present' as const }
-        : { path, outcome: 'missing' as const }
-    },
-
     readDir,
     readFile,
     writeFile,
@@ -453,15 +388,6 @@ export function createLocalWorkspaceFs(): LocalWorkspaceFs {
     },
 
     watch: subscribeFileWatcher,
-    // Nothing here provisions a checkout, so there is no credential story to
-    // report on. Claiming readiness would be a guess about a machine that never
-    // clones anything.
-    gitReadiness: () => ({
-      gitInstalled: false,
-      ghInstalled: false,
-      ghAuthenticated: false,
-      detail: 'this host does not provision checkouts'
-    }),
     discoverRepos
   }
 }
@@ -483,18 +409,8 @@ export function createLocalWorkspaceFsAdapters(
     pathExists: async (_r, path) => local.pathExists(path),
     setAllowedRoots: async (_r, roots) => local.setAllowedRoots(roots),
     resolveProjectPath: async (_r, projectId) => local.resolveProjectPath(projectId),
-    setProjectPath: async (_r, projectId, path, source) =>
-      local.setProjectPath(projectId, path, source),
+    setProjectPath: async (_r, projectId, path) => local.setProjectPath(projectId, path),
     forgetProjectPath: async (_r, projectId) => local.forgetProjectPath(projectId),
-    ensureProjectCheckout: async (_r, input) => local.ensureProjectCheckout(input.projectId),
-    // No runner: nothing here has a credential story to report on, and claiming
-    // readiness for a host that never clones would be a guess.
-    gitReadiness: async () => ({
-      gitInstalled: false,
-      ghInstalled: false,
-      ghAuthenticated: false,
-      detail: 'no runner to probe — this host does not provision checkouts'
-    }),
 
     readDir: async (_r, rootPath, dirPath) => local.readDir(rootPath, dirPath),
     readFile: async (_r, rootPath, filePath, force) => local.readFile(rootPath, filePath, force),

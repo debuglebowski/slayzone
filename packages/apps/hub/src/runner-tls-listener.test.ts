@@ -33,7 +33,7 @@ import WebSocket, { WebSocketServer } from 'ws'
 import {
   certMatchesFingerprint,
   certSha256FingerprintFromDer
-} from '@slayzone/runner-transport/shared'
+} from '@slayzone/computer-transport/shared'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import { deriveRunnerHubUrl } from './runner-listener.js'
 

@@ -123,14 +123,14 @@ import { createLocalWorkspaceFs } from '@slayzone/file-editor/server'
 import { runGhLocally, setGhExecutor } from '@slayzone/worktrees/server'
 import { missingRootsForProjects } from './local-runner-roots'
 import { seedProjectPaths } from './seed-runner-project-paths'
-import { recordRunnerProjectPaths } from '@slayzone/runners/server'
+import { recordRunnerProjectPaths } from '@slayzone/computers/server'
 // Runner transport: runner gateway + hub-auth + runner resolution, wired
 // unconditionally at boot (a hub always accepts runners).
 import {
   ghExecResultSchema,
   HubToRunnerMethods,
   projectListResultSchema
-} from '@slayzone/runner-transport/shared'
+} from '@slayzone/computer-transport/shared'
 import {
   createHubRunnerGateway,
   createRoutingChatBackend,
@@ -138,7 +138,7 @@ import {
   createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
   type HubRunnerGateway
-} from '@slayzone/runner-transport/server'
+} from '@slayzone/computer-transport/server'
 import {
   createHubAuth,
   createHubUser,
@@ -148,7 +148,7 @@ import {
 } from '@slayzone/hub-auth/server'
 import { verifyRestBearer } from './rest-auth.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
-import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/runners/server'
+import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/computers/server'
 import { createRunnerAuthAdapters } from './runner-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
@@ -1429,8 +1429,7 @@ export function composeServer(opts: {
         const outcome = await seedProjectPaths(rows, {
           resolve: (projectId) => workspaceFs.resolveProjectPath(runnerId, projectId),
           exists: (path) => workspaceFs.pathExists(runnerId, path),
-          adopt: (projectId, path) =>
-            workspaceFs.setProjectPath(runnerId, projectId, path, 'adopted')
+          adopt: (projectId, path) => workspaceFs.setProjectPath(runnerId, projectId, path)
         })
         if (outcome.adopted.length === 0) return
         recordDiagnosticEvent({
@@ -1465,11 +1464,7 @@ export function composeServer(opts: {
         await recordRunnerProjectPaths(
           db,
           runnerId,
-          parsed.data.projects.map((p) => ({
-            projectId: p.projectId,
-            path: p.path,
-            source: p.source
-          }))
+          parsed.data.projects.map((p) => ({ projectId: p.projectId, path: p.path }))
         )
       } catch (err) {
         // A runner too old to answer `project.list`, or one that dropped

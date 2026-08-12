@@ -75,7 +75,7 @@ import { readServiceLogTail } from '../service'
 const REPO_ROOT = process.env.SLZ_REPO_ROOT ?? process.cwd()
 const CLI_DIR = resolve(REPO_ROOT, 'packages/apps/cli')
 const HUB_DIR = resolve(REPO_ROOT, 'packages/apps/hub')
-const RUNNER_DIR = resolve(REPO_ROOT, 'packages/apps/runner')
+const RUNNER_DIR = resolve(REPO_ROOT, 'packages/apps/computer')
 const CLI_BIN = join(CLI_DIR, 'dist', 'slay.js')
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const RUNNER_BIN = join(RUNNER_DIR, 'dist', 'bin.cjs')
@@ -634,10 +634,7 @@ async function main(): Promise<void> {
       )
       const res = slayNoService(['runner', 'ls'], orphanRoot)
       assertEq(res.status, 0, `ls exits 0 (stderr: ${res.stderr})`)
-      assert(
-        new RegExp(orphanName).test(res.stdout),
-        `lists the config-only runner: ${res.stdout}`
-      )
+      assert(new RegExp(orphanName).test(res.stdout), `lists the config-only runner: ${res.stdout}`)
       // "unmanaged", not "stopped": `start` has to REGISTER it, not merely resume it,
       // and calling that "stopped" would misdescribe what happens next.
       assert(/unmanaged/.test(res.stdout), `marks it unmanaged: ${res.stdout}`)
@@ -701,7 +698,7 @@ async function main(): Promise<void> {
       // file would be the bug: the wait would pass by reading a stale artifact
       // instead of the unit's real output.
       assertEq(
-        readServiceLogTail('runner', logRoot, 200, 'slayzone-runner-nonexistent.service'),
+        readServiceLogTail('runner', logRoot, 200, 'slayzone-computer-nonexistent.service'),
         '',
         'journald source never falls back to the log dir'
       )

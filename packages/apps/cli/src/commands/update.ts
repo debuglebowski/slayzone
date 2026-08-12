@@ -34,7 +34,7 @@ import { Command } from 'commander'
 import { listRegisteredUnits, type ServiceKind } from '@slayzone/platform/service-unit'
 import { fail, resolveBackend } from '../service'
 
-const PACKAGE_NAMES = ['@slayzone/cli', '@slayzone/runner', '@slayzone/hub'] as const
+const PACKAGE_NAMES = ['@slayzone/cli', '@slayzone/computer', '@slayzone/hub'] as const
 type PackageName = (typeof PACKAGE_NAMES)[number]
 
 /** Which `ServiceKind` a package's registered units live under — cli has none.
@@ -42,7 +42,7 @@ type PackageName = (typeof PACKAGE_NAMES)[number]
  *  / node-pty): exactly the two packages with a ServiceKind. */
 const KIND_FOR_PACKAGE: Partial<Record<PackageName, ServiceKind>> = {
   '@slayzone/hub': 'hub',
-  '@slayzone/runner': 'runner'
+  '@slayzone/computer': 'runner'
 }
 
 type ManagerId = 'npm' | 'pnpm' | 'bun'

@@ -1,0 +1,34 @@
+{
+  "name": "@slayzone/computer",
+  "version": "0.36.0-beta.17",
+  "private": true,
+  "type": "module",
+  "main": "./src/main.ts",
+  "types": "./src/main.ts",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "bin": {
+    "slayzone-computer": "./dist/bin.cjs"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@slayzone/file-editor": "workspace:*",
+    "@slayzone/hooks": "workspace:*",
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/computer-transport": "workspace:*",
+    "node-pty": "^1.1.0",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@slayzone/computers": "workspace:*",
+    "@types/node": "^22.19.1",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

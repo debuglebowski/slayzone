@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { mintJoinToken as storeMintJoinToken } from '@slayzone/runners/server'
+import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 
 /**

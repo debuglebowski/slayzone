@@ -285,7 +285,7 @@ layer (`szjt1.`, `join_tokens`, `mintJoinToken`, `POST /api/runners/join-token`)
 them, both are `secret` scope, and a mix-up fails closed on a missing required
 var. The old name is RETIRED outright — no read-only alias. The first landing kept
 one on a "published operator contract" premise that was simply false: the
-published runner betas (`@slayzone/runner` 0.36.0-beta.2/3) read
+published runner betas (`@slayzone/computer` 0.36.0-beta.2/3) read
 `SLAYZONE_JOIN_TOKEN`, and `SLAYZONE_RUNNER_JOIN_TOKEN` only ever existed on
 unreleased main (introduced in `0156d82b5`, which no `v0.36.0-beta.*` tag
 contains), so no operator env anywhere carries it. It is therefore unmanifested

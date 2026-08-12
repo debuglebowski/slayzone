@@ -406,7 +406,7 @@ import {
   taskWindowsEvents
 } from './task-windows'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
-import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/runners/shared'
+import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/computers/shared'
 import {
   registerDiagnosticsHandlers,
   registerProcessDiagnostics,
@@ -740,7 +740,7 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
 
   const { startLocalRunner } = await import('./local-runner-supervisor')
   const runnerScriptPath = is.dev
-    ? join(app.getAppPath(), '../runner/dist/bin.cjs')
+    ? join(app.getAppPath(), '../computer/dist/bin.cjs')
     : join(process.resourcesPath, 'runner', 'bin.cjs')
   // The local runner gets its OWN channel-scoped root, handed over explicitly
   // below — it no longer shares one ambient root with the hub (which is how a
@@ -2473,7 +2473,7 @@ app
           })
       })
 
-    // Local-runner supervisor. Spawns a co-located @slayzone/runner subprocess so
+    // Local-runner supervisor. Spawns a co-located @slayzone/computer subprocess so
     // THIS machine can host runner work, pointed at the local hub's runner URL —
     // and AUTO-ENROLLS it with zero manual token. Always runs in local mode (a
     // hub always accepts runners; there is no mode to enable). Gated only on

@@ -33,7 +33,7 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
   if (a !== e) throw new Error(`${msg}: expected ${e}, got ${a}`)
 }
 
-const RUNNER = '/repo/packages/apps/runner/dist/bin.cjs'
+const RUNNER = '/repo/packages/apps/computer/dist/bin.cjs'
 /** An environ blob shaped like `ps eww` output. */
 const devEnv = `PATH=/usr/bin SLAYZONE_SUPERVISED=1 SHELL=/bin/zsh`
 const e2eEnv = `PATH=/usr/bin SLAYZONE_SUPERVISED=1 PLAYWRIGHT=1 SHELL=/bin/zsh`

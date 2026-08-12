@@ -15,7 +15,7 @@ called in exactly one place: `packages/apps/app/src/main/index.ts:1964` — the
 **Electron main process**.
 
 PTYs no longer live there. They are spawned by the **runner**
-(`packages/apps/runner/src/handlers/pty.ts`, `node-pty.spawn`) and managed by
+(`packages/apps/computer/src/handlers/pty.ts`, `node-pty.spawn`) and managed by
 the **hub**'s pty-manager (`packages/apps/hub/src/composition.ts`). Neither
 wires the recorder, so `spawnedSetter` is `null` in the process that owns the
 sessions and every call is a no-op.
@@ -28,7 +28,7 @@ tab-flag recorders are the same class, still unfixed.
 ### Measured evidence (dev DB, 2026-08-06)
 
 - Live agents right now: 14 `claude` processes, all children of PID 7872 =
-  `packages/apps/runner/dist/bin.cjs`.
+  `packages/apps/computer/dist/bin.cjs`.
 - `terminal_tabs.was_spawned = 0` for every one of their tasks.
 - Last quit (`00:42:47`) `app.quit_subprocess_shutdown` payload:
   `shutdownAllPtys {total: 0, exited: 0, killed: 0}` — main owns zero sessions,

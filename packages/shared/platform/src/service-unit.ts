@@ -112,7 +112,7 @@ const KINDS = {
   },
   runner: {
     labelPrefix: 'com.slayzone.runner.',
-    systemdPrefix: 'slayzone-runner-',
+    systemdPrefix: 'slayzone-computer-',
     description: 'SlayZone runner',
     outLog: 'runner.out.log',
     errLog: 'runner.err.log',
@@ -258,7 +258,9 @@ function probeUserBus(env: NodeJS.ProcessEnv): boolean {
     return out.trim().length > 0
   } catch (e) {
     const err = e as { stdout?: string | Buffer }
-    const state = (typeof err.stdout === 'string' ? err.stdout : err.stdout?.toString() ?? '').trim()
+    const state = (
+      typeof err.stdout === 'string' ? err.stdout : (err.stdout?.toString() ?? '')
+    ).trim()
     return Boolean(state) && !/^(offline|unknown)$/i.test(state)
   }
 }
@@ -289,7 +291,6 @@ export function explainNoBackend(reason: BackendReason): string {
   }
   return 'No user service manager is available here.'
 }
-
 
 /**
  * Absolute path of the unit file for `(kind, name)`. Deterministic — `start` and

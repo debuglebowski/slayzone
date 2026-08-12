@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 
 /**
- * Supervises a co-located @slayzone/runner subprocess (hub/runner split, wave 2B).
+ * Supervises a co-located @slayzone/computer subprocess (hub/runner split, wave 2B).
  *
  * Spawned in local mode (a hub always accepts runners; see index.ts).
  * this module is never imported/invoked ⇒ byte-identical boot.
@@ -23,7 +23,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
  * Exit code the runner uses for "the hub no longer recognizes me" (EX_CONFIG).
  *
  * Duplicated rather than imported: the app does not depend on
- * `@slayzone/runner-transport`, and taking a package dependency to share one
+ * `@slayzone/computer-transport`, and taking a package dependency to share one
  * integer would pull the whole transport tree into the main bundle. The canonical
  * definition is `RUNNER_EXIT_NEEDS_RE_ENROLLMENT` in
  * `runner-transport/src/shared/frames.ts` — keep them in step (a mismatch degrades

@@ -18,9 +18,8 @@ import { setRunnersDeps, type RunnersDeps } from '../app-deps.js'
 import {
   registerRunner,
   decodeJoinToken,
-  resolveTaskRunnerId,
-  setProjectLockedRunner
-} from '@slayzone/runners/server'
+  resolveTaskRunnerId
+} from '@slayzone/computers/server'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 
 const h = await createTestHarness()
@@ -174,29 +173,34 @@ test('runners.list: `usable` is independent of `connected`', async () => {
 
 // A chat agent and a terminal agent for the SAME task must land on the SAME
 // machine. Runner resolution is written TWICE — `resolveTaskRunnerId` in the
-// runners store, and an inlined statement in chat-data-ops — so a lock honoured
-// by one and not the other would split one task's work across two runners, only
-// one of which holds the checkout.
-test('project lock outranks the task pin, identically for pty and chat', async () => {
+// runners store, and an inlined statement in chat-data-ops — so any divergence
+// splits one task's work across two runners, only one of which holds the
+// checkout. This test exists to pin the two statements together; if you change
+// one COALESCE, this fails until you change the other.
+test('pty and chat resolve a task to the SAME runner at every precedence step', async () => {
   await h.slayDb.run(
     `INSERT INTO projects (id, name, color, sort_order, default_runner_id)
-     VALUES ('p-lock', 'P', '#fff', 0, 'r-default')`
+     VALUES ('p-res', 'P', '#fff', 0, 'r-default')`
   )
   await h.slayDb.run(
     `INSERT INTO tasks (id, project_id, title, status, runner_id)
-     VALUES ('t-lock', 'p-lock', 'T', 'todo', 'r-task')`
+     VALUES ('t-res', 'p-res', 'T', 'todo', 'r-task')`
   )
 
-  // Unlocked: the task's own pin wins, as it always has.
-  expect(await resolveTaskRunnerId(h.slayDb, 't-lock')).toBe('r-task')
-  expect(await createDbChatDataOps(h.slayDb).resolveRunnerId('t-lock')).toBe('r-task')
+  const both = async (taskId: string): Promise<[string | null, string | null]> => [
+    await resolveTaskRunnerId(h.slayDb, taskId),
+    await createDbChatDataOps(h.slayDb).resolveRunnerId(taskId)
+  ]
 
-  await setProjectLockedRunner(h.slayDb, 'p-lock', 'r-locked')
-  expect(await resolveTaskRunnerId(h.slayDb, 't-lock')).toBe('r-locked')
-  expect(await createDbChatDataOps(h.slayDb).resolveRunnerId('t-lock')).toBe('r-locked')
+  // The task's own pin wins over the project default.
+  expect(await both('t-res')).toEqual(['r-task', 'r-task'])
 
-  // And unpinning restores the previous answer rather than sticking.
-  await setProjectLockedRunner(h.slayDb, 'p-lock', null)
-  expect(await resolveTaskRunnerId(h.slayDb, 't-lock')).toBe('r-task')
-  expect(await createDbChatDataOps(h.slayDb).resolveRunnerId('t-lock')).toBe('r-task')
+  // Unpinned, it falls through to the project default.
+  await h.slayDb.run(`UPDATE tasks SET runner_id = NULL WHERE id = 't-res'`)
+  expect(await both('t-res')).toEqual(['r-default', 'r-default'])
+
+  // Neither set: null, so the caller applies its own fallback rather than
+  // silently inheriting some other project's machine.
+  await h.slayDb.run(`UPDATE projects SET default_runner_id = NULL WHERE id = 'p-res'`)
+  expect(await both('t-res')).toEqual([null, null])
 })

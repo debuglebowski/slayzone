@@ -286,13 +286,11 @@ export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
     },
 
     resolveRunnerId: async (taskId) => {
-      // `locked_runner_id` first, matching `resolveTaskRunnerId` in the runners
-      // store: a locked project's checkout lives at one path on one machine, so a
-      // task-level override would hand its agent a directory that need not exist
-      // there. Divergence here would route a chat agent and a terminal agent for
-      // the SAME task to different runners.
+      // Task pin over project default — IDENTICAL to `resolveTaskRunnerId` in
+      // the runners store. Divergence here would route a chat agent and a
+      // terminal agent for the SAME task to different runners.
       const row = await db.get<{ runner_id: string | null }>(
-        `SELECT COALESCE(p.locked_runner_id, t.runner_id, p.default_runner_id) AS runner_id
+        `SELECT COALESCE(t.runner_id, p.default_runner_id) AS runner_id
            FROM tasks t
            LEFT JOIN projects p ON p.id = t.project_id
           WHERE t.id = ?`,

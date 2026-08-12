@@ -122,7 +122,7 @@ run_test_electron_strict_loader packages/apps/hub/src/seed-runner-project-paths.
 # and was never wired. Pins that a report replaces a runner's rows wholesale (a
 # stale row would be trusted by reverse lookup) and that `resolve-by-path` still
 # answers from the legacy column during the upgrade window.
-run_test_electron_strict_loader packages/domains/runners/src/server/project-paths.test.ts
+run_test_electron_strict_loader packages/domains/computers/src/server/project-paths.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
 # has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
 run_test_electron_strict_loader packages/apps/hub/src/supervised-bootstrap.test.ts
@@ -521,8 +521,8 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/hub-auth/src/server/hub-auth.test.ts \
   packages/domains/hub-auth/src/server/users.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
-  packages/domains/runner-transport/src/server/exec-proxies.test.ts \
-  packages/apps/runner/src/ring-buffer.test.ts; then
+  packages/domains/computer-transport/src/server/exec-proxies.test.ts \
+  packages/apps/computer/src/ring-buffer.test.ts; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
@@ -535,8 +535,8 @@ fi
 # not a substitute: `fs.watch({recursive:true})` never delivers there, at any
 # timeout. Run each package's own suite instead.
 echo ""
-echo "=== packages/apps/runner (own vitest config) ==="
-if ( set -o pipefail; pnpm --filter @slayzone/runner test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
+echo "=== packages/apps/computer (own vitest config) ==="
+if ( set -o pipefail; pnpm --filter @slayzone/computer test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
@@ -544,8 +544,21 @@ fi
 
 # Same reason: the hub⇄runner fs round trip loads the real runner handlers.
 echo ""
-echo "=== packages/domains/runner-transport (own vitest config) ==="
-if ( set -o pipefail; pnpm --filter @slayzone/runner-transport test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
+echo "=== packages/domains/computer-transport (own vitest config) ==="
+if ( set -o pipefail; pnpm --filter @slayzone/computer-transport test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+fi
+
+# The runners DOMAIN suite (store, join-tokens, migration) was never registered
+# here, so three files' worth of assertions had gone stale unnoticed — the
+# migration test was asserting a column list two migrations out of date. Its
+# vitest.config.ts excludes `project-paths.test.ts`, which is an ipc-harness
+# suite run above by the strict loader.
+echo ""
+echo "=== packages/domains/computers (own vitest config) ==="
+if ( set -o pipefail; pnpm --filter @slayzone/computers test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))

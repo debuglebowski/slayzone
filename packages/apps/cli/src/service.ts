@@ -65,10 +65,10 @@ export function resolveBackend(): ServiceBackend {
 const PACKAGES = {
   hub: { pkg: '@slayzone/hub', bin: 'slayzone-hub', devDir: 'hub', envOverride: 'SLZ_HUB_BIN' },
   runner: {
-    pkg: '@slayzone/runner',
-    bin: 'slayzone-runner',
-    devDir: 'runner',
-    envOverride: 'SLZ_RUNNER_BIN'
+    pkg: '@slayzone/computer',
+    bin: 'slayzone-computer',
+    devDir: 'computer',
+    envOverride: 'SLZ_COMPUTER_BIN'
   }
 } as const satisfies Record<ServiceKind, unknown>
 

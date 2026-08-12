@@ -2,7 +2,7 @@
  * Unit tests for the HUB-side pty ring buffer.
  *
  * This buffer's job is different from the runner's mirror
- * (`packages/apps/runner/src/ring-buffer.ts`), and the difference decides the
+ * (`packages/apps/computer/src/ring-buffer.ts`), and the difference decides the
  * design:
  *
  *   - The runner's copy exists ONLY for short-range gap backfill, where a chunk

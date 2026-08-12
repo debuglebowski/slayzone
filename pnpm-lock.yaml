@@ -118,6 +118,9 @@ importers:
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../../domains/computers
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
@@ -160,9 +163,6 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
-      '@slayzone/runners':
-        specifier: workspace:*
-        version: link:../../domains/runners
       '@slayzone/search':
         specifier: workspace:*
         version: link:../../domains/search
@@ -453,6 +453,43 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/apps/computer:
+    dependencies:
+      '@slayzone/computer-transport':
+        specifier: workspace:*
+        version: link:../../domains/computer-transport
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../../domains/file-editor
+      '@slayzone/hooks':
+        specifier: workspace:*
+        version: link:../../shared/hooks
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
+      zod:
+        specifier: ^4
+        version: 4.3.5
+    devDependencies:
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../../domains/computers
+      '@types/node':
+        specifier: ^22.19.1
+        version: 22.19.7
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+
   packages/apps/hub:
     dependencies:
       '@slayzone/ai-config':
@@ -461,6 +498,12 @@ importers:
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
+      '@slayzone/computer-transport':
+        specifier: workspace:*
+        version: link:../../domains/computer-transport
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../../domains/computers
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
@@ -488,12 +531,6 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
-      '@slayzone/runner-transport':
-        specifier: workspace:*
-        version: link:../../domains/runner-transport
-      '@slayzone/runners':
-        specifier: workspace:*
-        version: link:../../domains/runners
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
@@ -646,43 +683,6 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-
-  packages/apps/runner:
-    dependencies:
-      '@slayzone/file-editor':
-        specifier: workspace:*
-        version: link:../../domains/file-editor
-      '@slayzone/hooks':
-        specifier: workspace:*
-        version: link:../../shared/hooks
-      '@slayzone/platform':
-        specifier: workspace:*
-        version: link:../../shared/platform
-      '@slayzone/runner-transport':
-        specifier: workspace:*
-        version: link:../../domains/runner-transport
-      node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
-      zod:
-        specifier: ^4
-        version: 4.3.5
-    devDependencies:
-      '@slayzone/runners':
-        specifier: workspace:*
-        version: link:../../domains/runners
-      '@types/node':
-        specifier: ^22.19.1
-        version: 22.19.7
-      esbuild:
-        specifier: ^0.25.0
-        version: 0.25.12
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
   packages/domains/agent-panels:
     dependencies:
@@ -895,6 +895,68 @@ importers:
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.8
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@24.12.0)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+
+  packages/domains/computer-transport:
+    dependencies:
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../diagnostics
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../processes
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../terminal
+      ws:
+        specifier: ^8.18.0
+        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      zod:
+        specifier: ^4
+        version: 4.3.5
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.1
+        version: 22.19.7
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+
+  packages/domains/computers:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+    devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      better-sqlite3:
+        specifier: ^12.8.0
+        version: 12.8.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1342,68 +1404,6 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-
-  packages/domains/runner-transport:
-    dependencies:
-      '@slayzone/diagnostics':
-        specifier: workspace:*
-        version: link:../diagnostics
-      '@slayzone/file-editor':
-        specifier: workspace:*
-        version: link:../file-editor
-      '@slayzone/processes':
-        specifier: workspace:*
-        version: link:../processes
-      '@slayzone/task':
-        specifier: workspace:*
-        version: link:../task
-      '@slayzone/terminal':
-        specifier: workspace:*
-        version: link:../terminal
-      ws:
-        specifier: ^8.18.0
-        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      zod:
-        specifier: ^4
-        version: 4.3.5
-    devDependencies:
-      '@types/node':
-        specifier: ^22.19.1
-        version: 22.19.7
-      '@types/ws':
-        specifier: ^8.5.13
-        version: 8.18.1
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
-
-  packages/domains/runners:
-    dependencies:
-      '@slayzone/platform':
-        specifier: workspace:*
-        version: link:../../shared/platform
-    devDependencies:
-      '@slayzone/test-utils':
-        specifier: workspace:*
-        version: link:../../shared/test-utils
-      '@slayzone/transport':
-        specifier: workspace:*
-        version: link:../../shared/transport
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
-      better-sqlite3:
-        specifier: ^12.8.0
-        version: 12.8.0
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@24.12.0)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
   packages/domains/search:
     dependencies:
@@ -2552,6 +2552,9 @@ importers:
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../../domains/computers
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
@@ -2573,9 +2576,6 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
-      '@slayzone/runners':
-        specifier: workspace:*
-        version: link:../../domains/runners
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings

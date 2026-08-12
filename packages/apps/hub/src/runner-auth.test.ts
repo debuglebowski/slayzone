@@ -20,7 +20,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { RUNNER_PROTOCOL_VERSION } from '@slayzone/runner-transport/shared'
+import { RUNNER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import { createHubAuth, RUNNER_KEY_PREFIX } from '@slayzone/hub-auth/server'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import {
@@ -29,7 +29,7 @@ import {
   listRunners,
   mintJoinToken,
   revokeRunner
-} from '@slayzone/runners/server'
+} from '@slayzone/computers/server'
 import { createSlayzoneDbAdapter } from '@slayzone/test-utils'
 import { runMigrations } from '@slayzone/transport/db-bootstrap'
 import { createRunnerAuthAdapters } from './runner-auth.js'

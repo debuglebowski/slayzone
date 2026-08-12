@@ -38,7 +38,7 @@ const require = createRequire(import.meta.url)
 const APP_DIR = path.resolve(__dirname, '..', '..')
 const HUB_BIN = path.resolve(APP_DIR, '..', 'hub', 'dist', 'bin.cjs')
 /** Built by `ensureRunnerBuilt()` in global-setup, so it exists before any spec. */
-const RUNNER_BIN = path.resolve(APP_DIR, '..', 'runner', 'dist', 'bin.cjs')
+const RUNNER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
 
 /**
  * The renderer test seams these specs drive from inside `page.evaluate`. Types are
