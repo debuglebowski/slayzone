@@ -88,6 +88,8 @@ export interface ComputerConfig {
   computerName?: string
   /** Full `ws(s)://…/computers` endpoint a standalone computer dials. */
   hubUrl?: string
+  /** Additional hubs this computer serves. See computer/config.ts. */
+  hubUrls?: string[]
   /** Filesystem roots the computer may operate under. Locally-declared, never pushed from the hub. Defaults to `[<ROOT>]` when absent. */
   allowedRoots?: string[]
   /** sha256 pin of the hub TLS leaf cert (lowercase hex). Normally the join token carries the pin instead. */

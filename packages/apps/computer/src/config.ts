@@ -26,6 +26,24 @@ import { decodeJoinToken } from '@slayzone/platform/join-token'
 export const computerConfigSchema = z.object({
   /** `ws://` or `wss://` hub computer endpoint. */
   hubUrl: z.string().min(1),
+  /**
+   * Additional hubs this computer serves, beyond `hubUrl`.
+   *
+   * OPT-IN, and absent by default. The credential store and the project-path
+   * store have BOTH been keyed by hub host since they were written, so serving
+   * several hubs needs no new persistence — only one dialer each.
+   *
+   * The cost is stated plainly because it cannot be designed away: every hub's
+   * work runs as the SAME OS user, in the same `$HOME`, with the same
+   * credentials. `allowedRoots` bounds the RPC surface, not the processes it
+   * spawns — one shell command inside a pty leaves it. So this is a convenience,
+   * not isolation: for real separation, run one computer per hub under its own
+   * OS account, which is the boundary the kernel actually enforces.
+   *
+   * No env channel: `SLAYZONE_HUB_ADDRESS` carries a single authority
+   * (`host[:port]`), and a comma-separated list would collide with that format.
+   */
+  hubUrls: z.array(z.string().min(1)).optional(),
   /** Required for first contact; later runs reconnect with stored credentials. */
   joinToken: z.string().min(1).optional(),
   /** Human-readable computer name shown on the hub. Defaults to the hostname. */
@@ -147,6 +165,7 @@ type Env = Record<string, string | undefined>
 function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
   const out: Partial<ComputerConfig> = {}
   if (shared.hubUrl !== undefined) out.hubUrl = shared.hubUrl
+  if (shared.hubUrls !== undefined) out.hubUrls = shared.hubUrls
   if (shared.joinToken !== undefined) out.joinToken = shared.joinToken
   if (shared.computerName !== undefined) out.name = shared.computerName
   // The FS path-jail — locally-declared only, never sourced from hub-pushed data.
@@ -271,4 +290,12 @@ function urlProtocol(url: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Every hub this computer dials — `hubUrls` when set, else the single `hubUrl`.
+ *  De-duplicated, because the same hub twice would mean two dialers racing over
+ *  one credential entry. */
+export function effectiveHubUrls(config: ComputerConfig): string[] {
+  const all = config.hubUrls && config.hubUrls.length > 0 ? config.hubUrls : [config.hubUrl]
+  return [...new Set(all)]
 }

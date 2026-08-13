@@ -3,7 +3,7 @@ import { homedir, hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
-import { assertPathAllowed, ENV_VARS, loadComputerConfig } from './config'
+import { assertPathAllowed, effectiveHubUrls, ENV_VARS, loadComputerConfig } from './config'
 import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from '@slayzone/platform/join-token'
 
 function mintToken(payload: JoinTokenPayload): string {
@@ -390,5 +390,24 @@ describe('assertPathAllowed', () => {
 
   it('throws when no roots are configured', () => {
     expect(() => assertPathAllowed('/anything', [])).toThrow(/no allowedRoots/)
+  })
+})
+
+describe('effectiveHubUrls', () => {
+  it('is the single hubUrl when no list is configured', () => {
+    const config = loadComputerConfig(
+      { SLAYZONE_HUB_ADDRESS: '127.0.0.1:8788', SLAYZONE_HUB_JOIN_TOKEN: 't' },
+      {}
+    )
+    expect(effectiveHubUrls(config)).toEqual([config.hubUrl])
+  })
+
+  it('uses the list when set, de-duplicated', () => {
+    const config = loadComputerConfig(
+      { SLAYZONE_HUB_ADDRESS: '127.0.0.1:8788', SLAYZONE_HUB_JOIN_TOKEN: 't' },
+      { hubUrls: ['ws://a/computers', 'ws://b/computers', 'ws://a/computers'] }
+    )
+    // Two dialers for one hub would race over a single credential entry.
+    expect(effectiveHubUrls(config)).toEqual(['ws://a/computers', 'ws://b/computers'])
   })
 })
