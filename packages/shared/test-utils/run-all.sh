@@ -503,6 +503,7 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/apps/app/src/main/hub-tokens.test.ts \
   packages/apps/app/src/main/hub-cert-pinning.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
+  packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \

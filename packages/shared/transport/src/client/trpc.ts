@@ -129,6 +129,9 @@ export function getTrpcClient(): TrpcVanillaClient {
 export type HubWsClient = {
   id: string
   url: string
+  /** The token this socket was OPENED with. `connectionParams` is sent once per
+   *  connect, so a later token is only reachable by rebuilding — see below. */
+  token?: string
   client: TrpcVanillaClient
   wsClient: ReturnType<typeof createTrpcWsClient>['wsClient']
 }
@@ -143,6 +146,14 @@ const hubClients = new Map<string, HubWsClient>()
  * A cached entry is returned as-is even if `url` differs — a hub's url only
  * changes via a relaunch-gated config edit today, so live re-pointing is out of
  * scope (Phase 5 handles add/remove through a fresh boot).
+ *
+ * A changed TOKEN is different, and must rebuild: signing in to a hub is only
+ * reachable AFTER that hub has been added, and adding it already opened this
+ * socket untokened. Returning the cached client there stranded the hub
+ * permanently unauthenticated — `HubsSettingsTab.signIn()` pushes the fresh
+ * token into the registry precisely so no relaunch is needed, and this cache was
+ * quietly discarding it. Latent until client auth became mandatory on every
+ * non-supervised hub; before that an untokened socket still worked.
  */
 export function getOrCreateHubClient(opts: {
   id: string
@@ -153,13 +164,17 @@ export function getOrCreateHubClient(opts: {
   token?: string
 }): HubWsClient {
   const cached = hubClients.get(opts.id)
-  if (cached) return cached
+  // The default hub is the boot singleton and carries no token — never rebuild
+  // it, or every module-scope getTrpcClient() caller would keep a dead socket.
+  if (cached && (opts.isDefault || cached.token === opts.token)) return cached
+  if (cached) cached.wsClient.close()
   const created = opts.isDefault
     ? initTrpcClient(opts.url, { links: opts.links })
     : createTrpcWsClient({ url: opts.url, links: opts.links, token: opts.token })
   const entry: HubWsClient = {
     id: opts.id,
     url: opts.url,
+    ...(opts.token ? { token: opts.token } : {}),
     client: created.client,
     wsClient: created.wsClient
   }
