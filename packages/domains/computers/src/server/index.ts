@@ -40,3 +40,15 @@ export {
   machinesByHostId,
   type MachineRecord
 } from './machines'
+
+export {
+  assertComputerVisible,
+  isComputerVisible,
+  listVisibleComputerIds,
+  visibilityClause,
+  claimComputer,
+  setComputerVisibility,
+  grantComputerAccess,
+  revokeComputerAccess,
+  type ComputerViewer
+} from './visibility'

@@ -48,7 +48,9 @@ describe('computer schema migration (v149 + v163)', () => {
         // v161 — who this computer belongs to. NULL = unclaimed.
         'owner_user_id',
         // v164 — which physical box, for grouping. Mutable; nothing references it.
-        'host_id'
+        'host_id',
+        // v165 — private by default, but only once the computer has an owner.
+        'visibility'
       ])
       expect(columnNames(t.raw, 'join_tokens')).toEqual([
         'id',

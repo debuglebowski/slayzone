@@ -99,14 +99,28 @@ test('computers.mintJoinToken: returns a decodable szjt1 token embedding hub URL
 })
 
 test('computers.setProjectDefaultComputer + setTaskComputer + resolveTaskComputer', async () => {
-  await caller.setProjectDefaultComputer({ projectId, computerId: 'computer-default' })
-  expect((await caller.resolveTaskComputer({ taskId })).computerId).toBe('computer-default')
+  // Real rows, not arbitrary strings: binding now asserts the computer is one
+  // this caller may actually use, so a made-up id is refused — which is the
+  // point of the guard.
+  const dflt = await registerComputer(h.slayDb, {
+    name: 'default-box',
+    platform: 'darwin-arm64',
+    version: '0.36.0'
+  })
+  const pinned = await registerComputer(h.slayDb, {
+    name: 'pinned-box',
+    platform: 'darwin-arm64',
+    version: '0.36.0'
+  })
 
-  await caller.setTaskComputer({ taskId, computerId: 'computer-pinned' })
-  expect((await caller.resolveTaskComputer({ taskId })).computerId).toBe('computer-pinned')
+  await caller.setProjectDefaultComputer({ projectId, computerId: dflt.id })
+  expect((await caller.resolveTaskComputer({ taskId })).computerId).toBe(dflt.id)
+
+  await caller.setTaskComputer({ taskId, computerId: pinned.id })
+  expect((await caller.resolveTaskComputer({ taskId })).computerId).toBe(pinned.id)
 
   await caller.setTaskComputer({ taskId, computerId: null })
-  expect((await caller.resolveTaskComputer({ taskId })).computerId).toBe('computer-default')
+  expect((await caller.resolveTaskComputer({ taskId })).computerId).toBe(dflt.id)
 })
 
 test('computers.revokeComputer: drops the computer from the active list', async () => {

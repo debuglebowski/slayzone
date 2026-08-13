@@ -9,7 +9,12 @@ import {
   setTaskComputer as storeSetTaskComputer,
   resolveTaskComputerId as storeResolveTaskComputerId,
   machinesByHostId as storeMachinesByHostId,
-  renameMachine as storeRenameMachine
+  renameMachine as storeRenameMachine,
+  assertComputerVisible,
+  listVisibleComputerIds,
+  claimComputer as storeClaimComputer,
+  setComputerVisibility as storeSetComputerVisibility,
+  type ComputerViewer
 } from '@slayzone/computers/server'
 
 /**
@@ -35,6 +40,15 @@ import {
 
 const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes
 
+/**
+ * Whose view this request runs in. `principal` is null on a supervised hub, where
+ * the Electron host owns the process and there is exactly one human — filtering
+ * there would break the desktop app for no gain.
+ */
+const viewerOf = (ctx: { principal?: { userId?: string } | null }): ComputerViewer => ({
+  userId: ctx.principal?.userId ?? null
+})
+
 export const computersRouter = router({
   /**
    * All non-revoked computers from the store, each annotated with live status from
@@ -48,6 +62,10 @@ export const computersRouter = router({
    */
   list: publicProcedure.query(async ({ ctx }) => {
     const rows = await storeListComputers(ctx.db)
+    // Same predicate the binding guards use — a list that shows a computer a
+    // mutation would refuse (or worse, hides one it would accept) is the drift
+    // this shares one implementation to avoid.
+    const visible = await listVisibleComputerIds(ctx.db, viewerOf(ctx))
     // One query for the whole list rather than a join per row: the machine is
     // decoration, and a computer with no host id is legitimately ungrouped.
     const machines = await storeMachinesByHostId(ctx.db)
@@ -56,7 +74,9 @@ export const computersRouter = router({
     const live = gateway?.listComputers() ?? []
     const liveById = new Map(live.map((r) => [r.computerId, r]))
     const usableIds = new Set((gateway?.listUsableComputers() ?? []).map((r) => r.computerId))
-    return rows.map((row) => {
+    return rows
+      .filter((row) => visible.has(row.id))
+      .map((row) => {
       const conn = liveById.get(row.id)
       return {
         id: row.id,
@@ -133,6 +153,8 @@ export const computersRouter = router({
   setTaskComputer: publicProcedure
     .input(z.object({ taskId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
+      // Binding a task to a computer is code execution in that computer's $HOME.
+      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeSetTaskComputer(ctx.db, input.taskId, input.computerId)
       return { ok: true as const }
     }),
@@ -142,6 +164,7 @@ export const computersRouter = router({
   setProjectDefaultComputer: publicProcedure
     .input(z.object({ projectId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
+      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeSetProjectDefaultComputer(ctx.db, input.projectId, input.computerId)
       return { ok: true as const }
     }),
@@ -168,10 +191,35 @@ export const computersRouter = router({
       return { ok: true as const }
     }),
 
+  /**
+   * Take ownership of an UNOWNED computer.
+   *
+   * Every row is unowned today (v161 did not backfill — inventing an owner is a
+   * claim about whose machine it is that nothing knows), so this is the path from
+   * "visible to everyone" to actually private. Never reassigns an owned one.
+   */
+  claim: publicProcedure
+    .input(z.object({ computerId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.principal?.userId
+      if (!userId) throw new Error('sign in to claim a computer')
+      return { claimed: await storeClaimComputer(ctx.db, input.computerId, userId) }
+    }),
+
+  /** Private (owner + grants), or visible to everyone on this hub. */
+  setVisibility: publicProcedure
+    .input(z.object({ computerId: z.string(), visibility: z.enum(['private', 'hub', 'shared']) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+      await storeSetComputerVisibility(ctx.db, input.computerId, input.visibility)
+      return { ok: true as const }
+    }),
+
   /** Revoke a computer (idempotent — first revocation time wins). */
   revokeComputer: publicProcedure
     .input(z.object({ computerId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeRevokeComputer(ctx.db, input.computerId)
       return { ok: true as const }
     })

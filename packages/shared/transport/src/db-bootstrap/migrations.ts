@@ -3726,6 +3726,37 @@ export const migrations: Migration[] = [
         CREATE INDEX idx_computers_host_id ON computers(host_id);
       `)
     }
+  },
+  {
+    version: 165,
+    up: (db) => {
+      // Private by default — but only for a computer that HAS an owner.
+      //
+      // An unowned computer stays visible to every authenticated user. Hiding it
+      // would strand every existing install behind a claim nobody knows to
+      // perform: `owner_user_id` is NULL on every row today (v161 deliberately did
+      // not backfill, because inventing an owner is a claim about whose machine it
+      // is that nothing here knows). `computers.claim` is how a NULL becomes a
+      // real owner.
+      //
+      // `visibility` only means anything once owned:
+      //   private — owner + explicit grants + hub admins
+      //   hub     — every authenticated user on this hub
+      //   shared  — reserved for cross-hub sharing; treated as `private` for now
+      db.exec(`
+        ALTER TABLE computers ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private';
+
+        CREATE TABLE computer_grants (
+          computer_id        TEXT NOT NULL,
+          user_id            TEXT NOT NULL,
+          role               TEXT NOT NULL DEFAULT 'use',
+          granted_by_user_id TEXT,
+          created_at         INTEGER NOT NULL,
+          PRIMARY KEY (computer_id, user_id)
+        );
+        CREATE INDEX idx_computer_grants_user ON computer_grants(user_id);
+      `)
+    }
   }
 ]
 

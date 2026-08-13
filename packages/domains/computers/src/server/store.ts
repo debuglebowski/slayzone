@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ComputerRecord } from '../shared/types'
+import { listVisibleComputerIds, type ComputerViewer } from './visibility'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 
 /**
@@ -306,11 +307,20 @@ export async function setComputerOwner(
 export async function resolveTaskComputerIdOrDefault(
   db: SlayzoneDb,
   taskId: string,
-  listConnectedComputers: () => Array<{ computerId: string; name?: string }>
+  listConnectedComputers: () => Array<{ computerId: string; name?: string }>,
+  /** Whose view to auto-select within. Omitted = no filtering, which is correct
+   *  for a supervised hub (one human, no identities) and wrong anywhere else:
+   *  auto-selecting "the only connected computer" could otherwise land a task on
+   *  a machine belonging to someone else entirely. */
+  viewer?: ComputerViewer
 ): Promise<string | null> {
   const bound = await resolveTaskComputerId(db, taskId)
   if (bound !== null) return bound
-  const connected = listConnectedComputers()
+  let connected = listConnectedComputers()
+  if (viewer?.userId) {
+    const visible = await listVisibleComputerIds(db, viewer)
+    connected = connected.filter((c) => visible.has(c.computerId))
+  }
   if (connected.length === 0) return null
   if (connected.length === 1) return connected[0].computerId
   const local = connected.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
