@@ -4,7 +4,7 @@ import net from 'net'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
-import { test as base, expect } from '@playwright/test'
+import { test as base, expect, type Page } from '@playwright/test'
 import type { AnyTRPCRouter } from '@trpc/server'
 import {
   launchIsolatedElectron,
@@ -70,7 +70,54 @@ interface SecondHub {
   proc: ChildProcess
   port: number
   url: string
+  /** Bootstrap-owner bearer for this hub. Every non-supervised hub requires auth. */
+  token: string
+  /** The same owner's credentials, for the specs that sign in through the UI. */
+  email: string
+  password: string
   stop: () => Promise<void>
+}
+
+/**
+ * Bearer token per hub url, registered at spawn and consumed by `withHubClient`.
+ *
+ * A registry rather than a parameter on each of the ~10 call sites: auth is not
+ * what this spec is about, and a token that must be threaded by hand is a token
+ * some future call site forgets — which fails as `hub requires authentication`
+ * far from the cause. Urls absent from the map (the supervised LOCAL hub) send no
+ * connectionParams at all, exactly as before.
+ */
+const hubTokens = new Map<string, string>()
+
+/**
+ * Read the bootstrap owner a standalone hub provisions on first boot.
+ *
+ * The file appears during boot, before the health server is constructed, so by
+ * the time `/health` answers it is already there — polled anyway so a slow first
+ * boot degrades into a wait rather than a confusing auth failure.
+ */
+async function readOwner(
+  storeDir: string,
+  timeoutMs = 30_000
+): Promise<{ token: string; email: string; password: string }> {
+  const file = path.join(storeDir, 'hub.owner.json')
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+        token?: string
+        email?: string
+        password?: string
+      }
+      if (parsed.token && parsed.email && parsed.password) {
+        return { token: parsed.token, email: parsed.email, password: parsed.password }
+      }
+    } catch {
+      /* not written yet */
+    }
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  throw new Error(`hub owner file not usable within ${timeoutMs}ms: ${file}`)
 }
 
 /** Spawn the sidecar bin as a second, standalone hub on its own port + store. */
@@ -101,10 +148,20 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
   })
   proc.stdout?.on('data', () => undefined)
   proc.stderr?.on('data', () => undefined)
+  const url = `ws://127.0.0.1:${port}/trpc`
+  // A standalone hub gates its client API on a bearer (supervised is the only
+  // exemption), so every caller below — this spec's raw clients AND the app —
+  // has to carry one. The hub provisions its own first user on first boot
+  // precisely so this needs no human; that file is the credential.
+  const owner = await readOwner(storeDir)
+  hubTokens.set(url, owner.token)
   return {
     proc,
     port,
-    url: `ws://127.0.0.1:${port}/trpc`,
+    url,
+    token: owner.token,
+    email: owner.email,
+    password: owner.password,
     stop: () =>
       new Promise<void>((resolve) => {
         if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
@@ -146,6 +203,49 @@ async function waitForHubHealth(port: number, timeoutMs = 30_000): Promise<void>
     await new Promise((r) => setTimeout(r, 300))
   }
   throw new Error(`second hub /health not ready on :${port} within ${timeoutMs}ms`)
+}
+
+/**
+ * Give the running app a bearer for a remote hub, the way a Settings sign-in does.
+ *
+ * Goes through the product's own IPC (`app:set-hub-token` → safeStorage →
+ * `<clientState>/hub-tokens.json`) rather than seeding a file, because the store
+ * is encrypted with a key only the app has.
+ *
+ * The reload is load-bearing, not caution: `getOrCreateHubClient` caches one WS
+ * client per hub id and ignores the token on every later call, so a token stored
+ * after that hub's client exists would never reach a socket. A fresh renderer
+ * context re-reads the token map at boot and connects authed.
+ */
+async function authorizeHubInApp(page: Page, hubId: string, token: string): Promise<void> {
+  const stored = await page.evaluate(
+    async ({ hubId, token }) => {
+      const api = (
+        window as unknown as {
+          api: {
+            app: {
+              setHubToken: (p: { hubId: string; token: string }) => Promise<unknown>
+              getHubTokens: () => Promise<Record<string, string>>
+            }
+          }
+        }
+      ).api
+      try {
+        await api.app.setHubToken({ hubId, token })
+        return { ok: (await api.app.getHubTokens())[hubId] === token }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+    { hubId, token }
+  )
+  if (!stored.ok) {
+    throw new Error(
+      `could not store hub token for ${hubId}: ${stored.error ?? 'not readable back'}`
+    )
+  }
+  await page.reload()
+  await page.waitForSelector('#root', { timeout: 30_000 })
 }
 
 interface HubComputer {
@@ -252,17 +352,39 @@ async function attachComputerToHub(opts: {
   }
 }
 
+/**
+ * Give a second hub a computer of its own.
+ *
+ * `projects.create` REFUSES on a hub with no usable computer — a project's files
+ * live on a machine, so a hub with none has nowhere to put them and no way to run
+ * an agent. A bare second hub therefore cannot hold the fixture data these specs
+ * federate over, whether it is seeded over a raw client or created through the
+ * app's own picker. The jail admits `storeDir`, which is where every path these
+ * specs hand a project lives.
+ */
+function attachDefaultComputer(hub: SecondHub, storeDir: string): Promise<HubComputer> {
+  return attachComputerToHub({
+    hubUrl: hub.url,
+    rootDir: path.join(storeDir, 'computer-root'),
+    credentialsDir: path.join(storeDir, 'computer-creds'),
+    allowedRoots: storeDir,
+    name: 'e2e-remote-hub-computer'
+  })
+}
+
 base.describe('Multi-hub federation (2 hubs)', () => {
   base('rail unions both hubs; local DB stays isolated; writes route to owner', async () => {
     base.setTimeout(180_000)
 
     const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
     let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
     let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
     try {
       hub = await spawnSecondHub(secondStore)
       await waitForHubHealth(hub.port)
       const remoteHubUrl = hub.url
+      hubComputer = await attachDefaultComputer(hub, secondStore)
 
       // Seed a project + task on the REMOTE hub before launch (union picks it up
       // on first federated fetch).
@@ -303,6 +425,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
 
       // Seed a LOCAL-hub project so the union has one project from each hub.
       const localProjectId = await page.evaluate(async () => {
@@ -405,6 +528,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         .toBe(true)
     } finally {
       if (launched) await launched.close()
+      // Computer before hub: it re-dials on disconnect, so killing the hub first
+      // leaves it reconnecting against a dead port for the whole teardown.
+      if (hubComputer) await hubComputer.stop()
       if (hub) await hub.stop()
       fs.rmSync(secondStore, { recursive: true, force: true })
     }
@@ -421,11 +547,13 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     const TITLE = 'created on the remote hub'
     const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
     let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
     let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
     try {
       hub = await spawnSecondHub(secondStore)
       await waitForHubHealth(hub.port)
       const remoteHubUrl = hub.url
+      hubComputer = await attachDefaultComputer(hub, secondStore)
 
       const remoteProjectId = await withHubClient(remoteHubUrl, async (c) => {
         const project = (await c.projects.create.mutate({
@@ -459,6 +587,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
 
       // The remote project's rail tile proves the federated board landed — and
       // with it the project→hub ownership the create routes on.
@@ -522,6 +651,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         .toBe(true)
     } finally {
       if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
       if (hub) await hub.stop()
       fs.rmSync(secondStore, { recursive: true, force: true })
     }
@@ -532,11 +662,13 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
     const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
     let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
     let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
     try {
       hub = await spawnSecondHub(secondStore)
       await waitForHubHealth(hub.port)
       const remoteHubUrl = hub.url
+      hubComputer = await attachDefaultComputer(hub, secondStore)
 
       launched = await launchIsolatedElectron({
         name: 'multi-hub-settings',
@@ -561,6 +693,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
 
       // Open Settings → click the Hubs nav item; assert both hub rows.
       await clickSettings(page)
@@ -608,6 +741,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       expect(onLocal).toBe(false)
     } finally {
       if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
       if (hub) await hub.stop()
       fs.rmSync(secondStore, { recursive: true, force: true })
     }
@@ -653,6 +787,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
 
       await clickSettings(page)
       const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
@@ -712,18 +847,12 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         await waitForHubHealth(hub.port)
         const remoteHubUrl = hub.url
 
-        // The remote hub needs its OWN computer: terminals run only on computers, so a
-        // bare hub refuses pty.create with an actionable error. This is also what
-        // makes the assertion below meaningful — the PTY genuinely runs on the
-        // remote hub's machine rather than inside the hub process itself.
-        hubComputer = await attachComputerToHub({
-          hubUrl: remoteHubUrl,
-          rootDir: path.join(secondStore, 'computer-root'),
-          credentialsDir: path.join(secondStore, 'computer-creds'),
-          // Path-jail must admit the pty cwd used below.
-          allowedRoots: secondStore,
-          name: 'e2e-remote-hub-computer'
-        })
+        // Here the computer is not just the create-guard's precondition (see
+        // `attachDefaultComputer`) but the subject: terminals run ONLY on
+        // computers, so this is what makes the assertion below meaningful — the
+        // PTY genuinely runs on the remote hub's machine rather than inside the
+        // hub process itself. The jail admits the pty cwd used below.
+        hubComputer = await attachDefaultComputer(hub, secondStore)
 
         // Remote hub: create a project (path = the remote store dir, a real dir) +
         // a task to run a terminal in.
@@ -764,6 +893,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
         const page = launched.page
         await page.waitForSelector('#root', { timeout: 20_000 })
+        await authorizeHubInApp(page, 'remote-b', hub.token)
 
         // Spawn a raw-shell PTY for the remote task via the app's federated client
         // registry (the remote hub's client), then drive a command and assert the
@@ -842,11 +972,13 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     // the whole point of this test, not just the settings-tab UI in isolation.
     const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
     let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
     let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
     try {
       hub = await spawnSecondHub(secondStore)
       await waitForHubHealth(hub.port)
       const remoteHubUrl = hub.url
+      hubComputer = await attachDefaultComputer(hub, secondStore)
 
       // Seed a project on the hub-to-be-added BEFORE it's added — proves the
       // rail picks up pre-existing remote data on first live connect, not just
@@ -896,6 +1028,23 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(page.locator('[data-testid="hubs-save-relaunch"]')).toBeHidden({
         timeout: 10_000
       })
+
+      // The hub is standalone, so it gates every request on a signed-in account.
+      // Signing in HERE — through the product's own dialog, not a seeded token —
+      // is what makes the live path complete: `signIn()` pushes the fresh token
+      // into the hub registry, and this hub's WS client has not been created yet,
+      // so it opens authed on the first federated fetch. Still no reload.
+      await page.locator('[data-testid="hub-signin-open"]').first().click()
+      await expect(page.locator('[data-testid="hub-signin-dialog"]')).toBeVisible({
+        timeout: 10_000
+      })
+      await page.locator('[data-testid="hub-signin-email"]').fill(hub.email)
+      await page.locator('[data-testid="hub-signin-password"]').fill(hub.password)
+      await page.locator('[data-testid="hub-signin"]').click()
+      await expect(page.locator('[data-testid="hub-signin-result"]')).toContainText('signed in', {
+        timeout: 15_000
+      })
+      await page.keyboard.press('Escape')
       await page.keyboard.press('Escape')
 
       // The live path in question: the remote hub's project appears in the
@@ -903,6 +1052,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(projectBlob(page, 'LI')).toBeVisible({ timeout: 20_000 })
     } finally {
       if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
       if (hub) await hub.stop()
       fs.rmSync(secondStore, { recursive: true, force: true })
     }
@@ -932,11 +1082,21 @@ interface HubClient {
   [key: string]: HubClient & HubProcedure
 }
 
-/** Run `fn` with a raw tRPC WS client to a hub, closing the socket after. */
+/**
+ * Run `fn` with a raw tRPC WS client to a hub, closing the socket after.
+ *
+ * Sends the hub's registered bearer as `connectionParams` — the same channel the
+ * app's own client uses. Unregistered urls (the supervised local hub) send no
+ * params frame, which is byte-identical to the untokened path.
+ */
 async function withHubClient<T>(url: string, fn: (client: HubClient) => Promise<T>): Promise<T> {
   const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
   const superjson = (await import('superjson')).default
-  const ws = createWSClient({ url })
+  const token = hubTokens.get(url)
+  const ws = createWSClient({
+    url,
+    ...(token ? { connectionParams: async () => ({ token }) } : {})
+  })
   const client = createTRPCClient<AnyTRPCRouter>({
     links: [wsLink({ client: ws, transformer: superjson })]
   }) as unknown as HubClient

@@ -1,7 +1,19 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
-const BAD_PATH = '/tmp/nonexistent-slayzone-path-e2e'
+/**
+ * A path that does not exist but that the computer is WILLING to look at.
+ *
+ * Derived from `TEST_PROJECT_PATH` (worker-scoped, under $HOME) rather than a
+ * `/tmp` literal: `workspace.pathExists` runs on the computer that owns the
+ * project's files, behind that computer's `allowedRoots` jail, and the local
+ * computer's jail is `[$HOME]`. A `/tmp` path is refused before it is ever
+ * stat'd, which surfaces as `reachable: false` — and the path guard treats "could
+ * not ask" as explicitly NOT "missing", so the error UI never renders and this
+ * file tested nothing. Assigned in `beforeAll` because the fixture rebinds
+ * `TEST_PROJECT_PATH` per worker.
+ */
+let BAD_PATH: string
 
 test.describe('Error states', () => {
   let projectAbbrev: string
@@ -9,6 +21,7 @@ test.describe('Error states', () => {
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
+    BAD_PATH = `${TEST_PROJECT_PATH}-does-not-exist`
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Bad Path', color: '#dc2626', path: BAD_PATH })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
