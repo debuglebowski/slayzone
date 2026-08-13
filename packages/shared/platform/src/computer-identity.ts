@@ -26,4 +26,4 @@
  * remote fresh-uuid path → an orphan per boot), so both derive this const. A
  * standalone computer renames via the config.json `computerName` key instead.
  */
-export const DEFAULT_LOCAL_RUNNER_NAME = 'local-computer'
+export const DEFAULT_LOCAL_COMPUTER_NAME = 'local-computer'

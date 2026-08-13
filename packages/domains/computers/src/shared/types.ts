@@ -6,7 +6,7 @@
 // The local-computer identity constant now lives on the lean
 // `@slayzone/platform/slayzone-config` subpath (so the computer bundle can read it
 // without the heavy server graph). Re-exported here for existing consumers.
-export { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/slayzone-config'
+export { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
 
 /**
  * Row in `computers` — one enrolled computer (a machine/process that can host

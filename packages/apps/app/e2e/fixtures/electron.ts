@@ -301,7 +301,7 @@ async function launchElectronWithRetry(args: {
   workerArtifactsDir: string
   executablePath: string
   /** Extra env merged LAST into the launch literal — lets an isolated spec pass
-   *  otherwise-stripped SLAYZONE_* vars (e.g. SLAYZONE_E2E_NO_RUNNER /
+   *  otherwise-stripped SLAYZONE_* vars (e.g. SLAYZONE_E2E_NO_COMPUTER /
    *  SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN) through the strip below.
    *  Wins over the fixed keys, so a spec may also override an isolation default
    *  intentionally. */
@@ -406,7 +406,7 @@ async function launchElectronWithRetry(args: {
           // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
           // isolated spec needs (computer-loopback: SLAYZONE_ROOT,
           // SLAYZONE_HUB_ADDRESS, SLAYZONE_HUB_JOIN_TOKEN; computer-less specs:
-          // SLAYZONE_E2E_NO_RUNNER). Merged LAST so a spec can also override an
+          // SLAYZONE_E2E_NO_COMPUTER). Merged LAST so a spec can also override an
           // isolation default on purpose. Undefined for every default launch
           // (shared worker app + 103) → byte-identical there.
           ...(args.extraEnv ?? {})
@@ -523,7 +523,7 @@ export async function launchIsolatedElectron(opts: {
  *
  * Returns false (rather than throwing) when no computer appears: a suite-wide throw
  * here would convert an infrastructure hiccup into ~70 confusing failures, and
- * specs that legitimately boot computer-less (SLAYZONE_E2E_NO_RUNNER=1) call this
+ * specs that legitimately boot computer-less (SLAYZONE_E2E_NO_COMPUTER=1) call this
  * too. The individual spec still fails loudly on its own assertion.
  */
 /** What `computers.list` returned when the gate last passed (diagnostic). */

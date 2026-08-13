@@ -263,7 +263,7 @@ async function main(): Promise<void> {
 
     // --- spawn the computer, isolated, pointed at the minted token -------------
     // The computer display name + FS path-jail now come from <ROOT>/computer.config.json
-    // (the SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
+    // (the SLAYZONE_COMPUTER_NAME / SLAYZONE_COMPUTER_ALLOWED_ROOTS env channels are gone).
     // Write them before spawn so the standalone computer reads them.
     writeFileSync(
       join(computerRootDir, 'computer.config.json'),

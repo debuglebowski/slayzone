@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'n
 import { homedir, hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/slayzone-config'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
 import { assertPathAllowed, ENV_VARS, loadComputerConfig } from './config'
 import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from '@slayzone/platform/join-token'
 
@@ -56,7 +56,7 @@ describe('loadComputerConfig', () => {
 
   it('allowedRoots defaults to [homedir()] when SUPERVISED (no env channel)', () => {
     // The supervised local computer self-derives its FS path-jail — the former
-    // SLAYZONE_RUNNER_ALLOWED_ROOTS host-injection channel is gone. shared={}
+    // SLAYZONE_COMPUTER_ALLOWED_ROOTS host-injection channel is gone. shared={}
     // for a supervised computer, so this default holds untouched.
     const config = loadComputerConfig({
       [ENV_VARS.hubAddress]: 'hub.example',
@@ -72,7 +72,7 @@ describe('loadComputerConfig', () => {
       [ENV_VARS.hubAddress]: 'hub.example',
       SLAYZONE_SUPERVISED: '1'
     })
-    expect(config.name).toBe(DEFAULT_LOCAL_RUNNER_NAME)
+    expect(config.name).toBe(DEFAULT_LOCAL_COMPUTER_NAME)
   })
 
   it('name defaults to the hostname when NOT supervised and no config', () => {
@@ -90,7 +90,7 @@ describe('loadComputerConfig', () => {
 
   it('reads hubUrl/name/pinnedCertSha256 from the shared config', () => {
     // The single <ROOT>/config.json carries the pin too (the former
-    // SLAYZONE_RUNNER_CONFIG path-pointing env var is gone). Creds always derive
+    // SLAYZONE_COMPUTER_CONFIG path-pointing env var is gone). Creds always derive
     // from the ROOT anchor (`<ROOT>/computers`) — no credentialsDir knob.
     const config = loadComputerConfig(
       {},

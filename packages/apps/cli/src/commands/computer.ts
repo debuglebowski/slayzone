@@ -32,7 +32,7 @@ import { isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
 import { discoverHubs } from '@slayzone/platform/hub-discovery'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import {
-  DEFAULT_LOCAL_RUNNER_NAME,
+  DEFAULT_LOCAL_COMPUTER_NAME,
   loadComputerConfigFile,
   updateComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
@@ -553,11 +553,11 @@ export function computerCommand(): Command {
 
       // `local-computer` is the desktop app's co-located computer, and the hub COLLAPSES
       // every enroll under that name onto one deterministic id (see
-      // DEFAULT_LOCAL_RUNNER_NAME). A second computer claiming it would silently take
+      // DEFAULT_LOCAL_COMPUTER_NAME). A second computer claiming it would silently take
       // over that row instead of appearing as its own node.
-      if (name === DEFAULT_LOCAL_RUNNER_NAME) {
+      if (name === DEFAULT_LOCAL_COMPUTER_NAME) {
         fail(
-          `"${DEFAULT_LOCAL_RUNNER_NAME}" is reserved for the computer inside the SlayZone ` +
+          `"${DEFAULT_LOCAL_COMPUTER_NAME}" is reserved for the computer inside the SlayZone ` +
             `desktop app — a second computer using it would collide with that one on the hub. ` +
             `Choose another name.`
         )

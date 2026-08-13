@@ -59,7 +59,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_TOKEN: 'secret',
   // HMAC signing key for ALL of hub-auth (better-auth's session/cookie signer AND
   // the computer enroll/api-key credentials) — hence `HUB_AUTH`, not the former
-  // `HUB_RUNNER_TRANSPORT_SECRET`, which named just one of its consumers. Rule 2
+  // `HUB_COMPUTER_TRANSPORT_SECRET`, which named just one of its consumers. Rule 2
   // (name by what the value IS). `_SECRET` = a key you HOLD and sign with, vs
   // `_TOKEN` = a bearer you PRESENT (SLAYZONE_HUB_TOKEN above).
   SLAYZONE_HUB_AUTH_SECRET: 'secret',
@@ -98,11 +98,11 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // gate no longer reads this. Kept manifested because specs still set it to
   // document "this spec wants a computer" (an unmanifested var would be stripped
   // by sanitizeSpawnEnv, fail-closed, and read as a silent typo).
-  SLAYZONE_E2E_ALLOW_RUNNER: 'infra',
+  SLAYZONE_E2E_ALLOW_COMPUTER: 'infra',
   // Opt-OUT, and the only lever that changes behavior now: set by the specs that
   // must boot computer-less (remote-mode, sidecar-crash, and the "hub accepts
   // computers with none spawned" contract test).
-  SLAYZONE_E2E_NO_RUNNER: 'infra',
+  SLAYZONE_E2E_NO_COMPUTER: 'infra',
   SLAYZONE_E2E_INSTALL_HOOKS: 'infra',
   // Redirects the MACHINE-WIDE ~/.slayzone (hooks/, bin/) — the files shared by
   // every SlayZone process on the box, which deliberately do NOT follow

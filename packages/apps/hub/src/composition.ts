@@ -148,7 +148,7 @@ import {
 } from '@slayzone/hub-auth/server'
 import { verifyRestBearer } from './rest-auth.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
-import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskComputerId } from '@slayzone/computers/server'
+import { DEFAULT_LOCAL_COMPUTER_NAME, resolveTaskComputerId } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
@@ -528,7 +528,7 @@ export function composeServer(opts: {
   })
   // Computer resolution for exec routing: a task's explicit binding, else the
   // connected default computer (sole connected, else the one named
-  // DEFAULT_LOCAL_RUNNER_NAME; several unnamed → refuse to guess). `null` means
+  // DEFAULT_LOCAL_COMPUTER_NAME; several unnamed → refuse to guess). `null` means
   // "run in-process", which every routing backend below handles as a local spawn.
   //
   // Deliberately simple: the reconnect grace + last-known-computer cache that used to
@@ -546,7 +546,7 @@ export function composeServer(opts: {
     const usable = execGateway?.listUsableComputers() ?? []
     if (usable.length === 0) return null
     if (usable.length === 1) return usable[0].computerId
-    const local = usable.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+    const local = usable.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
     return local ? local.computerId : null
   }
   /** Effective computer for a task: explicit binding, else connected default. */
@@ -1250,7 +1250,7 @@ export function composeServer(opts: {
       dbPath: join(dataRoot, 'hub-auth.sqlite'),
       // better-auth baseURL: a fixed loopback constant. Computers authenticate via
       // api-key/bearer (not cookies/redirects), so this is internal plumbing and
-      // never needs an operator override — the SLAYZONE_RUNNER_TRANSPORT_BASE_URL
+      // never needs an operator override — the SLAYZONE_COMPUTER_TRANSPORT_BASE_URL
       // env knob was inlined.
       baseURL: 'http://127.0.0.1:8788',
       secret: hubAuthSecret
@@ -1260,10 +1260,10 @@ export function composeServer(opts: {
     // which enroll name is the co-located auto-spawned computer so it collapses to
     // ONE deterministic-id row instead of orphaning one per boot. MUST match the
     // name the supervised computer enrolls under — both derive the SHARED
-    // DEFAULT_LOCAL_RUNNER_NAME const (the supervised computer defaults to it when
+    // DEFAULT_LOCAL_COMPUTER_NAME const (the supervised computer defaults to it when
     // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote computers (any
     // other name) keep the fresh-uuid path.
-    const localComputerName = DEFAULT_LOCAL_RUNNER_NAME
+    const localComputerName = DEFAULT_LOCAL_COMPUTER_NAME
     // Assigned further down, once the workspace-fs adapters exist. The
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.

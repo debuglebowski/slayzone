@@ -87,7 +87,7 @@ async function maybeInteractiveSetup(): Promise<{
         // below); a declined-save value is threaded into loadComputerConfig via the
         // returned allowedRoots.
         configKey: 'allowedRoots',
-        envKey: 'SLAYZONE_RUNNER_ALLOWED_ROOTS',
+        envKey: 'SLAYZONE_COMPUTER_ALLOWED_ROOTS',
         label: 'Filesystem roots the computer may access (comma-separated)',
         default: defaultRoot,
         transform: (raw) => {
@@ -105,7 +105,7 @@ async function maybeInteractiveSetup(): Promise<{
         // saved value reaches computer.config.json (re-read below), a declined-save value
         // is threaded into loadComputerConfig via the returned name.
         configKey: 'computerName',
-        envKey: 'SLAYZONE_RUNNER_NAME',
+        envKey: 'SLAYZONE_COMPUTER_NAME',
         label: 'Computer display name',
         hint: `default: ${hostname()}`
       }

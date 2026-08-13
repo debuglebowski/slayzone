@@ -6,7 +6,7 @@
  *
  * (plus the join-token embedded hubUrl/cert as the lowest fallback). Env still
  * wins so operators / the supervised host can override per boot. There is no
- * separate `SLAYZONE_RUNNER_CONFIG` path-pointing knob — one derived config file.
+ * separate `SLAYZONE_COMPUTER_CONFIG` path-pointing knob — one derived config file.
  *
  * @module computer/config
  */
@@ -16,7 +16,7 @@ import { homedir, hostname } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import {
-  DEFAULT_LOCAL_RUNNER_NAME,
+  DEFAULT_LOCAL_COMPUTER_NAME,
   loadComputerConfigFile,
   type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
@@ -66,7 +66,7 @@ export const ENV_VARS = {
   // path-jail to `[homedir()]` (below), a STANDALONE computer gets it from
   // <ROOT>/computer.config.json `allowedRoots` (+ the ROOT default in bin.ts). The
   // computer NAME likewise has no env channel — it derives from SUPERVISED (→
-  // DEFAULT_LOCAL_RUNNER_NAME) or computer.config.json `computerName`, else the hostname.
+  // DEFAULT_LOCAL_COMPUTER_NAME) or computer.config.json `computerName`, else the hostname.
   // The cert pin has NO env channel either: it arrives via the join token (auto
   // path) or <ROOT>/computer.config.json `pinnedCertSha256` (explicit standalone path).
   // Never a bare env var — a fingerprint is never fished out of ambient env.
@@ -141,7 +141,7 @@ type Env = Record<string, string | undefined>
 /**
  * Map `<ROOT>/computer.config.json` onto the computer's effective config shape.
  * This is the SINGLE config file for a standalone computer — the former
- * `SLAYZONE_RUNNER_CONFIG` env var (a second path-pointing knob at an arbitrary
+ * `SLAYZONE_COMPUTER_CONFIG` env var (a second path-pointing knob at an arbitrary
  * file) is gone; there is one derived config at `<ROOT>/computer.config.json`.
  */
 function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
@@ -169,7 +169,7 @@ function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
  *     (startLocalComputerWithAutoEnroll passes `{...process.env}`, which carries
  *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
  *     supplies the computer's env in full (SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN),
- *     and the name derives from SUPERVISED (→ DEFAULT_LOCAL_RUNNER_NAME), so the
+ *     and the name derives from SUPERVISED (→ DEFAULT_LOCAL_COMPUTER_NAME), so the
  *     shared file must not leak into it. Keeps the supervised computer boot
  *     byte-identical to pre-config behavior.
  * Callers can also pass an explicit shared config to test the layering.
@@ -210,7 +210,7 @@ export function loadComputerConfig(
     // Supervised local computer → the shared const so the hub's dedup collapses it
     // to one row; standalone → the hostname (computer.config.json `computerName` overrides
     // via ...fromShared below).
-    name: env.SLAYZONE_SUPERVISED === '1' ? DEFAULT_LOCAL_RUNNER_NAME : hostname(),
+    name: env.SLAYZONE_SUPERVISED === '1' ? DEFAULT_LOCAL_COMPUTER_NAME : hostname(),
     // FS path-jail default. Supervised local computer → `[homedir()]` (it operates
     // on the user's own projects under $HOME); standalone → `[]` here, then
     // computer.config.json `allowedRoots` (...fromShared below) or the SLAYZONE_ROOT

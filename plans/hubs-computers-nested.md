@@ -68,7 +68,7 @@ Why a provider rather than props: the dialogs currently reach `RunnersHubRows` t
 - Drops `showHubColumn`, `hubLabel`, `onCount`, `revision`; keeps `hubId`, `isLocalHub`.
 - Renders its own count line and empty state.
 - **Gains mint**: `useMutation(trpc.computers.mintJoinToken.mutationOptions())` + inline label form + `+ Add runner`; on success calls `showMintedToken({token, hubLabel, hubUrl})` and invalidates its own `runners.list`.
-- Keeps the local-runner specials verbatim: `DEFAULT_LOCAL_RUNNER_NAME` restart button, and the `runner-local-missing` / `Start` row.
+- Keeps the local-runner specials verbatim: `DEFAULT_LOCAL_COMPUTER_NAME` restart button, and the `runner-local-missing` / `Start` row.
 - Revoke keeps the closed-over thunk idiom — unchanged.
 
 ### 3. `HubsSettingsTab.tsx`

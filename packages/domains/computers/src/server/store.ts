@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ComputerRecord } from '../shared/types'
-import { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 
 /**
  * Computer store: CRUD over the v149 computer tables (`computers`,
@@ -293,7 +293,7 @@ export async function setComputerOwner(
  *   1. the task's explicit `computer_id`
  *   2. its project's `default_computer_id`
  *   3. the sole connected computer, if exactly one is connected
- *   4. the connected computer named {@link DEFAULT_LOCAL_RUNNER_NAME} (the
+ *   4. the connected computer named {@link DEFAULT_LOCAL_COMPUTER_NAME} (the
  *      co-located one the app auto-enrolls)
  *   5. `null` — genuinely nowhere to run
  *
@@ -313,6 +313,6 @@ export async function resolveTaskComputerIdOrDefault(
   const connected = listConnectedComputers()
   if (connected.length === 0) return null
   if (connected.length === 1) return connected[0].computerId
-  const local = connected.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+  const local = connected.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
   return local ? local.computerId : null
 }

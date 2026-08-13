@@ -254,7 +254,7 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_ROOT
        -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
        -u SLAYZONE_HUB_AUTH_SECRET
        -u SLAYZONE_HUB_JOIN_TOKEN
-       -u SLAYZONE_RUNNER_CREDENTIALS_DIR
+       -u SLAYZONE_COMPUTER_CREDENTIALS_DIR
        -u ELECTRON_RUN_AS_NODE)
 
 # Fixed loopback port for the hub's ONE listener (tRPC + health + join-token REST +
@@ -310,7 +310,7 @@ echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
 echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_JOIN_TOKEN="$JOIN_TOKEN" \
-  SLAYZONE_RUNNER_CREDENTIALS_DIR="$RUN_CREDS" \
+  SLAYZONE_COMPUTER_CREDENTIALS_DIR="$RUN_CREDS" \
   "$SMOKE/runner/node_modules/.bin/slayzone-computer" > "$SMOKE/runner.log" 2>&1 &
 RPID=$!
 

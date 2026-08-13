@@ -199,7 +199,7 @@ async function attachComputerToHub(opts: {
       SLAYZONE_ROOT: opts.rootDir,
       SLAYZONE_HUB_ADDRESS: new URL(payload.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: minted.token,
-      SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir
+      SLAYZONE_COMPUTER_CREDENTIALS_DIR: opts.credentialsDir
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })

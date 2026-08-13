@@ -103,7 +103,7 @@ export const DEV_HUB_AUTH_SECRET = 'slayzone-dev-computer-secret'
  * Name of the co-located ("local") auto-spawned computer — re-exported so every
  * existing importer of this subpath keeps working.
  */
-export { DEFAULT_LOCAL_RUNNER_NAME } from './computer-identity'
+export { DEFAULT_LOCAL_COMPUTER_NAME } from './computer-identity'
 
 /** Name reported by the desktop app's supervised sidecar. Fixed rather than
  *  ROOT-derived: the app's ROOT is a platform state dir whose basename is

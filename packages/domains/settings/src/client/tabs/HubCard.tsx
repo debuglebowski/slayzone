@@ -4,7 +4,7 @@ import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 // Leaf subpath, deliberately not `@slayzone/platform/slayzone-config`: that one
 // imports node:fs/node:path, which rollup externalizes out of the renderer bundle
 // and then fails to resolve. Same constant, browser-safe module.
-import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/computer-identity'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
 import { FolderCog, Loader2, Plus, RefreshCw, RotateCw, Trash2, X } from 'lucide-react'
 import { useComputerActions } from './ComputerActions'
@@ -323,7 +323,7 @@ export function HubCard({
   const localComputerMissing =
     isLocalHub &&
     computersQuery.isSuccess &&
-    !computers.some((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+    !computers.some((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
 
   const mint = async (): Promise<void> => {
     try {
@@ -500,7 +500,7 @@ export function HubCard({
                     {/* The app's OWN supervised child — the one computer it can cycle
                         as a process. Restarting kills every agent pty on this
                         machine, so the provider gates it behind a confirm. */}
-                    {isLocalHub && computer.name === DEFAULT_LOCAL_RUNNER_NAME && (
+                    {isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -519,7 +519,7 @@ export function HubCard({
                         no corresponding way to undo it. Every OTHER computer on this
                         hub keeps its revoke, including ones enrolled before the
                         local hub stopped offering enrollment. */}
-                    {!(isLocalHub && computer.name === DEFAULT_LOCAL_RUNNER_NAME) && (
+                    {!(isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME) && (
                       <Button
                         variant="ghost"
                         size="sm"

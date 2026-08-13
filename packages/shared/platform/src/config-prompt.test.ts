@@ -229,8 +229,8 @@ async function main(): Promise<void> {
   await test('empty answer WITH a default collects the default', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
-    const prevEnv = process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS
-    delete process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS
+    const prevEnv = process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS
+    delete process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS
     try {
       const io = fakeIo(['', 'y']) // Enter accepts default, then save
       const res = await runInteractiveConfig({
@@ -239,7 +239,7 @@ async function main(): Promise<void> {
         fields: [
           {
             configKey: 'allowedRoots',
-            envKey: 'SLAYZONE_RUNNER_ALLOWED_ROOTS',
+            envKey: 'SLAYZONE_COMPUTER_ALLOWED_ROOTS',
             label: 'Roots',
             default: '/work',
             transform: (raw) => ({ config: [raw], env: raw })
@@ -247,12 +247,12 @@ async function main(): Promise<void> {
         ]
       })
       assertEq(res.collected.length, 1, 'default collected')
-      assertEq(process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS, '/work', 'env seeded with default')
+      assertEq(process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS, '/work', 'env seeded with default')
       const roots = readJson(cfgPath).allowedRoots
       assert(Array.isArray(roots) && roots[0] === '/work', 'persisted array')
     } finally {
-      if (prevEnv === undefined) delete process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS
-      else process.env.SLAYZONE_RUNNER_ALLOWED_ROOTS = prevEnv
+      if (prevEnv === undefined) delete process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS
+      else process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS = prevEnv
       rmSync(dir, { recursive: true, force: true })
     }
   })

@@ -28,7 +28,7 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  *   (b) MANUAL computer — mint a token via the tRPC proc, spawn the bundled computer
  *       DIRECTLY as a loopback child, assert enroll + a pty round-trips output.
  *       The deterministic full-loop baseline.
- *   (a) AUTO-ENROLL computer (Wave3.5-D3) — set `SLAYZONE_E2E_ALLOW_RUNNER=1` so
+ *   (a) AUTO-ENROLL computer (Wave3.5-D3) — set `SLAYZONE_E2E_ALLOW_COMPUTER=1` so
  *       the in-app supervisor spawns the computer itself: main waits for the
  *       sidecar ready, mints a token over loopback REST (`POST
  *       /api/computers/join-token`), injects it + the wss url into the computer env,
@@ -112,7 +112,7 @@ function spawnLoopbackComputer(opts: {
   const electronPath = require('electron') as unknown as string
   const logs: string[] = []
   // The display name + FS path-jail now come from <ROOT>/computer.config.json (the
-  // SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
+  // SLAYZONE_COMPUTER_NAME / SLAYZONE_COMPUTER_ALLOWED_ROOTS env channels are gone).
   // Write them before spawn so the STANDALONE computer reads them.
   fs.mkdirSync(opts.rootDir, { recursive: true })
   fs.writeFileSync(
@@ -134,7 +134,7 @@ function spawnLoopbackComputer(opts: {
       // SLAYZONE_MODE (local here → ws, matching the loopback hub).
       SLAYZONE_HUB_ADDRESS: new URL(opts.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: opts.joinToken,
-      SLAYZONE_RUNNER_CREDENTIALS_DIR: opts.credentialsDir
+      SLAYZONE_COMPUTER_CREDENTIALS_DIR: opts.credentialsDir
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -392,14 +392,14 @@ base.describe('Computer loopback (computer ON)', () => {
         SLAYZONE_ROOT: userDataDir,
         // Documents intent: this spec's subject IS the auto-enroll chain, so it
         // must not silently depend on the suite-wide computer-ON default. The boot
-        // gate no longer reads this key (only SLAYZONE_E2E_NO_RUNNER changes
+        // gate no longer reads this key (only SLAYZONE_E2E_NO_COMPUTER changes
         // behavior); it stays as a declaration of what the test requires.
-        SLAYZONE_E2E_ALLOW_RUNNER: '1',
+        SLAYZONE_E2E_ALLOW_COMPUTER: '1',
         // The supervised computer self-derives its path-jail to `[homedir()]` (no
         // env channel). userDataDir lives under `.e2e-runtime` → under the repo →
         // under $HOME, so it is inside the jail and the PTY exec below passes.
-        // The computer enrolls as DEFAULT_LOCAL_RUNNER_NAME ('local-computer').
-        SLAYZONE_RUNNER_CREDENTIALS_DIR: path.join(userDataDir, 'auto-computer-creds')
+        // The computer enrolls as DEFAULT_LOCAL_COMPUTER_NAME ('local-computer').
+        SLAYZONE_COMPUTER_CREDENTIALS_DIR: path.join(userDataDir, 'auto-computer-creds')
       })
     })
 
@@ -435,7 +435,7 @@ base.describe('Computer loopback (computer ON)', () => {
     async () => {
       base.setTimeout(120_000)
 
-      // Boot with the supervisor explicitly OPTED OUT (`SLAYZONE_E2E_NO_RUNNER=1`)
+      // Boot with the supervisor explicitly OPTED OUT (`SLAYZONE_E2E_NO_COMPUTER=1`)
       // — e2e is otherwise computer-ON by default, which would auto-spawn a local
       // computer and invalidate the zero-connected assertion below. This proves the
       // always-on contract: the hub still builds the gateway + binds the /computers
@@ -452,7 +452,7 @@ base.describe('Computer loopback (computer ON)', () => {
         },
         extraEnv: (userDataDir) => ({
           SLAYZONE_ROOT: userDataDir,
-          SLAYZONE_E2E_NO_RUNNER: '1'
+          SLAYZONE_E2E_NO_COMPUTER: '1'
         })
       })
 

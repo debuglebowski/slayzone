@@ -14,7 +14,7 @@ import { useDialogStore } from '@slayzone/settings/client'
 import { SettingsTabIntro } from './project-settings-shared'
 
 /** Select sentinel for the project's Local (in-process) default computer (null). */
-const LOCAL_RUNNER_VALUE = '__local__'
+const LOCAL_COMPUTER_VALUE = '__local__'
 
 interface GeneralTabProps {
   project: Project
@@ -102,7 +102,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   // The default computer is its own binding (persisted immediately), not part of the
   // name/color/path form save. null = Local.
   const handleDefaultComputerChange = async (value: string): Promise<void> => {
-    const computerId = value === LOCAL_RUNNER_VALUE ? null : value
+    const computerId = value === LOCAL_COMPUTER_VALUE ? null : value
     setDefaultComputerId(computerId)
     await setProjectDefaultComputer.mutateAsync({ projectId: project.id, computerId })
   }
@@ -181,14 +181,14 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
               <p className="text-sm text-muted-foreground">No computers — tasks run locally</p>
             ) : (
               <Select
-                value={defaultComputerId ?? LOCAL_RUNNER_VALUE}
+                value={defaultComputerId ?? LOCAL_COMPUTER_VALUE}
                 onValueChange={handleDefaultComputerChange}
               >
                 <SelectTrigger id="default-computer" className="max-w-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={LOCAL_RUNNER_VALUE}>Local</SelectItem>
+                  <SelectItem value={LOCAL_COMPUTER_VALUE}>Local</SelectItem>
                   {computers.map((computer) => (
                     <SelectItem key={computer.id} value={computer.id}>
                       {computer.name}

@@ -63,7 +63,7 @@ async function waitFor(cond: () => boolean, timeoutMs: number, msg: string): Pro
 
 // --- fake computer script (controllable exit code / output) -----------------
 
-const FAKE_RUNNER = `'use strict'
+const FAKE_COMPUTER = `'use strict'
 const code = Number(process.env.FAKE_EXIT_CODE || '0')
 const lines = Number(process.env.FAKE_LINES || '0')
 // Echoed so a test can see WHICH join token this particular spawn was handed —
@@ -88,7 +88,7 @@ function writeFakeComputer(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-sup-test-'))
   tmpDirs.push(dir)
   const p = path.join(dir, 'fake-computer.cjs')
-  fs.writeFileSync(p, FAKE_RUNNER)
+  fs.writeFileSync(p, FAKE_COMPUTER)
   return p
 }
 function cleanup(): void {

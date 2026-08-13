@@ -406,7 +406,7 @@ import {
   taskWindowsEvents
 } from './task-windows'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
-import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/computers/shared'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/shared'
 import {
   registerDiagnosticsHandlers,
   registerProcessDiagnostics,
@@ -661,7 +661,7 @@ async function mintLocalComputerJoinToken(
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          label: DEFAULT_LOCAL_RUNNER_NAME
+          label: DEFAULT_LOCAL_COMPUTER_NAME
         })
       })
       if (res.ok) {
@@ -775,9 +775,9 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
       // mint's full ws(s)://host[:port]/computers url. OVERRIDES any inherited
       // value so the local computer always dials THIS boot's hub.
       SLAYZONE_HUB_ADDRESS: new URL(minted.hubUrl).host,
-      // No SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS handoff: under
+      // No SLAYZONE_COMPUTER_NAME / SLAYZONE_COMPUTER_ALLOWED_ROOTS handoff: under
       // SLAYZONE_SUPERVISED=1 (above) the computer defaults its enroll name to
-      // DEFAULT_LOCAL_RUNNER_NAME (matching the hub's localComputerName so the dedup
+      // DEFAULT_LOCAL_COMPUTER_NAME (matching the hub's localComputerName so the dedup
       // collapses to one row) and its path-jail to `[homedir()]`.
       SLAYZONE_HUB_JOIN_TOKEN: minted.token
     },
@@ -2483,8 +2483,8 @@ app
     // what run the agents — an e2e suite that boots computer-less exercises a
     // configuration the product does not have. A spec that genuinely needs a
     // computer-less hub (remote-mode, sidecar-crash, the "hub accepts computers with
-    // no computer spawned" contract) opts OUT via `SLAYZONE_E2E_NO_RUNNER=1`.
-    // The former opt-in `SLAYZONE_E2E_ALLOW_RUNNER` is no longer read here.
+    // no computer spawned" contract) opts OUT via `SLAYZONE_E2E_NO_COMPUTER=1`.
+    // The former opt-in `SLAYZONE_E2E_ALLOW_COMPUTER` is no longer read here.
     // Off the boot critical path (setImmediate); failure is log-only.
     //
     // The auto-enroll resolves the ordering the wave-2 skeleton deferred: main has
@@ -2497,7 +2497,7 @@ app
     // fingerprint → dials wss with pinning → enrolls. If minting fails after
     // retries the computer is left UNSPAWNED — boot never crashes; the user can
     // still enroll remote computers via the UI.
-    if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_RUNNER !== '1') {
+    if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_COMPUTER !== '1') {
       setImmediate(() => {
         void ensureLocalComputerStarted().catch((err) => {
           console.error('[local-computer] auto-enroll failed (local computer, non-fatal):', err)

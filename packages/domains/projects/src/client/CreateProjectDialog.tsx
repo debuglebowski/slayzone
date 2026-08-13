@@ -19,7 +19,7 @@ import type { Project } from '@slayzone/projects/shared'
 export type ProjectStartMode = 'scratch' | 'github' | 'linear'
 
 /** Sentinel for "no explicit binding" — Select has no null value. */
-const DEFAULT_RUNNER_VALUE = '__default__'
+const DEFAULT_COMPUTER_VALUE = '__default__'
 
 export interface ProjectCreationContext {
   startMode: ProjectStartMode
@@ -182,14 +182,14 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
             <div className="space-y-2">
               <Label htmlFor="computer">Machine</Label>
               <Select
-                value={targetComputerId ?? DEFAULT_RUNNER_VALUE}
-                onValueChange={(v) => setTargetComputerId(v === DEFAULT_RUNNER_VALUE ? null : v)}
+                value={targetComputerId ?? DEFAULT_COMPUTER_VALUE}
+                onValueChange={(v) => setTargetComputerId(v === DEFAULT_COMPUTER_VALUE ? null : v)}
               >
                 <SelectTrigger id="computer" data-testid="create-project-computer">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={DEFAULT_RUNNER_VALUE}>Default computer</SelectItem>
+                  <SelectItem value={DEFAULT_COMPUTER_VALUE}>Default computer</SelectItem>
                   {computers.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.name}

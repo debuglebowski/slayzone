@@ -14,7 +14,7 @@ import {
   setTaskComputer,
   touchComputerLastSeen
 } from './store'
-import { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 import { createMigratedDb, seedProjectAndTask, type TestDb } from './test-db'
 
 let t: TestDb
@@ -313,7 +313,7 @@ describe('task/project computer binding', () => {
       expect(
         await resolveTaskComputerIdOrDefault(t.db, taskId, () => [
           { computerId: 'r-remote', name: 'build-box' },
-          { computerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
+          { computerId: 'r-local', name: DEFAULT_LOCAL_COMPUTER_NAME }
         ])
       ).toBe('r-local')
     })
@@ -332,7 +332,7 @@ describe('task/project computer binding', () => {
       await setTaskComputer(t.db, taskId, 'computer-pinned')
       expect(
         await resolveTaskComputerIdOrDefault(t.db, taskId, () => [
-          { computerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
+          { computerId: 'r-local', name: DEFAULT_LOCAL_COMPUTER_NAME }
         ])
       ).toBe('computer-pinned')
     })
