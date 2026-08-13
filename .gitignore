@@ -62,3 +62,7 @@ chromium/out/
 
 # depot_tools — fetched via git clone, not vendored (see scripts/chromium/env.sh)
 tools/depot_tools/
+
+# Throwaway second-hub stores from the multi-hub e2e specs (mkdtemp under the
+# app package). Normally removed in teardown; they survive a run that dies.
+packages/apps/app/e2e-second-hub-*/
