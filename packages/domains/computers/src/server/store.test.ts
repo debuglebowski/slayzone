@@ -12,7 +12,9 @@ import {
   revokeComputer,
   setProjectDefaultComputer,
   setTaskComputer,
-  touchComputerLastSeen
+  touchComputerLastSeen,
+  unrevokeComputer,
+  deleteComputer
 } from './store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 import { createMigratedDb, seedProjectAndTask, type TestDb } from './test-db'
@@ -362,5 +364,57 @@ describe('task/project computer binding', () => {
 
   it('unknown task resolves to null', async () => {
     expect(await resolveTaskComputerId(t.db, 'nope')).toBeNull()
+  })
+})
+
+describe('deleteComputer', () => {
+  // These columns are plain TEXT with no FK, so nothing nulls them for us — a
+  // dangling computer_id resolves to a dead machine at exec time.
+  it('nulls every binding and removes placements and grants', async () => {
+    const c = await registerComputer(t.db, {
+      name: 'doomed',
+      platform: 'darwin-arm64',
+      version: '0.36.0'
+    })
+    seedProjectAndTask(t.raw, 'proj-d', 'task-d')
+    await setProjectDefaultComputer(t.db, 'proj-d', c.id)
+    await setTaskComputer(t.db, 'task-d', c.id)
+    await t.db.run(
+      `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+       VALUES (?, 'proj-d', '/srv/app', 'ready', 1)`,
+      [c.id]
+    )
+    await t.db.run(
+      `INSERT INTO computer_grants (computer_id, user_id, role, created_at) VALUES (?, 'bob', 'use', 1)`,
+      [c.id]
+    )
+
+    await deleteComputer(t.db, c.id)
+
+    expect(await getComputer(t.db, c.id)).toBeNull()
+    expect((await t.db.get<{ computer_id: string | null }>(`SELECT computer_id FROM tasks WHERE id = 'task-d'`))?.computer_id).toBeNull()
+    expect(
+      (
+        await t.db.get<{ default_computer_id: string | null }>(
+          `SELECT default_computer_id FROM projects WHERE id = 'proj-d'`
+        )
+      )?.default_computer_id
+    ).toBeNull()
+    expect((await t.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM project_placements`))?.n).toBe(0)
+    expect((await t.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM computer_grants`))?.n).toBe(0)
+  })
+})
+
+describe('unrevokeComputer', () => {
+  it('clears the flag and returns the computer to the active list', async () => {
+    const c = await registerComputer(t.db, {
+      name: 'back',
+      platform: 'darwin-arm64',
+      version: '0.36.0'
+    })
+    await revokeComputer(t.db, c.id)
+    expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(false)
+    await unrevokeComputer(t.db, c.id)
+    expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(true)
   })
 })

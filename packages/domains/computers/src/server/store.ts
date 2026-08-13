@@ -195,6 +195,46 @@ export async function retireStaleLocalComputers(
   return results[results.length - 1]?.changes ?? staleIds.length
 }
 
+/**
+ * Clear a revocation. Does NOT bring the computer back on its own.
+ *
+ * Revoking makes the computer's next `hello` fail with `needs-re-enrollment`; the
+ * dialer treats that as fatal, exits 78, and the supervisor latches and stops
+ * restarting. So by the time anyone un-revokes there is no process left to
+ * re-dial — the credential survives (revoke only sets the column), but nothing is
+ * holding it. Un-revoking is therefore half of a RE-INVITE: clear the flag, then
+ * hand over a fresh join token.
+ */
+export async function unrevokeComputer(db: SlayzoneDb, id: string): Promise<void> {
+  await db.run(`UPDATE computers SET revoked_at = NULL WHERE id = ?`, [id])
+}
+
+/**
+ * Delete a computer and everything that pointed at it.
+ *
+ * Follows `retireStaleLocalComputers`' shape — one transaction, never a bare
+ * DELETE — because these columns are plain TEXT with no foreign keys, so nothing
+ * repoints or nulls them for us and a dangling `computer_id` resolves to a dead
+ * machine at exec time.
+ *
+ * Two deliberate differences from retire: bindings are NULLed rather than
+ * repointed (there is no survivor to repoint to), and placements and grants go
+ * too — they describe a machine that no longer exists.
+ */
+export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> {
+  await db.batchTxn([
+    { type: 'run', sql: `UPDATE tasks SET computer_id = NULL WHERE computer_id = ?`, params: [id] },
+    {
+      type: 'run',
+      sql: `UPDATE projects SET default_computer_id = NULL WHERE default_computer_id = ?`,
+      params: [id]
+    },
+    { type: 'run', sql: `DELETE FROM project_placements WHERE computer_id = ?`, params: [id] },
+    { type: 'run', sql: `DELETE FROM computer_grants WHERE computer_id = ?`, params: [id] },
+    { type: 'run', sql: `DELETE FROM computers WHERE id = ?`, params: [id] }
+  ])
+}
+
 export async function getComputer(db: SlayzoneDb, id: string): Promise<ComputerRecord | null> {
   return (await db.get<ComputerRecord>(`SELECT * FROM computers WHERE id = ?`, [id])) ?? null
 }

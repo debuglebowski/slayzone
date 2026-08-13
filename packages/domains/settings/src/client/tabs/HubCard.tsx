@@ -227,10 +227,28 @@ export interface HubCardProps {
  * second carried information only while disconnected. Merged, the cell always
  * answers "can this take work right now, and if not, when did it last check in".
  */
-function statusText(row: { connected: boolean; lastSeenAt: number | null }): string {
-  if (row.connected) return 'Connected'
-  if (row.lastSeenAt == null) return 'Never connected'
-  return `Last seen ${new Date(row.lastSeenAt).toLocaleString()}`
+/**
+ * Five states, not two.
+ *
+ * `usable` has been computed by the router all along and read by nothing —
+ * "socket open" and "can take work" differ while a computer has gone silent but
+ * its watchdog has not reaped it yet, and that gap is exactly when a binary
+ * Connected/Offline lies. REVOKED outranks everything: it is a deliberate act,
+ * and reporting connectivity for a computer whose credential was pulled would
+ * describe the wrong thing entirely.
+ */
+function computerStatus(row: {
+  connected: boolean
+  usable?: boolean
+  lastSeenAt: number | null
+  revokedAt?: number | null
+}): { label: string; tone: HubStatusTone } {
+  if (row.revokedAt != null) return { label: 'Revoked', tone: 'bad' }
+  if (row.usable) return { label: 'Connected', tone: 'ok' }
+  // Socket open but silent — it will be reaped, and until then it cannot take work.
+  if (row.connected) return { label: 'Not responding', tone: 'bad' }
+  if (row.lastSeenAt == null) return { label: 'Never connected', tone: 'idle' }
+  return { label: `Offline · last seen ${new Date(row.lastSeenAt).toLocaleString()}`, tone: 'idle' }
 }
 
 /**
@@ -471,9 +489,9 @@ export function HubCard({
                       similar. */}
                   <td className="w-32 py-2 pr-3">
                     <HubStatus
-                      tone={computer.connected ? 'ok' : 'idle'}
-                      label={statusText(computer)}
-                      title={statusText(computer)}
+                      tone={computerStatus(computer).tone}
+                      label={computerStatus(computer).label}
+                      title={computerStatus(computer).label}
                     />
                   </td>
                   <td className="w-24 py-2 text-right">

@@ -7,6 +7,8 @@ export {
   listComputers,
   touchComputerLastSeen,
   revokeComputer,
+  unrevokeComputer,
+  deleteComputer,
   setTaskComputer,
   setProjectDefaultComputer,
   setComputerOwner,

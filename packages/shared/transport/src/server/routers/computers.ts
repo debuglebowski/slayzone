@@ -5,6 +5,8 @@ import {
   listComputers as storeListComputers,
   mintJoinToken as storeMintJoinToken,
   revokeComputer as storeRevokeComputer,
+  unrevokeComputer as storeUnrevokeComputer,
+  deleteComputer as storeDeleteComputer,
   setProjectDefaultComputer as storeSetProjectDefaultComputer,
   setTaskComputer as storeSetTaskComputer,
   resolveTaskComputerId as storeResolveTaskComputerId,
@@ -60,8 +62,12 @@ export const computersRouter = router({
    * has gone silent but its watchdog has not reaped it yet, and `connected` alone
    * previously let a caller conclude a computer was available when it was not.
    */
-  list: publicProcedure.query(async ({ ctx }) => {
-    const rows = await storeListComputers(ctx.db)
+  list: publicProcedure
+    .input(z.object({ includeRevoked: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+    // Revoked rows are RETURNED, not hidden: revoking is a deliberate act and the
+    // row is how you undo it. The client dims and sorts them last.
+    const rows = await storeListComputers(ctx.db, { includeRevoked: input?.includeRevoked ?? true })
     // Same predicate the binding guards use — a list that shows a computer a
     // mutation would refuse (or worse, hides one it would accept) is the drift
     // this shares one implementation to avoid.
@@ -89,6 +95,7 @@ export const computersRouter = router({
         connected: conn !== undefined,
         usable: usableIds.has(row.id),
         connectedAt: conn?.connectedAt ?? null,
+        revokedAt: row.revoked_at,
         // `hostId`, never a machine id: a merge destroys the losing row, so a
         // client holding one could act on an id that no longer exists. The host
         // id survives on the winner.
@@ -212,6 +219,37 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeSetComputerVisibility(ctx.db, input.computerId, input.visibility)
+      return { ok: true as const }
+    }),
+
+  /**
+   * Clear a revocation.
+   *
+   * Not enough on its own to bring the computer back: revoking made its next
+   * `hello` fatal, so the process exited and its supervisor latched. Un-revoking
+   * is half a RE-INVITE — the caller mints a fresh join token and hands it over.
+   */
+  unrevoke: publicProcedure
+    .input(z.object({ computerId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+      await storeUnrevokeComputer(ctx.db, input.computerId)
+      return { ok: true as const }
+    }),
+
+  /**
+   * Delete a computer and everything pointing at it.
+   *
+   * Bindings are NULLed rather than repointed — there is no survivor — and
+   * placements and grants go with it. The columns carry no foreign keys, so
+   * nothing does this for us and a dangling id resolves to a dead machine at
+   * exec time.
+   */
+  delete: publicProcedure
+    .input(z.object({ computerId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+      await storeDeleteComputer(ctx.db, input.computerId)
       return { ok: true as const }
     }),
 
