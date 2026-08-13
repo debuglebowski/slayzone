@@ -25,6 +25,12 @@ export interface ComputerRecord {
   last_seen_at: number | null
   created_at: number
   revoked_at: number | null
+  /** Which physical box this computer is on (v164). NULL = ungrouped — either a
+   *  computer too old to report one, or one whose host id could not be resolved.
+   *  A MUTABLE attribute: never store it, never key anything off it. */
+  host_id?: string | null
+  /** SlayZone user who owns this computer (v161). NULL = unclaimed. */
+  owner_user_id?: string | null
 }
 
 /**

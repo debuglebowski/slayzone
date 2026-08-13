@@ -74,7 +74,10 @@ vi.mock('@slayzone/transport/client', () => ({
       computers: {
         list: { queryOptions: () => ({ __hub: hub }), queryFilter: () => ({ __hub: hub }) },
         mintJoinToken: { mutationOptions: () => ({ __key: 'mint', __hub: hub }) },
-        revokeComputer: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }
+        renameMachine: {
+        mutationOptions: () => ({ __key: 'computers.renameMachine' })
+      },
+      revokeComputer: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }
       }
     }
   },

@@ -220,3 +220,9 @@ export async function renameMachine(
     hostId
   ])
 }
+
+/** Every machine, keyed by host id — one query to decorate a whole computer list. */
+export async function machinesByHostId(db: SlayzoneDb): Promise<Map<string, MachineRecord>> {
+  const rows = await db.all<MachineRecord>(`SELECT * FROM machines`)
+  return new Map(rows.map((m) => [m.host_id, m]))
+}

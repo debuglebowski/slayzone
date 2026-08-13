@@ -7,7 +7,9 @@ import {
   revokeComputer as storeRevokeComputer,
   setProjectDefaultComputer as storeSetProjectDefaultComputer,
   setTaskComputer as storeSetTaskComputer,
-  resolveTaskComputerId as storeResolveTaskComputerId
+  resolveTaskComputerId as storeResolveTaskComputerId,
+  machinesByHostId as storeMachinesByHostId,
+  renameMachine as storeRenameMachine
 } from '@slayzone/computers/server'
 
 /**
@@ -46,6 +48,9 @@ export const computersRouter = router({
    */
   list: publicProcedure.query(async ({ ctx }) => {
     const rows = await storeListComputers(ctx.db)
+    // One query for the whole list rather than a join per row: the machine is
+    // decoration, and a computer with no host id is legitimately ungrouped.
+    const machines = await storeMachinesByHostId(ctx.db)
     const deps = getComputersDepsOrNull()
     const gateway = deps?.getGateway()
     const live = gateway?.listComputers() ?? []
@@ -63,7 +68,16 @@ export const computersRouter = router({
         createdAt: row.created_at,
         connected: conn !== undefined,
         usable: usableIds.has(row.id),
-        connectedAt: conn?.connectedAt ?? null
+        connectedAt: conn?.connectedAt ?? null,
+        // `hostId`, never a machine id: a merge destroys the losing row, so a
+        // client holding one could act on an id that no longer exists. The host
+        // id survives on the winner.
+        machine: row.host_id
+          ? (() => {
+              const m = machines.get(row.host_id)
+              return m ? { hostId: m.host_id, name: m.name } : null
+            })()
+          : null
       }
     })
   }),
@@ -138,6 +152,20 @@ export const computersRouter = router({
     .query(async ({ ctx, input }) => {
       const computerId = await storeResolveTaskComputerId(ctx.db, input.taskId)
       return { computerId }
+    }),
+
+  /**
+   * Name a machine (`null` clears it).
+   *
+   * Keyed on HOST ID, never a machine id. Two rows can merge between a render and
+   * a click, which deletes one of the ids the client was holding; the host id is
+   * what survives on the winner.
+   */
+  renameMachine: publicProcedure
+    .input(z.object({ hostId: z.string().min(1), name: z.string().trim().max(64).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      await storeRenameMachine(ctx.db, input.hostId, input.name)
+      return { ok: true as const }
     }),
 
   /** Revoke a computer (idempotent — first revocation time wins). */

@@ -37,5 +37,6 @@ export {
   pruneAnonymousEmptyMachines,
   renameMachine,
   pickMachineWinner,
+  machinesByHostId,
   type MachineRecord
 } from './machines'

@@ -8,6 +8,7 @@ import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identit
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
 import { FolderCog, Loader2, Plus, RefreshCw, RotateCw, Trash2, X } from 'lucide-react'
 import { useComputerActions } from './ComputerActions'
+import { MachineLabel } from './MachineLabel'
 
 /**
  * A hub, as a card that owns its computers.
@@ -459,6 +460,10 @@ export function HubCard({
                       <span className="text-muted-foreground truncate text-xs">
                         {computer.capabilities.length > 0 ? computer.capabilities.join(', ') : '—'}
                       </span>
+                      {/* Which physical box. Repeats across rows that share one,
+                          which is what makes the grouping visible without adding a
+                          header to the common one-computer-per-machine case. */}
+                      <MachineLabel machine={computer.machine ?? null} />
                     </div>
                   </td>
                   {/* The same component the hub header uses, so the dot, the
