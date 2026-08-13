@@ -36,6 +36,7 @@ import {
   rmSync,
   statSync,
   readdirSync,
+  readFileSync,
   writeFileSync
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -278,7 +279,17 @@ async function main(): Promise<void> {
     })
 
     // --- assert enrollment via computers.list over tRPC-WS ---------------------
-    const built = createWSClient({ url: `ws://127.0.0.1:${hubPort}/trpc` })
+    // This hub is STANDALONE, so it requires client auth — a loopback caller no
+    // longer bypasses. The bootstrap owner file is exactly the affordance that
+    // keeps `slay hub start` usable on a clean root, so use it here too: if this
+    // read ever fails, the operator experience is broken in the same way.
+    const ownerRaw = readFileSync(join(hubRootDir, 'hub.owner.json'), 'utf-8')
+    const ownerToken = (JSON.parse(ownerRaw) as { token?: string }).token
+    assert(Boolean(ownerToken), 'bootstrap owner file carries a bearer token')
+    const built = createWSClient({
+      url: `ws://127.0.0.1:${hubPort}/trpc`,
+      connectionParams: () => ({ token: ownerToken as string })
+    })
     wsClient = built
     const trpc = createTRPCClient({
       links: [wsLink({ client: built, transformer: superjson })]

@@ -29,6 +29,7 @@ export {
   isRemoteMode,
   isLoopbackHost,
   assertModeHostConsistency,
+  assertLoopbackBind,
   type SlayzoneMode
 } from './slayzone-mode'
 // Multi-hub discovery. Also available as the lean `@slayzone/platform/hub-discovery`

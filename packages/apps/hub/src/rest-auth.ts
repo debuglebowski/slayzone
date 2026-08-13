@@ -91,6 +91,9 @@ function isLoopbackAddress(addr: string | undefined): boolean {
 }
 
 export interface RestAuthActionOptions {
+  /** Supervised hubs are the only ones that keep the loopback exemption — see
+   *  `restAuthAction`. Absent = standalone, i.e. no exemption. */
+  supervised?: boolean
   /** Whether THIS hub enforces auth (`isRemoteMode() && hubAuth != null`). */
   hubAuthRequired: boolean
   /** The raw request url (`req.url`), query string included. */
@@ -115,9 +118,13 @@ export interface RestAuthActionOptions {
 export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   if (!opts.hubAuthRequired) return 'allow'
   // A co-located caller is inside the trust boundary the loopback bind already
-  // established; keeping it open is what makes an enforcing hub byte-identical
-  // for the desktop host, the supervised computer, and in-task `slay` calls.
-  if (isLoopbackAddress(opts.remoteAddress)) return 'allow'
+  // established — but ONLY on a supervised hub, where that bind is asserted and
+  // the Electron host owns the process. On a standalone hub this exemption was
+  // the real fail-open: with auth now required on every non-supervised hub, an
+  // unconditional loopback pass made the gate inert exactly where it started to
+  // matter. Standalone loopback callers present a bearer like anyone else; the
+  // CLI already has the plumbing for one.
+  if (opts.supervised && isLoopbackAddress(opts.remoteAddress)) return 'allow'
   // No url at all → cannot prove the route is exempt, so demand a bearer.
   if (!opts.url) return 'verify'
   const path = opts.url.split('?')[0]
@@ -182,6 +189,7 @@ export function withRestAuth(opts: {
   }
   return (req, res) => {
     const action = restAuthAction({
+      supervised: process.env.SLAYZONE_SUPERVISED === '1',
       hubAuthRequired: opts.getHubAuthRequired(),
       url: req.url,
       remoteAddress: req.socket.remoteAddress ?? undefined

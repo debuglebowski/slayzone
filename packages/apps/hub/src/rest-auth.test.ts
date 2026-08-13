@@ -215,12 +215,27 @@ async function main(): Promise<void> {
     assertEq(remoteWan('/api/hub/users?x=1'), 'allow', 'query string does not defeat the match')
   })
 
-  await test('loopback callers bypass the gate (co-located processes, byte-identical)', () => {
+  // SUPERVISED-ONLY. On a supervised hub the bind is asserted loopback and the
+  // Electron host owns the process, so a co-located caller sits inside a boundary
+  // the OS already drew — that path stays byte-identical. On a standalone hub this
+  // was the real fail-open: with auth required on every non-supervised hub, an
+  // unconditional loopback pass made the gate inert exactly where it began to matter.
+  await test('loopback callers bypass the gate ONLY on a supervised hub', () => {
     for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '127.0.0.53']) {
       assertEq(
-        restAuthAction({ hubAuthRequired: true, url: '/api/tasks', remoteAddress: addr }),
+        restAuthAction({
+          supervised: true,
+          hubAuthRequired: true,
+          url: '/api/tasks',
+          remoteAddress: addr
+        }),
         'allow',
-        `loopback ${addr} bypasses`
+        `loopback ${addr} bypasses when supervised`
+      )
+      assertEq(
+        restAuthAction({ hubAuthRequired: true, url: '/api/tasks', remoteAddress: addr }),
+        'verify',
+        `loopback ${addr} must present a bearer on a standalone hub`
       )
     }
   })
@@ -390,17 +405,38 @@ async function main(): Promise<void> {
       }
     })
 
-    await test('withRestAuth: a real loopback peer is allowed with no bearer', async () => {
-      // No override — the peer address is genuinely 127.0.0.1, proving the
-      // loopback bypass works against a live socket (this is the path the
-      // desktop host / supervised computer / in-task `slay` take).
+    await test('withRestAuth: a real loopback peer is allowed with no bearer when supervised', async () => {
+      // The peer address is genuinely 127.0.0.1. Supervised, so the bypass
+      // applies — this is the path the desktop host, the supervised computer and
+      // in-task `slay` take, and it must stay byte-identical for them.
+      const prev = process.env.SLAYZONE_SUPERVISED
+      process.env.SLAYZONE_SUPERVISED = '1'
       const h = await mountGate({ required: true, auth, forceOffBox: false })
       try {
         const res = await h.get('/api/tasks')
-        assertEq(res.status, 200, 'loopback bypasses the gate')
+        assertEq(res.status, 200, 'supervised loopback bypasses the gate')
         assertEq(res.reached, true, 'inner handler ran')
       } finally {
         await h.close()
+        if (prev === undefined) delete process.env.SLAYZONE_SUPERVISED
+        else process.env.SLAYZONE_SUPERVISED = prev
+      }
+    })
+
+    await test('withRestAuth: a real loopback peer on a STANDALONE hub must authenticate', async () => {
+      const prev = process.env.SLAYZONE_SUPERVISED
+      delete process.env.SLAYZONE_SUPERVISED
+      const h = await mountGate({ required: true, auth, forceOffBox: false })
+      try {
+        assertEq((await h.get('/api/tasks')).status, 401, 'no bearer is refused')
+        assertEq(
+          (await h.get('/api/tasks', `Bearer ${validToken}`)).status,
+          200,
+          'a valid bearer is accepted'
+        )
+      } finally {
+        await h.close()
+        if (prev !== undefined) process.env.SLAYZONE_SUPERVISED = prev
       }
     })
 

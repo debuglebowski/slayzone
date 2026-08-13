@@ -21,7 +21,8 @@ import {
   getTrpcPort,
   getSlayzoneMode,
   isRemoteMode,
-  assertModeHostConsistency
+  assertModeHostConsistency,
+  assertLoopbackBind
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
@@ -30,6 +31,7 @@ import { deriveComputerHubUrl } from './computer-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
+import { ensureBootstrapOwner } from './bootstrap-owner'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
@@ -47,6 +49,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // SLAYZONE_MODE hardening. Supervised is always local/loopback (the Electron
   // host owns it), so the mode/bind guard applies to standalone only: refuse to
   // boot an exposed-but-unhardened hub (mode=local + non-loopback bind).
+  if (supervised) {
+    // Supervised is now the only thing that turns client auth off, which makes it
+    // a security boundary rather than a convenience flag. It must therefore be
+    // unable to expose an unauthenticated hub off-box.
+    assertLoopbackBind(host)
+  }
   if (!supervised) {
     assertModeHostConsistency(getSlayzoneMode(), host)
     // Remote computers reach this hub's MCP/hook callbacks via
@@ -117,7 +125,26 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // auth. Auth-required is now DERIVED from SLAYZONE_MODE (remote ⇒ on) rather
   // than a separate flag — an internet-facing hub gates client /trpc; a loopback
   // (local/supervised) hub does not. Still requires hubAuth to have loaded.
-  const hubAuthRequired = isRemoteMode() && hubAuth != null
+  // Auth is no longer mode-derived. EVERY non-supervised hub requires a user
+  // identity, loopback or not: ownership of a computer is meaningless without one,
+  // and `owner_user_id` being nullable is exactly the hole a private-by-default
+  // model cannot cover. SLAYZONE_MODE still gates TLS, cert pinning and scheme —
+  // only auth stops depending on it.
+  //
+  // Supervised is the SOLE exemption, and it is a real one: the Electron host owns
+  // that hub, it is loopback-only (asserted above), and the app already carries the
+  // user. See `assertLoopbackBind`.
+  const hubAuthRequired = !supervised
+  // Fail CLOSED. Previously `&& hubAuth != null` meant a hub whose auth failed to
+  // initialize silently served every client unauthenticated — on an internet-facing
+  // box. Computers already fail closed here (a broken auth DB makes enroll
+  // unavailable rather than unauthenticated); clients now do too.
+  if (hubAuthRequired && !hubAuth) {
+    throw new Error(
+      '[slayzone] hub auth failed to initialize — refusing to boot a hub that cannot ' +
+        'authenticate its clients. Computers already fail closed here; clients now do too.'
+    )
+  }
   setHubDescribeDeps({
     getFingerprint: () => hubIdentity?.fingerprintSha256Hex ?? null,
     getAuthRequired: () => hubAuthRequired
@@ -125,6 +152,21 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Gate all (non-open) tRPC procedures on a verified principal when this hub
   // enforces auth. Off → inert pass-through (byte-identical).
   setAuthGate(() => hubAuthRequired)
+
+  // A standalone hub that requires auth must not come up unusable by the operator
+  // who just started it. Creates the first user on first boot only, prints the
+  // credentials once, and leaves them in a 0600 file `slay` reads on this box.
+  if (hubAuthRequired && hubAuth) {
+    try {
+      await ensureBootstrapOwner(hubAuth, dataRoot, (m) => log(m))
+    } catch (err) {
+      // A hub with no owner is still a correctly-secured hub — the operator can
+      // add one with `slay hub users add`. Do not fail the boot over convenience.
+      log(
+        `[slayzone] could not provision a bootstrap owner: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
 
   // Chromium-fork OAuth deep-link bridge. The C++ shell forwards
   // `slayzone://auth/callback` to this Unix socket (auth:deep-link); we parse the

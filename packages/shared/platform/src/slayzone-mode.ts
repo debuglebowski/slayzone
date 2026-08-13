@@ -49,3 +49,22 @@ export function assertModeHostConsistency(mode: SlayzoneMode, host: string): voi
     )
   }
 }
+
+/**
+ * Refuse to bind a supervised hub anywhere but loopback.
+ *
+ * Supervised is the ONE thing that turns client auth off, which makes the flag a
+ * security boundary rather than a convenience. It is just
+ * `process.env.SLAYZONE_SUPERVISED === '1'`, so without this a stray env var would
+ * expose an unauthenticated hub on a real interface. The Electron host already
+ * binds loopback; this makes that non-regressible.
+ */
+export function assertLoopbackBind(host: string): void {
+  if (!isLoopbackHost(host)) {
+    throw new Error(
+      `[slayzone] SLAYZONE_SUPERVISED=1 binds a hub with client auth DISABLED, so it ` +
+        `must bind loopback — got '${host}'. Unset SLAYZONE_SUPERVISED for a hub that ` +
+        `listens off-box; it will then require authentication.`
+    )
+  }
+}
