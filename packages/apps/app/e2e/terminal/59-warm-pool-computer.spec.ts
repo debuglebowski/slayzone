@@ -1,5 +1,5 @@
 /**
- * Warm pool runs ON THE RUNNER (Phase 6).
+ * Warm pool runs ON THE COMPUTER (Phase 6).
  *
  * The pool pre-boots a real agent, so before this it was the last path by which
  * the HUB could start an agent itself — and `pty-store` reached for it precisely

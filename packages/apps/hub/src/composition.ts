@@ -1070,7 +1070,7 @@ export function composeServer(opts: {
     menu: menuEvents,
     taskBus,
     // NOTE: no per-task hub-bearer verifier. A computer-routed pty's hook posts to
-    // the RUNNER's own loopback relay (which forwards to the hub over the authed
+    // the COMPUTER's own loopback relay (which forwards to the hub over the authed
     // ws channel via the gateway `event` consumer wired below) — the hook never
     // carries a bearer, so there is nothing to verify on the agent-hook route.
     //
@@ -1300,7 +1300,7 @@ export function composeServer(opts: {
         resolveComputerId: (spec) => resolveExecComputer(spec.computerId)
       })
     )
-    // Warm agents are the RUNNER's processes, so they outlive a hub or sidecar
+    // Warm agents are the COMPUTER's processes, so they outlive a hub or sidecar
     // restart — unlike the old hub-local pool, whose children died with it. An
     // unclaimed pre-booted agent is a billable LLM process with no owner, so
     // reconcile against the computer's own list on every (re)connect and reap
@@ -1349,7 +1349,7 @@ export function composeServer(opts: {
       })
     })
     // `gh` authenticates as whoever owns the machine it runs on. Run on the hub,
-    // the PR panel spoke as the HUB while the agent pushed as the RUNNER — two
+    // the PR panel spoke as the HUB while the agent pushed as the COMPUTER — two
     // identities for one repository, and only one of them held credentials for it.
     // Route the single `spawnGh` chokepoint; the eleven typed gh functions and
     // their parsing stay here untouched.

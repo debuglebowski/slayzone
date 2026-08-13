@@ -73,7 +73,7 @@ export interface ChatSpawnSpec {
   binaryName: string
   args: string[]
   /**
-   * Absolute cwd, or empty to let the RUNNER resolve it from `projectId`. The
+   * Absolute cwd, or empty to let the COMPUTER resolve it from `projectId`. The
    * hub cannot: it held one path column covering every computer, so it could only
    * ever be right about one of them.
    */

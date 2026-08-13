@@ -41,7 +41,7 @@ export function CreateWorktreeDialog({
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<CreateWorktreePhase | null>(null)
 
-  // A worktree is created by `git worktree add` ON THE RUNNER, so the location
+  // A worktree is created by `git worktree add` ON THE COMPUTER, so the location
   // has to be a directory that exists there — a path browsed on this desktop
   // would simply fail to create.
   const [browseOpen, setBrowseOpen] = useState(false)

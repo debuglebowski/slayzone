@@ -295,7 +295,7 @@ export const HubToComputerMethods = {
   procGetBufferSince: 'proc.getBufferSince',
   /** Live child processes the computer still holds — drives reattach. */
   procList: 'proc.list',
-  // project → path mapping. The RUNNER owns where a project lives on its own
+  // project → path mapping. The COMPUTER owns where a project lives on its own
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
   projectSetPath: 'project.setPath',
@@ -318,7 +318,7 @@ export const ptySpawnParamsSchema = z
     command: z.string().min(1),
     args: z.array(z.string()).optional(),
     /**
-     * Absolute cwd. Optional now: when absent the RUNNER resolves it from
+     * Absolute cwd. Optional now: when absent the COMPUTER resolves it from
      * `projectId` against its own `project.*` mapping, because the hub cannot —
      * it held one path column naming a directory on a machine it does not own.
      *
@@ -566,7 +566,7 @@ export type ProjectResolvePathResult = z.infer<typeof projectResolvePathResultSc
 
 export const projectSetPathParamsSchema = z.object({
   projectId: z.string().min(1),
-  /** Absolute path ON THE RUNNER. Must resolve inside `allowedRoots`. */
+  /** Absolute path ON THE COMPUTER. Must resolve inside `allowedRoots`. */
   path: z.string().min(1)
 })
 export type ProjectSetPathParams = z.infer<typeof projectSetPathParamsSchema>
@@ -607,7 +607,7 @@ export type ProjectListResult = z.infer<typeof projectListResultSchema>
  * for four times.
  *
  * Why route it at all: `gh` authenticates as whoever owns the machine it runs on.
- * On the hub the PR panel spoke as the HUB while the agent pushed as the RUNNER —
+ * On the hub the PR panel spoke as the HUB while the agent pushed as the COMPUTER —
  * two identities for one repo, and only one of them had credentials.
  *
  * `args` is argv, never a shell string: a PR title or comment body is arbitrary
@@ -877,7 +877,7 @@ export type FsDeleteParams = z.infer<typeof fsDeleteParamsSchema>
 
 export const fsCopyInParamsSchema = z.object({
   rootPath: z.string().min(1),
-  /** Absolute source ON THE RUNNER. Also jailed — it is a second machine path. */
+  /** Absolute source ON THE COMPUTER. Also jailed — it is a second machine path. */
   absoluteSrc: z.string().min(1),
   targetDir: z.string().optional()
 })
@@ -1007,7 +1007,7 @@ export const procSpawnParamsSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   /**
-   * Run `command` through the RUNNER's own login shell (its `$SHELL`) instead of
+   * Run `command` through the COMPUTER's own login shell (its `$SHELL`) instead of
    * spawning it as a literal file+argv. Set by the process domain, whose
    * `command` is a shell string (`pnpm dev`); NOT set for an agent spawn, which
    * passes a resolved binary + argv that a shell would re-parse (splitting any

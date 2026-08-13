@@ -1848,7 +1848,7 @@ function App(): React.JSX.Element {
           />
           {/* Re-point a project whose directory has moved. Rendered here rather
               than inside the guard hook (a hook cannot render), and browsing the
-              RUNNER that owns the project — the native dialog it replaces browsed
+              COMPUTER that owns the project — the native dialog it replaces browsed
               this desktop, so on a remote computer it returned a path that did not
               exist there. */}
           <WorkspaceDirPicker

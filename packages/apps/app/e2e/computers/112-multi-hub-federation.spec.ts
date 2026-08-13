@@ -24,7 +24,7 @@ import {
  *      (the union is a client-side merge, not cross-hub data bleed).
  *   3. ROUTING — a routed task write (via the federated useTasksData path the UI
  *      uses) on a remote-hub task lands on the REMOTE hub's DB, not local.
- *   4. RUNNER ENROLLMENT — the Computers tab merges every hub's computers into one
+ *   4. COMPUTER ENROLLMENT — the Computers tab merges every hub's computers into one
  *      table and mints a join token on the hub the operator PICKS (a computer belongs
  *      to exactly one hub, decided at mint time).
  *

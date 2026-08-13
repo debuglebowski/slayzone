@@ -171,7 +171,9 @@ describe('v163 computer → computer rename', () => {
 
       expect(tableNames(t.raw)).toContain('computers')
       expect(tableNames(t.raw)).toContain('project_placements')
-      // The old names must be GONE, not shadowed by a leftover copy.
+      // The old names must be GONE, not shadowed by a leftover copy. These two
+      // string literals are PRE-RENAME names on purpose — a codemod that rewrites
+      // them makes the assertion vacuous, which has now happened twice.
       expect(tableNames(t.raw)).not.toContain('runners')
       expect(tableNames(t.raw)).not.toContain('runner_project_checkouts')
 

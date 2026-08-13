@@ -23,7 +23,7 @@ const PROCESSES: { scope: string; items: Process[] }[] = [
     scope: 'Set up auth',
     items: [
       { name: 'Type Check', command: 'pnpm typecheck --watch', status: 'running' },
-      { name: 'Test Runner', command: 'pnpm test:unit --watch', status: 'running' }
+      { name: 'Test Computer', command: 'pnpm test:unit --watch', status: 'running' }
     ]
   },
   {

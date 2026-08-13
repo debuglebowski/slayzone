@@ -19,7 +19,7 @@ import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnosti
 import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 // No `spawnLocalPty` import: this process no longer spawns a pty itself under any
 // path. It reaches every agent through the injected backend, which routes to a
-// computer. `spawnLocalPty` still exists in pty-backend for the RUNNER's own use.
+// computer. `spawnLocalPty` still exists in pty-backend for the COMPUTER's own use.
 import { getPtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
@@ -1179,7 +1179,7 @@ export interface CreatePtyOptions {
    */
   computerId?: string | null
   /**
-   * Threaded into the spawn spec so the RUNNER can resolve its own cwd. `cwd`
+   * Threaded into the spawn spec so the COMPUTER can resolve its own cwd. `cwd`
    * below still wins when non-empty — a worktree path or a `task.base_dir`
    * override is a directory the computer created or was explicitly told about,
    * not a hub guess about someone else's disk.
@@ -1214,7 +1214,7 @@ export interface CreatePtyOptions {
    * `conversationId`, and sends the task's initial prompt to the running agent.
    */
   adoptPty?: {
-    /** Key the RUNNER currently files the warm session under. */
+    /** Key the COMPUTER currently files the warm session under. */
     warmId: string
     /** Computer holding it. Adoption is a rekey there, not a local handoff. */
     computerId: string
@@ -1658,7 +1658,7 @@ export async function createPty(
     const spawnRemote = async (rawFile: string, rawArgs: string[]): Promise<pty.IPty> =>
       (await getPtyBackend().spawn(buildSpec(rawFile, rawArgs))) as unknown as pty.IPty
     if (opts.adoptPty) {
-      // Warm-process adoption: the agent is already running ON THE RUNNER. Adopting
+      // Warm-process adoption: the agent is already running ON THE COMPUTER. Adopting
       // REKEYS it there (warmId → this sessionId) rather than spawning anything, so
       // pid, output buffer and seq counter carry over and what comes back is an
       // ordinary routed handle. Everything the agent emitted while warm arrives as
@@ -1749,7 +1749,7 @@ export async function createPty(
     if (opts.adoptPty) {
       resizePty(sessionId, opts.cols ?? 80, opts.rows ?? 24)
     }
-    // No seed append here any more: the warm output is replayed by the RUNNER in
+    // No seed append here any more: the warm output is replayed by the COMPUTER in
     // the adopt reply and arrives as the first chunk on this session's normal data
     // path, so it lands in the RingBuffer (and through `filterBufferData`) exactly
     // like live output. Appending it here as well would duplicate it.
@@ -2437,7 +2437,7 @@ export async function createPty(
           // non-zero. Suppressed only for a stale session (the "session expired"
           // overlay handles that case).
           //
-          // Runs for RUNNER-ROUTED sessions too. It used to be gated on
+          // Runs for COMPUTER-ROUTED sessions too. It used to be gated on
           // `computerId == null` back when a computer was the exotic case and a local
           // spawn was the norm; since every pty routes through a computer that gate
           // disabled the feature outright — an agent that crashed left a dead pane

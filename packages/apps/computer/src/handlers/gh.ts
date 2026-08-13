@@ -2,7 +2,7 @@
  * Run `gh` on the computer.
  *
  * `gh` authenticates as whoever owns the machine it runs on. Running it on the
- * hub meant the PR panel spoke as the HUB while the agent pushed as the RUNNER —
+ * hub meant the PR panel spoke as the HUB while the agent pushed as the COMPUTER —
  * two identities for one repository, and only one of them had credentials for it.
  * So it moves here, where the checkout and the credentials already are.
  *

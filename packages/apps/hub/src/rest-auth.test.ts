@@ -169,7 +169,7 @@ async function main(): Promise<void> {
 
   await test('the agent-hook route is guarded from the internet', () => {
     // Local agents post to sidecar loopback; a computer-routed agent posts to the
-    // RUNNER's loopback and the envelope is relayed over the authed ws channel —
+    // COMPUTER's loopback and the envelope is relayed over the authed ws channel —
     // so NO legitimate caller reaches this route over the WAN.
     assertEq(remoteWan('/api/agent-hook'), 'verify', 'agent-hook guarded off-box')
   })

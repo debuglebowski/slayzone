@@ -27,7 +27,7 @@ async function resolveGhPath(): Promise<string | null> {
  *
  * Injectable because `gh` authenticates as whoever owns the machine it runs on:
  * executing it here meant the PR panel spoke as the HUB while the agent pushed as
- * the RUNNER — two identities for one repository, only one of them holding
+ * the COMPUTER — two identities for one repository, only one of them holding
  * credentials. The hub injects a routed executor so the process lands on the
  * computer; the eleven typed functions below, and all their JSON parsing, are
  * untouched.

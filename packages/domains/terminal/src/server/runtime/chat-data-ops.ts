@@ -95,7 +95,7 @@ export interface ChatDataOps {
   /** Effective computer for this task, or null for the hub. Mirrors the pty spawn
    *  lookups' `resolveComputerId`; the default impl reads the tasks/projects rows. */
   resolveComputerId(taskId: string): Promise<string | null>
-  /** Project this task belongs to, so the RUNNER can resolve its own cwd.
+  /** Project this task belongs to, so the COMPUTER can resolve its own cwd.
    *  Mirrors the pty spawn lookups' `getTaskProjectId`. */
   getTaskProjectId(taskId: string): Promise<string | null>
   bumpAutocompleteUsage(source: string, name: string): Promise<void>

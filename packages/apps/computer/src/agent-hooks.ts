@@ -1,7 +1,7 @@
 /**
  * Install the agent lifecycle hooks this machine needs, at computer boot.
  *
- * WHY A RUNNER DOES THIS AT ALL. Agent status — the running spinner, the unread
+ * WHY A COMPUTER DOES THIS AT ALL. Agent status — the running spinner, the unread
  * marker, turn boundaries — is driven entirely by hook events: the agent runs
  * `~/.slayzone/hooks/notify.sh`, which POSTs to whoever spawned it. The installers
  * used to live inside the desktop app and were called from exactly one place, so

@@ -5,7 +5,7 @@
 set -e
 # Node 24 removed the bare `--loader` flag; `--experimental-loader` is the working
 # equivalent (eventual replacement: `--import` + `module.register()`). Registers the
-# electron/dep mock loader for both the npx-tsx and Electron runners below.
+# electron/dep mock loader for both the npx-tsx and Electron computers below.
 LOADER="--experimental-loader ./packages/shared/test-utils/loader.ts"
 TSX="npx tsx"
 PASS=0
@@ -100,7 +100,7 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/session-swi
 # agent-prompts capture + the deleted-session filter on listPromptsForTask.
 run_test_electron_strict_loader packages/domains/agent-turns/src/server/prompt-capture.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts
-# Wave-1 hub/runner split — exec-domain DB access moved behind injectable ops seams.
+# Wave-1 hub/computer split — exec-domain DB access moved behind injectable ops seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
@@ -110,16 +110,16 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-bounda
 # reaching the desktop over AppDeps for the offscreen render alone.
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/computer-auth.test.ts
-# Routing the filesystem to runners put the local runner's [homedir()] jail in
+# Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
 run_test_electron_strict_loader packages/apps/hub/src/local-computer-roots.test.ts
 # `projects.path` is being deleted; this is the one-time hand-off of its values to
-# the local runner. It must never overwrite a mapping the user re-pointed, and
+# the local computer. It must never overwrite a mapping the user re-pointed, and
 # must never record a path that is not on that machine.
 run_test_electron_strict_loader packages/apps/hub/src/seed-computer-project-paths.test.ts
-# The hub's MIRROR of runner-reported paths, on the v149 table that modelled this
-# and was never wired. Pins that a report replaces a runner's rows wholesale (a
+# The hub's MIRROR of computer-reported paths, on the v149 table that modelled this
+# and was never wired. Pins that a report replaces a computer's rows wholesale (a
 # stale row would be trusted by reverse lookup) and that `resolve-by-path` still
 # answers from the legacy column during the upgrade window.
 run_test_electron_strict_loader packages/domains/computers/src/server/project-paths.test.ts
@@ -146,11 +146,11 @@ run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
-# Wave-2 hub/runner split — OS-level exec routed behind injectable spawn-backend seams.
+# Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/computers.test.ts
-# Hub↔runner install handshake — boots the built hub+runner bins, isolated (tmp
-# home/store, ports 0, scrubbed env), asserts the runner enrolls + the real
+# Hub↔computer install handshake — boots the built hub+computer bins, isolated (tmp
+# home/store, ports 0, scrubbed env), asserts the computer enrolls + the real
 # dev/prod DBs stay byte-unchanged. Auto-builds both bundles on demand (first run
 # is slower). Electron ABI → strict loader.
 run_test_electron_strict_loader packages/apps/hub/src/install-handshake.test.ts
@@ -181,7 +181,7 @@ run_test packages/apps/hub/src/health.test.ts
 run_test packages/shared/platform/src/hub-port-block.test.ts
 # Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
 run_test packages/shared/platform/src/hub-discovery.test.ts
-# OS-supervisor units (launchd/systemd) behind `slay hub create` + `slay runner
+# OS-supervisor units (launchd/systemd) behind `slay hub create` + `slay computer
 # create` — generated file CONTENT only; never registers with the real supervisor (P5).
 run_test packages/shared/platform/src/service-unit.test.ts
 # `slay hub` end-to-end: boots two REAL hubs in temp roots, then drives ls /
@@ -190,12 +190,12 @@ run_test packages/shared/platform/src/service-unit.test.ts
 # launchd/systemd unit is ever installed by the suite. Electron ABI (the hub
 # bundle needs better-sqlite3) → strict loader.
 run_test_electron_strict_loader packages/apps/cli/src/commands/hub-lifecycle.test.ts
-# `slay runner` end-to-end: boots a REAL hub in a temp root, mints a join token over
-# its loopback REST channel, then drives `runner create` through the built CLI and
-# asserts the runner ENROLLS (a runner has no /health to probe — its own
+# `slay computer` end-to-end: boots a REAL hub in a temp root, mints a join token over
+# its loopback REST channel, then drives `computer create` through the built CLI and
+# asserts the computer ENROLLS (a computer has no /health to probe — its own
 # `mode:"enroll"` line and its credential file are the evidence). Forces the
 # unsupervised branch (SLZ_FORCE_NO_SERVICE=1), so no launchd/systemd unit is ever
-# installed. Electron ABI (hub better-sqlite3 + runner node-pty) → strict loader.
+# installed. Electron ABI (hub better-sqlite3 + computer node-pty) → strict loader.
 run_test_electron_strict_loader packages/apps/cli/src/commands/computer-lifecycle.test.ts
 # `slay update` — global npm install detection + version bump. npm itself is a
 # PATH-faked script (no native deps involved) => plain node.
@@ -205,9 +205,9 @@ run_test packages/apps/cli/src/local-hub.test.ts
 run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
-# Wave-3.5 runner TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
+# Wave-3.5 computer TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
 run_test packages/apps/hub/src/computer-tls-listener.test.ts
-# Per-role hub.config.json/hub.state.json + runner.config.json (env>file>default,
+# Per-role hub.config.json/hub.state.json + computer.config.json (env>file>default,
 # auto-gen secret, race-safe, legacy shared config.json fallback).
 run_test packages/shared/platform/src/hub-config-file.test.ts
 run_test packages/shared/platform/src/computer-config-file.test.ts
@@ -215,7 +215,7 @@ run_test packages/apps/hub/src/standalone-config.test.ts
 # getSupervisedRoot: channel-to-bucket folding (beta/unknown → stable, never a
 # third bucket), SLAYZONE_ROOT composition.
 run_test packages/shared/platform/src/dirs.test.ts
-# Interactive first-run setup (hub+runner): TTY/supervised/noninteractive gating,
+# Interactive first-run setup (hub+computer): TTY/supervised/noninteractive gating,
 # confirm-to-save, env seed, config.json merge (fake IO — no real TTY).
 run_test packages/shared/platform/src/config-prompt.test.ts
 # CLI author context resolves from SLAYZONE_AGENT_ID (the injected var), not AGENT_MODE.
@@ -252,9 +252,9 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/codex
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
-# Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|runner>,
+# Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
 # copy-only (regression guard: a failed copy must never touch the legacy source),
-# runner slice is a per-host-file → shared-map TRANSFORM, not a directory copy.
+# computer slice is a per-host-file → shared-map TRANSFORM, not a directory copy.
 run_test packages/apps/app/src/main/channel-storage-migration.test.ts
 # Hidden-window invariant under Playwright. Six call sites open-coded
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
@@ -265,13 +265,13 @@ run_test packages/shared/platform/src/slayzone-mode.test.ts
 # Env scope manifest + sanitizeSpawnEnv — spawn-boundary denylist (fail closed).
 run_test packages/shared/platform/src/env-manifest.test.ts
 # Cursor-position/status query+response stripping — shared by pty-manager and the
-# runner (spontaneous-/clear regression guard; scope must stay narrow).
+# computer (spontaneous-/clear regression guard; scope must stay narrow).
 run_test packages/shared/platform/src/device-status-queries.test.ts
 # hubUrlFromAddr — authority-only SLAYZONE_HUB_ADDRESS + scheme from SLAYZONE_MODE.
 run_test packages/shared/platform/src/hub-addr.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
-# Wave-3.5 D5 runner restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
+# Wave-3.5 D5 computer restart-survival — stable port + local-computer dedup (count stays 1 across reboots).
 run_test_electron_strict_loader packages/apps/hub/src/computer-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/computers/join-token.test.ts
@@ -285,7 +285,7 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/wor
 # (pipefail), so the ~30 still-broken domain suites no longer mask as PASS — they now
 # count as FAIL. Two known buckets remain, tracked as a separate per-domain-fix task:
 #   1. better-sqlite3 ERR_DLOPEN — DB-handler tests on plain-node `run_test` need the
-#      Electron runner (some also need async-DB await fixes once they load).
+#      Electron computer (some also need async-DB await fixes once they load).
 #   2. rest-api/tasks/* + mcp-tools/* — real assertion failures (async-DB move fallout).
 run_test_electron_strict_loader packages/domains/agent-turns/src/server/db.test.ts
 run_test_electron_strict_loader packages/domains/agent-turns/src/server/git-snapshot.test.ts
@@ -309,7 +309,7 @@ run_test_electron_strict_loader packages/domains/automations/src/server/engine.t
 # Terminal — SGR stripping + WebGL renderer lifecycle
 run_test packages/domains/terminal/src/server/filter-buffer-data.test.ts
 run_test packages/domains/terminal/src/server/stdin-input.test.ts
-# Wave-3 remote-runner per-PTY env (loopback vs hub URL + scoped token).
+# Wave-3 remote-computer per-PTY env (loopback vs hub URL + scoped token).
 run_test packages/domains/terminal/src/server/mcp-env.test.ts
 run_test packages/domains/terminal/src/client/webgl-loader.test.ts
 # Terminal — downgrade guard: the pinned @xterm/addon-webgl build must carry the
@@ -356,7 +356,7 @@ run_test packages/domains/terminal/src/client/useTerminalStateStore.test.ts
 # Terminal — idle-close engagement (browser/other-panel interaction keeps agent warm)
 run_test packages/domains/terminal/src/server/engagement.test.ts
 run_test packages/domains/terminal/src/server/session-error-gate.test.ts
-# Terminal — PTY exit handling: shell-fallback decision + the runner-routed
+# Terminal — PTY exit handling: shell-fallback decision + the computer-routed
 # recovery-shell adoption guard (was never registered here, so it never ran).
 run_test packages/domains/terminal/src/server/pty-exit-strategy.test.ts
 # Terminal — fresh-vs-resume decision (restart-clobber invariant: known id ⇒ resume)
@@ -385,17 +385,17 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cre
 
 
 # Strict: pipefail makes a non-zero test exit code propagate through the grep
-# filter, so a real failure counts as FAIL (the lenient runners above count
+# filter, so a real failure counts as FAIL (the lenient computers above count
 # PASS as long as any output is produced).
 
 # Side-car supervisor crash-recovery (slice 2.5.1 HARD GATE).
 run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.test.ts
 
-# Local-runner supervisor exit reporting — the runner owns every agent pty, so
+# Local-computer supervisor exit reporting — the computer owns every agent pty, so
 # its exits must stay observable (they killed whole fleets silently before).
 run_test_electron_strict packages/apps/app/src/main/local-computer-supervisor.test.ts
 
-# e2e stale-process reaper: must never match the dev app's live runner (doing so
+# e2e stale-process reaper: must never match the dev app's live computer (doing so
 # SIGTERM'd every agent on the machine once per `pnpm test:e2e`).
 run_test packages/apps/app/e2e/fixtures/stale-processes.test.ts
 
@@ -486,13 +486,13 @@ if [ -n "$GITHUB_TOKEN" ]; then
 fi
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) can't run
-# under the tsx/electron runners above — they need the vitest runner. The app
+# under the tsx/electron computers above — they need the vitest computer. The app
 # vitest config wires @vitejs/plugin-react. Explicit file paths override vitest's
 # default include glob so only these run (no sweep of the tsx-harness *.test.ts).
 #
-# A few non-jsdom node suites ride along here because they need vitest's runner for
+# A few non-jsdom node suites ride along here because they need vitest's computer for
 # other reasons — the hub-auth ones use `vi`-free vitest globals plus node:sqlite,
-# which the tsx/electron runners above don't provide. (Their own
+# which the tsx/electron computers above don't provide. (Their own
 # `pnpm --filter @slayzone/hub-auth test` also covers them; listing them here is
 # what puts them in the aggregate run.)
 echo ""
@@ -528,8 +528,8 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# The runner is a separate app with its OWN vitest config (node environment, no
-# jsdom). Its handler suites — pty/proc/fs/git/project/gh/runner-config, ~150
+# The computer is a separate app with its OWN vitest config (node environment, no
+# jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150
 # assertions — were never in this aggregate, so they only ran if someone happened
 # to run the package directly. Listing the files under the app's jsdom config is
 # not a substitute: `fs.watch({recursive:true})` never delivers there, at any
@@ -542,7 +542,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# Same reason: the hub⇄runner fs round trip loads the real runner handlers.
+# Same reason: the hub⇄computer fs round trip loads the real computer handlers.
 echo ""
 echo "=== packages/domains/computer-transport (own vitest config) ==="
 if ( set -o pipefail; pnpm --filter @slayzone/computer-transport test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
@@ -551,7 +551,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# The runners DOMAIN suite (store, join-tokens, migration) was never registered
+# The computers DOMAIN suite (store, join-tokens, migration) was never registered
 # here, so three files' worth of assertions had gone stale unnoticed — the
 # migration test was asserting a column list two migrations out of date. Its
 # vitest.config.ts excludes `project-paths.test.ts`, which is an ipc-harness

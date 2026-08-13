@@ -85,7 +85,7 @@ const stubDb = {
 setDatabase(stubDb)
 
 /**
- * Warm adoption is a REKEY on a RUNNER (`pty.warmAdopt`) reached through
+ * Warm adoption is a REKEY on a COMPUTER (`pty.warmAdopt`) reached through
  * `PtyBackend.adopt` — there is no hub-local warm pool. These tests exercise the
  * adoption BRANCH of createPty, so they stand in a backend whose `adopt` returns
  * the fake pty the computer would have handed back.

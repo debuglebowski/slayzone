@@ -6,7 +6,7 @@
  * dial/auth env. A LOCAL spawn (`computerId == null`, or no remote target) gets the
  * loopback SLAYZONE_AGENT_HOOK_URL and no hub env; no port var either — the CLI
  * reads the port from the DB. A REMOTE spawn is byte-identical for identity: the
- * agent posts to the RUNNER's loopback, and the computer overlays the hook URL and
+ * agent posts to the COMPUTER's loopback, and the computer overlays the hook URL and
  * relays to the hub over its own ws channel.
  *
  * `HUB_ENV_KEYS` below pins both the live dial var (SLAYZONE_HUB_ADDRESS) and the
@@ -184,10 +184,10 @@ const REMOTE: RemoteMcpEnv = {
   }
 }
 
-// ── REMOTE (computerId != null + provider): agent posts to RUNNER LOOPBACK ──────
+// ── REMOTE (computerId != null + provider): agent posts to COMPUTER LOOPBACK ──────
 //
 // New topology: the agent env is byte-identical local vs remote. The agent
-// ALWAYS posts to computer loopback; the RUNNER overlays SLAYZONE_AGENT_HOOK_URL
+// ALWAYS posts to computer loopback; the COMPUTER overlays SLAYZONE_AGENT_HOOK_URL
 // (it owns its own loopback port) and relays to the hub over its ws channel.
 // So buildMcpEnv's remote branch sets NO hub URL, NO bearer, and NO hook URL
 // (the computer supplies it) — only the agent id + ROOT + the opaque ctx blob.

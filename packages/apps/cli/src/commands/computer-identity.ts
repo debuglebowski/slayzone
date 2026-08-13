@@ -1,5 +1,5 @@
 /**
- * ONE ANSWER TO "DOES THIS RUNNER EXIST".
+ * ONE ANSWER TO "DOES THIS COMPUTER EXIST".
  *
  * THE BUG THIS MODULE EXISTS TO KILL. `create` asked the ROOT (`computer.config.json`
  * names a computer) while `start`/`stop`/`rm`/`restart`/`logs` asked the UNIT FILE, and

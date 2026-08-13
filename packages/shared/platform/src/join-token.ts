@@ -5,7 +5,7 @@
  * exact format minted by the hub in `@slayzone/computers/server` (join-tokens.ts).
  *
  * TWO CONSUMERS, ONE DECODER:
- *   - the RUNNER reads the embedded `hubUrl` + `certFingerprint` to dial + pin the
+ *   - the COMPUTER reads the embedded `hubUrl` + `certFingerprint` to dial + pin the
  *     hub before sending any computer frame;
  *   - `slay computer create` validates a `--token` locally (fail fast on a typo rather
  *     than installing a unit that crash-loops against an undialable hub) and reads

@@ -33,7 +33,7 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
   if (a !== e) throw new Error(`${msg}: expected ${e}, got ${a}`)
 }
 
-const RUNNER = '/repo/packages/apps/computer/dist/bin.cjs'
+const COMPUTER = '/repo/packages/apps/computer/dist/bin.cjs'
 /** An environ blob shaped like `ps eww` output. */
 const devEnv = `PATH=/usr/bin SLAYZONE_SUPERVISED=1 SHELL=/bin/zsh`
 const e2eEnv = `PATH=/usr/bin SLAYZONE_SUPERVISED=1 PLAYWRIGHT=1 SHELL=/bin/zsh`
@@ -49,12 +49,12 @@ function reader(map: Record<number, string>): (pid: number) => string {
 // --- tests ----------------------------------------------------------------
 
 test('parses `pgrep -af` output into pid + command', () => {
-  const out = `1234 Electron ${RUNNER}\n5678 Electron ${RUNNER}\n`
+  const out = `1234 Electron ${COMPUTER}\n5678 Electron ${COMPUTER}\n`
   assertEq(
     parsePgrepOutput(out),
     [
-      { pid: 1234, command: `Electron ${RUNNER}` },
-      { pid: 5678, command: `Electron ${RUNNER}` }
+      { pid: 1234, command: `Electron ${COMPUTER}` },
+      { pid: 5678, command: `Electron ${COMPUTER}` }
     ] satisfies StaleCandidate[],
     'both lines parsed'
   )
@@ -66,12 +66,12 @@ test('ignores blank and malformed pgrep lines', () => {
 
 test('does NOT select a dev-run process — the regression', () => {
   // Same bundle path as a test run; only the environment tells them apart.
-  const candidates = parsePgrepOutput(`4242 Electron ${RUNNER}`)
+  const candidates = parsePgrepOutput(`4242 Electron ${COMPUTER}`)
   assertEq(selectTestRunPids(candidates, reader({ 4242: devEnv }), []), [], 'dev computer spared')
 })
 
 test('selects a process carrying the Playwright marker', () => {
-  const candidates = parsePgrepOutput(`4242 Electron ${RUNNER}\n4243 Electron ${RUNNER}`)
+  const candidates = parsePgrepOutput(`4242 Electron ${COMPUTER}\n4243 Electron ${COMPUTER}`)
   assertEq(
     selectTestRunPids(candidates, reader({ 4242: devEnv, 4243: e2eEnv }), []),
     [4243],
@@ -80,7 +80,7 @@ test('selects a process carrying the Playwright marker', () => {
 })
 
 test('never selects an excluded pid, marker or not', () => {
-  const candidates = parsePgrepOutput(`4243 Electron ${RUNNER}`)
+  const candidates = parsePgrepOutput(`4243 Electron ${COMPUTER}`)
   assertEq(
     selectTestRunPids(candidates, reader({ 4243: e2eEnv }), [4243]),
     [],
@@ -89,12 +89,12 @@ test('never selects an excluded pid, marker or not', () => {
 })
 
 test('fails closed when the environment cannot be read', () => {
-  const candidates = parsePgrepOutput(`9999 Electron ${RUNNER}`)
+  const candidates = parsePgrepOutput(`9999 Electron ${COMPUTER}`)
   assertEq(selectTestRunPids(candidates, reader({}), []), [], 'unreadable env is not killed')
 })
 
 test('does not match PLAYWRIGHT as a substring of another variable', () => {
-  const candidates = parsePgrepOutput(`4244 Electron ${RUNNER}`)
+  const candidates = parsePgrepOutput(`4244 Electron ${COMPUTER}`)
   const sneaky = `PATH=/usr/bin NOT_PLAYWRIGHT=1 MY_PLAYWRIGHT_DIR=/tmp`
   assertEq(selectTestRunPids(candidates, reader({ 4244: sneaky }), []), [], 'no substring match')
 })

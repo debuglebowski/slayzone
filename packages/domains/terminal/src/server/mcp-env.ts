@@ -22,7 +22,7 @@ export interface RemoteMcpEnv {
    * hub's REST surface (loopback resolves on the computer machine, where no hub
    * runs). The provider MUST return `null` rather than an empty/invalid base.
    *
-   * NOTE: the AGENT HOOK no longer uses this. The hook posts to the RUNNER's own
+   * NOTE: the AGENT HOOK no longer uses this. The hook posts to the COMPUTER's own
    * loopback `/api/agent-hook`, and the computer relays to the hub over its
    * authenticated ws channel (so the agent env is byte-identical local vs
    * remote and carries no per-agent hub bearer). This field remains only for the
@@ -171,7 +171,7 @@ export async function buildMcpEnv(
   // state lives, and a child can no longer derive it: with the desktop app's
   // supervised roles channel-scoped (`~/.slayzone/<dev|stable>/hub`), the old
   // "everyone falls through to ~/.slayzone" assumption is dead. Worse, a pty
-  // routed through the co-located LOCAL RUNNER inherits that computer's own
+  // routed through the co-located LOCAL COMPUTER inherits that computer's own
   // (different, role-scoped) SLAYZONE_ROOT through the base env — the manifest
   // tags the var `global`, so sanitizeSpawnEnv keeps it. Setting it here means
   // the hub's value always overrides that inherited one at the spawn boundary
@@ -200,7 +200,7 @@ export async function buildMcpEnv(
   }
 
   if (remote) {
-    // Remote computer: the agent posts to the RUNNER's own loopback /api/agent-hook
+    // Remote computer: the agent posts to the COMPUTER's own loopback /api/agent-hook
     // (the computer overlays SLAYZONE_AGENT_HOOK_URL at spawn and relays to the hub
     // over its ws channel). So we set NO hub URL, NO bearer, and NO hook URL here
     // — the identity env is byte-identical to a local spawn. `remote.hubBaseUrl`

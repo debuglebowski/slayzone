@@ -753,7 +753,7 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
     scriptPath: computerScriptPath,
     env: {
       ...process.env,
-      // This computer's own channel-scoped RUNNER root — separate from the hub's,
+      // This computer's own channel-scoped COMPUTER root — separate from the hub's,
       // so its credential store (computer.state.json) and logs never mix with the
       // hub's DB/artifacts. Explicit because the computer cannot derive it:
       // getSupervisedRoot is desktop-app-only, and an inherited-unset value would

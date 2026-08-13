@@ -1171,7 +1171,7 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
         taskId: spec.taskId,
         projectId: null,
         computerId,
-        // The binary NAME, resolved against the RUNNER's PATH — never a
+        // The binary NAME, resolved against the COMPUTER's PATH — never a
         // hub-resolved absolute path, which would not exist there. `shell` is
         // deliberately unset: argv must reach execve unsplit.
         command: spec.binaryName,

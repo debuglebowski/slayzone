@@ -19,7 +19,7 @@ export interface AgentHookRelayGateway {
 /**
  * Wire the hub-side consumer for computer-RELAYED agent hooks (hub/computer split).
  *
- * A computer-routed pty posts its lifecycle hook to the RUNNER's OWN loopback
+ * A computer-routed pty posts its lifecycle hook to the COMPUTER's OWN loopback
  * `/api/agent-hook`; the computer forwards the raw envelope to the hub over its
  * authenticated ws channel as a generic `event` with `name: 'agent-hook'`. This
  * feeds that envelope through the SAME `processAgentHook` authority the local

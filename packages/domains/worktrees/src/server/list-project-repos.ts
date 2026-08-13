@@ -1,5 +1,5 @@
 /**
- * Repo discovery for the git panel, addressed by RUNNER.
+ * Repo discovery for the git panel, addressed by COMPUTER.
  *
  * The walk itself moved to `@slayzone/file-editor/server` (`discoverRepos`) so it
  * can execute on the machine that owns the directory. It used to run here, in the

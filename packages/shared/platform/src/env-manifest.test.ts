@@ -67,7 +67,7 @@ check('PLAYWRIGHT in NON_PREFIXED_INFRA', NON_PREFIXED_INFRA.has('PLAYWRIGHT'))
 // MODE-derived scheme to get wrong and rule 5 protects nothing.
 //
 // SLAYZONE_AGENT_HOOK_URL is that case — local = sidecar loopback, remote = the
-// RUNNER's own loopback (it relays to the hub over its authed ws), never a
+// COMPUTER's own loopback (it relays to the hub over its authed ws), never a
 // wss/https hub URL and never a bearer. It must stay a full URL because its only
 // reader is the deliberately logic-free shared `notify.sh`; an `_ADDRESS` form
 // would push scheme+path assembly back into that file, which is exactly the rot

@@ -13,7 +13,7 @@ import { parseShellArgs } from '../adapters/flag-parser'
 /**
  * Keeps ONE warm, pre-booted agent ready per (computer, project), so the first agent a
  * task opens skips both shell-init and agent boot. The warm process lives ON THE
- * RUNNER — never on the hub — and is held outside the pty-manager `sessions` map
+ * COMPUTER — never on the hub — and is held outside the pty-manager `sessions` map
  * until `claimWarmShell` → `createPty({ adoptPty })` promotes it, registered under
  * its real `taskId:tabId` from the start so terminal identity is never renamed.
  *
@@ -37,11 +37,11 @@ import { parseShellArgs } from '../adapters/flag-parser'
 
 const WARM_MODE = 'claude-code' // default provider; only this mode is pre-warmed
 const RECONCILE_DEBOUNCE_MS = 150
-// (No seed cap here any more — the RUNNER buffers warm output in its own
+// (No seed cap here any more — the COMPUTER buffers warm output in its own
 // RingBuffer, which is already capped at 750 KiB and evicts oldest-first.)
 
 interface WarmHandle {
-  /** Placeholder key the RUNNER files this session under until adoption rekeys it. */
+  /** Placeholder key the COMPUTER files this session under until adoption rekeys it. */
   warmId: string
   /** The computer holding the process. Part of the pool key — a warm agent is only
    *  useful to a task that resolves to the SAME machine. */
@@ -470,7 +470,7 @@ function killWarm(projectId: string): void {
   const handle = warm.get(projectId)
   if (!handle) return
   warm.delete(projectId)
-  // The process is the RUNNER's, so this is a request, not a local kill — and it
+  // The process is the COMPUTER's, so this is a request, not a local kill — and it
   // is fire-and-forget: a computer that has gone away already took its warm agents
   // with it, and `reapOrphanWarms` covers anything that outlives us.
   void getPtyBackend()
@@ -492,7 +492,7 @@ function killWarm(projectId: string): void {
 /**
  * Kill warm sessions on `computerId` that this hub is not tracking.
  *
- * Warm agents are the RUNNER's processes now, so — unlike the old hub-local pool,
+ * Warm agents are the COMPUTER's processes now, so — unlike the old hub-local pool,
  * whose children died with the hub — they survive a hub restart, a sidecar
  * restart, or any reconnect that rebuilt the pool map. An unclaimed pre-booted
  * agent is a billable LLM process with no owner, so the hub reconciles against

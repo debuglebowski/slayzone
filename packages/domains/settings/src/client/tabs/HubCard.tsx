@@ -42,7 +42,7 @@ import { useComputerActions } from './ComputerActions'
  * card by CONSTRUCTION. The alternative (one flat table routing by an id→hub map)
  * makes the same correctness a lookup that can silently go stale.
  *
- * THE LOCAL RUNNER is the one row this client can control as a PROCESS rather than
+ * THE LOCAL COMPUTER is the one row this client can control as a PROCESS rather than
  * as a registry entry: it is the app's own supervised child. So on the local hub
  * only, its row carries a restart action, and its ABSENCE gets a leaf of its own —
  * a local hub with no local computer cannot execute anything at all, and that state
@@ -343,7 +343,7 @@ export function HubCard({
   const firstLoad = !computersQuery.isSuccess && !computersQuery.isError
 
   /**
-   * THE LOCAL HUB'S RUNNER SET IS A SINGLETON — exactly one computer, the app's own
+   * THE LOCAL HUB'S COMPUTER SET IS A SINGLETON — exactly one computer, the app's own
    * supervised child, spawned and enrolled at boot. A machine you point at a hub
    * is a computer for a hub OTHER machines can reach, which a local hub is not: a
    * token minted here carries a loopback dial address, redeemable only by

@@ -544,7 +544,7 @@ export interface SupervisorStatus {
 /**
  * Ask the supervisor whether a registered service is up, and under which pid.
  *
- * This is the RUNNER's substitute for `/health`. A hub binds a port and answers a
+ * This is the COMPUTER's substitute for `/health`. A hub binds a port and answers a
  * probe, so `hub ls` can discover it without asking any supervisor; a computer binds
  * nothing (it dials the hub), so the only local source of truth about whether its
  * process exists is the supervisor that owns it.

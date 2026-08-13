@@ -713,7 +713,7 @@ export async function processAgentHook(
  * Receives agent lifecycle pings from the bundled `notify.sh` hook script.
  *
  * Auth: NONE. The hook ALWAYS posts to loopback — either the local sidecar's
- * 127.0.0.1 port, or (for a computer-routed pty) the RUNNER's OWN loopback, which
+ * 127.0.0.1 port, or (for a computer-routed pty) the COMPUTER's OWN loopback, which
  * relays to the hub over its already-authenticated ws channel. So the agent env
  * carries no per-agent bearer and the route trusts loopback, exactly as the
  * local path always has. Blast radius is renderer-side status updates + a chime.

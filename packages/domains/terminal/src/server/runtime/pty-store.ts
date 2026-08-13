@@ -298,7 +298,7 @@ export function createPtyOps(db: SlayzoneDb) {
 
     const modeInfo = (await lookups.getTerminalMode(modeId)) ?? undefined
 
-    // Warm-process pool: if this project has a ready warm agent ON THE RUNNER this
+    // Warm-process pool: if this project has a ready warm agent ON THE COMPUTER this
     // spawn resolves to, and it matches (default mode, project-root cwd, fresh
     // start, same flags), adopt it instead of cold-spawning. A miss is silent —
     // createPty cold-spawns exactly as before.
@@ -312,7 +312,7 @@ export function createPtyOps(db: SlayzoneDb) {
     const taskId = opts.sessionId.split(':')[0]
     let computerId: string | null = null
     // Resolved regardless of whether a warm agent is claimed: it is threaded into
-    // the spawn spec so the RUNNER can resolve its own cwd when the caller has no
+    // the spawn spec so the COMPUTER can resolve its own cwd when the caller has no
     // absolute path to give (see PtySpawnSpec.projectId).
     let projectId: string | null = null
     if (taskId) {

@@ -198,7 +198,7 @@ export async function createTestHarness(): Promise<TestHarness> {
   }
 }
 
-// Minimal test runner — chains async tests sequentially, runs sync tests immediately
+// Minimal test computer — chains async tests sequentially, runs sync tests immediately
 let _testQueue: Promise<void> = Promise.resolve()
 let _hasAsync = false
 

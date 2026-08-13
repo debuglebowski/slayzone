@@ -338,7 +338,7 @@ function xmlEscape(value: string): string {
  * The environment a supervised process needs. launchd hands an agent a nearly empty
  * env, so anything the process must see is pinned here rather than inherited.
  *
- * The two kinds pin different sets, and the RUNNER's is deliberately minimal: its
+ * The two kinds pin different sets, and the COMPUTER's is deliberately minimal: its
  * display name, filesystem path-jail, join token and cert pin have NO env channel at
  * all (see `computer/src/config.ts`) — they come from `<ROOT>/config.json`, which is
  * 0600. A unit file is 0644 and world-readable, so a join token must never be

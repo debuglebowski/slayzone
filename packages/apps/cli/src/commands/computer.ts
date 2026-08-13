@@ -399,7 +399,7 @@ export function computerCommand(): Command {
   //
   // The only verb here whose subject is a hub rather than this machine, and that is
   // unavoidable: a join token can only be minted by the hub it points at (it embeds
-  // that hub's dial URL + cert fingerprint), so WHICH HUB A RUNNER CONNECTS TO is
+  // that hub's dial URL + cert fingerprint), so WHICH HUB A COMPUTER CONNECTS TO is
   // decided here, not by `create`. It lives under `computer` because the thing being
   // created is a computer's credential; addressing follows the ambient hub target
   // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `cli-hub-target.json`), so `slay --hub staging computer
@@ -576,7 +576,7 @@ export function computerCommand(): Command {
         )
       }
 
-      // ONE ROOT, ONE RUNNER — checked independently of the unit file.
+      // ONE ROOT, ONE COMPUTER — checked independently of the unit file.
       //
       // Two computers sharing a root would share `computer.config.json` (so the second's
       // token + name would overwrite the first's) and the credential store, then fight

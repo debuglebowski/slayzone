@@ -8,7 +8,7 @@ const LABS_FEATURES = [
   {
     key: 'labs_tests_panel',
     label: 'Tests Panel',
-    description: 'Show test runner panel in the home tab'
+    description: 'Show test computer panel in the home tab'
   },
   {
     key: 'labs_loop_mode',

@@ -5,7 +5,7 @@
  * — "where each computer has each project checked out, one row per pair" — and had
  * never been wired to anything. This is the change that starts using it.
  *
- * The RUNNER is the author. It owns the mapping because it owns the disk, and
+ * The COMPUTER is the author. It owns the mapping because it owns the disk, and
  * nothing here ever invents a row — a hub-authored path is precisely what made
  * `projects.path` wrong.
  *

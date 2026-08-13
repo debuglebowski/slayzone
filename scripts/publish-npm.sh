@@ -3,7 +3,7 @@
 # publish-npm.sh — build, verify, and publish @slayzone/hub, @slayzone/computer and
 # @slayzone/cli to npm.
 #
-# hub + runner are install-time-rebuild packages (native addons); the CLI has no
+# hub + computer are install-time-rebuild packages (native addons); the CLI has no
 # native deps and publishes as a plain self-contained bundle.
 #
 # WHY THIS SCRIPT EXISTS / HOW TO RUN:
@@ -61,7 +61,7 @@ pnpm --filter @slayzone/cli build
 #
 # publish_manifest <pkgdir> <pubname> <bin> <entry> <desc> [native-dep...]
 #   entry — the bundle the bin points at, relative to the package root. The hub
-#           and runner emit dist/bin.cjs; the CLI emits dist/slay.js.
+#           and computer emit dist/bin.cjs; the CLI emits dist/slay.js.
 #   native-dep... — may be EMPTY (the CLI has no native deps). Under `set -u`,
 #           bash 3.2 (which macOS still ships) treats `"${arr[@]}"` on an empty
 #           array as an unbound variable, so the args are passed through "$@"
@@ -89,14 +89,14 @@ publish_manifest() {
 
 echo "==> Rewriting publish manifests"
 publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub ./dist/bin.cjs \
-  "SlayZone hub — headless server (DB, routers, auth, runner gateway)" \
+  "SlayZone hub — headless server (DB, routers, auth, computer gateway)" \
   better-sqlite3 node-pty bufferutil utf-8-validate
 publish_manifest packages/apps/computer "@slayzone/computer" slayzone-computer ./dist/bin.cjs \
-  "SlayZone runner — remote execution node (pty, git, fs, processes)" \
+  "SlayZone computer — remote execution node (pty, git, fs, processes)" \
   node-pty bufferutil utf-8-validate
 # The CLI has NO native deps: build.mjs inlines every workspace dep and leaves only
 # the `node:sqlite` builtin external, so there is nothing to rebuild at install
-# time (unlike hub/runner). Zero dependencies is therefore correct, not an omission.
+# time (unlike hub/computer). Zero dependencies is therefore correct, not an omission.
 publish_manifest packages/apps/cli "@slayzone/cli" slay ./dist/slay.js \
   "SlayZone CLI — run, list and target SlayZone hubs; drive tasks, ptys and projects"
 
@@ -105,7 +105,7 @@ cat > packages/apps/hub/README.md <<'EOF'
 # @slayzone/hub (SlayZone hub)
 
 Headless SlayZone hub: owns the SQLite DB, tRPC/REST routers, auth, and the
-runner gateway that runners dial into.
+computer gateway that computers dial into.
 
     SLAYZONE_ROOT=~/slayzone-hub \
       SLAYZONE_HUB_AUTH_SECRET=$(openssl rand -hex 32) slayzone-hub
@@ -119,12 +119,12 @@ Omit it and the hub anchors to its launch directory.
 The client-facing `/trpc` socket is **unauthenticated** and binds `127.0.0.1`
 by default. Do **not** point `SLAYZONE_HUB_ADDRESS` at a non-loopback host to
 expose it beyond loopback except on a fully trusted network — user
-authentication on `/trpc` is not yet implemented. Runner traffic (`/computers`) is TLS + cert-pinned and safe to expose.
+authentication on `/trpc` is not yet implemented. Computer traffic (`/computers`) is TLS + cert-pinned and safe to expose.
 
 GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
 cat > packages/apps/computer/README.md <<'EOF'
-# @slayzone/computer (SlayZone runner)
+# @slayzone/computer (SlayZone computer)
 
 A SlayZone execution node. Dials OUT to a hub over pinned `wss://` using a join
 token (mint one on the hub), then runs terminals/agents/git on this machine.
@@ -134,11 +134,11 @@ token (mint one on the hub), then runs terminals/agents/git on this machine.
 The join token embeds the hub URL + cert fingerprint, so nothing else is
 required.
 
-This runs the runner in the FOREGROUND: it will not come back after a crash or a
+This runs the computer in the FOREGROUND: it will not come back after a crash or a
 logout. To install it as a supervised service instead, use the CLI:
 
     npm install -g @slayzone/cli
-    slay runner create <name> --token <token from the hub>
+    slay computer create <name> --token <token from the hub>
 
 GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
@@ -163,27 +163,27 @@ systemd --user on Linux), so it restarts if it crashes and starts again when you
 log in. Names are unique per machine — `create` fails if one already exists. To
 run a hub in the foreground instead, use `npx @slayzone/hub`.
 
-## Runners on this machine
+## Computers on this machine
 
-A runner is an execution node: it dials out to a hub and runs terminals, agents
+A computer is an execution node: it dials out to a hub and runs terminals, agents
 and git there. Mint a join token on the hub, then:
 
-    slay runner create <name> --token <szjt1…>   # install it here and keep it running
-    slay runner ls              # every runner installed on this machine
-    slay runner logs <name>
-    slay runner stop <name>     # stop it, keep it registered
-    slay runner start <name>    # bring a stopped runner back
-    slay runner rm <name>       # stop it and remove its registration
+    slay computer create <name> --token <szjt1…>   # install it here and keep it running
+    slay computer ls              # every computer installed on this machine
+    slay computer logs <name>
+    slay computer stop <name>     # stop it, keep it registered
+    slay computer start <name>    # bring a stopped computer back
+    slay computer rm <name>       # stop it and remove its registration
 
 The token embeds the hub URL and its cert fingerprint, so `--token` is the only
 configuration needed. It is stored in `<root>/config.json` (owner-only) — never in
-the service unit. `--root <dir>` picks where the runner's config, credentials and
+the service unit. `--root <dir>` picks where the computer's config, credentials and
 logs live (default: the current directory), and `--allow <dir>` (repeatable) sets
-the filesystem roots it may touch. One runner per root.
+the filesystem roots it may touch. One computer per root.
 
-`create` waits until the runner has actually reached its hub, and unregisters
+`create` waits until the computer has actually reached its hub, and unregisters
 itself again if it cannot — so a bad token fails loudly instead of leaving a
-service that retries forever. `rm` leaves the runner's data on disk and does NOT
+service that retries forever. `rm` leaves the computer's data on disk and does NOT
 revoke it on the hub; revoke it there if the machine is going away.
 
 ## Targeting a hub
@@ -208,18 +208,18 @@ echo "   $RUN_TGZ"
 echo "   $CLI_TGZ"
 
 # --- SMOKE: install BOTH tarballs under PLAIN NODE (proves the ABI rebuild) and
-#     drive the full deploy handshake: boot hub → mint join token → boot runner →
-#     assert the runner enrolls. This is the ONLY place the published-package
-#     native rebuild (better-sqlite3 for the hub, node-pty for the runner) is
+#     drive the full deploy handshake: boot hub → mint join token → boot computer →
+#     assert the computer enrolls. This is the ONLY place the published-package
+#     native rebuild (better-sqlite3 for the hub, node-pty for the computer) is
 #     exercised end-to-end; the dev-tree bins can't (Electron ABI). ---
-echo "==> Smoke: clean-install hub + runner tarballs under plain node + drive enroll handshake"
+echo "==> Smoke: clean-install hub + computer tarballs under plain node + drive enroll handshake"
 SMOKE="$(mktemp -d /tmp/slz-pub-smoke.XXXXXX)"
-HUB_ROOT="$SMOKE/hub-root"; RUN_ROOT="$SMOKE/runner-root"
-RUN_CREDS="$SMOKE/runner-creds"; RUN_WORK="$SMOKE/work"
+HUB_ROOT="$SMOKE/hub-root"; RUN_ROOT="$SMOKE/computer-root"
+RUN_CREDS="$SMOKE/computer-creds"; RUN_WORK="$SMOKE/work"
 mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
-( cd "$SMOKE" && mkdir hub runner cli \
+( cd "$SMOKE" && mkdir hub computer cli \
   && ( cd hub && npm init -y >/dev/null && npm install "$HUB_TGZ" >/dev/null 2>&1 ) \
-  && ( cd runner && npm init -y >/dev/null && npm install "$RUN_TGZ" >/dev/null 2>&1 ) \
+  && ( cd computer && npm init -y >/dev/null && npm install "$RUN_TGZ" >/dev/null 2>&1 ) \
   && ( cd cli && npm init -y >/dev/null && npm install "$CLI_TGZ" >/dev/null 2>&1 ) )
 
 # Both bins MUST carry a `#!/usr/bin/env node` shebang: npm/npx exec the bin
@@ -229,7 +229,7 @@ mkdir -p "$HUB_ROOT" "$RUN_ROOT" "$RUN_CREDS" "$RUN_WORK"
 # the same files npx runs — before anything else, so the failure names the
 # cause instead of surfacing as a confusing boot error further down.
 for b in "$SMOKE/hub/node_modules/.bin/slayzone-hub" \
-         "$SMOKE/runner/node_modules/.bin/slayzone-computer" \
+         "$SMOKE/computer/node_modules/.bin/slayzone-computer" \
          "$SMOKE/cli/node_modules/.bin/slay"; do
   # `.bin` entries are symlinks on posix and shim scripts on Windows; resolve so
   # we read the bundle itself.
@@ -240,7 +240,7 @@ for b in "$SMOKE/hub/node_modules/.bin/slayzone-hub" \
 done
 echo "   ✓ all three published bins carry a node shebang"
 
-# Shared HMAC secret so the hub's runner-auth verifies the runner it enrolls.
+# Shared HMAC secret so the hub's computer-auth verifies the computer it enrolls.
 SMOKE_SECRET="$(openssl rand -hex 32)"
 
 # Scrub any inherited SlayZone env before booting. Running this script from
@@ -258,8 +258,8 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_ROOT
        -u ELECTRON_RUN_AS_NODE)
 
 # Fixed loopback port for the hub's ONE listener (tRPC + health + join-token REST +
-# /computers, demuxed by path). The runner URL embedded in the minted token rides
-# this same port; there is no separate runner port to set.
+# /computers, demuxed by path). The computer URL embedded in the minted token rides
+# this same port; there is no separate computer port to set.
 HUB_PORT=47811
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_ADDRESS="127.0.0.1:$HUB_PORT" \
@@ -270,7 +270,7 @@ HPID=$!
 smoke_fail() {
   echo "   SMOKE FAIL — $1"
   echo "   --- hub.log ---";    grep -vE "Migration [0-9]+ applied" "$SMOKE/hub.log" 2>/dev/null | tail -25
-  echo "   --- runner.log ---"; tail -25 "$SMOKE/runner.log" 2>/dev/null
+  echo "   --- computer.log ---"; tail -25 "$SMOKE/computer.log" 2>/dev/null
   kill "$HPID" "${RPID:-}" 2>/dev/null || true
   rm -rf "$SMOKE"
   echo "Aborting before publish." ; exit 1
@@ -293,14 +293,14 @@ for i in $(seq 1 20); do
   TOKEN_JSON="$(curl -s -X POST "http://127.0.0.1:$HUB_PORT/api/computers/join-token" \
     -H 'content-type: application/json' -d '{"label":"publish-smoke"}' 2>/dev/null || true)"
   echo "$TOKEN_JSON" | grep -q '"token"' && break
-  [ "$i" = "20" ] && smoke_fail "join-token mint never succeeded (runner listener bind?)"
+  [ "$i" = "20" ] && smoke_fail "join-token mint never succeeded (computer listener bind?)"
   sleep 1
 done
 JOIN_TOKEN="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).token)' "$TOKEN_JSON")"
 HUB_WSS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).hubUrl)' "$TOKEN_JSON")"
-echo "   ✓ minted join token (hub runner url: $HUB_WSS)"
+echo "   ✓ minted join token (hub computer url: $HUB_WSS)"
 
-# Boot the runner from ITS tarball (proves node-pty rebuilt for the consumer ABI)
+# Boot the computer from ITS tarball (proves node-pty rebuilt for the consumer ABI)
 # and point it at the minted token — which is self-sufficient: it embeds the hub's
 # `wss://…/computers` url AND the cert fingerprint to pin, so no address env is
 # needed (and none would do: SLAYZONE_HUB_ADDRESS is authority-only, and in the
@@ -311,22 +311,22 @@ echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
   SLAYZONE_ROOT="$RUN_ROOT" SLAYZONE_HUB_JOIN_TOKEN="$JOIN_TOKEN" \
   SLAYZONE_COMPUTER_CREDENTIALS_DIR="$RUN_CREDS" \
-  "$SMOKE/runner/node_modules/.bin/slayzone-computer" > "$SMOKE/runner.log" 2>&1 &
+  "$SMOKE/computer/node_modules/.bin/slayzone-computer" > "$SMOKE/computer.log" 2>&1 &
 RPID=$!
 
-# Assert enrollment via the RUNNER's stdout: on a fresh runner the dialer logs
+# Assert enrollment via the COMPUTER's stdout: on a fresh computer the dialer logs
 # `connected to hub {…,"mode":"enroll"}` — the hub accepted the join token, minted
 # credentials over the pinned wss link, and the handshake completed. (The hub's own
-# "runner enrolled" line goes to <dataRoot>/logs/sidecar.log, NOT stdout — see
-# hub/src/log.ts — so we assert on the runner's captured stdout, and specifically
-# on mode=enroll: a fresh credential-less runner must ENROLL, not hello-reconnect.)
+# "computer enrolled" line goes to <dataRoot>/logs/sidecar.log, NOT stdout — see
+# hub/src/log.ts — so we assert on the computer's captured stdout, and specifically
+# on mode=enroll: a fresh credential-less computer must ENROLL, not hello-reconnect.)
 for i in $(seq 1 20); do
-  if grep -q '"mode":"enroll"' "$SMOKE/runner.log" 2>/dev/null; then break; fi
-  kill -0 "$RPID" 2>/dev/null || smoke_fail "runner process exited before enrolling"
-  [ "$i" = "20" ] && smoke_fail "runner did not enroll within 20s"
+  if grep -q '"mode":"enroll"' "$SMOKE/computer.log" 2>/dev/null; then break; fi
+  kill -0 "$RPID" 2>/dev/null || smoke_fail "computer process exited before enrolling"
+  [ "$i" = "20" ] && smoke_fail "computer did not enroll within 20s"
   sleep 1
 done
-echo "   ✓ runner enrolled into the hub over the pinned wss link"
+echo "   ✓ computer enrolled into the hub over the pinned wss link"
 
 # --- CLI smoke: the published `slay` must DISCOVER the running hub and STOP it.
 # Discovery probes the hub port block, but this smoke hub binds a fixed loopback
@@ -337,7 +337,7 @@ echo "   ✓ runner enrolled into the hub over the pinned wss link"
 # unit) terminates it.
 #
 # Deliberately NOT `slay hub create`: that REGISTERS a launchd/systemd unit, and a
-# publish smoke must not install a service on the CI runner or a developer's
+# publish smoke must not install a service on the CI computer or a developer's
 # machine. Unit-file content is covered by platform/src/service-unit.test.ts.
 SLAY="$SMOKE/cli/node_modules/.bin/slay"
 CLI_ENV=(env "${SCRUB[@]}" SLAYZONE_ROOT="$HUB_ROOT")
@@ -370,7 +370,7 @@ for i in $(seq 1 15); do
 done
 echo "   ✓ slay hub stop terminated the hub (discovery + SIGTERM path)"
 
-echo "   SMOKE PASS — hub + runner enrolled, and the published CLI drove the hub, under plain node"
+echo "   SMOKE PASS — hub + computer enrolled, and the published CLI drove the hub, under plain node"
 kill "$HPID" "$RPID" 2>/dev/null || true
 rm -rf "$SMOKE"
 
@@ -395,7 +395,7 @@ esac
 echo "==> Publishing to npm (auth: $WHO, tag: $NPM_TAG)"
 
 # Idempotent per package: an immutable npm version means a partial prior run
-# (e.g. hub published, runner failed) must be resumable. Skip any name@version
+# (e.g. hub published, computer failed) must be resumable. Skip any name@version
 # already on the registry; publish the rest. Makes any re-dispatch safe.
 publish_one() {
   local dir="$1" name="$2"

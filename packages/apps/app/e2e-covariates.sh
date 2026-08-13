@@ -21,10 +21,10 @@
 set -uo pipefail
 
 # Every SlayZone-owned process: the dev app (launched by electron-vite from the
-# repo's own electron dist), its helpers, its sidecar, plus any hub/runner.
+# repo's own electron dist), its helpers, its sidecar, plus any hub/computer.
 # Plain word-split rather than `mapfile` — macOS ships bash 3.2.
 all_pids=$(
-  pgrep -f 'node_modules/electron/dist/Electron\.app|out/main/index\.js|hub/dist/bin\.c?js|runner/dist/bin\.cjs' 2>/dev/null || true
+  pgrep -f 'node_modules/electron/dist/Electron\.app|out/main/index\.js|hub/dist/bin\.c?js|computer/dist/bin\.cjs' 2>/dev/null || true
 )
 
 # Convert ps etime ([[DD-]HH:]MM:SS) to seconds.

@@ -1,5 +1,5 @@
 /**
- * Bundle the runner into a single self-contained dist/bin.cjs (node target).
+ * Bundle the computer into a single self-contained dist/bin.cjs (node target).
  * Not wired into the app build pipeline — build on demand:
  *   pnpm --filter @slayzone/computer build
  */
@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url)
  * Teach esbuild Vite's `?raw` suffix: `import x from 'pkg/file.sh?raw'` inlines
  * the file's text at build time.
  *
- * The runner installs the SAME agent hooks the desktop app does, from the same
+ * The computer installs the SAME agent hooks the desktop app does, from the same
  * shared installers, so both need the same two file bodies inlined — and the
  * shared code deliberately takes them as parameters rather than importing them,
  * so it carries no bundler syntax. Implementing Vite's spelling here means the

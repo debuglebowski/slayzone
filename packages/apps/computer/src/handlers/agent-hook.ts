@@ -3,7 +3,7 @@
  *
  * Hub/computer split: a task's PTY that spawns on a computer must post its lifecycle
  * hook to the SAME place a local spawn does — loopback. There is no hub on the
- * computer machine, so this hosts `/api/agent-hook` on the RUNNER's own loopback
+ * computer machine, so this hosts `/api/agent-hook` on the COMPUTER's own loopback
  * and relays each envelope to the hub OVER THE EXISTING authenticated ws channel
  * (a generic `event` notification, `name: 'agent-hook'`). The hub's composition
  * root consumes that event and feeds it to the shared `processAgentHook`.

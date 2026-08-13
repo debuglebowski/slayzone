@@ -847,7 +847,7 @@ export interface CreateChatOpts {
    */
   computerId?: string | null
   /**
-   * Project this session belongs to, so the RUNNER can resolve its own cwd when
+   * Project this session belongs to, so the COMPUTER can resolve its own cwd when
    * `cwd` is empty — the hub cannot, having no path column that could be right
    * about more than one machine. `cwd` still wins when set (a worktree, or a
    * `task.base_dir` the user chose). Mirrors `PtySpawnSpec.projectId`.

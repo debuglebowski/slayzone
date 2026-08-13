@@ -1,7 +1,7 @@
-# Runners Domain
+# Computers Domain
 
-Runner registry for the hub/runner split: which runner machines exist, how they
-enroll (single-use join tokens, sha256 hashes at rest), and where each runner
+Computer registry for the hub/computer split: which computer machines exist, how they
+enroll (single-use join tokens, sha256 hashes at rest), and where each computer
 has each project checked out. Wave 1 lands DARK — schema (migration v149) +
 store only, no tRPC router yet.
 
@@ -11,8 +11,8 @@ store only, no tRPC router yet.
 
 ## Server (server/)
 
-- `store.ts` — runner register/list/get/touch/revoke, checkout upsert/get/list,
-  task/project runner-binding helpers (`NULL` = inherit / local)
+- `store.ts` — computer register/list/get/touch/revoke, checkout upsert/get/list,
+  task/project computer-binding helpers (`NULL` = inherit / local)
 - `join-tokens.ts` — `mintJoinToken` / `verifyJoinToken` / `decodeJoinToken`
   (`szjt1.<base64url payload>` tokens; only hashes stored)
 

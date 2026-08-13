@@ -20,7 +20,7 @@ export interface PtySpawnSpec {
   taskId: string
   computerId: string | null
   /**
-   * Which project this session belongs to, so the RUNNER can resolve its own
+   * Which project this session belongs to, so the COMPUTER can resolve its own
    * cwd. The hub cannot: it held one `projects.path` column naming a directory
    * on a machine it does not own, which could only ever be right about one
    * computer.

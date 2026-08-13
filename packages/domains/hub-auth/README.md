@@ -1,7 +1,7 @@
 # @slayzone/hub-auth
 
 BetterAuth-backed auth for the SlayZone hub: user sessions (email/password +
-bearer tokens), JWT issuance, organizations, and runner API keys. Fully
+bearer tokens), JWT issuance, organizations, and computer API keys. Fully
 isolated sub-app — it owns its own sqlite file and never touches the app's
 `SlayzoneDb` or migration registry.
 
@@ -58,15 +58,15 @@ package. `bearer`, `jwt`, and `organization` still come from
   `res.locals.hubAuth` (accessor: `getHubAuthContext(res)`).
 - `verifyRunnerApiKey(auth, key)` / `requireApiKey(auth)` → resolves
   `RunnerPrincipal { runnerId, keyId }` from the `x-api-key` header; only
-  accepts keys minted with runner metadata; middleware attaches it as
-  `res.locals.runner` (accessor: `getRunnerPrincipal(res)`).
+  accepts keys minted with computer metadata; middleware attaches it as
+  `res.locals.computer` (accessor: `getRunnerPrincipal(res)`).
 - `mintRunnerApiKey(auth, { runnerId, name })` / `revokeRunnerApiKey(auth,
-  keyId)` → runner keys are owned by an internal service user
-  (`runners@slayzone.internal`, created lazily) because the api-key plugin
-  requires a user reference; the runner identity is stored as `{ runnerId }`
+  keyId)` → computer keys are owned by an internal service user
+  (`computers@slayzone.internal`, created lazily) because the api-key plugin
+  requires a user reference; the computer identity is stored as `{ runnerId }`
   key metadata. Revocation deletes the key row through `auth.$context`'s
   adapter because the plugin's `/api-key/delete` endpoint is session-bound
-  and runner keys are managed server-side.
+  and computer keys are managed server-side.
 
 ## Schema snapshot (better-auth 1.6.23 + plugins, sqlite)
 

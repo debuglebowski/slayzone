@@ -34,7 +34,7 @@ With hoisted layout, electron lives at repo root `node_modules/`, not app's. ele
 
 ## Python setuptools
 
-macOS runners have Python 3.12+ which removed `distutils`. electron-builder 25.x's bundled node-gyp needs it:
+macOS computers have Python 3.12+ which removed `distutils`. electron-builder 25.x's bundled node-gyp needs it:
 
 ```yaml
 - run: pip3 install --break-system-packages setuptools

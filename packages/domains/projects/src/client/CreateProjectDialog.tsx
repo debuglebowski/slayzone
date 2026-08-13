@@ -84,7 +84,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const handlePicked = (picked: string): void => {
     setPath(picked)
     // Auto-fill name from the folder name if empty. Split on both separators —
-    // the chosen path belongs to the RUNNER, which may be a different OS.
+    // the chosen path belongs to the COMPUTER, which may be a different OS.
     if (!name.trim()) setName(picked.split(/[\\/]/).filter(Boolean).pop() ?? '')
   }
 

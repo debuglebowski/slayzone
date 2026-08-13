@@ -1,6 +1,6 @@
 /**
  * Tests for createPty's warm adoption branch (`opts.adoptPty`). Verifies that a warm
- * agent already running ON A RUNNER is registered under the real sessionId WITHOUT a
+ * agent already running ON A COMPUTER is registered under the real sessionId WITHOUT a
  * fresh spawn, that the task-scoped env is exported and the agent exec'd via the
  * post-spawn write, and that the warm scrollback reaches the RingBuffer.
  *
@@ -172,7 +172,7 @@ await test('adopt: exports task identity then execs the agent', async () => {
 await test('adopt: warm scrollback reaches the RingBuffer via the data path', async () => {
   const fake = makeFakePty()
   installFakeBackend(fake)
-  // Delivered BY THE RUNNER in the adopt reply, then emitted on this session's
+  // Delivered BY THE COMPUTER in the adopt reply, then emitted on this session's
   // ordinary onData — so it lands in the buffer through `filterBufferData` exactly
   // like live output, rather than being appended as a separate seed.
   warmScrollback = 'WARM-PROMPT$ '

@@ -4,7 +4,7 @@
  * The directory picker that replaced the native file dialog for workspace paths.
  *
  * What matters here is not the chrome but the claims it makes: it browses the
- * RUNNER's filesystem (the native dialog browsed the desktop's, which is how a
+ * COMPUTER's filesystem (the native dialog browsed the desktop's, which is how a
  * remote task ended up with a path that existed nowhere), it stays inside that
  * computer's jail, and when the jail is empty it says so instead of rendering a
  * blank list that reads as "this machine has no folders".

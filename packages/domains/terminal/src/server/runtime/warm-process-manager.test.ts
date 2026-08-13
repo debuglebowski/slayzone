@@ -144,7 +144,7 @@ await test('warm spawn pre-boots the agent + records a pooled session (B3b)', as
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  // The provider command is sent as postSpawnCommand for the RUNNER to exec into
+  // The provider command is sent as postSpawnCommand for the COMPUTER to exec into
   // the warm shell (agent pre-boot). Built hub-side so the hub stays the sole
   // authority on mode templates + conversation ids.
   const post = lastSpawn()?.postSpawnCommand ?? ''
@@ -243,7 +243,7 @@ await test('claim returns the computer handle, not a process (nothing to seed hu
     computerId: 'computer-1',
     flags: '--dangerously'
   })
-  // The pool no longer owns output. The RUNNER buffers a warm session in its own
+  // The pool no longer owns output. The COMPUTER buffers a warm session in its own
   // RingBuffer and replays it in the pty.warmAdopt reply, which reaches the hub on
   // the session's normal data path — so it passes through `interceptSyncQueries` +
   // `filterBufferData` (attachPtyHandlers wraps remote handles too) exactly like
