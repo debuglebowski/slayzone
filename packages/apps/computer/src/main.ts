@@ -21,7 +21,7 @@ import {
   RpcError,
   computerShutdownParamsSchema
 } from '@slayzone/computer-transport/shared'
-import type { ComputerConfig } from './config'
+import { effectiveHubUrls, type ComputerConfig } from './config'
 import { startHostIdReconciler } from './host-id'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createFsHandlers } from './handlers/fs'
@@ -46,8 +46,17 @@ export interface ComputerRuntimeDeps {
 }
 
 export interface ComputerHandle {
+  /** The primary hub's dialer — `hubUrls[0]`, or the single `hubUrl`. */
   dialer: HubDialer
+  /** One per hub this computer serves. Length 1 unless `hubUrls` is configured. */
+  dialers: HubDialer[]
   stop(): Promise<void>
+}
+
+/** One hub's worth of runtime: its dialer, and how to tear it down. */
+interface HubConnection {
+  dialer: HubDialer
+  dispose: () => Promise<void>
 }
 
 export interface HubRequestHandlerDeps {
@@ -145,32 +154,6 @@ export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps 
     (() => {
       // Logging is opt-in — with no sink, computer lifecycle diagnostics are discarded.
     })
-  // Creds always derive from the ROOT anchor (`<ROOT>/computers`, see
-  // credential-store slayzoneRootDir) — no override knob. Tests inject a store
-  // via deps.credentialStore.
-  const credentialStore =
-    deps.credentialStore ?? createFileCredentialStore(hubHostFromUrl(config.hubUrl))
-
-  // The dialer THROWS if a pin is set on a `ws://` url (pinning is meaningless
-  // without TLS). An EXPLICITLY-configured pin (env/file) on a ws:// url already
-  // fails loudly in loadComputerConfig — so any pin reaching here on a ws:// url can
-  // only be the join-token-DECODED fingerprint (the auto path). Softly drop it so a
-  // ws token stays usable for loopback/dev; the real computer path is wss:// (the hub's
-  // /computers listener is https), where the pin is fed through and enforced.
-  const isSecureUrl = (() => {
-    try {
-      return new URL(config.hubUrl).protocol === 'wss:'
-    } catch {
-      return false
-    }
-  })()
-  const pinnedCertSha256 =
-    config.pinnedCertSha256 && isSecureUrl ? config.pinnedCertSha256 : undefined
-  if (config.pinnedCertSha256 && !isSecureUrl) {
-    log('ignoring token-decoded cert fingerprint on a non-wss hub url (pinning requires wss://)', {
-      hubUrl: config.hubUrl
-    })
-  }
 
   // `startComputer` is synchronous, and resolving the host id is file I/O. Rather
   // than make the whole entrypoint async, the identity object is MUTABLE and the
@@ -199,82 +182,144 @@ export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps 
     })
 
   let handle: ComputerHandle
-  let dispatch: HubRequestDispatch
-  const dialer = new HubDialer({
-    url: config.hubUrl,
-    identity,
-    credentialStore,
-    ...(config.joinToken ? { joinToken: config.joinToken } : {}),
-    ...(pinnedCertSha256 ? { pinnedCertSha256 } : {}),
-    onHubRequest: (method, params) => dispatch.handle(method, params),
-    log
-  })
 
-  // Where this computer keeps its projects. Loaded async (one file read) and
-  // late-bound, like the agent-hook URL — the dispatch table is synchronous.
-  let projectPaths: ProjectPathStore | null = null
-  void createProjectPathStore(hubHostFromUrl(config.hubUrl))
-    .then((store) => {
-      projectPaths = store
-      log('project path map loaded', { file: store.filePath, count: store.list().length })
-    })
-    .catch((err) => log('project path map failed to load', { error: String(err) }))
+  /**
+   * Everything that belongs to ONE hub.
+   *
+   * All of it is per-hub, including the agent-hook relay: a pty spawned by hub A
+   * is dispatched by A's table and must post its hooks back over A's socket, so a
+   * shared relay would forward another hub's agent lifecycle to the wrong place.
+   * The two persistence layers were already keyed by hub host, so nothing new is
+   * stored — this is the runtime catching up with a shape the files always had.
+   */
+  const connectHub = (hubUrl: string, isPrimary: boolean): HubConnection => {
+    // Creds always derive from the ROOT anchor, keyed by hub host. The injected
+    // store (tests) applies to the PRIMARY hub only — one store cannot stand in
+    // for several hubs' credentials without silently sharing one entry.
+    const credentialStore =
+      (isPrimary ? deps.credentialStore : undefined) ??
+      createFileCredentialStore(hubHostFromUrl(hubUrl))
 
-  dispatch = createHubRequestHandler({
-    shutdown: (reason) => {
-      log('computer shutdown requested by hub', { reason })
-      void handle.stop().then(() => deps.onShutdown?.(reason))
-    },
-    dialer,
-    config,
-    log,
-    getProjectPaths: () => projectPaths
-  })
-
-  dialer.events.on('connected', ({ computerId, mode }) => log('connected to hub', { computerId, mode }))
-  dialer.events.on('disconnected', ({ reason }) => log('disconnected from hub', { reason }))
-  dialer.events.on('reconnect-scheduled', ({ attempt, delayMs }) =>
-    log('reconnect scheduled', { attempt, delayMs })
-  )
-  dialer.events.on('error', ({ error, fatal, reason }) => {
-    // `needs-re-enrollment` is the one failure an operator can act on: the hub no
-    // longer recognizes this computer (its storage was deleted, one of its two DBs was
-    // restored without the other, or the computer was revoked). Log it as its own
-    // thing rather than burying it in a generic fatal, because the message carries
-    // the fix and the process is about to stop.
-    if (reason === 'needs-re-enrollment') {
-      log('NEEDS RE-ENROLLMENT — this computer will not reconnect until it is enrolled again', {
-        error: error.message,
-        reason
+    // Pinning is meaningless without TLS. An EXPLICIT pin on a ws:// url already
+    // failed loudly in loadComputerConfig, so a pin reaching here on ws:// can only
+    // be the join-token-decoded one (the auto path) — softly dropped so a ws token
+    // stays usable for loopback/dev. Evaluated PER HUB: one hub may be wss and
+    // another loopback ws.
+    const isSecureUrl = (() => {
+      try {
+        return new URL(hubUrl).protocol === 'wss:'
+      } catch {
+        return false
+      }
+    })()
+    const pinnedCertSha256 =
+      config.pinnedCertSha256 && isSecureUrl ? config.pinnedCertSha256 : undefined
+    if (config.pinnedCertSha256 && !isSecureUrl) {
+      log('ignoring token-decoded cert fingerprint on a non-wss hub url (pinning requires wss://)', {
+        hubUrl
       })
-      return
     }
-    log(fatal ? 'fatal error' : 'error', { error: error.message, fatal })
-  })
 
-  // Agent-hook loopback relay (hub/computer split): host /api/agent-hook on the
-  // computer's own loopback and forward each envelope to the hub over the existing
-  // authed ws channel. Its ephemeral port binds async; feed the URL into the
-  // dispatch (shared ctx) so ptys spawned after the bind overlay it into the
-  // agent env. Best-effort — a bind failure only means remote hooks fall back to
-  // whatever URL the hub baked in (degraded, not fatal to exec).
-  let agentHookServer: AgentHookServer | null = null
-  void createAgentHookServer({ dialer, config, log })
-    .then((srv) => {
-      agentHookServer = srv
-      dispatch.setAgentHookUrl(srv.url)
+    let dispatch: HubRequestDispatch
+    const dialer = new HubDialer({
+      url: hubUrl,
+      identity,
+      credentialStore,
+      ...(config.joinToken && isPrimary ? { joinToken: config.joinToken } : {}),
+      ...(pinnedCertSha256 ? { pinnedCertSha256 } : {}),
+      onHubRequest: (method, params) => dispatch.handle(method, params),
+      log
     })
-    .catch((err) => log('agent-hook relay failed to start', { error: String(err) }))
 
-  dialer.start()
+    // Where this computer keeps THIS hub's projects. Loaded async (one file read)
+    // and late-bound, like the agent-hook URL — the dispatch table is synchronous.
+    let projectPaths: ProjectPathStore | null = null
+    void createProjectPathStore(hubHostFromUrl(hubUrl))
+      .then((store) => {
+        projectPaths = store
+        log('project path map loaded', {
+          hubUrl,
+          file: store.filePath,
+          count: store.list().length
+        })
+      })
+      .catch((err) => log('project path map failed to load', { hubUrl, error: String(err) }))
+
+    dispatch = createHubRequestHandler({
+      shutdown: (reason) => {
+        log('computer shutdown requested by hub', { hubUrl, reason })
+        void handle.stop().then(() => deps.onShutdown?.(reason))
+      },
+      dialer,
+      config,
+      log,
+      getProjectPaths: () => projectPaths
+    })
+
+    // Every line carries the hub, because with more than one connection "reconnect
+    // scheduled" on its own does not say which peer went away.
+    dialer.events.on('connected', ({ computerId, mode }) =>
+      log('connected to hub', { hubUrl, computerId, mode })
+    )
+    dialer.events.on('disconnected', ({ reason }) => log('disconnected from hub', { hubUrl, reason }))
+    dialer.events.on('reconnect-scheduled', ({ attempt, delayMs }) =>
+      log('reconnect scheduled', { hubUrl, attempt, delayMs })
+    )
+    dialer.events.on('error', ({ error, fatal, reason }) => {
+      // `needs-re-enrollment` is the one failure an operator can act on: that hub no
+      // longer recognizes this computer (its storage was deleted, one of its two DBs
+      // was restored without the other, or the computer was revoked). Log it as its
+      // own thing rather than burying it in a generic fatal, because the message
+      // carries the fix.
+      if (reason === 'needs-re-enrollment') {
+        log('NEEDS RE-ENROLLMENT — this computer will not reconnect until it is enrolled again', {
+          hubUrl,
+          error: error.message,
+          reason
+        })
+        return
+      }
+      log(fatal ? 'fatal error' : 'error', { hubUrl, error: error.message, fatal })
+    })
+
+    // Agent-hook loopback relay: host /api/agent-hook on this computer's own
+    // loopback and forward each envelope to THIS hub over its authed ws channel.
+    // Its ephemeral port binds async; feed the URL into the dispatch so ptys
+    // spawned after the bind overlay it into the agent env. Best-effort — a bind
+    // failure only degrades remote hooks, it does not stop exec.
+    let agentHookServer: AgentHookServer | null = null
+    void createAgentHookServer({ dialer, config, log })
+      .then((srv) => {
+        agentHookServer = srv
+        dispatch.setAgentHookUrl(srv.url)
+      })
+      .catch((err) => log('agent-hook relay failed to start', { hubUrl, error: String(err) }))
+
+    dialer.start()
+
+    return {
+      dialer,
+      dispose: async () => {
+        // Kill live ptys/processes before the socket drops so nothing is orphaned.
+        dispatch.dispose()
+        if (agentHookServer) await agentHookServer.close()
+        await dialer.stop()
+      }
+    }
+  }
+
+  const hubUrls = effectiveHubUrls(config)
+  const connections = hubUrls.map((url, i) => connectHub(url, i === 0))
+
   handle = {
-    dialer,
+    // The primary hub's dialer. Kept as a named field because a computer serving
+    // exactly one hub is the overwhelming case and every existing caller reads it;
+    // `dialers` is what multi-hub callers iterate.
+    dialer: connections[0].dialer,
+    dialers: connections.map((c) => c.dialer),
     stop: async () => {
-      // Kill live ptys/processes before the socket drops so nothing is orphaned.
-      dispatch.dispose()
       hostIdStop?.()
-      if (agentHookServer) await agentHookServer.close()
-      await dialer.stop()
+      await Promise.all(connections.map((c) => c.dispose()))
     }
   }
   return handle

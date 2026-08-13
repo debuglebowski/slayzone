@@ -124,3 +124,51 @@ describe('startComputer cert-pin guard', () => {
     if (handle) await (handle as ReturnType<typeof startComputer>).stop()
   })
 })
+
+describe('startComputer multi-hub', () => {
+  // Loopback port 0 keeps this hermetic — startComputer calls dialer.start(), so a
+  // routable host would do real network I/O. See the note above.
+  it('opens one dialer per configured hub, and only one by default', async () => {
+    const single = startComputer(testConfig, { credentialStore: memoryStore() })
+    try {
+      expect(single.dialers.length).toBe(1)
+      // The named `dialer` stays the primary, because a computer serving exactly
+      // one hub is the overwhelming case and every existing caller reads it.
+      expect(single.dialer).toBe(single.dialers[0])
+    } finally {
+      await single.stop()
+    }
+
+    const multi = startComputer(
+      {
+        ...testConfig,
+        hubUrls: ['ws://127.0.0.1:0/computers', 'ws://127.0.0.2:0/computers']
+      },
+      { credentialStore: memoryStore() }
+    )
+    try {
+      expect(multi.dialers.length).toBe(2)
+      // Independent connections, not one dialer reused — each hub has its own
+      // credentials, its own project-path map and its own agent-hook relay.
+      expect(multi.dialers[0]).not.toBe(multi.dialers[1])
+    } finally {
+      await multi.stop()
+    }
+  })
+
+  // The same hub twice would mean two dialers racing over one credential entry.
+  it('de-duplicates repeated hub urls', async () => {
+    const handle = startComputer(
+      {
+        ...testConfig,
+        hubUrls: ['ws://127.0.0.1:0/computers', 'ws://127.0.0.1:0/computers']
+      },
+      { credentialStore: memoryStore() }
+    )
+    try {
+      expect(handle.dialers.length).toBe(1)
+    } finally {
+      await handle.stop()
+    }
+  })
+})
