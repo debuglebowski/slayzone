@@ -10,7 +10,10 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { HubToComputerMethods, ComputerNotificationMethods } from '@slayzone/computer-transport/shared'
+import {
+  HubToComputerMethods,
+  ComputerNotificationMethods
+} from '@slayzone/computer-transport/shared'
 import type { ComputerConfig } from '../config'
 import { createProjectPathStore, projectsFilePath } from '../project-paths'
 import { createPtyHandlers } from './pty'
@@ -58,9 +61,9 @@ describe('project path mapping', () => {
     mkdirSync(target, { recursive: true })
     const { handlers } = await handlersFor([dir])
 
-    expect(
-      await handlers[M.projectSetPath]({ projectId: 'p1', path: target })
-    ).toEqual({ path: target })
+    expect(await handlers[M.projectSetPath]({ projectId: 'p1', path: target })).toEqual({
+      path: target
+    })
     expect(handlers[M.projectResolvePath]({ projectId: 'p1' })).toEqual({
       path: target,
       exists: true
@@ -87,9 +90,9 @@ describe('project path mapping', () => {
     const inner = join(dir, 'inner')
     mkdirSync(inner, { recursive: true })
     const { handlers } = await handlersFor([inner])
-    await expect(
-      handlers[M.projectSetPath]({ projectId: 'p1', path: dir })
-    ).rejects.toThrow(/allowedRoots/)
+    await expect(handlers[M.projectSetPath]({ projectId: 'p1', path: dir })).rejects.toThrow(
+      /allowedRoots/
+    )
     expect(handlers[M.projectResolvePath]({ projectId: 'p1' })).toEqual({ path: null })
   })
 

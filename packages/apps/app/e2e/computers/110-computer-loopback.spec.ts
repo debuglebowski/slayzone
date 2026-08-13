@@ -175,7 +175,9 @@ function spawnLoopbackComputer(opts: {
 }
 
 /** All computers the hub currently knows about (store rows + live status). */
-function listComputers(page: Page): Promise<Array<{ id: string; name: string; connected: boolean }>> {
+function listComputers(
+  page: Page
+): Promise<Array<{ id: string; name: string; connected: boolean }>> {
   return page.evaluate(
     () =>
       window.getTrpcVanillaClient().computers.list.query() as Promise<

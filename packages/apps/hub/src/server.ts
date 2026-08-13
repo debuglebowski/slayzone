@@ -315,7 +315,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   //              (carried in its join token) is enforced end-to-end, unchanged from
   //              the old separate-listener design.
   const wss = new WebSocketServer({ noServer: true })
-  const computerWss = computerGateway && hubIdentity ? new WebSocketServer({ noServer: true }) : null
+  const computerWss =
+    computerGateway && hubIdentity ? new WebSocketServer({ noServer: true }) : null
   httpServer.on('upgrade', (req, socket, head) => {
     const pathname = (req.url ?? '').split('?')[0]
     if (pathname === '/trpc') {

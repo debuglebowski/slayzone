@@ -116,7 +116,9 @@ describe('enrollment', () => {
       })
     )
     const frame = await reply
-    expect((frame.error as { code: number }).code).toBe(ComputerTransportErrorCodes.protocolMismatch)
+    expect((frame.error as { code: number }).code).toBe(
+      ComputerTransportErrorCodes.protocolMismatch
+    )
   })
 })
 

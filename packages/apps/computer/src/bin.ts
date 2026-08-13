@@ -21,7 +21,10 @@
 import { hostname } from 'node:os'
 import { delimiter } from 'node:path'
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
-import { getComputerConfigFilePath, loadComputerConfigFile } from '@slayzone/platform/slayzone-config'
+import {
+  getComputerConfigFilePath,
+  loadComputerConfigFile
+} from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'

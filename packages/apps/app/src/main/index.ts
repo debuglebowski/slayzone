@@ -830,7 +830,9 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
     onNeedsReEnrollment: () => {
       // The hub no longer recognizes this computer, so restarting cannot help. Say so
       // where the user will see it: nothing can execute until it is enrolled again.
-      console.error('[local-computer] needs re-enrollment — the hub does not recognize this computer')
+      console.error(
+        '[local-computer] needs re-enrollment — the hub does not recognize this computer'
+      )
       try {
         recordDiagnosticEvent({
           level: 'error',

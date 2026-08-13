@@ -1293,10 +1293,10 @@ export function composeServer(opts: {
     // Assigned further down, once the workspace-fs adapters exist. The
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.
-    let widenLocalComputerRoots: (computerId: string, computerName: string) => Promise<void> = async () =>
-      undefined
-    let seedLocalProjectPaths: (computerId: string, computerName: string) => Promise<void> = async () =>
-      undefined
+    let widenLocalComputerRoots: (computerId: string, computerName: string) => Promise<void> =
+      async () => undefined
+    let seedLocalProjectPaths: (computerId: string, computerName: string) => Promise<void> =
+      async () => undefined
     let mirrorComputerProjectPaths: (computerId: string) => Promise<void> = async () => undefined
     const computerGateway = createHubComputerGateway(
       createComputerAuthAdapters({ db, auth: hubAuth, localComputerName })
@@ -1484,7 +1484,11 @@ export function composeServer(opts: {
     // project the computer has since dropped is reflected rather than remembered.
     mirrorComputerProjectPaths = async (computerId: string): Promise<void> => {
       try {
-        const listed = await computerGateway.request(computerId, HubToComputerMethods.projectList, {})
+        const listed = await computerGateway.request(
+          computerId,
+          HubToComputerMethods.projectList,
+          {}
+        )
         const parsed = projectListResultSchema.safeParse(listed)
         if (!parsed.success) return
         await recordComputerProjectPaths(

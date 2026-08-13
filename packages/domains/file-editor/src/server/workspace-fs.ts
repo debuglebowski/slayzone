@@ -220,7 +220,12 @@ export interface WorkspaceFsAdapters {
   ): Promise<void>
   createFile(computerId: string | null, rootPath: string, filePath: string): Promise<void>
   createDir(computerId: string | null, rootPath: string, dirPath: string): Promise<void>
-  rename(computerId: string | null, rootPath: string, oldPath: string, newPath: string): Promise<void>
+  rename(
+    computerId: string | null,
+    rootPath: string,
+    oldPath: string,
+    newPath: string
+  ): Promise<void>
   delete(computerId: string | null, rootPath: string, targetPath: string): Promise<void>
   copyIn(
     computerId: string | null,
@@ -228,7 +233,12 @@ export interface WorkspaceFsAdapters {
     absoluteSrc: string,
     targetDir?: string
   ): Promise<string>
-  copy(computerId: string | null, rootPath: string, srcPath: string, destPath: string): Promise<void>
+  copy(
+    computerId: string | null,
+    rootPath: string,
+    srcPath: string,
+    destPath: string
+  ): Promise<void>
   gitStatus(computerId: string | null, rootPath: string): Promise<GitStatusMap>
   searchFiles(
     computerId: string | null,

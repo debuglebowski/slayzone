@@ -2,7 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HubToComputerMethods, ComputerNotificationMethods } from '@slayzone/computer-transport/shared'
+import {
+  HubToComputerMethods,
+  ComputerNotificationMethods
+} from '@slayzone/computer-transport/shared'
 import type { ComputerConfig } from '../config'
 import { createFsHandlers } from './fs'
 import type { ComputerDialer } from './types'

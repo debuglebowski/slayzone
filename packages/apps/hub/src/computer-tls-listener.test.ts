@@ -84,7 +84,10 @@ async function startTlsComputerHub(dir: string): Promise<TlsComputerHub> {
   const port = (https.address() as AddressInfo).port
   return {
     https,
-    url: deriveComputerHubUrl({ remote: false, host: '127.0.0.1', port })!.replace('ws://', 'wss://'),
+    url: deriveComputerHubUrl({ remote: false, host: '127.0.0.1', port })!.replace(
+      'ws://',
+      'wss://'
+    ),
     fingerprint: identity.fingerprintSha256Hex,
     close: async () => {
       wss.close()

@@ -225,6 +225,8 @@ describe('WorkspaceDirPicker', () => {
     rootsError = new Error('computer offline')
     renderPicker()
     await waitFor(() => expect(screen.getByTestId('workspace-dir-picker-error')).toBeDefined())
-    expect(screen.getByTestId('workspace-dir-picker-error').textContent).toContain('computer offline')
+    expect(screen.getByTestId('workspace-dir-picker-error').textContent).toContain(
+      'computer offline'
+    )
   })
 })

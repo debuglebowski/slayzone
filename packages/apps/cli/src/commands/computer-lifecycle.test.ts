@@ -345,7 +345,10 @@ async function main(): Promise<void> {
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
       assert(/not a valid SlayZone join token/.test(res.stderr), `explains why: ${res.stderr}`)
       // The whole point of failing fast: no computer.config.json, no unit, nothing to clean up.
-      assert(!existsSync(join(rejectRoot, 'computer.config.json')), 'no computer.config.json written')
+      assert(
+        !existsSync(join(rejectRoot, 'computer.config.json')),
+        'no computer.config.json written'
+      )
       assertEq(leakedUnits(backend).length, 0, 'no unit written')
     })
 
@@ -364,7 +367,10 @@ async function main(): Promise<void> {
         /reserved for the computer inside the SlayZone/.test(res.stderr),
         `explains: ${res.stderr}`
       )
-      assert(!existsSync(join(rejectRoot, 'computer.config.json')), 'no computer.config.json written')
+      assert(
+        !existsSync(join(rejectRoot, 'computer.config.json')),
+        'no computer.config.json written'
+      )
     })
 
     await test('create refuses a duplicate name, pointing at start/rm', async () => {
@@ -389,7 +395,11 @@ async function main(): Promise<void> {
       )
       try {
         const fake = `szjt1.${Buffer.from(
-          JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', certFingerprint: 'ab', secret: 's' })
+          JSON.stringify({
+            hubUrl: 'ws://127.0.0.1:1/computers',
+            certFingerprint: 'ab',
+            secret: 's'
+          })
         ).toString('base64url')}`
         const res = slay(['computer', 'create', name, '--token', fake, '--root', rejectRoot], {
           root: rejectRoot
@@ -573,7 +583,10 @@ async function main(): Promise<void> {
         20_000,
         'hub reports a connected computer'
       )
-      assert((health.computersConnected ?? 0) >= 1, `computersConnected: ${health.computersConnected}`)
+      assert(
+        (health.computersConnected ?? 0) >= 1,
+        `computersConnected: ${health.computersConnected}`
+      )
     })
 
     await test('create refuses a second computer under a name it already spawned', async () => {
@@ -634,7 +647,10 @@ async function main(): Promise<void> {
       )
       const res = slayNoService(['computer', 'ls'], orphanRoot)
       assertEq(res.status, 0, `ls exits 0 (stderr: ${res.stderr})`)
-      assert(new RegExp(orphanName).test(res.stdout), `lists the config-only computer: ${res.stdout}`)
+      assert(
+        new RegExp(orphanName).test(res.stdout),
+        `lists the config-only computer: ${res.stdout}`
+      )
       // "unmanaged", not "stopped": `start` has to REGISTER it, not merely resume it,
       // and calling that "stopped" would misdescribe what happens next.
       assert(/unmanaged/.test(res.stdout), `marks it unmanaged: ${res.stdout}`)

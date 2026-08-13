@@ -223,7 +223,12 @@ describe('createRoutingPtyBackend', () => {
 
     // Seq continues from the seed's high-water mark rather than restarting, so a
     // frame at or below it is a duplicate and must not be re-delivered.
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-warm', seq: 5, data: 'DUP' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-warm',
+      seq: 5,
+      data: 'DUP'
+    })
     gateway.emit('pty.data', {
       computerId: 'computer-1',
       sessionId: 'sess-warm',
@@ -250,7 +255,12 @@ describe('createRoutingPtyBackend', () => {
     const handle = await backend.spawn(ptySpec({ sessionId: 'sess-x' }))
     const chunks: string[] = []
     handle.onData((d) => chunks.push(d))
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-x', seq: 0, data: 'fresh' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-x',
+      seq: 0,
+      data: 'fresh'
+    })
     await new Promise((r) => setTimeout(r, 0))
     expect(chunks.join('')).toBe('fresh')
   })
@@ -274,12 +284,22 @@ describe('createRoutingPtyBackend', () => {
     const chunks: string[] = []
     handle.onData((d) => chunks.push(d))
 
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 7, data: 'late' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 7,
+      data: 'late'
+    })
 
     await vi.waitFor(() => expect(chunks).toEqual(['late']))
 
     // And delivery continues normally from there.
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 8, data: 'next' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 8,
+      data: 'next'
+    })
     expect(chunks).toEqual(['late', 'next'])
   })
 
@@ -300,8 +320,18 @@ describe('createRoutingPtyBackend', () => {
     const chunks: string[] = []
     handle.onData((d) => chunks.push(d))
 
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 0, data: 'FIRST' })
-    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 1, data: 'second' })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 0,
+      data: 'FIRST'
+    })
+    gateway.emit('pty.data', {
+      computerId: 'computer-1',
+      sessionId: 'sess-1',
+      seq: 1,
+      data: 'second'
+    })
 
     expect(chunks).toEqual(['FIRST', 'second'])
   })
@@ -949,7 +979,11 @@ describe('worktree routing is per-task', () => {
       gateway,
       local,
       resolveComputerId: (taskId) =>
-        taskId === 'task-on-computer' ? 'computer-7' : taskId === 'task-on-other' ? 'computer-9' : null
+        taskId === 'task-on-computer'
+          ? 'computer-7'
+          : taskId === 'task-on-other'
+            ? 'computer-9'
+            : null
     })
 
     await wt.isGitRepo('task-on-computer', '/repo-a')
@@ -960,7 +994,9 @@ describe('worktree routing is per-task', () => {
     expect(routed.map((c) => c.computerId)).toEqual(['computer-7', 'computer-9'])
 
     // A task bound to nothing does not silently run on the hub.
-    await expect(wt.isGitRepo('task-unassigned', '/repo-c')).rejects.toThrow(NoComputerAvailableError)
+    await expect(wt.isGitRepo('task-unassigned', '/repo-c')).rejects.toThrow(
+      NoComputerAvailableError
+    )
     expect(local.isGitRepo).not.toHaveBeenCalled()
   })
 
@@ -1022,7 +1058,9 @@ describe('the no-computer error is actionable', () => {
     ).rejects.toThrow(/chat agent claude/)
 
     const proc = createRoutingProcessBackend({ gateway, resolveComputerId: () => null })
-    expect(() => proc.spawn(procSpec({ computerId: null, id: 'proc-42' }))).toThrow(/process proc-42/)
+    expect(() => proc.spawn(procSpec({ computerId: null, id: 'proc-42' }))).toThrow(
+      /process proc-42/
+    )
 
     const wt = createRemoteWorktreeAdapters({
       gateway,

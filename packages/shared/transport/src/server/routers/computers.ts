@@ -66,49 +66,51 @@ export const computersRouter = router({
   list: publicProcedure
     .input(z.object({ includeRevoked: z.boolean().optional() }).optional())
     .query(async ({ ctx, input }) => {
-    // Revoked rows are RETURNED, not hidden: revoking is a deliberate act and the
-    // row is how you undo it. The client dims and sorts them last.
-    const rows = await storeListComputers(ctx.db, { includeRevoked: input?.includeRevoked ?? true })
-    // Same predicate the binding guards use — a list that shows a computer a
-    // mutation would refuse (or worse, hides one it would accept) is the drift
-    // this shares one implementation to avoid.
-    const visible = await listVisibleComputerIds(ctx.db, viewerOf(ctx))
-    // One query for the whole list rather than a join per row: the machine is
-    // decoration, and a computer with no host id is legitimately ungrouped.
-    const machines = await storeMachinesByHostId(ctx.db)
-    const deps = getComputersDepsOrNull()
-    const gateway = deps?.getGateway()
-    const live = gateway?.listComputers() ?? []
-    const liveById = new Map(live.map((r) => [r.computerId, r]))
-    const usableIds = new Set((gateway?.listUsableComputers() ?? []).map((r) => r.computerId))
-    return rows
-      .filter((row) => visible.has(row.id))
-      .map((row) => {
-      const conn = liveById.get(row.id)
-      return {
-        id: row.id,
-        name: row.name,
-        platform: row.platform,
-        version: row.version,
-        capabilities: parseCapabilities(row.capabilities_json),
-        lastSeenAt: row.last_seen_at,
-        createdAt: row.created_at,
-        connected: conn !== undefined,
-        usable: usableIds.has(row.id),
-        connectedAt: conn?.connectedAt ?? null,
-        revokedAt: row.revoked_at,
-        // `hostId`, never a machine id: a merge destroys the losing row, so a
-        // client holding one could act on an id that no longer exists. The host
-        // id survives on the winner.
-        machine: row.host_id
-          ? (() => {
-              const m = machines.get(row.host_id)
-              return m ? { hostId: m.host_id, name: m.name } : null
-            })()
-          : null
-      }
-    })
-  }),
+      // Revoked rows are RETURNED, not hidden: revoking is a deliberate act and the
+      // row is how you undo it. The client dims and sorts them last.
+      const rows = await storeListComputers(ctx.db, {
+        includeRevoked: input?.includeRevoked ?? true
+      })
+      // Same predicate the binding guards use — a list that shows a computer a
+      // mutation would refuse (or worse, hides one it would accept) is the drift
+      // this shares one implementation to avoid.
+      const visible = await listVisibleComputerIds(ctx.db, viewerOf(ctx))
+      // One query for the whole list rather than a join per row: the machine is
+      // decoration, and a computer with no host id is legitimately ungrouped.
+      const machines = await storeMachinesByHostId(ctx.db)
+      const deps = getComputersDepsOrNull()
+      const gateway = deps?.getGateway()
+      const live = gateway?.listComputers() ?? []
+      const liveById = new Map(live.map((r) => [r.computerId, r]))
+      const usableIds = new Set((gateway?.listUsableComputers() ?? []).map((r) => r.computerId))
+      return rows
+        .filter((row) => visible.has(row.id))
+        .map((row) => {
+          const conn = liveById.get(row.id)
+          return {
+            id: row.id,
+            name: row.name,
+            platform: row.platform,
+            version: row.version,
+            capabilities: parseCapabilities(row.capabilities_json),
+            lastSeenAt: row.last_seen_at,
+            createdAt: row.created_at,
+            connected: conn !== undefined,
+            usable: usableIds.has(row.id),
+            connectedAt: conn?.connectedAt ?? null,
+            revokedAt: row.revoked_at,
+            // `hostId`, never a machine id: a merge destroys the losing row, so a
+            // client holding one could act on an id that no longer exists. The host
+            // id survives on the winner.
+            machine: row.host_id
+              ? (() => {
+                  const m = machines.get(row.host_id)
+                  return m ? { hostId: m.host_id, name: m.name } : null
+                })()
+              : null
+          }
+        })
+    }),
 
   /**
    * Mint a single-use enrollment token. The token embeds the hub's computer WS URL

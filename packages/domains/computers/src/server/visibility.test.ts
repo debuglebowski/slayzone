@@ -86,7 +86,9 @@ describe('assertComputerVisible', () => {
   it('throws for a computer the viewer cannot see', async () => {
     const c = await add('mine')
     await own(c, 'alice')
-    await expect(assertComputerVisible(t.db, c, { userId: 'bob' })).rejects.toThrow(/no such computer/)
+    await expect(assertComputerVisible(t.db, c, { userId: 'bob' })).rejects.toThrow(
+      /no such computer/
+    )
   })
 
   // The message must not distinguish "exists but hidden" from "does not exist" —

@@ -212,7 +212,8 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
           {/* Name the hub: with several connected, a token pasted onto the wrong
               machine is indistinguishable from a broken one. */}
           <p className="text-muted-foreground text-xs" data-testid="computer-minted-hub">
-            This computer will connect to <span className="text-foreground">{minted?.hubLabel}</span>
+            This computer will connect to{' '}
+            <span className="text-foreground">{minted?.hubLabel}</span>
             {minted?.hubUrl ? <span className="font-mono"> ({minted.hubUrl})</span> : null}
           </p>
           <code className="text-muted-foreground border-border block max-w-full overflow-x-auto rounded-md border p-3 font-mono text-xs break-all">
@@ -257,9 +258,9 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
             <AlertDialogTitle>Restart local computer</AlertDialogTitle>
             <AlertDialogDescription>
               Every agent and terminal running on this machine stops immediately — they are all
-              child processes of the computer. The computer reconnects on its own, but running agents do
-              not resume and unsaved terminal state is lost. Computers on other machines are
-              unaffected.
+              child processes of the computer. The computer reconnects on its own, but running
+              agents do not resume and unsaved terminal state is lost. Computers on other machines
+              are unaffected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

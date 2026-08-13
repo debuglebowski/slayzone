@@ -519,7 +519,8 @@ export function HubCard({
                         requestEditRoots({
                           id: computer.id,
                           name: computer.name,
-                          load: () => trpcClient.workspace.listRoots.query({ computerId: computer.id }),
+                          load: () =>
+                            trpcClient.workspace.listRoots.query({ computerId: computer.id }),
                           save: (roots) =>
                             trpcClient.workspace.setAllowedRoots.mutate({
                               computerId: computer.id,
@@ -697,4 +698,3 @@ export function HubCard({
     />
   )
 }
-

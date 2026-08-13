@@ -163,10 +163,10 @@ export async function retireStaleLocalComputers(
 ): Promise<number> {
   // Read-only probe first: the common steady-state path has no duplicates, so
   // avoid opening a write transaction (and the repoint/delete churn) every enroll.
-  const stale = await db.all<{ id: string }>(`SELECT id FROM computers WHERE name = ? AND id <> ?`, [
-    opts.name,
-    opts.keepComputerId
-  ])
+  const stale = await db.all<{ id: string }>(
+    `SELECT id FROM computers WHERE name = ? AND id <> ?`,
+    [opts.name, opts.keepComputerId]
+  )
   if (stale.length === 0) return 0
 
   const staleIds = stale.map((r) => r.id)
@@ -304,7 +304,10 @@ export async function setProjectDefaultComputer(
  * every install that has never opened project settings — which is why an
  * unbound task must resolve to a real computer rather than to "the hub".
  */
-export async function resolveTaskComputerId(db: SlayzoneDb, taskId: string): Promise<string | null> {
+export async function resolveTaskComputerId(
+  db: SlayzoneDb,
+  taskId: string
+): Promise<string | null> {
   // The task's own pin wins over the project default. `chat-data-ops.ts`
   // `resolveComputerId` MUST stay identical — divergence would route a chat agent
   // and a terminal agent for the SAME task to different computers.

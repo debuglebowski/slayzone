@@ -24,7 +24,10 @@
  */
 
 import http from 'node:http'
-import { AGENT_HOOK_EVENT_NAME, ComputerNotificationMethods } from '@slayzone/computer-transport/shared'
+import {
+  AGENT_HOOK_EVENT_NAME,
+  ComputerNotificationMethods
+} from '@slayzone/computer-transport/shared'
 import type { HandlerContext } from './types'
 
 /** Loopback path the overlaid SLAYZONE_AGENT_HOOK_URL points at. */

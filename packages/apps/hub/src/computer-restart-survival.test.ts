@@ -112,7 +112,11 @@ interface BootResult {
  *  Mirrors server.ts: derive the `/computers` URL from the (stable) hub port, mint a
  *  token embedding it, then run the computer's authenticate logic. */
 async function simulateBoot(deps: BootDeps): Promise<BootResult> {
-  const hubUrl = deriveComputerHubUrl({ remote: false, host: HOST, port: deps.hubPort ?? HUB_PORT })!
+  const hubUrl = deriveComputerHubUrl({
+    remote: false,
+    host: HOST,
+    port: deps.hubPort ?? HUB_PORT
+  })!
   const minted = await mintJoinToken(deps.db, {
     hubUrl,
     certFingerprint: 'sha256:deadbeef',

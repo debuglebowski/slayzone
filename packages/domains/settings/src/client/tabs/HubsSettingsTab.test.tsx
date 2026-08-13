@@ -301,7 +301,9 @@ describe('HubsSettingsTab — nested computers', () => {
     await rowSettled()
     await waitFor(() => expect(blocks().length).toBe(1))
     expect(blocks()[0]?.hub).toBe('local')
-    expect(screen.getByTestId('hub-computers-unavailable').textContent).toContain('not connected yet')
+    expect(screen.getByTestId('hub-computers-unavailable').textContent).toContain(
+      'not connected yet'
+    )
   })
 
   it('says the local hub is off rather than listing computers for it', async () => {
@@ -314,7 +316,9 @@ describe('HubsSettingsTab — nested computers', () => {
     await rowSettled()
     await waitFor(() => expect(blocks().length).toBe(1))
     expect(blocks()[0]?.hub).toBe('hub:remote')
-    expect(screen.getByTestId('hub-computers-unavailable').textContent).toContain('local hub is off')
+    expect(screen.getByTestId('hub-computers-unavailable').textContent).toContain(
+      'local hub is off'
+    )
   })
 
   it('gives every hub the same status vocabulary', async () => {

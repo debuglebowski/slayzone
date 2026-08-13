@@ -219,12 +219,12 @@ describe('local-computer dedup (Wave3.5-D5)', () => {
       now: 1
     })
     await registerComputer(t.db, { name: 'local-computer', platform: 'p', version: 'v', now: 2 })
-    expect(await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })).toBe(
-      1
-    )
-    expect(await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })).toBe(
-      0
-    )
+    expect(
+      await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })
+    ).toBe(1)
+    expect(
+      await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })
+    ).toBe(0)
     expect(await listComputers(t.db)).toHaveLength(1)
   })
 
@@ -306,9 +306,9 @@ describe('task/project computer binding', () => {
     // in-process fallback, such a task must still resolve to a real computer or no
     // agent could ever start on an existing install.
     it('falls back to the sole connected computer when nothing is bound', async () => {
-      expect(await resolveTaskComputerIdOrDefault(t.db, taskId, () => [{ computerId: 'r-only' }])).toBe(
-        'r-only'
-      )
+      expect(
+        await resolveTaskComputerIdOrDefault(t.db, taskId, () => [{ computerId: 'r-only' }])
+      ).toBe('r-only')
     })
 
     it('prefers the local computer by name when several are connected', async () => {
@@ -392,7 +392,13 @@ describe('deleteComputer', () => {
     await deleteComputer(t.db, c.id)
 
     expect(await getComputer(t.db, c.id)).toBeNull()
-    expect((await t.db.get<{ computer_id: string | null }>(`SELECT computer_id FROM tasks WHERE id = 'task-d'`))?.computer_id).toBeNull()
+    expect(
+      (
+        await t.db.get<{ computer_id: string | null }>(
+          `SELECT computer_id FROM tasks WHERE id = 'task-d'`
+        )
+      )?.computer_id
+    ).toBeNull()
     expect(
       (
         await t.db.get<{ default_computer_id: string | null }>(
@@ -400,7 +406,9 @@ describe('deleteComputer', () => {
         )
       )?.default_computer_id
     ).toBeNull()
-    expect((await t.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM project_placements`))?.n).toBe(0)
+    expect((await t.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM project_placements`))?.n).toBe(
+      0
+    )
     expect((await t.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM computer_grants`))?.n).toBe(0)
   })
 })

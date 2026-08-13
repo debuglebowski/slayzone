@@ -95,9 +95,9 @@ describe('ComputerCard', () => {
     resolvedComputerId = null
     render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
 
-    const options = Array.from(screen.getByTestId('computer-select').querySelectorAll('option')).map(
-      (o) => o.textContent
-    )
+    const options = Array.from(
+      screen.getByTestId('computer-select').querySelectorAll('option')
+    ).map((o) => o.textContent)
     expect(options).toContain('Inherit project default (Local)')
     expect(options).toContain('mac-studio')
     expect(options).toContain('linux-box')
@@ -105,10 +105,12 @@ describe('ComputerCard', () => {
 
   it('labels the inherit option with the project default computer name when set', () => {
     computersData = [{ id: 'computer-a', name: 'mac-studio' }]
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId="computer-a" />)
-    const options = Array.from(screen.getByTestId('computer-select').querySelectorAll('option')).map(
-      (o) => o.textContent
+    render(
+      <ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId="computer-a" />
     )
+    const options = Array.from(
+      screen.getByTestId('computer-select').querySelectorAll('option')
+    ).map((o) => o.textContent)
     expect(options).toContain('Inherit project default (mac-studio)')
   })
 
@@ -119,14 +121,19 @@ describe('ComputerCard', () => {
     fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-a' } })
 
     await waitFor(() => {
-      expect(setTaskComputerSpy).toHaveBeenCalledWith({ taskId: 'task-1', computerId: 'computer-a' })
+      expect(setTaskComputerSpy).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        computerId: 'computer-a'
+      })
     })
   })
 
   it('selecting inherit fires setTaskComputer with null', async () => {
     computersData = [{ id: 'computer-a', name: 'mac-studio' }]
     // Start pinned so switching to inherit is a real change.
-    render(<ComputerCard taskId="task-1" taskComputerId="computer-a" projectDefaultComputerId={null} />)
+    render(
+      <ComputerCard taskId="task-1" taskComputerId="computer-a" projectDefaultComputerId={null} />
+    )
 
     fireEvent.change(screen.getByTestId('computer-select'), { target: { value: '__inherit__' } })
 
@@ -138,7 +145,9 @@ describe('ComputerCard', () => {
   it('shows the effective resolved computer', () => {
     computersData = [{ id: 'computer-a', name: 'mac-studio' }]
     resolvedComputerId = 'computer-a'
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId="computer-a" />)
+    render(
+      <ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId="computer-a" />
+    )
     expect(screen.getByText('Runs on mac-studio')).toBeDefined()
   })
 })

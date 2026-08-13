@@ -127,7 +127,10 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
   ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
   const statePath = join(computerRoot, 'computer.state.json')
-  check('computer.state.json created (single file, not a directory of files)', existsSync(statePath))
+  check(
+    'computer.state.json created (single file, not a directory of files)',
+    existsSync(statePath)
+  )
   const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>
   check(
     'first hub entry merged in, keyed by hub-host derived from filename',
@@ -165,10 +168,9 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
     threw = true
   }
   check('does not throw on one corrupt legacy file', !threw)
-  const state = JSON.parse(readFileSync(join(computerRoot, 'computer.state.json'), 'utf8')) as Record<
-    string,
-    unknown
-  >
+  const state = JSON.parse(
+    readFileSync(join(computerRoot, 'computer.state.json'), 'utf8')
+  ) as Record<string, unknown>
   check('the good entry still migrated despite the corrupt sibling', 'good-hub' in state)
   check('the corrupt entry is simply absent, not a garbage value', !('corrupt-hub' in state))
 }
@@ -219,10 +221,9 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
     'sentinel makes 2nd run a no-op — later hub blob NOT picked up',
     !existsSync(join(hubRoot, 'blobs', 'ff', 'laterblob'))
   )
-  const state = JSON.parse(readFileSync(join(computerRoot, 'computer.state.json'), 'utf8')) as Record<
-    string,
-    unknown
-  >
+  const state = JSON.parse(
+    readFileSync(join(computerRoot, 'computer.state.json'), 'utf8')
+  ) as Record<string, unknown>
   check(
     'sentinel makes 2nd run a no-op — later computer credential NOT picked up',
     !('hub-b' in state)

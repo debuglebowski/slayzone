@@ -4,7 +4,11 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHubAuth, type HubAuth, COMPUTER_KEY_PREFIX } from './auth'
-import { mintComputerApiKey, revokeComputerApiKey, RUNNER_SERVICE_USER_EMAIL } from './computer-keys'
+import {
+  mintComputerApiKey,
+  revokeComputerApiKey,
+  RUNNER_SERVICE_USER_EMAIL
+} from './computer-keys'
 import { createHubUser } from './users'
 import { requireApiKey, requireSession, verifyComputerApiKey, verifySession } from './verify'
 
@@ -217,7 +221,10 @@ describe('computer API keys (create / verify / revoke)', () => {
     // only then evaluates the limit, so an unknown key never reaches it. It can
     // only throttle the legitimate holder — a machine credential that is either
     // valid or not. 30 here is well past the old ceiling of 10.
-    const minted = await mintComputerApiKey(auth, { computerId: 'computer-reconnect', name: 'flappy' })
+    const minted = await mintComputerApiKey(auth, {
+      computerId: 'computer-reconnect',
+      name: 'flappy'
+    })
     for (let i = 1; i <= 30; i += 1) {
       const principal = await verifyComputerApiKey(auth, minted.key)
       expect(principal, `verify #${i} should still succeed`).toEqual({
@@ -235,7 +242,10 @@ describe('computer API keys (create / verify / revoke)', () => {
     // BEFORE the per-key flag, which is what makes this work; asserted here so a
     // plugin upgrade that reorders those checks fails loudly instead of silently
     // re-bricking every existing computer.
-    const minted = await mintComputerApiKey(auth, { computerId: 'computer-upgraded', name: 'old-key' })
+    const minted = await mintComputerApiKey(auth, {
+      computerId: 'computer-upgraded',
+      name: 'old-key'
+    })
     const raw = new DatabaseSync(dbPath)
     raw.exec(
       `UPDATE apikey SET rateLimitEnabled = 1, rateLimitMax = 10, rateLimitTimeWindow = 86400000,

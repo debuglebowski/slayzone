@@ -48,10 +48,9 @@ export interface MachineRecord {
  *
  * Pure and total, so the rule can be tested without a database.
  */
-export function pickMachineWinner<T extends { name: string | null; created_at: number; id: string }>(
-  a: T,
-  b: T
-): { winner: T; loser: T } {
+export function pickMachineWinner<
+  T extends { name: string | null; created_at: number; id: string }
+>(a: T, b: T): { winner: T; loser: T } {
   const aNamed = a.name !== null && a.name !== ''
   const bNamed = b.name !== null && b.name !== ''
   if (aNamed !== bNamed) return aNamed ? { winner: a, loser: b } : { winner: b, loser: a }
@@ -64,9 +63,7 @@ export function pickMachineWinner<T extends { name: string | null; created_at: n
 }
 
 async function machineByHostId(db: SlayzoneDb, hostId: string): Promise<MachineRecord | null> {
-  return (
-    (await db.get<MachineRecord>(`SELECT * FROM machines WHERE host_id = ?`, [hostId])) ?? null
-  )
+  return (await db.get<MachineRecord>(`SELECT * FROM machines WHERE host_id = ?`, [hostId])) ?? null
 }
 
 /**

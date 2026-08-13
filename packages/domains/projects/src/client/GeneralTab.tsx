@@ -53,7 +53,9 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setIconLetters(project.icon_letters || '')
     setIconImagePath(project.icon_image_path)
     setIconCacheKey(project.updated_at)
-    setDefaultComputerId((project as { default_computer_id?: string | null }).default_computer_id ?? null)
+    setDefaultComputerId(
+      (project as { default_computer_id?: string | null }).default_computer_id ?? null
+    )
   }, [project])
 
   const computers = computersQuery.data ?? []

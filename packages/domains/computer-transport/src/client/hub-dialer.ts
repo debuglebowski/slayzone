@@ -577,7 +577,11 @@ export class HubDialer {
     }
     const handler = this.opts.onHubRequest
     if (!handler) {
-      conn.rpc.respondError(id, ComputerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
+      conn.rpc.respondError(
+        id,
+        ComputerTransportErrorCodes.unimplemented,
+        `unimplemented: ${method}`
+      )
       return
     }
     void (async () => {

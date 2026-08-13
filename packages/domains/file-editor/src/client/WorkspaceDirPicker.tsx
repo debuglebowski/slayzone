@@ -174,8 +174,8 @@ export function WorkspaceDirPicker({
           // so — and where to fix it — beats an empty list that reads as "this
           // machine has no folders".
           <p className="text-muted-foreground text-xs" data-testid="workspace-dir-picker-no-roots">
-            This computer has no allowed folders configured, so it will not open anything. Add one in
-            Settings → Connections, on the computer’s row.
+            This computer has no allowed folders configured, so it will not open anything. Add one
+            in Settings → Connections, on the computer’s row.
           </p>
         ) : (
           <>

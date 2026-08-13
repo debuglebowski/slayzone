@@ -468,7 +468,9 @@ export function computerCommand(): Command {
         return
       }
       if (computers.length === 0) {
-        console.log('No computers here. Create one with `slay computer create <name> --token <token>`.')
+        console.log(
+          'No computers here. Create one with `slay computer create <name> --token <token>`.'
+        )
         // Only mention supervision when it is actually missing — on a healthy box
         // this is noise, and the reason names the fix that applies to THIS machine.
         if (backend === 'none')

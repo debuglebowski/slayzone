@@ -159,7 +159,10 @@ describe('loadComputerConfig', () => {
 
   it('fails fast when an EXPLICIT config.json pin is set on a ws:// hub url (no silent downgrade)', () => {
     expect(() =>
-      loadComputerConfig({}, { hubUrl: 'ws://hub.example/computers', pinnedCertSha256: 'a'.repeat(64) })
+      loadComputerConfig(
+        {},
+        { hubUrl: 'ws://hub.example/computers', pinnedCertSha256: 'a'.repeat(64) }
+      )
     ).toThrow(/requires a wss:\/\/ hub url/)
   })
 

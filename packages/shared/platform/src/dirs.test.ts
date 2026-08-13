@@ -53,7 +53,11 @@ console.log('─'.repeat(40))
 test("channel='dev' → the dev bucket", () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
     assertEq(getSupervisedRoot('hub', 'dev'), join('/tmp/root', 'dev', 'hub'), 'dev hub')
-    assertEq(getSupervisedRoot('computer', 'dev'), join('/tmp/root', 'dev', 'computer'), 'dev computer')
+    assertEq(
+      getSupervisedRoot('computer', 'dev'),
+      join('/tmp/root', 'dev', 'computer'),
+      'dev computer'
+    )
   })
 })
 
@@ -112,7 +116,11 @@ test('no channel arg ⇒ reads SLAYZONE_RELEASE_CHANNEL from env', () => {
 
 test('SLAYZONE_RELEASE_CHANNEL unset ⇒ getSlayzoneReleaseChannel() defaults to unknown ⇒ stable bucket', () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-    assertEq(getSupervisedRoot('computer'), join('/tmp/root', 'stable', 'computer'), 'unset → stable')
+    assertEq(
+      getSupervisedRoot('computer'),
+      join('/tmp/root', 'stable', 'computer'),
+      'unset → stable'
+    )
   })
 })
 

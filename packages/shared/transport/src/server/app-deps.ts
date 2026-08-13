@@ -863,7 +863,6 @@ export type ComputerGateway = {
     connectedAt: number
     lastSeenAt: number
   }>
-
 }
 
 export type ComputersDeps = {
@@ -895,7 +894,9 @@ export function setComputersDeps(deps: ComputersDeps): void {
 
 export function getComputersDeps(): ComputersDeps {
   if (!computersDeps)
-    throw new Error('computersDeps not initialized — composeServer/server host have not wired it yet')
+    throw new Error(
+      'computersDeps not initialized — composeServer/server host have not wired it yet'
+    )
   return computersDeps
 }
 

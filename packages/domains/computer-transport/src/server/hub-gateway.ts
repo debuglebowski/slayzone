@@ -340,7 +340,11 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
   ): Promise<void> {
     const parsed = enrollParamsSchema.safeParse(params)
     if (!parsed.success) {
-      conn.rpc.respondError(id, ComputerTransportErrorCodes.unauthorized, 'malformed enroll request')
+      conn.rpc.respondError(
+        id,
+        ComputerTransportErrorCodes.unauthorized,
+        'malformed enroll request'
+      )
       protocolError(conn, `malformed enroll params: ${parsed.error.message}`)
       conn.ws.close(1008, 'malformed enroll')
       return
@@ -480,7 +484,11 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
   }
 
-  function handleComputerNotification(conn: ComputerConnection, method: string, params: unknown): void {
+  function handleComputerNotification(
+    conn: ComputerConnection,
+    method: string,
+    params: unknown
+  ): void {
     if (!conn.descriptor) {
       protocolError(conn, `notification '${method}' before authentication`)
       return
@@ -562,7 +570,10 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     })
     ws.on('close', () => teardown(conn, 'socket-closed'))
     ws.on('error', (err) => {
-      log('computer computer socket error', { computerId: conn.descriptor?.computerId, error: String(err) })
+      log('computer computer socket error', {
+        computerId: conn.descriptor?.computerId,
+        error: String(err)
+      })
     })
   }
 

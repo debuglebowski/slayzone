@@ -499,7 +499,9 @@ function createDetachController<E extends DetachableEntry>(
   }
 
   gateway.events.on('computer-lost', (p) => detachComputer(p.computerId, 'computer-lost'))
-  gateway.events.on('computer-disconnected', (p) => detachComputer(p.computerId, 'computer-disconnected'))
+  gateway.events.on('computer-disconnected', (p) =>
+    detachComputer(p.computerId, 'computer-disconnected')
+  )
   gateway.events.on('computer-connected', (p) => {
     void reattachComputer(p.computer.computerId, p.computer.epoch)
   })
@@ -720,7 +722,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           })
         ),
       write: (data: string): void => {
-        void gateway.request(computerId, HubToComputerMethods.ptyWrite, { sessionId, data }).catch(noop)
+        void gateway
+          .request(computerId, HubToComputerMethods.ptyWrite, { sessionId, data })
+          .catch(noop)
       },
       resize: (cols: number, rows: number): void => {
         void gateway
@@ -795,7 +799,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
     spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle> {
       const computerId = resolveComputerId(spec)
-      if (computerId == null) throw new NoComputerAvailableError(`terminal session ${spec.sessionId}`)
+      if (computerId == null)
+        throw new NoComputerAvailableError(`terminal session ${spec.sessionId}`)
 
       // `pid` is null until the remote `pty.spawn` reply lands (remote ptys key by
       // sessionId, not pid). The handle exposes it via a getter so it stays a
@@ -1290,7 +1295,8 @@ export function createRemoteWorktreeAdapters(
   return {
     async createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch) {
       const computerId = await resolveComputerId(taskId)
-      if (computerId == null) throw new NoComputerAvailableError(`worktree create for task ${taskId}`)
+      if (computerId == null)
+        throw new NoComputerAvailableError(`worktree create for task ${taskId}`)
       await gateway.request(computerId, HubToComputerMethods.gitCreateWorktree, {
         repoPath,
         worktreePath,
@@ -1301,7 +1307,8 @@ export function createRemoteWorktreeAdapters(
 
     async removeWorktree(taskId, projectPath, worktreePath) {
       const computerId = await resolveComputerId(taskId)
-      if (computerId == null) throw new NoComputerAvailableError(`worktree remove for task ${taskId}`)
+      if (computerId == null)
+        throw new NoComputerAvailableError(`worktree remove for task ${taskId}`)
       const res = await gateway.request(computerId, HubToComputerMethods.gitRemoveWorktree, {
         projectPath,
         worktreePath
@@ -1311,18 +1318,24 @@ export function createRemoteWorktreeAdapters(
 
     async runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch) {
       const computerId = await resolveComputerId(taskId)
-      if (computerId == null) throw new NoComputerAvailableError(`worktree setup for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.gitRunWorktreeSetupScript, {
-        worktreePath,
-        repoPath,
-        sourceBranch
-      })
+      if (computerId == null)
+        throw new NoComputerAvailableError(`worktree setup for task ${taskId}`)
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.gitRunWorktreeSetupScript,
+        {
+          worktreePath,
+          repoPath,
+          sourceBranch
+        }
+      )
       return gitRunWorktreeSetupScriptResultSchema.parse(res)
     },
 
     async copyIgnoredFiles(taskId, repoPath, worktreePath, behavior, customPaths) {
       const computerId = await resolveComputerId(taskId)
-      if (computerId == null) throw new NoComputerAvailableError(`ignored-file copy for task ${taskId}`)
+      if (computerId == null)
+        throw new NoComputerAvailableError(`ignored-file copy for task ${taskId}`)
       await gateway.request(computerId, HubToComputerMethods.gitCopyIgnoredFiles, {
         repoPath,
         worktreePath,
@@ -1333,7 +1346,8 @@ export function createRemoteWorktreeAdapters(
 
     async getCurrentBranch(taskId, repoPath) {
       const computerId = await resolveComputerId(taskId)
-      if (computerId == null) throw new NoComputerAvailableError(`git branch read for task ${taskId}`)
+      if (computerId == null)
+        throw new NoComputerAvailableError(`git branch read for task ${taskId}`)
       const res = await gateway.request(computerId, HubToComputerMethods.gitGetCurrentBranch, {
         repoPath
       })
@@ -1342,7 +1356,8 @@ export function createRemoteWorktreeAdapters(
 
     async isGitRepo(taskId, path) {
       const computerId = await resolveComputerId(taskId)
-      if (computerId == null) throw new NoComputerAvailableError(`git repo probe for task ${taskId}`)
+      if (computerId == null)
+        throw new NoComputerAvailableError(`git repo probe for task ${taskId}`)
       const res = await gateway.request(computerId, HubToComputerMethods.gitIsGitRepo, { path })
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
     },
@@ -1485,7 +1500,6 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       await req(computerId, HubToComputerMethods.projectForgetPath, { projectId }, fsOkResultSchema)
     },
 
-
     async discoverRepos(computerId, rootPath, maxDepth) {
       if (computerId == null) return local.discoverRepos(rootPath, maxDepth)
       const res = await req(
@@ -1530,12 +1544,22 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
 
     async createFile(computerId, rootPath, filePath) {
       if (computerId == null) return local.createFile(rootPath, filePath)
-      await req(computerId, HubToComputerMethods.fsCreateFile, { rootPath, filePath }, fsOkResultSchema)
+      await req(
+        computerId,
+        HubToComputerMethods.fsCreateFile,
+        { rootPath, filePath },
+        fsOkResultSchema
+      )
     },
 
     async createDir(computerId, rootPath, dirPath) {
       if (computerId == null) return local.createDir(rootPath, dirPath)
-      await req(computerId, HubToComputerMethods.fsCreateDir, { rootPath, dirPath }, fsOkResultSchema)
+      await req(
+        computerId,
+        HubToComputerMethods.fsCreateDir,
+        { rootPath, dirPath },
+        fsOkResultSchema
+      )
     },
 
     async rename(computerId, rootPath, oldPath, newPath) {
@@ -1550,7 +1574,12 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
 
     async delete(computerId, rootPath, targetPath) {
       if (computerId == null) return local.delete(rootPath, targetPath)
-      await req(computerId, HubToComputerMethods.fsDelete, { rootPath, targetPath }, fsOkResultSchema)
+      await req(
+        computerId,
+        HubToComputerMethods.fsDelete,
+        { rootPath, targetPath },
+        fsOkResultSchema
+      )
     },
 
     async copyIn(computerId, rootPath, absoluteSrc, targetDir) {
@@ -1576,7 +1605,12 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
 
     async gitStatus(computerId, rootPath) {
       if (computerId == null) return local.gitStatus(rootPath)
-      return req(computerId, HubToComputerMethods.fsGitStatus, { rootPath }, fsGitStatusResultSchema)
+      return req(
+        computerId,
+        HubToComputerMethods.fsGitStatus,
+        { rootPath },
+        fsGitStatusResultSchema
+      )
     },
 
     async searchFiles(computerId, rootPath, query, opts) {
@@ -1663,9 +1697,11 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
         gateway.events.off('fs.change', onChange)
         gateway.events.off('computer-disconnected', onDisconnected)
         gateway.events.off('computer-lost', onDisconnected)
-        void gateway.request(computerId!, HubToComputerMethods.fsWatchStop, { watchId }).catch(() => {
-          /* already gone */
-        })
+        void gateway
+          .request(computerId!, HubToComputerMethods.fsWatchStop, { watchId })
+          .catch(() => {
+            /* already gone */
+          })
       }
       return stop
     }

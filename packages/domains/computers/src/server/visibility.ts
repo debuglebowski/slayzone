@@ -121,7 +121,12 @@ export async function setComputerVisibility(
 
 export async function grantComputerAccess(
   db: SlayzoneDb,
-  opts: { computerId: string; userId: string; grantedByUserId: string | null; role?: 'use' | 'admin' }
+  opts: {
+    computerId: string
+    userId: string
+    grantedByUserId: string | null
+    role?: 'use' | 'admin'
+  }
 ): Promise<void> {
   await db.run(
     `INSERT INTO computer_grants (computer_id, user_id, role, granted_by_user_id, created_at)

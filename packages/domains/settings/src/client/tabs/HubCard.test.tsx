@@ -78,12 +78,12 @@ vi.mock('@slayzone/transport/client', () => ({
         list: { queryOptions: () => ({ __hub: hub }), queryFilter: () => ({ __hub: hub }) },
         mintJoinToken: { mutationOptions: () => ({ __key: 'mint', __hub: hub }) },
         onStatusChange: {
-        subscriptionOptions: () => ({ __key: 'computers.onStatusChange' })
-      },
-      renameMachine: {
-        mutationOptions: () => ({ __key: 'computers.renameMachine' })
-      },
-      revokeComputer: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }
+          subscriptionOptions: () => ({ __key: 'computers.onStatusChange' })
+        },
+        renameMachine: {
+          mutationOptions: () => ({ __key: 'computers.renameMachine' })
+        },
+        revokeComputer: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }
       }
     }
   },
@@ -595,7 +595,9 @@ describe('HubCard', () => {
   // never appear on a computer we cannot actually control.
 
   it('offers restart on the local hub’s local-computer row only', async () => {
-    computersByHub = { local: [makeComputer({ id: 'r-local', name: 'local-computer' }), makeComputer()] }
+    computersByHub = {
+      local: [makeComputer({ id: 'r-local', name: 'local-computer' }), makeComputer()]
+    }
     await renderLocal()
     expect(screen.getAllByTestId('computer-row').length).toBe(2)
     expect(screen.getAllByTestId('computer-local-restart').length).toBe(1)

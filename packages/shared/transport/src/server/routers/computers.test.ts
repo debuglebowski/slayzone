@@ -140,7 +140,11 @@ test('computers.revokeComputer: drops the computer from the active list', async 
 test('computers: list degrades + mintJoinToken throws when the gateway is unwired', async () => {
   // Registry with no gateway + no URL — mirrors init-not-resolved (never populated),
   // but exercised here by resetting the deps to a null-gateway shape.
-  setComputersDeps({ getGateway: () => null, getHubUrl: () => null, getCertFingerprint: () => null })
+  setComputersDeps({
+    getGateway: () => null,
+    getHubUrl: () => null,
+    getCertFingerprint: () => null
+  })
 
   const rows = await caller.list()
   expect(rows.every((r) => r.connected === false)).toBe(true)

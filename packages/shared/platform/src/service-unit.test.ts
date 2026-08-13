@@ -334,7 +334,11 @@ console.log('─'.repeat(40))
 
 test('computer identity is namespaced apart from the hub', () => {
   assertEq(launchdLabel('computer', 'builder'), 'com.slayzone.computer.builder', 'launchd label')
-  assertEq(systemdUnitName('computer', 'builder'), 'slayzone-computer-builder.service', 'systemd unit')
+  assertEq(
+    systemdUnitName('computer', 'builder'),
+    'slayzone-computer-builder.service',
+    'systemd unit'
+  )
   // Same NAME under the two kinds must never resolve to the same file, or
   // `computer rm dev` would delete a hub named dev.
   assert(

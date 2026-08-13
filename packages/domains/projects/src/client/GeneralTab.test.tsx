@@ -38,7 +38,7 @@ vi.mock('@tanstack/react-query', () => ({
     mutateAsync:
       opts.__key === 'computers.setProjectDefaultComputer'
         ? setProjectDefaultComputerSpy
-          : genericMutateAsync
+        : genericMutateAsync
   })
 }))
 

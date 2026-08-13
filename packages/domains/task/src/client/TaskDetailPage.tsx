@@ -2591,8 +2591,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               <>
                                 <p className="mb-2">Can’t reach the machine for this task</p>
                                 <p className="text-sm">
-                                  Its computer is offline, so the workspace can’t be opened. The path
-                                  itself is unchanged.
+                                  Its computer is offline, so the workspace can’t be opened. The
+                                  path itself is unchanged.
                                 </p>
                               </>
                             ) : (

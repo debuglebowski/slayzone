@@ -40,7 +40,10 @@ import {
  * gateway's own options type. Keeping this a `Pick` (rather than re-declaring
  * the signatures) guarantees an exact, drift-proof match with the gateway.
  */
-export type ComputerAuthAdapters = Pick<HubComputerGatewayOptions, 'verifyEnrollment' | 'verifyApiKey'>
+export type ComputerAuthAdapters = Pick<
+  HubComputerGatewayOptions,
+  'verifyEnrollment' | 'verifyApiKey'
+>
 
 export interface ComputerAuthAdapterDeps {
   /** App `SlayzoneDb` — home of the `computers` / `join_tokens` tables. */

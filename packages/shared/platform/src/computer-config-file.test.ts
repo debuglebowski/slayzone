@@ -198,7 +198,11 @@ test('getComputerConfigFilePath resolves under SLAYZONE_ROOT', () => {
   const prev = process.env.SLAYZONE_ROOT
   process.env.SLAYZONE_ROOT = dir
   try {
-    assertEq(getComputerConfigFilePath(), join(dir, 'computer.config.json'), 'path under root override')
+    assertEq(
+      getComputerConfigFilePath(),
+      join(dir, 'computer.config.json'),
+      'path under root override'
+    )
     saveComputerConfigFile({ computerName: 'r1' })
     const raw = readFileSync(join(dir, 'computer.config.json'), 'utf8')
     assert(/r1/.test(raw), 'wrote to the overridden root dir')

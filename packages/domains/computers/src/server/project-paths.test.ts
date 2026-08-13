@@ -40,12 +40,8 @@ await makeProject('p-legacy', 'Legacy', '/legacy/root')
 await makeProject('p-mirror', 'Mirrored', null)
 
 test('records what a computer reports, and lists every machine holding a project', async () => {
-  await recordComputerProjectPaths(db, 'r1', [
-    { projectId: 'p-mirror', path: '/srv/work/app' }
-  ])
-  await recordComputerProjectPaths(db, 'r2', [
-    { projectId: 'p-mirror', path: '/home/deploy/app' }
-  ])
+  await recordComputerProjectPaths(db, 'r1', [{ projectId: 'p-mirror', path: '/srv/work/app' }])
+  await recordComputerProjectPaths(db, 'r2', [{ projectId: 'p-mirror', path: '/home/deploy/app' }])
 
   const held = await locations('p-mirror')
   expect(held.length).toBe(2)
@@ -61,9 +57,7 @@ test('a later report replaces that computer’s rows wholesale', async () => {
     { projectId: 'p-mirror', path: '/srv/work/app' },
     { projectId: 'p-legacy', path: '/srv/work/other' }
   ])
-  await recordComputerProjectPaths(db, 'r1', [
-    { projectId: 'p-mirror', path: '/srv/work/moved' }
-  ])
+  await recordComputerProjectPaths(db, 'r1', [{ projectId: 'p-mirror', path: '/srv/work/moved' }])
 
   const forMirror = await locations('p-mirror')
   expect(forMirror.find((l) => l.computerId === 'r1')!.path).toBe('/srv/work/moved')

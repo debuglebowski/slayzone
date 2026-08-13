@@ -103,7 +103,10 @@ async function main(): Promise<void> {
       const token = await mintToken(db)
       const result = await adapters.verifyEnrollment({ ...ENROLL_BASE, joinToken: token })
 
-      assert(typeof result.computerId === 'string' && result.computerId.length > 0, 'computerId set')
+      assert(
+        typeof result.computerId === 'string' && result.computerId.length > 0,
+        'computerId set'
+      )
       assert(result.apiKey.startsWith(COMPUTER_KEY_PREFIX), 'apiKey carries the computer prefix')
 
       const row = await getComputer(db, result.computerId)
@@ -228,7 +231,11 @@ async function main(): Promise<void> {
 
     // --- Local-computer dedup (Wave3.5-D5) -----------------------------------
     await test('LOCAL enroll uses a deterministic id + UPSERTs one row across relaunches', async () => {
-      const localAdapters = createComputerAuthAdapters({ db, auth, localComputerName: 'local-computer' })
+      const localAdapters = createComputerAuthAdapters({
+        db,
+        auth,
+        localComputerName: 'local-computer'
+      })
       const before = (await listComputers(db)).filter((r) => r.name === 'local-computer').length
 
       const t1 = await mintToken(db, 'local-1')
@@ -245,7 +252,11 @@ async function main(): Promise<void> {
         joinToken: t2
       })
 
-      assertEq(first.computerId, deterministicLocalComputerId('local-computer'), 'id is deterministic')
+      assertEq(
+        first.computerId,
+        deterministicLocalComputerId('local-computer'),
+        'id is deterministic'
+      )
       assertEq(second.computerId, first.computerId, 'relaunch keeps the SAME local computerId')
       assertEq(
         (await listComputers(db)).filter((r) => r.name === 'local-computer').length,
@@ -282,7 +293,11 @@ async function main(): Promise<void> {
       })
       const localRows = (await listComputers(db)).filter((r) => r.name === 'dup-local')
       assertEq(localRows.length, 1, 'collapsed to a single local row')
-      assertEq(localRows[0].id, enrolled.computerId, 'the surviving row is the deterministic-id one')
+      assertEq(
+        localRows[0].id,
+        enrolled.computerId,
+        'the surviving row is the deterministic-id one'
+      )
       assertEq(
         localRows[0].id,
         deterministicLocalComputerId('dup-local'),

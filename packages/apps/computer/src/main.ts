@@ -148,7 +148,10 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   return { handle, dispose, setAgentHookUrl }
 }
 
-export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps = {}): ComputerHandle {
+export function startComputer(
+  config: ComputerConfig,
+  deps: ComputerRuntimeDeps = {}
+): ComputerHandle {
   const log =
     deps.log ??
     (() => {
@@ -215,9 +218,12 @@ export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps 
     const pinnedCertSha256 =
       config.pinnedCertSha256 && isSecureUrl ? config.pinnedCertSha256 : undefined
     if (config.pinnedCertSha256 && !isSecureUrl) {
-      log('ignoring token-decoded cert fingerprint on a non-wss hub url (pinning requires wss://)', {
-        hubUrl
-      })
+      log(
+        'ignoring token-decoded cert fingerprint on a non-wss hub url (pinning requires wss://)',
+        {
+          hubUrl
+        }
+      )
     }
 
     let dispatch: HubRequestDispatch
@@ -261,7 +267,9 @@ export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps 
     dialer.events.on('connected', ({ computerId, mode }) =>
       log('connected to hub', { hubUrl, computerId, mode })
     )
-    dialer.events.on('disconnected', ({ reason }) => log('disconnected from hub', { hubUrl, reason }))
+    dialer.events.on('disconnected', ({ reason }) =>
+      log('disconnected from hub', { hubUrl, reason })
+    )
     dialer.events.on('reconnect-scheduled', ({ attempt, delayMs }) =>
       log('reconnect scheduled', { hubUrl, attempt, delayMs })
     )
