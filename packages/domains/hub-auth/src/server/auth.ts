@@ -19,7 +19,7 @@ export interface HubAuthConfig {
 }
 
 /** Prefix minted computer API keys start with (SlayZone computer). */
-export const RUNNER_KEY_PREFIX = 'szr_'
+export const COMPUTER_KEY_PREFIX = 'szr_'
 
 /**
  * Options are built inline inside `betterAuth()` so the instance type keeps
@@ -58,7 +58,7 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
       apiKey({
         // Computer identity travels in key metadata ({ computerId }).
         enableMetadata: true,
-        defaultPrefix: RUNNER_KEY_PREFIX,
+        defaultPrefix: COMPUTER_KEY_PREFIX,
         // Computer keys are MACHINE credentials verified once per reconnect, so the
         // plugin's default verify limit (10 requests / 24h, ON unless set) bricks
         // them: the 11th reconnect in a day is denied, `verifyComputerApiKey` returns

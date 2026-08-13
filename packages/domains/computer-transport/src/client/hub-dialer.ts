@@ -21,7 +21,7 @@ import type { ClientOptions } from 'ws'
 import { TypedEventEmitter } from '../shared/events'
 import {
   enrollResultSchema,
-  RUNNER_PROTOCOL_VERSION,
+  COMPUTER_PROTOCOL_VERSION,
   ComputerTransportErrorCodes,
   helloResultSchema,
   HubToComputerMethods,
@@ -372,7 +372,7 @@ export class HubDialer {
       platform: this.opts.identity.platform,
       version: this.opts.identity.version,
       capabilities: this.opts.identity.capabilities,
-      protocolVersion: RUNNER_PROTOCOL_VERSION,
+      protocolVersion: COMPUTER_PROTOCOL_VERSION,
       epoch: this.epoch
     })
     return enrollResultSchema.parse(raw)

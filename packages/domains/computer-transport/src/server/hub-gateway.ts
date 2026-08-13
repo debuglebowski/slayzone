@@ -27,7 +27,7 @@ import {
   type FsChangeParams,
   type EnrollParams,
   enrollParamsSchema,
-  RUNNER_PROTOCOL_VERSION,
+  COMPUTER_PROTOCOL_VERSION,
   ComputerTransportErrorCodes,
   helloParamsSchema,
   heartbeatParamsSchema,
@@ -339,11 +339,11 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       conn.ws.close(1008, 'malformed enroll')
       return
     }
-    if (parsed.data.protocolVersion !== RUNNER_PROTOCOL_VERSION) {
+    if (parsed.data.protocolVersion !== COMPUTER_PROTOCOL_VERSION) {
       conn.rpc.respondError(
         id,
         ComputerTransportErrorCodes.protocolMismatch,
-        `hub speaks computer protocol v${RUNNER_PROTOCOL_VERSION}, computer sent v${parsed.data.protocolVersion}`
+        `hub speaks computer protocol v${COMPUTER_PROTOCOL_VERSION}, computer sent v${parsed.data.protocolVersion}`
       )
       conn.ws.close(1008, 'protocol mismatch')
       return

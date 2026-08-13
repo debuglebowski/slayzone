@@ -42,7 +42,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
-import { RUNNER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import { listComputers, mintJoinToken } from '@slayzone/computers/server'
@@ -142,7 +142,7 @@ async function simulateBoot(deps: BootDeps): Promise<BootResult> {
     platform: 'darwin-arm64',
     version: '0.35.0',
     capabilities: ['pty', 'git'],
-    protocolVersion: RUNNER_PROTOCOL_VERSION
+    protocolVersion: COMPUTER_PROTOCOL_VERSION
   })
   await store.save({ computerId: enrolled.computerId, apiKey: enrolled.apiKey })
   return { hubUrl, authMode: 'enroll', computerId: enrolled.computerId }
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
             platform: 'p',
             version: 'v',
             capabilities: [],
-            protocolVersion: RUNNER_PROTOCOL_VERSION
+            protocolVersion: COMPUTER_PROTOCOL_VERSION
           })
         }
         // A real remote computer (different name) — a sleeping laptop; must NOT be reaped.
@@ -251,7 +251,7 @@ async function main(): Promise<void> {
           platform: 'p',
           version: 'v',
           capabilities: [],
-          protocolVersion: RUNNER_PROTOCOL_VERSION
+          protocolVersion: COMPUTER_PROTOCOL_VERSION
         })
         assertEq(await localComputerCount(db), 3, 'three orphaned local rows seeded')
 

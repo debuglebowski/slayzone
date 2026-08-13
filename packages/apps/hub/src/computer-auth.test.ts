@@ -20,8 +20,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { RUNNER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
-import { createHubAuth, RUNNER_KEY_PREFIX } from '@slayzone/hub-auth/server'
+import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import { createHubAuth, COMPUTER_KEY_PREFIX } from '@slayzone/hub-auth/server'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import {
   deterministicLocalComputerId,
@@ -82,7 +82,7 @@ const ENROLL_BASE = {
   platform: 'darwin-arm64',
   version: '0.35.0',
   capabilities: ['pty', 'git'],
-  protocolVersion: RUNNER_PROTOCOL_VERSION
+  protocolVersion: COMPUTER_PROTOCOL_VERSION
 }
 
 async function main(): Promise<void> {
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
       const result = await adapters.verifyEnrollment({ ...ENROLL_BASE, joinToken: token })
 
       assert(typeof result.computerId === 'string' && result.computerId.length > 0, 'computerId set')
-      assert(result.apiKey.startsWith(RUNNER_KEY_PREFIX), 'apiKey carries the computer prefix')
+      assert(result.apiKey.startsWith(COMPUTER_KEY_PREFIX), 'apiKey carries the computer prefix')
 
       const row = await getComputer(db, result.computerId)
       assert(row !== null, 'computers row persisted')
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     await test('verifyApiKey returns null for an unknown key', async () => {
       assertEq(await adapters.verifyApiKey('not-a-real-key'), null, 'unknown key ⇒ null')
       assertEq(
-        await adapters.verifyApiKey(`${RUNNER_KEY_PREFIX}bogus`),
+        await adapters.verifyApiKey(`${COMPUTER_KEY_PREFIX}bogus`),
         null,
         'well-prefixed but bogus key ⇒ null'
       )

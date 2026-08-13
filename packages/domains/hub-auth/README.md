@@ -57,13 +57,13 @@ package. `bearer`, `jwt`, and `organization` still come from
   `Authorization: Bearer <session-token>`; middleware attaches it as
   `res.locals.hubAuth` (accessor: `getHubAuthContext(res)`).
 - `verifyRunnerApiKey(auth, key)` / `requireApiKey(auth)` → resolves
-  `RunnerPrincipal { runnerId, keyId }` from the `x-api-key` header; only
+  `RunnerPrincipal { computerId, keyId }` from the `x-api-key` header; only
   accepts keys minted with computer metadata; middleware attaches it as
   `res.locals.computer` (accessor: `getRunnerPrincipal(res)`).
-- `mintRunnerApiKey(auth, { runnerId, name })` / `revokeRunnerApiKey(auth,
+- `mintRunnerApiKey(auth, { computerId, name })` / `revokeRunnerApiKey(auth,
   keyId)` → computer keys are owned by an internal service user
   (`computers@slayzone.internal`, created lazily) because the api-key plugin
-  requires a user reference; the computer identity is stored as `{ runnerId }`
+  requires a user reference; the computer identity is stored as `{ computerId }`
   key metadata. Revocation deletes the key row through `auth.$context`'s
   adapter because the plugin's `/api-key/delete` endpoint is session-bound
   and computer keys are managed server-side.

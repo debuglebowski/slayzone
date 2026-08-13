@@ -47,10 +47,10 @@ import { z } from 'zod'
  * revoked) and only an operator enrolling it again resolves it. Lives here so the
  * computer that exits with it and the supervisor that reads it cannot disagree.
  */
-export const RUNNER_EXIT_NEEDS_RE_ENROLLMENT = 78
+export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 
 /** Bump on any breaking change to the frames below. */
-export const RUNNER_PROTOCOL_VERSION = 2
+export const COMPUTER_PROTOCOL_VERSION = 2
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {

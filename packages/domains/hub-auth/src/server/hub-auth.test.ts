@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createHubAuth, type HubAuth, RUNNER_KEY_PREFIX } from './auth'
+import { createHubAuth, type HubAuth, COMPUTER_KEY_PREFIX } from './auth'
 import { mintComputerApiKey, revokeComputerApiKey, RUNNER_SERVICE_USER_EMAIL } from './computer-keys'
 import { createHubUser } from './users'
 import { requireApiKey, requireSession, verifyComputerApiKey, verifySession } from './verify'
@@ -182,7 +182,7 @@ describe('bearer-token verification', () => {
 describe('computer API keys (create / verify / revoke)', () => {
   it('mints, verifies, and revokes a computer key', async () => {
     const minted = await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
-    expect(minted.key.startsWith(RUNNER_KEY_PREFIX)).toBe(true)
+    expect(minted.key.startsWith(COMPUTER_KEY_PREFIX)).toBe(true)
     expect(minted.keyId).toBeTruthy()
     expect(minted.computerId).toBe('computer-1')
 
@@ -273,7 +273,7 @@ describe('computer API keys (create / verify / revoke)', () => {
     expect(missing.state.statusCode).toBe(401)
     expect(missing.state.nextCalls).toEqual([])
 
-    const invalid = fakeReqRes({ 'x-api-key': `${RUNNER_KEY_PREFIX}not-a-real-key` })
+    const invalid = fakeReqRes({ 'x-api-key': `${COMPUTER_KEY_PREFIX}not-a-real-key` })
     await requireApiKey(auth)(invalid.req, invalid.res as never, invalid.next)
     expect(invalid.state.statusCode).toBe(401)
     expect(invalid.state.nextCalls).toEqual([])

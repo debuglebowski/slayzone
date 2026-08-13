@@ -19,8 +19,8 @@ that will use it, or the agent gets a cwd that does not exist.
 
 | call | seam | notes |
 |---|---|---|
-| pty spawn | `PtyBackend.spawn` | `runnerId` from `resolveRunnerId(taskId)`, `pty-store.ts:313` |
-| chat agent spawn | `ChatBackend.spawn` | `runnerId` from `data.resolveRunnerId`, `chat-handlers.ts:332` |
+| pty spawn | `PtyBackend.spawn` | `computerId` from `resolveComputerId(taskId)`, `pty-store.ts:313` |
+| chat agent spawn | `ChatBackend.spawn` | `computerId` from `data.resolveComputerId`, `chat-handlers.ts:332` |
 | `createWorktree` | `WorktreeExecAdapters` | in `createWorktreeForTask` |
 | `removeWorktree` | `WorktreeExecAdapters` | in `cleanupTaskFull` — see the caveat below |
 | `runWorktreeSetupScript` | `WorktreeExecAdapters` | in `createWorktreeForTask` |
@@ -37,7 +37,7 @@ that will use it, or the agent gets a cwd that does not exist.
 | `removeArtifactDir` | removes the same; routing it made archiving a task impossible |
 | `getWorktreeColor` | SYNC, and UI state. A sync function cannot be a network call |
 | `ensureProjectWorktreeColors` | same class; runs on every task-list read |
-| background processes (`ProcessBackend`) | project-level dev servers, not agents. `doSpawn` is sync and also driven by restart timers, so it cannot resolve a computer. Spec passes `runnerId: null` deliberately |
+| background processes (`ProcessBackend`) | project-level dev servers, not agents. `doSpawn` is sync and also driven by restart timers, so it cannot resolve a computer. Spec passes `computerId: null` deliberately |
 
 ## Callers that MUST tolerate zero computers
 
@@ -76,7 +76,7 @@ requirement — not silently on the hub:
 ## Still undecided
 
 - **Background processes**: routing them means an async `doSpawn`, and they ignore a
-  per-task `runner_id` pin today (they follow the connected default). Fine while they
+  per-task `computer_id` pin today (they follow the connected default). Fine while they
   are dev servers; revisit if they ever host agents.
 - **A task whose project has no repo** never creates a worktree, so its cwd is a
   plain path. Nothing guarantees that path exists on a computer — who creates it?

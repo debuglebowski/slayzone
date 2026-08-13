@@ -23,7 +23,7 @@ import { delimiter } from 'node:path'
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
 import { getComputerConfigFilePath, loadComputerConfigFile } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
-import { RUNNER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
+import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { ENV_VARS, loadComputerConfig } from './config'
 import { startComputer } from './main'
@@ -204,7 +204,7 @@ async function main(): Promise<void> {
   // an exit code is a far sturdier channel for that than matching a log line.
   handle.dialer.events.on('error', ({ fatal, reason }) => {
     if (reason === 'needs-re-enrollment') {
-      process.exitCode = RUNNER_EXIT_NEEDS_RE_ENROLLMENT
+      process.exitCode = COMPUTER_EXIT_NEEDS_RE_ENROLLMENT
       return
     }
     if (fatal) process.exitCode = 1

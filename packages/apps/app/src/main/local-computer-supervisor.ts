@@ -25,11 +25,11 @@ import { spawn, type ChildProcess } from 'node:child_process'
  * Duplicated rather than imported: the app does not depend on
  * `@slayzone/computer-transport`, and taking a package dependency to share one
  * integer would pull the whole transport tree into the main bundle. The canonical
- * definition is `RUNNER_EXIT_NEEDS_RE_ENROLLMENT` in
+ * definition is `COMPUTER_EXIT_NEEDS_RE_ENROLLMENT` in
  * `computer-transport/src/shared/frames.ts` — keep them in step (a mismatch degrades
  * to "supervisor keeps retrying", i.e. today's behavior, not a crash).
  */
-const RUNNER_EXIT_NEEDS_RE_ENROLLMENT = 78
+const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 
 /** Production timing defaults. Overridable via `LocalComputerOpts.timing` (tests). */
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000] as const
@@ -280,7 +280,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       // has forgotten its identity, and only an operator enrolling it again fixes
       // that. Respawning would burn the backoff budget re-failing identically. Read
       // it from the EXIT CODE (a shared constant) rather than matching a log line.
-      if (code === RUNNER_EXIT_NEEDS_RE_ENROLLMENT) needsReEnrollment = true
+      if (code === COMPUTER_EXIT_NEEDS_RE_ENROLLMENT) needsReEnrollment = true
       child = null
       if (healthyTimer) clearTimeout(healthyTimer)
       if (stopped) return

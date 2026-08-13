@@ -1,4 +1,4 @@
-export { createHubAuth, RUNNER_KEY_PREFIX, type HubAuth, type HubAuthConfig } from './auth'
+export { createHubAuth, COMPUTER_KEY_PREFIX, type HubAuth, type HubAuthConfig } from './auth'
 export { createAuthExpressApp, type FetchHandlerAuth } from './app'
 export {
   API_KEY_HEADER,
