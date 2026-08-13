@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '../trpc'
 import { getComputersDeps, getComputersDepsOrNull } from '../app-deps'
 import {
@@ -252,6 +253,32 @@ export const computersRouter = router({
       await storeDeleteComputer(ctx.db, input.computerId)
       return { ok: true as const }
     }),
+
+  /**
+   * Connection changes, pushed.
+   *
+   * Fed by the gateway events that ALREADY exist — `computer-connected`,
+   * `computer-disconnected` and the watchdog's `computer-lost`. Until now their
+   * only consumer was exec-proxies disposing pty sessions, so every signal the
+   * system computed about a computer going away was thrown at the wall: the
+   * Settings list had no polling and refreshed only when a human clicked.
+   *
+   * Deliberately NOT fed by the computer's own HubDialer events. Those live in
+   * the computer's process and exist only while it is running — the hub cannot
+   * learn "the computer is gone" from a process that is gone. The silent-but-open
+   * case is covered here too, because the watchdog fires `computer-lost` after
+   * the heartbeat window.
+   *
+   * Emits an id, not a row: the row carries machine and ownership fields this
+   * event knows nothing about, so the client invalidates and refetches.
+   */
+  onStatusChange: publicProcedure.subscription(() =>
+    observable<{ computerId: string; connected: boolean }>((emit) => {
+      const subscribe = getComputersDepsOrNull()?.subscribeComputerStatus
+      if (!subscribe) return () => undefined
+      return subscribe((change) => emit.next(change))
+    })
+  ),
 
   /** Revoke a computer (idempotent — first revocation time wins). */
   revokeComputer: publicProcedure

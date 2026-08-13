@@ -863,9 +863,20 @@ export type ComputerGateway = {
     connectedAt: number
     lastSeenAt: number
   }>
+
 }
 
 export type ComputersDeps = {
+  /**
+   * Push connection changes to subscribers. Wired in `composition.ts`, where the
+   * real gateway and its typed event map are in scope — a structural mirror of a
+   * generic `TypedEventEmitter` would have to lie about its types, which is the
+   * drift the ComputerGateway note above warns about. Absent = no live updates,
+   * which is the fork sidecar's honest state.
+   */
+  subscribeComputerStatus?: (
+    listener: (change: { computerId: string; connected: boolean }) => void
+  ) => () => void
   /** Live computer gateway, or null until the async computer init resolves. */
   getGateway: () => ComputerGateway | null
   /** ws(s)://host:port/computers URL a join token embeds for the computer to dial.

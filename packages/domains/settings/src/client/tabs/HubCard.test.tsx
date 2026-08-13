@@ -68,13 +68,19 @@ const editRootsSpy = vi.fn(
 let renderingHubId = 'local'
 
 vi.mock('@slayzone/transport/client', () => ({
+  // Live status pushes are wired in the component; these tests drive the list
+  // directly, so the subscription is a no-op here.
+  useSubscription: () => undefined,
   useTRPC: () => {
     const hub = renderingHubId
     return {
       computers: {
         list: { queryOptions: () => ({ __hub: hub }), queryFilter: () => ({ __hub: hub }) },
         mintJoinToken: { mutationOptions: () => ({ __key: 'mint', __hub: hub }) },
-        renameMachine: {
+        onStatusChange: {
+        subscriptionOptions: () => ({ __key: 'computers.onStatusChange' })
+      },
+      renameMachine: {
         mutationOptions: () => ({ __key: 'computers.renameMachine' })
       },
       revokeComputer: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }

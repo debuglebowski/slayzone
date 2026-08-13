@@ -191,7 +191,13 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
                   <SelectItem value={LOCAL_COMPUTER_VALUE}>Local</SelectItem>
                   {computers.map((computer) => (
                     <SelectItem key={computer.id} value={computer.id}>
+                      {/* Warned, never disabled: work queues until the computer
+                          returns, and a project's machine is often a laptop that
+                          is simply asleep. */}
                       {computer.name}
+                      {computer.usable === false ? (
+                        <span className="text-muted-foreground ml-1.5 text-xs">offline</span>
+                      ) : null}
                     </SelectItem>
                   ))}
                 </SelectContent>

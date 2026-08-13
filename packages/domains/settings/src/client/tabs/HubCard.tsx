@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 // Leaf subpath, deliberately not `@slayzone/platform/slayzone-config`: that one
 // imports node:fs/node:path, which rollup externalizes out of the renderer bundle
 // and then fails to resolve. Same constant, browser-safe module.
@@ -324,6 +324,17 @@ export function HubCard({
   // enable). `list` merges live connection status when a computer is connected;
   // it's a plain DB read otherwise.
   const computersQuery = useQuery(trpc.computers.list.queryOptions())
+
+  // Push, not poll. The hub already knows the moment a computer connects, drops
+  // or is reaped by the heartbeat watchdog — before this the list refreshed only
+  // when a human clicked refresh, so an offline computer looked connected
+  // indefinitely. Invalidate rather than patch the cache: the row also carries
+  // machine and ownership fields this event knows nothing about.
+  useSubscription(
+    trpc.computers.onStatusChange.subscriptionOptions(undefined, {
+      onData: () => void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
+    })
+  )
   const computers = computersQuery.data ?? []
 
   const revokeMutation = useMutation(trpc.computers.revokeComputer.mutationOptions())

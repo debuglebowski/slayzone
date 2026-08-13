@@ -1234,7 +1234,33 @@ export function composeServer(opts: {
   setComputersDeps({
     getGateway: () => computerGatewayRef,
     getHubUrl: () => computerHubUrl,
-    getCertFingerprint: () => computerCertFingerprint
+    getCertFingerprint: () => computerCertFingerprint,
+    // Live status for the Settings list, from the events the gateway ALREADY
+    // emits. Their only consumer until now was exec-proxies disposing pty
+    // sessions, so every signal about a computer going away was computed and
+    // discarded — the list had no polling and refreshed only on a click.
+    //
+    // The gateway ref is late-bound, so resolve it when someone subscribes; a
+    // subscription opened before init returns an inert unsubscribe rather than
+    // capturing null forever.
+    subscribeComputerStatus: (listener) => {
+      const gateway = computerGatewayRef
+      if (!gateway) return () => undefined
+      const up = (p: { computer: { computerId: string } }): void =>
+        listener({ computerId: p.computer.computerId, connected: true })
+      const down = (p: { computerId: string }): void =>
+        listener({ computerId: p.computerId, connected: false })
+      gateway.events.on('computer-connected', up)
+      gateway.events.on('computer-disconnected', down)
+      // The watchdog's own event — this is what covers a socket that is open but
+      // silent, which no client-side timer could observe.
+      gateway.events.on('computer-lost', down)
+      return () => {
+        gateway.events.off('computer-connected', up)
+        gateway.events.off('computer-disconnected', down)
+        gateway.events.off('computer-lost', down)
+      }
+    }
   })
 
   // Remote-MCP-env provider. Wired synchronously here — it depends only on

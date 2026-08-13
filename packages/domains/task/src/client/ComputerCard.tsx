@@ -88,7 +88,14 @@ export function ComputerCard({
           </SelectItem>
           {computers.map((computer) => (
             <SelectItem key={computer.id} value={computer.id}>
+              {/* Offline is WARNED, never disabled: work aimed at an offline
+                  computer queues until it returns, and binding a project to a
+                  sleeping laptop is the normal case — disabling the option would
+                  contradict the semantics. */}
               {computer.name}
+              {computer.usable === false ? (
+                <span className="text-muted-foreground ml-1.5 text-xs">offline</span>
+              ) : null}
             </SelectItem>
           ))}
         </SelectContent>
