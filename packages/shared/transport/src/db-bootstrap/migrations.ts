@@ -3691,6 +3691,41 @@ export const migrations: Migration[] = [
         CREATE INDEX idx_project_placements_path ON project_placements(root_path);
       `)
     }
+  },
+  {
+    version: 164,
+    up: (db) => {
+      // A MACHINE is the physical box; a COMPUTER is one OS user's environment on
+      // it. Several computers share a machine — one per OS account — and this is
+      // what lets the UI group them.
+      //
+      // `host_id` is a MUTABLE ATTRIBUTE, not an identity. A box's id is discovered
+      // from a world-writable file (see computer/host-id.ts) and a computer can
+      // ADOPT a peer's value, so it changes under you. Two consequences the schema
+      // encodes deliberately:
+      //
+      //   - no foreign key, and no computer ever stores a machine id. Association
+      //     is a value join on `host_id`. A merge DELETES the losing machine row,
+      //     so any stored reference to it would dangle.
+      //   - `host_id` is UNIQUE on machines, which makes "two machine rows for one
+      //     box" unrepresentable going forward. The merge case arises only when a
+      //     computer flips onto an id another row already holds.
+      //
+      // `name` NULL = never named. A named machine is the only thing here a user
+      // authored, which is why the merge rule keeps the named row.
+      db.exec(`
+        CREATE TABLE machines (
+          id         TEXT PRIMARY KEY,
+          host_id    TEXT NOT NULL UNIQUE,
+          name       TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        ALTER TABLE computers ADD COLUMN host_id TEXT;
+        CREATE INDEX idx_computers_host_id ON computers(host_id);
+      `)
+    }
   }
 ]
 

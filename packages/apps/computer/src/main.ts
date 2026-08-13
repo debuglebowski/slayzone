@@ -12,7 +12,8 @@ import {
   createFileCredentialStore,
   HubDialer,
   hubHostFromUrl,
-  type ComputerCredentialStore
+  type ComputerCredentialStore,
+  type ComputerIdentity
 } from '@slayzone/computer-transport/client'
 import {
   ComputerTransportErrorCodes,
@@ -21,6 +22,7 @@ import {
   computerShutdownParamsSchema
 } from '@slayzone/computer-transport/shared'
 import type { ComputerConfig } from './config'
+import { startHostIdReconciler } from './host-id'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createFsHandlers } from './handlers/fs'
 import { createGhHandlers } from './handlers/gh'
@@ -170,16 +172,37 @@ export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps 
     })
   }
 
+  // `startComputer` is synchronous, and resolving the host id is file I/O. Rather
+  // than make the whole entrypoint async, the identity object is MUTABLE and the
+  // dialer reads `hostId` when it builds an enroll/hello frame — not when the
+  // dialer is constructed. Local file reads finish long before a socket does, so
+  // in practice the first enroll carries it; if it ever loses that race the field
+  // is optional and the computer is simply ungrouped until its next connect.
+  //
+  // Failure is never fatal: grouping is cosmetic.
+  const identity = {
+    name: config.name,
+    platform: `${process.platform}-${process.arch}`,
+    version: RUNNER_VERSION,
+    capabilities: config.capabilities
+  } as ComputerIdentity
+  let hostIdStop: (() => void) | undefined
+  void startHostIdReconciler({ log })
+    .then((r) => {
+      identity.hostId = r.hostId
+      hostIdStop = r.stop
+    })
+    .catch((err: unknown) => {
+      log('host id unavailable — this computer will not be grouped onto a machine', {
+        error: err instanceof Error ? err.message : String(err)
+      })
+    })
+
   let handle: ComputerHandle
   let dispatch: HubRequestDispatch
   const dialer = new HubDialer({
     url: config.hubUrl,
-    identity: {
-      name: config.name,
-      platform: `${process.platform}-${process.arch}`,
-      version: RUNNER_VERSION,
-      capabilities: config.capabilities
-    },
+    identity,
     credentialStore,
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
     ...(pinnedCertSha256 ? { pinnedCertSha256 } : {}),
@@ -249,6 +272,7 @@ export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps 
     stop: async () => {
       // Kill live ptys/processes before the socket drops so nothing is orphaned.
       dispatch.dispose()
+      hostIdStop?.()
       if (agentHookServer) await agentHookServer.close()
       await dialer.stop()
     }

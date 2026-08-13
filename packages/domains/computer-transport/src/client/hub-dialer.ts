@@ -50,6 +50,9 @@ export interface ComputerIdentity {
   platform: string
   version: string
   capabilities: string[]
+  /** Which physical box this computer is on — groups it with its siblings.
+   *  Optional: absent means ungrouped, never "same box as someone else". */
+  hostId?: string
 }
 
 export type HubDialerEvents = {
@@ -373,7 +376,8 @@ export class HubDialer {
       version: this.opts.identity.version,
       capabilities: this.opts.identity.capabilities,
       protocolVersion: COMPUTER_PROTOCOL_VERSION,
-      epoch: this.epoch
+      epoch: this.epoch,
+      ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {})
     })
     return enrollResultSchema.parse(raw)
   }
@@ -386,7 +390,10 @@ export class HubDialer {
         try {
           const raw = await conn.rpc.request(ComputerToHubMethods.hello, {
             apiKey: stored.apiKey,
-            epoch: this.epoch
+            epoch: this.epoch,
+            // Reconnect is the ONLY moment the hub can learn that this computer
+            // adopted a peer's host id while it was offline.
+            ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {})
           })
           const result = helloResultSchema.parse(raw)
           this.onAuthenticated(conn, result.computerId, 'hello')

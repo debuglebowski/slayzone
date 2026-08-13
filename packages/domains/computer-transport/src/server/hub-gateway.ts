@@ -101,7 +101,13 @@ export interface HubComputerGatewayOptions {
    */
   verifyEnrollment: (params: EnrollParams) => Promise<{ computerId: string; apiKey: string }>
   /** Resolve an api key to a computer identity, or null to refuse. */
-  verifyApiKey: (apiKey: string) => Promise<{
+  /** `hostId` rides the HELLO frame: a computer that adopted a peer's id while
+   *  offline reports it on reconnect, and that is the only moment the hub can
+   *  learn it. Absent from an older peer, which stays ungrouped. */
+  verifyApiKey: (
+    apiKey: string,
+    context?: { hostId?: string }
+  ) => Promise<{
     computerId: string
     name?: string
     platform?: string
@@ -392,7 +398,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
     let identity: Awaited<ReturnType<HubComputerGatewayOptions['verifyApiKey']>>
     try {
-      identity = await options.verifyApiKey(parsed.data.apiKey)
+      identity = await options.verifyApiKey(parsed.data.apiKey, { hostId: parsed.data.hostId })
     } catch (err) {
       conn.rpc.respondError(
         id,

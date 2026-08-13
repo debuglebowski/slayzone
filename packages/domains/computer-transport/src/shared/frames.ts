@@ -92,6 +92,15 @@ export const ComputerToHubMethods = {
  */
 const epochField = z.string().min(1).optional()
 
+/**
+ * Which physical box this computer is on — see `computer/host-id.ts`.
+ *
+ * OPTIONAL on purpose: a computer too old to report one stays UNGROUPED rather
+ * than being guessed onto a machine. Grouping is cosmetic, so absent must mean
+ * "unknown", never "same as some other box".
+ */
+const hostIdField = z.string().min(1).optional()
+
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
   joinToken: z.string().min(1),
@@ -104,7 +113,8 @@ export const enrollParamsSchema = z.object({
   /** Capability tags, e.g. `['pty', 'git']`. */
   capabilities: z.array(z.string()),
   protocolVersion: z.number().int().positive(),
-  epoch: epochField
+  epoch: epochField,
+  hostId: hostIdField
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -117,7 +127,8 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
   apiKey: z.string().min(1),
-  epoch: epochField
+  epoch: epochField,
+  hostId: hostIdField
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 

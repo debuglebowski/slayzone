@@ -31,6 +31,7 @@ import {
   registerComputer,
   retireStaleLocalComputers,
   touchComputerLastSeen,
+  reconcileMachineForComputer,
   verifyJoinToken
 } from '@slayzone/computers/server'
 
@@ -174,10 +175,17 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     }
 
     grace.set(key, { computerId, apiKey: minted.key, expiresAt: at + graceMs })
+    if (params.hostId) {
+      try {
+        await reconcileMachineForComputer(db, { computerId, hostId: params.hostId, now: at })
+      } catch {
+        /* grouping is cosmetic — never block an enroll on it */
+      }
+    }
     return { computerId, apiKey: minted.key }
   }
 
-  const verifyApiKey: ComputerAuthAdapters['verifyApiKey'] = async (apiKey) => {
+  const verifyApiKey: ComputerAuthAdapters['verifyApiKey'] = async (apiKey, context) => {
     const principal = await verifyComputerApiKey(auth, apiKey)
     if (!principal) return null
 
@@ -185,6 +193,17 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     if (!computer || computer.revoked_at !== null) return null
 
     await touchComputerLastSeen(db, computer.id, now())
+    // Grouping only — never allowed to fail a reconnect.
+    if (context?.hostId) {
+      try {
+        await reconcileMachineForComputer(db, {
+          computerId: computer.id,
+          hostId: context.hostId
+        })
+      } catch {
+        /* a computer that cannot be grouped still works perfectly well */
+      }
+    }
 
     return {
       computerId: computer.id,

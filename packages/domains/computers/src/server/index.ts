@@ -31,3 +31,11 @@ export {
 export { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 
 export { recordComputerProjectPaths, resolveProjectByPath } from './project-paths'
+
+export {
+  reconcileMachineForComputer,
+  pruneAnonymousEmptyMachines,
+  renameMachine,
+  pickMachineWinner,
+  type MachineRecord
+} from './machines'
